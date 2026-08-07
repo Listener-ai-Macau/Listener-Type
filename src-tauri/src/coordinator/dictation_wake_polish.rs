@@ -1159,7 +1159,29 @@ async fn run_streaming_polish(
     llm_thinking_enabled: bool,
     front_app: Option<&str>,
     prior_turns: &[(String, String)],
+    prefetch: Option<PolishPrefetch>,
 ) -> (String, Option<String>, bool) {
+    // 预热采用判定：终稿与预热输入逐字一致且预热未失败 → 采用（回放+live）；
+    // 否则取消丢弃走正常请求。
+    let prefetch = match prefetch {
+        Some(p) if polish_prefetch_adoptable(&p, &raw.text) => {
+            log::info!(
+                "[coord] polish prefetch adopted input_chars={}",
+                p.input.chars().count()
+            );
+            Some(p)
+        }
+        Some(p) => {
+            log::info!(
+                "[coord] polish prefetch discarded: final differs (prefetch={} final={})",
+                p.input.chars().count(),
+                raw.text.chars().count()
+            );
+            p.cancel.store(true, Ordering::SeqCst);
+            None
+        }
+        None => None,
+    };
     log::info!(
         "[coord] streaming_insert path ENTER (raw_chars={})",
         raw.text.chars().count()
@@ -1261,25 +1283,30 @@ async fn run_streaming_polish(
     });
 
     // 3. 调流式润色，on_delta 塞 mpsc；should_cancel 检查 dictation 取消旗。
+    //    有预热时改为从预热流驱动（先回放缓冲 delta，再切 live）。
     let inner_for_cancel = Arc::clone(inner);
     let should_cancel = move || inner_for_cancel.state.lock().cancelled;
-    let outcome = super::polish_or_passthrough_streaming(
-        raw,
-        mode,
-        hotwords,
-        style_system_prompt,
-        working_languages,
-        chinese_script_preference,
-        output_language_preference,
-        llm_thinking_enabled,
-        front_app,
-        prior_turns,
-        move |delta: &str| {
-            let _ = tx.send(delta.to_string());
-        },
-        should_cancel,
-    )
-    .await;
+    let outcome = if let Some(prefetch) = prefetch {
+        drive_polish_prefetch(prefetch, tx).await
+    } else {
+        super::polish_or_passthrough_streaming(
+            raw,
+            mode,
+            hotwords,
+            style_system_prompt,
+            working_languages,
+            chinese_script_preference,
+            output_language_preference,
+            llm_thinking_enabled,
+            front_app,
+            prior_turns,
+            move |delta: &str| {
+                let _ = tx.send(delta.to_string());
+            },
+            should_cancel,
+        )
+        .await
+    };
     // tx 已经被 move 进 on_delta 闭包；闭包随 polish_or_passthrough_streaming 返回
     // 而 drop，typer 那侧 blocking_recv 拿到 None 自然退出。
 
@@ -1390,6 +1417,32 @@ async fn run_streaming_polish(
             } else {
                 (raw.text.clone(), Some(reason), false)
             }
+        }
+    }
+}
+
+/// 从预热流驱动 typer：先回放缓冲的 delta，再随流 live 转发，直到预热任务
+/// 写入最终结果。只在采用判定通过后调用（输入与终稿逐字一致）。
+async fn drive_polish_prefetch(
+    prefetch: PolishPrefetch,
+    tx: tokio::sync::mpsc::UnboundedSender<String>,
+) -> super::StreamingPolishOutcome {
+    loop {
+        let notified = prefetch.notify.notified();
+        let next = {
+            let mut buf = prefetch.buf.lock();
+            if let Some(chunk) = buf.chunks.pop_front() {
+                Some(Ok(chunk))
+            } else {
+                buf.result.take().map(Err)
+            }
+        };
+        match next {
+            Some(Ok(chunk)) => {
+                let _ = tx.send(chunk);
+            }
+            Some(Err(outcome)) => return outcome,
+            None => notified.await,
         }
     }
 }

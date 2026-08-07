@@ -395,6 +395,149 @@ fn note_embedded_asr_speech_activity(inner: &Arc<Inner>, session_id: SessionId) 
     });
 }
 
+/// endpoint 触发时的预热润色：用当前预览文本提前发起 LLM 流式润色，与 ASR
+/// 终稿等待并行。被采用时首字提前 ~0.4-0.6s；终稿与预热输入不一致则取消
+/// 丢弃、走正常路径（delta 只进缓冲，绝不上屏，丢弃对外不可见）。
+fn maybe_start_polish_prefetch(inner: &Arc<Inner>, session_id: SessionId) {
+    let prefs = inner.prefs.get();
+    if !prefs.streaming_insert || inner.translation_modifier_seen.load(Ordering::SeqCst) {
+        return;
+    }
+    if std::env::var("LISTENER_TYPE_FORCE_RAW_OUTPUT")
+        .map(|value| value == "1")
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let pack = match inner
+        .style_packs
+        .get_or_default_active(&prefs.active_style_pack_id)
+    {
+        Ok(pack) => pack,
+        Err(_) => return,
+    };
+    let mode = pack.base_mode;
+    let raw_uses_llm = mode == PolishMode::Raw && super::raw_style_pack_uses_llm(&pack);
+    if mode == PolishMode::Raw && !raw_uses_llm {
+        return;
+    }
+    let auth_blocked =
+        current_llm_auth_fingerprint()
+            .ok()
+            .is_some_and(current_llm_auth_is_rejected);
+    if auth_blocked || llm_stall_circuit_open() {
+        return;
+    }
+    let Some(preview) = current_embedded_audio_partial_preview(inner) else {
+        return;
+    };
+    let preview = preview.trim().to_string();
+    if preview.is_empty() {
+        return;
+    }
+    // 与完成路径同序的确定性变换，最大化终稿一致率。
+    let correction_rules = inner.correction_rules.list().unwrap_or_default();
+    let input = apply_correction_rules(&preview, &correction_rules);
+    let prior_turns: Vec<(String, String)> = if prefs.polish_context_window_minutes > 0 {
+        inner
+            .history
+            .recent_within_minutes(prefs.polish_context_window_minutes)
+            .map(|sessions| {
+                sessions
+                    .into_iter()
+                    .filter(|s| s.error_code.is_none() && !s.final_text.trim().is_empty())
+                    .map(|s| (s.raw_transcript, s.final_text))
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let hotwords = enabled_phrases(inner);
+    let working_languages = prefs.working_languages.clone();
+    let chinese_script_preference = prefs.chinese_script_preference;
+    let output_language_preference = prefs.output_language_preference;
+    let llm_thinking_enabled = prefs.llm_thinking_enabled;
+    let front_app = inner.state.lock().front_app.clone();
+    let style_system_prompt = pack.prompt.clone();
+
+    let prefetch = PolishPrefetch {
+        input: input.clone(),
+        buf: Arc::new(Mutex::new(PolishPrefetchBuf::default())),
+        notify: Arc::new(tokio::sync::Notify::new()),
+        cancel: Arc::new(AtomicBool::new(false)),
+    };
+    let buf = Arc::clone(&prefetch.buf);
+    let notify = Arc::clone(&prefetch.notify);
+    let cancel = Arc::clone(&prefetch.cancel);
+    let result_buf = Arc::clone(&prefetch.buf);
+    let result_notify = Arc::clone(&prefetch.notify);
+    let should_cancel = {
+        let inner = Arc::clone(inner);
+        move || cancel.load(Ordering::SeqCst) || inner.state.lock().cancelled
+    };
+    let raw = RawTranscript {
+        text: input.clone(),
+        duration_ms: 0,
+    };
+    async_runtime::spawn(async move {
+        let outcome = super::polish_or_passthrough_streaming(
+            &raw,
+            mode,
+            &hotwords,
+            &style_system_prompt,
+            &working_languages,
+            chinese_script_preference,
+            output_language_preference,
+            llm_thinking_enabled,
+            front_app.as_deref(),
+            &prior_turns,
+            move |delta: &str| {
+                buf.lock().chunks.push_back(delta.to_string());
+                notify.notify_one();
+            },
+            should_cancel,
+        )
+        .await;
+        let outcome = match outcome {
+            super::StreamingPolishOutcome::UnsupportedFallback => {
+                super::StreamingPolishOutcome::Failed("prefetch unsupported".to_string())
+            }
+            other => other,
+        };
+        result_buf.lock().result = Some(outcome);
+        result_notify.notify_one();
+    });
+    // 同会话只留一份预热；覆盖旧槽前先取消（防泄漏在后台跑满 8s 空转）。
+    if let Some((_, old)) = inner
+        .polish_prefetch
+        .lock()
+        .replace((session_id, prefetch))
+    {
+        old.cancel.store(true, Ordering::SeqCst);
+    }
+    log::info!(
+        "[coord] polish prefetch started session_id={session_id} input_chars={}",
+        input.chars().count()
+    );
+}
+
+fn take_polish_prefetch(inner: &Arc<Inner>, session_id: SessionId) -> Option<PolishPrefetch> {
+    match inner.polish_prefetch.lock().take() {
+        Some((id, prefetch)) if id == session_id => Some(prefetch),
+        Some((_, prefetch)) => {
+            prefetch.cancel.store(true, Ordering::SeqCst);
+            None
+        }
+        None => None,
+    }
+}
+
+/// 采用条件：终稿与预热输入逐字一致且预热流未失败。
+fn polish_prefetch_adoptable(prefetch: &PolishPrefetch, final_text: &str) -> bool {
+    prefetch.input == final_text && !prefetch.failed()
+}
+
 fn handle_target_speaker_update(
     inner: &Arc<Inner>,
     session_id: SessionId,
@@ -460,6 +603,8 @@ fn handle_target_speaker_update(
     // and final-frame work are still in flight.
     let stop_feedback_started = Instant::now();
     let feedback_emitted = request_embedded_audio_stop_feedback(inner, stop_reason);
+    // 预热润色：与 stop/终稿并行发起，终稿一致则采用，首字提前 ~0.4-0.6s。
+    maybe_start_polish_prefetch(inner, session_id);
     if feedback_emitted {
         log::info!(
             "[asr] stop_to_transcribing_ms={} session_id={session_id} reason={stop_reason} long_form={long_form} timeout_ms={endpoint_timeout_ms} body_started={body_started} sentence_pause={}",
@@ -2397,6 +2542,10 @@ async fn finish_end_session_after_stop_transition(
         "[coord] polish dispatch: translation={translation_active} mode={mode:?} wayland_session={wayland_session} streaming_eligible={streaming_eligible} llm_auth_blocked={llm_auth_blocked} llm_stall_blocked={llm_stall_blocked}"
     );
 
+    // 取出 endpoint 时刻发起的预热润色（若本会话有）。只有流式分支会尝试采用；
+    // 其他分支（翻译/熔断/一次性）一律取消丢弃。
+    let mut polish_prefetch = take_polish_prefetch(inner, current_session_id);
+
     let (polished, polish_error, already_streamed) = if translation_active {
         log::info!(
             "[coord] translation mode → target=\u{300C}{}\u{300D} working={:?} front_app={:?}",
@@ -2434,6 +2583,7 @@ async fn finish_end_session_after_stop_transition(
             llm_thinking_enabled,
             front_app.as_deref(),
             &prior_turns,
+            polish_prefetch.take(),
         )
         .await
     } else {
@@ -2467,6 +2617,11 @@ async fn finish_end_session_after_stop_transition(
         }
         (p, e, false)
     };
+
+    // 非流式分支（翻译/熔断/一次性）：预热用不上，取消丢弃。
+    if let Some(prefetch) = polish_prefetch {
+        prefetch.cancel.store(true, Ordering::SeqCst);
+    }
 
     let polished = finalize_polished_text(
         polished,

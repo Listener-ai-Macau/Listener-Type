@@ -8,6 +8,7 @@ use super::{
     device_ai_processing_completion_delay, device_ai_processing_io_allowed,
     device_processing_final_succeeded, dictation_asr_engine_backend_id,
     dictation_asr_quality_warning, dictation_asr_uses_core_accurate_engine, dictation_error_code,
+    drive_polish_prefetch,
     embedded_audio_stop_feedback_latched, embedded_audio_stop_is_user_initiated,
     embedded_ble_listener_capture_ready, embedded_ble_processing_sync_disabled,
     embedded_ble_session_actor_history, embedded_ble_session_event_should_trace,
@@ -17,7 +18,8 @@ use super::{
     filter_automatic_wake_text, finalize_polished_text, finish_dictation_pipeline_error,
     finish_dictation_timeout, install_embedded_ble_listener_cancel,
     mark_embedded_ble_listener_ready, normalize_embedded_pcm_for_asr,
-    normalize_embedded_streaming_pcm_for_asr, preserve_recording_transcript,
+    normalize_embedded_streaming_pcm_for_asr, polish_prefetch_adoptable,
+    preserve_recording_transcript,
     provider_preview_change, publish_embedded_ble_asr_final,
     record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
     remove_standalone_dictation_fillers, request_embedded_audio_stop_feedback,
@@ -33,6 +35,7 @@ use super::{
     LOCAL_CONFIRMATION_START_MS,
 };
 use crate::coordinator::Coordinator;
+use crate::coordinator::{PolishPrefetch, PolishPrefetchBuf};
 use crate::coordinator_state::{new_session_id, SessionPhase};
 use crate::embedded_audio::{
     build_audio_data_notification, build_session_start_notification,
@@ -680,6 +683,74 @@ fn idle_cancel_without_capture_flag_does_not_route_by_default_embedded_pref() {
 
     let history = embedded_ble_session_actor_history(&coordinator.inner);
     assert!(history.is_empty());
+}
+
+#[test]
+fn polish_prefetch_adoptable_only_on_exact_final_match_and_no_failure() {
+    use std::collections::VecDeque;
+    let make = |input: &str, result: Option<super::StreamingPolishOutcome>| PolishPrefetch {
+        input: input.to_string(),
+        buf: Arc::new(parking_lot::Mutex::new(PolishPrefetchBuf {
+            chunks: VecDeque::new(),
+            result,
+        })),
+        notify: Arc::new(tokio::sync::Notify::new()),
+        cancel: Arc::new(AtomicBool::new(false)),
+    };
+    assert!(polish_prefetch_adoptable(
+        &make("整理后的正文", None),
+        "整理后的正文"
+    ));
+    assert!(
+        !polish_prefetch_adoptable(&make("整理后的正文", None), "整理后的正文，多了尾巴"),
+        "final with extra tail must not adopt"
+    );
+    assert!(!polish_prefetch_adoptable(
+        &make(
+            "整理后的正文",
+            Some(super::StreamingPolishOutcome::Failed("idle timeout".into()))
+        ),
+        "整理后的正文"
+    ));
+}
+
+#[tokio::test]
+async fn drive_polish_prefetch_replays_buffer_then_streams_live() {
+    use std::collections::VecDeque;
+    let prefetch = PolishPrefetch {
+        input: "正文".to_string(),
+        buf: Arc::new(parking_lot::Mutex::new(PolishPrefetchBuf {
+            chunks: VecDeque::from(["你".to_string(), "你好".to_string()]),
+            result: None,
+        })),
+        notify: Arc::new(tokio::sync::Notify::new()),
+        cancel: Arc::new(AtomicBool::new(false)),
+    };
+    let buf = Arc::clone(&prefetch.buf);
+    let notify = Arc::clone(&prefetch.notify);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let drive = tokio::spawn(drive_polish_prefetch(prefetch, tx));
+    // 等驱动把两个缓冲 chunk 回放完，再补一个 live chunk + 结束。
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    buf.lock().chunks.push_back("你好世".to_string());
+    notify.notify_one();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    buf.lock().result = Some(super::StreamingPolishOutcome::Streamed("你好世界".into()));
+    notify.notify_one();
+
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(2), drive)
+        .await
+        .expect("drive must finish")
+        .expect("drive task");
+    let mut received = Vec::new();
+    while let Ok(chunk) = rx.try_recv() {
+        received.push(chunk);
+    }
+    assert_eq!(received, vec!["你", "你好", "你好世"]);
+    match outcome {
+        super::StreamingPolishOutcome::Streamed(text) => assert_eq!(text, "你好世界"),
+        _ => panic!("expected Streamed outcome"),
+    }
 }
 
 #[test]

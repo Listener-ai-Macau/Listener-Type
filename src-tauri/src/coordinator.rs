@@ -390,6 +390,10 @@ struct Inner {
     /// 当前嵌入式 BLE 抓音循环的取消标志。胶囊取消走 cancel_session 时会置位，
     /// 让 blocking BLE notify loop 及时退出。
     embedded_ble_cancel_flag: Mutex<Option<Arc<AtomicBool>>>,
+    /// 预热润色：endpoint 触发时用当时的预览文本提前发起 LLM 润色，与 ASR
+    /// 终稿等待并行。终稿与预热输入一致才被采用（不一致即取消丢弃，回退
+    /// 正常路径）。只存一份当前会话的预热。
+    polish_prefetch: Mutex<Option<(SessionId, PolishPrefetch)>>,
     /// 空闲 cancel 去重：phase=Idle 时第一次 cancel 已处理后置位，后续 Idle
     /// 重复的 Esc/cancel 直接跳过，不再每次 bounce background listener actor
     /// （2026-08-07 全天 1875 次 idle cancel，每次都 actor_restart + LED sync；
@@ -710,6 +714,7 @@ impl Coordinator {
                     device_key_pending_ble_action: Mutex::new(None),
                     embedded_ble_session_actor: Mutex::new(EmbeddedBleSessionActorState::default()),
                     embedded_ble_cancel_flag: Mutex::new(None),
+                    polish_prefetch: Mutex::new(None),
                     idle_hotkey_cancel_sent: AtomicBool::new(false),
                     recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                     hotkey: Mutex::new(None),
@@ -794,6 +799,7 @@ impl Coordinator {
                 device_key_pending_ble_action: Mutex::new(None),
                 embedded_ble_session_actor: Mutex::new(EmbeddedBleSessionActorState::default()),
                 embedded_ble_cancel_flag: Mutex::new(None),
+                polish_prefetch: Mutex::new(None),
                 idle_hotkey_cancel_sent: AtomicBool::new(false),
                 recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                 hotkey: Mutex::new(None),
@@ -2892,6 +2898,31 @@ pub enum StreamingPolishOutcome {
     /// 流式过程中失败（HTTP / 解析 / 空流等）。`String` 是失败原因，调用方应当
     /// 走 raw 兜底（同 `polish_or_passthrough` 失败分支的语义）。
     Failed(String),
+}
+
+/// 预热润色流的共享状态。endpoint 触发即发起；被采用前 delta 只进缓冲区，
+/// 绝不上屏——采用时先回放缓冲再切 live；不采用则置 cancel 丢弃。
+pub(crate) struct PolishPrefetch {
+    /// 预热输入文本（endpoint 时刻的预览 + 纠错规则变换）。终稿与之相等才采用。
+    pub(crate) input: String,
+    pub(crate) buf: Arc<Mutex<PolishPrefetchBuf>>,
+    pub(crate) notify: Arc<tokio::sync::Notify>,
+    pub(crate) cancel: Arc<AtomicBool>,
+}
+
+#[derive(Default)]
+pub(crate) struct PolishPrefetchBuf {
+    pub(crate) chunks: std::collections::VecDeque<String>,
+    pub(crate) result: Option<StreamingPolishOutcome>,
+}
+
+impl PolishPrefetch {
+    pub(crate) fn failed(&self) -> bool {
+        matches!(
+            self.buf.lock().result,
+            Some(StreamingPolishOutcome::Failed(_))
+        )
+    }
 }
 
 #[derive(Default)]
