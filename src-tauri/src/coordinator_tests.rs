@@ -4173,6 +4173,20 @@ fn llm_auth_failure_circuit_only_rejects_the_failed_configuration() {
 }
 
 #[test]
+fn llm_auth_rejection_notice_is_once_per_credential_fingerprint() {
+    let mut circuit = LlmAuthFailureCircuit::default();
+    // 未熔断时不得发提示。
+    assert!(!circuit.take_notice(11));
+    // 熔断打开后：同一指纹只取到一次提示资格；无关指纹不提示；换指纹重新允许。
+    circuit.reject(11);
+    assert!(circuit.take_notice(11));
+    assert!(!circuit.take_notice(11), "notice must be once per fingerprint");
+    assert!(!circuit.take_notice(12), "unrelated fingerprint must not notice");
+    circuit.reject(12);
+    assert!(circuit.take_notice(12), "new credential set notices again");
+}
+
+#[test]
 fn llm_auth_failure_circuit_only_classifies_auth_http_statuses() {
     assert!(llm_error_is_auth_rejection(&LLMError::InvalidResponse {
         status: 401,

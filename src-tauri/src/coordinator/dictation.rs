@@ -2788,6 +2788,32 @@ async fn finish_end_session_after_stop_transition(
             error_code: transcript_error_code,
         },
     );
+    // LLM auth 熔断打开时发一次可见提示（每个凭据指纹一次）：后续会话仍走
+    // 静默原文的合同路径，但用户必须有机会知道「润色已失效」——2026-08-05
+    // owner 的 key 401 了一整天、48 次听写全走原文而无人察觉。仅在本会话
+    // 需要 LLM 润色时提示（raw 原文用户与坏 key 无关，不打扰）。
+    if (mode != PolishMode::Raw || raw_uses_llm) && !translation_active {
+        if let Ok(fingerprint) = current_llm_auth_fingerprint() {
+            if current_llm_auth_is_rejected(fingerprint)
+                && take_llm_auth_rejection_notice(fingerprint)
+            {
+                let notice_inner = Arc::clone(inner);
+                async_runtime::spawn(async move {
+                    // 等本次 Done 先落位，再弹出 2.5s 自消的错误胶囊。
+                    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+                    log::info!("[coord] LLM auth rejection notice shown (once per credential set)");
+                    emit_capsule(
+                        &notice_inner,
+                        CapsuleState::Error,
+                        0.0,
+                        0,
+                        Some("润色 API key 失效，已改用原文上屏；请到设置更新 key".to_string()),
+                        None,
+                    );
+                });
+            }
+        }
+    }
     let done_message = if status == InsertStatus::Inserted
         && !polish_error.is_some()
         && !tsf_required_insert_failed

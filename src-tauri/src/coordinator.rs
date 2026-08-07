@@ -2897,6 +2897,9 @@ pub enum StreamingPolishOutcome {
 #[derive(Default)]
 struct LlmAuthFailureCircuit {
     rejected_fingerprint: Option<u64>,
+    /// 每个凭据指纹只发一次用户可见提示（熔断后静默原文是合同，但「401 一整天
+    /// 用户无感知」也是事故——2026-08-05 owner 整天没润色却不知情）。
+    notice_sent_fingerprint: Option<u64>,
 }
 
 impl LlmAuthFailureCircuit {
@@ -2906,6 +2909,17 @@ impl LlmAuthFailureCircuit {
 
     fn reject(&mut self, fingerprint: u64) {
         self.rejected_fingerprint = Some(fingerprint);
+    }
+
+    /// 熔断打开且这组凭据还没发过可见提示时，取走一次「应提示」资格。
+    fn take_notice(&mut self, fingerprint: u64) -> bool {
+        if self.rejected_fingerprint == Some(fingerprint)
+            && self.notice_sent_fingerprint != Some(fingerprint)
+        {
+            self.notice_sent_fingerprint = Some(fingerprint);
+            return true;
+        }
+        false
     }
 }
 
@@ -2930,6 +2944,12 @@ fn current_llm_auth_is_rejected(fingerprint: u64) -> bool {
 
 fn note_llm_auth_rejection(fingerprint: u64) {
     llm_auth_failure_circuit().lock().reject(fingerprint);
+}
+
+/// 熔断处于打开状态且这组凭据还没发过可见提示时，取走一次「应提示」资格。
+/// 返回 true 仅一次；换 key（新指纹）后会重新允许提示。
+fn take_llm_auth_rejection_notice(fingerprint: u64) -> bool {
+    llm_auth_failure_circuit().lock().take_notice(fingerprint)
 }
 
 fn llm_error_is_auth_rejection(error: &LLMError) -> bool {
