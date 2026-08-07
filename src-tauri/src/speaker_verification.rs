@@ -112,6 +112,13 @@ impl SessionSpeakerAdaptationGate {
                         self.bootstrap_disqualified = true;
                     }
                 }
+                SessionSpeakerClassification::Target { .. } => {
+                    // 未满一整窗(<1000ms)的 Target：不算一格，但也不清空连击——
+                    // 它仍是本人证据。LST-REC-025 只让 Uncertain/NonTarget 打断
+                    // bootstrap 连击；2026-08-07 07:23 session 里 800/600ms 的
+                    // Target 窗把连击清零，bootstrap 从未成立，后段声纹漂移冻结
+                    // 在 8 字（「你看一」事故）。
+                }
                 _ => {
                     self.bootstrap_candidates.clear();
                     self.bootstrap_consecutive_non_target = 0;
@@ -1940,6 +1947,40 @@ mod tests {
         }
         assert_eq!(enrolled.promote_covered(&mut enrolled_profile, None), 0);
         assert_eq!(enrolled_profile.embeddings.len(), 1);
+    }
+
+    #[test]
+    fn short_target_window_does_not_break_body_bootstrap_streak() {
+        // 2026-08-07 07:23 「你看一」事故：800/600ms 的 Target 短窗把 bootstrap
+        // 连击清零，body exemplar 从未建立，后段声纹漂移冻结在 8 字。
+        // 短 Target 窗不算一格，但不得清空连击（LST-REC-025 只让
+        // Uncertain/NonTarget 打断）。
+        let target_full = |score, embedding| {
+            observation(
+                SessionSpeakerClassification::Target { score },
+                1_200,
+                embedding,
+            )
+        };
+        let mut profile = SessionSpeakerProfile {
+            embeddings: Arc::new(vec![vec![1.0, 0.0]]),
+            adaptive: true,
+        };
+        let mut gate = SessionSpeakerAdaptationGate::default();
+        gate.note(3_000, target_full(0.48, [0.90, 0.10]));
+        // 短 Target 窗（不足 1000ms）插在全窗之间：连击必须保留。
+        gate.note(
+            3_200,
+            observation(
+                SessionSpeakerClassification::Target { score: 0.47 },
+                600,
+                [0.88, 0.12],
+            ),
+        );
+        gate.note(3_400, target_full(0.46, [0.86, 0.14]));
+        gate.note(3_800, target_full(0.45, [0.84, 0.16]));
+        assert_eq!(gate.promote_covered(&mut profile, None), 3);
+        assert_eq!(profile.embeddings.len(), 4);
     }
 
     #[test]
