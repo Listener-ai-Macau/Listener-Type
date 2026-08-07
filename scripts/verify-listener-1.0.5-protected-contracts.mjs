@@ -291,6 +291,24 @@ gate("multi_speaker_owner_isolation", () => {
   );
 });
 
+gate("multi_speaker_unit_tests_green", () => {
+  // String contracts cannot catch semantic drift between the isolation
+  // implementation and its tests (the two b29d803-born red tests proved it).
+  // Actually run the volcengine suite in the release gate.
+  const run = spawnSync(
+    "cargo",
+    ["test", "--release", "--lib", "asr::volcengine"],
+    { cwd: join(typeRoot, "src-tauri"), encoding: "utf8" },
+  );
+  if (run.error) {
+    throw new Error(`cargo test failed to start: ${run.error.message}`);
+  }
+  if (run.status !== 0) {
+    const tail = (run.stdout || "").split("\n").slice(-12).join("\n");
+    throw new Error(`asr::volcengine tests red:\n${tail}`);
+  }
+});
+
 gate("snappy_success_capsule_close", () => {
   // Owner: 结尾拖. Text is already on screen; old 1050ms Done linger felt slow.
   // Keep a brief checkmark, then out — ≤400ms hide + ≤120ms exit.

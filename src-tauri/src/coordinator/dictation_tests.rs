@@ -683,6 +683,32 @@ fn idle_cancel_without_capture_flag_does_not_route_by_default_embedded_pref() {
 }
 
 #[test]
+fn repeated_idle_hotkey_cancels_are_deduped_at_the_bridge() {
+    // 2026-08-07 storm: 1875 idle Esc/cancels, each bouncing the background
+    // listener actor (stale session cancel flag gave every one real work).
+    // The bridge suppresses repeat Idle cancels; a non-Idle cancel re-arms.
+    let coordinator = Coordinator::new();
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    register_embedded_ble_cancel_flag(&coordinator.inner, &cancel_flag);
+    coordinator.inner.state.lock().phase = SessionPhase::Idle;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let inner = std::sync::Arc::clone(&coordinator.inner);
+    let handle = std::thread::spawn(move || crate::coordinator::hotkey_bridge_loop(inner, rx));
+    tx.send(crate::hotkey::HotkeyEvent::Cancelled).unwrap();
+    tx.send(crate::hotkey::HotkeyEvent::Cancelled).unwrap();
+    drop(tx);
+    handle.join().unwrap();
+
+    let history = embedded_ble_session_actor_history(&coordinator.inner);
+    let cancel_commands = history
+        .iter()
+        .filter(|record| record.command == EmbeddedBleSessionActorCommand::CancelCommand)
+        .count();
+    assert_eq!(cancel_commands, 1, "repeat Idle cancels must be deduped");
+}
+
+#[test]
 fn capsule_cancel_routes_by_embedded_ble_preference_without_capture_flag() {
     let coordinator = Coordinator::new();
     {

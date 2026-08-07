@@ -501,11 +501,13 @@ function shouldPreserveMessageWithoutPayload(
   if (sessionId && messageSessionId === sessionId) {
     return true;
   }
-  // Also keep the last preview when backend omits session on a level tick but
-  // we are still in the same recording continuum.
+  // Also keep the last preview when a level tick omits the session id (cannot
+  // be attributed to another session) and we are still in the same recording
+  // continuum. A tick from a *different* session must fall through and clear,
+  // so the previous session's preview never sticks across the boundary.
   if (
+    sessionId == null &&
     messageSessionId != null &&
-    (state === 'recording' || state === 'transcribing' || state === 'polishing') &&
     (previousState === 'recording' || previousState === 'transcribing' || previousState === 'polishing')
   ) {
     return true;

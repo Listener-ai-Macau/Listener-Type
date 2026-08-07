@@ -390,6 +390,12 @@ struct Inner {
     /// 当前嵌入式 BLE 抓音循环的取消标志。胶囊取消走 cancel_session 时会置位，
     /// 让 blocking BLE notify loop 及时退出。
     embedded_ble_cancel_flag: Mutex<Option<Arc<AtomicBool>>>,
+    /// 空闲 cancel 去重：phase=Idle 时第一次 cancel 已处理后置位，后续 Idle
+    /// 重复的 Esc/cancel 直接跳过，不再每次 bounce background listener actor
+    /// （2026-08-07 全天 1875 次 idle cancel，每次都 actor_restart + LED sync；
+    /// 陈旧 session 的 cancel flag 泄漏让每次都有活可干）。非 Idle 的 cancel
+    /// 会把它清零。
+    idle_hotkey_cancel_sent: AtomicBool,
     recording_mute: Mutex<SharedRecordingMuteState>,
     hotkey: Mutex<Option<HotkeyMonitor>>,
     hotkey_status: Mutex<HotkeyStatus>,
@@ -704,6 +710,7 @@ impl Coordinator {
                     device_key_pending_ble_action: Mutex::new(None),
                     embedded_ble_session_actor: Mutex::new(EmbeddedBleSessionActorState::default()),
                     embedded_ble_cancel_flag: Mutex::new(None),
+                    idle_hotkey_cancel_sent: AtomicBool::new(false),
                     recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                     hotkey: Mutex::new(None),
                     hotkey_status: Mutex::new(HotkeyStatus::default()),
@@ -787,6 +794,7 @@ impl Coordinator {
                 device_key_pending_ble_action: Mutex::new(None),
                 embedded_ble_session_actor: Mutex::new(EmbeddedBleSessionActorState::default()),
                 embedded_ble_cancel_flag: Mutex::new(None),
+                idle_hotkey_cancel_sent: AtomicBool::new(false),
                 recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                 hotkey: Mutex::new(None),
                 hotkey_status: Mutex::new(HotkeyStatus::default()),
@@ -2134,8 +2142,24 @@ fn hotkey_bridge_loop(inner: Arc<Inner>, rx: mpsc::Receiver<HotkeyEvent>) {
             }
             HotkeyEvent::Cancelled => {
                 let phase = inner_cloned.state.lock().phase;
-                log::info!("[coord] global hotkey cancel received phase={phase:?}");
-                cancel_session(&inner_cloned);
+                if phase == SessionPhase::Idle {
+                    // 空闲重复 cancel 去重：第一次已做清理；后续 Idle 的
+                    // Esc/cancel 不再 bounce background listener actor。
+                    if inner_cloned
+                        .idle_hotkey_cancel_sent
+                        .swap(true, Ordering::SeqCst)
+                    {
+                        continue;
+                    }
+                    log::info!("[coord] global hotkey cancel received phase={phase:?}");
+                    cancel_session(&inner_cloned);
+                } else {
+                    inner_cloned
+                        .idle_hotkey_cancel_sent
+                        .store(false, Ordering::SeqCst);
+                    log::info!("[coord] global hotkey cancel received phase={phase:?}");
+                    cancel_session(&inner_cloned);
+                }
             }
             HotkeyEvent::TranslationModifierPressed => {
                 let translation_hotkey = inner_cloned.prefs.get().translation_hotkey;
