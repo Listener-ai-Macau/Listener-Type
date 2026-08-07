@@ -2962,6 +2962,67 @@ fn llm_error_is_auth_rejection(error: &LLMError) -> bool {
     )
 }
 
+// ── LLM stall circuit（非 auth 的连续失败熔断）──
+//
+// 与 auth 熔断同构但面向 provider 抽风：deepseek 连续空转/网络失败时，每次
+// 听写都要白等 8s 空转超时（2026-08-07 owner 连续 3 句 ×8.4s）。2 次连续失败
+// 开闸 120s，期间润色直接跳过走原文；到期半开允许一次尝试，成功即复位。
+// auth 失败不计入（401/403 走上面的 auth 熔断）。
+
+#[derive(Default)]
+struct LlmStallCircuit {
+    consecutive_failures: u32,
+    open_until: Option<Instant>,
+}
+
+impl LlmStallCircuit {
+    fn is_open(&self, now: Instant) -> bool {
+        self.open_until.is_some_and(|until| until > now)
+    }
+
+    fn note_success(&mut self) {
+        self.consecutive_failures = 0;
+        self.open_until = None;
+    }
+
+    fn note_failure(&mut self, now: Instant) {
+        self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+        if self.consecutive_failures >= LLM_STALL_OPEN_AFTER_FAILURES {
+            self.open_until = Some(now + LLM_STALL_OPEN_DURATION);
+        }
+    }
+}
+
+const LLM_STALL_OPEN_AFTER_FAILURES: u32 = 2;
+const LLM_STALL_OPEN_DURATION: Duration = Duration::from_secs(120);
+static LLM_STALL_CIRCUIT: OnceLock<Mutex<LlmStallCircuit>> = OnceLock::new();
+
+fn llm_stall_circuit() -> &'static Mutex<LlmStallCircuit> {
+    LLM_STALL_CIRCUIT.get_or_init(|| Mutex::new(LlmStallCircuit::default()))
+}
+
+fn llm_stall_circuit_open() -> bool {
+    llm_stall_circuit().lock().is_open(Instant::now())
+}
+
+fn note_llm_polish_success() {
+    llm_stall_circuit().lock().note_success();
+}
+
+fn note_llm_polish_stall_failure() {
+    let circuit = llm_stall_circuit();
+    let mut circuit = circuit.lock();
+    let before_open = circuit.is_open(Instant::now());
+    circuit.note_failure(Instant::now());
+    if !before_open && circuit.is_open(Instant::now()) {
+        log::warn!(
+            "[coord] LLM stall circuit open after {} consecutive failures; raw insert for {}s",
+            circuit.consecutive_failures,
+            LLM_STALL_OPEN_DURATION.as_secs()
+        );
+    }
+}
+
 /// 流式润色入口。在不支持流式的所有 case 都返回 `UnsupportedFallback`，让调用方
 /// 透明降级。不修改任何持久化 / 焦点 / 光标状态。
 ///

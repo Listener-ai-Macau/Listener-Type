@@ -4173,6 +4173,39 @@ fn llm_auth_failure_circuit_only_rejects_the_failed_configuration() {
 }
 
 #[test]
+fn llm_stall_circuit_opens_after_two_failures_and_recovers() {
+    let mut circuit = LlmStallCircuit::default();
+    let t0 = Instant::now();
+
+    assert!(!circuit.is_open(t0));
+    circuit.note_failure(t0);
+    assert!(!circuit.is_open(t0), "first failure must not open the circuit");
+    circuit.note_failure(t0 + Duration::from_secs(1));
+    assert!(circuit.is_open(t0 + Duration::from_secs(2)), "second consecutive failure opens");
+    assert!(
+        circuit.is_open(t0 + Duration::from_secs(119)),
+        "still open inside the 120s window"
+    );
+    assert!(
+        !circuit.is_open(t0 + Duration::from_secs(121)),
+        "half-open after the cooldown: one attempt is allowed"
+    );
+
+    // 半开后再失败 → 重新开闸 120s。
+    circuit.note_failure(t0 + Duration::from_secs(122));
+    assert!(circuit.is_open(t0 + Duration::from_secs(123)));
+
+    // 成功复位：清空计数并关闸。
+    circuit.note_success();
+    assert!(!circuit.is_open(t0 + Duration::from_secs(123)));
+    circuit.note_failure(t0 + Duration::from_secs(124));
+    assert!(
+        !circuit.is_open(t0 + Duration::from_secs(125)),
+        "after reset, a single failure must not reopen"
+    );
+}
+
+#[test]
 fn llm_auth_rejection_notice_is_once_per_credential_fingerprint() {
     let mut circuit = LlmAuthFailureCircuit::default();
     // 未熔断时不得发提示。

@@ -2383,6 +2383,7 @@ async fn finish_end_session_after_stop_transition(
     let llm_auth_blocked = current_llm_auth_fingerprint()
         .ok()
         .is_some_and(current_llm_auth_is_rejected);
+    let llm_stall_blocked = llm_stall_circuit_open();
     let needs_llm_polish = mode != PolishMode::Raw || raw_uses_llm;
     let streaming_eligible = streaming_insert_eligible(
         prefs.streaming_insert,
@@ -2390,9 +2391,10 @@ async fn finish_end_session_after_stop_transition(
         mode,
         raw_uses_llm,
         wayland_session,
-    ) && !llm_auth_blocked;
+    ) && !llm_auth_blocked
+        && !llm_stall_blocked;
     log::info!(
-        "[coord] polish dispatch: translation={translation_active} mode={mode:?} wayland_session={wayland_session} streaming_eligible={streaming_eligible} llm_auth_blocked={llm_auth_blocked}"
+        "[coord] polish dispatch: translation={translation_active} mode={mode:?} wayland_session={wayland_session} streaming_eligible={streaming_eligible} llm_auth_blocked={llm_auth_blocked} llm_stall_blocked={llm_stall_blocked}"
     );
 
     let (polished, polish_error, already_streamed) = if translation_active {
@@ -2413,9 +2415,9 @@ async fn finish_end_session_after_stop_transition(
         )
         .await;
         (p, e, false)
-    } else if llm_auth_blocked && needs_llm_polish {
+    } else if (llm_auth_blocked || llm_stall_blocked) && needs_llm_polish {
         log::info!(
-            "[coord] LLM auth circuit open; inserting raw transcript without polish wait (raw_chars={})",
+            "[coord] LLM circuit open (auth={llm_auth_blocked} stall={llm_stall_blocked}); inserting raw transcript without polish wait (raw_chars={})",
             raw.text.chars().count()
         );
         (raw.text.clone(), None, false)
@@ -2448,6 +2450,21 @@ async fn finish_end_session_after_stop_transition(
             &prior_turns,
         )
         .await;
+        // 一次性路径的成败也喂 stall 熔断：成功复位；非 auth 失败累计。
+        // （auth 401/403 已由 polish_text 写入 auth 熔断，这里不重复计。）
+        match &e {
+            None => note_llm_polish_success(),
+            Some(err) => {
+                let auth_failure = err.contains("credentials were already rejected")
+                    || err.contains("AuthenticationError")
+                    || err.contains("status 401")
+                    || err.contains("status 403")
+                    || err.contains("Unauthorized");
+                if !auth_failure {
+                    note_llm_polish_stall_failure();
+                }
+            }
+        }
         (p, e, false)
     };
 

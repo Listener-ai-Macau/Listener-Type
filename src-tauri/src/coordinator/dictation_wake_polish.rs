@@ -1302,6 +1302,7 @@ async fn run_streaming_polish(
     // 6. 把 outcome 翻译成 (polished, polish_error, already_streamed)。
     match outcome {
         super::StreamingPolishOutcome::Streamed(text) => {
+            note_llm_polish_success();
             log::info!(
                 "[coord] streaming_insert SUCCESS: polished_chars={} typed_chars={} typer_err={:?}",
                 text.chars().count(),
@@ -1363,6 +1364,11 @@ async fn run_streaming_polish(
                 || reason.contains("status 401")
                 || reason.contains("status 403")
                 || reason.contains("Unauthorized");
+            // 非 auth 失败计入 stall 熔断（连续 2 次开闸 120s，provider 抽风期
+            // 不再每句白等空转超时）；auth 走自己的熔断，不计入。
+            if !auth_failure {
+                note_llm_polish_stall_failure();
+            }
             // 流式失败但已经流了一部分 chars：用户屏幕上有半截 polish。history 应当
             // 跟屏幕一致 —— 记 typed_text 而不是 raw.text，否则保存内容跟用户看见的
             // 内容会分叉（pr-agent #412 \"Wrong final text\" 反馈）。

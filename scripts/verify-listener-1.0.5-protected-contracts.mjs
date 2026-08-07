@@ -222,13 +222,28 @@ gate("snappy_insert_when_llm_auth_or_tsf_unavailable", () => {
   // slow paste. Contract: circuit-open skips polish; TSF-not-ready skips submit.
   mustInclude(
     dictation,
-    "LLM auth circuit open; inserting raw transcript without polish wait",
-    "auth circuit skips polish for snappy raw insert",
+    "LLM circuit open (auth={llm_auth_blocked} stall={llm_stall_blocked}); inserting raw transcript without polish wait",
+    "auth/stall circuits skip polish for snappy raw insert",
   );
   mustInclude(
     dictation,
     "llm_auth_blocked",
     "polish dispatch logs auth-block gate",
+  );
+  mustInclude(
+    dictation,
+    "llm_stall_blocked",
+    "polish dispatch logs stall-block gate",
+  );
+  mustInclude(
+    coordinatorRs,
+    "LLM_STALL_OPEN_AFTER_FAILURES: u32 = 2",
+    "stall circuit opens after two consecutive failures",
+  );
+  mustInclude(
+    coordinatorRs,
+    "LLM_STALL_OPEN_DURATION: Duration = Duration::from_secs(120)",
+    "stall circuit cools down 120s then half-opens",
   );
   mustInclude(
     coordinatorRs,
