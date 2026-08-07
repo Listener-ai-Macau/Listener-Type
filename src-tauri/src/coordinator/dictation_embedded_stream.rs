@@ -878,11 +878,18 @@ impl EmbeddedStreamingDictation {
                         candidate.pcm.len(),
                         candidate.local_absent_count,
                     ) {
+                        // Distinguish the two skip reasons: short PCM vs repeated
+                        // local Absent evidence. 2026-08-07 session 548 was logged
+                        // as "too short" with pcm_ms=4520 ≥ min — misleading.
+                        let too_short =
+                            candidate.pcm.len() < MIN_TERMINAL_OFFLINE_PCM_BYTES;
                         log::info!(
-                            "[wake-phrase] terminal skip offline cascade: candidate too short embedded_session_id={} pcm_ms={} min_ms={}",
+                            "[wake-phrase] terminal skip offline cascade reason={} embedded_session_id={} pcm_ms={} min_ms={} local_absent_count={}",
+                            if too_short { "candidate_too_short" } else { "local_absent_evidence" },
                             embedded_session_id,
                             candidate.pcm.len() / 32,
-                            MIN_TERMINAL_OFFLINE_PCM_BYTES / 32
+                            MIN_TERMINAL_OFFLINE_PCM_BYTES / 32,
+                            candidate.local_absent_count
                         );
                         None
                     } else {
