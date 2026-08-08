@@ -9,7 +9,6 @@ import {
   getVoiceprintStatus,
   listInstalledApplications,
   deleteVoiceprint,
-  setActiveStylePack,
   setDeviceSettings,
   startVoiceprintEnrollment,
 } from '../../lib/ipc';
@@ -24,7 +23,6 @@ import type {
   DeviceSettingsSnapshot,
   DeviceSettingsUpdateRequest,
   InstalledApplication,
-  PolishMode,
   PostDictationKey,
   ShortcutBinding,
   VoiceprintStatus,
@@ -716,78 +714,6 @@ function DeviceFirmwareSettingsCard() {
                   saveVoiceAutomation({ voiceAutoStopEnabled })}
                 disabled={controlsDisabled}
               />
-            </SettingRow>
-            <SettingRow
-              label={t('settings.recording.longFormDictationLabel')}
-              desc={t('settings.recording.longFormDictationDesc')}
-            >
-              <Toggle
-                on={Boolean(prefs.longFormDictation)}
-                onToggle={longFormDictation =>
-                  savePrefs(current => ({ ...current, longFormDictation }))}
-              />
-            </SettingRow>
-            <SettingRow
-              label={t('settings.recording.dictationPolishLabel')}
-              desc={t('settings.recording.dictationPolishDesc')}
-            >
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignSelf: 'flex-start',
-                  padding: 2,
-                  borderRadius: 8,
-                  background: 'var(--ol-control-track)',
-                  flexWrap: 'wrap',
-                  gap: 2,
-                }}
-              >
-                {([
-                  ['raw', 'builtin.raw', t('settings.recording.dictationPolishRaw')] as const,
-                  ['light', 'builtin.light', t('settings.recording.dictationPolishLight')] as const,
-                  ['structured', 'builtin.structured', t('settings.recording.dictationPolishStructured')] as const,
-                  ['formal', 'builtin.formal', t('settings.recording.dictationPolishFormal')] as const,
-                ]).map(([mode, packId, label]) => {
-                  const active = prefs.defaultMode === mode
-                    || prefs.activeStylePackId === packId;
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => {
-                        void (async () => {
-                          try {
-                            await setActiveStylePack(packId);
-                            await savePrefs(current => ({
-                              ...current,
-                              defaultMode: mode as PolishMode,
-                              activeStylePackId: packId,
-                            }));
-                          } catch (error) {
-                            console.warn('[device-settings] set polish mode failed', error);
-                          }
-                        })();
-                      }}
-                      style={{
-                        minWidth: 56,
-                        height: 28,
-                        padding: '0 10px',
-                        fontSize: 12,
-                        fontWeight: 500,
-                        border: 0,
-                        borderRadius: 6,
-                        fontFamily: 'inherit',
-                        background: active ? 'var(--ol-control-active)' : 'transparent',
-                        color: active ? 'var(--ol-ink)' : 'var(--ol-ink-3)',
-                        boxShadow: active ? 'var(--ol-control-active-shadow)' : 'none',
-                        cursor: 'default',
-                      }}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
             </SettingRow>
             <SettingRow
               label={t('settings.recording.removeFillerWordsLabel')}

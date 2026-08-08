@@ -19,7 +19,6 @@ function Emit-Hit {
     "stop_to_transcribing_ms=",
     "stop_to_done_ms=",
     "target_speaker_inactive_",
-    "long_form=",
     "sentence_pause=",
     "仍在剪贴板",
     "上屏失败",

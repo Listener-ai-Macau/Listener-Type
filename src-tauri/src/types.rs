@@ -1237,10 +1237,6 @@ pub struct UserPreferences {
     /// 从听写预览和最终文本中移除独立的中文犹豫语气词。默认开启。
     #[serde(default = "default_true")]
     pub remove_filler_words: bool,
-    /// 长文听写模式：本人静音结束阈值从 1.0s 放宽到 2.0s，方便写邮件/长段口述时
-    /// 短暂想词不被掐断。默认关闭，保持 1.0.4 标准听写跟手合同。
-    #[serde(default)]
-    pub long_form_dictation: bool,
     /// 普通听写成功插入后是否自动发送提交按键。默认关闭，避免升级后意外提交。
     pub send_key_after_dictation: bool,
     /// 自动发送使用的按键。仅在 send_key_after_dictation 开启时生效。
@@ -1521,8 +1517,6 @@ struct UserPreferencesWire {
     copy_dictation_to_clipboard: Option<bool>,
     #[serde(default = "default_true")]
     remove_filler_words: bool,
-    #[serde(default)]
-    long_form_dictation: bool,
     send_key_after_dictation: bool,
     #[serde(default)]
     post_dictation_key: PostDictationKey,
@@ -1646,7 +1640,6 @@ impl Default for UserPreferencesWire {
             restore_clipboard_after_paste: prefs.restore_clipboard_after_paste,
             copy_dictation_to_clipboard: Some(prefs.copy_dictation_to_clipboard),
             remove_filler_words: prefs.remove_filler_words,
-            long_form_dictation: prefs.long_form_dictation,
             send_key_after_dictation: prefs.send_key_after_dictation,
             post_dictation_key: prefs.post_dictation_key,
             voice_wake_phrase: prefs.voice_wake_phrase,
@@ -1834,7 +1827,6 @@ impl<'de> Deserialize<'de> for UserPreferences {
                 .copy_dictation_to_clipboard
                 .unwrap_or(wire.streaming_insert_save_clipboard),
             remove_filler_words: wire.remove_filler_words,
-            long_form_dictation: wire.long_form_dictation,
             send_key_after_dictation: wire.send_key_after_dictation,
             post_dictation_key: wire.post_dictation_key,
             voice_wake_phrase: if wire.voice_wake_phrase.trim().is_empty() {
@@ -2272,7 +2264,6 @@ impl Default for UserPreferences {
             restore_clipboard_after_paste: true,
             copy_dictation_to_clipboard: true,
             remove_filler_words: true,
-            long_form_dictation: false,
             send_key_after_dictation: false,
             post_dictation_key: PostDictationKey::default(),
             voice_wake_phrase: default_voice_wake_phrase(),

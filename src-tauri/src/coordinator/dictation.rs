@@ -49,17 +49,15 @@ const WAKE_DIAGNOSTIC_RETENTION_MAX_BYTES: u64 = 32 * 1024 * 1024;
 const WAKE_DIAGNOSTIC_RETENTION_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const POST_DICTATION_KEY_DELAY: Duration = Duration::from_millis(60);
 const EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT: Duration = Duration::from_millis(300);
-// Owner dictation endpoint. Standard mode uses 1.0s for snappy completion on
-// finished sentences; optional long-form mode uses 2.0s. Incomplete body text
-// (no 。？！) uses 1.5s; *very short* incomplete body (≤4 spoken chars, e.g.
-// "那你") holds 2.5s so mid-thought / late ASR tails are not cut (installed
-// 4ff44fc3). Only the wake/target speaker's latest speech refreshes this
-// clock — other people talking must not lengthen auto-end. Default
-// complete-sentence path remains 1.0s (1.0.4 contract).
+// Owner dictation endpoint. Finished sentences use 1.0s for snappy completion
+// (1.0.4 contract). Incomplete body text (no 。？！) uses 1.5s; *very short*
+// incomplete body (≤4 spoken chars, e.g. "那你") holds 2.5s so mid-thought /
+// late ASR tails are not cut (installed 4ff44fc3). Only the wake/target
+// speaker's latest speech refreshes this clock — other people talking must
+// not lengthen auto-end.
 const EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS: u64 = 1_000;
 const EMBEDDED_TARGET_SPEAKER_INCOMPLETE_BODY_END_TIMEOUT_MS: u64 = 1_500;
 const EMBEDDED_TARGET_SPEAKER_SHORT_BODY_END_TIMEOUT_MS: u64 = 2_500;
-const EMBEDDED_TARGET_SPEAKER_LONG_FORM_END_TIMEOUT_MS: u64 = 2_000;
 // Spoken-content length at/under this is treated as "just started body".
 const EMBEDDED_SHORT_BODY_SPOKEN_CHARS: usize = 4;
 // Installed session 72519330: wake capsule → ~1.2s host auto-end on the wake
@@ -73,14 +71,6 @@ const EMBEDDED_PROVIDER_STALL_FALLBACK_LAG_MS: u64 = 500;
 // before local-clock fallback may end the session.
 const EMBEDDED_PROVIDER_STALL_CONFIRM_MS: u64 = 1_000;
 
-fn target_speaker_end_timeout_ms(long_form: bool) -> u64 {
-    if long_form {
-        EMBEDDED_TARGET_SPEAKER_LONG_FORM_END_TIMEOUT_MS
-    } else {
-        EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
-    }
-}
-
 fn preview_spoken_char_count(preview: Option<&str>) -> usize {
     preview
         .map(str::trim)
@@ -93,18 +83,14 @@ fn preview_spoken_char_count(preview: Option<&str>) -> usize {
         .unwrap_or(0)
 }
 
-/// Endpoint timeout from mode + body completeness.
+/// Endpoint timeout from body completeness.
 ///
 /// Historical mistake: "ends with 。？！ → 2s" made *every* Chinese short
 /// dictation feel slow (cloud ASR almost always adds terminal punctuation).
 /// Correct polarity: finished sentences stay snappy 1.0s; incomplete body
 /// holds 1.5s; very short incomplete body holds 2.5s so late cloud tails can
 /// land (intermittent "那你"-only finals).
-/// Optional long-form remains the only intentional flat 2.0s path.
-fn target_speaker_end_timeout_ms_for_preview(long_form: bool, preview: Option<&str>) -> u64 {
-    if long_form {
-        return EMBEDDED_TARGET_SPEAKER_LONG_FORM_END_TIMEOUT_MS;
-    }
+fn target_speaker_end_timeout_ms_for_preview(preview: Option<&str>) -> u64 {
     let has_body = preview.map(str::trim).is_some_and(|text| !text.is_empty());
     if has_body && !preview_ends_with_sentence_terminal(preview) {
         if preview_spoken_char_count(preview) <= EMBEDDED_SHORT_BODY_SPOKEN_CHARS {
@@ -130,8 +116,6 @@ fn target_speaker_inactive_stop_reason(timeout_ms: u64) -> &'static str {
         "target_speaker_inactive_no_body_3000ms"
     } else if timeout_ms >= EMBEDDED_TARGET_SPEAKER_SHORT_BODY_END_TIMEOUT_MS {
         "target_speaker_inactive_2500ms"
-    } else if timeout_ms >= EMBEDDED_TARGET_SPEAKER_LONG_FORM_END_TIMEOUT_MS {
-        "target_speaker_inactive_2000ms"
     } else if timeout_ms >= EMBEDDED_TARGET_SPEAKER_INCOMPLETE_BODY_END_TIMEOUT_MS {
         "target_speaker_inactive_1500ms"
     } else {
@@ -547,7 +531,6 @@ fn handle_target_speaker_update(
     if update.target_activity_advanced || update.pending_activity_advanced {
         note_embedded_asr_speech_activity(inner, session_id);
     }
-    let long_form = inner.prefs.get().long_form_dictation;
     let preview = current_embedded_audio_partial_preview(inner);
     // Prefer the live filtered preview if present; wake guard body_started is
     // the durable latch once any non-empty body was seen this session.
@@ -555,8 +538,7 @@ fn handle_target_speaker_update(
         || preview
             .as_deref()
             .is_some_and(|text| !text.trim().is_empty());
-    let mode_timeout_ms =
-        target_speaker_end_timeout_ms_for_preview(long_form, preview.as_deref());
+    let mode_timeout_ms = target_speaker_end_timeout_ms_for_preview(preview.as_deref());
     let endpoint_timeout_ms = if body_started {
         mode_timeout_ms
     } else if automatic_wake_session_active(inner, session_id) {
@@ -598,7 +580,7 @@ fn handle_target_speaker_update(
         );
     }
 
-    // 1.0.5 A3: latch Transcribing + keep last preview immediately at the
+    // 1.0.4 A3: latch Transcribing + keep last preview immediately at the
     // silence threshold so the UI does not hang on Listening while BLE stop
     // and final-frame work are still in flight.
     let stop_feedback_started = Instant::now();
@@ -607,7 +589,7 @@ fn handle_target_speaker_update(
     maybe_start_polish_prefetch(inner, session_id);
     if feedback_emitted {
         log::info!(
-            "[asr] stop_to_transcribing_ms={} session_id={session_id} reason={stop_reason} long_form={long_form} timeout_ms={endpoint_timeout_ms} body_started={body_started} sentence_pause={}",
+            "[asr] stop_to_transcribing_ms={} session_id={session_id} reason={stop_reason} timeout_ms={endpoint_timeout_ms} body_started={body_started} sentence_pause={}",
             stop_feedback_started.elapsed().as_millis(),
             preview_ends_with_sentence_terminal(preview.as_deref())
         );

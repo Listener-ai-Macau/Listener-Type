@@ -918,8 +918,6 @@ export function RecordingSection() {
     savePrefs({ ...prefs, showCapsule });
   const onMuteDuringRecordingChange = (muteDuringRecording: boolean) =>
     savePrefs({ ...prefs, muteDuringRecording });
-  const onLongFormDictationChange = (longFormDictation: boolean) =>
-    savePrefs({ ...prefs, longFormDictation });
   const onMicrophoneDeviceChange = (microphoneDeviceName: string) =>
     savePrefs({ ...prefs, microphoneDeviceName });
   const onDictationInputSourceChange = (dictationInputSource: DictationInputSource) =>
@@ -1114,12 +1112,6 @@ export function RecordingSection() {
         desc={t('settings.recording.muteDuringRecordingDesc')}
       >
         <Toggle on={prefs.muteDuringRecording} onToggle={onMuteDuringRecordingChange} />
-      </SettingRow>
-      <SettingRow
-        label={t('settings.recording.longFormDictationLabel')}
-        desc={t('settings.recording.longFormDictationDesc')}
-      >
-        <Toggle on={Boolean(prefs.longFormDictation)} onToggle={onLongFormDictationChange} />
       </SettingRow>
     </Card>
 

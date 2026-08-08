@@ -1368,7 +1368,7 @@ fn proactive_stop_accumulates_trailing_silence_only_after_body_started() {
 }
 
 #[test]
-fn long_form_endpoint_requires_two_seconds_without_that_speaker() {
+fn finished_sentences_stay_snappy_incomplete_body_holds() {
     let base = crate::asr::volcengine::TargetSpeakerUpdate {
         speaker_id: Some("1".into()),
         target_speech_end_ms: Some(1_500),
@@ -1384,55 +1384,49 @@ fn long_form_endpoint_requires_two_seconds_without_that_speaker() {
         pending_activity_advanced: false,
         speaker_info_present: true,
     };
-    // Standard 1.0s is due at +1000, but long-form 2.0s is not yet.
+    // Standard 1.0s is due at +1000; a wider 2.0s window is not yet due.
     assert!(super::target_speaker_endpoint_due(&base));
     assert!(!super::target_speaker_endpoint_due_with_timeout(&base, 2_000));
 
-    let long_form_due = crate::asr::volcengine::TargetSpeakerUpdate {
+    let wider_window_due = crate::asr::volcengine::TargetSpeakerUpdate {
         provider_audio_duration_ms: Some(3_500),
         audio_duration_ms: Some(3_500),
         ..base
     };
     assert!(super::target_speaker_endpoint_due_with_timeout(
-        &long_form_due,
+        &wider_window_due,
         2_000
     ));
-    assert_eq!(super::target_speaker_end_timeout_ms(false), 1_000);
-    assert_eq!(super::target_speaker_end_timeout_ms(true), 2_000);
     assert_eq!(
         super::target_speaker_inactive_stop_reason(1_000),
         "target_speaker_inactive_1000ms"
-    );
-    assert_eq!(
-        super::target_speaker_inactive_stop_reason(2_000),
-        "target_speaker_inactive_2000ms"
     );
     // Finished sentences with 。？！ stay snappy 1.0s (old "terminal→2s" made
     // every Chinese short utterance feel slow). Incomplete body holds 1.5s so
     // mid-thought pauses are not cut (installed "现在是进入" / "你帮").
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview(false, Some("用全刷。")),
+        super::target_speaker_end_timeout_ms_for_preview(Some("用全刷。")),
         1_000
     );
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview(false, Some("简单说一下。")),
+        super::target_speaker_end_timeout_ms_for_preview(Some("简单说一下。")),
         1_000
     );
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview(false, Some("现在整体是一个什么进度？")),
+        super::target_speaker_end_timeout_ms_for_preview(Some("现在整体是一个什么进度？")),
         1_000
     );
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview(false, Some("你继续帮我看一下吧")),
+        super::target_speaker_end_timeout_ms_for_preview(Some("你继续帮我看一下吧")),
         1_500
     );
     // 5 spoken chars → short-body ladder (≤4 is 2.5s).
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview(false, Some("现在是进入")),
+        super::target_speaker_end_timeout_ms_for_preview(Some("现在是进入")),
         1_500
     );
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview(false, Some("那你")),
+        super::target_speaker_end_timeout_ms_for_preview(Some("那你")),
         2_500
     );
     assert_eq!(
@@ -1442,14 +1436,6 @@ fn long_form_endpoint_requires_two_seconds_without_that_speaker() {
     assert_eq!(
         super::target_speaker_inactive_stop_reason(2_500),
         "target_speaker_inactive_2500ms"
-    );
-    assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview(true, Some("用全刷。")),
-        2_000
-    );
-    assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview(true, Some("你继续帮我看一下吧")),
-        2_000
     );
     assert!(super::preview_ends_with_sentence_terminal(Some(
         "现在整体是一个什么进度？你跟我简单说一下。"
@@ -2110,11 +2096,11 @@ fn target_speaker_endpoint_waits_for_startup_body_calibration() {
 fn incomplete_body_preview_uses_fifteen_hundred_ms_endpoint() {
     // Very short incomplete body holds longer (installed "那你" mid-cut).
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview(false, Some("你帮")),
+        super::target_speaker_end_timeout_ms_for_preview( Some("你帮")),
         2_500
     );
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview(false, Some("那你")),
+        super::target_speaker_end_timeout_ms_for_preview( Some("那你")),
         2_500
     );
     assert_eq!(
@@ -2123,17 +2109,17 @@ fn incomplete_body_preview_uses_fifteen_hundred_ms_endpoint() {
     );
     // Longer incomplete body keeps 1.5s.
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview(false, Some("你继续帮我看一下吧")),
+        super::target_speaker_end_timeout_ms_for_preview( Some("你继续帮我看一下吧")),
         1_500
     );
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview(false, Some("你帮。")),
+        super::target_speaker_end_timeout_ms_for_preview( Some("你帮。")),
         1_000
     );
     // Empty / no body keeps base snappy; no-body abandon is layered separately.
-    assert_eq!(super::target_speaker_end_timeout_ms_for_preview(false, None), 1_000);
+    assert_eq!(super::target_speaker_end_timeout_ms_for_preview( None), 1_000);
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview(false, Some("   ")),
+        super::target_speaker_end_timeout_ms_for_preview( Some("   ")),
         1_000
     );
 }
@@ -2164,7 +2150,7 @@ fn host_started_wake_guard_survives_embedded_session_begin() {
         "host-started wake guard must survive embedded session begin attach"
     );
 
-    let mode_timeout = super::target_speaker_end_timeout_ms_for_preview(false, None);
+    let mode_timeout = super::target_speaker_end_timeout_ms_for_preview( None);
     let no_body_timeout = if automatic_wake_body_started(&coordinator.inner, session_id) {
         mode_timeout
     } else if automatic_wake_session_active(&coordinator.inner, session_id) {
@@ -2184,7 +2170,7 @@ fn automatic_wake_no_body_uses_longer_endpoint_timeout() {
     // Session 72519330: after visible capsule + 700ms body wait, 1.0s snappy
     // endpoint still measured the wake-phrase clock and empty-ended. Wake
     // sessions without body text must use the 3.0s abandon timeout; once body
-    // starts, standard 1.0s (or long-form 2.0s) returns.
+    // starts, standard 1.0s returns.
     let coordinator = Coordinator::new();
     let session_id = new_session_id();
     arm_automatic_wake_text_guard(&coordinator.inner, session_id, "开始录音".into(), 1_200);
@@ -2193,7 +2179,7 @@ fn automatic_wake_no_body_uses_longer_endpoint_timeout() {
     assert!(automatic_wake_session_active(&coordinator.inner, session_id));
     assert!(!automatic_wake_body_started(&coordinator.inner, session_id));
 
-    let mode_timeout = super::target_speaker_end_timeout_ms_for_preview(false, None);
+    let mode_timeout = super::target_speaker_end_timeout_ms_for_preview( None);
     assert_eq!(mode_timeout, 1_000);
     let no_body_timeout = if automatic_wake_body_started(&coordinator.inner, session_id) {
         mode_timeout
