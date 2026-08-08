@@ -41,6 +41,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/check-window-hotkey-fallback.mjs` | Global hotkeys | Hotkey tests and manual smoke |
 | `scripts/dirty-change-inventory.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/listener-preproduction-scenarios.json` | Automation and audits | Node/PowerShell script tests |
+| `scripts/owner-accept-1.0.4-recording-ux.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/performance-baselines.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/record-preproduction-machine-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/regression-guard-commits.json` | Automation and audits | Node/PowerShell script tests |
@@ -55,6 +56,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/run-v1.0.2-regression.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/validation/run_ble_recording_cancel_matrix.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-frontend.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/verify-listener-1.0.4-protected-contracts.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify_device_control_ble_settings_static.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify_device_control_recovery_root_cause.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify_native_hid_gatt_recovery_static.py` | Automation and audits | Node/PowerShell script tests |

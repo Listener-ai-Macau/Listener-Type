@@ -3580,7 +3580,7 @@ mod tests {
     #[test]
     fn isolation_freeze_blocks_polluted_final_over_owner_ceiling() {
         // After NonTarget restabilizes away from owner, a longer mixed final must
-        // not expand the ledger past the freeze ceiling (1.0.5 multi-speaker goal).
+        // not expand the ledger past the freeze ceiling (1.0.4 multi-speaker goal).
         let mut state = SyncState::default();
         state.local_speaker_tracking_enabled = true;
         state.local_speaker_stable_target = false;
