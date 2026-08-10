@@ -1,0 +1,29 @@
+{
+  "models": [
+    {
+      "name": "campplus-current",
+      "path": "C:/Users/OWNER/AppData/Roaming/Listener Type/models/speaker-verification/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
+    },
+    {
+      "name": "eres2net-candidate",
+      "path": "C:/path/to/3dspeaker_speech_eres2net_base_200k_sv_zh-cn_16k-common.onnx"
+    }
+  ],
+  "enrollment_session_wavs": [
+    "corpus/enrollment/free-01.wav",
+    "corpus/enrollment/free-02.wav",
+    "corpus/enrollment/free-03.wav"
+  ],
+  "samples": [
+    {
+      "id": "owner-01",
+      "path": "corpus/owner/owner-01.wav",
+      "label": "owner"
+    },
+    {
+      "id": "non-owner-01",
+      "path": "corpus/non-owner/non-owner-01.wav",
+      "label": "non_owner"
+    }
+  ]
+}

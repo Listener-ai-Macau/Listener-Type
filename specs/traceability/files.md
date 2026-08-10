@@ -58,7 +58,9 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/run-listener-1.0.4-regression.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-listener-1.0.4-type-connected-soak.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-recording-consumption-physical-validation.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/run-speaker-verification-evaluation.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-v1.0.2-regression.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/speaker-evaluation-manifest.example.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/validation/run_ble_recording_cancel_matrix.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-frontend.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-listener-1.0.4-clean-env.ps1` | Automation and audits | Node/PowerShell script tests |

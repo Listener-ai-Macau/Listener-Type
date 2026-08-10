@@ -358,6 +358,31 @@ gate("recording_automation_settings_copy", () => {
   mustInclude(deviceSection, "voiceprintNoisyHint", "noisy-room expectation copy");
 });
 
+gate("dual_bank_voiceprint_enrollment", () => {
+  mustInclude(speaker, "TemplatePurpose::WakePhrase", "fixed-phrase template bank");
+  mustInclude(speaker, "TemplatePurpose::FreeSpeech", "free-speech template bank");
+  mustMatch(
+    speaker,
+    /DUAL_TEMPLATE_WINDOWS_PER_BANK:\s*usize\s*=\s*3/,
+    "three embeddings per enrollment bank",
+  );
+  mustMatch(
+    speaker,
+    /DUAL_TEMPLATE_MIN_ACTIVE_FRAMES_PER_WINDOW:\s*usize\s*=\s*10/,
+    "each enrollment template contains at least 1000 ms active speech",
+  );
+  mustInclude(
+    speaker,
+    "runtime_evaluates_listener_labeled_speaker_corpus",
+    "owner/non-owner model evaluation gate",
+  );
+  mustInclude(
+    speaker,
+    "template.session_embeddings.clone()",
+    "session tracking uses free-speech templates",
+  );
+});
+
 // Installed empty wake 72519330: before body text exists, auto-end must not use
 // snappy 1.0s on the wake clock (scared owner with "没有识别到语音").
 gate("wake_no_body_uses_longer_abandon_timeout", () => {

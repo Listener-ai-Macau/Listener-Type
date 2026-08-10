@@ -32,6 +32,8 @@ flowchart LR
 - Each dictation session is independent; Listener Type does not answer the transcript as a chat agent.
 - Clipboard fallback must preserve the generated result when direct insertion fails.
 - Debug audio recording is opt-in and bounded by retention settings.
+- Enrolled owner verification keeps separate OS-protected template banks for the fixed wake phrase and for natural free speech. Wake admission compares only the fixed-phrase bank; in-session owner tracking compares only the free-speech bank. Enrollment audio is discarded after feature extraction.
+- When no owner voiceprint is enrolled, wake-derived speaker identity is advisory: uncertain evidence must not erase recognized body text or produce a false no-speech result. Only repeated strong local NonTarget evidence may enforce an owner-isolation veto.
 - Embedded audio keeps the firmware VKA1 packet model intact. Batch debug paths reconstruct a complete PCM session before ASR; streaming paths create the normal ASR consumer on `session_start`, feed each `audio_data` PCM chunk immediately, and finalize through the same `end_session` path on `session_stop`.
 - Embedded streaming starts the device AI processing LED when Type accepts the first valid PCM chunk for ASR. The stop boundary only switches the capsule into transcribing feedback; it must not delay the purple AI processing signal until the end.
 - Embedded streaming cancel/error/link-loss paths must cancel ASR, restore prepared IME state, return coordinator state to Idle, and show an error capsule.

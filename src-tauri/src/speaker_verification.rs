@@ -292,14 +292,19 @@ mod platform {
     const KEYRING_SERVICE: &str = "com.listener.type.voiceprint";
     const KEYRING_ACCOUNT: &str = "owner-template-v1";
     const KEYRING_SUPPLEMENTAL_ACCOUNT_PREFIX: &str = "owner-template-v2-";
-    const MAX_SUPPLEMENTAL_TEMPLATES: usize = 3;
+    // v3 enrollment stores independent fixed-phrase and free-speech banks. Keep
+    // the existing account prefix so upgrades can read/delete v1/v2 material,
+    // but reserve enough protected entries for both banks.
+    const MAX_SUPPLEMENTAL_TEMPLATES: usize = 7;
     const SAMPLE_RATE: i32 = 16_000;
     const VERIFICATION_MIN_SPEECH_MS: usize = 1_000;
-    const ENROLLMENT_SECONDS: u64 = 7;
-    const ENROLLMENT_MIN_SECONDS: usize = 3;
+    const ENROLLMENT_SECONDS: u64 = 11;
+    const ENROLLMENT_MIN_SECONDS: usize = 6;
     const ENROLLMENT_FRAME_MS: usize = 100;
     const ENROLLMENT_MIN_ACTIVE_FRAMES: usize = 18;
     const TEMPLATE_WINDOW_MS: usize = 1_600;
+    const DUAL_TEMPLATE_WINDOWS_PER_BANK: usize = 3;
+    const DUAL_TEMPLATE_MIN_ACTIVE_FRAMES_PER_WINDOW: usize = 10;
     // Product sensitivity: platform DEFAULT_SCORE_MILLI is 500 (0.50). Real-owner
     // wake in mild noise often scores ~0.43–0.55; 0.50 cut too many true hits.
     // Keep below same-speaker unit-test floor and well above typical non-owner.
@@ -355,11 +360,21 @@ mod platform {
         phrase: Option<String>,
         #[serde(default)]
         invalidated: bool,
+        #[serde(default)]
+        purpose: Option<TemplatePurpose>,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum TemplatePurpose {
+        WakePhrase,
+        FreeSpeech,
     }
 
     #[derive(Debug, Clone)]
     struct SpeakerTemplate {
-        embeddings: Vec<Vec<f32>>,
+        wake_embeddings: Vec<Vec<f32>>,
+        session_embeddings: Vec<Vec<f32>>,
         phrase: Option<String>,
         invalidated: bool,
     }
@@ -410,7 +425,10 @@ mod platform {
 
     impl SpeakerRuntime {
         fn load(root: &Path) -> Result<Self, String> {
-            let model_path = root.join(MODEL_NAME);
+            Self::load_model(root, &root.join(MODEL_NAME))
+        }
+
+        fn load_model(root: &Path, model_path: &Path) -> Result<Self, String> {
             let onnx_path = root.join("onnxruntime.dll");
             let providers_path = root.join("onnxruntime_providers_shared.dll");
             let sherpa_path = root.join("sherpa-onnx-c-api.dll");
@@ -651,18 +669,48 @@ mod platform {
             .collect()
     }
 
-    fn enrollment_template_windows(pcm: &[u8]) -> Result<Vec<&[u8]>, String> {
-        let speech = enrollment_speech_window(pcm)?;
-        let mut windows = Vec::with_capacity(MAX_SUPPLEMENTAL_TEMPLATES + 1);
-        windows.push(speech);
-        for window in evenly_spaced_windows(speech, TEMPLATE_WINDOW_MS, MAX_SUPPLEMENTAL_TEMPLATES)
-        {
-            if window.len() >= SAMPLE_RATE as usize * 2 * VERIFICATION_MIN_SPEECH_MS / 1000 {
-                windows.push(window);
+    #[derive(Debug)]
+    struct EnrollmentTemplateWindows<'a> {
+        wake: Vec<&'a [u8]>,
+        session: Vec<&'a [u8]>,
+    }
+
+    fn quality_template_windows<'a>(pcm: &'a [u8], label: &str) -> Result<Vec<&'a [u8]>, String> {
+        let frame_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_FRAME_MS / 1000;
+        let windows =
+            evenly_spaced_windows(pcm, TEMPLATE_WINDOW_MS, DUAL_TEMPLATE_WINDOWS_PER_BANK);
+        if windows.len() != DUAL_TEMPLATE_WINDOWS_PER_BANK {
+            return Err(format!("{label}录音太短，请按提示完整录制。"));
+        }
+        for window in &windows {
+            let (_, _, active_frames, _, _, _) = active_speech_bounds(window, frame_bytes, 20.0)
+                .map_err(|_| format!("{label}没有检测到清晰人声，请靠近设备重新录制。"))?;
+            if active_frames < DUAL_TEMPLATE_MIN_ACTIVE_FRAMES_PER_WINDOW {
+                return Err(format!(
+                    "{label}有效人声不足 1 秒，请保持自然语速并完整说完。"
+                ));
             }
         }
-        windows.truncate(MAX_SUPPLEMENTAL_TEMPLATES + 1);
         Ok(windows)
+    }
+
+    fn enrollment_template_windows(pcm: &[u8]) -> Result<EnrollmentTemplateWindows<'_>, String> {
+        let speech = enrollment_speech_window(pcm)?;
+        let minimum_dual_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_MIN_SECONDS;
+        if speech.len() < minimum_dual_bytes {
+            return Err("有效人声不足 6 秒，请先说三遍唤醒词，再说一句自然的话。".to_string());
+        }
+
+        // Enrollment prompt orders fixed phrase first and free speech second.
+        // Give each bank 55% of the trimmed capture, with a small overlap around
+        // the transition so normal pauses do not create a dead window.
+        let split = speech.len() / 2 & !1usize;
+        let overlap = speech.len() / 20 & !1usize;
+        let wake_end = split.saturating_add(overlap).min(speech.len()) & !1usize;
+        let session_start = split.saturating_sub(overlap) & !1usize;
+        let wake = quality_template_windows(&speech[..wake_end], "唤醒词")?;
+        let session = quality_template_windows(&speech[session_start..], "自然语音")?;
+        Ok(EnrollmentTemplateWindows { wake, session })
     }
 
     fn verification_speech_window(pcm: &[u8]) -> Result<&[u8], String> {
@@ -827,6 +875,16 @@ mod platform {
     fn ensure_runtime_assets() -> Result<std::path::PathBuf, String> {
         let root = crate::persistence::speaker_verification_root()
             .map_err(|err| format!("create voiceprint model directory failed: {err}"))?;
+        let runtime_ready = [
+            "onnxruntime.dll",
+            "onnxruntime_providers_shared.dll",
+            "sherpa-onnx-c-api.dll",
+        ]
+        .iter()
+        .all(|name| root.join(name).exists());
+        if runtime_ready {
+            return Ok(root);
+        }
         let archive_path = root.join(format!("sherpa-onnx-{RUNTIME_VERSION}.tar.bz2"));
         download_verified(RUNTIME_URL, &archive_path, RUNTIME_ARCHIVE_SHA256)?;
         extract_runtime(&root, &archive_path)?;
@@ -889,18 +947,20 @@ mod platform {
         embedding: &[f32],
         phrase: &str,
         invalidated: bool,
+        purpose: TemplatePurpose,
     ) -> Result<String, String> {
         let mut bytes = Vec::with_capacity(embedding.len() * 4);
         for value in embedding {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         serde_json::to_string(&StoredTemplate {
-            version: 2,
+            version: 3,
             model_sha256: MODEL_SHA256.to_string(),
             dimension: embedding.len(),
             embedding_base64: BASE64.encode(bytes),
             phrase: Some(phrase.to_string()),
             invalidated,
+            purpose: Some(purpose),
         })
         .map_err(|err| format!("encode voiceprint template failed: {err}"))
     }
@@ -908,10 +968,10 @@ mod platform {
     fn decode_template(value: &str) -> Result<SpeakerTemplate, String> {
         let stored: StoredTemplate = serde_json::from_str(value)
             .map_err(|err| format!("voiceprint template damaged: {err}"))?;
-        if !matches!(stored.version, 1 | 2) || stored.model_sha256 != MODEL_SHA256 {
+        if !matches!(stored.version, 1 | 2 | 3) || stored.model_sha256 != MODEL_SHA256 {
             return Err("voiceprint template is incompatible with the current model".to_string());
         }
-        if stored.version == 2
+        if stored.version >= 2
             && stored
                 .phrase
                 .as_ref()
@@ -930,8 +990,18 @@ mod platform {
             .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
             .collect::<Vec<_>>();
         normalize(&mut embedding)?;
+        let (wake_embeddings, session_embeddings) = match stored.purpose {
+            Some(TemplatePurpose::WakePhrase) => (vec![embedding], Vec::new()),
+            Some(TemplatePurpose::FreeSpeech) => (Vec::new(), vec![embedding]),
+            None => {
+                // v1/v2 had one undifferentiated bank. Preserve compatibility
+                // until the owner re-enrolls with the dual-template prompt.
+                (vec![embedding.clone()], vec![embedding])
+            }
+        };
         Ok(SpeakerTemplate {
-            embeddings: vec![embedding],
+            wake_embeddings,
+            session_embeddings,
             phrase: stored.phrase,
             invalidated: stored.invalidated,
         })
@@ -942,11 +1012,32 @@ mod platform {
             .phrase
             .as_deref()
             .ok_or_else(|| "voiceprint template wake phrase is missing".to_string())?;
+        if template.wake_embeddings.is_empty() || template.session_embeddings.is_empty() {
+            return Err("voiceprint template requires wake and free-speech banks".to_string());
+        }
         let encoded = template
-            .embeddings
+            .wake_embeddings
             .iter()
-            .map(|embedding| encode_template(embedding, phrase, template.invalidated))
+            .map(|embedding| {
+                encode_template(
+                    embedding,
+                    phrase,
+                    template.invalidated,
+                    TemplatePurpose::WakePhrase,
+                )
+            })
+            .chain(template.session_embeddings.iter().map(|embedding| {
+                encode_template(
+                    embedding,
+                    phrase,
+                    template.invalidated,
+                    TemplatePurpose::FreeSpeech,
+                )
+            }))
             .collect::<Result<Vec<_>, _>>()?;
+        if encoded.len() > MAX_SUPPLEMENTAL_TEMPLATES + 1 {
+            return Err("voiceprint template contains too many protected entries".to_string());
+        }
         delete_stored_credentials()?;
         for index in 0..MAX_SUPPLEMENTAL_TEMPLATES {
             let entry = supplemental_keyring_entry(index)?;
@@ -995,7 +1086,8 @@ mod platform {
                                     if extra.phrase == template.phrase
                                         && extra.invalidated == template.invalidated =>
                                 {
-                                    template.embeddings.extend(extra.embeddings)
+                                    template.wake_embeddings.extend(extra.wake_embeddings);
+                                    template.session_embeddings.extend(extra.session_embeddings);
                                 }
                                 Ok(_) => log::warn!(
                                     "[speaker-verification] ignored supplemental owner template index={index}: wake phrase binding differs"
@@ -1204,16 +1296,27 @@ mod platform {
         let result: Result<VoiceprintStatus, String> = (|| {
             let runtime = ensure_runtime()?;
             let windows = enrollment_template_windows(pcm)?;
-            let embeddings = windows
+            let wake_embeddings = windows
+                .wake
                 .iter()
                 .map(|speech| {
                     runtime
                         .embedding(speech)
-                        .map_err(|err| format!("声纹特征提取失败，请重新说三遍唤醒词：{err}"))
+                        .map_err(|err| format!("唤醒词声纹特征提取失败，请重新录制：{err}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let session_embeddings = windows
+                .session
+                .iter()
+                .map(|speech| {
+                    runtime
+                        .embedding(speech)
+                        .map_err(|err| format!("自然语音声纹特征提取失败，请重新录制：{err}"))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let template = SpeakerTemplate {
-                embeddings,
+                wake_embeddings,
+                session_embeddings,
                 phrase: Some(phrase.clone()),
                 invalidated: false,
             };
@@ -1281,7 +1384,7 @@ mod platform {
             .map(|candidate| runtime.embedding(candidate))
             .collect::<Result<Vec<_>, _>>()?;
         let score = template
-            .embeddings
+            .wake_embeddings
             .iter()
             .flat_map(|enrolled| {
                 candidate_embeddings
@@ -1305,7 +1408,7 @@ mod platform {
         });
         log::info!(
             "[speaker-verification] compared enrolled_templates={} candidate_windows={} speech_ms={} score={score:.6}",
-            template.embeddings.len(),
+            template.wake_embeddings.len(),
             candidate_embeddings.len(),
             candidate_windows[0].len() / 32
         );
@@ -1329,7 +1432,7 @@ mod platform {
                 .template
                 .as_ref()
                 .filter(|template| template_matches_phrase(template, &phrase))
-                .map(|template| template.embeddings.clone())
+                .map(|template| template.session_embeddings.clone())
         };
         if let Some(embeddings) = enrolled {
             return Ok(SessionSpeakerProfile {
@@ -1475,12 +1578,51 @@ mod platform {
         fn template_binary_round_trip_is_normalized_and_compact() {
             let mut embedding = (1..=192).map(|value| value as f32).collect::<Vec<_>>();
             normalize(&mut embedding).unwrap();
-            let encoded = encode_template(&embedding, "小爱同学", false).unwrap();
+            let encoded =
+                encode_template(&embedding, "小爱同学", false, TemplatePurpose::WakePhrase)
+                    .unwrap();
             assert!(encoded.len() < 1800);
             let decoded = decode_template(&encoded).unwrap();
-            assert!((cosine(&embedding, &decoded.embeddings[0]).unwrap() - 1.0).abs() < 1e-5);
+            assert!((cosine(&embedding, &decoded.wake_embeddings[0]).unwrap() - 1.0).abs() < 1e-5);
+            assert!(decoded.session_embeddings.is_empty());
             assert_eq!(decoded.phrase.as_deref(), Some("小爱同学"));
             assert!(!decoded.invalidated);
+        }
+
+        #[test]
+        fn template_purpose_separates_new_banks_and_maps_legacy_to_both() {
+            let mut embedding = vec![1.0, 2.0, 3.0];
+            normalize(&mut embedding).unwrap();
+            let free = decode_template(
+                &encode_template(&embedding, "开始录音", false, TemplatePurpose::FreeSpeech)
+                    .unwrap(),
+            )
+            .unwrap();
+            assert!(free.wake_embeddings.is_empty());
+            assert_eq!(free.session_embeddings.len(), 1);
+
+            let mut bytes = Vec::new();
+            for value in &embedding {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            let legacy = serde_json::to_string(&StoredTemplate {
+                version: 2,
+                model_sha256: MODEL_SHA256.to_string(),
+                dimension: embedding.len(),
+                embedding_base64: BASE64.encode(bytes),
+                phrase: Some("开始录音".into()),
+                invalidated: false,
+                purpose: None,
+            })
+            .unwrap();
+            let legacy = decode_template(&legacy).unwrap();
+            assert_eq!(legacy.wake_embeddings.len(), 1);
+            assert_eq!(legacy.session_embeddings.len(), 1);
+            assert!(
+                (cosine(&legacy.wake_embeddings[0], &legacy.session_embeddings[0]).unwrap() - 1.0)
+                    .abs()
+                    < 1e-5
+            );
         }
 
         #[test]
@@ -1493,6 +1635,7 @@ mod platform {
                 embedding_base64: BASE64.encode(0.5f32.to_le_bytes()),
                 phrase: Some("小爱同学".into()),
                 invalidated: false,
+                purpose: None,
             })
             .unwrap();
             assert!(decode_template(&wrong).is_err());
@@ -1501,7 +1644,8 @@ mod platform {
         #[test]
         fn voiceprint_template_only_protects_its_enrolled_phrase() {
             let template = SpeakerTemplate {
-                embeddings: vec![vec![1.0, 0.0]],
+                wake_embeddings: vec![vec![1.0, 0.0]],
+                session_embeddings: vec![vec![1.0, 0.0]],
                 phrase: Some("小爱同学".into()),
                 invalidated: false,
             };
@@ -1524,9 +1668,9 @@ mod platform {
         fn enrollment_window_keeps_repeated_phrase_span_and_drops_outer_silence() {
             let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
             let mut samples = vec![0i16; SAMPLE_RATE as usize];
-            samples.extend(vec![800i16; frame_samples * 10]);
+            samples.extend(vec![800i16; frame_samples * 32]);
             samples.extend(vec![0i16; frame_samples * 2]);
-            samples.extend(vec![-900i16; frame_samples * 10]);
+            samples.extend(vec![-900i16; frame_samples * 32]);
             samples.extend(vec![0i16; SAMPLE_RATE as usize]);
             let pcm = samples
                 .iter()
@@ -1534,23 +1678,28 @@ mod platform {
                 .collect::<Vec<_>>();
             let window = enrollment_speech_window(&pcm).expect("speech window");
             assert!(window.len() < pcm.len());
-            assert!(window.len() >= SAMPLE_RATE as usize * 2 * 2);
+            assert!(window.len() >= SAMPLE_RATE as usize * 2 * ENROLLMENT_MIN_SECONDS);
         }
 
         #[test]
         fn enrollment_builds_bounded_long_and_short_owner_templates() {
             let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
             let mut samples = vec![0i16; frame_samples * 5];
-            samples.extend(vec![800i16; frame_samples * 45]);
+            samples.extend(vec![800i16; frame_samples * 80]);
             samples.extend(vec![0i16; frame_samples * 5]);
             let pcm = samples
                 .iter()
                 .flat_map(|sample| sample.to_le_bytes())
                 .collect::<Vec<_>>();
             let windows = enrollment_template_windows(&pcm).expect("template windows");
-            assert_eq!(windows.len(), MAX_SUPPLEMENTAL_TEMPLATES + 1);
-            assert!(windows[0].len() > windows[1].len());
-            assert!(windows[1..]
+            assert_eq!(windows.wake.len(), DUAL_TEMPLATE_WINDOWS_PER_BANK);
+            assert_eq!(windows.session.len(), DUAL_TEMPLATE_WINDOWS_PER_BANK);
+            assert!(windows
+                .wake
+                .iter()
+                .all(|window| window.len() == TEMPLATE_WINDOW_MS * 32));
+            assert!(windows
+                .session
                 .iter()
                 .all(|window| window.len() == TEMPLATE_WINDOW_MS * 32));
         }
@@ -1618,7 +1767,16 @@ mod platform {
                 let wav = fs::read(path).expect("read fixture");
                 denzic_audio_v1_core::read_wav_pcm16le(&wav).expect("decode 16 kHz mono fixture")
             };
-            let runtime = ensure_runtime().expect("load verified runtime");
+            let runtime = match std::env::var("LISTENER_VOICEPRINT_EVAL_MODEL") {
+                Ok(path) => {
+                    let root = evaluation_runtime_root();
+                    Arc::new(
+                        SpeakerRuntime::load_model(&root, Path::new(&path))
+                            .expect("load requested evaluation model"),
+                    )
+                }
+                Err(_) => ensure_runtime().expect("load verified runtime"),
+            };
             let enrolled = runtime
                 .embedding(&fixture("LISTENER_VOICEPRINT_SPEAKER1_A"))
                 .expect("speaker1 enrollment embedding");
@@ -1654,7 +1812,7 @@ mod platform {
             };
             let raw = runtime.embedding(&pcm).expect("raw embedding");
             let raw_score = template
-                .embeddings
+                .session_embeddings
                 .iter()
                 .map(|enrolled| cosine(enrolled, &raw).expect("raw score"))
                 .max_by(f32::total_cmp)
@@ -1663,15 +1821,248 @@ mod platform {
             let mut processed_score = f32::NEG_INFINITY;
             for window in &windows {
                 let candidate = runtime.embedding(window).expect("window embedding");
-                for enrolled in &template.embeddings {
+                for enrolled in &template.session_embeddings {
                     processed_score =
                         processed_score.max(cosine(enrolled, &candidate).expect("window score"));
                 }
             }
             println!(
                 "raw_score={raw_score:.6} processed_score={processed_score:.6} enrolled_templates={} candidate_windows={} threshold={VERIFICATION_THRESHOLD:.3}",
-                template.embeddings.len(),
+                template.session_embeddings.len(),
                 windows.len()
+            );
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct EvaluationManifest {
+            models: Vec<EvaluationModel>,
+            enrollment_session_wavs: Vec<String>,
+            samples: Vec<EvaluationSample>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct EvaluationModel {
+            name: String,
+            path: String,
+        }
+
+        #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+        #[serde(rename_all = "snake_case")]
+        enum EvaluationLabel {
+            Owner,
+            NonOwner,
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct EvaluationSample {
+            id: String,
+            path: String,
+            label: EvaluationLabel,
+        }
+
+        #[derive(Debug, Serialize)]
+        struct EvaluationScore {
+            id: String,
+            label: EvaluationLabel,
+            score: f32,
+            inference_ms: u128,
+        }
+
+        #[derive(Debug, Serialize)]
+        struct ModelEvaluationReport {
+            model: String,
+            model_sha256: String,
+            threshold: f32,
+            owner_samples: usize,
+            non_owner_samples: usize,
+            owner_recall: f32,
+            non_owner_suppression: f32,
+            inference_p95_ms: u128,
+            pass: bool,
+            scores: Vec<EvaluationScore>,
+        }
+
+        fn resolve_evaluation_path(base: &Path, value: &str) -> std::path::PathBuf {
+            let path = std::path::PathBuf::from(value);
+            if path.is_absolute() {
+                path
+            } else {
+                base.join(path)
+            }
+        }
+
+        fn evaluation_runtime_root() -> std::path::PathBuf {
+            match std::env::var("LISTENER_SPEAKER_EVAL_RUNTIME_ROOT") {
+                Ok(path) => std::path::PathBuf::from(path),
+                Err(_) => ensure_runtime_assets().expect("prepare speaker runtime assets"),
+            }
+        }
+
+        fn evaluation_pcm(path: &Path) -> Vec<u8> {
+            let wav = fs::read(path).unwrap_or_else(|err| {
+                panic!(
+                    "read consented evaluation fixture {}: {err}",
+                    path.display()
+                )
+            });
+            denzic_audio_v1_core::read_wav_pcm16le(&wav).unwrap_or_else(|err| {
+                panic!(
+                    "decode 16 kHz mono evaluation fixture {}: {err}",
+                    path.display()
+                )
+            })
+        }
+
+        fn evaluation_embedding(runtime: &SpeakerRuntime, path: &Path) -> Vec<f32> {
+            let pcm = evaluation_pcm(path);
+            let speech = session_speaker_speech_window(&pcm).unwrap_or_else(|err| {
+                panic!("quality-check evaluation fixture {}: {err}", path.display())
+            });
+            assert!(
+                speech.len() >= VERIFICATION_MIN_SPEECH_MS * 32,
+                "evaluation fixture must contain at least {} ms real speech: {}",
+                VERIFICATION_MIN_SPEECH_MS,
+                path.display()
+            );
+            runtime
+                .embedding(speech)
+                .unwrap_or_else(|err| panic!("embed evaluation fixture {}: {err}", path.display()))
+        }
+
+        #[test]
+        #[ignore = "requires a consented, owner-labeled Listener speaker corpus"]
+        fn runtime_evaluates_listener_labeled_speaker_corpus() {
+            let manifest_path = std::path::PathBuf::from(
+                std::env::var("LISTENER_SPEAKER_EVAL_MANIFEST")
+                    .expect("LISTENER_SPEAKER_EVAL_MANIFEST path"),
+            );
+            let output_path = std::path::PathBuf::from(
+                std::env::var("LISTENER_SPEAKER_EVAL_OUTPUT")
+                    .expect("LISTENER_SPEAKER_EVAL_OUTPUT path"),
+            );
+            let manifest: EvaluationManifest = serde_json::from_slice(
+                &fs::read(&manifest_path).expect("read speaker evaluation manifest"),
+            )
+            .expect("parse speaker evaluation manifest");
+            let base = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+            assert!(
+                manifest.enrollment_session_wavs.len() >= DUAL_TEMPLATE_WINDOWS_PER_BANK,
+                "evaluation requires at least three consented free-speech enrollment references"
+            );
+            let owner_samples = manifest
+                .samples
+                .iter()
+                .filter(|sample| sample.label == EvaluationLabel::Owner)
+                .count();
+            let non_owner_samples = manifest.samples.len().saturating_sub(owner_samples);
+            assert!(
+                owner_samples >= 20,
+                "evaluation requires at least 20 owner samples"
+            );
+            assert!(
+                non_owner_samples >= 20,
+                "evaluation requires at least 20 non-owner samples"
+            );
+
+            let runtime_root = evaluation_runtime_root();
+            let mut reports = Vec::new();
+            for model in &manifest.models {
+                let model_path = resolve_evaluation_path(base, &model.path);
+                let runtime = SpeakerRuntime::load_model(&runtime_root, &model_path)
+                    .unwrap_or_else(|err| panic!("load evaluation model {}: {err}", model.name));
+                let references = manifest
+                    .enrollment_session_wavs
+                    .iter()
+                    .map(|path| {
+                        evaluation_embedding(&runtime, &resolve_evaluation_path(base, path))
+                    })
+                    .collect::<Vec<_>>();
+                let mut scores = Vec::with_capacity(manifest.samples.len());
+                for sample in &manifest.samples {
+                    let path = resolve_evaluation_path(base, &sample.path);
+                    let started = std::time::Instant::now();
+                    let embedding = evaluation_embedding(&runtime, &path);
+                    let inference_ms = started.elapsed().as_millis();
+                    let score = references
+                        .iter()
+                        .map(|reference| {
+                            cosine(reference, &embedding).expect("matching dimensions")
+                        })
+                        .max_by(f32::total_cmp)
+                        .expect("enrollment references");
+                    scores.push(EvaluationScore {
+                        id: sample.id.clone(),
+                        label: sample.label,
+                        score,
+                        inference_ms,
+                    });
+                }
+
+                let mut best = None;
+                for step in 0..=1_000 {
+                    let threshold = step as f32 / 1_000.0;
+                    let accepted_owner = scores
+                        .iter()
+                        .filter(|sample| {
+                            sample.label == EvaluationLabel::Owner && sample.score >= threshold
+                        })
+                        .count();
+                    let rejected_non_owner = scores
+                        .iter()
+                        .filter(|sample| {
+                            sample.label == EvaluationLabel::NonOwner && sample.score < threshold
+                        })
+                        .count();
+                    let recall = accepted_owner as f32 / owner_samples as f32;
+                    let suppression = rejected_non_owner as f32 / non_owner_samples as f32;
+                    let quality = recall + suppression;
+                    if best
+                        .as_ref()
+                        .is_none_or(|(_, _, _, best_quality)| quality > *best_quality)
+                    {
+                        best = Some((threshold, recall, suppression, quality));
+                    }
+                }
+                let (threshold, owner_recall, non_owner_suppression, _) =
+                    best.expect("threshold sweep");
+                let mut inference_ms = scores
+                    .iter()
+                    .map(|sample| sample.inference_ms)
+                    .collect::<Vec<_>>();
+                inference_ms.sort_unstable();
+                let p95_index = (inference_ms.len() * 95 / 100).min(inference_ms.len() - 1);
+                let inference_p95_ms = inference_ms[p95_index];
+                let pass = owner_recall >= 0.95
+                    && non_owner_suppression >= 0.90
+                    && inference_p95_ms <= 300;
+                reports.push(ModelEvaluationReport {
+                    model: model.name.clone(),
+                    model_sha256: sha256(&model_path).expect("hash evaluation model"),
+                    threshold,
+                    owner_samples,
+                    non_owner_samples,
+                    owner_recall,
+                    non_owner_suppression,
+                    inference_p95_ms,
+                    pass,
+                    scores,
+                });
+            }
+            assert!(
+                !reports.is_empty(),
+                "evaluation manifest contains no models"
+            );
+            if let Some(parent) = output_path.parent() {
+                fs::create_dir_all(parent).expect("create speaker evaluation output directory");
+            }
+            fs::write(
+                &output_path,
+                serde_json::to_vec_pretty(&reports).expect("encode speaker evaluation report"),
+            )
+            .expect("write speaker evaluation report");
+            assert!(
+                reports.iter().any(|report| report.pass),
+                "no speaker model meets owner recall, non-owner suppression, and latency gates"
             );
         }
     }

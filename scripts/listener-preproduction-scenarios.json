@@ -3,6 +3,21 @@
   "version": "1.0.2",
   "purpose": "Canonical Listener 1.0.2 preproduction physical acceptance scenarios. Human, bench, regression, and release audit gates must use this file as the scenario source of truth.",
   "pending_operator_steering": {
+    "listener_dual_bank_voiceprint_and_multi_speaker_calibration_20260810": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-08-10T18:18:00+08:00",
+      "source": "Product-owner direction: 继续开一个目标做好多人录音与声纹识别。",
+      "requirement": "Replace wake-derived single-template session identity with protected fixed-phrase and free-speech template banks; compare CAMPPlus and ERes2NetV2 on the same consented Listener corpus; calibrate duration-aware owner/non-owner decisions without allowing provider diarization or uncertain ephemeral voiceprint evidence to erase recognized owner speech.",
+      "machine_gates": [
+        "new enrollment yields at least three quality-gated fixed-phrase embeddings and three quality-gated free-speech embeddings without retaining enrollment audio",
+        "at least 20 labeled owner and 20 labeled non-owner samples produce owner recall >=95%, non-owner suppression >=90%, and local inference p95 <=300 ms",
+        "at least 10 alternating or overlapping owner/non-owner scenarios preserve the owner's first and last sentence, exclude confirmed room speech, and terminate without a permanent Listening state",
+        "historical raw-ASR-body regressions never collapse to the no-speech result, while repeated strong NonTarget evidence still vetoes unsafe recovery",
+        "the installed Program Files payload matches the final MSI identity and the existing wake-to-capsule 1500 ms ceiling does not regress"
+      ],
+      "evidence_boundary": "Persist model hashes, quality metrics, anonymous sample IDs, speaker scores, classifications, timings, confusion matrices, and package hashes. Do not archive raw enrollment audio or transcript body text in the registry or release evidence.",
+      "acceptance_boundary": "Machine gates and an installed-product self-run must pass before the owner is prompted for a final real-room two-speaker experience check. A paper benchmark or upstream fixture smoke does not replace the Listener-labeled corpus."
+    },
     "listener_manual_delete_repair_and_type_auto_reattach_20260721": {
       "status": "active_owner_direction",
       "recorded_at": "2026-07-21T16:00:00+08:00",
