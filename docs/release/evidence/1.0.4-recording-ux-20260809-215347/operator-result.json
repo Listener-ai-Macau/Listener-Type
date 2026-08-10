@@ -1,0 +1,40 @@
+{
+  "schema": "listener.1.0.4.recording_ux.owner_acceptance",
+  "result": "FAIL",
+  "evidence_dir": "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\docs\\release\\evidence\\1.0.4-recording-ux-20260809-215347",
+  "steps": [
+    {
+      "id": "00-ready",
+      "progress": "0/3",
+      "title": "Listener 1.0.4 录音验收",
+      "selected": "失败",
+      "note": "可以了，它现在不同步变化了，但表情还是完全静止的。",
+      "observed_at": "2026-08-09T21:54:12.7044480+08:00"
+    },
+    {
+      "id": "01-short-snappy",
+      "progress": "1/3",
+      "title": "短句跟手（默认 1s）",
+      "selected": "通过",
+      "note": "今天天气不错，我们继续测试。",
+      "observed_at": "2026-08-09T21:54:26.1232325+08:00"
+    },
+    {
+      "id": "02-no-mid-cut",
+      "progress": "2/3",
+      "title": "中途不掐 + 句末耐停",
+      "selected": "通过",
+      "note": "我想先说明一下：这个功能主要是为了让长句在中间换气时不被系统掐断。",
+      "observed_at": "2026-08-09T21:54:41.9929838+08:00"
+    },
+    {
+      "id": "03-other-speaker",
+      "progress": "3/3",
+      "title": "别人说话不拖（可选）",
+      "selected": "失败",
+      "note": "先恢复一下。然后我现在说两个人在说话，看一下能不能……这个自动我暂时不支持。",
+      "observed_at": "2026-08-09T21:55:05.5472339+08:00"
+    }
+  ],
+  "finished_at": "2026-08-09T21:55:05.5642773+08:00"
+}

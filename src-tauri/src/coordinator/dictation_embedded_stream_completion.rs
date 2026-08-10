@@ -79,6 +79,7 @@ impl EmbeddedStreamingDictation {
 
     fn abort_active_session(&mut self, inner: &Arc<Inner>, message: &str) {
         clear_hidden_automatic_candidate();
+        self.activation_segment_race_guard = None;
         set_device_ai_processing_async(inner, false, "embedded_stream_abort");
         if matches!(
             self.speaker_candidate
@@ -200,6 +201,7 @@ impl EmbeddedStreamingDictation {
         self.transcript = None;
         self.pending_stop_expected_packet_count = None;
         self.pending_stop_force_after = None;
+        self.activation_segment_race_guard = None;
         self.terminal_received = false;
     }
 

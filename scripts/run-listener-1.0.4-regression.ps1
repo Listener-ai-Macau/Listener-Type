@@ -207,8 +207,6 @@ try {
     )
     if ($AllowDirtyWorktree.IsPresent) { $args += "-AllowDirtyWorktree" }
     if ($AllowDifferentHead.IsPresent) { $args += "-AllowDifferentHead" }
-    # Engineering work that only adds anti-regression tooling on top of frozen HEAD.
-    if (-not $AllowDirtyWorktree.IsPresent) { $args += "-AllowDirtyWorktree" }
     Invoke-PwshFile (Join-Path $scriptDir "verify-listener-1.0.4-identity.ps1") $args
   }
 

@@ -46,6 +46,10 @@ impl LocalSessionSpeakerTracker {
         }
     }
 
+    fn profile_is_adaptive(&self) -> Option<bool> {
+        self.profile.as_ref().map(|profile| profile.is_adaptive())
+    }
+
     fn observe(
         &mut self,
         pcm: &[u8],
@@ -258,6 +262,14 @@ impl EmbeddedAudioDictationSession {
                 stable_target_end_ms,
             )
         });
+        if let (Some(asr), Some(adaptive)) = (
+            self.volcengine_asr.as_ref(),
+            self.local_speaker_tracker
+                .as_ref()
+                .and_then(LocalSessionSpeakerTracker::profile_is_adaptive),
+        ) {
+            asr.note_local_speaker_profile_adaptive(adaptive);
+        }
         if let (Some(asr), Some((audio_end_ms, classification))) =
             (self.volcengine_asr.as_ref(), local_speaker_evidence)
         {
@@ -443,6 +455,14 @@ fn schedule_default_wake_diagnostic_cleanup(directory: std::path::PathBuf) {
     }
 }
 
+fn next_wake_diagnostic_capture_count(is_default_directory: bool, current: usize) -> Option<usize> {
+    if is_default_directory || current < WAKE_DIAGNOSTIC_MAX_CANDIDATES {
+        current.checked_add(1)
+    } else {
+        None
+    }
+}
+
 fn save_bounded_wake_diagnostic(embedded_session_id: u32, outcome: &'static str, pcm: &[u8]) {
     // Prefer explicit env; otherwise always keep a small rolling ring under LocalAppData
     // so owner wake misses can be inspected without re-running with special flags.
@@ -462,10 +482,16 @@ fn save_bounded_wake_diagnostic(embedded_session_id: u32, outcome: &'static str,
     if directory.trim().is_empty() {
         return;
     }
-    let Ok(index) =
-        WAKE_DIAGNOSTIC_CAPTURE_COUNT.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-            (current < WAKE_DIAGNOSTIC_MAX_CANDIDATES).then_some(current + 1)
-        })
+    // The default directory is a rolling store, so its per-process sequence must
+    // keep advancing after 128 captures. The retention worker owns the 128-file /
+    // 32 MiB bounds. Applying the old explicit-session cap here permanently
+    // stopped live evidence after a noisy soak filled the ring, leaving later
+    // real wake misses impossible to diagnose until Type restarted.
+    let Ok(index) = WAKE_DIAGNOSTIC_CAPTURE_COUNT.fetch_update(
+        Ordering::SeqCst,
+        Ordering::SeqCst,
+        |current| next_wake_diagnostic_capture_count(is_default_directory, current),
+    )
     else {
         return;
     };
@@ -714,6 +740,9 @@ const STREAMING_KWS_ROTATE_OVERLAP_BYTES: usize = STREAMING_KWS_ROTATE_OVERLAP_M
 /// wake word detection — see the 治本 plan. Do not lower this again until one of
 /// those gates the dispatch.
 const EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS: u64 = 30_000;
+// 2026-08-09 12:46:59 激活竞态：ACTIVATE 与旧唤醒段 complete 相隔 0.1s。旧段
+// STOP 落在该窗口内且正文未开始时，视为段 rotation 而非用户说完，不 finalize。
+const EMBEDDED_ACTIVATION_SEGMENT_RACE_WINDOW: Duration = Duration::from_millis(2_000);
 const OWNER_VERIFICATION_START_MS: usize = 1_100;
 const OWNER_VERIFICATION_START_BYTES: usize = OWNER_VERIFICATION_START_MS * 32;
 const OWNER_VERIFICATION_SNAPSHOT_MS: [usize; 3] = [OWNER_VERIFICATION_START_MS, 1_800, 2_400];
@@ -1101,6 +1130,11 @@ struct EmbeddedStreamingDictation {
     /// When set, continuous background will force-finish a STOP that never
     /// recovered missing packets so capture can keep TYPE:READY open.
     pending_stop_force_after: Option<Instant>,
+    /// 2026-08-09 12:46:59 激活竞态：VREC:ACTIVATE 发出后 0.1s 旧唤醒段
+    /// complete（仅含 1845ms 唤醒词），其 STOP/complete 不得 finalize 听写会话；
+    /// 正文在激活后的新设备段。值为（激活前旧段 embedded_session_id, 激活时刻）。
+    /// 竞态窗口外或正文已开始时，旧段结束仍走正常 finalize。
+    activation_segment_race_guard: Option<(u32, Instant)>,
     terminal_received: bool,
     keep_listening_after_pipeline_errors: bool,
 }
@@ -1115,6 +1149,7 @@ impl Default for EmbeddedStreamingDictation {
             transcript: None,
             pending_stop_expected_packet_count: None,
             pending_stop_force_after: None,
+            activation_segment_race_guard: None,
             terminal_received: false,
             keep_listening_after_pipeline_errors: false,
         }

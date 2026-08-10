@@ -1,0 +1,7 @@
+{
+  "selected": "失败",
+  "text": "可以了，它现在不同步变化了，但表情还是完全静止的。",
+  "spoken_text": null,
+  "output_path": "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\scripts\\..\\docs\\release\\evidence\\1.0.4-recording-ux-20260809-215347\\step-00-ready-note.txt"
+}
+

@@ -32,6 +32,12 @@ pub struct SessionSpeakerProfile {
     adaptive: bool,
 }
 
+impl SessionSpeakerProfile {
+    pub fn is_adaptive(&self) -> bool {
+        self.adaptive
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SessionSpeakerClassification {
     Target { score: f32 },
@@ -217,10 +223,18 @@ fn adapt_session_speaker_profile(
     count
 }
 
+// 会话分段分类阈值。Target 下限仍是 0.42（与唤醒开闸一致），但 2026-08-09
+// 12:47:04 复现：第二个人的声音得分 0.426–0.58 全判 Target、持续刷新本人端点
+// 时钟 → 永不结束。引入置信余量带：[0.42, 0.55) 弱 Target 降为 Uncertain——
+// 不刷新本人时钟、也不冻结切换；只有 ≥0.55 的确信 Target 才刷新（见
+// volcengine.rs note_local_speaker_classification）。文字过滤口径不变。
+const SESSION_SPEAKER_CONFIDENT_TARGET_MIN_SCORE: f32 = 0.55;
+const SESSION_SPEAKER_NON_TARGET_MAX_SCORE: f32 = 0.34;
+
 fn session_speaker_classification_for_score(score: f32) -> SessionSpeakerClassification {
-    if score >= 0.42 {
+    if score >= SESSION_SPEAKER_CONFIDENT_TARGET_MIN_SCORE {
         SessionSpeakerClassification::Target { score }
-    } else if score <= 0.34 {
+    } else if score <= SESSION_SPEAKER_NON_TARGET_MAX_SCORE {
         SessionSpeakerClassification::NonTarget { score }
     } else {
         SessionSpeakerClassification::Uncertain { score }
@@ -1808,6 +1822,39 @@ mod tests {
         assert!(matches!(
             session_speaker_classification_for_score(0.38),
             SessionSpeakerClassification::Uncertain { .. }
+        ));
+    }
+
+    #[test]
+    fn weak_target_band_is_uncertain_not_target() {
+        // F3 fixture（2026-08-09 12:47:04）：第二个人的声音得分 0.426–0.58。
+        // [0.42, 0.55) 弱 Target 带必须判 Uncertain（不刷新端点时钟、不冻结），
+        // ≥0.55 才是确信 Target。
+        for score in [0.42, 0.426, 0.47, 0.50, 0.54] {
+            assert!(
+                matches!(
+                    session_speaker_classification_for_score(score),
+                    SessionSpeakerClassification::Uncertain { .. }
+                ),
+                "score {score} must be Uncertain (weak-target band)"
+            );
+        }
+        for score in [0.55, 0.58, 0.72] {
+            assert!(
+                matches!(
+                    session_speaker_classification_for_score(score),
+                    SessionSpeakerClassification::Target { .. }
+                ),
+                "score {score} must be confident Target"
+            );
+        }
+        assert!(matches!(
+            session_speaker_classification_for_score(0.41),
+            SessionSpeakerClassification::Uncertain { .. }
+        ));
+        assert!(matches!(
+            session_speaker_classification_for_score(0.34),
+            SessionSpeakerClassification::NonTarget { .. }
         ));
     }
 

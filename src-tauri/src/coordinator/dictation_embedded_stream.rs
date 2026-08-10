@@ -133,6 +133,18 @@ impl EmbeddedStreamingDictation {
                     }
                     return Ok(false);
                 }
+                // 2026-08-09 12:46:59 激活竞态：新设备段的包先于 Started 到达时
+                // 兜底懒绑定；旧段（同段）包正常喂入——正常路径里正文就在激活后的
+                // 同段延续里，只有「旧段在竞态窗口内 STOP 且正文未开始」才重绑定。
+                if let Some((pre_segment_id, _)) = self.activation_segment_race_guard {
+                    if chunk_session_id != pre_segment_id {
+                        self.embedded_session_id = Some(chunk_session_id);
+                        self.activation_segment_race_guard = None;
+                        log::info!(
+                            "[coord] dictation session lazily bound to post-activation embedded segment embedded_session_id={chunk_session_id}"
+                        );
+                    }
+                }
                 if embedded_streaming_chunk_is_asr_input(&chunk) {
                     self.begin_session_if_needed(inner, chunk.session_id)
                         .await?;
@@ -211,6 +223,44 @@ impl EmbeddedStreamingDictation {
                     );
                     self.reset_for_next_session();
                     return Ok(true);
+                }
+                // 2026-08-09 12:46:59 激活竞态：旧唤醒段在 ACTIVATE 后 0.1s complete，
+                // 只含 1845ms 唤醒词——此时 finalize 必空稿。竞态窗口内且正文未开始
+                // 时，旧段 STOP 视为段 rotation：不 finalize，绑定激活后的新设备段。
+                if let Some((pre_segment_id, activated_at)) = self.activation_segment_race_guard {
+                    if self.session.is_some() && session_id == pre_segment_id {
+                        let body_started = self
+                            .session
+                            .as_ref()
+                            .map(|session| session.session_id)
+                            .is_some_and(|coordinator_session_id| {
+                                automatic_wake_body_started(inner, coordinator_session_id)
+                                    || current_embedded_audio_partial_preview(inner)
+                                        .as_deref()
+                                        .is_some_and(|text| !text.trim().is_empty())
+                            });
+                        if !body_started
+                            && activated_at.elapsed() <= EMBEDDED_ACTIVATION_SEGMENT_RACE_WINDOW
+                        {
+                            log::info!(
+                                "[coord] pre-activation embedded segment {session_id} stopped {}ms after wake activation with no body; dictation session stays open for the post-activation segment",
+                                activated_at.elapsed().as_millis()
+                            );
+                            self.collector.reset();
+                            self.embedded_session_id = None;
+                            self.pending_stop_expected_packet_count = None;
+                            // This STOP completed only the pre-activation wake
+                            // segment, not the live dictation. `true` tells the
+                            // continuous actor that the whole pipeline is done;
+                            // it then calls submission_result(), sees
+                            // terminal_received=false, and discards the session
+                            // as "尚未收到结束包". Keep the actor pending until the
+                            // post-activation segment arrives.
+                            return Ok(false);
+                        }
+                        // 窗口外或正文已开始：正常 finalize，竞态守卫使命结束。
+                        self.activation_segment_race_guard = None;
+                    }
                 }
                 if let Some(session) = self.session.as_ref() {
                     crate::observability::record_embedded_audio_stop(session.session_id);
@@ -370,6 +420,21 @@ impl EmbeddedStreamingDictation {
             return Ok(());
         }
         if self.session.is_some() || self.speaker_candidate.is_some() {
+            // 2026-08-09 12:46:59 激活竞态：听写会话在等激活后的新设备段时，
+            // 新段（唤醒监听窗 rotation）直接绑定给听写，而不是报 session 不一致。
+            if let Some((pre_segment_id, _)) = self.activation_segment_race_guard {
+                if self.session.is_some()
+                    && embedded_session_id != pre_segment_id
+                    && start_origin == crate::embedded_audio::SessionStartOrigin::VoiceActivation
+                {
+                    self.embedded_session_id = Some(embedded_session_id);
+                    self.activation_segment_race_guard = None;
+                    log::info!(
+                        "[coord] dictation session bound to post-activation embedded segment embedded_session_id={embedded_session_id} (pre-activation segment {pre_segment_id} did not finalize)"
+                    );
+                    return Ok(());
+                }
+            }
             if self.embedded_session_id != Some(embedded_session_id) {
                 return Err(format!(
                     "嵌入式音频流式 session 不一致: current={:?}, incoming={embedded_session_id}",
@@ -2128,6 +2193,10 @@ impl EmbeddedStreamingDictation {
         arm_automatic_wake_text_guard(inner, session.session_id, phrase.clone(), capsule_audio_ms);
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         self.session = Some(session);
+        // 2026-08-09 12:46:59 激活竞态：ACTIVATE 发出后旧唤醒段可能立即 complete
+        // （仅含唤醒词）；竞态窗口内该段的 STOP 不得 finalize 本会话，正文在激活后
+        // 的新设备段里。绑定由 Started/PcmChunk 处理分支完成。
+        self.activation_segment_race_guard = Some((embedded_session_id, Instant::now()));
         let session = self
             .session
             .as_mut()

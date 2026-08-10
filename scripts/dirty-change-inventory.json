@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-31",
+  "updated_at": "2026-08-10",
   "purpose": "Classifies every current dirty Listener Type/Firmware path while the 1.0.4 recording and wake refinement is in progress. Release gates still require clean worktrees; this inventory prevents mystery dirty changes during focused repair/review.",
   "entries": [
     {
@@ -20,6 +20,7 @@
         "scripts/release-check.mjs",
         "scripts/check-repo-hygiene.mjs",
         "scripts/check-brand-residue.mjs",
+        "scripts/check-module-budgets.mjs",
         "scripts/check-dirty-change-inventory.mjs",
         "scripts/check-ota-transfer-speed-log.mjs",
         "scripts/check-ota-transfer-speed-log.test.mjs",
@@ -45,13 +46,13 @@
         "scripts/listener-preproduction-scenarios.json",
         "scripts/windows-listener-type-lifecycle-e2e.py",
         "scripts/windows-package-msvc.ps1",
-      "scripts/windows-package-msvc.test.mjs",
-      "scripts/windows-startup-lifecycle-contract.test.mjs",
-      "scripts/windows-ui-config.test.mjs",
-      "tools/firmware_ota_headless/Cargo.lock",
-      "tools/firmware_ota_headless/Cargo.toml",
-      "tools/firmware_ota_headless/src/main.rs"
-    ]
+        "scripts/windows-package-msvc.test.mjs",
+        "scripts/windows-startup-lifecycle-contract.test.mjs",
+        "scripts/windows-ui-config.test.mjs",
+        "tools/firmware_ota_headless/Cargo.lock",
+        "tools/firmware_ota_headless/Cargo.toml",
+        "tools/firmware_ota_headless/src/main.rs"
+      ]
     },
     {
       "id": "type_performance_baselines_and_startup_takeover",
@@ -88,12 +89,14 @@
         "src-tauri/src/cli.rs",
         "src-tauri/src/coordinator.rs",
         "src-tauri/src/coordinator/dictation.rs",
+        "src-tauri/src/coordinator/dictation_embedded_stream_completion.rs",
         "src-tauri/src/embedded_ble.rs",
         "src-tauri/src/lib.rs",
         "src-tauri/src/persistence.rs",
         "tools/embedded_audio_replay/*.ps1",
         "tools/volcengine_asr_probe/src/asr/mod.rs",
-        "tools/volcengine_asr_probe/src/main.rs"
+        "tools/volcengine_asr_probe/src/main.rs",
+        "specs/traceability/files.md"
       ]
     },
     {
@@ -321,6 +324,27 @@
         "tools/verify_charging_awake_policy_static.ps1",
         "tools/verify_device_settings_static.ps1",
         "tools/verify_v2_board_profile_static.ps1"
+      ]
+    },
+    {
+      "id": "review_fixes_ws_timeout_and_gate_wiring_20260808",
+      "repo": "type",
+      "item": "Code-review fixes: websocket connect timeout, identity gate dirty-flag dead code, owner-accept exit codes, wake-idle contract gate, robocopy /MIR guard, frontend/release gate wiring",
+      "state": "tooling_guard_validated",
+      "evidence": [
+        "npm run verify: all wired gates OK except check:module-budgets (pre-existing red at HEAD: dictation_wake_polish.rs 1555>1200, dictation_embedded_stream.rs 2179>2000, unpair.rs 918>900)",
+        "cargo test --lib asr:: 156 passed 0 failed",
+        "node scripts/verify-listener-1.0.4-protected-contracts.mjs 27 gates PASS",
+        "npm run check:hotkey-injection PASS (wired into release-check.mjs)",
+        "release-check.mjs still stops at repo hygiene on dirty tree as intended"
+      ],
+      "patterns": [
+        "docs/release/evidence/1.0.4-recording-ux-20260809-215347/**",
+        "scripts/owner-accept-1.0.4-recording-ux.ps1",
+        "scripts/run-listener-1.0.4-regression.ps1",
+        "scripts/verify-frontend.mjs",
+        "scripts/verify-listener-1.0.4-protected-contracts.mjs",
+        "scripts/windows-build-gnu.ps1"
       ]
     }
   ]

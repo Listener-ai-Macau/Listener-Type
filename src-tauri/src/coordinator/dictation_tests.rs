@@ -3808,3 +3808,227 @@ fn every_automatic_wake_path_seeds_session_speaker_tracking() {
         .expect("live automatic wake path must create a dictation session");
     assert!(live_session < live_seed && live_seed < live_accept);
 }
+
+#[tokio::test]
+async fn activation_segment_race_rebinds_post_activation_segment_instead_of_finalizing() {
+    // 2026-08-09 12:46:59 复现 fixture：VREC:ACTIVATE 后 0.1s 旧唤醒段（93）
+    // complete，仅含 1845ms 唤醒词——竞态窗口内旧段 STOP 不得 finalize（否则
+    // 必空稿）；听写会话必须绑定激活后的新设备段（94），其 PCM 正常进 ASR。
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = session_id;
+        state.phase = SessionPhase::Listening;
+        state.cancelled = false;
+    }
+    register_embedded_ble_cancel_flag(&coordinator.inner, &Arc::new(AtomicBool::new(false)));
+    let consumer = Arc::new(CountingConsumer::default());
+    let consumer_for_session: Arc<dyn crate::recorder::AudioConsumer> = consumer.clone();
+    let mut streaming = EmbeddedStreamingDictation::background_listener();
+    streaming.embedded_session_id = Some(93);
+    streaming.session = Some(embedded_audio_test_session(session_id, consumer_for_session));
+    streaming.activation_segment_race_guard = Some((93, Instant::now()));
+
+    // 旧段在竞态窗口内 STOP：不 finalize，会话保持打开，守卫保留等待新段。
+    let handled = streaming
+        .handle_ble_packet_actor_command(
+            &coordinator.inner,
+            StreamingSessionEvent::Stopped {
+                session_id: 93,
+                expected_packet_count: 58,
+                origin: crate::embedded_audio::SessionStopOrigin::VoiceActivation,
+            },
+        )
+        .await
+        .expect("pre-activation stop handled");
+    assert!(
+        !handled,
+        "pre-activation segment rotation is pending, not a completed dictation"
+    );
+    assert!(
+        streaming.session.is_some(),
+        "dictation session must stay open across the pre-activation segment stop"
+    );
+    assert_eq!(
+        streaming.activation_segment_race_guard.map(|guard| guard.0),
+        Some(93),
+        "race guard stays armed until the post-activation segment binds"
+    );
+    assert_eq!(streaming.embedded_session_id, None);
+    assert_eq!(streaming.pending_stop_expected_packet_count, None);
+    assert!(!streaming.terminal_received);
+
+    // 同段尾包（极端时序）仍正常喂入——正常路径里正文就在激活后的同段延续。
+    let wake_tail = pcm_from_samples(&samples_for_ms(100, 3_000));
+    streaming.activation_segment_race_guard = Some((93, Instant::now()));
+    streaming.embedded_session_id = Some(93);
+    streaming
+        .handle_ble_packet_actor_command(
+            &coordinator.inner,
+            StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
+                session_id: 93,
+                packet_sequence: 12,
+                pcm: wake_tail.clone(),
+                raw_input_level_percent: Some(20),
+                after_stop_boundary: false,
+            }),
+        )
+        .await
+        .expect("same-segment tail handled");
+    assert_eq!(
+        consumer.bytes.load(Ordering::SeqCst),
+        wake_tail.len(),
+        "same-segment PCM after activation must still feed ASR (normal path body)"
+    );
+    assert_eq!(
+        streaming.activation_segment_race_guard.map(|guard| guard.0),
+        Some(93),
+        "same-segment PCM must not clear the race guard"
+    );
+
+    // 激活后的新设备段（94，唤醒监听窗 rotation）Started：直接绑定听写会话。
+    streaming
+        .handle_ble_packet_actor_command(
+            &coordinator.inner,
+            StreamingSessionEvent::Started {
+                session_id: 94,
+                origin: crate::embedded_audio::SessionStartOrigin::VoiceActivation,
+            },
+        )
+        .await
+        .expect("post-activation segment start handled");
+    assert_eq!(streaming.embedded_session_id, Some(94));
+    assert!(streaming.activation_segment_race_guard.is_none());
+    assert!(streaming.session.is_some());
+
+    // 新段正文 PCM 正常进 ASR。
+    let body = pcm_from_samples(&samples_for_ms(200, 2_500));
+    streaming
+        .handle_ble_packet_actor_command(
+            &coordinator.inner,
+            StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
+                session_id: 94,
+                packet_sequence: 0,
+                pcm: body.clone(),
+                raw_input_level_percent: Some(33),
+                after_stop_boundary: false,
+            }),
+        )
+        .await
+        .expect("post-activation body handled");
+    assert_eq!(
+        consumer.bytes.load(Ordering::SeqCst),
+        wake_tail.len() + body.len(),
+        "post-activation segment body must reach ASR"
+    );
+}
+
+#[tokio::test]
+async fn activation_segment_race_guard_does_not_break_normal_stop_paths() {
+    // 守卫不得改变正常路径：窗口外（>2s）或正文已开始时，旧段 STOP 照常走
+    // pending-stop/finalize 流程。
+    for (guard_age, with_body, label) in [
+        (Some(Duration::from_secs(3)), false, "race window expired"),
+        (None, true, "body already started"),
+    ] {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+        register_embedded_ble_cancel_flag(&coordinator.inner, &Arc::new(AtomicBool::new(false)));
+        let consumer = Arc::new(CountingConsumer::default());
+        let consumer_for_session: Arc<dyn crate::recorder::AudioConsumer> = consumer.clone();
+        let mut streaming = EmbeddedStreamingDictation::background_listener();
+        streaming.embedded_session_id = Some(93);
+        streaming.session = Some(embedded_audio_test_session(session_id, consumer_for_session));
+        let activated_at = guard_age
+            .map(|age| Instant::now() - age)
+            .unwrap_or_else(Instant::now);
+        streaming.activation_segment_race_guard = Some((93, activated_at));
+        if with_body {
+            update_embedded_audio_partial_preview(&coordinator.inner, session_id, "正文".into());
+        }
+
+        let handled = streaming
+            .handle_ble_packet_actor_command(
+                &coordinator.inner,
+                StreamingSessionEvent::Stopped {
+                    session_id: 93,
+                    expected_packet_count: 58,
+                    origin: crate::embedded_audio::SessionStopOrigin::VoiceActivation,
+                },
+            )
+            .await
+            .expect("stop handled");
+        assert!(!handled, "{label}: normal stop path keeps waiting for tail");
+        assert!(
+            streaming.activation_segment_race_guard.is_none(),
+            "{label}: race guard disarms once the normal path takes over"
+        );
+        assert_eq!(
+            streaming.pending_stop_expected_packet_count,
+            Some(58),
+            "{label}: normal pending-stop flow armed"
+        );
+        assert!(streaming.session.is_some(), "{label}: session untouched");
+    }
+}
+
+#[test]
+fn unresolved_local_speech_hold_is_capped_six_seconds_after_attributed() {
+    // F4 fixture（2026-08-09 12:47:04）：旁人连续说话，本地未归属人声持续推进，
+    // 旧逻辑会把自动结束无限挂起。挂起以最后一次归属语音 +6s 封顶。
+    let base = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("1".into()),
+        target_speech_end_ms: Some(10_000),
+        provider_audio_duration_ms: Some(20_000),
+        audio_duration_ms: Some(20_000),
+        local_speech_end_ms: Some(19_900),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(10_000),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    // cap 内（归属 10s + 6s = 16s；未归属人声尾端 14s、且仍在 1.0s 窗口内 recent）
+    // → 仍阻挡结束（本人说话分类滞后不受影响的通道保留）。
+    let within_cap = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(14_500),
+        audio_duration_ms: Some(14_500),
+        local_speech_end_ms: Some(14_000),
+        ..base.clone()
+    };
+    assert!(super::has_unresolved_recent_local_speech(&within_cap, 1_000));
+    assert!(!super::target_speaker_endpoint_due(&within_cap));
+    // cap 外（未归属人声尾端推进到 19.9s > 16s 封顶）→ 不再阻挡，端点可按
+    // 1.0s 合同触发。
+    assert!(!super::has_unresolved_recent_local_speech(&base, 1_000));
+    assert!(super::target_speaker_endpoint_due(&base));
+}
+
+#[test]
+fn default_wake_diagnostic_sequence_keeps_advancing_after_retention_limit() {
+    assert_eq!(
+        super::next_wake_diagnostic_capture_count(
+            true,
+            super::WAKE_DIAGNOSTIC_MAX_CANDIDATES
+        ),
+        Some(super::WAKE_DIAGNOSTIC_MAX_CANDIDATES + 1)
+    );
+    assert_eq!(
+        super::next_wake_diagnostic_capture_count(
+            false,
+            super::WAKE_DIAGNOSTIC_MAX_CANDIDATES
+        ),
+        None,
+        "an explicit operator-managed capture session keeps its bounded session cap"
+    );
+}

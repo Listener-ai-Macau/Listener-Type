@@ -136,9 +136,9 @@ const defaultDeviceKeyboardKey = (
 let mockSettings: UserPreferences = {
   hotkey: { trigger: 'rightControl', mode: 'toggle', keys: [{ code: 'ControlRight' }] },
   dictationHotkey: { primary: 'RightControl', modifiers: [] },
-  defaultMode: 'structured',
+  defaultMode: 'raw',
   enabledModes: ['raw', 'light', 'structured', 'formal'],
-  activeStylePackId: 'builtin.structured',
+  activeStylePackId: 'builtin.raw',
   styleSystemPrompts: {
     raw: '只做最小化整理：补全标点、必要分句，保留原话顺序、用词和语气。',
     light: '把口语转写整理成自然文字，去掉口癖和重复，保留原意与语气。',

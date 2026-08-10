@@ -1,0 +1,7 @@
+{
+  "selected": "通过",
+  "text": "今天天气不错，我们继续测试。",
+  "spoken_text": "今天天气不错，我们继续测试。",
+  "output_path": "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\scripts\\..\\docs\\release\\evidence\\1.0.4-recording-ux-20260809-215347\\step-01-short-snappy-note.txt"
+}
+

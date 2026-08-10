@@ -60,9 +60,14 @@ function Invoke-Step {
   $raw | Set-Content (Join-Path $EvidenceDir ("step-{0}-raw.txt" -f $Id)) -Encoding utf8
   $parsed = $null
   try {
-    $jsonLines = @($raw -split "`r?`n" | Where-Object { $_.Trim().StartsWith("{") })
-    if ($jsonLines.Count -gt 0) {
-      $parsed = ($jsonLines[-1] | ConvertFrom-Json)
+    $trimmedRaw = $raw.Trim()
+    if ($trimmedRaw.StartsWith("{") -and $trimmedRaw.EndsWith("}")) {
+      $parsed = ($trimmedRaw | ConvertFrom-Json)
+    } else {
+      $jsonLines = @($raw -split "`r?`n" | Where-Object { $_.Trim().StartsWith("{") })
+      if ($jsonLines.Count -gt 0) {
+        $parsed = ($jsonLines[-1] | ConvertFrom-Json)
+      }
     }
   } catch {}
   if (-not $parsed) {
@@ -149,4 +154,11 @@ $summaryPath = Join-Path $EvidenceDir "operator-result.json"
 Write-Output ("ACCEPTANCE_RESULT={0}" -f $overall)
 Write-Output ("EVIDENCE_DIR={0}" -f $EvidenceDir)
 Write-Output ("SUMMARY={0}" -f $summaryPath)
-exit 0
+$exitCode = switch ($overall) {
+  "PASS" { 0 }
+  "FAIL" { 2 }
+  "ABORT" { 3 }
+  "INCOMPLETE" { 4 }
+  default { 5 }
+}
+exit $exitCode

@@ -269,11 +269,28 @@ gate("feature_surface", () => {
 
 gate("wake_idle_boundary", () => {
   // Product contract: voice activation only while non-idle with BT light on.
-  const bundle = powerManager + voiceRecording + typesRs + wakePolish + dictation;
-  assert.ok(bundle.length > 0, "wake/power sources readable");
+  // Assert the firmware-side sources directly — the desktop bundle always
+  // contains "idle" somewhere, so the old combined-regex gate could never fail
+  // even when the firmware checkout was missing entirely.
   assert.ok(
-    /low_power|idle|voice_auto_start|voice activation|Bluetooth/i.test(bundle),
-    "idle / voice activation surface must remain present",
+    powerManager.length > 0,
+    "firmware power_manager.c must be readable (firmware checkout missing?)",
+  );
+  assert.ok(
+    voiceRecording.length > 0,
+    "firmware voice_recording_control.c must be readable (firmware checkout missing?)",
+  );
+  mustInclude(powerManager, "low_power", "firmware low-power management surface");
+  mustInclude(powerManager, "idle", "firmware idle tracking surface");
+  mustInclude(
+    voiceRecording,
+    "voice_auto_start",
+    "firmware voice auto-start gate surface",
+  );
+  mustInclude(
+    voiceRecording,
+    "voice_activation",
+    "firmware voice activation surface",
   );
 });
 

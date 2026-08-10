@@ -779,7 +779,14 @@ pub(super) fn merge_streaming_candidate(
     let old_segment_text = join_timed_segment_text(previous_segments);
     if candidate.authoritative_cumulative
         && !previous_text.is_empty()
-        && timed_segments_represent_text(previous_segments, previous_text)
+        // The optimistic display stream can leave overlapping provisional
+        // segments even after its rendered text was de-duplicated. Requiring
+        // that stale ledger to represent `previous_text` prevented a later
+        // full-range two-pass result from replacing it and let the stale
+        // segments reappear at the tail. The incoming cumulative result is the
+        // authority here: replace atomically when its own segments represent
+        // its text and its timeline covers the prior ledger.
+        && timed_segments_represent_text(&incoming_segments, &candidate_text)
         && authoritative_segments_cover_previous(previous_segments, &incoming_segments)
     {
         return (candidate_text, incoming_segments);
@@ -1729,6 +1736,63 @@ mod tests {
             "first corrected sentence. final corrected sentence."
         );
         assert_eq!(segments.len(), 1);
+    }
+
+    #[test]
+    fn authoritative_cumulative_replaces_polluted_optimistic_ledger_when_timeline_covers_it() {
+        let first = "开始录音，现在预览应该逐步出现，原文也不能被改写。";
+        let tail = "后面继续检查功能不能回退。";
+        let previous_text = format!("{first}{tail}");
+        // Optimistic streaming can leave overlapping provisional segments in
+        // the ledger even though its displayed text was already de-duplicated.
+        let previous_segments = vec![
+            TranscriptSegment {
+                start_ms: 120,
+                end_ms: Some(6_232),
+                text: first.into(),
+            },
+            TranscriptSegment {
+                start_ms: 6_500,
+                end_ms: Some(12_000),
+                text: "后面继续检查".into(),
+            },
+            TranscriptSegment {
+                start_ms: 7_100,
+                end_ms: Some(13_200),
+                text: "继续检查功能不能回退。".into(),
+            },
+        ];
+        assert!(!timed_segments_represent_text(
+            &previous_segments,
+            &previous_text
+        ));
+
+        let final_tail = format!("{tail}最终确认。技术细节也不能回退。");
+        let final_text = format!("{first}{final_tail}");
+
+        let candidate = TranscriptCandidate {
+            authoritative_cumulative: true,
+            text: final_text.clone(),
+            timed_segments: vec![
+                TranscriptSegment {
+                    start_ms: 120,
+                    end_ms: Some(6_232),
+                    text: first.into(),
+                },
+                TranscriptSegment {
+                    start_ms: 6_372,
+                    end_ms: Some(13_392),
+                    text: final_tail,
+                },
+            ],
+        };
+
+        let (merged, segments) =
+            merge_streaming_candidate(&previous_text, &previous_segments, candidate);
+
+        assert_eq!(merged, final_text);
+        assert_eq!(segments.len(), 2);
+        assert!(timed_segments_represent_text(&segments, &merged));
     }
 
     #[test]

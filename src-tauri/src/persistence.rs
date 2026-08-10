@@ -28,7 +28,7 @@ use crate::types::{
     builtin_style_pack_for_mode, builtin_style_pack_id, builtin_style_packs,
     default_active_style_pack_id, CorrectionRule, CustomStylePrompts, DictationSession,
     DictionaryEntry, PolishMode, StylePack, StylePackExample, StylePackKind, UserPreferences,
-    VocabPresetStore, BUILTIN_STYLE_PACK_LIGHT_ID,
+    VocabPresetStore,
 };
 
 const HISTORY_CAP: usize = 200;
@@ -1433,7 +1433,7 @@ impl StylePackStore {
         }
         if let Some(pack) = packs
             .iter()
-            .find(|pack| pack.id == BUILTIN_STYLE_PACK_LIGHT_ID && pack.enabled)
+            .find(|pack| pack.id == default_active_style_pack_id() && pack.enabled)
             .cloned()
         {
             return Ok(pack);

@@ -16,6 +16,9 @@ const checks = [
   ['frontend verification', 'npm run verify'],
   ['same-version MSI replacement contract', 'npm run check:msi-upgrade-contract'],
   ['updater manifest generation', 'node scripts/write-updater-manifest.test.mjs'],
+  // Needs a cargo build (dry-run hotkey injection test), so it lives here with
+  // the other Rust gates rather than in the fast frontend gate.
+  ['hotkey injection dry-run gate', 'npm run check:hotkey-injection'],
   [
     'tauri library tests',
     'cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1',

@@ -130,6 +130,10 @@ const EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS: u64 = 700;
 const EMBEDDED_TERMINAL_WAKE_CONTINUATION_TTL: Duration = Duration::from_secs(6);
 const EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS: u64 = 200;
 const EMBEDDED_LOCAL_SPEAKER_CLASSIFICATION_SLACK_MS: u64 = 100;
+// F4（2026-08-09 12:47:04）：旁人连续说话时未归属本地语音不断前进，会把
+// 自动结束无限挂起。挂起以最后一次归属语音 +6s 封顶；本人正常说话的分类
+// 滞后远小于 6s，不受影响。
+const EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS: u64 = 6_000;
 static EMBEDDED_ASR_SPEECH_ACTIVITY_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 fn should_restore_clipboard_after_dictation(
@@ -655,6 +659,8 @@ fn local_speech_confidently_non_target(
 
 /// Recent local speech energy that is not yet attributed as non-target. Used to
 /// hold auto-end while the owner may still be talking even if cloud text froze.
+/// F4：挂起上限为最后一次归属语音 +6s（EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS），
+/// 旁人连续说话不会把结束无限挂起。
 fn has_unresolved_recent_local_speech(
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
     endpoint_timeout_ms: u64,
@@ -666,6 +672,9 @@ fn has_unresolved_recent_local_speech(
             let attributed_end_ms = update.stable_attributed_speech_end_ms.unwrap_or_default();
             local_speech_ms
                 > attributed_end_ms.saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
+                && local_speech_ms
+                    <= attributed_end_ms
+                        .saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
                 && !local_speech_confidently_non_target(update, local_speech_ms)
                 && audio_ms.saturating_sub(local_speech_ms) < endpoint_timeout_ms
         })
@@ -2062,6 +2071,12 @@ async fn finish_end_session_after_stop_transition(
     device_ai_processing.start_if_needed("dictation_transcribing_processing_start");
 
     let uses_global_timeout = asr_transcribe_uses_global_timeout(&asr);
+    // F2（2026-08-09 12:47:04 云端空转）：终稿空但本地持续人声时要用留存音频
+    // 向新 ASR 会话重试一次——match 会移走 asr，先留 Arc 句柄。
+    let volcengine_for_empty_retry = match &asr {
+        ActiveAsr::Volcengine(asr) => Some(Arc::clone(asr)),
+        _ => None,
+    };
     let raw = match asr {
         ActiveAsr::Volcengine(asr) => {
             debug_assert!(uses_global_timeout);
@@ -2301,6 +2316,45 @@ async fn finish_end_session_after_stop_transition(
             raw.text.chars().count()
         );
     }
+    // F2 云端空转兜底重试（2026-08-09 12:47:04：包全收、音频足量、云端
+    // audio_duration 正常增长，但终稿只有唤醒词残段）。终稿空且本地证据显示
+    // 整段持续人声时，用 retained_pcm 向新 ASR 会话有界重试一次；仍空才走
+    // 下面的 emptyTranscript 护栏。replay_retained_audio_once 自带一次性闸。
+    if raw.text.trim().is_empty() {
+        if let Some(asr) = volcengine_for_empty_retry.as_ref() {
+            if asr.has_sustained_local_speech_evidence() {
+                log::warn!(
+                    "[coord] empty final with sustained local speech evidence; retrying once with retained audio session_id={current_session_id}"
+                );
+                asr.cancel();
+                let retry_timeout =
+                    std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS);
+                match tokio::time::timeout(retry_timeout, asr.replay_retained_audio_once()).await {
+                    Ok(Ok(replayed)) if !replayed.text.trim().is_empty() => {
+                        log::info!(
+                            "[coord] empty-spin retained-audio retry recovered session_id={} chars={}",
+                            current_session_id,
+                            replayed.text.chars().count()
+                        );
+                        raw = replayed;
+                        raw.text =
+                            filter_automatic_wake_text(inner, current_session_id, &raw.text, false);
+                    }
+                    Ok(Ok(_)) => {
+                        log::info!(
+                            "[coord] empty-spin retained-audio retry still empty session_id={current_session_id}"
+                        );
+                    }
+                    Ok(Err(error)) => {
+                        log::warn!("[coord] empty-spin retained-audio retry failed: {error}");
+                    }
+                    Err(_) => {
+                        log::warn!("[coord] empty-spin retained-audio retry timed out");
+                    }
+                }
+            }
+        }
+    }
     // Live multi-speaker finals can collapse to empty after speaker filtering
     // even when the capsule already streamed a long owner preview. Prefer that
     // preview over the false "没有识别到语音" failure path.
@@ -2441,9 +2495,9 @@ async fn finish_end_session_after_stop_transition(
             Ok(pack) => pack,
             Err(error) => {
                 log::warn!(
-                    "[coord] active style pack unavailable, falling back to builtin light: {error}"
+                    "[coord] active style pack unavailable, falling back to builtin raw: {error}"
                 );
-                crate::types::builtin_style_pack_for_mode(PolishMode::Light)
+                crate::types::builtin_style_pack_for_mode(PolishMode::Raw)
             }
         }
     };

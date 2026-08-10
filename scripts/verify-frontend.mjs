@@ -1,13 +1,24 @@
 #!/usr/bin/env node
 // verify-frontend.mjs — One-command frontend health gate.
 //
-// Runs all automated checks that can verify frontend correctness
+// Runs the automated checks that can verify frontend correctness
 // without a human looking at the screen:
-//   1. TypeScript compilation (tsc --noEmit)
-//   2. Vite production build (npm run build)
-//   3. All check:* scripts
-//   4. All test:* scripts
-//   5. Hardcoded color / dark mode hygiene (check-dark-mode)
+//   1. Product demo copy scan (inline)
+//   2. TypeScript compilation (tsc --noEmit)
+//   3. Static check gates: brand, dark-mode, docs inheritance, module budgets,
+//      tauri info, ASR latency contract, recording consumption evidence,
+//      device-settings UI e2e contract (a static source contract on the
+//      e2e script, not the hardware e2e itself)
+//   4. All unit tests (npm test)
+//   5. Vite production build
+//
+// Deliberately NOT here:
+//   - check:hotkey-injection (spawns cargo test; wired into release-check.mjs)
+//   - check:ota-speed-log (requires a --log evidence file; it is an analyzer,
+//     not a standalone gate — its static parser contract
+//     check:ota-speed-log-contract is wired into release-check.mjs)
+//   - the real installed device-settings UI e2e (needs a connected Type
+//     device; run via scripts/run-installed-device-settings-hidden.ps1)
 //
 // Usage: node scripts/verify-frontend.mjs
 // Exit 0 = all pass, 1 = any fail
@@ -105,6 +116,12 @@ run('tsc --noEmit', 'npx tsc --noEmit');
 const checks = [
   'check:brand',
   'check:dark-mode',
+  'check:docs',
+  'check:module-budgets',
+  'check:tauri-info',
+  'check:asr-latency',
+  'check:recording-consumption-evidence',
+  'test:device-settings-ui-e2e-contract',
 ];
 for (const c of checks) {
   run(c, `npm run ${c}`);

@@ -372,7 +372,7 @@ pub fn builtin_style_pack_id(mode: PolishMode) -> &'static str {
 }
 
 pub fn default_active_style_pack_id() -> String {
-    BUILTIN_STYLE_PACK_LIGHT_ID.to_string()
+    BUILTIN_STYLE_PACK_RAW_ID.to_string()
 }
 
 pub fn builtin_style_pack_for_mode(mode: PolishMode) -> StylePack {
@@ -2241,7 +2241,7 @@ impl Default for UserPreferences {
                 &None,
             )
             .expect("default legacy hotkey is not custom"),
-            default_mode: PolishMode::Structured,
+            default_mode: PolishMode::Raw,
             enabled_modes: vec![
                 PolishMode::Raw,
                 PolishMode::Light,

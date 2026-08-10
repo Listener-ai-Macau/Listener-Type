@@ -147,7 +147,7 @@ for (const token of [
 const provisionalPreview = section(
   volcengine,
   "if !has_final\n            && pending_unattributed_speech",
-  "let result = &speaker_filtered_result.result;",
+  "let prefer_final_optimistic = has_final",
   "Display-only provisional preview path",
 );
 requireExcludes(
@@ -221,7 +221,7 @@ requireExcludes(completion, "FINAL_RESULT_UNCOVERED_AUDIO_GRACE", "Final-result 
 for (const token of [
   "pub struct FinalIntermediateTranscript",
   "pub authoritative_two_pass: bool",
-  "let authoritative_two_pass = candidate.authoritative_cumulative;",
+  "let authoritative_two_pass = candidate.authoritative_cumulative && !two_pass_empty_final;",
 ]) {
   requireIncludes(volcengine, token, "Provider-authoritative correction metadata");
 }

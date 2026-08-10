@@ -16,6 +16,18 @@ if ([string]::IsNullOrWhiteSpace($ArtifactsRoot)) {
 if ($appRoot -match "\s") {
   Write-Host "[info] App path contains spaces: $appRoot"
   Write-Host "[info] Mirroring to no-space scratch build root: $MirrorRoot"
+  # robocopy /MIR deletes everything in the target that is not in the source.
+  # Only ever mirror into the script's own fixed scratch dir under %TEMP% —
+  # a mistyped -MirrorRoot (e.g. a user directory) must never become a /MIR target.
+  $tempRoot = [System.IO.Path]::GetFullPath($env:TEMP).TrimEnd('\')
+  $mirrorFull = [System.IO.Path]::GetFullPath($MirrorRoot)
+  $expectedLeaf = "listener-type-windows-gnu"
+  if (
+    -not $mirrorFull.StartsWith($tempRoot + '\', [System.StringComparison]::OrdinalIgnoreCase) -or
+    -not [string]::Equals((Split-Path $mirrorFull -Leaf), $expectedLeaf, [System.StringComparison]::OrdinalIgnoreCase)
+  ) {
+    throw "-MirrorRoot must be `"$tempRoot\$expectedLeaf`" (robocopy /MIR target safety); got: $mirrorFull"
+  }
   New-Item -ItemType Directory -Force -Path $MirrorRoot | Out-Null
   robocopy $appRoot $MirrorRoot /MIR /XD "$appRoot\.artifacts" "$appRoot\node_modules" "$appRoot\dist" "$appRoot\src-tauri\target" "$MirrorRoot\.artifacts" "$MirrorRoot\node_modules" "$MirrorRoot\dist" "$MirrorRoot\src-tauri\target" | Out-Host
   if ($LASTEXITCODE -gt 7) {
