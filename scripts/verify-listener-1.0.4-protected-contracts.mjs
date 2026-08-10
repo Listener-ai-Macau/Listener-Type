@@ -398,13 +398,14 @@ gate("wake_no_body_uses_longer_abandon_timeout", () => {
   );
 });
 
-// Installed mid-sentence cut 19df34c4: pending provisional body must block
-// auto-end, and provisional growth must refresh the owner endpoint clock.
-gate("no_mid_sentence_cut_pending_blocks_endpoint", () => {
-  mustInclude(
+// Installed mid-sentence cut 19df34c4: pending owner/unknown provisional body
+// must block auto-end. Confirmed nearby speech is the only exception, otherwise
+// another person can keep the owner's session open indefinitely.
+gate("pending_owner_blocks_but_confirmed_other_does_not", () => {
+  mustMatch(
     dictation,
-    "let pending_blocks_endpoint = update.pending_unattributed_speech;",
-    "pending unattributed speech always blocks auto-end",
+    /let pending_blocks_endpoint = update\.pending_unattributed_speech\s*&& !\(recent_local_speech_is_non_target && provider_other_speaker_advanced\);/,
+    "pending speech blocks unless local and provider evidence confirm another speaker",
   );
   mustInclude(
     dictationTests,
@@ -415,6 +416,11 @@ gate("no_mid_sentence_cut_pending_blocks_endpoint", () => {
     dictationTests,
     "local_wake_still_pending",
     "local authority + pending must not endpoint",
+  );
+  mustInclude(
+    dictationTests,
+    "confirmed_other_speaker_does_not_extend_endpoint_via_provider_attribution",
+    "confirmed nearby speech must not hold the owner endpoint",
   );
 });
 
