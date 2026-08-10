@@ -422,6 +422,10 @@ fn resume_embedded_ble_listener_after_pairing_recovery(
     refresh_embedded_ble_listener(inner);
 }
 
+fn embedded_ble_pairing_recovery_emits_intermediate_capsule(reason: &str) -> bool {
+    reason != EMBEDDED_BLE_HARDWARE_RECOVERY_PAIRING_HOLD_REASON
+}
+
 fn arm_embedded_ble_type_recovery_audio_capsule(inner: &Arc<Inner>) {
     inner
         .embedded_ble_type_recovery_audio_capsule_pending
@@ -680,12 +684,13 @@ fn start_embedded_ble_passive_local_reattach_watch(
                     log::info!(
                         "[embedded-ble] passive local Windows reattach observed new local HID address={address:012X}; reopening background notify directly without the status-characteristic probe"
                     );
+                    crate::embedded_ble::remember_passive_local_pairing_notify_address(address);
                     arm_embedded_ble_type_pairasync_startup_guard(&inner);
                     resume_embedded_ble_listener_after_pairing_recovery(
                         &inner,
                         "passive local Windows reattach new HID evidence",
                         EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
-                        true,
+                        embedded_ble_pairing_recovery_emits_intermediate_capsule(reason),
                     );
                     break;
                 }
@@ -777,12 +782,13 @@ fn start_embedded_ble_passive_local_reattach_watch(
                             .map(|value| format!("{value:012X}"))
                             .collect::<Vec<_>>()
                     );
+                    crate::embedded_ble::remember_passive_local_pairing_notify_address(address);
                     arm_embedded_ble_type_pairasync_startup_guard(&inner);
                     resume_embedded_ble_listener_after_pairing_recovery(
                         &inner,
                         "passive reattach timeout present HID reopen",
                         EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
-                        true,
+                        embedded_ble_pairing_recovery_emits_intermediate_capsule(reason),
                     );
                     break;
                 }
@@ -976,7 +982,7 @@ fn start_embedded_ble_pairing_confirmation_watch(
                             } else {
                                 EmbeddedBleRecoveryCapsuleMessage::RestoringAudio
                             },
-                            true,
+                            embedded_ble_pairing_recovery_emits_intermediate_capsule(reason),
                         );
                         break;
                     }

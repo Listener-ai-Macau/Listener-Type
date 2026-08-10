@@ -1980,6 +1980,46 @@ fn embedded_ble_background_pairing_decision_precedes_generic_reconnect_capsule()
 }
 
 #[test]
+fn ec11_passive_repair_waits_for_terminal_audio_truth_and_promotes_fresh_hid() {
+    assert!(
+        !embedded_ble_pairing_recovery_emits_intermediate_capsule(
+            EMBEDDED_BLE_HARDWARE_RECOVERY_PAIRING_HOLD_REASON
+        ),
+        "physical EC11 repair must not claim recovery before notify plus TYPE:READY"
+    );
+    assert!(
+        embedded_ble_pairing_recovery_emits_intermediate_capsule(
+            EMBEDDED_BLE_MANUAL_UNPAIR_HOLD_REASON
+        ),
+        "the EC11 terminal-only rule must not silently remove unrelated manual-pairing progress"
+    );
+
+    let source = include_str!("coordinator.rs");
+    let monitor_start = source
+        .find("fn start_embedded_ble_passive_local_reattach_watch")
+        .expect("passive local reattach monitor should exist");
+    let monitor_end = source[monitor_start..]
+        .find("fn embedded_ble_passive_local_reattach_evidence_ready")
+        .map(|offset| monitor_start + offset)
+        .expect("passive local reattach monitor boundary should exist");
+    let monitor = &source[monitor_start..monitor_end];
+    let remember_index = monitor
+        .find("remember_passive_local_pairing_notify_address(address)")
+        .expect("fresh native HID identity must become the immediate notify target");
+    let resume_index = monitor
+        .find("\"passive local Windows reattach new HID evidence\"")
+        .expect("fresh HID recovery should resume the background listener");
+    assert!(
+        remember_index < resume_index,
+        "the fresh HID address must supersede stale recent-pairing/runtime caches before notify reopen"
+    );
+    assert!(
+        monitor.contains("embedded_ble_pairing_recovery_emits_intermediate_capsule(reason)"),
+        "physical EC11 recovery must arm only the terminal notify-ready capsule"
+    );
+}
+
+#[test]
 fn embedded_ble_recovery_capsule_messages_fit_without_ellipsis() {
     let messages = [
         EmbeddedBleRecoveryCapsuleMessage::RestoringAudio,

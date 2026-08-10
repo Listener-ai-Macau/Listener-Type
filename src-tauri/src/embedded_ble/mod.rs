@@ -905,6 +905,14 @@ pub fn current_notify_keep_address() -> Option<u64> {
 }
 
 #[cfg(target_os = "windows")]
+pub fn remember_passive_local_pairing_notify_address(address: u64) {
+    windows_ble::remember_passive_local_pairing_notify_address(address);
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn remember_passive_local_pairing_notify_address(_address: u64) {}
+
+#[cfg(target_os = "windows")]
 pub fn unpair_listener_devices_for_known_addresses(
     extra_names: &[String],
     addresses: &[u64],

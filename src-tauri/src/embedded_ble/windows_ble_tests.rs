@@ -1957,6 +1957,28 @@ fn persisted_startup_notify_address_is_named_bounded_and_after_recent_pairing() 
 }
 
 #[test]
+fn passive_local_pairing_address_supersedes_stale_fast_notify_caches() {
+    let source = include_str!("embedded_ble.rs");
+    let helper_start = source
+        .find("pub(super) fn remember_passive_local_pairing_notify_address")
+        .expect("passive local pairing address helper should exist");
+    let helper_end = source[helper_start..]
+        .find("fn runtime_bluetooth_target_address")
+        .map(|offset| helper_start + offset)
+        .expect("passive local pairing address helper boundary should exist");
+    let helper = &source[helper_start..helper_end];
+    assert!(helper.contains("remember_recent_pairing_fast_gatt"));
+    assert!(helper.contains("remember_runtime_bluetooth_target_address_for_current"));
+    assert!(
+        helper.find("remember_recent_pairing_fast_gatt").unwrap()
+            < helper
+                .find("remember_runtime_bluetooth_target_address_for_current")
+                .unwrap(),
+        "the fresh HID identity must replace the stale recent-pairing target before the ordinary runtime cache"
+    );
+}
+
+#[test]
 fn native_windows_hid_takeover_stays_on_current_identity_without_advertisement_wait() {
     let source = include_str!("embedded_ble.rs");
     let notify_start = source

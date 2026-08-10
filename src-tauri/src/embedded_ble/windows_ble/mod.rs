@@ -3972,6 +3972,19 @@ pub(super) fn current_notify_keep_address() -> Option<u64> {
         .or_else(peek_listener_ota_post_confirm_notify_target_address)
 }
 
+pub(super) fn remember_passive_local_pairing_notify_address(address: u64) {
+    let target_name = effective_bluetooth_target_name(None);
+    remember_recent_pairing_fast_gatt(&target_name, Some(address), Instant::now());
+    remember_runtime_bluetooth_target_address_for_current(
+        address,
+        "passive local Windows reattach fresh HID identity",
+    );
+    log::info!(
+        "[embedded-ble] passive local Windows reattach promoted fresh HID address={} as the immediate notify target target={target_name:?}",
+        crate::embedded_ble::format_bluetooth_address(address)
+    );
+}
+
 fn runtime_bluetooth_target_address() -> Option<u64> {
     let target_name = effective_bluetooth_target_name(None);
     let now = Instant::now();
