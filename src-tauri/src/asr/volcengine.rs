@@ -483,6 +483,130 @@ fn final_wake_only_provider_gap_is_owner_safe(
         .is_some_and(|stable_end_ms| stable_end_ms > wake_end_ms.saturating_add(250))
 }
 
+/// Recover a provider-final tail when an unenrolled, wake-derived local
+/// profile never left the owner but cloud diarization split that same speaker
+/// into a second cluster.  This is intentionally narrower than accepting all
+/// provider text: all stable utterances must be sequential (no simultaneous
+/// speech), every foreign-cluster utterance must have local evidence, and every
+/// overlapping local sample must still hold the wake identity without a single
+/// NonTarget classification. This also covers provider A/B/A cluster drift.
+fn final_adaptive_speaker_split_gap_is_owner_safe(
+    state: &SyncState,
+    provider_result: &Value,
+    target_text: &str,
+) -> bool {
+    if !state.local_speaker_tracking_enabled
+        || !state.local_speaker_profile_adaptive
+        || !state.local_speaker_stable_target
+        || state.owner_isolation_frozen
+        || state.local_consecutive_non_target != 0
+        || target_text.trim().is_empty()
+    {
+        return false;
+    }
+    let Some(target_speaker_id) = state.target_speaker_id.as_deref() else {
+        return false;
+    };
+    let provider_text = provider_result
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if spoken_content_len(provider_text) <= spoken_content_len(target_text) {
+        return false;
+    }
+    let normalize = |text: &str| {
+        text.chars()
+            .filter(|ch| ch.is_alphanumeric())
+            .collect::<String>()
+    };
+    let normalized_provider = normalize(provider_text);
+    let normalized_target = normalize(target_text);
+    if normalized_target.is_empty() {
+        return false;
+    }
+
+    let mut stable_utterances = provider_result
+        .get("utterances")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|utterance| utterance_is_stable(utterance))
+        .collect::<Vec<_>>();
+    if stable_utterances.len() < 2 {
+        return false;
+    }
+    stable_utterances.sort_by_key(|utterance| utterance_start_ms(utterance));
+    if stable_utterances.windows(2).any(|pair| {
+        let previous_end_ms = utterance_end_ms(pair[0]);
+        let next_start_ms = utterance_start_ms(pair[1]);
+        previous_end_ms
+            .zip(next_start_ms)
+            .map_or(true, |(end_ms, start_ms)| start_ms < end_ms)
+    }) {
+        return false;
+    }
+    let attributed_text = stable_utterances
+        .iter()
+        .filter_map(|utterance| utterance.get("text").and_then(Value::as_str))
+        .collect::<String>();
+    if normalize(&attributed_text) != normalized_provider {
+        return false;
+    }
+    let target_utterances = stable_utterances
+        .iter()
+        .copied()
+        .filter(|utterance| {
+            utterance_speaker_id(utterance).as_deref() == Some(target_speaker_id)
+        })
+        .collect::<Vec<_>>();
+    let split_utterances = stable_utterances
+        .iter()
+        .copied()
+        .filter(|utterance| {
+            utterance_speaker_id(utterance)
+                .as_deref()
+                .is_some_and(|speaker_id| speaker_id != target_speaker_id)
+        })
+        .collect::<Vec<_>>();
+    if target_utterances.is_empty() || split_utterances.is_empty() {
+        return false;
+    }
+    let attributed_target_text = target_utterances
+        .iter()
+        .filter_map(|utterance| utterance.get("text").and_then(Value::as_str))
+        .collect::<String>();
+    if normalize(&attributed_target_text) != normalized_target {
+        return false;
+    }
+    split_utterances.iter().all(|utterance| {
+        let (Some(start_ms), Some(end_ms)) =
+            (utterance_start_ms(utterance), utterance_end_ms(utterance))
+        else {
+            return false;
+        };
+        let overlapping = state
+            .local_speaker_evidence
+            .iter()
+            .filter(|sample| {
+                let sample_center_ms = sample
+                    .audio_end_ms
+                    .saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+                sample_center_ms >= start_ms && sample_center_ms <= end_ms
+            })
+            .collect::<Vec<_>>();
+        !overlapping.is_empty()
+            && overlapping.iter().all(|sample| {
+                sample.stable_target
+                    && !matches!(
+                        sample.classification,
+                        crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                            ..
+                        }
+                    )
+            })
+    })
+}
+
 fn result_marks_two_pass_empty(result: &Value) -> bool {
     result
         .get("utterances")
@@ -2475,6 +2599,11 @@ impl VolcengineStreamingASR {
                 .unwrap_or_default();
             let state = self.state.lock();
             final_wake_only_provider_gap_is_owner_safe(&state, result, target_text)
+                || final_adaptive_speaker_split_gap_is_owner_safe(
+                    &state,
+                    result,
+                    target_text,
+                )
         };
         let prefer_final_optimistic = has_final && !prefer_final_provider_text && {
             let target_text = speaker_filtered_result
@@ -2498,7 +2627,7 @@ impl VolcengineStreamingASR {
         };
         let result = if prefer_final_provider_text {
             log::info!(
-                "[asr] protocol final restores previously attributed provider text after wake-only utterance regression target_chars={} provider_chars={}",
+                "[asr] protocol final restores owner-safe provider text after diarization regression target_chars={} provider_chars={}",
                 speaker_filtered_result
                     .result
                     .get("text")
@@ -4533,6 +4662,168 @@ mod tests {
                 filtered.result["text"].as_str().unwrap(),
             ),
             "a wake-only history must not promote an unattributed raw tail"
+        );
+    }
+
+    #[test]
+    fn installed_session_27_recovers_sequential_cloud_speaker_split() {
+        // Installed session 27 delivered every audio packet, and the provider
+        // returned the complete text, but cloud diarization moved the owner's
+        // final sentence from speaker 0 to speaker 1. The adaptive wake profile
+        // remained stably on the owner throughout the sequential continuation.
+        let result = json!({
+            "text": "开始录音。再检查一下整个东西还有没有什么别的问题。比如说录音、绘画日志之类的，然后我再说一下，没什么问题就这样吧，这个产品现在浏览好像卡住了。",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 40,
+                    "end_time": 1172,
+                    "text": "开始录音。"
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 1350,
+                    "end_time": 6000,
+                    "text": "再检查一下整个东西还有没有什么别的问题。"
+                },
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 6200,
+                    "end_time": 8692,
+                    "text": "比如说录音、绘画日志之类的，然后我再"
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 8900,
+                    "end_time": 14222,
+                    "text": "说一下，没什么问题就这样吧，这个产品现在浏览好像卡住了。"
+                }
+            ]
+        });
+        let target_text = "开始录音。比如说录音、绘画日志之类的，然后我再";
+        let mut state = SyncState::default();
+        state.local_speaker_tracking_enabled = true;
+        state.local_speaker_profile_adaptive = true;
+        state.local_speaker_stable_target = true;
+        state.target_speaker_id = Some("0".into());
+        state.wake_speaker_phrase = Some("开始录音".into());
+        state.local_speaker_evidence = [
+            1_000, 2_000, 4_000, 6_000, 7_000, 8_600, 9_800, 11_200, 13_000, 14_600,
+        ]
+            .into_iter()
+            .map(|audio_end_ms| LocalSpeakerEvidence {
+                audio_end_ms,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.41,
+                    },
+                stable_target: true,
+            })
+            .collect();
+
+        assert!(final_adaptive_speaker_split_gap_is_owner_safe(
+            &state,
+            &result,
+            target_text,
+        ));
+
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        *asr.state.lock() = state;
+        let (tx, mut rx) = oneshot::channel();
+        asr.state.lock().final_tx = Some(tx);
+        let final_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 15_700 },
+            "result": result,
+        }))
+        .expect("session 27 final serializes");
+        let final_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::LastPacket,
+            Serialization::Json,
+            &final_payload,
+            None,
+        );
+
+        assert!(!asr.handle_frame(&final_frame));
+        let transcript = rx
+            .try_recv()
+            .expect("session 27 final should resolve")
+            .expect("sequential owner continuation should remain successful");
+        assert_eq!(
+            transcript.text,
+            "开始录音。再检查一下整个东西还有没有什么别的问题。比如说录音、绘画日志之类的，然后我再说一下，没什么问题就这样吧，这个产品现在浏览好像卡住了。"
+        );
+    }
+
+    #[test]
+    fn adaptive_split_recovery_rejects_real_or_overlapping_other_speaker() {
+        let sequential = json!({
+            "text": "开始录音。主讲人第一句保持完整。旁边的人不应该被写进去。",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 40,
+                    "end_time": 4200,
+                    "text": "开始录音。主讲人第一句保持完整。"
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 4400,
+                    "end_time": 6800,
+                    "text": "旁边的人不应该被写进去。"
+                }
+            ]
+        });
+        let target_text = sequential["utterances"][0]["text"]
+            .as_str()
+            .expect("target utterance text")
+            .to_string();
+        let mut state = SyncState::default();
+        state.local_speaker_tracking_enabled = true;
+        state.local_speaker_profile_adaptive = true;
+        state.local_speaker_stable_target = true;
+        state.target_speaker_id = Some("0".into());
+        state.local_speaker_evidence.push(LocalSpeakerEvidence {
+            audio_end_ms: 5_600,
+            classification:
+                crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                    score: 0.18,
+                },
+            stable_target: true,
+        });
+        assert!(
+            !final_adaptive_speaker_split_gap_is_owner_safe(
+                &state,
+                &sequential,
+                &target_text,
+            ),
+            "local NonTarget evidence must keep a real second speaker excluded"
+        );
+
+        state.local_speaker_evidence[0].classification =
+            crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: 0.4 };
+        let mut overlapping = sequential;
+        overlapping["utterances"][1]["start_time"] = json!(3900);
+        assert!(
+            !final_adaptive_speaker_split_gap_is_owner_safe(
+                &state,
+                &overlapping,
+                &target_text,
+            ),
+            "overlapping cloud speakers must never be merged into the owner transcript"
         );
     }
 
