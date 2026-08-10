@@ -4,10 +4,10 @@
   "frozen_baseline": {
     "type_ref": "v1.0.4",
     "type_tag": "v1.0.4",
-    "firmware_commit": "95aca299ab28b1970773c29864fa01c71fd8dbc6",
+    "firmware_commit": "1c0a182a3134937f3170f5f7589b1f4b920b8ea3",
     "firmware_tag": "v1.0.4",
-    "msi_sha256": "A7DFA087076DF7691ACB33E78360D16A9D01EB8AACB1FA437EC32FF46DB5E26F",
-    "ota_sha256": "D36552F61932CB7EE2966FBEB3CF85ED020F263D24B11F2B71AA30C29088DE2B",
+    "msi_sha256": "D4367508CD9ED478206A2CCF1990F9E9C71F84D2E223214DF0772DDB327ED152",
+    "ota_sha256": "42D057F3F68B504C1594DB476D80331436391236D344691915B98BE861D4CCD8",
     "human_pass_artifact": "Listener-Type/.artifacts/listener-1.0.4-endpoint-calibration-20260804"
   },
   "items": [

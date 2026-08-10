@@ -21,12 +21,17 @@ if ([string]::IsNullOrWhiteSpace($FirmwareRepo)) {
   $FirmwareRepo = Join-Path $ListenerRoot "Listener-Firmware"
 }
 
+$baselinePath = Join-Path $scriptDir "listener-1.0.4-requirement-test-map.json"
+if (-not (Test-Path -LiteralPath $baselinePath)) {
+  throw "release baseline missing: $baselinePath"
+}
+$baseline = (Get-Content -Raw -LiteralPath $baselinePath | ConvertFrom-Json).frozen_baseline
 $expected = [ordered]@{
-  type_tag        = "v1.0.4"
-  firmware_commit = "95aca299ab28b1970773c29864fa01c71fd8dbc6"
-  firmware_tag    = "v1.0.4"
-  msi_sha256      = "A7DFA087076DF7691ACB33E78360D16A9D01EB8AACB1FA437EC32FF46DB5E26F"
-  ota_sha256      = "D36552F61932CB7EE2966FBEB3CF85ED020F263D24B11F2B71AA30C29088DE2B"
+  type_tag        = [string]$baseline.type_tag
+  firmware_commit = [string]$baseline.firmware_commit
+  firmware_tag    = [string]$baseline.firmware_tag
+  msi_sha256      = ([string]$baseline.msi_sha256).ToUpperInvariant()
+  ota_sha256      = ([string]$baseline.ota_sha256).ToUpperInvariant()
   msi_name        = "ListenerType_1.0.4_x64_en-US.msi"
   ota_name        = "ListenerFirmware_1.0.4_ota.zip"
 }
@@ -137,10 +142,10 @@ if ($typeHead -eq $typeTagCommit) {
   Add-Check "type_commit" "FAIL" "head=$typeHead tag_commit=$typeTagCommit; release HEAD must match $($expected.type_tag)"
 }
 
-if ($fwTagCommit -eq $expected.firmware_commit) {
-  Add-Check "firmware_commit" "PASS" "$fwTagCommit (tag $($expected.firmware_tag)); head=$fwHead"
+if ($fwTagCommit -eq $expected.firmware_commit -and $fwHead -eq $expected.firmware_commit) {
+  Add-Check "firmware_commit" "PASS" "$fwHead (tag $($expected.firmware_tag))"
 } else {
-  Add-Check "firmware_commit" "FAIL" "tag_commit=$fwTagCommit expected=$($expected.firmware_commit)"
+  Add-Check "firmware_commit" "FAIL" "head=$fwHead tag_commit=$fwTagCommit expected=$($expected.firmware_commit)"
 }
 
 if ($typeDesc -like "v1.0.4*") {
@@ -149,10 +154,10 @@ if ($typeDesc -like "v1.0.4*") {
   Add-Check "type_tag" "WARN" "describe=$typeDesc"
 }
 
-if ($fwDesc -like "v1.0.4*") {
+if ($fwDesc -eq $expected.firmware_tag) {
   Add-Check "firmware_tag" "PASS" $fwDesc
 } else {
-  Add-Check "firmware_tag" "WARN" "describe=$fwDesc"
+  Add-Check "firmware_tag" "FAIL" "describe=$fwDesc expected=$($expected.firmware_tag)"
 }
 
 if ($typeDirty -eq 0) {
