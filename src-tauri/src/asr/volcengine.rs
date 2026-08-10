@@ -292,6 +292,10 @@ struct SyncState {
     local_target_confirmed: bool,
     local_consecutive_target: u8,
     local_consecutive_non_target: u8,
+    /// Wake-derived profiles are advisory, but two very-low-score windows are
+    /// strong enough to mark current speech as another person for endpointing.
+    /// This does not flip/freeze the owner transcript ledger.
+    local_adaptive_consecutive_strong_non_target: u8,
     local_speaker_evidence: Vec<LocalSpeakerEvidence>,
     wake_speaker_phrase: Option<String>,
     speaker_info_present: bool,
@@ -315,6 +319,7 @@ struct LocalSpeakerEvidence {
 const LOCAL_SPEAKER_SWITCH_CONFIRMATIONS: u8 = 2;
 const LOCAL_SPEAKER_EVIDENCE_LIMIT: usize = 64;
 const LOCAL_SPEAKER_WINDOW_MS: u64 = 1_200;
+const LOCAL_ADAPTIVE_STRONG_NON_TARGET_MAX_SCORE: f32 = 0.20;
 const MAX_WAKE_PHRASE_UTTERANCE_MS: u64 = 1_800;
 
 fn latest_audio_duration_ms(state: &SyncState) -> Option<u64> {
@@ -500,6 +505,7 @@ fn final_adaptive_speaker_split_gap_is_owner_safe(
         || !state.local_speaker_stable_target
         || state.owner_isolation_frozen
         || state.local_consecutive_non_target != 0
+        || state.local_non_target_speech_end_ms.is_some()
         || target_text.trim().is_empty()
     {
         return false;
@@ -1467,6 +1473,7 @@ struct RecoverySpeakerSnapshot {
     local_target_confirmed: bool,
     local_consecutive_target: u8,
     local_consecutive_non_target: u8,
+    local_adaptive_consecutive_strong_non_target: u8,
     local_speaker_evidence: Vec<LocalSpeakerEvidence>,
     wake_speaker_phrase: Option<String>,
 }
@@ -1517,6 +1524,8 @@ impl VolcengineStreamingASR {
             local_target_confirmed: state.local_target_confirmed,
             local_consecutive_target: state.local_consecutive_target,
             local_consecutive_non_target: state.local_consecutive_non_target,
+            local_adaptive_consecutive_strong_non_target: state
+                .local_adaptive_consecutive_strong_non_target,
             local_speaker_evidence: state.local_speaker_evidence.clone(),
             wake_speaker_phrase: state.wake_speaker_phrase.clone(),
         }
@@ -1535,6 +1544,8 @@ impl VolcengineStreamingASR {
         state.local_target_confirmed = snapshot.local_target_confirmed;
         state.local_consecutive_target = snapshot.local_consecutive_target;
         state.local_consecutive_non_target = snapshot.local_consecutive_non_target;
+        state.local_adaptive_consecutive_strong_non_target =
+            snapshot.local_adaptive_consecutive_strong_non_target;
         state.local_speaker_evidence = snapshot.local_speaker_evidence;
         state.wake_speaker_phrase = snapshot.wake_speaker_phrase;
     }
@@ -1767,8 +1778,31 @@ impl VolcengineStreamingASR {
         audio_duration_ms: u64,
         classification: crate::speaker_verification::SessionSpeakerClassification,
     ) {
-        let (update, stable_target, effective_classification) = {
+        let (update, stable_target, effective_classification, adaptive_strong_non_target) = {
             let mut state = self.state.lock();
+            let adaptive_strong_non_target = state.local_speaker_profile_adaptive
+                && matches!(
+                    classification,
+                    crate::speaker_verification::SessionSpeakerClassification::NonTarget { score }
+                        if score <= LOCAL_ADAPTIVE_STRONG_NON_TARGET_MAX_SCORE
+                );
+            if adaptive_strong_non_target {
+                state.local_adaptive_consecutive_strong_non_target = state
+                    .local_adaptive_consecutive_strong_non_target
+                    .saturating_add(1);
+                if state.local_adaptive_consecutive_strong_non_target
+                    >= LOCAL_SPEAKER_SWITCH_CONFIRMATIONS
+                {
+                    state.local_non_target_speech_end_ms = Some(
+                        state
+                            .local_non_target_speech_end_ms
+                            .unwrap_or_default()
+                            .max(audio_duration_ms),
+                    );
+                }
+            } else {
+                state.local_adaptive_consecutive_strong_non_target = 0;
+            }
             // A profile inferred from a short wake phrase has repeatedly scored
             // the same user's longer body as NonTarget (installed sessions
             // 81/86). Until the user has an enrolled voiceprint, negative local
@@ -1878,10 +1912,11 @@ impl VolcengineStreamingASR {
                 target_speaker_update_from_state(&state, false, false),
                 stable_target,
                 effective_classification,
+                adaptive_strong_non_target,
             )
         };
         log::info!(
-            "[asr] local session-speaker evidence classification={classification:?} effective={effective_classification:?} stable_target={stable_target} audio_end_ms={audio_duration_ms}"
+            "[asr] local session-speaker evidence classification={classification:?} effective={effective_classification:?} stable_target={stable_target} adaptive_strong_non_target={adaptive_strong_non_target} audio_end_ms={audio_duration_ms}"
         );
         if update.speaker_id.is_some() || update.local_speaker_tracking_enabled {
             self.emit_target_speaker_update(update);
@@ -1907,6 +1942,7 @@ impl VolcengineStreamingASR {
         state.local_target_confirmed = false;
         state.local_consecutive_target = 0;
         state.local_consecutive_non_target = 0;
+        state.local_adaptive_consecutive_strong_non_target = 0;
         state.local_speaker_evidence.clear();
         state.owner_isolation_frozen = false;
         state.owner_isolation_ceiling_text.clear();
@@ -4231,10 +4267,43 @@ mod tests {
         assert!(state.local_speaker_stable_target);
         assert!(!state.owner_isolation_frozen);
         assert_eq!(state.local_consecutive_non_target, 0);
+        assert_eq!(state.local_non_target_speech_end_ms, None);
         assert!(state.local_speaker_evidence.iter().all(|sample| matches!(
             sample.classification,
             crate::speaker_verification::SessionSpeakerClassification::Uncertain { .. }
         )));
+    }
+
+    #[test]
+    fn adaptive_profile_marks_repeated_strong_other_speech_for_endpoint_only() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_local_speaker_tracking_started("开始录音");
+        asr.note_local_speaker_profile_adaptive(true);
+        asr.note_local_speaker_classification(
+            12_600,
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.089 },
+        );
+        assert_eq!(asr.state.lock().local_non_target_speech_end_ms, None);
+        asr.note_local_speaker_classification(
+            13_000,
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.112 },
+        );
+
+        let state = asr.state.lock();
+        assert!(state.local_speaker_stable_target);
+        assert!(!state.owner_isolation_frozen);
+        assert_eq!(state.local_non_target_speech_end_ms, Some(13_000));
+        assert!(matches!(
+            state.local_speaker_classification,
+            Some(crate::speaker_verification::SessionSpeakerClassification::Uncertain { .. })
+        ));
     }
 
     #[test]
@@ -4815,6 +4884,16 @@ mod tests {
 
         state.local_speaker_evidence[0].classification =
             crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: 0.4 };
+        state.local_non_target_speech_end_ms = Some(5_600);
+        assert!(
+            !final_adaptive_speaker_split_gap_is_owner_safe(
+                &state,
+                &sequential,
+                &target_text,
+            ),
+            "confirmed adaptive NonTarget speech must reject provider-wide tail recovery"
+        );
+        state.local_non_target_speech_end_ms = None;
         let mut overlapping = sequential;
         overlapping["utterances"][1]["start_time"] = json!(3900);
         assert!(

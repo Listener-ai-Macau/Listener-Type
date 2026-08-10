@@ -690,19 +690,32 @@ fn target_speaker_endpoint_due_with_provider_stall(
     let local_target_authority =
         update.local_speaker_tracking_enabled && update.local_target_speech_end_ms.is_some();
     let cloud_target_authority = update.speaker_info_present && update.speaker_id.is_some();
+    let recent_local_speech_is_non_target = update
+        .local_speech_end_ms
+        .is_some_and(|speech_ms| local_speech_confidently_non_target(update, speech_ms));
+    let provider_other_speaker_advanced = update
+        .target_speech_end_ms
+        .zip(update.stable_attributed_speech_end_ms)
+        .is_some_and(|(target_ms, attributed_ms)| attributed_ms > target_ms);
     // Installed session 19df34c4: body text kept growing only in the provisional
     // channel while stable_attributed stayed on the wake phrase. A local target
     // clock already existed, so the old "pending only blocks without local
-    // authority" rule let auto-end fire mid-sentence. Any pending unattributed
-    // body speech must block endpoint regardless of local_target_authority.
-    let pending_blocks_endpoint = update.pending_unattributed_speech;
+    // authority" rule let auto-end fire mid-sentence. Pending unattributed body
+    // speech blocks unless repeated strong local evidence and a newer
+    // non-target provider attribution both identify another person; room
+    // speech must not hold auto-end, while startup calibration stays protected.
+    let pending_blocks_endpoint = update.pending_unattributed_speech
+        && !(recent_local_speech_is_non_target && provider_other_speaker_advanced);
+    let stable_attributed_speech_end_ms = (!recent_local_speech_is_non_target)
+        .then_some(update.stable_attributed_speech_end_ms)
+        .flatten();
     let target_speech_end_ms = update
         .target_speech_end_ms
         .into_iter()
         // Provider diarization can briefly split one continuous owner utterance
         // into a new speaker id. Stable attributed speech must still hold the
         // endpoint clock even though target-only text filtering remains strict.
-        .chain(update.stable_attributed_speech_end_ms)
+        .chain(stable_attributed_speech_end_ms)
         .chain(update.local_target_speech_end_ms)
         .max();
     // Once the provider has reported any covered audio boundary, measure the

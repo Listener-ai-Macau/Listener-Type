@@ -1587,6 +1587,36 @@ fn target_speaker_endpoint_uses_newest_stable_attributed_boundary_after_diarizat
 }
 
 #[test]
+fn confirmed_other_speaker_does_not_extend_endpoint_via_provider_attribution() {
+    // Installed session 245: the owner ended at 10842 ms. A nearby speaker then
+    // advanced stable attribution to 15132 ms and kept a provisional tail open.
+    // Repeated strong local NonTarget evidence must keep both provider channels
+    // from extending the owner's endpoint clock.
+    let update = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(10_842),
+        provider_audio_duration_ms: Some(15_600),
+        audio_duration_ms: Some(15_700),
+        local_speech_end_ms: Some(14_700),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: Some(14_600),
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(15_132),
+        target_activity_advanced: false,
+        pending_unattributed_speech: true,
+        pending_activity_advanced: true,
+        speaker_info_present: true,
+    };
+
+    assert!(super::target_speaker_endpoint_due(&update));
+    let without_local_other = crate::asr::volcengine::TargetSpeakerUpdate {
+        local_non_target_speech_end_ms: None,
+        ..update
+    };
+    assert!(!super::target_speaker_endpoint_due(&without_local_other));
+}
+
+#[test]
 fn target_speaker_endpoint_waits_for_provider_coverage_before_stopping_quiet_tail() {
     let provider_is_behind = crate::asr::volcengine::TargetSpeakerUpdate {
         speaker_id: Some("0".into()),
