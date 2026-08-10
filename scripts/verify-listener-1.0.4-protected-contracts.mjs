@@ -529,6 +529,11 @@ gate("multi_speaker_owner_isolation", () => {
     "room_speech_raw_stream_does_not_inflate_optimistic_while_local_non_target",
     "room stream optimistic freeze unit test",
   );
+  mustInclude(
+    volcengineAsr,
+    "installed_session_768_recovers_raw_body_without_prior_stable_attribution",
+    "wake-only provider final must recover the recognized owner body",
+  );
 });
 
 gate("multi_speaker_unit_tests_green", () => {

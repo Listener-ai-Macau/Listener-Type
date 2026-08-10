@@ -321,6 +321,10 @@ const LOCAL_SPEAKER_EVIDENCE_LIMIT: usize = 64;
 const LOCAL_SPEAKER_WINDOW_MS: u64 = 1_200;
 const LOCAL_ADAPTIVE_STRONG_NON_TARGET_MAX_SCORE: f32 = 0.20;
 const MAX_WAKE_PHRASE_UTTERANCE_MS: u64 = 1_800;
+// Volcengine session 768 emitted an exact wake-only row spanning 1,902 ms.
+// Permit that provider timing drift only for unenrolled/adaptive final recovery;
+// the normal speaker-attribution path keeps the stricter 1,800 ms boundary.
+const MAX_ADAPTIVE_WAKE_ONLY_UTTERANCE_MS: u64 = 2_500;
 
 fn latest_audio_duration_ms(state: &SyncState) -> Option<u64> {
     state
@@ -412,13 +416,22 @@ fn final_wake_only_provider_gap_is_owner_safe(
         .get("text")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    // Final speaker filtering can return an empty target even though the
+    // session ledger already committed the wake row (session 768). Use that
+    // accepted ledger only as a wake-only recovery anchor, never as arbitrary
+    // body text.
+    let recovery_target_text = if target_text.trim().is_empty() {
+        state.best_transcript_text.as_str()
+    } else {
+        target_text
+    };
     let local_identity_allows_recovery = state.local_speaker_profile_adaptive
         || (state.local_speaker_stable_target
             && !state.owner_isolation_frozen
             && state.local_consecutive_non_target == 0);
     if !state.local_speaker_tracking_enabled
         || !local_identity_allows_recovery
-        || spoken_content_len(provider_text) <= spoken_content_len(target_text)
+        || spoken_content_len(provider_text) <= spoken_content_len(recovery_target_text)
     {
         return false;
     }
@@ -429,7 +442,7 @@ fn final_wake_only_provider_gap_is_owner_safe(
         .chars()
         .filter(|ch| ch.is_alphanumeric())
         .collect::<String>();
-    let normalized_target = target_text
+    let normalized_target = recovery_target_text
         .chars()
         .filter(|ch| ch.is_alphanumeric())
         .collect::<String>();
@@ -467,7 +480,6 @@ fn final_wake_only_provider_gap_is_owner_safe(
         .filter(|utterance| utterance_is_stable(utterance))
         .collect::<Vec<_>>();
     if stable_utterances.len() != 1
-        || !utterance_is_bounded_wake_phrase(stable_utterances[0], &normalized_phrase)
         || !stable_utterances[0]
             .get("text")
             .and_then(Value::as_str)
@@ -482,7 +494,25 @@ fn final_wake_only_provider_gap_is_owner_safe(
         return false;
     }
 
-    let wake_end_ms = utterance_end_ms(stable_utterances[0]).unwrap_or_default();
+    let (Some(wake_start_ms), Some(wake_end_ms)) = (
+        utterance_start_ms(stable_utterances[0]),
+        utterance_end_ms(stable_utterances[0]),
+    ) else {
+        return false;
+    };
+    if state.local_speaker_profile_adaptive {
+        // Installed session 768: every PCM packet arrived and Volcengine's raw
+        // final contained the complete body, but stable attribution never moved
+        // past the wake row. With no enrolled voiceprint, the wake-derived
+        // profile is advisory; only repeated strong local NonTarget evidence may
+        // veto this exact wake-only provider-schema recovery.
+        return wake_end_ms.saturating_sub(wake_start_ms)
+            <= MAX_ADAPTIVE_WAKE_ONLY_UTTERANCE_MS
+            && state.local_non_target_speech_end_ms.is_none();
+    }
+    if !utterance_is_bounded_wake_phrase(stable_utterances[0], &normalized_phrase) {
+        return false;
+    }
     state
         .stable_attributed_speech_end_ms
         .is_some_and(|stable_end_ms| stable_end_ms > wake_end_ms.saturating_add(250))
@@ -4731,6 +4761,97 @@ mod tests {
                 filtered.result["text"].as_str().unwrap(),
             ),
             "a wake-only history must not promote an unattributed raw tail"
+        );
+    }
+
+    #[test]
+    fn installed_session_768_recovers_raw_body_without_prior_stable_attribution() {
+        // The provider final carried the full sentence in result.text while its
+        // only stable utterance remained the wake phrase. All local windows were
+        // advisory Uncertain and no repeated strong NonTarget switch existed.
+        let result = json!({
+            "text": "开始录音。现在更差了，你看一下现在是这样子。",
+            "utterances": [{
+                "additions": { "speaker_id": "0", "source": "two_pass" },
+                "definite": true,
+                "start_time": 40,
+                "end_time": 1942,
+                "text": "开始录音。"
+            }]
+        });
+        let mut state = SyncState::default();
+        state.local_speaker_tracking_enabled = true;
+        state.local_speaker_profile_adaptive = true;
+        state.local_speaker_stable_target = true;
+        state.local_speaker_classification = Some(
+            crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                score: 0.476_475_06,
+            },
+        );
+        state.target_speaker_id = Some("0".into());
+        state.stable_attributed_speech_end_ms = Some(1_942);
+        state.wake_speaker_phrase = Some("开始录音".into());
+        state.best_transcript_text = "开始录音。".into();
+        state.last_partial_text = state.best_transcript_text.clone();
+
+        assert!(final_wake_only_provider_gap_is_owner_safe(
+            &state,
+            &result,
+            "",
+        ));
+
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        {
+            let mut runtime = asr.state.lock();
+            runtime.local_speaker_tracking_enabled = true;
+            runtime.local_speaker_profile_adaptive = true;
+            runtime.local_speaker_stable_target = true;
+            runtime.local_speaker_classification = state.local_speaker_classification;
+            runtime.target_speaker_id = Some("0".into());
+            runtime.stable_attributed_speech_end_ms = Some(1_942);
+            runtime.wake_speaker_phrase = Some("开始录音".into());
+            runtime.best_transcript_text = "开始录音。".into();
+            runtime.last_partial_text = runtime.best_transcript_text.clone();
+        }
+        let (tx, mut rx) = oneshot::channel();
+        asr.state.lock().final_tx = Some(tx);
+        let final_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 7_516 },
+            "result": result.clone(),
+        }))
+        .expect("session 768 final serializes");
+        let final_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::LastPacket,
+            Serialization::Json,
+            &final_payload,
+            None,
+        );
+        assert!(!asr.handle_frame(&final_frame));
+        let transcript = rx
+            .try_recv()
+            .expect("session 768 final should resolve")
+            .expect("wake-only provider schema gap should recover body");
+        assert_eq!(
+            transcript.text,
+            "开始录音。现在更差了，你看一下现在是这样子。"
+        );
+
+        state.local_non_target_speech_end_ms = Some(4_900);
+        assert!(
+            !final_wake_only_provider_gap_is_owner_safe(
+                &state,
+                &result,
+                "",
+            ),
+            "repeated strong local NonTarget evidence must still veto recovery"
         );
     }
 
