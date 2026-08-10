@@ -299,10 +299,11 @@ mod platform {
     const SAMPLE_RATE: i32 = 16_000;
     const VERIFICATION_MIN_SPEECH_MS: usize = 1_000;
     const ENROLLMENT_SECONDS: u64 = 11;
-    const ENROLLMENT_MIN_SECONDS: usize = 6;
+    const ENROLLMENT_MIN_SECONDS: usize = 5;
     const ENROLLMENT_FRAME_MS: usize = 100;
     const ENROLLMENT_MIN_ACTIVE_FRAMES: usize = 18;
     const TEMPLATE_WINDOW_MS: usize = 1_600;
+    const ENROLLMENT_TEMPLATE_WINDOW_MS: usize = 1_000;
     const DUAL_TEMPLATE_WINDOWS_PER_BANK: usize = 3;
     const DUAL_TEMPLATE_MIN_ACTIVE_FRAMES_PER_WINDOW: usize = 10;
     // Product sensitivity: platform DEFAULT_SCORE_MILLI is 500 (0.50). Real-owner
@@ -670,15 +671,35 @@ mod platform {
     }
 
     #[derive(Debug)]
-    struct EnrollmentTemplateWindows<'a> {
-        wake: Vec<&'a [u8]>,
-        session: Vec<&'a [u8]>,
+    struct EnrollmentTemplateWindows {
+        wake: Vec<Vec<u8>>,
+        session: Vec<Vec<u8>>,
     }
 
-    fn quality_template_windows<'a>(pcm: &'a [u8], label: &str) -> Result<Vec<&'a [u8]>, String> {
+    fn compact_active_speech_frames(pcm: &[u8], frame_bytes: usize) -> Result<Vec<u8>, String> {
+        let (_, _, _, _, _, active_threshold) = active_speech_bounds(pcm, frame_bytes, 20.0)?;
+        let rms = frame_rms(pcm, frame_bytes);
+        let mut compacted = Vec::with_capacity(pcm.len());
+        for (index, frame) in pcm.chunks(frame_bytes).enumerate() {
+            if rms
+                .get(index)
+                .is_some_and(|value| *value >= active_threshold)
+            {
+                compacted.extend_from_slice(frame);
+            }
+        }
+        Ok(compacted)
+    }
+
+    fn quality_template_windows(pcm: &[u8], label: &str) -> Result<Vec<Vec<u8>>, String> {
         let frame_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_FRAME_MS / 1000;
-        let windows =
-            evenly_spaced_windows(pcm, TEMPLATE_WINDOW_MS, DUAL_TEMPLATE_WINDOWS_PER_BANK);
+        let compacted = compact_active_speech_frames(pcm, frame_bytes)
+            .map_err(|_| format!("{label}没有检测到清晰人声，请靠近设备重新录制。"))?;
+        let windows = evenly_spaced_windows(
+            &compacted,
+            ENROLLMENT_TEMPLATE_WINDOW_MS,
+            DUAL_TEMPLATE_WINDOWS_PER_BANK,
+        );
         if windows.len() != DUAL_TEMPLATE_WINDOWS_PER_BANK {
             return Err(format!("{label}录音太短，请按提示完整录制。"));
         }
@@ -691,14 +712,14 @@ mod platform {
                 ));
             }
         }
-        Ok(windows)
+        Ok(windows.into_iter().map(<[u8]>::to_vec).collect())
     }
 
-    fn enrollment_template_windows(pcm: &[u8]) -> Result<EnrollmentTemplateWindows<'_>, String> {
+    fn enrollment_template_windows(pcm: &[u8]) -> Result<EnrollmentTemplateWindows, String> {
         let speech = enrollment_speech_window(pcm)?;
         let minimum_dual_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_MIN_SECONDS;
         if speech.len() < minimum_dual_bytes {
-            return Err("有效人声不足 6 秒，请先说三遍唤醒词，再说一句自然的话。".to_string());
+            return Err("录音不足 5 秒，请先说三遍唤醒词，再连续说一句自然的话。".to_string());
         }
 
         // Enrollment prompt orders fixed phrase first and free speech second.
@@ -1263,6 +1284,13 @@ mod platform {
         }
         std::thread::spawn(|| {
             std::thread::sleep(Duration::from_secs(ENROLLMENT_SECONDS));
+            let capture_still_active = enrollment_capture_needs_host_stop(STATE.lock().capture);
+            if !capture_still_active {
+                log::info!(
+                    "[speaker-verification] enrollment stop timer skipped because device session already completed"
+                );
+                return;
+            }
             if let Err(err) =
                 crate::embedded_ble::send_recording_control_stop(Duration::from_secs(4))
             {
@@ -1270,6 +1298,10 @@ mod platform {
             }
         });
         Ok(status_for_phrase(&wake_phrase))
+    }
+
+    fn enrollment_capture_needs_host_stop(capture: Option<CaptureState>) -> bool {
+        matches!(capture, Some(CaptureState::Armed | CaptureState::Capturing))
     }
 
     pub fn take_enrollment_arm() -> bool {
@@ -1697,11 +1729,55 @@ mod platform {
             assert!(windows
                 .wake
                 .iter()
-                .all(|window| window.len() == TEMPLATE_WINDOW_MS * 32));
+                .all(|window| window.len() == ENROLLMENT_TEMPLATE_WINDOW_MS * 32));
             assert!(windows
                 .session
                 .iter()
-                .all(|window| window.len() == TEMPLATE_WINDOW_MS * 32));
+                .all(|window| window.len() == ENROLLMENT_TEMPLATE_WINDOW_MS * 32));
+        }
+
+        #[test]
+        fn enrollment_compacts_normal_pauses_before_dual_bank_windows() {
+            let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
+            let mut samples = vec![0i16; frame_samples * 5];
+            samples.extend(vec![800i16; frame_samples * 10]);
+            samples.extend(vec![0i16; frame_samples * 3]);
+            samples.extend(vec![-900i16; frame_samples * 10]);
+            samples.extend(vec![0i16; frame_samples * 5]);
+            samples.extend(vec![700i16; frame_samples * 10]);
+            samples.extend(vec![0i16; frame_samples * 5]);
+            samples.extend(vec![-750i16; frame_samples * 10]);
+            samples.extend(vec![0i16; frame_samples * 10]);
+            let pcm = samples
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>();
+            let windows = enrollment_template_windows(&pcm)
+                .expect("normal phrase/sentence pauses must not fail template quality");
+            assert_eq!(windows.wake.len(), 3);
+            assert_eq!(windows.session.len(), 3);
+            assert!(windows
+                .wake
+                .iter()
+                .chain(&windows.session)
+                .all(|window| window.len() >= VERIFICATION_MIN_SPEECH_MS * 32));
+        }
+
+        #[test]
+        fn completed_enrollment_cancels_late_host_stop() {
+            assert!(enrollment_capture_needs_host_stop(Some(
+                CaptureState::Armed
+            )));
+            assert!(enrollment_capture_needs_host_stop(Some(
+                CaptureState::Capturing
+            )));
+            assert!(!enrollment_capture_needs_host_stop(Some(
+                CaptureState::Complete
+            )));
+            assert!(!enrollment_capture_needs_host_stop(Some(
+                CaptureState::Error
+            )));
+            assert!(!enrollment_capture_needs_host_stop(None));
         }
 
         #[test]

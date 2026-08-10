@@ -381,6 +381,16 @@ gate("dual_bank_voiceprint_enrollment", () => {
     "template.session_embeddings.clone()",
     "session tracking uses free-speech templates",
   );
+  mustInclude(
+    speaker,
+    "enrollment_compacts_normal_pauses_before_dual_bank_windows",
+    "normal enrollment pauses are compacted before quality gating",
+  );
+  mustInclude(
+    speaker,
+    "completed_enrollment_cancels_late_host_stop",
+    "an early device endpoint cancels the delayed host STOP",
+  );
 });
 
 // Installed empty wake 72519330: before body text exists, auto-end must not use
