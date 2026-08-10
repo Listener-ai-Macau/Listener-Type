@@ -227,6 +227,30 @@ fn automatic_wake_guard_removes_only_the_activation_prefix() {
         ),
         "正常语句里开始录音只是普通内容。"
     );
+    assert_eq!(
+        super::strip_automatic_activation_prefix(
+            "嗯，开始录音，多人识别现在只保留我说的话。",
+            "开始录音",
+            false,
+        ),
+        "多人识别现在只保留我说的话。"
+    );
+    assert_eq!(
+        super::strip_automatic_activation_prefix(
+            "嗯嗯开始录音。正文保持完整。",
+            "开始录音",
+            false,
+        ),
+        "正文保持完整。"
+    );
+    assert_eq!(
+        super::strip_automatic_activation_prefix(
+            "额外版本，开始录音只是普通内容。",
+            "开始录音",
+            false,
+        ),
+        "额外版本，开始录音只是普通内容。"
+    );
 }
 
 #[test]

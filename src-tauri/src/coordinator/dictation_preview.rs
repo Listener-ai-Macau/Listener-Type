@@ -672,9 +672,31 @@ fn strip_automatic_activation_prefix(text: &str, phrase: &str, partial: bool) ->
         return text.to_string();
     }
 
+    // The authoritative pass can prepend a standalone hesitation to the wake
+    // phrase (for example, "嗯，开始录音，正文").  Filler cleanup runs later
+    // and must remain independently configurable, so consume only a bounded
+    // leading run here and only commit that removal when the wake phrase (or
+    // its already-established suffix) actually matches afterwards.
+    let mut activation_candidate = text;
+    loop {
+        let trimmed = activation_candidate
+            .trim_start_matches(is_embedded_audio_partial_preview_decorative);
+        let filler_bytes = trimmed
+            .char_indices()
+            .take_while(|(_, ch)| matches!(ch, '嗯' | '呃' | '额' | '唔'))
+            .map(|(index, ch)| index + ch.len_utf8())
+            .last()
+            .unwrap_or(0);
+        if filler_bytes == 0 {
+            activation_candidate = trimmed;
+            break;
+        }
+        activation_candidate = &trimmed[filler_bytes..];
+    }
+
     let mut phrase_index = 0usize;
     let mut consumed_end = 0usize;
-    for (index, ch) in text.char_indices() {
+    for (index, ch) in activation_candidate.char_indices() {
         let next = index + ch.len_utf8();
         if is_embedded_audio_partial_preview_decorative(ch) {
             consumed_end = next;
@@ -684,7 +706,7 @@ fn strip_automatic_activation_prefix(text: &str, phrase: &str, partial: bool) ->
             break;
         }
         if !wake_phrase_character_matches(ch, phrase[phrase_index]) {
-            return strip_bounded_activation_suffix(text, &phrase)
+            return strip_bounded_activation_suffix(activation_candidate, &phrase)
                 .unwrap_or_else(|| text.to_string());
         }
         phrase_index += 1;
@@ -692,7 +714,7 @@ fn strip_automatic_activation_prefix(text: &str, phrase: &str, partial: bool) ->
     }
 
     if phrase_index == phrase.len() {
-        text[consumed_end..]
+        activation_candidate[consumed_end..]
             .trim_start_matches(is_embedded_audio_partial_preview_decorative)
             .trim()
             .to_string()
