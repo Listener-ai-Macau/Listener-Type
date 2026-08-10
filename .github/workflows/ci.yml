@@ -10,6 +10,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Resolve pinned Denzic Platform commit
+        id: platform-ref
+        run: echo "commit=$(git rev-parse HEAD:third_party/denzic-platform)" >> "$GITHUB_OUTPUT"
+      - name: Require Denzic Platform deploy key
+        env:
+          DENZIC_PLATFORM_DEPLOY_KEY: ${{ secrets.DENZIC_PLATFORM_DEPLOY_KEY }}
+        run: test -n "$DENZIC_PLATFORM_DEPLOY_KEY" || { echo "Missing read-only DENZIC_PLATFORM_DEPLOY_KEY repository secret" >&2; exit 1; }
+      - uses: actions/checkout@v6
+        with:
+          repository: Listener-ai-Macau/Denzic-Platform
+          ref: ${{ steps.platform-ref.outputs.commit }}
+          path: third_party/denzic-platform
+          ssh-key: ${{ secrets.DENZIC_PLATFORM_DEPLOY_KEY }}
+          persist-credentials: false
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -24,6 +38,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Resolve pinned Denzic Platform commit
+        id: platform-ref
+        run: echo "commit=$(git rev-parse HEAD:third_party/denzic-platform)" >> "$GITHUB_OUTPUT"
+      - name: Require Denzic Platform deploy key
+        env:
+          DENZIC_PLATFORM_DEPLOY_KEY: ${{ secrets.DENZIC_PLATFORM_DEPLOY_KEY }}
+        run: test -n "$DENZIC_PLATFORM_DEPLOY_KEY" || { echo "Missing read-only DENZIC_PLATFORM_DEPLOY_KEY repository secret" >&2; exit 1; }
+      - uses: actions/checkout@v6
+        with:
+          repository: Listener-ai-Macau/Denzic-Platform
+          ref: ${{ steps.platform-ref.outputs.commit }}
+          path: third_party/denzic-platform
+          ssh-key: ${{ secrets.DENZIC_PLATFORM_DEPLOY_KEY }}
+          persist-credentials: false
       - uses: actions/setup-node@v6
         with:
           node-version: 22

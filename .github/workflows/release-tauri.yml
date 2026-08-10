@@ -10,10 +10,29 @@ jobs:
   windows-release-smoke:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - name: Resolve pinned Denzic Platform commit
+        id: platform-ref
+        shell: pwsh
+        run: |
+          $commit = git rev-parse HEAD:third_party/denzic-platform
+          "commit=$commit" >> $env:GITHUB_OUTPUT
+      - name: Require Denzic Platform deploy key
+        shell: pwsh
+        env:
+          DENZIC_PLATFORM_DEPLOY_KEY: ${{ secrets.DENZIC_PLATFORM_DEPLOY_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:DENZIC_PLATFORM_DEPLOY_KEY)) {
+            throw "Missing read-only DENZIC_PLATFORM_DEPLOY_KEY repository secret"
+          }
+      - uses: actions/checkout@v6
         with:
-          submodules: recursive
-      - uses: actions/setup-node@v4
+          repository: Listener-ai-Macau/Denzic-Platform
+          ref: ${{ steps.platform-ref.outputs.commit }}
+          path: third_party/denzic-platform
+          ssh-key: ${{ secrets.DENZIC_PLATFORM_DEPLOY_KEY }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
