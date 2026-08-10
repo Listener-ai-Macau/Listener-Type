@@ -89,6 +89,7 @@
         "src-tauri/src/cli.rs",
         "src-tauri/src/coordinator.rs",
         "src-tauri/src/coordinator/dictation.rs",
+        "src-tauri/src/coordinator/dictation_preview.rs",
         "src-tauri/src/coordinator/dictation_embedded_stream_completion.rs",
         "src-tauri/src/embedded_ble.rs",
         "src-tauri/src/lib.rs",
