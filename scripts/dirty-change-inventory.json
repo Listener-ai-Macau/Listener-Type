@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-10",
+  "updated_at": "2026-08-11",
   "purpose": "Classifies every current dirty Listener Type/Firmware path while the 1.0.4 recording and wake refinement is in progress. Release gates still require clean worktrees; this inventory prevents mystery dirty changes during focused repair/review.",
   "entries": [
     {
@@ -346,6 +346,25 @@
         "scripts/verify-frontend.mjs",
         "scripts/verify-listener-1.0.4-protected-contracts.mjs",
         "scripts/windows-build-gnu.ps1"
+      ]
+    },
+    {
+      "id": "listener_voiceprint_multi_speaker_goal_20260811",
+      "repo": "type",
+      "item": "Dual-bank voiceprint enrollment, active-speech classification, duration/quality model evaluation, and ten-scenario multi-speaker release gate",
+      "state": "machine_regressions_pass_pending_consented_corpus_and_human_review",
+      "evidence": [
+        "cargo test --lib speaker_verification: 27 passed, 3 explicit consent/runtime ignores, 0 failed",
+        "npm run check:multi-speaker-timelines: 10 scenarios PASS (7 alternating, 3 overlap)",
+        "node scripts/verify-listener-1.0.4-protected-contracts.mjs: 28 gates PASS before timeline contract integration",
+        "Consented 20-owner/20-non-owner corpus and final installed two-speaker review remain pending"
+      ],
+      "patterns": [
+        "docs/features/dictation-pipeline.md",
+        "scripts/multi-speaker-timeline-scenarios.json",
+        "scripts/run-multi-speaker-timeline-regressions.mjs",
+        "scripts/run-speaker-verification-evaluation.ps1",
+        "scripts/speaker-evaluation-manifest.example.json"
       ]
     }
   ]

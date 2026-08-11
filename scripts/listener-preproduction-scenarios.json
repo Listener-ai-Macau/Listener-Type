@@ -7,10 +7,10 @@
       "status": "active_owner_direction",
       "recorded_at": "2026-08-10T18:18:00+08:00",
       "source": "Product-owner direction: 继续开一个目标做好多人录音与声纹识别。",
-      "requirement": "Replace wake-derived single-template session identity with protected fixed-phrase and free-speech template banks; compare CAMPPlus and ERes2NetV2 on the same consented Listener corpus; calibrate duration-aware owner/non-owner decisions without allowing provider diarization or uncertain ephemeral voiceprint evidence to erase recognized owner speech.",
+      "requirement": "Replace wake-derived single-template session identity with protected fixed-phrase and free-speech template banks; compare CAMPPlus and ERes2NetV2 on the same consented Listener corpus; require one deployable threshold to pass short/medium/long and clean/noisy/far-field owner/non-owner slices without allowing provider diarization or uncertain ephemeral voiceprint evidence to erase recognized owner speech.",
       "machine_gates": [
         "new enrollment yields at least three quality-gated fixed-phrase embeddings and three quality-gated free-speech embeddings without retaining enrollment audio",
-        "at least 20 labeled owner and 20 labeled non-owner samples produce owner recall >=95%, non-owner suppression >=90%, and local inference p95 <=300 ms",
+        "at least 20 labeled owner and 20 labeled non-owner samples produce owner recall >=95%, non-owner suppression >=90%, and model-only local inference p95 <=300 ms overall and in every short/medium/long and clean/noisy/far-field slice, with at least 5 samples per label in each slice",
         "at least 10 alternating or overlapping owner/non-owner scenarios preserve the owner's first and last sentence, exclude confirmed room speech, and terminate without a permanent Listening state",
         "historical raw-ASR-body regressions never collapse to the no-speech result, while repeated strong NonTarget evidence still vetoes unsafe recovery",
         "the installed Program Files payload matches the final MSI identity and the existing wake-to-capsule 1500 ms ceiling does not regress"

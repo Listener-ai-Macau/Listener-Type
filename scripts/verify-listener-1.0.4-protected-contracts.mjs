@@ -59,6 +59,8 @@ const deviceSection = read("src/pages/settings/DeviceSection.tsx");
 const capsuleTsx = read("src/components/Capsule.tsx");
 const capsulePreviewRules = read("src/lib/capsulePreviewRules.ts");
 const capsulePreviewRulesTest = read("src/lib/capsulePreviewRules.test.ts");
+const multiSpeakerTimelineCatalog = read("scripts/multi-speaker-timeline-scenarios.json");
+const multiSpeakerTimelineRunner = read("scripts/run-multi-speaker-timeline-regressions.mjs");
 const speaker = existsSync(join(typeRoot, "src-tauri/src/speaker_verification.rs"))
   ? read("src-tauri/src/speaker_verification.rs")
   : "";
@@ -376,6 +378,18 @@ gate("dual_bank_voiceprint_enrollment", () => {
     "runtime_evaluates_listener_labeled_speaker_corpus",
     "owner/non-owner model evaluation gate",
   );
+  mustInclude(speaker, "duration_slices", "short/medium/long evaluation slices");
+  mustInclude(speaker, "quality_slices", "clean/noisy/far-field evaluation slices");
+  mustInclude(
+    speaker,
+    "applied.owner_samples >= 5 && applied.non_owner_samples >= 5",
+    "minimum per-slice owner/non-owner corpus coverage",
+  );
+  mustInclude(
+    speaker,
+    "let started = std::time::Instant::now();",
+    "model-only local inference timing starts immediately before embedding",
+  );
   mustInclude(
     speaker,
     "template.session_embeddings.clone()",
@@ -390,6 +404,36 @@ gate("dual_bank_voiceprint_enrollment", () => {
     speaker,
     "completed_enrollment_cancels_late_host_stop",
     "an early device endpoint cancels the delayed host STOP",
+  );
+  mustInclude(
+    speaker,
+    "session_speaker_signal_metrics(speech)?",
+    "session exclusion uses active speech duration rather than pause-spanning duration",
+  );
+  mustInclude(
+    speaker,
+    "session_speaker_exclusion_uses_active_speech_not_pause_spanning_duration",
+    "sparse speech with a long pause cannot become confident NonTarget evidence",
+  );
+});
+
+gate("multi_speaker_timeline_matrix", () => {
+  const catalog = JSON.parse(multiSpeakerTimelineCatalog);
+  assert.equal(catalog.schema, "listener.multi_speaker_timeline_scenarios");
+  assert.ok(catalog.scenarios.length >= 10, "at least ten explicit multi-speaker scenarios");
+  assert.ok(
+    catalog.scenarios.filter((scenario) => scenario.kind === "overlap").length >= 3,
+    "at least three overlap scenarios",
+  );
+  mustInclude(
+    multiSpeakerTimelineRunner,
+    "transcript_pass && scenario.endpoint_pass && scenario.lifecycle_pass",
+    "each timeline requires transcript, endpoint, and lifecycle evidence",
+  );
+  mustInclude(
+    multiSpeakerTimelineRunner,
+    "transcript_body_retained: false",
+    "timeline evidence excludes transcript body text",
   );
 });
 

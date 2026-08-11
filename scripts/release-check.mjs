@@ -13,6 +13,7 @@ const checks = [
   ['recording low-latency regression contract', 'npm run check:recording-latency'],
   ['OTA speed log parser contract', 'npm run check:ota-speed-log-contract'],
   ['performance baseline contract', 'npm run check:performance-baselines'],
+  ['multi-speaker timeline regressions', 'npm run check:multi-speaker-timelines'],
   ['frontend verification', 'npm run verify'],
   ['same-version MSI replacement contract', 'npm run check:msi-upgrade-contract'],
   ['updater manifest generation', 'node scripts/write-updater-manifest.test.mjs'],

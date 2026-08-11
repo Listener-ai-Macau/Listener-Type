@@ -18,12 +18,38 @@
     {
       "id": "owner-01",
       "path": "corpus/owner/owner-01.wav",
-      "label": "owner"
+      "label": "owner",
+      "quality": "clean"
     },
     {
       "id": "non-owner-01",
       "path": "corpus/non-owner/non-owner-01.wav",
-      "label": "non_owner"
+      "label": "non_owner",
+      "quality": "clean"
+    },
+    {
+      "id": "owner-noisy-01",
+      "path": "corpus/owner/owner-noisy-01.wav",
+      "label": "owner",
+      "quality": "noisy"
+    },
+    {
+      "id": "non-owner-noisy-01",
+      "path": "corpus/non-owner/non-owner-noisy-01.wav",
+      "label": "non_owner",
+      "quality": "noisy"
+    },
+    {
+      "id": "owner-far-01",
+      "path": "corpus/owner/owner-far-01.wav",
+      "label": "owner",
+      "quality": "far_field"
+    },
+    {
+      "id": "non-owner-far-01",
+      "path": "corpus/non-owner/non-owner-far-01.wav",
+      "label": "non_owner",
+      "quality": "far_field"
     }
   ]
 }

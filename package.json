@@ -27,6 +27,7 @@
     "check:ota-speed-log": "node scripts/check-ota-transfer-speed-log.mjs",
     "check:ota-speed-log-contract": "node scripts/check-ota-transfer-speed-log.test.mjs",
     "check:performance-baselines": "node scripts/check-performance-baselines.mjs",
+    "check:multi-speaker-timelines": "node scripts/run-multi-speaker-timeline-regressions.mjs",
     "check:preproduction-bench-contract": "node scripts/check-preproduction-bench-contract.mjs",
     "check:release-root-artifacts": "node scripts/check-release-root-artifacts.mjs",
     "check:msi-upgrade-contract": "node scripts/windows-package-msvc.test.mjs",

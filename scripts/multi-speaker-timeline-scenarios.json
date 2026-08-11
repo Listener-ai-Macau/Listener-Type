@@ -1,0 +1,67 @@
+{
+  "schema": "listener.multi_speaker_timeline_scenarios",
+  "schema_version": 1,
+  "scenarios": [
+    {
+      "id": "owner_other_owner_sequential",
+      "kind": "alternating",
+      "transcript_test": "speaker_filter_locks_first_speaker_and_excludes_other_people",
+      "endpoint_test": "target_speaker_endpoint_requires_one_second_without_that_speaker"
+    },
+    {
+      "id": "owner_then_long_room_tail",
+      "kind": "alternating",
+      "transcript_test": "room_speech_raw_stream_does_not_inflate_optimistic_while_local_non_target",
+      "endpoint_test": "confirmed_other_speaker_does_not_extend_endpoint_via_provider_attribution"
+    },
+    {
+      "id": "owner_diarization_flip_then_tail",
+      "kind": "alternating",
+      "transcript_test": "local_target_timeline_rescues_same_person_split_across_cloud_speakers",
+      "endpoint_test": "target_speaker_endpoint_uses_newest_stable_attributed_boundary_after_diarization_flip"
+    },
+    {
+      "id": "owner_transient_mismatch_then_tail",
+      "kind": "alternating",
+      "transcript_test": "cloud_target_survives_uncertain_and_isolated_non_target_windows",
+      "endpoint_test": "target_speaker_endpoint_holds_after_one_transient_local_mismatch"
+    },
+    {
+      "id": "other_first_then_owner_first_and_tail",
+      "kind": "alternating",
+      "transcript_test": "local_wake_speaker_evidence_binds_cloud_target_after_other_speaker",
+      "endpoint_test": "target_speaker_endpoint_holds_during_owner_identity_recovery"
+    },
+    {
+      "id": "wake_misrecognized_owner_split_tail",
+      "kind": "alternating",
+      "transcript_test": "local_timeline_recovers_body_when_cloud_misrecognizes_wake_and_splits_speaker",
+      "endpoint_test": "target_speaker_endpoint_waits_for_provider_coverage_before_stopping_quiet_tail"
+    },
+    {
+      "id": "startup_false_negative_owner_recovers",
+      "kind": "alternating",
+      "transcript_test": "startup_false_negatives_do_not_create_target_endpoint_authority",
+      "endpoint_test": "target_speaker_endpoint_waits_for_startup_body_calibration"
+    },
+    {
+      "id": "owner_and_other_overlap",
+      "kind": "overlap",
+      "transcript_test": "adaptive_split_recovery_rejects_real_or_overlapping_other_speaker",
+      "endpoint_test": "confirmed_other_speaker_does_not_extend_endpoint_via_provider_attribution"
+    },
+    {
+      "id": "cloud_collapses_overlapping_speakers",
+      "kind": "overlap",
+      "transcript_test": "local_timeline_excludes_other_person_when_cloud_collapses_speaker_ids",
+      "endpoint_test": "confirmed_other_speaker_does_not_extend_endpoint_via_provider_attribution"
+    },
+    {
+      "id": "owner_tail_survives_non_target_final_boundary",
+      "kind": "overlap",
+      "transcript_test": "protocol_final_preserves_owner_preview_after_non_target_tail_empties_boundaries",
+      "endpoint_test": "incomplete_body_preview_uses_fifteen_hundred_ms_endpoint"
+    }
+  ],
+  "lifecycle_test": "session_actor_commands_apply_asr_cancel_timeout_and_empty_final_behavior"
+}

@@ -35,6 +35,21 @@ $nonOwnerCount = @($manifestData.samples | Where-Object { $_.label -eq "non_owne
 if ($ownerCount -lt 20 -or $nonOwnerCount -lt 20) {
   throw "Speaker evaluation needs at least 20 owner and 20 non-owner samples; owner=$ownerCount non_owner=$nonOwnerCount."
 }
+$sampleIds = @($manifestData.samples | ForEach-Object { [string]$_.id })
+if (@($sampleIds | Sort-Object -Unique).Count -ne $sampleIds.Count) {
+  throw "Speaker evaluation sample IDs must be unique."
+}
+foreach ($quality in @("clean", "noisy", "far_field")) {
+  $qualityOwnerCount = @($manifestData.samples | Where-Object {
+      $_.quality -eq $quality -and $_.label -eq "owner"
+    }).Count
+  $qualityNonOwnerCount = @($manifestData.samples | Where-Object {
+      $_.quality -eq $quality -and $_.label -eq "non_owner"
+    }).Count
+  if ($qualityOwnerCount -lt 5 -or $qualityNonOwnerCount -lt 5) {
+    throw "Speaker evaluation quality '$quality' needs at least 5 owner and 5 non-owner samples; owner=$qualityOwnerCount non_owner=$qualityNonOwnerCount."
+  }
+}
 
 $outputDir = Split-Path -Parent $outputPath
 if ($outputDir) {
@@ -64,6 +79,12 @@ try {
 
 $reports = Get-Content -Raw -LiteralPath $outputPath | ConvertFrom-Json
 $reports | Select-Object model, model_sha256, threshold, owner_recall, non_owner_suppression, inference_p95_ms, pass | Format-Table -AutoSize
+foreach ($report in $reports) {
+  Write-Host "Model slices: $($report.model)"
+  @($report.duration_slices) + @($report.quality_slices) |
+    Select-Object slice, applied_threshold, diagnostic_threshold, owner_samples, non_owner_samples, owner_recall, non_owner_suppression, inference_p95_ms, pass |
+    Format-Table -AutoSize
+}
 if (-not (@($reports | Where-Object { $_.pass }).Count)) {
   throw "No evaluated model met all speaker verification gates."
 }

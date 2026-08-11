@@ -34,6 +34,8 @@ flowchart LR
 - Debug audio recording is opt-in and bounded by retention settings.
 - Enrolled owner verification keeps separate OS-protected template banks for the fixed wake phrase and for natural free speech. Wake admission compares only the fixed-phrase bank; in-session owner tracking compares only the free-speech bank. Enrollment audio is discarded after feature extraction.
 - When no owner voiceprint is enrolled, wake-derived speaker identity is advisory: uncertain evidence must not erase recognized body text or produce a false no-speech result. Only repeated strong local NonTarget evidence may enforce an owner-isolation veto.
+- In-session exclusion measures actual active 100 ms speech frames, not the wall-clock span between the first and last active frame. A pause-spanning fragment with less than 1000 ms active speech cannot become confident NonTarget evidence. Privacy-safe logs include active/speech-span duration, signal RMS, inference latency, score and classification.
+- Speaker-model promotion uses `scripts/run-speaker-verification-evaluation.ps1` with the same consented Listener corpus for every candidate. One deployable threshold must pass the overall 20-owner/20-non-owner gates and every short/medium/long active-speech slice plus every clean/noisy/far-field slice. Each slice needs at least five samples per label; reports contain anonymous IDs, signal metrics, scores, model hashes and model-only inference latency, never transcript text or retained enrollment audio.
 - Embedded audio keeps the firmware VKA1 packet model intact. Batch debug paths reconstruct a complete PCM session before ASR; streaming paths create the normal ASR consumer on `session_start`, feed each `audio_data` PCM chunk immediately, and finalize through the same `end_session` path on `session_stop`.
 - Embedded streaming starts the device AI processing LED when Type accepts the first valid PCM chunk for ASR. The stop boundary only switches the capsule into transcribing feedback; it must not delay the purple AI processing signal until the end.
 - Embedded streaming cancel/error/link-loss paths must cancel ASR, restore prepared IME state, return coordinator state to Idle, and show an error capsule.
@@ -60,6 +62,8 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo test --manifest-path src-tauri/Cargo.toml --lib --no-run
 cargo test --manifest-path tools/embedded_audio_replay/Cargo.toml
 npm run build
+npm run check:multi-speaker-timelines
+pwsh -NoProfile -File scripts/run-speaker-verification-evaluation.ps1 -Manifest <consented-manifest.json>
 pwsh -NoProfile -File tools/embedded_audio_replay/run_ble_stream_smoke.ps1 -Port COM3 -VerifyHistory
 ```
 

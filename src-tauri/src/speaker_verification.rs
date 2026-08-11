@@ -781,6 +781,17 @@ mod platform {
         Ok(speech)
     }
 
+    fn session_speaker_signal_metrics(pcm: &[u8]) -> Result<(usize, f32, f32), String> {
+        let frame_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_FRAME_MS / 1_000;
+        let (_, _, active_frames, peak_rms, reference_rms, _) =
+            active_speech_bounds(pcm, frame_bytes, 20.0)?;
+        Ok((
+            active_frames * ENROLLMENT_FRAME_MS,
+            peak_rms,
+            reference_rms,
+        ))
+    }
+
     fn verification_template_windows(pcm: &[u8]) -> Result<Vec<&[u8]>, String> {
         let max_bytes = DEFAULT_MAX_CANDIDATE_MS as usize * 32;
         let raw = &pcm[..pcm.len().min(max_bytes) & !1usize];
@@ -1411,10 +1422,12 @@ mod platform {
         };
         let runtime = ensure_runtime()?;
         let candidate_windows = verification_template_windows(pcm)?;
+        let inference_started = std::time::Instant::now();
         let candidate_embeddings = candidate_windows
             .iter()
             .map(|candidate| runtime.embedding(candidate))
             .collect::<Result<Vec<_>, _>>()?;
+        let inference_ms = inference_started.elapsed().as_millis();
         let score = template
             .wake_embeddings
             .iter()
@@ -1439,7 +1452,7 @@ mod platform {
             verdict,
         });
         log::info!(
-            "[speaker-verification] compared enrolled_templates={} candidate_windows={} speech_ms={} score={score:.6}",
+            "[speaker-verification] compared enrolled_templates={} candidate_windows={} speech_ms={} inference_ms={inference_ms} score={score:.6}",
             template.wake_embeddings.len(),
             candidate_embeddings.len(),
             candidate_windows[0].len() / 32
@@ -1485,9 +1498,11 @@ mod platform {
         let source_speech_ms = speech.len() / 32;
         let model_pcm = pad_session_speaker_pcm(speech);
         let runtime = ensure_runtime()?;
+        let inference_started = std::time::Instant::now();
         let embedding = runtime.embedding(&model_pcm)?;
+        let inference_ms = inference_started.elapsed().as_millis();
         log::info!(
-            "[speaker-verification] ephemeral session target prepared phrase={} wake_end_ms={} speech_ms={} model_ms={}",
+            "[speaker-verification] ephemeral session target prepared phrase={} wake_end_ms={} speech_ms={} model_input_ms={} inference_ms={inference_ms}",
             phrase,
             (wake_end_seconds * 1000.0).round() as u64,
             source_speech_ms,
@@ -1505,9 +1520,12 @@ mod platform {
     ) -> Result<SessionSpeakerObservation, String> {
         let runtime = ensure_runtime()?;
         let speech = session_speaker_speech_window(pcm)?;
-        let real_speech_ms = speech.len() / 32;
+        let speech_span_ms = speech.len() / 32;
+        let (real_speech_ms, peak_rms, reference_rms) = session_speaker_signal_metrics(speech)?;
         let model_pcm = pad_session_speaker_pcm(speech);
+        let inference_started = std::time::Instant::now();
         let candidate = runtime.embedding(&model_pcm)?;
+        let inference_ms = inference_started.elapsed().as_millis();
         let score = profile
             .embeddings
             .iter()
@@ -1520,7 +1538,7 @@ mod platform {
         // stabilized speaker.
         let classification = session_speaker_classification_for_evidence(score, real_speech_ms);
         log::info!(
-            "[speaker-verification] local session sample real_speech_ms={real_speech_ms} model_ms={} score={score:.6} classification={classification:?}",
+            "[speaker-verification] local session sample real_speech_ms={real_speech_ms} speech_span_ms={speech_span_ms} model_input_ms={} peak_rms={peak_rms:.1} reference_rms={reference_rms:.1} inference_ms={inference_ms} score={score:.6} classification={classification:?}",
             model_pcm.len() / 32
         );
         Ok(SessionSpeakerObservation {
@@ -1934,14 +1952,100 @@ mod platform {
             id: String,
             path: String,
             label: EvaluationLabel,
+            quality: EvaluationQuality,
+        }
+
+        #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+        #[serde(rename_all = "snake_case")]
+        enum EvaluationQuality {
+            Clean,
+            Noisy,
+            FarField,
+        }
+
+        impl EvaluationQuality {
+            const ALL: [Self; 3] = [Self::Clean, Self::Noisy, Self::FarField];
+
+            fn name(self) -> &'static str {
+                match self {
+                    Self::Clean => "clean",
+                    Self::Noisy => "noisy",
+                    Self::FarField => "far_field",
+                }
+            }
+        }
+
+        #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+        #[serde(rename_all = "snake_case")]
+        enum EvaluationDuration {
+            Short,
+            Medium,
+            Long,
+        }
+
+        impl EvaluationDuration {
+            const ALL: [Self; 3] = [Self::Short, Self::Medium, Self::Long];
+
+            fn from_active_speech_ms(active_speech_ms: usize) -> Self {
+                match active_speech_ms {
+                    ..1_500 => Self::Short,
+                    1_500..2_500 => Self::Medium,
+                    _ => Self::Long,
+                }
+            }
+
+            fn name(self) -> &'static str {
+                match self {
+                    Self::Short => "short_1000_1499_ms",
+                    Self::Medium => "medium_1500_2499_ms",
+                    Self::Long => "long_2500_plus_ms",
+                }
+            }
         }
 
         #[derive(Debug, Serialize)]
         struct EvaluationScore {
             id: String,
             label: EvaluationLabel,
+            quality: EvaluationQuality,
+            duration: EvaluationDuration,
+            active_speech_ms: usize,
+            speech_span_ms: usize,
+            peak_rms: f32,
+            reference_rms: f32,
             score: f32,
             inference_ms: u128,
+        }
+
+        #[derive(Debug, Clone, Copy)]
+        struct EvaluationMetrics {
+            threshold: f32,
+            owner_samples: usize,
+            non_owner_samples: usize,
+            owner_recall: f32,
+            non_owner_suppression: f32,
+            inference_p95_ms: u128,
+        }
+
+        impl EvaluationMetrics {
+            fn passes(self) -> bool {
+                self.owner_recall >= 0.95
+                    && self.non_owner_suppression >= 0.90
+                    && self.inference_p95_ms <= 300
+            }
+        }
+
+        #[derive(Debug, Serialize)]
+        struct EvaluationSliceReport {
+            slice: String,
+            applied_threshold: f32,
+            diagnostic_threshold: f32,
+            owner_samples: usize,
+            non_owner_samples: usize,
+            owner_recall: f32,
+            non_owner_suppression: f32,
+            inference_p95_ms: u128,
+            pass: bool,
         }
 
         #[derive(Debug, Serialize)]
@@ -1954,6 +2058,8 @@ mod platform {
             owner_recall: f32,
             non_owner_suppression: f32,
             inference_p95_ms: u128,
+            duration_slices: Vec<EvaluationSliceReport>,
+            quality_slices: Vec<EvaluationSliceReport>,
             pass: bool,
             scores: Vec<EvaluationScore>,
         }
@@ -2005,6 +2111,246 @@ mod platform {
                 .unwrap_or_else(|err| panic!("embed evaluation fixture {}: {err}", path.display()))
         }
 
+        fn evaluation_sample_score(
+            runtime: &SpeakerRuntime,
+            references: &[Vec<f32>],
+            sample: &EvaluationSample,
+            path: &Path,
+        ) -> EvaluationScore {
+            let pcm = evaluation_pcm(path);
+            let speech = session_speaker_speech_window(&pcm).unwrap_or_else(|err| {
+                panic!("quality-check evaluation fixture {}: {err}", path.display())
+            });
+            let (active_speech_ms, peak_rms, reference_rms) =
+                session_speaker_signal_metrics(speech).unwrap_or_else(|err| {
+                    panic!("measure evaluation fixture {}: {err}", path.display())
+                });
+            assert!(
+                active_speech_ms >= VERIFICATION_MIN_SPEECH_MS,
+                "evaluation fixture must contain at least {} ms real speech: {}",
+                VERIFICATION_MIN_SPEECH_MS,
+                path.display()
+            );
+            let model_pcm = pad_session_speaker_pcm(speech);
+            let started = std::time::Instant::now();
+            let embedding = runtime
+                .embedding(&model_pcm)
+                .unwrap_or_else(|err| panic!("embed evaluation fixture {}: {err}", path.display()));
+            let inference_ms = started.elapsed().as_millis();
+            let score = references
+                .iter()
+                .map(|reference| cosine(reference, &embedding).expect("matching dimensions"))
+                .max_by(f32::total_cmp)
+                .expect("enrollment references");
+            EvaluationScore {
+                id: sample.id.clone(),
+                label: sample.label,
+                quality: sample.quality,
+                duration: EvaluationDuration::from_active_speech_ms(active_speech_ms),
+                active_speech_ms,
+                speech_span_ms: speech.len() / 32,
+                peak_rms,
+                reference_rms,
+                score,
+                inference_ms,
+            }
+        }
+
+        fn evaluation_metrics(scores: &[&EvaluationScore], threshold: f32) -> EvaluationMetrics {
+            let owner_samples = scores
+                .iter()
+                .filter(|sample| sample.label == EvaluationLabel::Owner)
+                .count();
+            let non_owner_samples = scores
+                .iter()
+                .filter(|sample| sample.label == EvaluationLabel::NonOwner)
+                .count();
+            let accepted_owner = scores
+                .iter()
+                .filter(|sample| {
+                    sample.label == EvaluationLabel::Owner && sample.score >= threshold
+                })
+                .count();
+            let rejected_non_owner = scores
+                .iter()
+                .filter(|sample| {
+                    sample.label == EvaluationLabel::NonOwner && sample.score < threshold
+                })
+                .count();
+            let mut inference_ms = scores
+                .iter()
+                .map(|sample| sample.inference_ms)
+                .collect::<Vec<_>>();
+            inference_ms.sort_unstable();
+            let inference_p95_ms = if inference_ms.is_empty() {
+                0
+            } else {
+                let index = (inference_ms.len() * 95).div_ceil(100) - 1;
+                inference_ms[index]
+            };
+            EvaluationMetrics {
+                threshold,
+                owner_samples,
+                non_owner_samples,
+                owner_recall: if owner_samples == 0 {
+                    0.0
+                } else {
+                    accepted_owner as f32 / owner_samples as f32
+                },
+                non_owner_suppression: if non_owner_samples == 0 {
+                    0.0
+                } else {
+                    rejected_non_owner as f32 / non_owner_samples as f32
+                },
+                inference_p95_ms,
+            }
+        }
+
+        fn calibrated_evaluation_metrics(scores: &[&EvaluationScore]) -> EvaluationMetrics {
+            (0..=1_000)
+                .map(|step| evaluation_metrics(scores, step as f32 / 1_000.0))
+                .max_by(|left, right| {
+                    let left_pass = left.owner_recall >= 0.95 && left.non_owner_suppression >= 0.90;
+                    let right_pass =
+                        right.owner_recall >= 0.95 && right.non_owner_suppression >= 0.90;
+                    left_pass
+                        .cmp(&right_pass)
+                        .then_with(|| {
+                            (left.owner_recall + left.non_owner_suppression)
+                                .total_cmp(&(right.owner_recall + right.non_owner_suppression))
+                        })
+                        .then_with(|| left.owner_recall.total_cmp(&right.owner_recall))
+                        .then_with(|| right.threshold.total_cmp(&left.threshold))
+                })
+                .expect("threshold sweep")
+        }
+
+        fn evaluation_slice_report(
+            name: String,
+            scores: &[&EvaluationScore],
+            applied_threshold: f32,
+        ) -> EvaluationSliceReport {
+            let applied = evaluation_metrics(scores, applied_threshold);
+            let diagnostic = calibrated_evaluation_metrics(scores);
+            let pass =
+                applied.owner_samples >= 5 && applied.non_owner_samples >= 5 && applied.passes();
+            EvaluationSliceReport {
+                slice: name,
+                applied_threshold,
+                diagnostic_threshold: diagnostic.threshold,
+                owner_samples: applied.owner_samples,
+                non_owner_samples: applied.non_owner_samples,
+                owner_recall: applied.owner_recall,
+                non_owner_suppression: applied.non_owner_suppression,
+                inference_p95_ms: applied.inference_p95_ms,
+                pass,
+            }
+        }
+
+        fn synthetic_evaluation_score(
+            id: &str,
+            label: EvaluationLabel,
+            score: f32,
+            inference_ms: u128,
+        ) -> EvaluationScore {
+            EvaluationScore {
+                id: id.to_string(),
+                label,
+                quality: EvaluationQuality::Clean,
+                duration: EvaluationDuration::Medium,
+                active_speech_ms: 2_000,
+                speech_span_ms: 2_000,
+                peak_rms: 900.0,
+                reference_rms: 600.0,
+                score,
+                inference_ms,
+            }
+        }
+
+        #[test]
+        fn evaluation_duration_buckets_keep_short_and_tail_risk_visible() {
+            assert_eq!(
+                EvaluationDuration::from_active_speech_ms(1_000),
+                EvaluationDuration::Short
+            );
+            assert_eq!(
+                EvaluationDuration::from_active_speech_ms(1_499),
+                EvaluationDuration::Short
+            );
+            assert_eq!(
+                EvaluationDuration::from_active_speech_ms(1_500),
+                EvaluationDuration::Medium
+            );
+            assert_eq!(
+                EvaluationDuration::from_active_speech_ms(2_499),
+                EvaluationDuration::Medium
+            );
+            assert_eq!(
+                EvaluationDuration::from_active_speech_ms(2_500),
+                EvaluationDuration::Long
+            );
+        }
+
+        #[test]
+        fn session_speaker_exclusion_uses_active_speech_not_pause_spanning_duration() {
+            let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1_000;
+            let mut samples = vec![900i16; frame_samples * 3];
+            samples.extend(vec![0i16; frame_samples * 6]);
+            samples.extend(vec![-900i16; frame_samples * 3]);
+            let pcm = samples
+                .into_iter()
+                .flat_map(i16::to_le_bytes)
+                .collect::<Vec<_>>();
+            let speech = session_speaker_speech_window(&pcm).expect("speech span");
+            assert_eq!(speech.len() / 32, 1_200);
+            let (real_speech_ms, _, _) =
+                session_speaker_signal_metrics(speech).expect("active speech metrics");
+            assert_eq!(real_speech_ms, 600);
+            assert!(matches!(
+                session_speaker_classification_for_evidence(0.20, real_speech_ms),
+                SessionSpeakerClassification::Uncertain { .. }
+            ));
+        }
+
+        #[test]
+        fn evaluation_calibration_prefers_a_threshold_that_meets_both_hard_gates() {
+            let mut scores = Vec::new();
+            for index in 0..20 {
+                scores.push(synthetic_evaluation_score(
+                    &format!("owner-{index}"),
+                    EvaluationLabel::Owner,
+                    if index == 0 { 0.48 } else { 0.70 },
+                    (index + 1) as u128,
+                ));
+                scores.push(synthetic_evaluation_score(
+                    &format!("non-owner-{index}"),
+                    EvaluationLabel::NonOwner,
+                    if index < 2 { 0.52 } else { 0.30 },
+                    (index + 1) as u128,
+                ));
+            }
+            let refs = scores.iter().collect::<Vec<_>>();
+            let metrics = calibrated_evaluation_metrics(&refs);
+            assert!(metrics.threshold > 0.52 && metrics.threshold <= 0.70);
+            assert_eq!(metrics.owner_recall, 0.95);
+            assert_eq!(metrics.non_owner_suppression, 1.0);
+            assert_eq!(metrics.inference_p95_ms, 19);
+            assert!(metrics.passes());
+        }
+
+        #[test]
+        fn evaluation_slice_requires_five_samples_per_label() {
+            let scores = vec![
+                synthetic_evaluation_score("owner", EvaluationLabel::Owner, 0.8, 10),
+                synthetic_evaluation_score("non-owner", EvaluationLabel::NonOwner, 0.2, 10),
+            ];
+            let refs = scores.iter().collect::<Vec<_>>();
+            let report = evaluation_slice_report("quality:clean".to_string(), &refs, 0.5);
+            assert_eq!(report.owner_recall, 1.0);
+            assert_eq!(report.non_owner_suppression, 1.0);
+            assert!(!report.pass);
+        }
+
         #[test]
         #[ignore = "requires a consented, owner-labeled Listener speaker corpus"]
         fn runtime_evaluates_listener_labeled_speaker_corpus() {
@@ -2053,73 +2399,64 @@ mod platform {
                         evaluation_embedding(&runtime, &resolve_evaluation_path(base, path))
                     })
                     .collect::<Vec<_>>();
-                let mut scores = Vec::with_capacity(manifest.samples.len());
-                for sample in &manifest.samples {
-                    let path = resolve_evaluation_path(base, &sample.path);
-                    let started = std::time::Instant::now();
-                    let embedding = evaluation_embedding(&runtime, &path);
-                    let inference_ms = started.elapsed().as_millis();
-                    let score = references
-                        .iter()
-                        .map(|reference| {
-                            cosine(reference, &embedding).expect("matching dimensions")
-                        })
-                        .max_by(f32::total_cmp)
-                        .expect("enrollment references");
-                    scores.push(EvaluationScore {
-                        id: sample.id.clone(),
-                        label: sample.label,
-                        score,
-                        inference_ms,
-                    });
-                }
-
-                let mut best = None;
-                for step in 0..=1_000 {
-                    let threshold = step as f32 / 1_000.0;
-                    let accepted_owner = scores
-                        .iter()
-                        .filter(|sample| {
-                            sample.label == EvaluationLabel::Owner && sample.score >= threshold
-                        })
-                        .count();
-                    let rejected_non_owner = scores
-                        .iter()
-                        .filter(|sample| {
-                            sample.label == EvaluationLabel::NonOwner && sample.score < threshold
-                        })
-                        .count();
-                    let recall = accepted_owner as f32 / owner_samples as f32;
-                    let suppression = rejected_non_owner as f32 / non_owner_samples as f32;
-                    let quality = recall + suppression;
-                    if best
-                        .as_ref()
-                        .is_none_or(|(_, _, _, best_quality)| quality > *best_quality)
-                    {
-                        best = Some((threshold, recall, suppression, quality));
-                    }
-                }
-                let (threshold, owner_recall, non_owner_suppression, _) =
-                    best.expect("threshold sweep");
-                let mut inference_ms = scores
+                let scores = manifest
+                    .samples
                     .iter()
-                    .map(|sample| sample.inference_ms)
+                    .map(|sample| {
+                        evaluation_sample_score(
+                            &runtime,
+                            &references,
+                            sample,
+                            &resolve_evaluation_path(base, &sample.path),
+                        )
+                    })
                     .collect::<Vec<_>>();
-                inference_ms.sort_unstable();
-                let p95_index = (inference_ms.len() * 95 / 100).min(inference_ms.len() - 1);
-                let inference_p95_ms = inference_ms[p95_index];
-                let pass = owner_recall >= 0.95
-                    && non_owner_suppression >= 0.90
-                    && inference_p95_ms <= 300;
+                let all_scores = scores.iter().collect::<Vec<_>>();
+                let overall = calibrated_evaluation_metrics(&all_scores);
+                let duration_slices = EvaluationDuration::ALL
+                    .into_iter()
+                    .map(|duration| {
+                        let slice = scores
+                            .iter()
+                            .filter(|sample| sample.duration == duration)
+                            .collect::<Vec<_>>();
+                        evaluation_slice_report(
+                            format!("duration:{}", duration.name()),
+                            &slice,
+                            overall.threshold,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let quality_slices = EvaluationQuality::ALL
+                    .into_iter()
+                    .map(|quality| {
+                        let slice = scores
+                            .iter()
+                            .filter(|sample| sample.quality == quality)
+                            .collect::<Vec<_>>();
+                        evaluation_slice_report(
+                            format!("quality:{}", quality.name()),
+                            &slice,
+                            overall.threshold,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let pass = overall.owner_samples == owner_samples
+                    && overall.non_owner_samples == non_owner_samples
+                    && overall.passes()
+                    && duration_slices.iter().all(|slice| slice.pass)
+                    && quality_slices.iter().all(|slice| slice.pass);
                 reports.push(ModelEvaluationReport {
                     model: model.name.clone(),
                     model_sha256: sha256(&model_path).expect("hash evaluation model"),
-                    threshold,
-                    owner_samples,
-                    non_owner_samples,
-                    owner_recall,
-                    non_owner_suppression,
-                    inference_p95_ms,
+                    threshold: overall.threshold,
+                    owner_samples: overall.owner_samples,
+                    non_owner_samples: overall.non_owner_samples,
+                    owner_recall: overall.owner_recall,
+                    non_owner_suppression: overall.non_owner_suppression,
+                    inference_p95_ms: overall.inference_p95_ms,
+                    duration_slices,
+                    quality_slices,
                     pass,
                     scores,
                 });
