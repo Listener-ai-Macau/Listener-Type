@@ -1350,6 +1350,18 @@ mod platform {
         }
     }
 
+    pub fn begin_enrollment_processing() {
+        let mut state = STATE.lock();
+        if matches!(
+            state.capture,
+            Some(CaptureState::Armed | CaptureState::Capturing)
+        ) {
+            state.capture = Some(CaptureState::Processing);
+            state.progress = 70;
+            state.enrollment_capture_started = None;
+        }
+    }
+
     pub fn finish_enrollment(pcm: &[u8], wake_phrase: &str) -> Result<VoiceprintStatus, String> {
         let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
         {
@@ -1364,6 +1376,9 @@ mod platform {
         let result: Result<VoiceprintStatus, String> = (|| {
             let runtime = ensure_runtime()?;
             let windows = enrollment_template_windows(pcm)?;
+            // Reject silence/short speech before invoking KWS, then validate the
+            // phrase before persisting either template bank.
+            crate::wake_phrase::calibrate(pcm, &phrase)?;
             let wake_embeddings = windows
                 .wake
                 .iter()
@@ -2514,9 +2529,10 @@ mod platform {
 pub(crate) use platform::prepare_runtime_assets;
 #[cfg(target_os = "windows")]
 pub use platform::{
-    delete_template, fail_enrollment, finish_enrollment, invalidate_for_phrase_change,
-    is_enrolled_for_phrase, observe_session_speaker, prepare_for_phrase, session_profile_from_wake,
-    start_enrollment, status_for_phrase, take_enrollment_arm, verify,
+    begin_enrollment_processing, delete_template, fail_enrollment, finish_enrollment,
+    invalidate_for_phrase_change, is_enrolled_for_phrase, observe_session_speaker,
+    prepare_for_phrase, session_profile_from_wake, start_enrollment, status_for_phrase,
+    take_enrollment_arm, verify,
 };
 
 #[cfg(not(target_os = "windows"))]
@@ -2549,6 +2565,9 @@ pub fn is_enrolled_for_phrase(_wake_phrase: &str) -> bool {
 pub fn take_enrollment_arm() -> bool {
     false
 }
+
+#[cfg(not(target_os = "windows"))]
+pub fn begin_enrollment_processing() {}
 
 #[cfg(not(target_os = "windows"))]
 pub fn start_enrollment(_wake_phrase: &str) -> Result<VoiceprintStatus, String> {

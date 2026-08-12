@@ -1124,26 +1124,31 @@ mod platform {
         Ok(None)
     }
 
-    fn select_calibration<F>(mut detects: F) -> Result<Option<(f32, f32)>, String>
+    fn enrollment_calibration_config() -> (f32, f32) {
+        (BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD)
+    }
+
+    fn validate_enrollment_phrase<F>(mut detects: F) -> Result<(f32, f32), String>
     where
         F: FnMut(f32, f32) -> Result<bool, String>,
     {
-        for &(score, threshold) in CALIBRATION_CANDIDATES {
-            if detects(score, threshold)? {
-                return Ok(Some((score, threshold)));
-            }
-        }
-        Ok(None)
+        let config = enrollment_calibration_config();
+        detects(config.0, config.1)?
+            .then_some(config)
+            .ok_or_else(|| {
+                "没有在声纹样本中识别到唤醒词，请用自然语速清晰重复三遍".to_string()
+            })
     }
 
     pub fn calibrate(pcm: &[u8], phrase: &str) -> Result<(), String> {
-        // Prove the enrollment audio contains the configured phrase under *some*
-        // candidate (including strict). Runtime still pins product-sensitive bootstrap
-        // so everyday wake is not locked to the strictest enrollment match.
-        let detected_with = select_calibration(|score, threshold| {
+        // Enrollment used to rebuild and run ten detector configurations from
+        // strict to sensitive. A rejected sample could therefore leave the UI
+        // looking like it was still recording for 20-30 seconds. Runtime always
+        // pins this product bootstrap anyway, so validate once with the exact
+        // configuration the owner will use after enrollment.
+        let detected_with = validate_enrollment_phrase(|score, threshold| {
             detect_with_config(pcm, phrase, score, threshold).map(|result| result.is_some())
-        })?
-        .ok_or_else(|| "没有在声纹样本中识别到唤醒词，请用自然语速清晰重复三遍".to_string())?;
+        })?;
         save_calibration(phrase, BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD)?;
         log::info!(
             "[wake-phrase] enrollment phrase verified (matched_at score={:.1} threshold={:.2}); runtime calibration pinned to bootstrap phrase={} score={:.1} threshold={:.2}",
@@ -1200,12 +1205,11 @@ mod platform {
         }
 
         #[test]
-        fn calibration_selects_the_strictest_matching_candidate() {
-            let selected =
-                select_calibration(|score, threshold| Ok(score >= 2.0 && threshold <= 0.15))
-                    .expect("calibration");
-            assert_eq!(selected, Some((2.0, 0.15)));
-            // Product bootstrap (4.0/0.04) sits on the sensitive end of the ladder.
+        fn enrollment_calibration_uses_the_live_product_bootstrap() {
+            assert_eq!(
+                enrollment_calibration_config(),
+                (BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD)
+            );
             assert!(
                 CALIBRATION_CANDIDATES.iter().any(|&(score, threshold)| {
                     (score - BOOTSTRAP_KEYWORD_SCORE).abs() < f32::EPSILON
@@ -1213,6 +1217,19 @@ mod platform {
                 }),
                 "bootstrap keyword values must appear in calibration candidates"
             );
+        }
+
+        #[test]
+        fn enrollment_calibration_runs_one_bounded_detector_pass() {
+            let mut calls = 0usize;
+            let selected = validate_enrollment_phrase(|score, threshold| {
+                calls += 1;
+                Ok(score == BOOTSTRAP_KEYWORD_SCORE
+                    && threshold == BOOTSTRAP_KEYWORD_THRESHOLD)
+            })
+            .expect("bootstrap enrollment pass");
+            assert_eq!(calls, 1);
+            assert_eq!(selected, enrollment_calibration_config());
         }
 
         #[test]
@@ -1232,12 +1249,6 @@ mod platform {
             ));
             assert!(!RECALL_CASCADE.is_empty());
             assert!(RECALL_CASCADE.len() >= 3);
-        }
-
-        #[test]
-        fn calibration_rejects_a_sample_without_the_phrase() {
-            let selected = select_calibration(|_, _| Ok(false)).expect("calibration");
-            assert_eq!(selected, None);
         }
 
         #[test]

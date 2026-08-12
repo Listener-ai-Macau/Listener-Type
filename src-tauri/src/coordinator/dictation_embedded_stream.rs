@@ -713,8 +713,8 @@ impl EmbeddedStreamingDictation {
         if candidate.kind == BufferedSpeakerCandidateKind::Enrollment {
             let pcm = candidate.pcm;
             let phrase = inner.prefs.get().voice_wake_phrase;
+            crate::speaker_verification::begin_enrollment_processing();
             let result = tauri::async_runtime::spawn_blocking(move || {
-                crate::wake_phrase::calibrate(&pcm, &phrase)?;
                 crate::speaker_verification::finish_enrollment(&pcm, &phrase)
             })
             .await
