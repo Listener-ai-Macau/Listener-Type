@@ -1,3 +1,50 @@
+// The production Volcengine client only needs the session classification type
+// from the desktop speaker-verification module. Keep the probe independent of
+// that module's device/runtime dependencies while preserving the same contract.
+#[allow(dead_code)]
+mod speaker_verification {
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub enum SessionSpeakerClassification {
+        Target { score: f32 },
+        NonTarget { score: f32 },
+        Uncertain { score: f32 },
+    }
+}
+
+// The shared production client contains an ignored live cadence test which
+// reads these three values through the desktop credential facade. Provide the
+// same narrow facade here so `cargo test` for the standalone probe remains
+// buildable after the client gained speaker-aware endpointing.
+#[cfg(test)]
+mod persistence {
+    #[derive(Clone, Copy)]
+    pub enum CredentialAccount {
+        VolcengineAppKey,
+        VolcengineAccessKey,
+        VolcengineResourceId,
+    }
+
+    pub struct CredentialsVault;
+
+    impl CredentialsVault {
+        pub fn get(account: CredentialAccount) -> Result<Option<String>, String> {
+            let root = super::load_credentials().map_err(|error| error.to_string())?;
+            let entry = root
+                .providers
+                .asr
+                .get("volcengine")
+                .or_else(|| root.providers.asr.get(&root.active.asr));
+            Ok(entry.and_then(|entry| match account {
+                CredentialAccount::VolcengineAppKey => {
+                    super::pick(&entry.app_key).or_else(|| super::pick(&entry.api_key))
+                }
+                CredentialAccount::VolcengineAccessKey => super::pick(&entry.access_key),
+                CredentialAccount::VolcengineResourceId => super::pick(&entry.resource_id),
+            }))
+        }
+    }
+}
+
 mod asr;
 use denzic_audio_v1_core as embedded_audio;
 
