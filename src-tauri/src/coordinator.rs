@@ -3376,6 +3376,12 @@ fn read_bailian_credentials() -> BailianCredentials {
 }
 
 fn read_volc_credentials() -> VolcengineCredentials {
+    #[cfg(target_os = "windows")]
+    if let Err(err) = CredentialsVault::refresh_from_system() {
+        // Keep the last known-good cache available during a transient Windows
+        // Credential Manager failure, but make the stale-read risk observable.
+        log::warn!("[asr] refresh Volcengine credentials from system vault failed: {err}");
+    }
     let app_id = CredentialsVault::get(CredentialAccount::VolcengineAppKey)
         .ok()
         .flatten()

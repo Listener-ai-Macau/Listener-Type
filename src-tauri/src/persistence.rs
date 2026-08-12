@@ -2511,6 +2511,24 @@ impl CredentialsVault {
         Ok(lookup_account(&load_credentials(), account))
     }
 
+    /// Reload the chunked credential document from the OS vault.
+    ///
+    /// The normal process cache avoids repeated macOS Keychain ACL prompts. On
+    /// Windows, however, the settings surface or a validation helper can update
+    /// Credential Manager while the long-running tray process still holds the
+    /// previous Resource ID. Call this once at a provider-session boundary so
+    /// the next recording cannot keep consuming a stale grant until restart.
+    #[cfg(target_os = "windows")]
+    pub fn refresh_from_system() -> Result<()> {
+        let _guard = credentials_lock().lock();
+        let root = match load_keyring_credentials()? {
+            Some(root) => root,
+            None => migrate_legacy_sources_for_update()?,
+        };
+        store_credentials_cache(&root);
+        Ok(())
+    }
+
     pub fn set(account: CredentialAccount, value: &str) -> Result<()> {
         let _guard = credentials_lock().lock();
         let mut root = load_credentials_for_update()?;

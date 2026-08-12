@@ -3906,6 +3906,25 @@ fn volcengine_preview_and_final_share_the_authoritative_session() {
 }
 
 #[test]
+fn windows_volcengine_session_refreshes_external_credential_updates_before_reading() {
+    let source = include_str!("../coordinator.rs");
+    let reader = source
+        .split("fn read_volc_credentials()")
+        .nth(1)
+        .expect("Volcengine credential reader must exist");
+    let refresh = reader
+        .find("CredentialsVault::refresh_from_system()")
+        .expect("Windows sessions must refresh the OS credential document");
+    let first_read = reader
+        .find("CredentialsVault::get(CredentialAccount::VolcengineAppKey)")
+        .expect("Volcengine App ID read must exist");
+    assert!(
+        refresh < first_read,
+        "the external vault refresh must happen before any cached Volcengine field is read"
+    );
+}
+
+#[test]
 fn every_automatic_wake_path_seeds_session_speaker_tracking() {
     let body = include_str!("dictation_embedded_stream.rs");
     assert_eq!(
