@@ -354,7 +354,6 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         start_recorder_for_starting(inner, current_session_id, &active_asr, consumer).await?;
 
         if let Err(e) = open_volcengine_asr(&asr).await {
-            log::error!("[coord] open ASR session failed: {e}");
             match startup_race_status_for_starting(inner, current_session_id) {
                 StartupRaceStatus::StaleContinuation => {
                     log::info!(
@@ -374,12 +373,21 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                 }
                 StartupRaceStatus::ActiveStarting => {}
             }
+            if e.permits_full_audio_replay() {
+                let recovery_target: Arc<dyn crate::asr::AudioConsumer> = asr.clone();
+                let retained_bytes = bridge.attach(recovery_target);
+                asr.mark_audio_delivery_failed(e.clone());
+                log::warn!(
+                    "[coord] ASR open failed; retained {retained_bytes} deferred audio bytes and continuing capture for one finalization replay: {e}"
+                );
+                finish_starting_session(inner, current_session_id).await;
+                return Ok(());
+            }
+
+            asr.mark_audio_delivery_failed(e.clone());
+            log::error!("[coord] open ASR session failed without a replayable transport error: {e}");
             discard_startup_resources_for_session(inner, current_session_id);
-            publish_dictation_pipeline_error(
-                inner,
-                current_session_id,
-                format!("ASR 连接失败: {e}"),
-            );
+            publish_dictation_pipeline_error(inner, current_session_id, format!("ASR 连接失败: {e}"));
             restore_prepared_windows_ime_session(inner, current_session_id);
             schedule_actionable_error_capsule_idle(inner, current_session_id);
             return Err(e.to_string());

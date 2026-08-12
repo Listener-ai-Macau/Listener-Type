@@ -976,7 +976,7 @@ async fn open_volcengine_asr(
     asr: &Arc<VolcengineStreamingASR>,
 ) -> Result<(), crate::asr::volcengine::VolcengineASRError> {
     let started = Instant::now();
-    asr.open_session().await?;
+    asr.open_session_for_deferred_audio().await?;
     log::info!(
         "[asr] authoritative optimized-bidirectional ASR ready; preview and final share one provider session elapsed_ms={}",
         started.elapsed().as_millis()
@@ -1686,7 +1686,6 @@ async fn build_embedded_audio_asr_consumer(
                 );
             }
             Err(err) => {
-                final_asr_for_open.cancel();
                 let still_current = {
                     let state = inner_for_open.state.lock();
                     state.session_id == session_id
@@ -1694,12 +1693,15 @@ async fn build_embedded_audio_asr_consumer(
                         && state.phase != SessionPhase::Idle
                 };
                 if still_current {
-                    log::error!("[coord] embedded Volcengine ASR open failed: {err}");
-                    finish_dictation_pipeline_error(
-                        &inner_for_open,
-                        session_id,
-                        format!("ASR 连接失败: {err}"),
+                    let target: Arc<dyn crate::asr::AudioConsumer> =
+                        final_asr_for_open.clone();
+                    let retained_bytes = bridge.attach(target);
+                    final_asr_for_open.mark_audio_delivery_failed(err.clone());
+                    log::warn!(
+                        "[coord] embedded Volcengine ASR open failed; retained {retained_bytes} deferred audio bytes for one finalization replay: {err}"
                     );
+                } else {
+                    final_asr_for_open.cancel();
                 }
             }
         }

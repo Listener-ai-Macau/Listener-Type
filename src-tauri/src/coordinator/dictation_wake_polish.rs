@@ -463,39 +463,30 @@ fn next_wake_diagnostic_capture_count(is_default_directory: bool, current: usize
     }
 }
 
+fn explicit_wake_diagnostic_directory(value: Option<String>) -> Option<std::path::PathBuf> {
+    value
+        .filter(|directory| !directory.trim().is_empty())
+        .map(std::path::PathBuf::from)
+}
+
 fn save_bounded_wake_diagnostic(embedded_session_id: u32, outcome: &'static str, pcm: &[u8]) {
-    // Prefer explicit env; otherwise always keep a small rolling ring under LocalAppData
-    // so owner wake misses can be inspected without re-running with special flags.
-    let explicit_directory = std::env::var(WAKE_DIAGNOSTIC_DIR_ENV).ok();
-    let is_default_directory = explicit_directory.is_none();
-    let directory = explicit_directory.unwrap_or_else(|| {
-        let base = std::env::var("LOCALAPPDATA")
-            .or_else(|_| std::env::var("APPDATA"))
-            .unwrap_or_else(|_| ".".to_string());
-        std::path::Path::new(&base)
-            .join("Listener Type")
-            .join("Logs")
-            .join("wake-diag-live")
-            .to_string_lossy()
-            .into_owned()
-    });
-    if directory.trim().is_empty() {
+    // Wake candidates contain ambient room speech. Production must never write
+    // them implicitly: capture is available only in an explicitly selected
+    // operator directory, and that directory still uses the bounded retention
+    // worker below.
+    let Some(directory) =
+        explicit_wake_diagnostic_directory(std::env::var(WAKE_DIAGNOSTIC_DIR_ENV).ok())
+    else {
         return;
-    }
-    // The default directory is a rolling store, so its per-process sequence must
-    // keep advancing after 128 captures. The retention worker owns the 128-file /
-    // 32 MiB bounds. Applying the old explicit-session cap here permanently
-    // stopped live evidence after a noisy soak filled the ring, leaving later
-    // real wake misses impossible to diagnose until Type restarted.
+    };
     let Ok(index) = WAKE_DIAGNOSTIC_CAPTURE_COUNT.fetch_update(
         Ordering::SeqCst,
         Ordering::SeqCst,
-        |current| next_wake_diagnostic_capture_count(is_default_directory, current),
+        |current| next_wake_diagnostic_capture_count(false, current),
     )
     else {
         return;
     };
-    let directory = std::path::PathBuf::from(directory);
     if let Err(err) = fs::create_dir_all(&directory) {
         log::warn!("[wake-phrase] diagnostic directory unavailable: {err}");
         return;
@@ -534,9 +525,7 @@ fn save_bounded_wake_diagnostic(embedded_session_id: u32, outcome: &'static str,
                 outcome,
                 pcm.len() / 32
             );
-            if is_default_directory {
-                schedule_default_wake_diagnostic_cleanup(directory);
-            }
+            schedule_default_wake_diagnostic_cleanup(directory);
         }
         Err(err) => log::warn!("[wake-phrase] diagnostic WAV write failed: {err}"),
     }
@@ -795,6 +784,12 @@ const KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 250;
 /// Explicit local Absent count before midstream hard-reject (blocks short
 /// prefix false wakes like "开始啥的"; one retry for noisy short clips).
 const KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2;
+/// Ordinary room speech can keep firmware VA sessions open for ~4.5 s. Three
+/// independent local-ASR Absents already cover the 0.8/1.4/1.8 s wake horizon;
+/// continuing speculative Paraformer calls on every rolling window only burns
+/// CPU and can starve WebView/audio work. Keep streaming KWS active: a later KWS
+/// hit still bypasses this cap and receives its full stage-2 confirmation.
+const LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT: u8 = 3;
 /// Do not serialize the BLE actor behind multi-second auxiliary recall after
 /// repeated local evidence already rejected an ambient candidate.
 const TERMINAL_OFFLINE_SKIP_ABSENT_COUNT: u8 = 2;
@@ -837,6 +832,11 @@ fn local_confirmation_snapshot_for_window(
     let window_pcm_bytes = total_pcm_bytes.saturating_sub(window_origin_bytes);
     next_local_confirmation_snapshot_bytes(attempts)
         .filter(|snapshot_bytes| window_pcm_bytes >= *snapshot_bytes)
+}
+
+#[cfg(target_os = "windows")]
+fn exploratory_local_confirmation_allowed(keyword_model_hit: bool, absent_count: u8) -> bool {
+    keyword_model_hit || absent_count < LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT
 }
 
 #[cfg(target_os = "windows")]

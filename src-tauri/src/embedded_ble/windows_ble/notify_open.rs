@@ -755,6 +755,61 @@ pub fn read_embedded_audio_status_for_device(
     ))
 }
 
+pub fn read_runtime_identity_for_device(
+    address: u64,
+    timeout: Duration,
+) -> Result<crate::embedded_ble::EmbeddedBleRuntimeIdentity, String> {
+    let _fresh_guard = BleFreshGattGuard::enter("runtime firmware identity")?;
+    let deadline = Instant::now() + timeout.max(Duration::from_millis(500));
+    let target = open_embedded_audio_status_target_for_device(address, deadline)?;
+    let readiness = read_embedded_audio_status_string_once(
+        &target.service,
+        OTA_READINESS_UUID,
+        deadline,
+        "runtime identity readiness",
+    );
+    let device = target
+        .device
+        .as_ref()
+        .ok_or_else(|| "runtime identity target did not retain its BLE device".to_string())?;
+    let hardware_revision = read_optional_string_characteristic(
+        device,
+        DIS_SERVICE_UUID,
+        DIS_HARDWARE_REVISION_UUID,
+    )
+    .or_else(|| readiness.as_deref().and_then(readiness_hardware_revision));
+    let firmware_version = read_optional_string_characteristic(
+        device,
+        DIS_SERVICE_UUID,
+        DIS_FIRMWARE_REVISION_UUID,
+    )
+    .or_else(|| readiness.as_deref().and_then(|value| readiness_field(value, "fw_version")));
+    // The custom audio-service readiness characteristic can be unavailable to
+    // a second Windows GATT session while the long-lived notify subscription
+    // owns that service. DIS remains readable in that state, so firmware also
+    // exposes the exact image build ID in Software Revision alongside the
+    // protocol version. Keep readiness as a compatibility fallback.
+    let build_id = read_optional_string_characteristic(
+        device,
+        DIS_SERVICE_UUID,
+        DIS_SOFTWARE_REVISION_UUID,
+    )
+    .as_deref()
+    .and_then(|value| readiness_field(value, "build_id"))
+    .or_else(|| {
+        readiness
+            .as_deref()
+            .and_then(|value| readiness_field(value, "build_id"))
+    });
+
+    Ok(crate::embedded_ble::EmbeddedBleRuntimeIdentity {
+        bluetooth_address: format!("{address:012X}"),
+        hardware_revision,
+        firmware_version,
+        build_id,
+    })
+}
+
 pub fn read_device_settings_revision(timeout: Duration) -> Result<u32, String> {
     let _fresh_guard = BleFreshGattGuard::enter("device settings revision")?;
     let deadline = Instant::now() + timeout.max(Duration::from_millis(250));

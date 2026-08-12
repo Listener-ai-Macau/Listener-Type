@@ -48,6 +48,34 @@ use crate::types::{
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+#[derive(Default)]
+struct DeferredBridgeTestConsumer {
+    pcm: Mutex<Vec<u8>>,
+}
+
+impl crate::asr::AudioConsumer for DeferredBridgeTestConsumer {
+    fn consume_pcm_chunk(&self, pcm: &[u8]) {
+        self.pcm.lock().expect("test pcm lock").extend_from_slice(pcm);
+    }
+}
+
+#[test]
+fn deferred_asr_bridge_flushes_prefix_once_and_forwards_tail_in_order() {
+    let bridge = super::DeferredAsrBridge::new();
+    crate::recorder::AudioConsumer::consume_pcm_chunk(&bridge, &[1, 2, 3]);
+    crate::recorder::AudioConsumer::consume_pcm_chunk(&bridge, &[4, 5]);
+
+    let target = Arc::new(DeferredBridgeTestConsumer::default());
+    let asr_target: Arc<dyn crate::asr::AudioConsumer> = target.clone();
+    assert_eq!(bridge.attach(asr_target), 5);
+    crate::recorder::AudioConsumer::consume_pcm_chunk(&bridge, &[6, 7]);
+
+    assert_eq!(
+        target.pcm.lock().expect("test pcm lock").as_slice(),
+        &[1, 2, 3, 4, 5, 6, 7]
+    );
+}
+
 #[test]
 fn local_confirmation_waits_for_pre_roll_plus_speech_observation() {
     assert_eq!(LOCAL_CONFIRMATION_START_MS, 800);
@@ -2416,6 +2444,15 @@ fn rolling_local_confirmation_restarts_the_800ms_ladder_per_window() {
 }
 
 #[test]
+fn ambient_speech_caps_speculative_local_asr_but_late_kws_still_confirms() {
+    assert!(super::exploratory_local_confirmation_allowed(false, 0));
+    assert!(super::exploratory_local_confirmation_allowed(false, 2));
+    assert!(!super::exploratory_local_confirmation_allowed(false, 3));
+    assert!(!super::exploratory_local_confirmation_allowed(false, u8::MAX));
+    assert!(super::exploratory_local_confirmation_allowed(true, u8::MAX));
+}
+
+#[test]
 fn rolling_local_confirmation_discards_only_stale_exploratory_tasks() {
     let old_origin = 1_000 * 32;
     let current_origin = 2_000 * 32;
@@ -4069,20 +4106,25 @@ fn unresolved_local_speech_hold_is_capped_six_seconds_after_attributed() {
 }
 
 #[test]
-fn default_wake_diagnostic_sequence_keeps_advancing_after_retention_limit() {
-    assert_eq!(
-        super::next_wake_diagnostic_capture_count(
-            true,
-            super::WAKE_DIAGNOSTIC_MAX_CANDIDATES
-        ),
-        Some(super::WAKE_DIAGNOSTIC_MAX_CANDIDATES + 1)
-    );
+fn explicit_wake_diagnostic_sequence_stops_at_retention_limit() {
     assert_eq!(
         super::next_wake_diagnostic_capture_count(
             false,
             super::WAKE_DIAGNOSTIC_MAX_CANDIDATES
         ),
         None,
-        "an explicit operator-managed capture session keeps its bounded session cap"
+        "an explicit operator-managed capture session must remain bounded"
+    );
+}
+
+#[test]
+fn production_default_resolves_zero_wake_diagnostic_targets_for_one_hundred_candidates() {
+    for _ in 0..100 {
+        assert!(super::explicit_wake_diagnostic_directory(None).is_none());
+    }
+    assert!(super::explicit_wake_diagnostic_directory(Some("   ".into())).is_none());
+    assert_eq!(
+        super::explicit_wake_diagnostic_directory(Some("D:\\listener-wake-diag".into())),
+        Some(std::path::PathBuf::from("D:\\listener-wake-diag"))
     );
 }

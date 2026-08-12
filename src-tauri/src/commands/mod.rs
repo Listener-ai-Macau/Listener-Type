@@ -347,6 +347,7 @@ pub fn record_ui_timeline_event(coord: CoordinatorState<'_>, payload: UiTimeline
             payload
                 .detail
                 .as_ref()
+                .map(crate::capsule_log::sanitize_diagnostic_value)
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "{}".into())
         ),

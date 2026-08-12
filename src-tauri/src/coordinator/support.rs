@@ -686,8 +686,13 @@ pub(super) fn emit_capsule_with_session(
             "backend.capsule",
             "emit_request",
             format!(
-                "seq={seq} session_id={session_id_for_log} state={state:?} elapsed_ms={elapsed_ms} level={level:.3} visible={visible} message={}",
-                payload.message.as_deref().unwrap_or("-")
+                "seq={seq} session_id={session_id_for_log} state={state:?} elapsed_ms={elapsed_ms} level={level:.3} visible={visible} has_message={} message_chars={}",
+                payload.message.is_some(),
+                payload
+                    .message
+                    .as_deref()
+                    .map(|value| value.chars().count())
+                    .unwrap_or(0)
             ),
         );
     }

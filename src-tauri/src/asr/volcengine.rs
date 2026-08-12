@@ -1581,18 +1581,7 @@ impl VolcengineStreamingASR {
     }
 
     pub async fn replay_retained_audio_once(&self) -> Result<RawTranscript, VolcengineASRError> {
-        if self.recovery_replay_started.swap(true, Ordering::SeqCst) {
-            return Err(VolcengineASRError::ConnectionFailed(
-                "full-audio recovery replay already attempted".into(),
-            ));
-        }
-        let pcm = self.retained_pcm.lock().clone();
-        if pcm.is_empty() {
-            return Err(VolcengineASRError::ConnectionFailed(
-                "full-audio recovery replay has no retained PCM".into(),
-            ));
-        }
-        let speaker_snapshot = self.recovery_speaker_snapshot();
+        let (pcm, speaker_snapshot) = self.claim_retained_audio_for_replay()?;
         let replay = Arc::new(Self::new_with_session_options(
             self.credentials.clone(),
             self.hotwords.clone(),
@@ -1613,6 +1602,24 @@ impl VolcengineStreamingASR {
             log::info!("[asr] full-audio recovery replay completed successfully");
         }
         result
+    }
+
+    fn claim_retained_audio_for_replay(
+        &self,
+    ) -> Result<(Vec<u8>, RecoverySpeakerSnapshot), VolcengineASRError> {
+        if self.recovery_replay_started.swap(true, Ordering::SeqCst) {
+            return Err(VolcengineASRError::ConnectionFailed(
+                "full-audio recovery replay already attempted".into(),
+            ));
+        }
+        let pcm = self.retained_pcm.lock().clone();
+        if pcm.is_empty() {
+            return Err(VolcengineASRError::ConnectionFailed(
+                "full-audio recovery replay has no retained PCM".into(),
+            ));
+        }
+        let speaker_snapshot = self.recovery_speaker_snapshot();
+        Ok((pcm, speaker_snapshot))
     }
 
     /// F2 云端空转判定：终稿为空时，本地 VAD 证据显示用户整段都在说话
@@ -1660,7 +1667,7 @@ impl VolcengineStreamingASR {
         self.set_audio_delivery_readiness(AudioDeliveryReadiness::Ready);
     }
 
-    fn mark_audio_delivery_failed(&self, error: VolcengineASRError) {
+    pub(crate) fn mark_audio_delivery_failed(&self, error: VolcengineASRError) {
         self.set_audio_delivery_readiness(AudioDeliveryReadiness::Failed(error));
     }
 
@@ -2014,12 +2021,23 @@ impl VolcengineStreamingASR {
     }
 
     pub async fn open_session(self: &Arc<Self>) -> Result<(), VolcengineASRError> {
-        self.mark_audio_delivery_opening();
-        let result = self.open_session_inner().await;
+        let result = self.open_session_for_deferred_audio().await;
         if let Err(error) = &result {
             self.mark_audio_delivery_failed(error.clone());
         }
         result
+    }
+
+    /// Opens the provider transport while leaving delivery readiness in
+    /// `Opening` on failure. Coordinator paths that buffer capture in a
+    /// `DeferredAsrBridge` use this variant so they can first move every
+    /// buffered byte into `retained_pcm`, then publish the startup failure to
+    /// a concurrent finalizer. This ordering prevents an empty recovery replay.
+    pub(crate) async fn open_session_for_deferred_audio(
+        self: &Arc<Self>,
+    ) -> Result<(), VolcengineASRError> {
+        self.mark_audio_delivery_opening();
+        self.open_session_inner().await
     }
 
     async fn open_session_inner(self: &Arc<Self>) -> Result<(), VolcengineASRError> {
@@ -2756,7 +2774,7 @@ impl VolcengineStreamingASR {
                     payload
                 );
             } else {
-                log::info!(
+                log::debug!(
                     "[asr] {} server JSON: {}",
                     self.session_options.endpoint.label(),
                     payload
@@ -5742,6 +5760,124 @@ mod tests {
             .await
             .expect_err("a failed opener must not become websocket-not-open");
         assert!(error.to_string().contains("TLS handshake rejected"));
+    }
+
+    #[tokio::test]
+    async fn deferred_open_failure_waits_until_recovery_pcm_is_sealed() {
+        let asr = Arc::new(VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: String::new(),
+                access_token: String::new(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        ));
+
+        let open_error = asr
+            .open_session_for_deferred_audio()
+            .await
+            .expect_err("missing credentials deterministically fail startup");
+        assert!(matches!(
+            asr.state.lock().audio_delivery_readiness,
+            AudioDeliveryReadiness::Opening
+        ));
+
+        let buffered_prefix = vec![7u8; 3_200];
+        asr.consume_pcm_chunk(&buffered_prefix);
+        assert_eq!(asr.retained_pcm.lock().as_slice(), buffered_prefix.as_slice());
+
+        asr.mark_audio_delivery_failed(open_error);
+        let readiness_error = asr
+            .await_audio_delivery_ready(Duration::from_millis(10))
+            .await
+            .expect_err("failure is published only after recovery PCM is retained");
+        assert!(matches!(
+            readiness_error,
+            VolcengineASRError::CredentialsMissing
+        ));
+    }
+
+    #[tokio::test]
+    async fn twenty_deferred_open_failures_retain_every_pcm_byte_before_publication() {
+        for attempt in 0u8..20 {
+            let asr = Arc::new(VolcengineStreamingASR::new(
+                VolcengineCredentials {
+                    app_id: String::new(),
+                    access_token: String::new(),
+                    resource_id: VolcengineCredentials::default_resource_id().into(),
+                },
+                Vec::new(),
+            ));
+            let error = asr
+                .open_session_for_deferred_audio()
+                .await
+                .expect_err("empty credentials inject a deterministic open failure");
+            let pcm = vec![attempt.saturating_add(1); 3_200 + usize::from(attempt) * 2];
+            asr.consume_pcm_chunk(&pcm);
+            assert_eq!(asr.retained_pcm.lock().as_slice(), pcm.as_slice());
+            assert!(matches!(
+                asr.state.lock().audio_delivery_readiness,
+                AudioDeliveryReadiness::Opening
+            ));
+            asr.mark_audio_delivery_failed(error);
+            assert!(asr
+                .await_audio_delivery_ready(Duration::from_millis(10))
+                .await
+                .is_err());
+            assert_eq!(asr.retained_pcm.lock().as_slice(), pcm.as_slice());
+        }
+    }
+
+    #[test]
+    fn twenty_send_failures_keep_prefix_and_tail_losslessly() {
+        for attempt in 0u8..20 {
+            let asr = VolcengineStreamingASR::new(
+                VolcengineCredentials {
+                    app_id: "app".into(),
+                    access_token: "token".into(),
+                    resource_id: VolcengineCredentials::default_resource_id().into(),
+                },
+                Vec::new(),
+            );
+            let prefix = vec![attempt.saturating_add(1); 3_200];
+            let tail = vec![attempt.saturating_add(21); 640];
+            asr.consume_pcm_chunk(&prefix);
+            asr.mark_audio_delivery_failed(VolcengineASRError::ConnectionFailed(
+                format!("injected send failure {attempt}"),
+            ));
+            asr.consume_pcm_chunk(&tail);
+            let retained = asr.retained_pcm.lock();
+            assert_eq!(retained.len(), prefix.len() + tail.len());
+            assert_eq!(&retained[..prefix.len()], prefix.as_slice());
+            assert_eq!(&retained[prefix.len()..], tail.as_slice());
+            assert!(!asr.recovery_replay_started.load(Ordering::SeqCst));
+        }
+    }
+
+    #[test]
+    fn twenty_final_failures_allow_exactly_one_complete_replay_claim() {
+        for attempt in 0u8..20 {
+            let asr = VolcengineStreamingASR::new(
+                VolcengineCredentials {
+                    app_id: "app".into(),
+                    access_token: "token".into(),
+                    resource_id: VolcengineCredentials::default_resource_id().into(),
+                },
+                Vec::new(),
+            );
+            let pcm = vec![attempt.saturating_add(1); 6_400 + usize::from(attempt) * 2];
+            asr.consume_pcm_chunk(&pcm);
+            asr.mark_audio_delivery_failed(VolcengineASRError::NoFinalResult);
+            let (claimed, _) = asr
+                .claim_retained_audio_for_replay()
+                .expect("first final-failure recovery claim succeeds");
+            assert_eq!(claimed, pcm);
+            let duplicate = match asr.claim_retained_audio_for_replay() {
+                Ok(_) => panic!("a second replay claim must be rejected"),
+                Err(error) => error,
+            };
+            assert!(duplicate.to_string().contains("already attempted"));
+        }
     }
 
     #[test]

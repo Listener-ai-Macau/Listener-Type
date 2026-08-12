@@ -66,6 +66,15 @@ pub struct EmbeddedAudioBleStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct EmbeddedBleRuntimeIdentity {
+    pub bluetooth_address: String,
+    pub hardware_revision: Option<String>,
+    pub firmware_version: Option<String>,
+    pub build_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeviceSettingsStatus {
     pub brightness_percent: u8,
     pub plugged_brightness_percent: u8,
@@ -500,6 +509,14 @@ pub fn read_embedded_audio_status_for_device(
     timeout: Duration,
 ) -> Result<EmbeddedAudioBleStatus, String> {
     windows_ble::read_embedded_audio_status_for_device(address, timeout)
+}
+
+#[cfg(target_os = "windows")]
+pub fn read_runtime_identity_for_device(
+    address: u64,
+    timeout: Duration,
+) -> Result<EmbeddedBleRuntimeIdentity, String> {
+    windows_ble::read_runtime_identity_for_device(address, timeout)
 }
 
 #[cfg(target_os = "windows")]

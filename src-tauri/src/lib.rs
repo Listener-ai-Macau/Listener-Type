@@ -60,6 +60,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const LOG_ROTATE_LIMIT_BYTES: u64 = 10 * 1024 * 1024;
+const LOG_SEGMENT_LIMIT_BYTES: u64 = LOG_ROTATE_LIMIT_BYTES / 2;
+const LOG_MAX_RECORD_BYTES: usize = 64 * 1024;
 const SUPPRESS_CAPSULE_WINDOW_ENV: &str = "LISTENER_TYPE_SUPPRESS_CAPSULE_WINDOW";
 const FORCE_RAW_OUTPUT_ENV: &str = "LISTENER_TYPE_FORCE_RAW_OUTPUT";
 #[cfg(target_os = "windows")]
@@ -1094,7 +1096,6 @@ fn init_file_logger() {
     let log_dir = log_dir_path();
     let _ = std::fs::create_dir_all(&log_dir);
     let log_file = log_dir.join("listener-type.log");
-    let rotation_err = rotate_log_if_too_large(&log_file).err();
     let level = if cfg!(debug_assertions) {
         LevelFilter::Debug
     } else {
@@ -1107,16 +1108,123 @@ fn init_file_logger() {
         TerminalMode::Mixed,
         ColorChoice::Auto,
     )];
-    if let Ok(file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_file)
-    {
-        loggers.push(WriteLogger::new(level, config, file));
-    }
+    let rotation_err = match OnlineRotatingLogWriter::open(log_file) {
+        Ok(writer) => {
+            loggers.push(WriteLogger::new(level, config, writer));
+            None
+        }
+        Err(error) => Some(error),
+    };
     let _ = CombinedLogger::init(loggers);
     if let Some(e) = rotation_err {
         log::warn!("[logger] 日志轮转失败: {e}");
+    }
+}
+
+struct OnlineRotatingLogWriter {
+    path: std::path::PathBuf,
+    archive: std::path::PathBuf,
+    file: Option<std::fs::File>,
+    active_len: u64,
+    pending_record: Vec<u8>,
+    discarding_record_tail: bool,
+}
+
+impl OnlineRotatingLogWriter {
+    fn open(path: std::path::PathBuf) -> std::io::Result<Self> {
+        rotate_log_if_too_large(&path)?;
+        let archive = path.with_file_name("listener-type.log.1");
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        let active_len = file.metadata()?.len();
+        Ok(Self {
+            path,
+            archive,
+            file: Some(file),
+            active_len,
+            pending_record: Vec::with_capacity(1024),
+            discarding_record_tail: false,
+        })
+    }
+
+    fn write_pending_record(&mut self) -> std::io::Result<()> {
+        if self.pending_record.is_empty() {
+            return Ok(());
+        }
+        let record = std::mem::take(&mut self.pending_record);
+        if self.active_len > 0
+            && self.active_len.saturating_add(record.len() as u64) > LOG_SEGMENT_LIMIT_BYTES
+        {
+            self.rotate()?;
+        }
+        let file = self
+            .file
+            .as_mut()
+            .ok_or_else(|| std::io::Error::other("rotating log file is unavailable"))?;
+        std::io::Write::write_all(file, &record)?;
+        self.active_len = self.active_len.saturating_add(record.len() as u64);
+        Ok(())
+    }
+
+    fn rotate(&mut self) -> std::io::Result<()> {
+        if let Some(mut file) = self.file.take() {
+            std::io::Write::flush(&mut file)?;
+        }
+        match std::fs::remove_file(&self.archive) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        std::fs::rename(&self.path, &self.archive)?;
+        self.file = Some(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)?,
+        );
+        self.active_len = 0;
+        Ok(())
+    }
+}
+
+impl std::io::Write for OnlineRotatingLogWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        for &byte in buf {
+            if self.discarding_record_tail {
+                if byte == b'\n' {
+                    self.pending_record
+                        .extend_from_slice(b"...[diagnostic record truncated]\n");
+                    self.discarding_record_tail = false;
+                    self.write_pending_record()?;
+                }
+                continue;
+            }
+
+            if byte == b'\n' {
+                self.pending_record.push(byte);
+                self.write_pending_record()?;
+            } else if self.pending_record.len() < LOG_MAX_RECORD_BYTES {
+                self.pending_record.push(byte);
+            } else {
+                self.discarding_record_tail = true;
+            }
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.discarding_record_tail {
+            self.pending_record
+                .extend_from_slice(b"...[diagnostic record truncated]");
+            self.discarding_record_tail = false;
+        }
+        self.write_pending_record()?;
+        if let Some(file) = self.file.as_mut() {
+            std::io::Write::flush(file)?;
+        }
+        Ok(())
     }
 }
 
@@ -1124,7 +1232,7 @@ fn rotate_log_if_too_large(path: &std::path::Path) -> std::io::Result<()> {
     let Ok(metadata) = std::fs::metadata(path) else {
         return Ok(());
     };
-    if metadata.len() <= LOG_ROTATE_LIMIT_BYTES {
+    if metadata.len() <= LOG_SEGMENT_LIMIT_BYTES {
         return Ok(());
     }
 
@@ -1134,7 +1242,16 @@ fn rotate_log_if_too_large(path: &std::path::Path) -> std::io::Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e),
     }
-    std::fs::rename(path, archive)
+    let mut source = std::fs::File::open(path)?;
+    let keep = metadata.len().min(LOG_SEGMENT_LIMIT_BYTES);
+    std::io::Seek::seek(
+        &mut source,
+        std::io::SeekFrom::Start(metadata.len().saturating_sub(keep)),
+    )?;
+    let mut newest = Vec::with_capacity(keep as usize);
+    std::io::Read::read_to_end(&mut source, &mut newest)?;
+    std::fs::write(&archive, newest)?;
+    std::fs::remove_file(path)
 }
 
 fn app_profile_dir_name() -> &'static str {
@@ -1536,7 +1653,7 @@ fn dispatch_cli_intent<R: Runtime>(
                         let result_json = serde_json::to_string(&result)
                             .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
                         println!("embedded_audio_ble_once_result_json={result_json}");
-                        log::info!("embedded_audio_ble_once_result_json={result_json}");
+                        log::debug!("embedded_audio_ble_once_result_json={result_json}");
                         log::info!(
                             "[cli] submit-embedded-audio-ble-once done: pcm_bytes={} missing_packets={} final_text_chars={}",
                             result.reconstructed_pcm_bytes,
@@ -1561,7 +1678,7 @@ fn dispatch_cli_intent<R: Runtime>(
                         let result_json = serde_json::to_string(&result)
                             .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
                         println!("embedded_audio_ble_stream_result_json={result_json}");
-                        log::info!("embedded_audio_ble_stream_result_json={result_json}");
+                        log::debug!("embedded_audio_ble_stream_result_json={result_json}");
                         log::info!(
                             "[cli] submit-embedded-audio-ble-stream done: pcm_bytes={} missing_packets={} final_text_chars={}",
                             result.reconstructed_pcm_bytes,
@@ -1961,7 +2078,7 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
                     headless_print_line(format!(
                         "embedded_audio_ble_once_result_json={result_json}"
                     ));
-                    log::info!("embedded_audio_ble_once_result_json={result_json}");
+                    log::debug!("embedded_audio_ble_once_result_json={result_json}");
                     log::info!(
                         "[cli] submit-embedded-audio-ble-once done: pcm_bytes={} missing_packets={} final_text_chars={}",
                         result.reconstructed_pcm_bytes,
@@ -1991,7 +2108,7 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
                     headless_print_line(format!(
                         "embedded_audio_ble_stream_result_json={result_json}"
                     ));
-                    log::info!("embedded_audio_ble_stream_result_json={result_json}");
+                    log::debug!("embedded_audio_ble_stream_result_json={result_json}");
                     log::info!(
                         "[cli] submit-embedded-audio-ble-stream done: pcm_bytes={} missing_packets={} final_text_chars={}",
                         result.reconstructed_pcm_bytes,
@@ -2722,7 +2839,8 @@ mod tests {
         parse_tray_polish_mode_id, rect_intersects_any_monitor, rotate_log_if_too_large,
         should_hide_main_on_close, should_keep_alive_on_exit_request,
         tray_polish_mode_menu_entries, tray_style_menu_enabled, CapsuleWindowBounds,
-        LOG_ROTATE_LIMIT_BYTES,
+        OnlineRotatingLogWriter, LOG_MAX_RECORD_BYTES, LOG_ROTATE_LIMIT_BYTES,
+        LOG_SEGMENT_LIMIT_BYTES,
     };
     #[cfg(target_os = "windows")]
     use super::{merge_webview2_test_browser_args, WRY_DEFAULT_DISABLED_WEBVIEW2_FEATURES};
@@ -3055,7 +3173,66 @@ mod tests {
 
         assert!(!log.exists());
         assert!(archive.exists());
-        assert!(std::fs::metadata(&archive).unwrap().len() > LOG_ROTATE_LIMIT_BYTES);
+        assert_eq!(
+            std::fs::metadata(&archive).unwrap().len(),
+            LOG_SEGMENT_LIMIT_BYTES
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn online_log_rotation_bounds_three_times_cap_and_preserves_retained_order() {
+        let dir = std::env::temp_dir().join(format!(
+            "listener-type-log-online-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("listener-type.log");
+        let archive = dir.join("listener-type.log.1");
+        let mut writer = OnlineRotatingLogWriter::open(log.clone()).unwrap();
+        let payload = "x".repeat(32 * 1024);
+        let records = (3 * LOG_ROTATE_LIMIT_BYTES as usize / payload.len()) + 2;
+
+        for sequence in 0..records {
+            writeln!(writer, "{sequence:06}|{payload}").unwrap();
+        }
+        writer.flush().unwrap();
+        drop(writer);
+
+        let active_bytes = std::fs::metadata(&log).unwrap().len();
+        let archive_bytes = std::fs::metadata(&archive).unwrap().len();
+        assert!(
+            active_bytes + archive_bytes
+                <= LOG_ROTATE_LIMIT_BYTES + LOG_MAX_RECORD_BYTES as u64 + 64
+        );
+        let retained = [archive.clone(), log.clone()]
+            .into_iter()
+            .flat_map(|path| {
+                std::fs::read_to_string(path)
+                    .unwrap()
+                    .lines()
+                    .map(|line| {
+                        line.split_once('|')
+                            .unwrap()
+                            .0
+                            .parse::<usize>()
+                            .unwrap()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert!(retained.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(retained.last().copied(), Some(records - 1));
+        assert_eq!(
+            std::fs::read_dir(&dir)
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with("listener-type.log"))
+                .count(),
+            2
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

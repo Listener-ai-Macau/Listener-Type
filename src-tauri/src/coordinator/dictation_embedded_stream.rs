@@ -1618,11 +1618,19 @@ impl EmbeddedStreamingDictation {
                                 .pcm
                                 .len()
                                 .saturating_sub(window_origin_bytes);
-                            let ladder_snapshot = local_confirmation_snapshot_for_window(
-                                candidate.pcm.len(),
-                                window_origin_bytes,
-                                candidate.local_confirmation_attempts,
+                            let exploratory_allowed = exploratory_local_confirmation_allowed(
+                                kws_hit.is_some(),
+                                candidate.local_absent_count,
                             );
+                            let ladder_snapshot = exploratory_allowed
+                                .then(|| {
+                                    local_confirmation_snapshot_for_window(
+                                        candidate.pcm.len(),
+                                        window_origin_bytes,
+                                        candidate.local_confirmation_attempts,
+                                    )
+                                })
+                                .flatten();
                             // Stage-2 ASAP after KWS (0.8s floor), not the 1.8s ladder.
                             let new_audio_since_last = window_pcm_bytes
                                 .saturating_sub(candidate.local_confirmation_last_snapshot_bytes);

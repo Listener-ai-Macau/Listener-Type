@@ -3626,11 +3626,93 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
         }
         flush_pending_device_key_ble_action(inner, "notify_ready");
         log::info!("[embedded-ble] background listener notify ready");
+        schedule_embedded_ble_runtime_identity_probe(inner, generation);
         // After a live notify identity is proven, prune same-name Windows ghosts
         // so the next OTA/reboot reconnect does not time out dead HID roots first.
         maybe_prune_listener_ghost_pairings_after_notify_ready(inner, generation);
     }
 }
+
+#[cfg(target_os = "windows")]
+fn schedule_embedded_ble_runtime_identity_probe(inner: &Arc<Inner>, generation: u64) {
+    let Some(address) = crate::embedded_ble::current_notify_keep_address() else {
+        log::warn!(
+            "[embedded-ble] runtime identity probe skipped generation={generation}: notify address unavailable"
+        );
+        return;
+    };
+    let inner = Arc::clone(inner);
+    async_runtime::spawn(async move {
+        // Identity is diagnostic, never part of the wake/notify critical path.
+        // Require a short idle window after notify-ready and yield whenever a
+        // recording starts so the three bounded GATT reads cannot delay audio.
+        const IDLE_SETTLE: Duration = Duration::from_secs(2);
+        const RETRY_POLL: Duration = Duration::from_millis(250);
+        const MAX_WAIT: Duration = Duration::from_secs(30);
+        let started_at = Instant::now();
+        let mut idle_since: Option<Instant> = None;
+        loop {
+            if inner.shutdown.load(Ordering::SeqCst)
+                || !inner.embedded_ble_listener_ready.load(Ordering::SeqCst)
+                || inner.embedded_ble_listener_generation.load(Ordering::SeqCst) != generation
+            {
+                log::info!(
+                    "[embedded-ble] runtime identity probe cancelled generation={generation}: notify generation changed"
+                );
+                return;
+            }
+            let session_idle = inner.state.lock().phase == SessionPhase::Idle;
+            let no_pending_device_action = inner.device_key_pending_ble_action.lock().is_none();
+            let idle = session_idle && no_pending_device_action;
+            if idle {
+                let since = idle_since.get_or_insert_with(Instant::now);
+                if since.elapsed() >= IDLE_SETTLE {
+                    break;
+                }
+            } else {
+                idle_since = None;
+            }
+            if started_at.elapsed() >= MAX_WAIT {
+                log::warn!(
+                    "[embedded-ble] runtime identity probe deferred beyond {} ms generation={generation}; recording path remained busy",
+                    MAX_WAIT.as_millis()
+                );
+                return;
+            }
+            tokio::time::sleep(RETRY_POLL).await;
+        }
+
+        let result = async_runtime::spawn_blocking(move || {
+            crate::embedded_ble::read_runtime_identity_for_device(address, Duration::from_secs(3))
+        })
+        .await;
+        match result {
+            Ok(Ok(identity)) => {
+                let complete = identity.hardware_revision.is_some()
+                    && identity.firmware_version.is_some()
+                    && identity.build_id.is_some();
+                log::info!(
+                    "[embedded-ble] runtime identity generation={generation} complete={complete} address={} hardware={:?} firmware={:?} build_id={:?} probe_elapsed_ms={}",
+                    identity.bluetooth_address,
+                    identity.hardware_revision,
+                    identity.firmware_version,
+                    identity.build_id,
+                    started_at.elapsed().as_millis()
+                );
+            }
+            Ok(Err(err)) => log::warn!(
+                "[embedded-ble] runtime identity probe failed generation={generation}: {}",
+                embedded_ble_log_preview(&err)
+            ),
+            Err(err) => log::warn!(
+                "[embedded-ble] runtime identity task failed generation={generation}: {err}"
+            ),
+        }
+    });
+}
+
+#[cfg(not(target_os = "windows"))]
+fn schedule_embedded_ble_runtime_identity_probe(_inner: &Arc<Inner>, _generation: u64) {}
 
 fn maybe_prune_listener_ghost_pairings_after_notify_ready(
     inner: &Arc<Inner>,
