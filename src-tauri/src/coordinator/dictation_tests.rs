@@ -3440,12 +3440,12 @@ fn kws_hit_schedules_immediate_local_confirmation() {
         polish.contains("kws_prompted_local_confirm")
             && polish.contains("KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS: usize = 700")
             && polish.contains("KWS_LOCAL_CONFIRM_RETRY_MS: usize = 400")
-            && polish.contains("KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 250")
+            && polish.contains("KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 100")
             && polish.contains("KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2")
             && polish.contains("gain_normalized_pcm16"),
-        "secondary budget 250ms + 2 Absent rejects + boosted (min 8x) local ASR"
+        "secondary budget 100ms + 2 Absent rejects + boosted (min 8x) local ASR"
     );
-    assert_eq!(super::KWS_SECONDARY_CONFIRM_BUDGET_MS, 250);
+    assert_eq!(super::KWS_SECONDARY_CONFIRM_BUDGET_MS, 100);
     assert_eq!(super::KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS, 700);
     assert!(
         super::KWS_SECONDARY_CONFIRM_BUDGET_MS + 100 <= 350,

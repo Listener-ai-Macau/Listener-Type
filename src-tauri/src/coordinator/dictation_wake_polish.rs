@@ -778,9 +778,11 @@ const KWS_ABSENT_COUNT_MIN_POST_HIT_MS: usize = 1_000;
 ///   stage-1 KWS (high recall) → stage-2 local wake verifier (precision)
 /// Wait only inside the accepted phrase-tail budget for stage-2; then fail-open
 /// as KeywordModel so an intermittently slow helper never makes wake feel
-/// unresponsive. Explicit Absent still rejects. The remaining ~100 ms covers
-/// actor polling plus recording-control/capsule dispatch under the 350 ms target.
-const KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 250;
+/// unresponsive. Explicit Absent still rejects. Installed session 66 spent
+/// 297 ms here after KWS had already supplied the phrase and pushed capsule
+/// latency to 1,306 ms. Keep only a 100 ms grace; actor polling plus recording
+/// control/capsule dispatch then stays inside the 350 ms phrase-tail target.
+const KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 100;
 /// Explicit local Absent count before midstream hard-reject (blocks short
 /// prefix false wakes like "开始啥的"; one retry for noisy short clips).
 const KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2;
