@@ -629,11 +629,21 @@ mod platform {
         let keyword = CString::new(keyword_tokens(phrase, score, threshold, emit_variants)?)
             .map_err(|_| "唤醒词无效")?;
         unsafe {
-            let onnx = Library::new(dll_root.join("onnxruntime.dll")).map_err(|e| e.to_string())?;
-            let providers = Library::new(dll_root.join("onnxruntime_providers_shared.dll"))
-                .map_err(|e| e.to_string())?;
-            let sherpa =
-                Library::new(dll_root.join("sherpa-onnx-c-api.dll")).map_err(|e| e.to_string())?;
+            let onnx_path = dll_root.join("onnxruntime.dll");
+            let providers_path = dll_root.join("onnxruntime_providers_shared.dll");
+            let sherpa_path = dll_root.join("sherpa-onnx-c-api.dll");
+            let onnx = Library::new(&onnx_path).map_err(|err| {
+                format!("load wake onnxruntime {} failed: {err}", onnx_path.display())
+            })?;
+            let providers = Library::new(&providers_path).map_err(|err| {
+                format!(
+                    "load wake onnxruntime providers {} failed: {err}",
+                    providers_path.display()
+                )
+            })?;
+            let sherpa = Library::new(&sherpa_path).map_err(|err| {
+                format!("load wake sherpa C API {} failed: {err}", sherpa_path.display())
+            })?;
             macro_rules! sym {
                 ($name:literal, $ty:ty) => {
                     *sherpa

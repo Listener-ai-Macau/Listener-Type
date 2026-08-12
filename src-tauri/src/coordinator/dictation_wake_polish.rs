@@ -784,15 +784,19 @@ const KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 250;
 /// Explicit local Absent count before midstream hard-reject (blocks short
 /// prefix false wakes like "开始啥的"; one retry for noisy short clips).
 const KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2;
-/// Ordinary room speech can keep firmware VA sessions open for ~4.5 s. Three
-/// independent local-ASR Absents already cover the 0.8/1.4/1.8 s wake horizon;
-/// continuing speculative Paraformer calls on every rolling window only burns
-/// CPU and can starve WebView/audio work. Keep streaming KWS active: a later KWS
-/// hit still bypasses this cap and receives its full stage-2 confirmation.
+/// Ordinary room speech can keep firmware VA sessions open for ~4.5 s. Limit
+/// the initial candidate to the 0.8/1.4/1.8 s ladder, then allow one focused
+/// confirmation after the first KWS rolling-window advance. The focused retry is
+/// important for real device captures whose ~1 s pre-roll destabilises the
+/// initial Paraformer windows, while one extra retry total keeps CPU work
+/// bounded. A later KWS hit always receives its full stage-2 confirmation.
 const LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT: u8 = 3;
-/// Do not serialize the BLE actor behind multi-second auxiliary recall after
-/// repeated local evidence already rejected an ambient candidate.
-const TERMINAL_OFFLINE_SKIP_ABSENT_COUNT: u8 = 2;
+/// After the initial ladder plus one focused retry, repeated explicit Absent is
+/// authoritative enough to skip the expensive terminal recall cascade. A
+/// timeout around spawn_blocking releases the BLE actor but cannot cancel the
+/// native KWS work, so running it for every ambient candidate causes seconds of
+/// hidden CPU contention and visible WebView/capsule stalls.
+const TERMINAL_OFFLINE_SKIP_ABSENT_COUNT: u8 = 4;
 const MIN_TERMINAL_OFFLINE_PCM_BYTES: usize = 16_000 * 2 * 2;
 const TERMINAL_OFFLINE_RECALL_BUDGET_MS: u64 = 500;
 const WAKE_END_PAD_SECONDS: f32 = 0.12;
@@ -835,8 +839,17 @@ fn local_confirmation_snapshot_for_window(
 }
 
 #[cfg(target_os = "windows")]
-fn exploratory_local_confirmation_allowed(keyword_model_hit: bool, absent_count: u8) -> bool {
-    keyword_model_hit || absent_count < LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT
+fn exploratory_local_confirmation_allowed(
+    keyword_model_hit: bool,
+    absent_count: u8,
+    window_origin_bytes: usize,
+    window_attempts: usize,
+) -> bool {
+    keyword_model_hit
+        || absent_count < LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT
+        || (window_origin_bytes > 0
+            && absent_count == LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT
+            && window_attempts == 0)
 }
 
 #[cfg(target_os = "windows")]

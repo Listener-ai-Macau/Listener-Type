@@ -943,9 +943,6 @@ impl EmbeddedStreamingDictation {
                         candidate.pcm.len(),
                         candidate.local_absent_count,
                     ) {
-                        // Distinguish the two skip reasons: short PCM vs repeated
-                        // local Absent evidence. 2026-08-07 session 548 was logged
-                        // as "too short" with pcm_ms=4520 ≥ min — misleading.
                         let too_short =
                             candidate.pcm.len() < MIN_TERMINAL_OFFLINE_PCM_BYTES;
                         log::info!(
@@ -1621,6 +1618,8 @@ impl EmbeddedStreamingDictation {
                             let exploratory_allowed = exploratory_local_confirmation_allowed(
                                 kws_hit.is_some(),
                                 candidate.local_absent_count,
+                                window_origin_bytes,
+                                candidate.local_confirmation_attempts,
                             );
                             let ladder_snapshot = exploratory_allowed
                                 .then(|| {

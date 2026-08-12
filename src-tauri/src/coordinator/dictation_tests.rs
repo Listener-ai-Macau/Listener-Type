@@ -2445,11 +2445,30 @@ fn rolling_local_confirmation_restarts_the_800ms_ladder_per_window() {
 
 #[test]
 fn ambient_speech_caps_speculative_local_asr_but_late_kws_still_confirms() {
-    assert!(super::exploratory_local_confirmation_allowed(false, 0));
-    assert!(super::exploratory_local_confirmation_allowed(false, 2));
-    assert!(!super::exploratory_local_confirmation_allowed(false, 3));
-    assert!(!super::exploratory_local_confirmation_allowed(false, u8::MAX));
-    assert!(super::exploratory_local_confirmation_allowed(true, u8::MAX));
+    assert!(super::exploratory_local_confirmation_allowed(false, 0, 0, 0));
+    assert!(super::exploratory_local_confirmation_allowed(false, 2, 0, 2));
+    assert!(!super::exploratory_local_confirmation_allowed(false, 3, 0, 3));
+    // 2026-08-12 sessions 43-45: all three initial windows returned Absent.
+    // Once KWS rotates past the ~1 s device pre-roll, exactly one focused retry
+    // must remain eligible instead of permanently disabling local recall.
+    assert!(super::exploratory_local_confirmation_allowed(
+        false,
+        3,
+        1_040 * 32,
+        0
+    ));
+    assert!(!super::exploratory_local_confirmation_allowed(
+        false,
+        4,
+        1_040 * 32,
+        0
+    ));
+    assert!(super::exploratory_local_confirmation_allowed(
+        true,
+        u8::MAX,
+        0,
+        usize::MAX
+    ));
 }
 
 #[test]
@@ -3533,21 +3552,15 @@ fn busy_local_wake_helper_is_retried_without_queue_or_keyword_fallback() {
 }
 
 #[test]
-fn terminal_offline_recall_skips_after_repeated_local_absence() {
+fn terminal_offline_recall_stops_after_initial_plus_focused_absence() {
     assert!(!super::should_run_terminal_offline_recall(
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES - 2,
         0
     ));
     assert!(super::should_run_terminal_offline_recall(
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
-        0
+        super::TERMINAL_OFFLINE_SKIP_ABSENT_COUNT - 1
     ));
-    assert!(super::should_run_terminal_offline_recall(
-        super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
-        1
-    ));
-    // Explicit repeated local Absent remains authoritative and must not spend
-    // more actor time on a sensitive terminal KWS retry.
     assert!(!super::should_run_terminal_offline_recall(
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
         super::TERMINAL_OFFLINE_SKIP_ABSENT_COUNT
@@ -3557,8 +3570,9 @@ fn terminal_offline_recall_skips_after_repeated_local_absence() {
     assert!(
         stream.contains("Duration::from_millis(TERMINAL_OFFLINE_RECALL_BUDGET_MS)")
             && stream.contains("terminal offline recall released actor after bounded wait")
+            && stream.contains("terminal skip offline cascade reason={}")
             && stream.contains("candidate.local_absent_count.saturating_add(1)"),
-        "terminal offline recovery must retain a bounded fallback without blocking later BLE input"
+        "terminal offline recovery must remain bounded and repeated focused Absents must suppress hidden native work"
     );
     assert_eq!(super::TERMINAL_OFFLINE_RECALL_BUDGET_MS, 500);
 }
