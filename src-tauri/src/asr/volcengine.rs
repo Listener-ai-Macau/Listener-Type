@@ -78,6 +78,8 @@ pub enum VolcengineASRError {
     AuthRejected(u16),
     #[error("authentication failed")]
     AuthenticationFailed,
+    #[error("识别额度已用完（错误码 {0}）；请在火山引擎补充 ASR 时长，或在设置中切换识别服务")]
+    QuotaExceeded(u32),
     #[error("no final result")]
     NoFinalResult,
     #[error("final result timed out")]
@@ -103,6 +105,17 @@ impl VolcengineASRError {
                 | Self::FinalResultCoverageIncomplete { .. }
         )
     }
+}
+
+const VOLCENGINE_AUDIO_DURATION_QUOTA_EXCEEDED: u32 = 45_000_292;
+
+fn classify_provider_error(code: u32, body: &str) -> VolcengineASRError {
+    if code == VOLCENGINE_AUDIO_DURATION_QUOTA_EXCEEDED
+        || body.to_ascii_lowercase().contains("quota exceeded")
+    {
+        return VolcengineASRError::QuotaExceeded(code);
+    }
+    VolcengineASRError::ConnectionFailed(format!("ASR error {code}: {body}"))
 }
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -2484,10 +2497,7 @@ impl VolcengineStreamingASR {
                 code,
                 body.chars().take(200).collect::<String>()
             );
-            self.fallback_to_partial_or_error(VolcengineASRError::ConnectionFailed(format!(
-                "ASR error {}: {}",
-                code, body
-            )));
+            self.fallback_to_partial_or_error(classify_provider_error(code, &body));
             self.state.lock().is_connected = false;
             *self.audio_tx.lock() = None;
             return false;
@@ -5696,7 +5706,38 @@ mod tests {
         assert!(VolcengineASRError::FinalResultTimeout.permits_full_audio_replay());
         assert!(!VolcengineASRError::CredentialsMissing.permits_full_audio_replay());
         assert!(!VolcengineASRError::AuthRejected(401).permits_full_audio_replay());
+        assert!(!VolcengineASRError::QuotaExceeded(
+            VOLCENGINE_AUDIO_DURATION_QUOTA_EXCEEDED
+        )
+        .permits_full_audio_replay());
         assert!(!VolcengineASRError::DecodeFailed("bad frame".into()).permits_full_audio_replay());
+    }
+
+    #[test]
+    fn provider_quota_exhaustion_is_actionable_and_not_a_transport_failure() {
+        let exact = classify_provider_error(
+            VOLCENGINE_AUDIO_DURATION_QUOTA_EXCEEDED,
+            "quota exceeded for types: audio_duration_lifetime",
+        );
+        assert!(matches!(
+            exact,
+            VolcengineASRError::QuotaExceeded(VOLCENGINE_AUDIO_DURATION_QUOTA_EXCEEDED)
+        ));
+        assert!(exact.to_string().contains("补充 ASR 时长"));
+        assert!(!exact.permits_full_audio_replay());
+
+        let future_code = classify_provider_error(45_999_999, "Quota Exceeded");
+        assert!(matches!(
+            future_code,
+            VolcengineASRError::QuotaExceeded(45_999_999)
+        ));
+
+        let transport = classify_provider_error(45_000_001, "temporary server error");
+        assert!(matches!(
+            transport,
+            VolcengineASRError::ConnectionFailed(_)
+        ));
+        assert!(transport.permits_full_audio_replay());
     }
 
     #[tokio::test]

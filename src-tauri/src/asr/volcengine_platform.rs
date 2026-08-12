@@ -192,6 +192,7 @@ fn map_volcengine_error(error: VolcengineASRError) -> AsrError {
         VolcengineASRError::AuthRejected(_) | VolcengineASRError::AuthenticationFailed => {
             AsrError::new(AsrErrorKind::Auth, message)
         }
+        VolcengineASRError::QuotaExceeded(_) => AsrError::new(AsrErrorKind::Provider, message),
         VolcengineASRError::ConnectionFailed(_) | VolcengineASRError::FinalResultTimeout => {
             AsrError::retryable(AsrErrorKind::Network, message)
         }
@@ -258,5 +259,9 @@ mod tests {
         let auth = map_volcengine_error(VolcengineASRError::AuthRejected(401));
         assert_eq!(auth.kind, AsrErrorKind::Auth);
         assert!(!auth.retryable);
+
+        let quota = map_volcengine_error(VolcengineASRError::QuotaExceeded(45_000_292));
+        assert_eq!(quota.kind, AsrErrorKind::Provider);
+        assert!(!quota.retryable);
     }
 }
