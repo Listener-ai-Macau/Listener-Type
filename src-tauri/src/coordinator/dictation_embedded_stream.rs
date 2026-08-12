@@ -1971,37 +1971,38 @@ impl EmbeddedStreamingDictation {
                             .as_ref()
                             .map(|candidate| keyword_fallback_absent_count(candidate, &kws))
                             .unwrap_or(0);
-                        if waited_ms >= KWS_SECONDARY_CONFIRM_BUDGET_MS
-                            && secondary_fallback_can_accept_keyword(
-                                true,
-                                explicit_absent_count,
-                            )
-                        {
-                            // Secondary slow/hung before returning evidence: fail-open
-                            // so a broken helper cannot disable voice activation.
-                            phrase_signal =
-                                denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
-                            log::info!(
-                                "[wake-phrase] stage2 timeout fail-open KeywordModel embedded_session_id={} waited_ms={} budget_ms={}",
-                                embedded_session_id,
-                                waited_ms,
-                                KWS_SECONDARY_CONFIRM_BUDGET_MS
-                            );
-                            Some(kws)
-                        } else if waited_ms >= KWS_SECONDARY_CONFIRM_BUDGET_MS
-                            && explicit_absent_count > 0
-                        {
-                            log::info!(
-                                "[wake-phrase] stage2 timeout held after explicit Absent embedded_session_id={} waited_ms={} budget_ms={} absent_count={}",
-                                embedded_session_id,
-                                waited_ms,
-                                KWS_SECONDARY_CONFIRM_BUDGET_MS,
-                                explicit_absent_count
-                            );
-                            None
-                        } else {
-                            // Within budget: wait for stage-2 (do not bare-KWS Accept).
-                            None
+                        match pending_secondary_decision(
+                            true,
+                            waited_ms,
+                            explicit_absent_count,
+                        ) {
+                            PendingSecondaryDecision::AcceptKeywordModel => {
+                                // Secondary slow/hung before returning evidence: fail-open
+                                // so a broken helper cannot disable voice activation.
+                                phrase_signal =
+                                    denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                log::info!(
+                                    "[wake-phrase] stage2 timeout fail-open KeywordModel embedded_session_id={} waited_ms={} budget_ms={}",
+                                    embedded_session_id,
+                                    waited_ms,
+                                    KWS_SECONDARY_CONFIRM_BUDGET_MS
+                                );
+                                Some(kws)
+                            }
+                            PendingSecondaryDecision::HoldAfterExplicitAbsent => {
+                                log::info!(
+                                    "[wake-phrase] stage2 timeout held after explicit Absent embedded_session_id={} waited_ms={} budget_ms={} absent_count={}",
+                                    embedded_session_id,
+                                    waited_ms,
+                                    KWS_SECONDARY_CONFIRM_BUDGET_MS,
+                                    explicit_absent_count
+                                );
+                                None
+                            }
+                            PendingSecondaryDecision::AwaitSecondary => {
+                                // Within budget: wait for stage-2 (do not bare-KWS Accept).
+                                None
+                            }
                         }
                     } else {
                         // No stage-1 yet: local-only ladder may still Present.

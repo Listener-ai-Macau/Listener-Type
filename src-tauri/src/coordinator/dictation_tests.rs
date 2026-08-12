@@ -3464,6 +3464,31 @@ fn explicit_absent_blocks_keyword_only_secondary_fallback() {
 
 #[cfg(target_os = "windows")]
 #[test]
+fn pending_secondary_timeout_obeys_the_one_hundred_ms_latency_boundary() {
+    use super::PendingSecondaryDecision::{
+        AcceptKeywordModel, AwaitSecondary, HoldAfterExplicitAbsent,
+    };
+
+    assert_eq!(
+        super::pending_secondary_decision(true, 99, 0),
+        AwaitSecondary
+    );
+    assert_eq!(
+        super::pending_secondary_decision(true, 100, 0),
+        AcceptKeywordModel
+    );
+    assert_eq!(
+        super::pending_secondary_decision(true, 100, 1),
+        HoldAfterExplicitAbsent
+    );
+    assert_eq!(
+        super::pending_secondary_decision(false, u64::MAX, 0),
+        AwaitSecondary
+    );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
 fn pre_hit_absent_blocks_only_the_keyword_endpoint_it_already_covered() {
     let covered = super::LocalConfirmationCoverage {
         start_bytes: 0,

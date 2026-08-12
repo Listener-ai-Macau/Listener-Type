@@ -1014,6 +1014,30 @@ fn secondary_fallback_can_accept_keyword(
 }
 
 #[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingSecondaryDecision {
+    AwaitSecondary,
+    AcceptKeywordModel,
+    HoldAfterExplicitAbsent,
+}
+
+#[cfg(target_os = "windows")]
+fn pending_secondary_decision(
+    keyword_model_hit: bool,
+    waited_ms: u64,
+    explicit_absent_count: u8,
+) -> PendingSecondaryDecision {
+    if !keyword_model_hit || waited_ms < KWS_SECONDARY_CONFIRM_BUDGET_MS {
+        return PendingSecondaryDecision::AwaitSecondary;
+    }
+    if secondary_fallback_can_accept_keyword(keyword_model_hit, explicit_absent_count) {
+        PendingSecondaryDecision::AcceptKeywordModel
+    } else {
+        PendingSecondaryDecision::HoldAfterExplicitAbsent
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn local_absent_covers_keyword_endpoint(
     coverage: Option<LocalConfirmationCoverage>,
     keyword_stream_origin_bytes: usize,
