@@ -1316,21 +1316,6 @@ mod platform {
             mark_error(&err);
             return Err(err);
         }
-        std::thread::spawn(|| {
-            std::thread::sleep(Duration::from_secs(ENROLLMENT_SECONDS));
-            let capture_still_active = enrollment_capture_needs_host_stop(STATE.lock().capture);
-            if !capture_still_active {
-                log::info!(
-                    "[speaker-verification] enrollment stop timer skipped because device session already completed"
-                );
-                return;
-            }
-            if let Err(err) =
-                crate::embedded_ble::send_recording_control_stop(Duration::from_secs(4))
-            {
-                mark_error(&format!("stop voiceprint enrollment failed: {err}"));
-            }
-        });
         Ok(status_for_phrase(&wake_phrase))
     }
 
@@ -1339,15 +1324,39 @@ mod platform {
     }
 
     pub fn take_enrollment_arm() -> bool {
-        let mut state = STATE.lock();
-        if state.capture == Some(CaptureState::Armed) {
-            state.capture = Some(CaptureState::Capturing);
-            state.progress = 35;
-            state.enrollment_capture_started = Some(std::time::Instant::now());
-            true
-        } else {
-            false
+        let armed = {
+            let mut state = STATE.lock();
+            if state.capture == Some(CaptureState::Armed) {
+                state.capture = Some(CaptureState::Capturing);
+                state.progress = 35;
+                state.enrollment_capture_started = Some(std::time::Instant::now());
+                true
+            } else {
+                false
+            }
+        };
+        if armed {
+            // The capture clock starts only after the dedicated device session
+            // actually arrives. BLE recovery or hidden-candidate preemption in
+            // the Preparing/Armed phase must not shorten the owner sample.
+            std::thread::spawn(|| {
+                std::thread::sleep(Duration::from_secs(ENROLLMENT_SECONDS));
+                let capture_still_active =
+                    enrollment_capture_needs_host_stop(STATE.lock().capture);
+                if !capture_still_active {
+                    log::info!(
+                        "[speaker-verification] enrollment stop timer skipped because device session already completed"
+                    );
+                    return;
+                }
+                if let Err(err) =
+                    crate::embedded_ble::send_recording_control_stop(Duration::from_secs(4))
+                {
+                    mark_error(&format!("stop voiceprint enrollment failed: {err}"));
+                }
+            });
         }
+        armed
     }
 
     pub fn begin_enrollment_processing() {
