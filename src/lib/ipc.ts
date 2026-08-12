@@ -86,6 +86,7 @@ const mockVoiceprintStatus: VoiceprintStatus = {
   requiresReenrollment: false,
   state: 'idle',
   progress: 0,
+  captureSecondsRemaining: null,
   score: null,
   threshold: 0.5,
   error: null,
@@ -103,6 +104,7 @@ export async function startVoiceprintEnrollment(): Promise<VoiceprintStatus> {
     ...mockVoiceprintStatus,
     state: 'capturing',
     progress: 35,
+    captureSecondsRemaining: 14,
   }));
 }
 

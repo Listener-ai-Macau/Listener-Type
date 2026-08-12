@@ -12,6 +12,7 @@ pub struct VoiceprintStatus {
     pub requires_reenrollment: bool,
     pub state: String,
     pub progress: u8,
+    pub capture_seconds_remaining: Option<u8>,
     pub score: Option<f32>,
     pub threshold: f32,
     pub error: Option<String>,
@@ -298,7 +299,7 @@ mod platform {
     const MAX_SUPPLEMENTAL_TEMPLATES: usize = 7;
     const SAMPLE_RATE: i32 = 16_000;
     const VERIFICATION_MIN_SPEECH_MS: usize = 1_000;
-    const ENROLLMENT_SECONDS: u64 = 11;
+    const ENROLLMENT_SECONDS: u64 = 14;
     const ENROLLMENT_MIN_SECONDS: usize = 5;
     const ENROLLMENT_FRAME_MS: usize = 100;
     const ENROLLMENT_MIN_ACTIVE_FRAMES: usize = 18;
@@ -345,6 +346,7 @@ mod platform {
         template: Option<SpeakerTemplate>,
         template_checked: bool,
         enrollment_phrase: Option<String>,
+        enrollment_capture_started: Option<std::time::Instant>,
         runtime: Option<Arc<SpeakerRuntime>>,
     }
 
@@ -719,7 +721,10 @@ mod platform {
         let speech = enrollment_speech_window(pcm)?;
         let minimum_dual_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_MIN_SECONDS;
         if speech.len() < minimum_dual_bytes {
-            return Err("录音不足 5 秒，请先说三遍唤醒词，再连续说一句自然的话。".to_string());
+            return Err(
+                "检测到的连续人声不足 5 秒。请在倒计时内先说三遍唤醒词，再连续说一句至少 3 秒的自然话，中间可以正常停顿。"
+                    .to_string(),
+            );
         }
 
         // Enrollment prompt orders fixed phrase first and free speech second.
@@ -1197,6 +1202,21 @@ mod platform {
             .as_ref()
             .is_some_and(|template| template_matches_phrase(template, &phrase));
         let requires_reenrollment = state.template.is_some() && !enrolled;
+        let capture_seconds_remaining = if state.capture == Some(CaptureState::Capturing) {
+            state.enrollment_capture_started.map(|started| {
+                ENROLLMENT_SECONDS
+                    .saturating_sub(started.elapsed().as_secs())
+                    .min(u8::MAX as u64) as u8
+            })
+        } else {
+            None
+        };
+        let progress = capture_seconds_remaining
+            .map(|remaining| {
+                let elapsed = ENROLLMENT_SECONDS.saturating_sub(remaining as u64);
+                20u64.saturating_add(elapsed.saturating_mul(50) / ENROLLMENT_SECONDS) as u8
+            })
+            .unwrap_or(state.progress);
         VoiceprintStatus {
             available: true,
             runtime_ready,
@@ -1209,7 +1229,8 @@ mod platform {
                 .unwrap_or(CaptureState::Idle)
                 .label()
                 .to_string(),
-            progress: state.progress,
+            progress,
+            capture_seconds_remaining,
             score: state.last_score,
             threshold: VERIFICATION_THRESHOLD,
             error: state.error.clone(),
@@ -1278,6 +1299,7 @@ mod platform {
             state.error = None;
             state.last_score = None;
             state.enrollment_phrase = Some(wake_phrase.clone());
+            state.enrollment_capture_started = None;
         }
         if let Err(err) = ensure_runtime() {
             mark_error(&err);
@@ -1288,7 +1310,8 @@ mod platform {
             state.capture = Some(CaptureState::Armed);
             state.progress = 20;
         }
-        if let Err(err) = crate::embedded_ble::send_recording_control_toggle(Duration::from_secs(4))
+        if let Err(err) =
+            crate::embedded_ble::send_recording_control_enrollment(Duration::from_secs(4))
         {
             mark_error(&err);
             return Err(err);
@@ -1320,6 +1343,7 @@ mod platform {
         if state.capture == Some(CaptureState::Armed) {
             state.capture = Some(CaptureState::Capturing);
             state.progress = 35;
+            state.enrollment_capture_started = Some(std::time::Instant::now());
             true
         } else {
             false
@@ -1335,6 +1359,7 @@ mod platform {
             }
             state.capture = Some(CaptureState::Processing);
             state.progress = 70;
+            state.enrollment_capture_started = None;
         }
         let result: Result<VoiceprintStatus, String> = (|| {
             let runtime = ensure_runtime()?;
@@ -1373,6 +1398,7 @@ mod platform {
                 state.last_score = None;
                 state.error = None;
                 state.enrollment_phrase = None;
+                state.enrollment_capture_started = None;
             }
             Ok(status_for_phrase(&phrase))
         })();
@@ -1588,6 +1614,7 @@ mod platform {
         state.last_score = None;
         state.error = None;
         state.enrollment_phrase = None;
+        state.enrollment_capture_started = None;
         log::info!(
             "[speaker-verification] owner template invalidated after wake phrase change previous={} next={}; re-enrollment required",
             previous,
@@ -1606,6 +1633,7 @@ mod platform {
         state.last_score = None;
         state.error = None;
         state.enrollment_phrase = None;
+        state.enrollment_capture_started = None;
         drop(state);
         Ok(status())
     }
@@ -1614,6 +1642,7 @@ mod platform {
         let mut state = STATE.lock();
         state.capture = Some(CaptureState::Error);
         state.error = Some(error.to_string());
+        state.enrollment_capture_started = None;
     }
 
     pub fn fail_enrollment(error: &str) {
@@ -2501,6 +2530,7 @@ pub fn status() -> VoiceprintStatus {
         requires_reenrollment: false,
         state: "unavailable".into(),
         progress: 0,
+        capture_seconds_remaining: None,
         score: None,
         threshold: 0.5,
         error: None,

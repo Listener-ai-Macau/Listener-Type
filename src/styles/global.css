@@ -325,6 +325,57 @@ a { color: inherit; text-decoration: none; }
   color: var(--ol-err);
 }
 
+.ol-voiceprint-guide {
+  display: grid;
+  gap: 7px;
+  padding: 10px 11px;
+  border: 0.5px solid color-mix(in srgb, var(--ol-accent) 38%, var(--ol-line-soft));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--ol-accent) 8%, var(--ol-surface-2));
+}
+
+.ol-voiceprint-guide-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ol-voiceprint-guide-step {
+  color: var(--ol-ink-2);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.ol-voiceprint-countdown {
+  flex: 0 0 auto;
+  color: var(--ol-accent);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ol-voiceprint-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ol-control-track);
+}
+
+.ol-voiceprint-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ol-accent);
+  transition: width 0.28s var(--ol-motion-quick);
+}
+
+.ol-voiceprint-guide-hint {
+  color: var(--ol-ink-4);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
 .ol-voiceprint-actions button {
   min-width: 0;
   max-width: 100%;

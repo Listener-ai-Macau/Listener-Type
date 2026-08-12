@@ -359,6 +359,8 @@ function DeviceFirmwareSettingsCard() {
 
   const voiceprintCaptureActive = ['preparing', 'armed', 'capturing', 'processing']
     .includes(voiceprint?.state ?? '');
+  const voiceprintRemaining = voiceprint?.captureSecondsRemaining;
+  const voiceprintWakePhraseStage = voiceprintRemaining == null || voiceprintRemaining >= 8;
 
   const commitWakePhrase = async () => {
     if (!prefs || wakePhraseBusy || voiceprintCaptureActive) return;
@@ -682,6 +684,32 @@ function DeviceFirmwareSettingsCard() {
                     </Btn>
                   )}
                 </div>
+                {voiceprintCaptureActive && (
+                  <div className="ol-voiceprint-guide" role="status" aria-live="polite">
+                    <div className="ol-voiceprint-guide-row">
+                      <span className="ol-voiceprint-guide-step">
+                        {voiceprint?.state === 'preparing' || voiceprint?.state === 'armed'
+                          ? t('settings.recording.voiceprintGuidePreparing', '正在准备设备，请稍候…')
+                          : voiceprint?.state === 'processing'
+                            ? t('settings.recording.voiceprintGuideProcessing', '录制完成，正在本机生成声纹…')
+                            : voiceprintWakePhraseStage
+                              ? t('settings.recording.voiceprintGuideWake', { phrase: prefs.voiceWakePhrase, defaultValue: '先自然地说三遍“{{phrase}}”' })
+                              : t('settings.recording.voiceprintGuideFreeSpeech', '现在连续说一句至少 3 秒的自然话')}
+                      </span>
+                      {voiceprintRemaining != null && voiceprint?.state === 'capturing' && (
+                        <strong className="ol-voiceprint-countdown">{voiceprintRemaining}s</strong>
+                      )}
+                    </div>
+                    <div className="ol-voiceprint-progress" aria-hidden="true">
+                      <span style={{ width: `${Math.max(4, Math.min(100, voiceprint?.progress ?? 0))}%` }} />
+                    </div>
+                    {voiceprint?.state === 'capturing' && (
+                      <div className="ol-voiceprint-guide-hint">
+                        {t('settings.recording.voiceprintGuideHint', '不用抢时间；正常停顿不会提前结束，倒计时结束后会自动处理。')}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className={`ol-voiceprint-status${voiceprint?.requiresReenrollment ? ' is-warning' : ''}`}>
                   {voiceprint?.requiresReenrollment
                     ? t('settings.recording.voiceprintReenrollDesc', '唤醒词已更换。重新录制前，任何人说对新唤醒词都可以启动。')

@@ -187,6 +187,15 @@ pub fn send_recording_control_activate(timeout: Duration) -> Result<(), String> 
     )
 }
 
+pub fn send_recording_control_enrollment(timeout: Duration) -> Result<(), String> {
+    send_recording_control_command(
+        b"VREC:ENROLL\n",
+        timeout,
+        "owner enrollment recording start",
+        ActiveControlTransientFallback::TryFreshGatt,
+    )
+}
+
 pub fn send_recording_control_speech_activity(timeout: Duration) -> Result<(), String> {
     let Some(result) = send_audio_control_via_active_capture(
         b"VREC:SPEECH\n",

@@ -19,6 +19,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/check-embedded-ble-processing-led.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-hotkey-injection.mjs` | Global hotkeys | Hotkey tests and manual smoke |
 | `scripts/check-hotkey-recorder.mjs` | Global hotkeys | Hotkey tests and manual smoke |
+| `scripts/check-live-wake-endpoint.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-live-wake-endpoint.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-module-budgets.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-ota-transfer-speed-log.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-ota-transfer-speed-log.test.mjs` | Automation and audits | Node/PowerShell script tests |
@@ -43,6 +45,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/dirty-change-inventory.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/listener-1.0.4-requirement-test-map.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/listener-preproduction-scenarios.json` | Automation and audits | Node/PowerShell script tests |
+| `scripts/multi-speaker-timeline-scenarios.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/owner-accept-1.0.4-recording-ux.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/performance-baselines.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/record-preproduction-machine-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
@@ -57,6 +60,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/run-installed-ota-hidden.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-listener-1.0.4-regression.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-listener-1.0.4-type-connected-soak.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/run-multi-speaker-timeline-regressions.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-recording-consumption-physical-validation.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-speaker-verification-evaluation.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-v1.0.2-regression.ps1` | Automation and audits | Node/PowerShell script tests |

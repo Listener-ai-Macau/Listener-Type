@@ -2653,6 +2653,28 @@ fn recognized_speech_refresh_is_scoped_to_the_active_audio_capture() {
 }
 
 #[test]
+fn owner_enrollment_uses_a_dedicated_firmware_control_mode() {
+    let source = std::include_str!("windows_ble/recording_control.rs");
+    let start = source
+        .find("pub fn send_recording_control_enrollment")
+        .expect("owner enrollment control helper should exist");
+    let end = source[start..]
+        .find("pub fn send_recording_control_speech_activity")
+        .map(|offset| start + offset)
+        .expect("owner enrollment helper boundary should exist");
+    let body = &source[start..end];
+
+    assert!(body.contains("VREC:ENROLL"));
+    assert!(body.contains("ActiveControlTransientFallback::TryFreshGatt"));
+    assert!(!body.contains("VREC:TOGGLE"));
+
+    let enrollment = std::include_str!("../speaker_verification.rs");
+    assert!(enrollment.contains("const ENROLLMENT_SECONDS: u64 = 14;"));
+    assert!(enrollment.contains("send_recording_control_enrollment(Duration::from_secs(4))"));
+    assert!(enrollment.contains("capture_seconds_remaining"));
+}
+
+#[test]
 fn processing_hints_do_not_retry_with_late_fresh_gatt() {
     assert_eq!(
         processing_state_active_transient_fallback(true),
