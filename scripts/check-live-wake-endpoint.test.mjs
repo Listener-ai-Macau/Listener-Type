@@ -61,9 +61,9 @@ test("rejects packet loss and a failed insertion", () => {
 });
 
 test("rejects an accepted wake over the latency ceiling", () => {
-  const report = analyzeLiveWakeLog(fixture(20, new Map([[5, { wakeMs: 1_501 }]])));
+  const report = analyzeLiveWakeLog(fixture(20, new Map([[5, { wakeMs: 1_201 }]])));
   assert.equal(report.status, "NO_GO");
-  assert.match(report.failures.join("\n"), /wake latency exceeds 1500 ms/);
+  assert.match(report.failures.join("\n"), /wake latency exceeds 1200 ms/);
 });
 
 test("applies the stop-to-done requirement as p95 rather than an invented max", () => {

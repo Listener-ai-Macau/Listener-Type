@@ -159,6 +159,24 @@ fn publish_embedded_ble_asr_final(
     published
 }
 
+fn publish_embedded_ble_wake_only_expired(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    let event = DictationEvent::WakeOnlyExpired { session_id };
+    if embedded_ble_actor_context_active(inner) {
+        apply_embedded_ble_session_actor_dictation_event(
+            inner,
+            EmbeddedBleSessionActorCommand::AsrFinal,
+            session_id,
+            "wake_only_expired transcript_empty=true",
+            event,
+            0.0,
+            None,
+            None,
+        )
+    } else {
+        apply_and_publish_dictation_event(inner, event, 0.0, None, None)
+    }
+}
+
 fn finish_dictation_pipeline_error(
     inner: &Arc<Inner>,
     session_id: SessionId,

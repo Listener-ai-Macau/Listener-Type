@@ -101,6 +101,9 @@ pub(crate) enum DictationEvent {
         session_id: SessionId,
         transcript_empty: bool,
     },
+    WakeOnlyExpired {
+        session_id: SessionId,
+    },
     PipelineError {
         session_id: SessionId,
     },
@@ -432,6 +435,22 @@ pub(crate) fn apply_dictation_event(
                     session_id: Some(session_id),
                     snapshot: Some(dictation_snapshot(state, DictationUiState::Polishing)),
                 }
+            }
+        }
+        DictationEvent::WakeOnlyExpired { session_id } => {
+            if let Some(result) = dictation_stale_or_cancelled(state, session_id) {
+                return result;
+            }
+            if state.phase != SessionPhase::Processing {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InvalidPhase,
+                };
+            }
+            state.phase = SessionPhase::Idle;
+            state.focus_target = None;
+            DictationTransition::Applied {
+                session_id: Some(session_id),
+                snapshot: Some(dictation_snapshot(state, DictationUiState::Idle)),
             }
         }
         DictationEvent::PipelineError { session_id } => {
@@ -1199,6 +1218,30 @@ mod tests {
             }
             other => panic!("expected actionable empty transcript error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn dictation_fsm_returns_wake_only_expiry_to_idle_without_error() {
+        let mut state = SessionState {
+            phase: SessionPhase::Processing,
+            session_id: session_id(33),
+            ..Default::default()
+        };
+
+        let transition = apply_dictation_event(
+            &mut state,
+            DictationEvent::WakeOnlyExpired {
+                session_id: session_id(33),
+            },
+        );
+
+        assert_eq!(state.phase, SessionPhase::Idle);
+        assert!(!state.cancelled);
+        assert_eq!(
+            transition.snapshot().map(|snapshot| snapshot.state),
+            Some(DictationUiState::Idle)
+        );
+        assert!(matches!(transition, DictationTransition::Applied { .. }));
     }
 
     #[test]

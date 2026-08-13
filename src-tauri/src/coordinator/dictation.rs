@@ -122,11 +122,11 @@ fn target_speaker_inactive_stop_reason(timeout_ms: u64) -> &'static str {
         "target_speaker_inactive_1000ms"
     }
 }
-// After capsule is visible, block auto-end briefly so the wake phrase alone is
-// not immediately endpointed. First non-empty body preview ends this wait
-// immediately. Keep shorter than the old 1000 ms so startup feels snappier
-// while the exact 1000 ms owner-inactivity endpoint stays unchanged.
-const EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS: u64 = 700;
+// The wake phrase is a complete activation command: after the capsule becomes
+// visible, give the owner a full three seconds to begin the body. The first
+// non-empty body preview ends this wait immediately, after which the exact
+// 1000 ms owner-inactivity endpoint remains unchanged.
+const EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS: u64 = 3_000;
 const EMBEDDED_TERMINAL_WAKE_CONTINUATION_TTL: Duration = Duration::from_secs(6);
 const EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS: u64 = 200;
 const EMBEDDED_LOCAL_SPEAKER_CLASSIFICATION_SLACK_MS: u64 = 100;
@@ -2402,6 +2402,38 @@ async fn finish_end_session_after_stop_transition(
     }
 
     if raw.text.trim().is_empty() {
+        let wake_only_expired = automatic_wake_session_active(inner, current_session_id)
+            && !automatic_wake_body_started(inner, current_session_id);
+        if wake_only_expired {
+            log::info!(
+                "[coord] wake-only body window expired silently session_id={current_session_id}"
+            );
+            device_ai_processing
+                .complete_success("wake_only_body_window_expired")
+                .await;
+            store_embedded_audio_final_result(
+                inner,
+                crate::embedded_audio::EmbeddedAudioTranscriptResult {
+                    session_id: current_session_id.to_string(),
+                    raw_transcript: String::new(),
+                    final_text: String::new(),
+                    error_code: None,
+                },
+            );
+            let published = publish_embedded_ble_wake_only_expired(inner, current_session_id);
+            if !published {
+                let mut state = inner.state.lock();
+                if state.session_id == current_session_id {
+                    state.phase = SessionPhase::Idle;
+                    state.focus_target = None;
+                }
+            }
+            clear_automatic_wake_text_guard(inner);
+            clear_embedded_audio_partial_preview(inner);
+            clear_embedded_audio_stats(inner);
+            restore_prepared_windows_ime_session(inner, current_session_id);
+            return Ok(());
+        }
         let session = DictationSession {
             id: Uuid::new_v4().to_string(),
             created_at: Utc::now().to_rfc3339(),

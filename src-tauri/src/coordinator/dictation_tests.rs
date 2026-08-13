@@ -2249,7 +2249,7 @@ fn host_started_wake_guard_survives_embedded_session_begin() {
 
 #[test]
 fn automatic_wake_no_body_uses_longer_endpoint_timeout() {
-    // Session 72519330: after visible capsule + 700ms body wait, 1.0s snappy
+    // Session 72519330: after visible capsule, the 1.0s snappy
     // endpoint still measured the wake-phrase clock and empty-ended. Wake
     // sessions without body text must use the 3.0s abandon timeout; once body
     // starts, standard 1.0s returns.
@@ -2326,6 +2326,62 @@ fn automatic_wake_no_body_uses_longer_endpoint_timeout() {
 }
 
 #[test]
+fn automatic_wake_preserves_first_clause_after_supported_body_pauses() {
+    for pause_ms in [0_u64, 500, 1_000, 2_000, 2_500] {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        arm_automatic_wake_text_guard(
+            &coordinator.inner,
+            session_id,
+            "开始录音".into(),
+            1_200,
+        );
+        acknowledge_automatic_wake_capsule_visible(&coordinator.inner, session_id);
+
+        assert!(automatic_wake_initial_body_wait_active(
+            &coordinator.inner,
+            session_id,
+            Some(1_200 + pause_ms),
+        ));
+        assert_eq!(
+            filter_automatic_wake_text(
+                &coordinator.inner,
+                session_id,
+                "开始录音。主讲人第一句内容要保持完整。最后这句话也不能丢。",
+                true,
+            ),
+            "主讲人第一句内容要保持完整。最后这句话也不能丢。",
+            "pause_ms={pause_ms}"
+        );
+        assert!(automatic_wake_body_started(&coordinator.inner, session_id));
+        assert!(!automatic_wake_initial_body_wait_active(
+            &coordinator.inner,
+            session_id,
+            Some(1_200 + pause_ms),
+        ));
+        clear_automatic_wake_text_guard(&coordinator.inner);
+    }
+}
+
+#[test]
+fn wake_only_expiry_is_handled_before_empty_transcript_failure_history() {
+    let source = include_str!("dictation.rs");
+    let branch_start = source
+        .find("let wake_only_expired = automatic_wake_session_active")
+        .expect("wake-only empty-result branch");
+    let branch_tail = &source[branch_start..];
+    let silent_return = branch_tail
+        .find("return Ok(());")
+        .expect("wake-only branch returns before generic failure");
+    let empty_failure = branch_tail
+        .find("error_code: Some(\"emptyTranscript\".to_string())")
+        .expect("generic empty-transcript failure remains after wake-only handling");
+    assert!(silent_return < empty_failure);
+    assert!(branch_tail[..silent_return].contains("error_code: None"));
+    assert!(branch_tail[..silent_return].contains("publish_embedded_ble_wake_only_expired"));
+}
+
+#[test]
 fn automatic_wake_starts_initial_body_wait_at_visible_capsule_ack() {
     let coordinator = Coordinator::new();
     let session_id = new_session_id();
@@ -2373,16 +2429,16 @@ fn automatic_wake_starts_initial_body_wait_at_visible_capsule_ack() {
         Some(1_200)
     ));
     acknowledge_automatic_wake_capsule_visible(&coordinator.inner, no_body_session_id);
-    // Deadline = capsule_audio 1200 + body wait 700 = 1900.
+    // Deadline = capsule_audio 1200 + body wait 3000 = 4200.
     assert!(automatic_wake_initial_body_wait_active(
         &coordinator.inner,
         no_body_session_id,
-        Some(1_899)
+        Some(4_199)
     ));
     assert!(!automatic_wake_initial_body_wait_active(
         &coordinator.inner,
         no_body_session_id,
-        Some(1_900)
+        Some(4_200)
     ));
 
     let manual_session_id = new_session_id();
@@ -2444,16 +2500,22 @@ fn rolling_local_confirmation_restarts_the_800ms_ladder_per_window() {
 }
 
 #[test]
-fn ambient_speech_caps_speculative_local_asr_but_late_kws_still_confirms() {
+fn ambient_speech_bounds_each_window_but_never_disables_late_phrase_confirmation() {
     assert!(super::exploratory_local_confirmation_allowed(false, 0, 0, 0));
     assert!(super::exploratory_local_confirmation_allowed(false, 2, 0, 2));
-    assert!(!super::exploratory_local_confirmation_allowed(false, 3, 0, 3));
-    // 2026-08-12 sessions 43-45: all three initial windows returned Absent.
-    // Once KWS rotates past the ~1 s device pre-roll, exactly one focused retry
-    // must remain eligible instead of permanently disabling local recall.
+    assert!(super::exploratory_local_confirmation_allowed(false, 3, 0, 3));
+    assert!(!super::exploratory_local_confirmation_allowed(false, 4, 0, 4));
+    // Every rolling window gets exactly one focused retry regardless of older
+    // candidate-wide Absents; repeated work inside that window remains blocked.
     assert!(super::exploratory_local_confirmation_allowed(
         false,
         3,
+        1_040 * 32,
+        0
+    ));
+    assert!(super::exploratory_local_confirmation_allowed(
+        false,
+        4,
         1_040 * 32,
         0
     ));
@@ -2461,6 +2523,12 @@ fn ambient_speech_caps_speculative_local_asr_but_late_kws_still_confirms() {
         false,
         4,
         1_040 * 32,
+        1
+    ));
+    assert!(super::exploratory_local_confirmation_allowed(
+        false,
+        u8::MAX,
+        2_040 * 32,
         0
     ));
     assert!(super::exploratory_local_confirmation_allowed(
@@ -2871,21 +2939,25 @@ fn local_confirmation_adds_context_with_a_strict_attempt_cap() {
     );
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(2),
-        Some(1_800 * 32)
+        Some(1_600 * 32)
     );
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(3),
-        Some(2_400 * 32)
+        Some(2_000 * 32)
     );
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(4),
-        Some(3_000 * 32)
+        Some(2_400 * 32)
     );
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(5),
+        Some(3_000 * 32)
+    );
+    assert_eq!(
+        super::next_local_confirmation_snapshot_bytes(6),
         Some(5_000 * 32)
     );
-    assert_eq!(super::next_local_confirmation_snapshot_bytes(6), None);
+    assert_eq!(super::next_local_confirmation_snapshot_bytes(7), None);
 }
 
 #[test]
@@ -3072,8 +3144,8 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
         body.find("begin_embedded_audio_dictation_session")
             < body.find("recording_control_task.await")
     );
-    assert!(body.contains("latency_target_ms=1200"));
-    assert!(body.contains("latency_ceiling_ms=1500"));
+    assert!(body.contains("latency_target_ms=1000"));
+    assert!(body.contains("latency_ceiling_ms=1200"));
 }
 
 #[test]
@@ -3440,12 +3512,12 @@ fn kws_hit_schedules_immediate_local_confirmation() {
         polish.contains("kws_prompted_local_confirm")
             && polish.contains("KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS: usize = 700")
             && polish.contains("KWS_LOCAL_CONFIRM_RETRY_MS: usize = 400")
-            && polish.contains("KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 100")
+            && polish.contains("KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 60")
             && polish.contains("KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2")
             && polish.contains("gain_normalized_pcm16"),
-        "secondary budget 100ms + 2 Absent rejects + boosted (min 8x) local ASR"
+        "secondary budget 60ms + 2 Absent rejects + boosted (min 8x) local ASR"
     );
-    assert_eq!(super::KWS_SECONDARY_CONFIRM_BUDGET_MS, 100);
+    assert_eq!(super::KWS_SECONDARY_CONFIRM_BUDGET_MS, 60);
     assert_eq!(super::KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS, 700);
     assert!(
         super::KWS_SECONDARY_CONFIRM_BUDGET_MS + 100 <= 350,
@@ -3464,26 +3536,63 @@ fn explicit_absent_blocks_keyword_only_secondary_fallback() {
 
 #[cfg(target_os = "windows")]
 #[test]
-fn pending_secondary_timeout_obeys_the_one_hundred_ms_latency_boundary() {
+fn pending_secondary_timeout_obeys_the_sixty_ms_latency_boundary() {
     use super::PendingSecondaryDecision::{
         AcceptKeywordModel, AwaitSecondary, HoldAfterExplicitAbsent,
     };
 
     assert_eq!(
-        super::pending_secondary_decision(true, 99, 0),
+        super::pending_secondary_decision(true, 59, 0),
         AwaitSecondary
     );
     assert_eq!(
-        super::pending_secondary_decision(true, 100, 0),
+        super::pending_secondary_decision(true, 60, 0),
         AcceptKeywordModel
     );
     assert_eq!(
-        super::pending_secondary_decision(true, 100, 1),
+        super::pending_secondary_decision(true, 60, 1),
         HoldAfterExplicitAbsent
     );
     assert_eq!(
         super::pending_secondary_decision(false, u64::MAX, 0),
         AwaitSecondary
+    );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn secondary_budget_counts_pre_hit_confirmation_work_once() {
+    assert_eq!(super::effective_secondary_waited_ms(0, 158), 158);
+    assert_eq!(super::effective_secondary_waited_ms(36, 158), 158);
+    assert_eq!(super::effective_secondary_waited_ms(100, 20), 100);
+    assert_eq!(super::effective_secondary_waited_ms(99, 20), 99);
+    assert_eq!(
+        super::pending_secondary_decision(
+            true,
+            super::effective_secondary_waited_ms(0, 158),
+            0,
+        ),
+        super::PendingSecondaryDecision::AcceptKeywordModel,
+    );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn incomplete_pre_hit_absent_cannot_veto_a_later_keyword_hit() {
+    use crate::wake_phrase::LocalPhraseRelation::Absent;
+
+    assert_eq!(
+        super::authoritative_local_absent_coverage(Absent, 3, 4, 0, 1_600 * 32),
+        None,
+        "a 3/4-character partial is HoldForMoreEvidence, not explicit Absent",
+    );
+    assert_eq!(
+        super::authoritative_local_absent_coverage(Absent, 4, 4, 0, 800 * 32),
+        Some(super::LocalConfirmationCoverage {
+            start_bytes: 0,
+            end_bytes: 800 * 32,
+        }),
+        "a full-length non-match remains authoritative anti-false-wake evidence",
     );
 }
 
@@ -3580,15 +3689,23 @@ fn busy_local_wake_helper_is_retried_without_queue_or_keyword_fallback() {
 fn terminal_offline_recall_stops_after_initial_plus_focused_absence() {
     assert!(!super::should_run_terminal_offline_recall(
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES - 2,
-        0
+        0,
+        false,
     ));
     assert!(super::should_run_terminal_offline_recall(
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
-        super::TERMINAL_OFFLINE_SKIP_ABSENT_COUNT - 1
+        super::TERMINAL_OFFLINE_SKIP_ABSENT_COUNT - 1,
+        false,
     ));
     assert!(!super::should_run_terminal_offline_recall(
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
-        super::TERMINAL_OFFLINE_SKIP_ABSENT_COUNT
+        super::TERMINAL_OFFLINE_SKIP_ABSENT_COUNT,
+        false,
+    ));
+    assert!(super::should_run_terminal_offline_recall(
+        super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
+        u8::MAX,
+        true,
     ));
 
     let stream = include_str!("dictation_embedded_stream.rs");
@@ -3600,6 +3717,98 @@ fn terminal_offline_recall_stops_after_initial_plus_focused_absence() {
         "terminal offline recovery must remain bounded and repeated focused Absents must suppress hidden native work"
     );
     assert_eq!(super::TERMINAL_OFFLINE_RECALL_BUDGET_MS, 500);
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn phonetic_near_match_requires_independent_kws_and_never_wakes_alone() {
+    let near = super::LocalWakeConfirmation {
+        matched: false,
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
+        transcript_chars: 3,
+        phonetic_prefix_units: 0,
+        phonetic_best_distance: 1,
+        phonetic_best_window_start: 0,
+        inference_ms: 100,
+        snapshot_pcm_ms: 1_400,
+        recovered_keyword_end_seconds: None,
+    };
+    assert!(super::phonetic_near_phrase_evidence(&near, 4));
+
+    let too_far = super::LocalWakeConfirmation {
+        phonetic_best_distance: 2,
+        ..near
+    };
+    assert!(!super::phonetic_near_phrase_evidence(&too_far, 4));
+
+    let too_short = super::LocalWakeConfirmation {
+        transcript_chars: 2,
+        ..near
+    };
+    assert!(!super::phonetic_near_phrase_evidence(&too_short, 4));
+
+    use super::TerminalInflightLocalDecision::{
+        AcceptLocal, PreserveKwsFusion, RecordAbsent,
+    };
+    let exact = super::LocalWakeConfirmation {
+        matched: true,
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::ExactStart,
+        transcript_chars: 4,
+        phonetic_prefix_units: 4,
+        phonetic_best_distance: 0,
+        phonetic_best_window_start: 0,
+        inference_ms: 100,
+        snapshot_pcm_ms: 1_400,
+        recovered_keyword_end_seconds: None,
+    };
+    assert_eq!(super::terminal_inflight_local_decision(&exact, false, 4), AcceptLocal);
+
+    let later = super::LocalWakeConfirmation {
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::PresentLater,
+        ..exact
+    };
+    assert_eq!(
+        super::terminal_inflight_local_decision(&later, false, 4),
+        PreserveKwsFusion
+    );
+    assert_eq!(super::terminal_inflight_local_decision(&later, true, 4), AcceptLocal);
+    assert_eq!(
+        super::terminal_inflight_local_decision(&near, false, 4),
+        PreserveKwsFusion
+    );
+    assert_eq!(
+        super::terminal_inflight_local_decision(&too_far, false, 4),
+        RecordAbsent
+    );
+}
+
+#[test]
+fn terminal_wait_budget_counts_time_already_spent_by_the_inflight_confirmation() {
+    assert_eq!(super::terminal_inflight_confirmation_remaining_ms(0), 250);
+    assert_eq!(super::terminal_inflight_confirmation_remaining_ms(43), 207);
+    assert_eq!(super::terminal_inflight_confirmation_remaining_ms(250), 0);
+    assert_eq!(super::terminal_inflight_confirmation_remaining_ms(999), 0);
+}
+
+#[test]
+fn terminal_consumes_the_running_confirmation_before_applying_absent_skip() {
+    let stream = include_str!("dictation_embedded_stream.rs");
+    let terminal = stream
+        .find("async fn finish_buffered_speaker_candidate")
+        .expect("terminal candidate handler");
+    let body = &stream[terminal..];
+    let join = body
+        .find("terminal joining in-flight local confirmation")
+        .expect("terminal in-flight join");
+    let skip = body
+        .find("should_run_terminal_offline_recall(")
+        .expect("terminal offline skip decision");
+    assert!(
+        join < skip,
+        "an already-running final-window confirmation must finish before older Absent evidence can skip terminal recall"
+    );
+    assert!(body.contains("terminal_inflight_confirmation_remaining_ms(elapsed_ms)"));
+    assert!(body.contains("terminal_completed_local_confirmation"));
 }
 
 #[test]
@@ -3632,6 +3841,9 @@ fn exact_phrase_only_local_confirmation_refines_late_keyword_boundary() {
         matched: true,
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::ExactStart,
         transcript_chars: 4,
+        phonetic_prefix_units: 4,
+        phonetic_best_distance: 0,
+        phonetic_best_window_start: 0,
         inference_ms: 100,
         snapshot_pcm_ms: 2_775,
         recovered_keyword_end_seconds: None,
@@ -3729,6 +3941,9 @@ fn local_only_start_phrase_has_a_bounded_nonzero_audio_endpoint() {
         matched: true,
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::ExactStart,
         transcript_chars: 9,
+        phonetic_prefix_units: 4,
+        phonetic_best_distance: 0,
+        phonetic_best_window_start: 0,
         inference_ms: 100,
         snapshot_pcm_ms: 1_800,
         recovered_keyword_end_seconds: None,
@@ -3756,6 +3971,26 @@ fn local_only_start_phrase_has_a_bounded_nonzero_audio_endpoint() {
         ..confirmation
     };
     assert_eq!(super::refined_wake_end_seconds(0.0, &later, 4), 0.0);
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn completed_local_confirmation_does_not_run_redundant_boundary_kws() {
+    let source = include_str!("dictation_wake_polish.rs");
+    let start = source
+        .find("fn spawn_local_wake_confirmation(")
+        .expect("local confirmation task");
+    let body = &source[start..];
+    let end = body
+        .find("\nstruct EmbeddedStreamingDictation")
+        .expect("local confirmation task end");
+    let body = &body[..end];
+
+    assert!(body.contains("result.recovered_keyword_end_seconds = None"));
+    assert!(
+        !body.contains("crate::wake_phrase::detect("),
+        "a completed local transcript must not pay another blocking KWS pass"
+    );
 }
 
 #[test]

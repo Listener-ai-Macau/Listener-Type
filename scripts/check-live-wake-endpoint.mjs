@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULT_THRESHOLDS = Object.freeze({
   requiredSamples: 20,
-  wakeP95Ms: 1_200,
-  wakeMaxMs: 1_500,
+  wakeP95Ms: 1_000,
+  wakeMaxMs: 1_200,
   phraseTailP95Ms: 350,
   phraseTailMaxMs: 500,
   endpointMinMs: 900,

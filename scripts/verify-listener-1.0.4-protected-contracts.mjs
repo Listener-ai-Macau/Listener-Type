@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 /**
- * Listener 1.0.4 protected source contracts.
- * Unified gate set: frozen 1.0.4 baseline contracts plus the recording-UX
- * extension gates (formerly the 1.0.5 contract layer — versions were unified
- * back to 1.0.4). Fails if accepted thresholds regress.
+ * Listener 1.0.5 protected source contracts.
+ * The historical filename is retained because release entrypoints reference it.
+ * Fails if accepted thresholds regress from the current product contract.
  */
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -74,7 +73,7 @@ const voiceRecording = existsSync(
   ? read("components/voice_recording_control/voice_recording_control.c", firmwareRoot)
   : "";
 
-// ─── Frozen 1.0.4 baseline contracts ────────────────────────────────────────
+// ─── Protected baseline contracts ───────────────────────────────────────────
 
 gate("local_confirmation_800ms", () => {
   mustMatch(
@@ -98,11 +97,11 @@ gate("target_speaker_end_1000ms", () => {
   mustInclude(dictation, "target_speaker_inactive_1000ms", "auto-stop reason string");
 });
 
-gate("body_initial_wait_700ms", () => {
+gate("wake_only_body_initial_wait_3000ms", () => {
   mustMatch(
     dictation,
-    /EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS:\s*u64\s*=\s*700/,
-    "automatic body initial wait 700 ms",
+    /EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS:\s*u64\s*=\s*3_000/,
+    "automatic wake-only body initial wait 3000 ms",
   );
 });
 
@@ -310,11 +309,10 @@ gate("clean_test_data_dir_contract", () => {
   );
 });
 
-// ─── Recording-UX extension gates (unified into 1.0.4) ─────────────────────
+// ─── Recording-UX extension gates ──────────────────────────────────────────
 
-// Owner release line: ship current UX as **1.0.4** (not a separate 1.0.5 product).
-gate("product_version_1.0.4", () => {
-  mustMatch(packageJson, /"version"\s*:\s*"1\.0\.4"/, "package.json version 1.0.4");
+gate("product_version_1.0.5", () => {
+  mustMatch(packageJson, /"version"\s*:\s*"1\.0\.5"/, "package.json version 1.0.5");
 });
 
 gate("standard_endpoint_still_1000ms_default", () => {
@@ -714,7 +712,7 @@ gate("stop_to_done_latency_observability", () => {
 
 const failed = results.filter((r) => r.status === "FAIL");
 const summary = {
-  schema: "listener.1.0.4.protected_contracts",
+  schema: "listener.1.0.5.protected_contracts",
   schema_version: 1,
   result: failed.length === 0 ? "PASS" : "FAIL",
   type_root: typeRoot,
@@ -723,7 +721,7 @@ const summary = {
 };
 console.log(JSON.stringify(summary, null, 2));
 if (failed.length) {
-  console.error(`\n1.0.4 contracts FAILED: ${failed.map((f) => f.id).join(", ")}`);
+  console.error(`\n1.0.5 contracts FAILED: ${failed.map((f) => f.id).join(", ")}`);
   process.exit(1);
 }
-console.log(`\n1.0.4 contracts PASS (${results.length} gates)`);
+console.log(`\n1.0.5 contracts PASS (${results.length} gates)`);

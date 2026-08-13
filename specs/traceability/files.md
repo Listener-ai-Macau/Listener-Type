@@ -10,6 +10,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/advance-preproduction-total-review.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/build-mac.sh` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-brand-residue.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/capture-live-wake-attempts.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/capture-live-wake-attempts.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-cloud-services.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-dark-mode.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-dirty-change-inventory.mjs` | Automation and audits | Node/PowerShell script tests |
@@ -21,6 +23,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/check-hotkey-recorder.mjs` | Global hotkeys | Hotkey tests and manual smoke |
 | `scripts/check-live-wake-endpoint.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-live-wake-endpoint.test.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-live-wake-only.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-live-wake-only.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-module-budgets.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-ota-transfer-speed-log.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-ota-transfer-speed-log.test.mjs` | Automation and audits | Node/PowerShell script tests |
@@ -56,6 +60,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/run-installed-audio-cdp.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-installed-audio-hidden.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-installed-device-settings-hidden.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/show-live-wake-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/show-live-wake-acceptance.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-installed-ota-cdp.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-installed-ota-hidden.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-listener-1.0.4-regression.ps1` | Automation and audits | Node/PowerShell script tests |

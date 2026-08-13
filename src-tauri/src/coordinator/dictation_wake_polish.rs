@@ -650,6 +650,11 @@ struct BufferedSpeakerCandidate {
     #[cfg(target_os = "windows")]
     local_confirmation_task:
         Option<tauri::async_runtime::JoinHandle<Result<LocalWakeConfirmation, String>>>,
+    /// Wall clock of the in-flight secondary confirmation. An exploratory
+    /// confirmation that already spent the full budget before KWS hit must not
+    /// be charged a second post-hit grace period.
+    #[cfg(target_os = "windows")]
+    local_confirmation_task_started_at: Option<Instant>,
     #[cfg(target_os = "windows")]
     local_confirmation_window_origin_bytes: usize,
     #[cfg(target_os = "windows")]
@@ -666,6 +671,11 @@ struct BufferedSpeakerCandidate {
     /// All completed midstream local Absent results. Terminal handling uses
     /// repeated evidence to skip an expensive ambient-only offline cascade.
     local_absent_count: u8,
+    /// Local evidence that may fuse only with an independent KWS hit: either a
+    /// complete phrase later in the window or a redacted zero/one-unit phonetic
+    /// near-match. It never wakes by itself, but keeps the bounded terminal KWS
+    /// cascade available after older-window Absents.
+    local_kws_fusion_evidence: bool,
     /// Absolute PCM interval inspected by the newest non-stale local Absent.
     /// A KWS fallback may not override it when it already covered that hit.
     #[cfg(target_os = "windows")]
@@ -708,6 +718,9 @@ struct LocalWakeConfirmation {
     matched: bool,
     phrase_relation: crate::wake_phrase::LocalPhraseRelation,
     transcript_chars: usize,
+    phonetic_prefix_units: usize,
+    phonetic_best_distance: usize,
+    phonetic_best_window_start: usize,
     inference_ms: u64,
     snapshot_pcm_ms: usize,
     recovered_keyword_end_seconds: Option<f32>,
@@ -740,10 +753,17 @@ const OWNER_VERIFICATION_SNAPSHOT_MS: [usize; 3] = [OWNER_VERIFICATION_START_MS,
 // incomplete/absent results stay eligible for KWS and later ladder retries.
 const LOCAL_CONFIRMATION_START_MS: usize = 800;
 const LOCAL_CONFIRMATION_START_BYTES: usize = LOCAL_CONFIRMATION_START_MS * 32;
-const LOCAL_CONFIRMATION_SNAPSHOT_MS: [usize; 6] = [
+// Keep the speculative verifier dense through the full phrase tail. The old
+// 1.8 -> 2.4 s gap left slow/quiet 0.8x utterances blind long enough to miss
+// the capsule latency target even though the same audio later verified. The
+// 1.6 s rung also starts as soon as the real 1.4 s pass normally releases the
+// helper; waiting until 1.75 s added ~90-150 ms of idle latency and pushed the
+// fixed product matrix above its 1 s p95 budget under real-device CPU timing.
+const LOCAL_CONFIRMATION_SNAPSHOT_MS: [usize; 7] = [
     LOCAL_CONFIRMATION_START_MS,
     1_400,
-    1_800,
+    1_600,
+    2_000,
     2_400,
     3_000,
     5_000,
@@ -780,25 +800,31 @@ const KWS_ABSENT_COUNT_MIN_POST_HIT_MS: usize = 1_000;
 /// as KeywordModel so an intermittently slow helper never makes wake feel
 /// unresponsive. Explicit Absent still rejects. Installed session 66 spent
 /// 297 ms here after KWS had already supplied the phrase and pushed capsule
-/// latency to 1,306 ms. Keep only a 100 ms grace; actor polling plus recording
-/// control/capsule dispatch then stays inside the 350 ms phrase-tail target.
-const KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 100;
+/// latency to 1,306 ms. Fixed-matrix evidence also showed that a new ~250 ms
+/// confirmation cannot finish inside the old 100 ms grace; waiting the full
+/// interval only moved common 1.91 s KWS hits to 2.01 s. Keep a 60 ms grace so
+/// actor polling plus recording-control/capsule dispatch remain inside both the
+/// phrase-tail and one-second start-to-capsule targets. Any already-completed
+/// explicit Absent remains authoritative.
+const KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 60;
 /// Explicit local Absent count before midstream hard-reject (blocks short
 /// prefix false wakes like "开始啥的"; one retry for noisy short clips).
 const KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2;
 /// Ordinary room speech can keep firmware VA sessions open for ~4.5 s. Limit
-/// the initial candidate to the 0.8/1.4/1.8 s ladder, then allow one focused
-/// confirmation after the first KWS rolling-window advance. The focused retry is
-/// important for real device captures whose ~1 s pre-roll destabilises the
-/// initial Paraformer windows, while one extra retry total keeps CPU work
-/// bounded. A later KWS hit always receives its full stage-2 confirmation.
-const LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT: u8 = 3;
+/// the initial candidate to the 0.8/1.4/1.6/2.0 s ladder, then allow exactly
+/// one focused confirmation in every later rolling window. Real device captures
+/// carry ~1 s pre-roll, so an older candidate-wide Absent cap permanently
+/// disabled recognition after the first few windows. Per-window work stays
+/// bounded, and a later KWS hit still receives its full stage-2 confirmation.
+const LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT: u8 = 4;
 /// After the initial ladder plus one focused retry, repeated explicit Absent is
 /// authoritative enough to skip the expensive terminal recall cascade. A
 /// timeout around spawn_blocking releases the BLE actor but cannot cancel the
 /// native KWS work, so running it for every ambient candidate causes seconds of
 /// hidden CPU contention and visible WebView/capsule stalls.
 const TERMINAL_OFFLINE_SKIP_ABSENT_COUNT: u8 = 4;
+const PHONETIC_NEAR_MAX_DISTANCE: usize = 1;
+const TERMINAL_INFLIGHT_CONFIRM_BUDGET_MS: u64 = 250;
 const MIN_TERMINAL_OFFLINE_PCM_BYTES: usize = 16_000 * 2 * 2;
 const TERMINAL_OFFLINE_RECALL_BUDGET_MS: u64 = 500;
 const WAKE_END_PAD_SECONDS: f32 = 0.12;
@@ -847,11 +873,13 @@ fn exploratory_local_confirmation_allowed(
     window_origin_bytes: usize,
     window_attempts: usize,
 ) -> bool {
-    keyword_model_hit
-        || absent_count < LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT
-        || (window_origin_bytes > 0
-            && absent_count == LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT
-            && window_attempts == 0)
+    if keyword_model_hit {
+        return true;
+    }
+    if window_origin_bytes == 0 {
+        return absent_count < LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT;
+    }
+    window_attempts == 0
 }
 
 #[cfg(target_os = "windows")]
@@ -930,9 +958,57 @@ fn kws_absent_counts_toward_reject(
     }
 }
 
-fn should_run_terminal_offline_recall(pcm_bytes: usize, local_absent_count: u8) -> bool {
+fn phonetic_near_phrase_evidence(
+    confirmation: &LocalWakeConfirmation,
+    phrase_chars: usize,
+) -> bool {
+    !confirmation.matched
+        && confirmation.phonetic_best_distance <= PHONETIC_NEAR_MAX_DISTANCE
+        && confirmation.transcript_chars >= phrase_chars.saturating_sub(1).max(1)
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalInflightLocalDecision {
+    AcceptLocal,
+    PreserveKwsFusion,
+    RecordAbsent,
+}
+
+#[cfg(target_os = "windows")]
+fn terminal_inflight_local_decision(
+    confirmation: &LocalWakeConfirmation,
+    task_has_keyword_model_hit: bool,
+    phrase_chars: usize,
+) -> TerminalInflightLocalDecision {
+    if confirmation.matched
+        && local_confirmation_can_activate(
+            task_has_keyword_model_hit,
+            confirmation.phrase_relation,
+        )
+    {
+        TerminalInflightLocalDecision::AcceptLocal
+    } else if confirmation.matched
+        || phonetic_near_phrase_evidence(confirmation, phrase_chars)
+    {
+        TerminalInflightLocalDecision::PreserveKwsFusion
+    } else {
+        TerminalInflightLocalDecision::RecordAbsent
+    }
+}
+
+fn should_run_terminal_offline_recall(
+    pcm_bytes: usize,
+    local_absent_count: u8,
+    local_kws_fusion_evidence: bool,
+) -> bool {
     pcm_bytes >= MIN_TERMINAL_OFFLINE_PCM_BYTES
-        && local_absent_count < TERMINAL_OFFLINE_SKIP_ABSENT_COUNT
+        && (local_kws_fusion_evidence
+            || local_absent_count < TERMINAL_OFFLINE_SKIP_ABSENT_COUNT)
+}
+
+fn terminal_inflight_confirmation_remaining_ms(elapsed_ms: u64) -> u64 {
+    TERMINAL_INFLIGHT_CONFIRM_BUDGET_MS.saturating_sub(elapsed_ms)
 }
 
 /// Bytes of candidate PCM to discard before ASR for an automatic wake accept.
@@ -1038,6 +1114,11 @@ fn pending_secondary_decision(
 }
 
 #[cfg(target_os = "windows")]
+fn effective_secondary_waited_ms(kws_waited_ms: u64, confirmation_attempt_ms: u64) -> u64 {
+    kws_waited_ms.max(confirmation_attempt_ms)
+}
+
+#[cfg(target_os = "windows")]
 fn local_absent_covers_keyword_endpoint(
     coverage: Option<LocalConfirmationCoverage>,
     keyword_stream_origin_bytes: usize,
@@ -1086,6 +1167,21 @@ fn completed_secondary_absent_is_authoritative(
 }
 
 #[cfg(target_os = "windows")]
+fn authoritative_local_absent_coverage(
+    relation: crate::wake_phrase::LocalPhraseRelation,
+    transcript_chars: usize,
+    phrase_chars: usize,
+    start_bytes: usize,
+    end_bytes: usize,
+) -> Option<LocalConfirmationCoverage> {
+    completed_secondary_absent_is_authoritative(relation, transcript_chars, phrase_chars)
+        .then_some(LocalConfirmationCoverage {
+            start_bytes,
+            end_bytes,
+        })
+}
+
+#[cfg(target_os = "windows")]
 fn run_local_wake_confirmation_once(
     pcm: &[u8],
     phrase: &str,
@@ -1100,6 +1196,9 @@ fn run_local_wake_confirmation_once(
         matched: result.matched,
         phrase_relation: result.phrase_relation,
         transcript_chars: result.transcript_chars,
+        phonetic_prefix_units: result.phonetic_prefix_units,
+        phonetic_best_distance: result.phonetic_best_distance,
+        phonetic_best_window_start: result.phonetic_best_window_start,
         inference_ms: result.inference_ms,
         snapshot_pcm_ms,
         recovered_keyword_end_seconds: None,
@@ -1111,20 +1210,20 @@ fn spawn_local_wake_confirmation(
     _inner: &Arc<Inner>,
     pcm: Vec<u8>,
     phrase: String,
-    recover_keyword_boundary: bool,
+    exploratory_local_only: bool,
 ) -> tauri::async_runtime::JoinHandle<Result<LocalWakeConfirmation, String>> {
     tauri::async_runtime::spawn_blocking(move || {
         let started = Instant::now();
         // Exploratory (no KWS yet) keeps the provided snapshot as-is.
         // KWS path: primary is the LST-WAKE-009 5 s tail; on Absent, retry a
         // short phrase-focus tail before counting hard-reject evidence.
-        let primary = if recover_keyword_boundary {
+        let primary = if exploratory_local_only {
             pcm.clone()
         } else {
             local_confirmation_pcm(&pcm, true)
         };
         let mut result = run_local_wake_confirmation_once(&primary, &phrase)?;
-        if !recover_keyword_boundary && !result.matched {
+        if !exploratory_local_only && !result.matched {
             let focus = kws_phrase_focus_pcm(&pcm);
             // Skip duplicate work when primary already was the short focus tail.
             if focus.len() < primary.len() {
@@ -1136,22 +1235,13 @@ fn spawn_local_wake_confirmation(
                 }
             }
         }
-        let recovered_keyword_end_seconds = if recover_keyword_boundary
-            && result.matched
-            && matches!(
-                result.phrase_relation,
-                crate::wake_phrase::LocalPhraseRelation::ExactStart
-                    | crate::wake_phrase::LocalPhraseRelation::PhoneticStart
-            )
-            && result.transcript_chars <= phrase.chars().count()
-        {
-            crate::wake_phrase::detect(&pcm, &phrase)
-                .map_err(|err| format!("recover local wake boundary: {err}"))?
-                .map(|found| found.end_seconds)
-        } else {
-            None
-        };
-        result.recovered_keyword_end_seconds = recovered_keyword_end_seconds;
+        // Do not synchronously run a second KWS pass after local ASR has already
+        // confirmed the phrase. Installed session 212 proved that redundant
+        // boundary-only pass can contend with the live spotter for ~2.9 s and
+        // turn a completed 0.8 s confirmation into a 5.2 s visible wake. The
+        // shared boundary policy already derives a bounded phrase endpoint from
+        // snapshot_pcm_ms for start-aligned local transcripts.
+        result.recovered_keyword_end_seconds = None;
         result.inference_ms = result
             .inference_ms
             .max(started.elapsed().as_millis() as u64);

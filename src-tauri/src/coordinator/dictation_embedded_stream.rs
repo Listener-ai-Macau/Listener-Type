@@ -492,6 +492,8 @@ impl EmbeddedStreamingDictation {
                 #[cfg(target_os = "windows")]
                 local_confirmation_task: None,
                 #[cfg(target_os = "windows")]
+                local_confirmation_task_started_at: None,
+                #[cfg(target_os = "windows")]
                 local_confirmation_window_origin_bytes: 0,
                 #[cfg(target_os = "windows")]
                 local_confirmation_task_origin_bytes: 0,
@@ -502,6 +504,7 @@ impl EmbeddedStreamingDictation {
                 kws_prompted_local_confirm: false,
                 kws_local_absent_count: 0,
                 local_absent_count: 0,
+                local_kws_fusion_evidence: false,
                 #[cfg(target_os = "windows")]
                 local_absent_coverage: None,
                 kws_first_hit_at: None,
@@ -781,6 +784,81 @@ impl EmbeddedStreamingDictation {
                     }
                 }
             }
+            // STOP can arrive a few milliseconds after the final rolling window
+            // schedules its local confirmation. Dropping that already-running
+            // task made late wake phrases deterministically lose their last
+            // evidence, while the blocking helper continued in the background.
+            // Wait only the remainder of the fixed budget already charged from
+            // task start; do not launch any additional work here.
+            #[cfg(target_os = "windows")]
+            let mut terminal_completed_local_confirmation = None;
+            #[cfg(target_os = "windows")]
+            if let Some(task) = candidate.local_confirmation_task.take() {
+                let task_origin_bytes = candidate.local_confirmation_task_origin_bytes;
+                let task_has_keyword_model_hit =
+                    candidate.local_confirmation_task_has_keyword_model_hit;
+                let elapsed_ms = candidate
+                    .local_confirmation_task_started_at
+                    .take()
+                    .map(|started| started.elapsed().as_millis() as u64)
+                    .unwrap_or(0);
+                let remaining_ms = terminal_inflight_confirmation_remaining_ms(elapsed_ms);
+                let already_finished = task.inner().is_finished();
+                log::info!(
+                    "[wake-phrase] terminal joining in-flight local confirmation embedded_session_id={} elapsed_ms={} remaining_ms={} already_finished={} window_origin_pcm_ms={} kws_hit={}",
+                    embedded_session_id,
+                    elapsed_ms,
+                    remaining_ms,
+                    already_finished,
+                    task_origin_bytes / 32,
+                    task_has_keyword_model_hit
+                );
+                let outcome = if already_finished {
+                    Some(task.await)
+                } else if remaining_ms == 0 {
+                    None
+                } else {
+                    match tokio::time::timeout(Duration::from_millis(remaining_ms), task).await {
+                        Ok(result) => Some(result),
+                        Err(_) => None,
+                    }
+                };
+                match outcome {
+                    Some(Ok(Ok(result))) => {
+                        log::info!(
+                            "[wake-phrase] terminal in-flight local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} phonetic_prefix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={} window_origin_pcm_ms={} kws_hit={}",
+                            embedded_session_id,
+                            result.matched,
+                            result.phrase_relation,
+                            result.snapshot_pcm_ms,
+                            result.transcript_chars,
+                            result.phonetic_prefix_units,
+                            result.phonetic_best_distance,
+                            result.phonetic_best_window_start,
+                            result.inference_ms,
+                            task_origin_bytes / 32,
+                            task_has_keyword_model_hit
+                        );
+                        terminal_completed_local_confirmation = Some((
+                            result,
+                            task_origin_bytes,
+                            task_has_keyword_model_hit,
+                        ));
+                    }
+                    Some(Ok(Err(err))) => log::info!(
+                        "[wake-phrase] terminal in-flight local confirmation unavailable embedded_session_id={embedded_session_id}: {err}"
+                    ),
+                    Some(Err(err)) => log::warn!(
+                        "[wake-phrase] terminal in-flight local confirmation task failed embedded_session_id={embedded_session_id}: {err}"
+                    ),
+                    None => log::info!(
+                        "[wake-phrase] terminal in-flight local confirmation exceeded remaining budget embedded_session_id={} elapsed_ms={} remaining_ms={}",
+                        embedded_session_id,
+                        elapsed_ms,
+                        remaining_ms
+                    ),
+                }
+            }
             let Some(mut detector) = candidate.wake_detector.take() else {
                 if let Some(sid) = take_early_capsule_session_id(&mut candidate) {
                     dismiss_early_wake_recording_capsule(inner, sid);
@@ -826,6 +904,10 @@ impl EmbeddedStreamingDictation {
             candidate.kws_total_ms = candidate.kws_total_ms.saturating_add(final_kws_ms);
             let mut phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
             let mut local_confirmation_ms = 0u64;
+            #[cfg(target_os = "windows")]
+            if let Some((result, _, _)) = terminal_completed_local_confirmation.as_ref() {
+                local_confirmation_ms = local_confirmation_ms.saturating_add(result.inference_ms);
+            }
             let wake_match = match wake_match.map(|found| {
                 offset_streaming_wake_match(found, stream_origin_bytes)
             }) {
@@ -844,12 +926,15 @@ impl EmbeddedStreamingDictation {
                                 local_confirmation_ms = local_confirmation_ms
                                     .saturating_add(result.inference_ms);
                                 log::info!(
-                                    "[wake-phrase] terminal KWS local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} inference_ms={}",
+                                    "[wake-phrase] terminal KWS local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} phonetic_prefix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={}",
                                     embedded_session_id,
                                     result.matched,
                                     result.phrase_relation,
                                     result.snapshot_pcm_ms,
                                     result.transcript_chars,
+                                    result.phonetic_prefix_units,
+                                    result.phonetic_best_distance,
+                                    result.phonetic_best_window_start,
                                     result.inference_ms
                                 );
                                 if result.matched {
@@ -939,9 +1024,63 @@ impl EmbeddedStreamingDictation {
                     // Streaming KWS missed — still try offline full-buffer cascade.
                     // Do not skip on midstream local Absent: that dropped last-chance
                     // recall when streaming never hit (owner quiet/device VA).
-                    if !should_run_terminal_offline_recall(
+                    #[cfg(target_os = "windows")]
+                    let terminal_local_match = terminal_completed_local_confirmation
+                        .take()
+                        .and_then(|(result, task_origin_bytes, task_has_keyword_model_hit)| {
+                            match terminal_inflight_local_decision(
+                                &result,
+                                task_has_keyword_model_hit,
+                                phrase.chars().count(),
+                            ) {
+                                TerminalInflightLocalDecision::AcceptLocal => {
+                                    let refined_end = refined_wake_end_seconds(
+                                        0.0,
+                                        &result,
+                                        phrase.chars().count(),
+                                    );
+                                    let refined_end = if task_has_keyword_model_hit {
+                                        refined_end
+                                    } else {
+                                        refined_end + task_origin_bytes as f32 / 32_000.0
+                                    };
+                                    phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                                    Some(crate::wake_phrase::Match {
+                                        end_seconds: refined_end,
+                                        matched_keyword: None,
+                                    })
+                                }
+                                TerminalInflightLocalDecision::PreserveKwsFusion => {
+                                    candidate.local_kws_fusion_evidence = true;
+                                    None
+                                }
+                                TerminalInflightLocalDecision::RecordAbsent => {
+                                    candidate.local_absent_count =
+                                        candidate.local_absent_count.saturating_add(1);
+                                    if let Some(coverage) = authoritative_local_absent_coverage(
+                                        result.phrase_relation,
+                                        result.transcript_chars,
+                                        phrase.chars().count(),
+                                        task_origin_bytes,
+                                        task_origin_bytes.saturating_add(
+                                            result.snapshot_pcm_ms.saturating_mul(32),
+                                        ),
+                                    ) {
+                                        candidate.local_absent_coverage = Some(coverage);
+                                    }
+                                    None
+                                }
+                            }
+                        });
+                    #[cfg(not(target_os = "windows"))]
+                    let terminal_local_match: Option<crate::wake_phrase::Match> = None;
+
+                    if terminal_local_match.is_some() {
+                        terminal_local_match
+                    } else if !should_run_terminal_offline_recall(
                         candidate.pcm.len(),
                         candidate.local_absent_count,
+                        candidate.local_kws_fusion_evidence,
                     ) {
                         let too_short =
                             candidate.pcm.len() < MIN_TERMINAL_OFFLINE_PCM_BYTES;
@@ -1009,16 +1148,34 @@ impl EmbeddedStreamingDictation {
                                             local_confirmation_ms = local_confirmation_ms
                                                 .saturating_add(result.inference_ms);
                                             log::info!(
-                                                "[wake-phrase] terminal offline→local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} inference_ms={}",
+                                                "[wake-phrase] terminal offline→local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} phonetic_prefix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={}",
                                                 embedded_session_id,
                                                 result.matched,
                                                 result.phrase_relation,
                                                 result.snapshot_pcm_ms,
                                                 result.transcript_chars,
+                                                result.phonetic_prefix_units,
+                                                result.phonetic_best_distance,
+                                                result.phonetic_best_window_start,
                                                 result.inference_ms
                                             );
-                                            if result.matched {
-                                                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                                            let phonetic_near =
+                                                phonetic_near_phrase_evidence(
+                                                    &result,
+                                                    phrase.chars().count(),
+                                                );
+                                            if result.matched || phonetic_near {
+                                                phrase_signal = if result.matched {
+                                                    denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript
+                                                } else {
+                                                    log::info!(
+                                                        "[wake-phrase] terminal offline KWS fused with one-unit phonetic near-match embedded_session_id={} phonetic_best_distance={} transcript_chars={}",
+                                                        embedded_session_id,
+                                                        result.phonetic_best_distance,
+                                                        result.transcript_chars
+                                                    );
+                                                    denzic_voice_activation_v1_core::PhraseSignal::KeywordModel
+                                                };
                                                 Some(found)
                                             } else {
                                                 // Offline cascade is a weak stage-1; Absent rejects.
@@ -1073,12 +1230,15 @@ impl EmbeddedStreamingDictation {
                                                 local_confirmation_ms = local_confirmation_ms
                                                     .saturating_add(result.inference_ms);
                                                 log::info!(
-                                                    "[wake-phrase] terminal local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} inference_ms={}",
+                                                    "[wake-phrase] terminal local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} phonetic_prefix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={}",
                                                     embedded_session_id,
                                                     result.matched,
                                                     result.phrase_relation,
                                                     result.snapshot_pcm_ms,
                                                     result.transcript_chars,
+                                                    result.phonetic_prefix_units,
+                                                    result.phonetic_best_distance,
+                                                    result.phonetic_best_window_start,
                                                     result.inference_ms
                                                 );
                                                 if result.matched
@@ -1671,13 +1831,16 @@ impl EmbeddedStreamingDictation {
                                     task_origin_bytes;
                                 candidate.local_confirmation_task_has_keyword_model_hit =
                                     kws_hit.is_some();
-                                candidate.local_confirmation_task =
-                                    Some(spawn_local_wake_confirmation(
+                                candidate.local_confirmation_task_started_at =
+                                    Some(Instant::now());
+                                candidate.local_confirmation_task = Some(
+                                    spawn_local_wake_confirmation(
                                         inner,
                                         confirmation_pcm,
                                         phrase.clone(),
                                         kws_hit.is_none(),
-                                    ));
+                                    ),
+                                );
                                 log::info!(
                                         "[wake-phrase] stage2 local confirm started embedded_session_id={} attempt={} threshold_pcm_ms={} snapshot_pcm_ms={} window_origin_pcm_ms={} window_pcm_ms={} kws_hit={} kws_immediate={} kws_retry={}",
                                         embedded_session_id,
@@ -1697,7 +1860,9 @@ impl EmbeddedStreamingDictation {
                             .as_ref()
                             .is_some_and(|task| task.inner().is_finished())
                         {
-                            candidate.local_confirmation_task.take().map(|task| {
+                            let task = candidate.local_confirmation_task.take();
+                            candidate.local_confirmation_task_started_at = None;
+                            task.map(|task| {
                                 (
                                     task,
                                     candidate.local_confirmation_task_origin_bytes,
@@ -1734,12 +1899,15 @@ impl EmbeddedStreamingDictation {
                             Ok(Ok(result)) => {
                                 local_confirmation_ms = result.inference_ms;
                                 log::info!(
-                                        "[wake-phrase] stage2 local confirm finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} inference_ms={} window_origin_pcm_ms={} kws_hit={}",
+                                        "[wake-phrase] stage2 local confirm finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} phonetic_prefix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={} window_origin_pcm_ms={} kws_hit={}",
                                         embedded_session_id,
                                         result.matched,
                                         result.phrase_relation,
                                         result.snapshot_pcm_ms,
                                         result.transcript_chars,
+                                        result.phonetic_prefix_units,
+                                        result.phonetic_best_distance,
+                                        result.phonetic_best_window_start,
                                         result.inference_ms,
                                         task_origin_bytes / 32,
                                         task_has_keyword_model_hit
@@ -1750,6 +1918,9 @@ impl EmbeddedStreamingDictation {
                                         result.phrase_relation,
                                     );
                                 if result.matched && !fusion_matched {
+                                    if let Some(candidate) = self.speaker_candidate.as_mut() {
+                                        candidate.local_kws_fusion_evidence = true;
+                                    }
                                     log::info!(
                                         "[wake-phrase] local-only PresentLater held for stage1 embedded_session_id={} phrase_relation={:?}",
                                         embedded_session_id,
@@ -1782,6 +1953,16 @@ impl EmbeddedStreamingDictation {
                                             .and_then(|found| found.matched_keyword),
                                     })
                                 } else if !result.matched {
+                                    let phonetic_near = phonetic_near_phrase_evidence(
+                                        &result,
+                                        phrase.chars().count(),
+                                    );
+                                    let authoritative_full_absent =
+                                        completed_secondary_absent_is_authoritative(
+                                            result.phrase_relation,
+                                            result.transcript_chars,
+                                            phrase.chars().count(),
+                                        );
                                     let (local_absent_count, kws_absent_count, counted_kws_absent) = {
                                         let candidate = self
                                             .speaker_candidate
@@ -1789,21 +1970,20 @@ impl EmbeddedStreamingDictation {
                                             .ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
                                         candidate.local_absent_count =
                                             candidate.local_absent_count.saturating_add(1);
-                                        candidate.local_absent_coverage =
-                                            Some(LocalConfirmationCoverage {
-                                                start_bytes: task_origin_bytes,
-                                                end_bytes: task_origin_bytes.saturating_add(
-                                                    result.snapshot_pcm_ms.saturating_mul(32),
-                                                ),
-                                            });
+                                        candidate.local_kws_fusion_evidence |= phonetic_near;
+                                        if let Some(coverage) = authoritative_local_absent_coverage(
+                                            result.phrase_relation,
+                                            result.transcript_chars,
+                                            phrase.chars().count(),
+                                            task_origin_bytes,
+                                            task_origin_bytes.saturating_add(
+                                                result.snapshot_pcm_ms.saturating_mul(32),
+                                            ),
+                                        ) {
+                                            candidate.local_absent_coverage = Some(coverage);
+                                        }
                                         let mut counted_kws_absent = false;
                                         if task_has_keyword_model_hit {
-                                            let authoritative_full_absent =
-                                                completed_secondary_absent_is_authoritative(
-                                                    result.phrase_relation,
-                                                    result.transcript_chars,
-                                                    phrase.chars().count(),
-                                                );
                                             if authoritative_full_absent {
                                                 candidate.kws_local_absent_count = candidate
                                                     .kws_local_absent_count
@@ -1847,10 +2027,11 @@ impl EmbeddedStreamingDictation {
                                             .map(|c| c.pcm.len() / 32)
                                             .unwrap_or(0);
                                         log::info!(
-                                            "[wake-phrase] local-only Absent recorded embedded_session_id={} count={} pcm_ms={}",
+                                            "[wake-phrase] local-only Absent recorded embedded_session_id={} count={} pcm_ms={} authoritative={}",
                                             embedded_session_id,
                                             local_absent_count,
-                                            pcm_ms
+                                            pcm_ms,
+                                            authoritative_full_absent
                                         );
                                         // Do NOT midstream-abort on exploratory Absents.
                                         // Owner evidence 2026-07-30: real 「开始录音」 can
@@ -1960,12 +2141,22 @@ impl EmbeddedStreamingDictation {
                         }
                         }
                     } else if let Some(kws) = kws_hit {
-                        let waited_ms = self
+                        let kws_waited_ms = self
                             .speaker_candidate
                             .as_ref()
                             .and_then(|c| c.kws_first_hit_at)
                             .map(|t| t.elapsed().as_millis() as u64)
                             .unwrap_or(0);
+                        let confirmation_attempt_ms = self
+                            .speaker_candidate
+                            .as_ref()
+                            .and_then(|c| c.local_confirmation_task_started_at)
+                            .map(|t| t.elapsed().as_millis() as u64)
+                            .unwrap_or(0);
+                        let waited_ms = effective_secondary_waited_ms(
+                            kws_waited_ms,
+                            confirmation_attempt_ms,
+                        );
                         let explicit_absent_count = self
                             .speaker_candidate
                             .as_ref()
@@ -1982,18 +2173,22 @@ impl EmbeddedStreamingDictation {
                                 phrase_signal =
                                     denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
                                 log::info!(
-                                    "[wake-phrase] stage2 timeout fail-open KeywordModel embedded_session_id={} waited_ms={} budget_ms={}",
+                                    "[wake-phrase] stage2 timeout fail-open KeywordModel embedded_session_id={} waited_ms={} kws_waited_ms={} secondary_attempt_ms={} budget_ms={}",
                                     embedded_session_id,
                                     waited_ms,
+                                    kws_waited_ms,
+                                    confirmation_attempt_ms,
                                     KWS_SECONDARY_CONFIRM_BUDGET_MS
                                 );
                                 Some(kws)
                             }
                             PendingSecondaryDecision::HoldAfterExplicitAbsent => {
                                 log::info!(
-                                    "[wake-phrase] stage2 timeout held after explicit Absent embedded_session_id={} waited_ms={} budget_ms={} absent_count={}",
+                                    "[wake-phrase] stage2 timeout held after explicit Absent embedded_session_id={} waited_ms={} kws_waited_ms={} secondary_attempt_ms={} budget_ms={} absent_count={}",
                                     embedded_session_id,
                                     waited_ms,
+                                    kws_waited_ms,
+                                    confirmation_attempt_ms,
                                     KWS_SECONDARY_CONFIRM_BUDGET_MS,
                                     explicit_absent_count
                                 );
@@ -2173,8 +2368,8 @@ impl EmbeddedStreamingDictation {
         let latency = denzic_observability_v1_core::assess_duration_ms(
             capsule_request_ms,
             denzic_observability_v1_core::PerformanceBudget {
-                target_ms: 1_200,
-                ceiling_ms: 1_500,
+                target_ms: 1_000,
+                ceiling_ms: 1_200,
             },
         );
         let latency_target_pass = latency.target_pass;
@@ -2232,7 +2427,7 @@ impl EmbeddedStreamingDictation {
             }
         };
         log::info!(
-            "[wake-phrase] live automatic session activated and released embedded_session_id={} phrase={} phrase_signal={:?} wake_end_s={:.3} post_wake_pcm_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} gate_total_ms={} recording_control_ms={} wake_to_capsule_request_ms={} latency_target_ms=1200 latency_target_pass={} latency_ceiling_ms=1500 latency_ceiling_pass={} phrase_tail_to_capsule_ms={} phrase_tail_target_ms=350 phrase_tail_target_pass={} phrase_tail_ceiling_ms=500 phrase_tail_ceiling_pass={}",
+            "[wake-phrase] live automatic session activated and released embedded_session_id={} phrase={} phrase_signal={:?} wake_end_s={:.3} post_wake_pcm_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} gate_total_ms={} recording_control_ms={} wake_to_capsule_request_ms={} latency_target_ms=1000 latency_target_pass={} latency_ceiling_ms=1200 latency_ceiling_pass={} phrase_tail_to_capsule_ms={} phrase_tail_target_ms=350 phrase_tail_target_pass={} phrase_tail_ceiling_ms=500 phrase_tail_ceiling_pass={}",
             embedded_session_id,
             phrase,
             phrase_signal,
