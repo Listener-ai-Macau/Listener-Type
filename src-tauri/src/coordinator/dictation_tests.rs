@@ -4161,7 +4161,11 @@ fn windows_volcengine_session_refreshes_external_credential_updates_before_readi
 
 #[test]
 fn every_automatic_wake_path_seeds_session_speaker_tracking() {
-    let body = include_str!("dictation_embedded_stream.rs");
+    let body = concat!(
+        include_str!("dictation_embedded_stream_session.rs"),
+        "\n",
+        include_str!("dictation_embedded_stream.rs")
+    );
     assert_eq!(
         body.matches("start_local_speaker_tracking(").count(),
         3,
