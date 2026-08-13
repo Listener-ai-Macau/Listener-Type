@@ -1138,6 +1138,7 @@ struct EmbeddedAudioDictationSession {
     proactive_stop_dispatched: bool,
 }
 
+include!("dictation_wake_diagnostics.rs");
 include!("dictation_wake_polish.rs");
 
 include!("dictation_session.rs");
@@ -1148,6 +1149,7 @@ fn embedded_audio_file_session_id() -> u32 {
     (chrono::Utc::now().timestamp_millis() as u64 & u32::MAX as u64) as u32
 }
 
+include!("dictation_embedded_stream_session.rs");
 include!("dictation_embedded_stream.rs");
 include!("dictation_embedded_stream_completion.rs");
 
