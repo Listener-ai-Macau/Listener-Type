@@ -299,7 +299,15 @@ mod platform {
     const MAX_SUPPLEMENTAL_TEMPLATES: usize = 7;
     const SAMPLE_RATE: i32 = 16_000;
     const VERIFICATION_MIN_SPEECH_MS: usize = 1_000;
-    const ENROLLMENT_SECONDS: u64 = 14;
+    // Xiaomi-style guided enrollment: three independent wake-phrase slots,
+    // followed by one longer free-speech slot. Keep one continuous device
+    // capture so the guidance does not introduce BLE start/stop races, but make
+    // the model banks follow the same time boundaries shown to the owner.
+    const ENROLLMENT_WAKE_STEP_SECONDS: u64 = 3;
+    const ENROLLMENT_WAKE_STEPS: u64 = 3;
+    const ENROLLMENT_WAKE_SECONDS: u64 = ENROLLMENT_WAKE_STEP_SECONDS * ENROLLMENT_WAKE_STEPS;
+    const ENROLLMENT_SESSION_MIN_SECONDS: u64 = 3;
+    const ENROLLMENT_SECONDS: u64 = 15;
     const ENROLLMENT_MIN_SECONDS: usize = 5;
     const ENROLLMENT_FRAME_MS: usize = 100;
     const ENROLLMENT_MIN_ACTIVE_FRAMES: usize = 18;
@@ -307,6 +315,7 @@ mod platform {
     const ENROLLMENT_TEMPLATE_WINDOW_MS: usize = 1_000;
     const DUAL_TEMPLATE_WINDOWS_PER_BANK: usize = 3;
     const DUAL_TEMPLATE_MIN_ACTIVE_FRAMES_PER_WINDOW: usize = 10;
+    const ENROLLMENT_WAKE_MIN_ACTIVE_FRAMES_PER_STEP: usize = 6;
     // Product sensitivity: platform DEFAULT_SCORE_MILLI is 500 (0.50). Real-owner
     // wake in mild noise often scores ~0.43–0.55; 0.50 cut too many true hits.
     // Keep below same-speaker unit-test floor and well above typical non-owner.
@@ -678,6 +687,53 @@ mod platform {
         session: Vec<Vec<u8>>,
     }
 
+    fn enrollment_capture_banks(pcm: &[u8]) -> Result<(&[u8], &[u8]), String> {
+        let bytes_per_second = SAMPLE_RATE as usize * 2;
+        let minimum_bytes =
+            bytes_per_second * (ENROLLMENT_WAKE_SECONDS + ENROLLMENT_SESSION_MIN_SECONDS) as usize;
+        if pcm.len() < minimum_bytes {
+            return Err(
+                "声纹录制提前结束。请按四个步骤完成三次唤醒词和最后一段自然语音。".to_string(),
+            );
+        }
+        let split = (bytes_per_second * ENROLLMENT_WAKE_SECONDS as usize).min(pcm.len()) & !1usize;
+        Ok((&pcm[..split], &pcm[split..]))
+    }
+
+    fn enrollment_wake_step_slices(wake_pcm: &[u8]) -> Result<Vec<&[u8]>, String> {
+        let step_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_WAKE_STEP_SECONDS as usize;
+        let required_bytes = step_bytes * ENROLLMENT_WAKE_STEPS as usize;
+        if wake_pcm.len() < required_bytes {
+            return Err("三次唤醒词录制不完整，请重新录制。".to_string());
+        }
+        Ok((0..ENROLLMENT_WAKE_STEPS as usize)
+            .map(|index| {
+                let start = index * step_bytes;
+                &wake_pcm[start..start + step_bytes]
+            })
+            .collect())
+    }
+
+    fn quality_wake_step_window(pcm: &[u8], step: usize) -> Result<Vec<u8>, String> {
+        let frame_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_FRAME_MS / 1000;
+        let compacted = compact_active_speech_frames(pcm, frame_bytes)
+            .map_err(|_| format!("第 {step} 次没有检测到清晰唤醒词，请靠近设备重新录制。"))?;
+        let active_frames = compacted.len() / frame_bytes;
+        if active_frames < ENROLLMENT_WAKE_MIN_ACTIVE_FRAMES_PER_STEP {
+            return Err(format!(
+                "第 {step} 次唤醒词太短，请自然、完整地说出唤醒词。"
+            ));
+        }
+
+        let window_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_TEMPLATE_WINDOW_MS / 1000;
+        let mut window = Vec::with_capacity(window_bytes);
+        while window.len() < window_bytes {
+            let remaining = window_bytes - window.len();
+            window.extend_from_slice(&compacted[..compacted.len().min(remaining)]);
+        }
+        Ok(window)
+    }
+
     fn compact_active_speech_frames(pcm: &[u8], frame_bytes: usize) -> Result<Vec<u8>, String> {
         let (_, _, _, _, _, active_threshold) = active_speech_bounds(pcm, frame_bytes, 20.0)?;
         let rms = frame_rms(pcm, frame_bytes);
@@ -718,24 +774,14 @@ mod platform {
     }
 
     fn enrollment_template_windows(pcm: &[u8]) -> Result<EnrollmentTemplateWindows, String> {
-        let speech = enrollment_speech_window(pcm)?;
-        let minimum_dual_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_MIN_SECONDS;
-        if speech.len() < minimum_dual_bytes {
-            return Err(
-                "检测到的连续人声不足 5 秒。请在倒计时内先说三遍唤醒词，再连续说一句至少 3 秒的自然话，中间可以正常停顿。"
-                    .to_string(),
-            );
-        }
-
-        // Enrollment prompt orders fixed phrase first and free speech second.
-        // Give each bank 55% of the trimmed capture, with a small overlap around
-        // the transition so normal pauses do not create a dead window.
-        let split = speech.len() / 2 & !1usize;
-        let overlap = speech.len() / 20 & !1usize;
-        let wake_end = split.saturating_add(overlap).min(speech.len()) & !1usize;
-        let session_start = split.saturating_sub(overlap) & !1usize;
-        let wake = quality_template_windows(&speech[..wake_end], "唤醒词")?;
-        let session = quality_template_windows(&speech[session_start..], "自然语音")?;
+        enrollment_speech_window(pcm)?;
+        let (wake_pcm, session_pcm) = enrollment_capture_banks(pcm)?;
+        let wake = enrollment_wake_step_slices(wake_pcm)?
+            .into_iter()
+            .enumerate()
+            .map(|(index, step_pcm)| quality_wake_step_window(step_pcm, index + 1))
+            .collect::<Result<Vec<_>, _>>()?;
+        let session = quality_template_windows(session_pcm, "自然语音")?;
         Ok(EnrollmentTemplateWindows { wake, session })
     }
 
@@ -790,11 +836,7 @@ mod platform {
         let frame_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_FRAME_MS / 1_000;
         let (_, _, active_frames, peak_rms, reference_rms, _) =
             active_speech_bounds(pcm, frame_bytes, 20.0)?;
-        Ok((
-            active_frames * ENROLLMENT_FRAME_MS,
-            peak_rms,
-            reference_rms,
-        ))
+        Ok((active_frames * ENROLLMENT_FRAME_MS, peak_rms, reference_rms))
     }
 
     fn verification_template_windows(pcm: &[u8]) -> Result<Vec<&[u8]>, String> {
@@ -1341,8 +1383,7 @@ mod platform {
             // the Preparing/Armed phase must not shorten the owner sample.
             std::thread::spawn(|| {
                 std::thread::sleep(Duration::from_secs(ENROLLMENT_SECONDS));
-                let capture_still_active =
-                    enrollment_capture_needs_host_stop(STATE.lock().capture);
+                let capture_still_active = enrollment_capture_needs_host_stop(STATE.lock().capture);
                 if !capture_still_active {
                     log::info!(
                         "[speaker-verification] enrollment stop timer skipped because device session already completed"
@@ -1387,7 +1428,16 @@ mod platform {
             let windows = enrollment_template_windows(pcm)?;
             // Reject silence/short speech before invoking KWS, then validate the
             // phrase before persisting either template bank.
-            crate::wake_phrase::calibrate(pcm, &phrase)?;
+            let (wake_pcm, _) = enrollment_capture_banks(pcm)?;
+            for (index, step_pcm) in enrollment_wake_step_slices(wake_pcm)?.iter().enumerate() {
+                crate::wake_phrase::calibrate(step_pcm, &phrase).map_err(|_| {
+                    format!(
+                        "第 {} 次没有识别到“{}”，请按每一步提示清晰重录。",
+                        index + 1,
+                        phrase
+                    )
+                })?;
+            }
             let wake_embeddings = windows
                 .wake
                 .iter()
@@ -1787,9 +1837,8 @@ mod platform {
         #[test]
         fn enrollment_builds_bounded_long_and_short_owner_templates() {
             let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
-            let mut samples = vec![0i16; frame_samples * 5];
-            samples.extend(vec![800i16; frame_samples * 80]);
-            samples.extend(vec![0i16; frame_samples * 5]);
+            let mut samples = vec![800i16; frame_samples * 90];
+            samples.extend(vec![-900i16; frame_samples * 60]);
             let pcm = samples
                 .iter()
                 .flat_map(|sample| sample.to_le_bytes())
@@ -1810,15 +1859,26 @@ mod platform {
         #[test]
         fn enrollment_compacts_normal_pauses_before_dual_bank_windows() {
             let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
+            // Three independent 3-second wake slots, each with natural pauses.
             let mut samples = vec![0i16; frame_samples * 5];
             samples.extend(vec![800i16; frame_samples * 10]);
-            samples.extend(vec![0i16; frame_samples * 3]);
+            samples.extend(vec![0i16; frame_samples * 15]);
+            samples.extend(vec![0i16; frame_samples * 10]);
             samples.extend(vec![-900i16; frame_samples * 10]);
+            samples.extend(vec![0i16; frame_samples * 10]);
             samples.extend(vec![0i16; frame_samples * 5]);
             samples.extend(vec![700i16; frame_samples * 10]);
+            samples.extend(vec![0i16; frame_samples * 15]);
+            // Free-speech slot: normal pauses are compacted before templates.
             samples.extend(vec![0i16; frame_samples * 5]);
             samples.extend(vec![-750i16; frame_samples * 10]);
-            samples.extend(vec![0i16; frame_samples * 10]);
+            samples.extend(vec![0i16; frame_samples * 5]);
+            samples.extend(vec![850i16; frame_samples * 10]);
+            samples.extend(vec![0i16; frame_samples * 5]);
+            samples.extend(vec![-800i16; frame_samples * 10]);
+            samples.extend(vec![0i16; frame_samples * 5]);
+            samples.extend(vec![750i16; frame_samples * 10]);
+            samples.extend(vec![0i16; frame_samples * 5]);
             let pcm = samples
                 .iter()
                 .flat_map(|sample| sample.to_le_bytes())
@@ -1832,6 +1892,44 @@ mod platform {
                 .iter()
                 .chain(&windows.session)
                 .all(|window| window.len() >= VERIFICATION_MIN_SPEECH_MS * 32));
+        }
+
+        #[test]
+        fn enrollment_template_banks_follow_the_four_step_prompt_boundary() {
+            let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
+            let mut samples = vec![800i16; frame_samples * 90];
+            samples.extend(vec![-900i16; frame_samples * 60]);
+            let pcm = samples
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>();
+
+            let windows = enrollment_template_windows(&pcm).expect("four-step enrollment");
+            assert!(windows
+                .wake
+                .iter()
+                .all(|window| i16::from_le_bytes([window[0], window[1]]) > 0));
+            assert!(windows
+                .session
+                .iter()
+                .all(|window| i16::from_le_bytes([window[0], window[1]]) < 0));
+        }
+
+        #[test]
+        fn enrollment_rejects_a_missing_wake_phrase_step() {
+            let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
+            let mut samples = vec![800i16; frame_samples * 30];
+            samples.extend(vec![0i16; frame_samples * 30]);
+            samples.extend(vec![-900i16; frame_samples * 30]);
+            samples.extend(vec![750i16; frame_samples * 60]);
+            let pcm = samples
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>();
+
+            let error = enrollment_template_windows(&pcm)
+                .expect_err("every displayed wake step must provide its own sample");
+            assert!(error.contains("第 2 次"), "unexpected error: {error}");
         }
 
         #[test]

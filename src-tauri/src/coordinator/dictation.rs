@@ -57,6 +57,12 @@ const EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT: Duration = Duration::from_millis(300
 // not lengthen auto-end.
 const EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS: u64 = 1_000;
 const EMBEDDED_TARGET_SPEAKER_INCOMPLETE_BODY_END_TIMEOUT_MS: u64 = 1_500;
+// A wake-derived voice profile can temporarily classify the continuing owner
+// as Uncertain. Do not turn that uncertainty into a 1s hard stop: allow one
+// bounded extra second for a paused owner to resume. Confirmed NonTarget speech
+// keeps the normal endpoint so another person cannot hold recording open.
+const EMBEDDED_TARGET_SPEAKER_UNCERTAIN_TAIL_END_TIMEOUT_MS: u64 = 2_000;
+const EMBEDDED_TARGET_SPEAKER_SEMANTIC_CONTINUATION_END_TIMEOUT_MS: u64 = 2_000;
 const EMBEDDED_TARGET_SPEAKER_SHORT_BODY_END_TIMEOUT_MS: u64 = 2_500;
 // Spoken-content length at/under this is treated as "just started body".
 const EMBEDDED_SHORT_BODY_SPOKEN_CHARS: usize = 4;
@@ -92,6 +98,12 @@ fn preview_spoken_char_count(preview: Option<&str>) -> usize {
 /// land (intermittent "那你"-only finals).
 fn target_speaker_end_timeout_ms_for_preview(preview: Option<&str>) -> u64 {
     let has_body = preview.map(str::trim).is_some_and(|text| !text.is_empty());
+    // Streaming ASR may optimistically punctuate a dangling discourse marker
+    // ("然后。", "但是。", "最后。") as if the sentence had finished. Keep a
+    // bounded extra second for the clause that the speaker has clearly queued.
+    if has_body && preview_has_dangling_continuation(preview) {
+        return EMBEDDED_TARGET_SPEAKER_SEMANTIC_CONTINUATION_END_TIMEOUT_MS;
+    }
     if has_body && !preview_ends_with_sentence_terminal(preview) {
         if preview_spoken_char_count(preview) <= EMBEDDED_SHORT_BODY_SPOKEN_CHARS {
             return EMBEDDED_TARGET_SPEAKER_SHORT_BODY_END_TIMEOUT_MS;
@@ -99,6 +111,66 @@ fn target_speaker_end_timeout_ms_for_preview(preview: Option<&str>) -> u64 {
         return EMBEDDED_TARGET_SPEAKER_INCOMPLETE_BODY_END_TIMEOUT_MS;
     }
     EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+}
+
+fn preview_has_dangling_continuation(preview: Option<&str>) -> bool {
+    let Some(text) = preview.map(str::trim).filter(|text| !text.is_empty()) else {
+        return false;
+    };
+    let lexical_tail = text
+        .trim_end_matches(|ch: char| {
+            ch.is_whitespace()
+                || matches!(
+                    ch,
+                    '，' | ',' | '、' | '。' | '！' | '？' | '.' | '!' | '?' | '…' | ':' | '：'
+                        | ';' | '；'
+                )
+        })
+        .to_ascii_lowercase();
+    const DANGLING_SUFFIXES: &[&str] = &[
+        "然后",
+        "但是",
+        "不过",
+        "而且",
+        "并且",
+        "另外",
+        "还有",
+        "接着",
+        "最后",
+        "所以",
+        "因此",
+        "因为",
+        "如果",
+        "假如",
+        "虽然",
+        "可是",
+        "或者",
+        "以及",
+        "就是",
+        "也就是",
+        "比如",
+        "例如",
+        "首先",
+        "其次",
+        "至于",
+        "那么",
+        "那这样的话",
+        "换句话说",
+        "and",
+        "but",
+        "because",
+        "so",
+        "then",
+        "finally",
+        "also",
+    ];
+    DANGLING_SUFFIXES.iter().any(|suffix| {
+        if suffix.is_ascii() {
+            lexical_tail.split_whitespace().last() == Some(*suffix)
+        } else {
+            lexical_tail.ends_with(suffix)
+        }
+    })
 }
 
 fn preview_ends_with_sentence_terminal(preview: Option<&str>) -> bool {
@@ -116,6 +188,8 @@ fn target_speaker_inactive_stop_reason(timeout_ms: u64) -> &'static str {
         "target_speaker_inactive_no_body_3000ms"
     } else if timeout_ms >= EMBEDDED_TARGET_SPEAKER_SHORT_BODY_END_TIMEOUT_MS {
         "target_speaker_inactive_2500ms"
+    } else if timeout_ms >= EMBEDDED_TARGET_SPEAKER_UNCERTAIN_TAIL_END_TIMEOUT_MS {
+        "target_speaker_guarded_tail_2000ms"
     } else if timeout_ms >= EMBEDDED_TARGET_SPEAKER_INCOMPLETE_BODY_END_TIMEOUT_MS {
         "target_speaker_inactive_1500ms"
     } else {
@@ -133,7 +207,7 @@ const EMBEDDED_LOCAL_SPEAKER_CLASSIFICATION_SLACK_MS: u64 = 100;
 // F4（2026-08-09 12:47:04）：旁人连续说话时未归属本地语音不断前进，会把
 // 自动结束无限挂起。挂起以最后一次归属语音 +6s 封顶；本人正常说话的分类
 // 滞后远小于 6s，不受影响。
-const EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS: u64 = 6_000;
+const EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS: u64 = 2_000;
 static EMBEDDED_ASR_SPEECH_ACTIVITY_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 fn should_restore_clipboard_after_dictation(
@@ -543,13 +617,18 @@ fn handle_target_speaker_update(
             .as_deref()
             .is_some_and(|text| !text.trim().is_empty());
     let mode_timeout_ms = target_speaker_end_timeout_ms_for_preview(preview.as_deref());
-    let endpoint_timeout_ms = if body_started {
+    let mode_endpoint_timeout_ms = if body_started {
         mode_timeout_ms
     } else if automatic_wake_session_active(inner, session_id) {
         EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS.max(mode_timeout_ms)
     } else {
         mode_timeout_ms
     };
+    let fusion_state = target_speaker_fusion_state(&update);
+    let endpoint_timeout_ms = target_speaker_endpoint_timeout_with_fusion(
+        fusion_state,
+        mode_endpoint_timeout_ms,
+    );
     let stop_reason = target_speaker_inactive_stop_reason(endpoint_timeout_ms);
     let initial_body_wait_active =
         automatic_wake_initial_body_wait_active(inner, session_id, update.audio_duration_ms);
@@ -593,9 +672,10 @@ fn handle_target_speaker_update(
     maybe_start_polish_prefetch(inner, session_id);
     if feedback_emitted {
         log::info!(
-            "[asr] stop_to_transcribing_ms={} session_id={session_id} reason={stop_reason} timeout_ms={endpoint_timeout_ms} body_started={body_started} sentence_pause={}",
+            "[asr] stop_to_transcribing_ms={} session_id={session_id} reason={stop_reason} timeout_ms={endpoint_timeout_ms} body_started={body_started} sentence_pause={} semantic_continuation={} fusion_state={fusion_state:?}",
             stop_feedback_started.elapsed().as_millis(),
-            preview_ends_with_sentence_terminal(preview.as_deref())
+            preview_ends_with_sentence_terminal(preview.as_deref()),
+            preview_has_dangling_continuation(preview.as_deref()),
         );
     }
 
@@ -657,10 +737,78 @@ fn local_speech_confidently_non_target(
         })
 }
 
+/// The owner was confirmed earlier, then the newest speech-energy window moved
+/// beyond that local Target boundary without becoming a confirmed NonTarget.
+/// This is identity uncertainty, not evidence that the owner stopped talking.
+/// Keep the hold bounded at two seconds; explicit other-speaker evidence never
+/// enters this branch.
+fn has_uncertain_owner_identity_tail(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+) -> bool {
+    if !update.local_speaker_tracking_enabled {
+        return false;
+    }
+    update
+        .local_target_speech_end_ms
+        .zip(update.local_speech_end_ms)
+        .is_some_and(|(target_ms, speech_ms)| {
+            speech_ms > target_ms.saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
+                && speech_ms
+                    <= target_ms
+                        .saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
+                && !local_speech_confidently_non_target(update, speech_ms)
+        })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TargetSpeakerFusionState {
+    /// Provider or local owner evidence advanced on this update.
+    OwnerContinuing,
+    /// Speech continued after the last confirmed owner boundary, but neither
+    /// local nor cloud evidence identified it as another person.
+    UncertainOwnerTail,
+    /// Strong local identity evidence says the newest speech is another person.
+    ConfirmedOther,
+    /// No current continuation evidence; ordinary silence endpoint applies.
+    Quiet,
+}
+
+fn target_speaker_fusion_state(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+) -> TargetSpeakerFusionState {
+    let latest_local_speech_is_other = update
+        .local_speech_end_ms
+        .is_some_and(|speech_ms| local_speech_confidently_non_target(update, speech_ms));
+    // Explicit other-speaker evidence wins over provider growth because cloud
+    // diarization may collapse two simultaneous speakers into the owner row.
+    if latest_local_speech_is_other {
+        return TargetSpeakerFusionState::ConfirmedOther;
+    }
+    if update.target_activity_advanced || update.pending_activity_advanced {
+        return TargetSpeakerFusionState::OwnerContinuing;
+    }
+    if has_uncertain_owner_identity_tail(update) {
+        return TargetSpeakerFusionState::UncertainOwnerTail;
+    }
+    TargetSpeakerFusionState::Quiet
+}
+
+fn target_speaker_endpoint_timeout_with_fusion(
+    fusion_state: TargetSpeakerFusionState,
+    mode_timeout_ms: u64,
+) -> u64 {
+    if fusion_state == TargetSpeakerFusionState::UncertainOwnerTail {
+        mode_timeout_ms.max(EMBEDDED_TARGET_SPEAKER_UNCERTAIN_TAIL_END_TIMEOUT_MS)
+    } else {
+        mode_timeout_ms
+    }
+}
+
 /// Recent local speech energy that is not yet attributed as non-target. Used to
 /// hold auto-end while the owner may still be talking even if cloud text froze.
-/// F4：挂起上限为最后一次归属语音 +6s（EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS），
-/// 旁人连续说话不会把结束无限挂起。
+/// The uncertain energy clock is capped from the last *confirmed owner*
+/// boundary, not from any attributed speaker. This preserves a natural pause
+/// while preventing weak room speech from repeatedly extending the session.
 fn has_unresolved_recent_local_speech(
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
     endpoint_timeout_ms: u64,
@@ -669,11 +817,18 @@ fn has_unresolved_recent_local_speech(
         .audio_duration_ms
         .zip(update.local_speech_end_ms)
         .is_some_and(|(audio_ms, local_speech_ms)| {
-            let attributed_end_ms = update.stable_attributed_speech_end_ms.unwrap_or_default();
-            local_speech_ms
-                > attributed_end_ms.saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
+            let confirmed_owner_end_ms = update
+                .target_speech_end_ms
+                .into_iter()
+                .chain(update.local_target_speech_end_ms)
+                .max()
+                .unwrap_or_default();
+            confirmed_owner_end_ms > 0
                 && local_speech_ms
-                    <= attributed_end_ms
+                    > confirmed_owner_end_ms
+                        .saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
+                && local_speech_ms
+                    <= confirmed_owner_end_ms
                         .saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
                 && !local_speech_confidently_non_target(update, local_speech_ms)
                 && audio_ms.saturating_sub(local_speech_ms) < endpoint_timeout_ms
@@ -697,6 +852,13 @@ fn target_speaker_endpoint_due_with_provider_stall(
         .target_speech_end_ms
         .zip(update.stable_attributed_speech_end_ms)
         .is_some_and(|(target_ms, attributed_ms)| attributed_ms > target_ms);
+    let uncertain_owner_budget_exhausted = update
+        .local_target_speech_end_ms
+        .zip(update.local_speech_end_ms)
+        .is_some_and(|(target_ms, speech_ms)| {
+            speech_ms
+                > target_ms.saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
+        });
     // Installed session 19df34c4: body text kept growing only in the provisional
     // channel while stable_attributed stayed on the wake phrase. A local target
     // clock already existed, so the old "pending only blocks without local
@@ -706,7 +868,8 @@ fn target_speaker_endpoint_due_with_provider_stall(
     // speech must not hold auto-end, while startup calibration stays protected.
     let pending_blocks_endpoint = update.pending_unattributed_speech
         && !(recent_local_speech_is_non_target && provider_other_speaker_advanced);
-    let stable_attributed_speech_end_ms = (!recent_local_speech_is_non_target)
+    let stable_attributed_speech_end_ms = (!recent_local_speech_is_non_target
+        && !uncertain_owner_budget_exhausted)
         .then_some(update.stable_attributed_speech_end_ms)
         .flatten();
     let target_speech_end_ms = update

@@ -122,6 +122,9 @@ const DEVICE_SETTINGS_REFRESH_MS = 8000;
 const DEVICE_SETTINGS_READ_TIMEOUT_MS = 12_000;
 const DEVICE_SETTINGS_WRITE_TIMEOUT_MS = 45_000;
 const DEFAULT_BATTERY_AUTO_SHUTDOWN_MINUTES = 10;
+const VOICEPRINT_ENROLLMENT_SECONDS = 15;
+const VOICEPRINT_WAKE_STEP_SECONDS = 3;
+const VOICEPRINT_WAKE_STEP_COUNT = 3;
 
 const fallbackShortcut = (): ShortcutBinding => ({
   primary: 'F1',
@@ -332,6 +335,8 @@ function DeviceFirmwareSettingsCard() {
   const [wakePhraseDraft, setWakePhraseDraft] = useState('');
   const [wakePhraseBusy, setWakePhraseBusy] = useState(false);
   const [wakePhraseError, setWakePhraseError] = useState<string | null>(null);
+  const voiceprintCaptureActive = ['preparing', 'armed', 'capturing', 'processing']
+    .includes(voiceprint?.state ?? '');
 
   const refreshVoiceprint = async () => {
     try {
@@ -347,9 +352,12 @@ function DeviceFirmwareSettingsCard() {
 
   useEffect(() => {
     void refreshVoiceprint();
-    const timer = window.setInterval(() => void refreshVoiceprint(), 1200);
+    const timer = window.setInterval(
+      () => void refreshVoiceprint(),
+      voiceprintCaptureActive ? 350 : 1200,
+    );
     return () => window.clearInterval(timer);
-  }, []);
+  }, [voiceprintCaptureActive]);
 
   useEffect(() => {
     if (prefs) {
@@ -357,10 +365,29 @@ function DeviceFirmwareSettingsCard() {
     }
   }, [prefs?.voiceWakePhrase]);
 
-  const voiceprintCaptureActive = ['preparing', 'armed', 'capturing', 'processing']
-    .includes(voiceprint?.state ?? '');
   const voiceprintRemaining = voiceprint?.captureSecondsRemaining;
-  const voiceprintWakePhraseStage = voiceprintRemaining == null || voiceprintRemaining >= 8;
+  const voiceprintElapsed = voiceprintRemaining == null
+    ? 0
+    : Math.max(0, VOICEPRINT_ENROLLMENT_SECONDS - voiceprintRemaining);
+  const voiceprintStepIndex = voiceprint?.state === 'processing'
+    ? 4
+    : Math.min(3, Math.floor(voiceprintElapsed / VOICEPRINT_WAKE_STEP_SECONDS));
+  const voiceprintStepRemaining = voiceprintRemaining == null
+    ? null
+    : voiceprintStepIndex < VOICEPRINT_WAKE_STEP_COUNT
+      ? VOICEPRINT_WAKE_STEP_SECONDS
+        - (voiceprintElapsed % VOICEPRINT_WAKE_STEP_SECONDS)
+      : voiceprintRemaining;
+  const voiceprintEnrollmentSteps = prefs ? [
+    ...Array.from({ length: VOICEPRINT_WAKE_STEP_COUNT }, (_, index) =>
+      t('settings.recording.voiceprintStepWake', {
+        current: index + 1,
+        total: VOICEPRINT_WAKE_STEP_COUNT,
+        phrase: prefs.voiceWakePhrase,
+        defaultValue: '第 {{current}}/{{total}} 次：说“{{phrase}}”',
+      })),
+    t('settings.recording.voiceprintStepFreeSpeech', '自然说一句至少 3 秒的话'),
+  ] : [];
 
   const commitWakePhrase = async () => {
     if (!prefs || wakePhraseBusy || voiceprintCaptureActive) return;
@@ -692,20 +719,42 @@ function DeviceFirmwareSettingsCard() {
                           ? t('settings.recording.voiceprintGuidePreparing', '正在准备设备，请稍候…')
                           : voiceprint?.state === 'processing'
                             ? t('settings.recording.voiceprintGuideProcessing', '录制完成，正在本机生成声纹…')
-                            : voiceprintWakePhraseStage
-                              ? t('settings.recording.voiceprintGuideWake', { phrase: prefs.voiceWakePhrase, defaultValue: '先自然地说三遍“{{phrase}}”' })
+                            : voiceprintStepIndex < VOICEPRINT_WAKE_STEP_COUNT
+                              ? t('settings.recording.voiceprintGuideWakeStep', {
+                                current: voiceprintStepIndex + 1,
+                                total: VOICEPRINT_WAKE_STEP_COUNT,
+                                phrase: prefs.voiceWakePhrase,
+                                defaultValue: '第 {{current}}/{{total}} 次，请自然地说“{{phrase}}”',
+                              })
                               : t('settings.recording.voiceprintGuideFreeSpeech', '现在连续说一句至少 3 秒的自然话')}
                       </span>
-                      {voiceprintRemaining != null && voiceprint?.state === 'capturing' && (
-                        <strong className="ol-voiceprint-countdown">{voiceprintRemaining}s</strong>
+                      {voiceprintStepRemaining != null && voiceprint?.state === 'capturing' && (
+                        <strong className="ol-voiceprint-countdown">{voiceprintStepRemaining}s</strong>
                       )}
+                    </div>
+                    <div className="ol-voiceprint-step-list">
+                      {voiceprintEnrollmentSteps.map((label, index) => {
+                        const complete = voiceprint?.state === 'processing' || index < voiceprintStepIndex;
+                        const active = voiceprint?.state === 'capturing' && index === voiceprintStepIndex;
+                        return (
+                          <div
+                            key={`${index}-${label}`}
+                            className={`ol-voiceprint-step${complete ? ' is-complete' : ''}${active ? ' is-active' : ''}`}
+                          >
+                            <span className="ol-voiceprint-step-marker" aria-hidden="true">
+                              {complete ? '✓' : index + 1}
+                            </span>
+                            <span>{label}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                     <div className="ol-voiceprint-progress" aria-hidden="true">
                       <span style={{ width: `${Math.max(4, Math.min(100, voiceprint?.progress ?? 0))}%` }} />
                     </div>
                     {voiceprint?.state === 'capturing' && (
                       <div className="ol-voiceprint-guide-hint">
-                        {t('settings.recording.voiceprintGuideHint', '不用抢时间；正常停顿不会提前结束，倒计时结束后会自动处理。')}
+                        {t('settings.recording.voiceprintGuideHint', '每一步单独取样；看到下一步后再继续，正常停顿不会提前结束。')}
                       </div>
                     )}
                   </div>

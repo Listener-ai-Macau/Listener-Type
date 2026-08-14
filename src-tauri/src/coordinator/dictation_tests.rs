@@ -8,27 +8,25 @@ use super::{
     device_ai_processing_completion_delay, device_ai_processing_io_allowed,
     device_processing_final_succeeded, dictation_asr_engine_backend_id,
     dictation_asr_quality_warning, dictation_asr_uses_core_accurate_engine, dictation_error_code,
-    drive_polish_prefetch,
-    embedded_audio_stop_feedback_latched, embedded_audio_stop_is_user_initiated,
-    embedded_ble_listener_capture_ready, embedded_ble_processing_sync_disabled,
-    embedded_ble_session_actor_history, embedded_ble_session_event_should_trace,
-    embedded_ble_stream_idle_timeout, embedded_pcm_capsule_level, embedded_pcm_rms_and_peak,
-    embedded_pcm_visual_level, embedded_streaming_chunk_is_asr_input,
-    emit_embedded_audio_transcribing_if_active, end_embedded_ble_session,
-    filter_automatic_wake_text, finalize_polished_text, finish_dictation_pipeline_error,
-    finish_dictation_timeout, install_embedded_ble_listener_cancel,
-    mark_embedded_ble_listener_ready, normalize_embedded_pcm_for_asr,
-    normalize_embedded_streaming_pcm_for_asr, polish_prefetch_adoptable,
-    preserve_recording_transcript,
-    provider_preview_change, publish_embedded_ble_asr_final,
-    record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
-    remove_standalone_dictation_fillers, request_embedded_audio_stop_feedback,
-    request_embedded_ble_recording_stop_from_host, should_restore_clipboard_after_dictation,
-    should_send_post_dictation_key, stabilize_embedded_audio_final_supplemental_preview,
-    stabilize_embedded_audio_partial_preview, store_embedded_audio_stats,
-    streaming_insert_eligible, update_embedded_audio_partial_preview, wayland_done_message,
-    EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand, EmbeddedStreamingAgcState,
-    EmbeddedStreamingDictation, DEVICE_AI_PROCESSING_MAX_VISIBLE_MS,
+    drive_polish_prefetch, embedded_audio_stop_feedback_latched,
+    embedded_audio_stop_is_user_initiated, embedded_ble_listener_capture_ready,
+    embedded_ble_processing_sync_disabled, embedded_ble_session_actor_history,
+    embedded_ble_session_event_should_trace, embedded_ble_stream_idle_timeout,
+    embedded_pcm_capsule_level, embedded_pcm_rms_and_peak, embedded_pcm_visual_level,
+    embedded_streaming_chunk_is_asr_input, emit_embedded_audio_transcribing_if_active,
+    end_embedded_ble_session, filter_automatic_wake_text, finalize_polished_text,
+    finish_dictation_pipeline_error, finish_dictation_timeout,
+    install_embedded_ble_listener_cancel, mark_embedded_ble_listener_ready,
+    normalize_embedded_pcm_for_asr, normalize_embedded_streaming_pcm_for_asr,
+    polish_prefetch_adoptable, preserve_recording_transcript, provider_preview_change,
+    publish_embedded_ble_asr_final, record_embedded_ble_session_actor_command,
+    register_embedded_ble_cancel_flag, remove_standalone_dictation_fillers,
+    request_embedded_audio_stop_feedback, request_embedded_ble_recording_stop_from_host,
+    should_restore_clipboard_after_dictation, should_send_post_dictation_key,
+    stabilize_embedded_audio_final_supplemental_preview, stabilize_embedded_audio_partial_preview,
+    store_embedded_audio_stats, streaming_insert_eligible, update_embedded_audio_partial_preview,
+    wayland_done_message, EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand,
+    EmbeddedStreamingAgcState, EmbeddedStreamingDictation, DEVICE_AI_PROCESSING_MAX_VISIBLE_MS,
     DEVICE_AI_PROCESSING_MIN_VISIBLE_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
     EMBEDDED_AUDIO_HOST_LIMITER_PEAK, EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV,
     EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS, LOCAL_CONFIRMATION_START_BYTES,
@@ -55,7 +53,10 @@ struct DeferredBridgeTestConsumer {
 
 impl crate::asr::AudioConsumer for DeferredBridgeTestConsumer {
     fn consume_pcm_chunk(&self, pcm: &[u8]) {
-        self.pcm.lock().expect("test pcm lock").extend_from_slice(pcm);
+        self.pcm
+            .lock()
+            .expect("test pcm lock")
+            .extend_from_slice(pcm);
     }
 }
 
@@ -264,11 +265,7 @@ fn automatic_wake_guard_removes_only_the_activation_prefix() {
         "多人识别现在只保留我说的话。"
     );
     assert_eq!(
-        super::strip_automatic_activation_prefix(
-            "嗯嗯开始录音。正文保持完整。",
-            "开始录音",
-            false,
-        ),
+        super::strip_automatic_activation_prefix("嗯嗯开始录音。正文保持完整。", "开始录音", false,),
         "正文保持完整。"
     );
     assert_eq!(
@@ -1438,7 +1435,9 @@ fn finished_sentences_stay_snappy_incomplete_body_holds() {
     };
     // Standard 1.0s is due at +1000; a wider 2.0s window is not yet due.
     assert!(super::target_speaker_endpoint_due(&base));
-    assert!(!super::target_speaker_endpoint_due_with_timeout(&base, 2_000));
+    assert!(!super::target_speaker_endpoint_due_with_timeout(
+        &base, 2_000
+    ));
 
     let wider_window_due = crate::asr::volcengine::TargetSpeakerUpdate {
         provider_audio_duration_ms: Some(3_500),
@@ -1468,6 +1467,32 @@ fn finished_sentences_stay_snappy_incomplete_body_holds() {
         super::target_speaker_end_timeout_ms_for_preview(Some("现在整体是一个什么进度？")),
         1_000
     );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(Some("我先检查一下，然后。")),
+        2_000,
+        "an optimistic full stop must not hide a dangling continuation",
+    );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(Some("最后。")),
+        2_000,
+    );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(Some("最后一句要完整。")),
+        1_000,
+        "ordinary words containing a connector are still complete",
+    );
+    assert!(super::preview_has_dangling_continuation(Some(
+        "这部分已经完成，但是。"
+    )));
+    assert!(!super::preview_has_dangling_continuation(Some(
+        "这部分已经完成。"
+    )));
+    assert!(super::preview_has_dangling_continuation(Some(
+        "We can continue, and."
+    )));
+    assert!(!super::preview_has_dangling_continuation(Some(
+        "This is a brand."
+    )));
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("你继续帮我看一下吧")),
         1_500
@@ -1598,7 +1623,9 @@ fn target_speaker_endpoint_requires_one_second_without_that_speaker() {
         pending_unattributed_speech: true,
         ..local_wake_target.clone()
     };
-    assert!(!super::target_speaker_endpoint_due(&local_wake_still_pending));
+    assert!(!super::target_speaker_endpoint_due(
+        &local_wake_still_pending
+    ));
     let local_wake_due = crate::asr::volcengine::TargetSpeakerUpdate {
         audio_duration_ms: Some(2_500),
         pending_unattributed_speech: false,
@@ -1895,6 +1922,86 @@ fn target_speaker_endpoint_uses_local_clock_only_for_a_clean_provider_stall() {
 }
 
 #[test]
+fn session_1378_uncertain_owner_tail_gets_bounded_resume_window() {
+    // Installed session 1378: the owner was locally confirmed through 2100 ms,
+    // later speech energy reached 3100 ms with only Uncertain classifications,
+    // and the provider still attributed the same speaker through 3612 ms. The
+    // old 1000 ms fallback stopped at local audio 5400 ms, cutting the resumed
+    // half-sentence. Identity uncertainty gets 2000 ms, but confirmed other
+    // speech keeps the normal 1000 ms endpoint.
+    let uncertain_tail = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(3_612),
+        provider_audio_duration_ms: Some(4_100),
+        audio_duration_ms: Some(5_400),
+        local_speech_end_ms: Some(3_100),
+        local_target_speech_end_ms: Some(2_100),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(3_612),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    assert_eq!(
+        super::target_speaker_fusion_state(&uncertain_tail),
+        super::TargetSpeakerFusionState::UncertainOwnerTail,
+    );
+    let timeout = super::target_speaker_endpoint_timeout_with_fusion(
+        super::target_speaker_fusion_state(&uncertain_tail),
+        1_000,
+    );
+    assert_eq!(timeout, 2_000);
+    assert!(!super::target_speaker_endpoint_due_with_provider_stall(
+        &uncertain_tail,
+        true,
+        timeout,
+    ));
+
+    let bounded_due = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(5_612),
+        ..uncertain_tail.clone()
+    };
+    assert!(super::target_speaker_endpoint_due_with_provider_stall(
+        &bounded_due,
+        true,
+        timeout,
+    ));
+
+    let confirmed_other = crate::asr::volcengine::TargetSpeakerUpdate {
+        local_non_target_speech_end_ms: Some(3_100),
+        ..uncertain_tail
+    };
+    assert_eq!(
+        super::target_speaker_fusion_state(&confirmed_other),
+        super::TargetSpeakerFusionState::ConfirmedOther,
+    );
+    assert_eq!(
+        super::target_speaker_endpoint_timeout_with_fusion(
+            super::target_speaker_fusion_state(&confirmed_other),
+            1_000,
+        ),
+        1_000,
+    );
+    assert!(super::target_speaker_endpoint_due_with_provider_stall(
+        &confirmed_other,
+        true,
+        1_000,
+    ));
+
+    let provider_owner_advanced = crate::asr::volcengine::TargetSpeakerUpdate {
+        target_activity_advanced: true,
+        ..bounded_due
+    };
+    assert_eq!(
+        super::target_speaker_fusion_state(&provider_owner_advanced),
+        super::TargetSpeakerFusionState::OwnerContinuing,
+        "cloud target progress is explicit owner-continuation evidence",
+    );
+}
+
+#[test]
 fn provider_stall_requires_real_time_without_provider_coverage_progress() {
     let coordinator = Coordinator::new();
     let session_id = new_session_id();
@@ -2178,11 +2285,11 @@ fn target_speaker_endpoint_waits_for_startup_body_calibration() {
 fn incomplete_body_preview_uses_fifteen_hundred_ms_endpoint() {
     // Very short incomplete body holds longer (installed "那你" mid-cut).
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview( Some("你帮")),
+        super::target_speaker_end_timeout_ms_for_preview(Some("你帮")),
         2_500
     );
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview( Some("那你")),
+        super::target_speaker_end_timeout_ms_for_preview(Some("那你")),
         2_500
     );
     assert_eq!(
@@ -2191,17 +2298,20 @@ fn incomplete_body_preview_uses_fifteen_hundred_ms_endpoint() {
     );
     // Longer incomplete body keeps 1.5s.
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview( Some("你继续帮我看一下吧")),
+        super::target_speaker_end_timeout_ms_for_preview(Some("你继续帮我看一下吧")),
         1_500
     );
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview( Some("你帮。")),
+        super::target_speaker_end_timeout_ms_for_preview(Some("你帮。")),
         1_000
     );
     // Empty / no body keeps base snappy; no-body abandon is layered separately.
-    assert_eq!(super::target_speaker_end_timeout_ms_for_preview( None), 1_000);
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview( Some("   ")),
+        super::target_speaker_end_timeout_ms_for_preview(None),
+        1_000
+    );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(Some("   ")),
         1_000
     );
 }
@@ -2220,7 +2330,10 @@ fn host_started_wake_guard_survives_embedded_session_begin() {
         state.phase = SessionPhase::Starting;
     }
     arm_automatic_wake_text_guard(&coordinator.inner, session_id, "开始录音".into(), 0);
-    assert!(automatic_wake_session_active(&coordinator.inner, session_id));
+    assert!(automatic_wake_session_active(
+        &coordinator.inner,
+        session_id
+    ));
     assert!(!automatic_wake_body_started(&coordinator.inner, session_id));
 
     // Mirror begin_embedded_audio_dictation_session preserve rule.
@@ -2232,7 +2345,7 @@ fn host_started_wake_guard_survives_embedded_session_begin() {
         "host-started wake guard must survive embedded session begin attach"
     );
 
-    let mode_timeout = super::target_speaker_end_timeout_ms_for_preview( None);
+    let mode_timeout = super::target_speaker_end_timeout_ms_for_preview(None);
     let no_body_timeout = if automatic_wake_body_started(&coordinator.inner, session_id) {
         mode_timeout
     } else if automatic_wake_session_active(&coordinator.inner, session_id) {
@@ -2258,10 +2371,13 @@ fn automatic_wake_no_body_uses_longer_endpoint_timeout() {
     arm_automatic_wake_text_guard(&coordinator.inner, session_id, "开始录音".into(), 1_200);
     acknowledge_automatic_wake_capsule_visible(&coordinator.inner, session_id);
 
-    assert!(automatic_wake_session_active(&coordinator.inner, session_id));
+    assert!(automatic_wake_session_active(
+        &coordinator.inner,
+        session_id
+    ));
     assert!(!automatic_wake_body_started(&coordinator.inner, session_id));
 
-    let mode_timeout = super::target_speaker_end_timeout_ms_for_preview( None);
+    let mode_timeout = super::target_speaker_end_timeout_ms_for_preview(None);
     assert_eq!(mode_timeout, 1_000);
     let no_body_timeout = if automatic_wake_body_started(&coordinator.inner, session_id) {
         mode_timeout
@@ -2330,12 +2446,7 @@ fn automatic_wake_preserves_first_clause_after_supported_body_pauses() {
     for pause_ms in [0_u64, 500, 1_000, 2_000, 2_500] {
         let coordinator = Coordinator::new();
         let session_id = new_session_id();
-        arm_automatic_wake_text_guard(
-            &coordinator.inner,
-            session_id,
-            "开始录音".into(),
-            1_200,
-        );
+        arm_automatic_wake_text_guard(&coordinator.inner, session_id, "开始录音".into(), 1_200);
         acknowledge_automatic_wake_capsule_visible(&coordinator.inner, session_id);
 
         assert!(automatic_wake_initial_body_wait_active(
@@ -2501,10 +2612,18 @@ fn rolling_local_confirmation_restarts_the_800ms_ladder_per_window() {
 
 #[test]
 fn ambient_speech_bounds_each_window_but_never_disables_late_phrase_confirmation() {
-    assert!(super::exploratory_local_confirmation_allowed(false, 0, 0, 0));
-    assert!(super::exploratory_local_confirmation_allowed(false, 2, 0, 2));
-    assert!(super::exploratory_local_confirmation_allowed(false, 3, 0, 3));
-    assert!(!super::exploratory_local_confirmation_allowed(false, 4, 0, 4));
+    assert!(super::exploratory_local_confirmation_allowed(
+        false, 0, 0, 0
+    ));
+    assert!(super::exploratory_local_confirmation_allowed(
+        false, 2, 0, 2
+    ));
+    assert!(super::exploratory_local_confirmation_allowed(
+        false, 3, 0, 3
+    ));
+    assert!(!super::exploratory_local_confirmation_allowed(
+        false, 4, 0, 4
+    ));
     // Every rolling window gets exactly one focused retry regardless of older
     // candidate-wide Absents; repeated work inside that window remains blocked.
     assert!(super::exploratory_local_confirmation_allowed(
@@ -3567,11 +3686,7 @@ fn secondary_budget_counts_pre_hit_confirmation_work_once() {
     assert_eq!(super::effective_secondary_waited_ms(100, 20), 100);
     assert_eq!(super::effective_secondary_waited_ms(99, 20), 99);
     assert_eq!(
-        super::pending_secondary_decision(
-            true,
-            super::effective_secondary_waited_ms(0, 158),
-            0,
-        ),
+        super::pending_secondary_decision(true, super::effective_secondary_waited_ms(0, 158), 0,),
         super::PendingSecondaryDecision::AcceptKeywordModel,
     );
 }
@@ -3622,6 +3737,45 @@ fn pre_hit_absent_blocks_only_the_keyword_endpoint_it_already_covered() {
         Some(later_window),
         2_035 * 32,
         2.795,
+    ));
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn session_643_full_absent_tail_conflict_blocks_keyword_timeout_fallback() {
+    let covered = super::LocalConfirmationCoverage {
+        start_bytes: 0,
+        end_bytes: 839 * 32,
+    };
+    assert!(super::local_absent_covers_keyword_endpoint(
+        Some(covered),
+        0,
+        1.040,
+    ));
+    assert_eq!(
+        super::pending_secondary_decision(true, 103, 1),
+        super::PendingSecondaryDecision::HoldAfterExplicitAbsent,
+        "an authoritative local non-match must not be reversed by the 60 ms KWS timeout",
+    );
+
+    let session_862_covered = super::LocalConfirmationCoverage {
+        start_bytes: 1_010 * 32,
+        end_bytes: 2_410 * 32,
+    };
+    assert!(super::local_absent_covers_keyword_endpoint(
+        Some(session_862_covered),
+        1_010 * 32,
+        2.690,
+    ));
+
+    let old_unrelated = super::LocalConfirmationCoverage {
+        start_bytes: 0,
+        end_bytes: 700 * 32,
+    };
+    assert!(!super::local_absent_covers_keyword_endpoint(
+        Some(old_unrelated),
+        0,
+        1.040,
     ));
 }
 
@@ -3747,9 +3901,7 @@ fn phonetic_near_match_requires_independent_kws_and_never_wakes_alone() {
     };
     assert!(!super::phonetic_near_phrase_evidence(&too_short, 4));
 
-    use super::TerminalInflightLocalDecision::{
-        AcceptLocal, PreserveKwsFusion, RecordAbsent,
-    };
+    use super::TerminalInflightLocalDecision::{AcceptLocal, PreserveKwsFusion, RecordAbsent};
     let exact = super::LocalWakeConfirmation {
         matched: true,
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::ExactStart,
@@ -3761,7 +3913,10 @@ fn phonetic_near_match_requires_independent_kws_and_never_wakes_alone() {
         snapshot_pcm_ms: 1_400,
         recovered_keyword_end_seconds: None,
     };
-    assert_eq!(super::terminal_inflight_local_decision(&exact, false, 4), AcceptLocal);
+    assert_eq!(
+        super::terminal_inflight_local_decision(&exact, false, 4),
+        AcceptLocal
+    );
 
     let later = super::LocalWakeConfirmation {
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::PresentLater,
@@ -3771,7 +3926,10 @@ fn phonetic_near_match_requires_independent_kws_and_never_wakes_alone() {
         super::terminal_inflight_local_decision(&later, false, 4),
         PreserveKwsFusion
     );
-    assert_eq!(super::terminal_inflight_local_decision(&later, true, 4), AcceptLocal);
+    assert_eq!(
+        super::terminal_inflight_local_decision(&later, true, 4),
+        AcceptLocal
+    );
     assert_eq!(
         super::terminal_inflight_local_decision(&near, false, 4),
         PreserveKwsFusion
@@ -4215,7 +4373,10 @@ async fn activation_segment_race_rebinds_post_activation_segment_instead_of_fina
     let consumer_for_session: Arc<dyn crate::recorder::AudioConsumer> = consumer.clone();
     let mut streaming = EmbeddedStreamingDictation::background_listener();
     streaming.embedded_session_id = Some(93);
-    streaming.session = Some(embedded_audio_test_session(session_id, consumer_for_session));
+    streaming.session = Some(embedded_audio_test_session(
+        session_id,
+        consumer_for_session,
+    ));
     streaming.activation_segment_race_guard = Some((93, Instant::now()));
 
     // 旧段在竞态窗口内 STOP：不 finalize，会话保持打开，守卫保留等待新段。
@@ -4333,7 +4494,10 @@ async fn activation_segment_race_guard_does_not_break_normal_stop_paths() {
         let consumer_for_session: Arc<dyn crate::recorder::AudioConsumer> = consumer.clone();
         let mut streaming = EmbeddedStreamingDictation::background_listener();
         streaming.embedded_session_id = Some(93);
-        streaming.session = Some(embedded_audio_test_session(session_id, consumer_for_session));
+        streaming.session = Some(embedded_audio_test_session(
+            session_id,
+            consumer_for_session,
+        ));
         let activated_at = guard_age
             .map(|age| Instant::now() - age)
             .unwrap_or_else(Instant::now);
@@ -4368,9 +4532,9 @@ async fn activation_segment_race_guard_does_not_break_normal_stop_paths() {
 }
 
 #[test]
-fn unresolved_local_speech_hold_is_capped_six_seconds_after_attributed() {
+fn unresolved_local_speech_hold_is_capped_two_seconds_after_confirmed_owner() {
     // F4 fixture（2026-08-09 12:47:04）：旁人连续说话，本地未归属人声持续推进，
-    // 旧逻辑会把自动结束无限挂起。挂起以最后一次归属语音 +6s 封顶。
+    // 旧逻辑会把自动结束无限挂起。挂起以最后一次确认本人语音 +2s 封顶。
     let base = crate::asr::volcengine::TargetSpeakerUpdate {
         speaker_id: Some("1".into()),
         target_speech_end_ms: Some(10_000),
@@ -4386,29 +4550,53 @@ fn unresolved_local_speech_hold_is_capped_six_seconds_after_attributed() {
         pending_activity_advanced: false,
         speaker_info_present: true,
     };
-    // cap 内（归属 10s + 6s = 16s；未归属人声尾端 14s、且仍在 1.0s 窗口内 recent）
+    // cap 内（本人 10s + 2s = 12s；未归属人声尾端 11s、且仍在 1.0s 窗口内 recent）
     // → 仍阻挡结束（本人说话分类滞后不受影响的通道保留）。
     let within_cap = crate::asr::volcengine::TargetSpeakerUpdate {
-        provider_audio_duration_ms: Some(14_500),
-        audio_duration_ms: Some(14_500),
-        local_speech_end_ms: Some(14_000),
+        provider_audio_duration_ms: Some(11_500),
+        audio_duration_ms: Some(11_500),
+        local_speech_end_ms: Some(11_000),
         ..base.clone()
     };
-    assert!(super::has_unresolved_recent_local_speech(&within_cap, 1_000));
+    assert!(super::has_unresolved_recent_local_speech(
+        &within_cap,
+        1_000
+    ));
     assert!(!super::target_speaker_endpoint_due(&within_cap));
-    // cap 外（未归属人声尾端推进到 19.9s > 16s 封顶）→ 不再阻挡，端点可按
+    // cap 外（未归属人声尾端推进到 19.9s > 12s 封顶）→ 不再阻挡，端点可按
     // 1.0s 合同触发。
     assert!(!super::has_unresolved_recent_local_speech(&base, 1_000));
     assert!(super::target_speaker_endpoint_due(&base));
+
+    // Installed session 1494: owner ended locally at 10.9s; provider later
+    // attributed room speech through 12.712s and local energy reached 13.8s.
+    // The unrelated attribution must not renew the uncertain-owner allowance.
+    let installed_session_1494 = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(10_322),
+        provider_audio_duration_ms: Some(13_700),
+        audio_duration_ms: Some(13_800),
+        local_speech_end_ms: Some(13_800),
+        local_target_speech_end_ms: Some(10_900),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(12_712),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    assert!(!super::has_unresolved_recent_local_speech(
+        &installed_session_1494,
+        1_000
+    ));
+    assert!(super::target_speaker_endpoint_due(&installed_session_1494));
 }
 
 #[test]
 fn explicit_wake_diagnostic_sequence_stops_at_retention_limit() {
     assert_eq!(
-        super::next_wake_diagnostic_capture_count(
-            false,
-            super::WAKE_DIAGNOSTIC_MAX_CANDIDATES
-        ),
+        super::next_wake_diagnostic_capture_count(false, super::WAKE_DIAGNOSTIC_MAX_CANDIDATES),
         None,
         "an explicit operator-managed capture session must remain bounded"
     );

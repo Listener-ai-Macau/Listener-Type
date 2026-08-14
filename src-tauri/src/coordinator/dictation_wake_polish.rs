@@ -9,15 +9,14 @@ const LOCAL_SPEAKER_CLASSIFY_STEP_MS: u64 = 400;
 
 struct LocalSessionSpeakerTracker {
     profile_rx: Option<
-        std::sync::mpsc::Receiver<Result<crate::speaker_verification::SessionSpeakerProfile, String>>,
+        std::sync::mpsc::Receiver<
+            Result<crate::speaker_verification::SessionSpeakerProfile, String>,
+        >,
     >,
     profile: Option<crate::speaker_verification::SessionSpeakerProfile>,
     classification_rx: Option<
         std::sync::mpsc::Receiver<
-            Result<
-                (u64, crate::speaker_verification::SessionSpeakerObservation),
-                String,
-            >,
+            Result<(u64, crate::speaker_verification::SessionSpeakerObservation), String>,
         >,
     >,
     adaptation_gate: crate::speaker_verification::SessionSpeakerAdaptationGate,
@@ -56,11 +55,14 @@ impl LocalSessionSpeakerTracker {
         audio_end_ms: u64,
         has_speech_energy: bool,
         stable_target_end_ms: Option<u64>,
-    ) -> Option<(u64, crate::speaker_verification::SessionSpeakerClassification)> {
+    ) -> Option<(
+        u64,
+        crate::speaker_verification::SessionSpeakerClassification,
+    )> {
         self.rolling_pcm.extend_from_slice(pcm);
         if self.rolling_pcm.len() > LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES {
-            let overflow = (self.rolling_pcm.len() - LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES + 1)
-                & !1usize;
+            let overflow =
+                (self.rolling_pcm.len() - LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES + 1) & !1usize;
             self.rolling_pcm.drain(..overflow);
         }
 
@@ -132,11 +134,9 @@ impl LocalSessionSpeakerTracker {
                 self.next_classification_audio_ms =
                     audio_end_ms.saturating_add(LOCAL_SPEAKER_CLASSIFY_STEP_MS);
                 tauri::async_runtime::spawn_blocking(move || {
-                    let result = crate::speaker_verification::observe_session_speaker(
-                        &profile,
-                        &snapshot,
-                    )
-                    .map(|classification| (audio_end_ms, classification));
+                    let result =
+                        crate::speaker_verification::observe_session_speaker(&profile, &snapshot)
+                            .map(|classification| (audio_end_ms, classification));
                     let _ = tx.send(result);
                 });
             }
@@ -285,9 +285,8 @@ impl EmbeddedAudioDictationSession {
             self.proactive_stop_body_started = true;
             self.proactive_stop_silence_ms = 0;
         } else if self.proactive_stop_body_started {
-            self.proactive_stop_silence_ms = self
-                .proactive_stop_silence_ms
-                .saturating_add(chunk_ms);
+            self.proactive_stop_silence_ms =
+                self.proactive_stop_silence_ms.saturating_add(chunk_ms);
         }
 
         self.normalized_pcm_bytes += asr_pcm.len();
@@ -323,8 +322,8 @@ static WAKE_DIAGNOSTIC_CLEANUP_RUNNING: AtomicBool = AtomicBool::new(false);
 
 fn prune_default_wake_diagnostics(directory: &std::path::Path) -> Result<usize, String> {
     let mut entries = Vec::new();
-    let read_dir = fs::read_dir(directory)
-        .map_err(|err| format!("read {}: {err}", directory.display()))?;
+    let read_dir =
+        fs::read_dir(directory).map_err(|err| format!("read {}: {err}", directory.display()))?;
     for item in read_dir {
         let Ok(item) = item else {
             continue;
@@ -430,11 +429,10 @@ fn save_bounded_wake_diagnostic(embedded_session_id: u32, outcome: &'static str,
     else {
         return;
     };
-    let Ok(index) = WAKE_DIAGNOSTIC_CAPTURE_COUNT.fetch_update(
-        Ordering::SeqCst,
-        Ordering::SeqCst,
-        |current| next_wake_diagnostic_capture_count(false, current),
-    )
+    let Ok(index) =
+        WAKE_DIAGNOSTIC_CAPTURE_COUNT.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+            next_wake_diagnostic_capture_count(false, current)
+        })
     else {
         return;
     };
@@ -761,6 +759,15 @@ const KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 60;
 /// Explicit local Absent count before midstream hard-reject (blocks short
 /// prefix false wakes like "开始啥的"; one retry for noisy short clips).
 const KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2;
+/// KWS and local ASR do not place the phrase tail on exactly the same frame.
+/// Sessions 643/862: local ASR had already produced an authoritative non-match,
+/// while KWS later estimated the same false keyword tail 201/280 ms farther
+/// into the stream. Treat that small boundary disagreement as coverage so a
+/// 60 ms secondary timeout cannot reverse explicit contradictory evidence.
+/// Keep this below the duration needed for the four-syllable wake phrase so an
+/// older unrelated Absent cannot veto a genuinely later phrase.
+const LOCAL_ABSENT_KEYWORD_TAIL_SLACK_MS: usize = 300;
+const LOCAL_ABSENT_KEYWORD_TAIL_SLACK_BYTES: usize = LOCAL_ABSENT_KEYWORD_TAIL_SLACK_MS * 32;
 /// Ordinary room speech can keep firmware VA sessions open for ~4.5 s. Limit
 /// the initial candidate to the 0.8/1.4/1.6/2.0 s ladder, then allow exactly
 /// one focused confirmation in every later rolling window. Real device captures
@@ -787,13 +794,8 @@ fn rolling_kws_rotation_start(
     phrase_already_hit: bool,
 ) -> Option<usize> {
     (!phrase_already_hit
-        && total_pcm_bytes.saturating_sub(stream_origin_bytes)
-            >= STREAMING_KWS_ROTATE_AFTER_BYTES)
-        .then(|| {
-            total_pcm_bytes
-                .saturating_sub(STREAMING_KWS_ROTATE_OVERLAP_BYTES)
-                & !1usize
-        })
+        && total_pcm_bytes.saturating_sub(stream_origin_bytes) >= STREAMING_KWS_ROTATE_AFTER_BYTES)
+        .then(|| total_pcm_bytes.saturating_sub(STREAMING_KWS_ROTATE_OVERLAP_BYTES) & !1usize)
 }
 
 #[cfg(target_os = "windows")]
@@ -877,11 +879,14 @@ fn next_local_confirmation_snapshot_bytes(attempts: usize) -> Option<usize> {
 }
 
 fn local_confirmation_pcm(pcm: &[u8], has_keyword_model_hit: bool) -> Vec<u8> {
-    tail_pcm_window(pcm, if has_keyword_model_hit {
-        KWS_LOCAL_CONFIRM_MAX_PCM_BYTES
-    } else {
-        pcm.len()
-    })
+    tail_pcm_window(
+        pcm,
+        if has_keyword_model_hit {
+            KWS_LOCAL_CONFIRM_MAX_PCM_BYTES
+        } else {
+            pcm.len()
+        },
+    )
 }
 
 fn tail_pcm_window(pcm: &[u8], max_bytes: usize) -> Vec<u8> {
@@ -933,15 +938,10 @@ fn terminal_inflight_local_decision(
     phrase_chars: usize,
 ) -> TerminalInflightLocalDecision {
     if confirmation.matched
-        && local_confirmation_can_activate(
-            task_has_keyword_model_hit,
-            confirmation.phrase_relation,
-        )
+        && local_confirmation_can_activate(task_has_keyword_model_hit, confirmation.phrase_relation)
     {
         TerminalInflightLocalDecision::AcceptLocal
-    } else if confirmation.matched
-        || phonetic_near_phrase_evidence(confirmation, phrase_chars)
-    {
+    } else if confirmation.matched || phonetic_near_phrase_evidence(confirmation, phrase_chars) {
         TerminalInflightLocalDecision::PreserveKwsFusion
     } else {
         TerminalInflightLocalDecision::RecordAbsent
@@ -954,8 +954,7 @@ fn should_run_terminal_offline_recall(
     local_kws_fusion_evidence: bool,
 ) -> bool {
     pcm_bytes >= MIN_TERMINAL_OFFLINE_PCM_BYTES
-        && (local_kws_fusion_evidence
-            || local_absent_count < TERMINAL_OFFLINE_SKIP_ABSENT_COUNT)
+        && (local_kws_fusion_evidence || local_absent_count < TERMINAL_OFFLINE_SKIP_ABSENT_COUNT)
 }
 
 fn terminal_inflight_confirmation_remaining_ms(elapsed_ms: u64) -> u64 {
@@ -978,9 +977,8 @@ fn post_wake_pcm_offset_bytes(wake_end_seconds: f32, pcm_len: usize) -> usize {
 const WAKE_SPEAKER_ANCHOR_MS: usize = 800;
 
 fn wake_speaker_anchor_pcm_offset_bytes(wake_end_seconds: f32, pcm_len: usize) -> usize {
-    let wake_end_bytes = ((wake_end_seconds.max(0.0) * 32_000.0).round() as usize)
-        .min(pcm_len)
-        & !1usize;
+    let wake_end_bytes =
+        ((wake_end_seconds.max(0.0) * 32_000.0).round() as usize).min(pcm_len) & !1usize;
     wake_end_bytes.saturating_sub(WAKE_SPEAKER_ANCHOR_MS * 32) & !1usize
 }
 
@@ -1081,7 +1079,10 @@ fn local_absent_covers_keyword_endpoint(
     let keyword_end_bytes = (keyword_end_seconds * 32_000.0).round() as usize;
     coverage.is_some_and(|covered| {
         covered.start_bytes <= keyword_stream_origin_bytes
-            && covered.end_bytes >= keyword_end_bytes
+            && covered
+                .end_bytes
+                .saturating_add(LOCAL_ABSENT_KEYWORD_TAIL_SLACK_BYTES)
+                >= keyword_end_bytes
     })
 }
 
@@ -1090,13 +1091,13 @@ fn keyword_fallback_absent_count(
     candidate: &BufferedSpeakerCandidate,
     wake_match: &crate::wake_phrase::Match,
 ) -> u8 {
-    candidate.kws_local_absent_count.max(u8::from(
-        local_absent_covers_keyword_endpoint(
+    candidate
+        .kws_local_absent_count
+        .max(u8::from(local_absent_covers_keyword_endpoint(
             candidate.local_absent_coverage,
             candidate.kws_stream_origin_bytes,
             wake_match.end_seconds,
-        ),
-    ))
+        )))
 }
 
 #[cfg(target_os = "windows")]
@@ -1125,11 +1126,12 @@ fn authoritative_local_absent_coverage(
     start_bytes: usize,
     end_bytes: usize,
 ) -> Option<LocalConfirmationCoverage> {
-    completed_secondary_absent_is_authoritative(relation, transcript_chars, phrase_chars)
-        .then_some(LocalConfirmationCoverage {
+    completed_secondary_absent_is_authoritative(relation, transcript_chars, phrase_chars).then_some(
+        LocalConfirmationCoverage {
             start_bytes,
             end_bytes,
-        })
+        },
+    )
 }
 
 #[cfg(target_os = "windows")]

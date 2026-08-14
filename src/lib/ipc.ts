@@ -104,7 +104,7 @@ export async function startVoiceprintEnrollment(): Promise<VoiceprintStatus> {
     ...mockVoiceprintStatus,
     state: 'capturing',
     progress: 35,
-    captureSecondsRemaining: 14,
+    captureSecondsRemaining: 15,
   }));
 }
 
