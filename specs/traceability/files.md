@@ -140,7 +140,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/asr/local/test_run.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/wake_helper.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/mod.rs` | ASR providers | Provider tests, dictation smoke |
-| `src-tauri/src/asr/volcengine.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine.rs` | ASR providers, owner-only multi-speaker filtering (including same cloud speaker-ID collapse) | Provider tests, multi-speaker timeline regressions, dictation smoke |
 | `src-tauri/src/asr/volcengine_platform.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_transcript.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/wav.rs` | ASR providers | Provider tests, dictation smoke |

@@ -333,6 +333,16 @@ const LOCAL_SPEAKER_SWITCH_CONFIRMATIONS: u8 = 2;
 const LOCAL_SPEAKER_EVIDENCE_LIMIT: usize = 64;
 const LOCAL_SPEAKER_WINDOW_MS: u64 = 1_200;
 const LOCAL_ENDPOINT_STRONG_NON_TARGET_MAX_SCORE: f32 = 0.20;
+// A cloud speaker id can collapse two real people into the same cluster. Do
+// not trust that id for a later stable utterance when the local verifier saw a
+// sustained owner-absence run over the whole utterance. Keep this deliberately
+// above the hard NonTarget threshold: field session d96a8653 had six windows
+// at 0.17..0.30 for the second person, while the accepted same-owner low-band
+// regression stayed at 0.307..0.337. Three windows (about 1.2 s with the
+// current cadence) prevents a single cross-phrase false negative from deleting
+// owner speech.
+const LOCAL_OWNER_ABSENCE_MAX_SCORE: f32 = 0.30;
+const LOCAL_OWNER_ABSENCE_CONFIRMATIONS: u32 = 3;
 const MAX_WAKE_PHRASE_UTTERANCE_MS: u64 = 1_800;
 // Volcengine session 768 emitted an exact wake-only row spanning 1,902 ms.
 // Permit that provider timing drift only for unenrolled/adaptive final recovery;
@@ -849,6 +859,7 @@ struct SpeakerFilteredResult {
     result: Value,
     optimistic_result: Value,
     speaker_info_present: bool,
+    stable_non_target_utterance_present: bool,
     target_speech_end_ms: Option<u64>,
     stable_attributed_speech_end_ms: Option<u64>,
     pending_unattributed_text: String,
@@ -1111,7 +1122,44 @@ fn local_evidence_supports_cloud_target(
         }
         has_stable_owner_overlap = true;
     }
-    has_stable_owner_overlap
+    has_stable_owner_overlap && !local_evidence_confirms_owner_absence(utterance, evidence)
+}
+
+fn local_evidence_confirms_owner_absence(
+    utterance: &Value,
+    evidence: &[LocalSpeakerEvidence],
+) -> bool {
+    let Some(end_ms) = utterance_end_ms(utterance) else {
+        return false;
+    };
+    let start_ms = utterance_start_ms(utterance).unwrap_or(end_ms);
+    let mut overlap_count = 0u32;
+    let mut target_votes = 0u32;
+    let mut owner_absence_votes = 0u32;
+    for sample in evidence {
+        let sample_center_ms = sample
+            .audio_end_ms
+            .saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+        if sample_center_ms < start_ms || sample_center_ms > end_ms {
+            continue;
+        }
+        overlap_count += 1;
+        if !sample.stable_target {
+            return true;
+        }
+        if matches!(
+            sample.classification,
+            crate::speaker_verification::SessionSpeakerClassification::Target { .. }
+        ) {
+            target_votes += 1;
+        }
+        if sample.classification.score() <= LOCAL_OWNER_ABSENCE_MAX_SCORE {
+            owner_absence_votes += 1;
+        }
+    }
+    overlap_count > 0
+        && target_votes == 0
+        && owner_absence_votes >= LOCAL_OWNER_ABSENCE_CONFIRMATIONS
 }
 
 /// Clamp a growing transcript to the frozen owner ceiling when multi-speaker
@@ -1161,6 +1209,36 @@ fn freeze_owner_isolation_ledger(state: &mut SyncState) {
         state.owner_isolation_ceiling_text.chars().count(),
         state.best_transcript_text.chars().count(),
         state.optimistic_preview_text.chars().count()
+    );
+}
+
+/// Freeze at the provider's already-filtered owner utterances when cloud
+/// diarization reused the owner's speaker id for a locally rejected later
+/// utterance. This is stronger than a raw voiceprint negative: a stable
+/// provider boundary and a sustained local owner-absence run must agree first.
+fn freeze_owner_isolation_at_filtered_result(state: &mut SyncState, filtered_result: &Value) {
+    if !state.local_speaker_tracking_enabled {
+        return;
+    }
+    let candidate = transcript_candidate_from_result(filtered_result);
+    if candidate.text.trim().is_empty() {
+        return;
+    }
+    state.owner_isolation_ceiling_text = candidate.text.clone();
+    state.owner_isolation_ceiling_segments = candidate.timed_segments.clone();
+    state.owner_isolation_frozen = true;
+
+    // A provisional preview may already contain the other person's words while
+    // diarization was pending. Replace every committed/display ledger with the
+    // filtered owner text so protocol-final fallback cannot restore that tail.
+    state.best_transcript_text = candidate.text.clone();
+    state.best_transcript_segments = candidate.timed_segments.clone();
+    state.last_partial_text = candidate.text.clone();
+    state.optimistic_preview_text = candidate.text;
+    state.optimistic_preview_segments = candidate.timed_segments;
+    log::info!(
+        "[asr] owner isolation froze at filtered stable utterances ceiling_chars={} reason=stable_same_cluster_owner_absence",
+        state.owner_isolation_ceiling_text.chars().count()
     );
 }
 
@@ -1342,6 +1420,19 @@ fn filter_result_to_target_speaker_with_local_evidence(
                 )
         })
     });
+    // Hard exclusion is intentionally narrower than ordinary cloud
+    // diarization filtering. It addresses the field failure where the cloud
+    // reused the *same* speaker id for a later real person. Missing local
+    // evidence and cloud A/B cluster drift are not hard exclusion evidence and
+    // retain their existing final-recovery paths.
+    let stable_same_cluster_owner_absence_present =
+        target_speaker_id.as_deref().is_some_and(|target| {
+            utterances.iter().any(|utterance| {
+                utterance_is_stable(utterance)
+                    && utterance_speaker_id(utterance).as_deref() == Some(target)
+                    && local_evidence_confirms_owner_absence(utterance, local_speaker_evidence)
+            })
+        });
     // Unstable stream tails are only "pending owner text" when local evidence
     // still votes Target for that window. Blindly including every indefinite
     // utterance let other people ride into the capsule/ledger while cloud
@@ -1446,6 +1537,7 @@ fn filter_result_to_target_speaker_with_local_evidence(
         result: filtered_result,
         optimistic_result,
         speaker_info_present,
+        stable_non_target_utterance_present: stable_same_cluster_owner_absence_present,
         target_speech_end_ms,
         stable_attributed_speech_end_ms,
         pending_unattributed_text,
@@ -1899,6 +1991,14 @@ impl VolcengineStreamingASR {
                         && state.local_consecutive_target >= LOCAL_SPEAKER_SWITCH_CONFIRMATIONS
                     {
                         state.local_speaker_stable_target = true;
+                        unfreeze_owner_isolation_ledger(&mut state);
+                    } else if state.owner_isolation_frozen
+                        && state.local_consecutive_target >= LOCAL_SPEAKER_SWITCH_CONFIRMATIONS
+                    {
+                        // Provider/local dual-gate exclusion may freeze while
+                        // the debounced identity still says owner. Two fresh
+                        // high-confidence owner windows allow the real owner to
+                        // resume after somebody else spoke.
                         unfreeze_owner_isolation_ledger(&mut state);
                     }
                 }
@@ -2572,6 +2672,9 @@ impl VolcengineStreamingASR {
                 &local_speaker_evidence,
                 wake_speaker_phrase.as_deref(),
             );
+            if filtered.stable_non_target_utterance_present {
+                freeze_owner_isolation_at_filtered_result(&mut state, &filtered.result);
+            }
             let previous_end_ms = state.target_speech_end_ms;
             let previous_pending_text = std::mem::take(&mut state.pending_unattributed_text);
             if let Some(end_ms) = filtered.target_speech_end_ms {
@@ -2712,37 +2815,41 @@ impl VolcengineStreamingASR {
         // longer owner tail. On protocol final we must prefer the longer
         // owner-safe optimistic text when available — otherwise intermittent
         // mid-cut finals insert only two chars (installed 4ff44fc3).
-        let prefer_final_provider_text = has_final && {
-            let target_text = speaker_filtered_result
-                .result
-                .get("text")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let state = self.state.lock();
-            final_wake_only_provider_gap_is_owner_safe(&state, result, target_text)
-                || final_sequential_speaker_split_gap_is_owner_safe(&state, result, target_text)
-        };
-        let prefer_final_optimistic = has_final && !prefer_final_provider_text && {
-            let target_text = speaker_filtered_result
-                .result
-                .get("text")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let optimistic_text = speaker_filtered_result
-                .optimistic_result
-                .get("text")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let longer = spoken_content_len(optimistic_text) > spoken_content_len(target_text);
-            let owner_ok = {
+        let prefer_final_provider_text =
+            has_final && !speaker_filtered_result.stable_non_target_utterance_present && {
+                let target_text = speaker_filtered_result
+                    .result
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 let state = self.state.lock();
-                local_speaker_allows_optimistic_preview(&state)
-                    || local_speaker_allows_non_destructive_final_recovery(&state)
-                    || spoken_content_len(&state.optimistic_preview_text)
-                        >= spoken_content_len(optimistic_text)
+                final_wake_only_provider_gap_is_owner_safe(&state, result, target_text)
+                    || final_sequential_speaker_split_gap_is_owner_safe(&state, result, target_text)
             };
-            longer && owner_ok
-        };
+        let prefer_final_optimistic = has_final
+            && !prefer_final_provider_text
+            && !speaker_filtered_result.stable_non_target_utterance_present
+            && {
+                let target_text = speaker_filtered_result
+                    .result
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let optimistic_text = speaker_filtered_result
+                    .optimistic_result
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let longer = spoken_content_len(optimistic_text) > spoken_content_len(target_text);
+                let owner_ok = {
+                    let state = self.state.lock();
+                    local_speaker_allows_optimistic_preview(&state)
+                        || local_speaker_allows_non_destructive_final_recovery(&state)
+                        || spoken_content_len(&state.optimistic_preview_text)
+                            >= spoken_content_len(optimistic_text)
+                };
+                longer && owner_ok
+            };
         let result = if prefer_final_provider_text {
             log::info!(
                 "[asr] protocol final restores owner-safe provider text after diarization regression target_chars={} provider_chars={}",
@@ -4460,6 +4567,228 @@ mod tests {
             .expect("session 2024 final should resolve")
             .expect("provider-recognized owner text must not become empty");
         assert_eq!(transcript.text, provider_text);
+    }
+
+    #[test]
+    fn same_cloud_speaker_id_excludes_later_utterance_with_sustained_owner_absence() {
+        // Installed session d96a8653: Volcengine emitted two stable utterances
+        // but reused speaker 0 for both people. The second utterance had no
+        // local Target window and a sustained 0.17..0.30 owner-absence run.
+        let result = json!({
+            "text": "开始录音。主人正文。旁人的话不能放进去。",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 0,
+                    "end_time": 5_112,
+                    "text": "开始录音。主人正文。"
+                },
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 5_700,
+                    "end_time": 9_632,
+                    "text": "旁人的话不能放进去。"
+                }
+            ]
+        });
+        let evidence = vec![
+            LocalSpeakerEvidence {
+                audio_end_ms: 2_200,
+                classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                    score: 0.65,
+                },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 6_800,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.29,
+                    },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 7_200,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.25,
+                    },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 7_600,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.18,
+                    },
+                stable_target: true,
+            },
+        ];
+        let mut target = None;
+        let filtered = filter_result_to_target_speaker_with_local_evidence(
+            &result,
+            &mut target,
+            true,
+            &evidence,
+            Some("开始录音"),
+        );
+        assert_eq!(target.as_deref(), Some("0"));
+        assert_eq!(filtered.result["text"], "开始录音。主人正文。");
+        assert!(filtered.stable_non_target_utterance_present);
+    }
+
+    #[test]
+    fn brief_low_score_dip_does_not_exclude_same_speaker_continuation() {
+        let result = json!({
+            "text": "开始录音。第一句。停顿以后还是主人第二句。",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 0,
+                    "end_time": 3_200,
+                    "text": "开始录音。第一句。"
+                },
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 4_000,
+                    "end_time": 6_800,
+                    "text": "停顿以后还是主人第二句。"
+                }
+            ]
+        });
+        let evidence = vec![
+            LocalSpeakerEvidence {
+                audio_end_ms: 2_000,
+                classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                    score: 0.63,
+                },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 5_000,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.24,
+                    },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 5_400,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.27,
+                    },
+                stable_target: true,
+            },
+        ];
+        let mut target = None;
+        let filtered = filter_result_to_target_speaker_with_local_evidence(
+            &result,
+            &mut target,
+            true,
+            &evidence,
+            Some("开始录音"),
+        );
+        assert_eq!(filtered.result["text"], result["text"]);
+        assert!(!filtered.stable_non_target_utterance_present);
+    }
+
+    #[test]
+    fn protocol_final_cannot_restore_same_cluster_other_speaker_tail() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_local_speaker_tracking_started("开始录音");
+        asr.note_local_speaker_profile_adaptive(true);
+        asr.note_local_speaker_classification(
+            2_200,
+            crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.65 },
+        );
+        for (audio_end_ms, score) in [(6_800, 0.29), (7_200, 0.25), (7_600, 0.18)] {
+            asr.note_local_speaker_classification(
+                audio_end_ms,
+                crate::speaker_verification::SessionSpeakerClassification::Uncertain { score },
+            );
+        }
+        {
+            let mut state = asr.state.lock();
+            state.best_transcript_text = "开始录音。主人正文。旁人的话不能放进去。".into();
+            state.last_partial_text = state.best_transcript_text.clone();
+            state.optimistic_preview_text = state.best_transcript_text.clone();
+        }
+        let provider_result = json!({
+            "text": "开始录音。主人正文。旁人的话不能放进去。",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 0,
+                    "end_time": 5_112,
+                    "text": "开始录音。主人正文。"
+                },
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 5_700,
+                    "end_time": 9_632,
+                    "text": "旁人的话不能放进去。"
+                }
+            ]
+        });
+        let (tx, mut rx) = oneshot::channel();
+        asr.state.lock().final_tx = Some(tx);
+        let payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 10_100 },
+            "result": provider_result,
+        }))
+        .expect("same-cluster final serializes");
+        let frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::LastPacket,
+            Serialization::Json,
+            &payload,
+            None,
+        );
+        assert!(!asr.handle_frame(&frame));
+        let transcript = rx
+            .try_recv()
+            .expect("same-cluster final should resolve")
+            .expect("owner text should remain non-empty");
+        assert_eq!(transcript.text, "开始录音。主人正文。");
+        assert!(asr.state.lock().owner_isolation_frozen);
+    }
+
+    #[test]
+    fn owner_can_resume_after_provider_local_isolation_freeze() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_local_speaker_tracking_started("开始录音");
+        asr.state.lock().owner_isolation_frozen = true;
+        asr.note_local_speaker_classification(
+            8_000,
+            crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.66 },
+        );
+        assert!(asr.state.lock().owner_isolation_frozen);
+        asr.note_local_speaker_classification(
+            8_400,
+            crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.68 },
+        );
+        assert!(!asr.state.lock().owner_isolation_frozen);
     }
 
     #[test]
