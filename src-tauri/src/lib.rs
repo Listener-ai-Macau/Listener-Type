@@ -474,6 +474,7 @@ pub fn run() {
             commands::record_ui_timeline_event,
             commands::set_settings,
             commands::start_voiceprint_enrollment,
+            commands::cancel_voiceprint_enrollment,
             commands::delete_voiceprint,
             commands::refresh_device_settings_status,
             commands::get_hotkey_status,
@@ -3183,10 +3184,8 @@ mod tests {
 
     #[test]
     fn online_log_rotation_bounds_three_times_cap_and_preserves_retained_order() {
-        let dir = std::env::temp_dir().join(format!(
-            "listener-type-log-online-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("listener-type-log-online-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let log = dir.join("listener-type.log");
@@ -3213,13 +3212,7 @@ mod tests {
                 std::fs::read_to_string(path)
                     .unwrap()
                     .lines()
-                    .map(|line| {
-                        line.split_once('|')
-                            .unwrap()
-                            .0
-                            .parse::<usize>()
-                            .unwrap()
-                    })
+                    .map(|line| line.split_once('|').unwrap().0.parse::<usize>().unwrap())
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
@@ -3229,7 +3222,10 @@ mod tests {
             std::fs::read_dir(&dir)
                 .unwrap()
                 .filter_map(Result::ok)
-                .filter(|entry| entry.file_name().to_string_lossy().starts_with("listener-type.log"))
+                .filter(|entry| entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("listener-type.log"))
                 .count(),
             2
         );

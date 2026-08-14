@@ -90,6 +90,7 @@ impl EmbeddedStreamingDictation {
                         return Err("声纹候选录音超过安全缓冲上限".to_string());
                     }
                     candidate.pcm.extend_from_slice(&chunk.pcm);
+                    if candidate.kind == BufferedSpeakerCandidateKind::Enrollment { crate::speaker_verification::observe_enrollment_capture(&candidate.pcm); }
                     if self
                         .promote_hidden_candidate_if_requested(inner, chunk_session_id)
                         .await?
@@ -431,6 +432,8 @@ impl EmbeddedStreamingDictation {
                 wake_detector: None,
                 wake_detector_init,
                 pending_phrase_match: None,
+                owner_ambiguous_confirmations: 0,
+                owner_best_ambiguous_score: 0.0,
                 #[cfg(target_os = "windows")]
                 local_confirmation_task: None,
                 #[cfg(target_os = "windows")]
@@ -656,6 +659,11 @@ impl EmbeddedStreamingDictation {
             return Ok(true);
         }
         if candidate.kind == BufferedSpeakerCandidateKind::Enrollment {
+            if !crate::speaker_verification::enrollment_should_process() {
+                log::info!("[speaker-verification] discarded cancelled enrollment candidate embedded_session_id={embedded_session_id}");
+                complete_voiceprint_enrollment_candidate("voiceprint_enrollment_cancelled");
+                return Ok(true);
+            }
             let pcm = candidate.pcm;
             let phrase = inner.prefs.get().voice_wake_phrase;
             crate::speaker_verification::begin_enrollment_processing();
@@ -844,6 +852,30 @@ impl EmbeddedStreamingDictation {
                 }
             };
             candidate.kws_total_ms = candidate.kws_total_ms.saturating_add(final_kws_ms);
+            // Terminal verification used to run only after phrase detection. That
+            // meant four exploratory local-ASR Absents could skip the independent
+            // offline KWS cascade even when this same completed buffer was a strong
+            // match for the enrolled owner (production session 1932: score 0.522).
+            // Verify once up front and reuse the result for both the bounded recall
+            // decision and the final gate. Owner evidence only permits KWS to run;
+            // it is never treated as phrase evidence by itself.
+            let phrase_enrolled =
+                crate::speaker_verification::is_enrolled_for_phrase(&phrase);
+            let voiceprint_pcm = candidate.pcm.clone();
+            let voiceprint_phrase = phrase.clone();
+            let verification_task = tauri::async_runtime::spawn_blocking(move || {
+                let started = Instant::now();
+                let result =
+                    crate::speaker_verification::verify(&voiceprint_pcm, &voiceprint_phrase);
+                (result, started.elapsed().as_millis() as u64)
+            })
+            .await;
+            let (verification, voiceprint_ms) = match verification_task {
+                Ok(result) => result,
+                Err(err) => (Err(format!("声纹验证任务失败: {err}")), 0),
+            };
+            let enrolled_owner_matched = phrase_enrolled
+                && verification.as_ref().is_ok_and(|result| result.matched);
             let mut phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
             let mut local_confirmation_ms = 0u64;
             #[cfg(target_os = "windows")]
@@ -1023,16 +1055,18 @@ impl EmbeddedStreamingDictation {
                         candidate.pcm.len(),
                         candidate.local_absent_count,
                         candidate.local_kws_fusion_evidence,
+                        enrolled_owner_matched,
                     ) {
                         let too_short =
                             candidate.pcm.len() < MIN_TERMINAL_OFFLINE_PCM_BYTES;
                         log::info!(
-                            "[wake-phrase] terminal skip offline cascade reason={} embedded_session_id={} pcm_ms={} min_ms={} local_absent_count={}",
+                            "[wake-phrase] terminal skip offline cascade reason={} embedded_session_id={} pcm_ms={} min_ms={} local_absent_count={} enrolled_owner_matched={}",
                             if too_short { "candidate_too_short" } else { "local_absent_evidence" },
                             embedded_session_id,
                             candidate.pcm.len() / 32,
                             MIN_TERMINAL_OFFLINE_PCM_BYTES / 32,
-                            candidate.local_absent_count
+                            candidate.local_absent_count,
+                            enrolled_owner_matched
                         );
                         None
                     } else {
@@ -1244,19 +1278,6 @@ impl EmbeddedStreamingDictation {
                     );
                     return Ok(true);
                 }
-            };
-            let voiceprint_pcm = candidate.pcm.clone();
-            let voiceprint_phrase = phrase.clone();
-            let verification_task = tauri::async_runtime::spawn_blocking(move || {
-                let started = Instant::now();
-                let result =
-                    crate::speaker_verification::verify(&voiceprint_pcm, &voiceprint_phrase);
-                (result, started.elapsed().as_millis() as u64)
-            })
-            .await;
-            let (verification, voiceprint_ms) = match verification_task {
-                Ok(result) => result,
-                Err(err) => (Err(format!("声纹验证任务失败: {err}")), 0),
             };
             let total_ms = candidate
                 .kws_total_ms
@@ -2212,18 +2233,34 @@ impl EmbeddedStreamingDictation {
             Ok(result) => result,
             Err(err) => (Err(format!("声纹验证任务失败: {err}")), 0),
         };
+        let owner_matched_by_voiceprint = match &verification {
+            Ok(result) if result.matched => true,
+            Ok(result) => note_ambiguous_owner_evidence(
+                &mut candidate.owner_ambiguous_confirmations,
+                &mut candidate.owner_best_ambiguous_score,
+                phrase_signal,
+                result.score,
+            ),
+            Err(_) => false,
+        };
+        let owner_recovered_by_local_phrase = local_phrase_can_recover_owner_gate(
+            phrase_signal,
+            pcm_ms,
+            &verification,
+        );
+        let owner_matched = owner_matched_by_voiceprint || owner_recovered_by_local_phrase;
         let total_ms = kws_ms
             .saturating_add(local_confirmation_ms)
             .saturating_add(voiceprint_ms);
         let gate_decision = denzic_voice_activation_v1_core::decide_gate(
             denzic_voice_activation_v1_core::GateInput {
                 phrase_signal,
-                owner_match: verification.as_ref().ok().map(|result| result.matched),
+                owner_match: verification.as_ref().ok().map(|_| owner_matched),
                 terminal: false,
             },
         );
         log::info!(
-            "[wake-phrase] automatic streaming gate embedded_session_id={} terminal=false pcm_ms={} kws_fed_bytes={} kws_step_ms={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} total_compute_ms={} phrase_signal={:?} gate_decision={:?} owner_matched={}",
+            "[wake-phrase] automatic streaming gate embedded_session_id={} terminal=false pcm_ms={} kws_fed_bytes={} kws_step_ms={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} total_compute_ms={} phrase_signal={:?} gate_decision={:?} owner_matched={} owner_recovered_by_local_phrase={} owner_ambiguous_confirmations={} owner_best_ambiguous_score={:.6}",
             embedded_session_id,
             pcm_ms,
             candidate.kws_fed_bytes,
@@ -2234,29 +2271,30 @@ impl EmbeddedStreamingDictation {
             total_ms,
             phrase_signal,
             gate_decision,
-            verification.as_ref().is_ok_and(|result| result.matched)
+            owner_matched,
+            owner_recovered_by_local_phrase,
+            candidate.owner_ambiguous_confirmations,
+            candidate.owner_best_ambiguous_score
         );
 
         if gate_decision != denzic_voice_activation_v1_core::GateDecision::Accept {
-            if let Ok(result) = &verification {
-                if !result.matched {
-                    if let Some(retry_ms) = next_owner_verification_retry_ms(pcm_ms) {
-                        candidate.pending_phrase_match = Some(PendingAutomaticPhraseMatch {
-                            wake_match,
-                            phrase_signal,
-                            local_confirmation_ms,
-                            owner_verification_start_ms: retry_ms,
-                        });
-                        log::info!(
-                            "[wake-phrase] phrase hit retained for owner retry embedded_session_id={} pcm_ms={} next_owner_window_ms={} score={}",
-                            embedded_session_id,
-                            pcm_ms,
-                            retry_ms,
-                            result.score
-                        );
-                        return Ok(false);
-                    }
-                }
+            if let Some(retry_ms) =
+                next_owner_verification_retry_after(pcm_ms, &verification)
+            {
+                candidate.pending_phrase_match = Some(PendingAutomaticPhraseMatch {
+                    wake_match,
+                    phrase_signal,
+                    local_confirmation_ms,
+                    owner_verification_start_ms: retry_ms,
+                });
+                log::info!(
+                    "[wake-phrase] phrase hit retained for owner retry embedded_session_id={} pcm_ms={} next_owner_window_ms={} verification={:?}",
+                    embedded_session_id,
+                    pcm_ms,
+                    retry_ms,
+                    verification.as_ref().map(|result| result.score)
+                );
+                return Ok(false);
             }
             save_bounded_wake_diagnostic(
                 embedded_session_id,

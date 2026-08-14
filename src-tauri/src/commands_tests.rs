@@ -2506,6 +2506,32 @@ fn load_wired_firmware_package_reads_nested_factory_directory() {
 }
 
 #[test]
+fn load_wired_firmware_package_selects_latest_nested_factory_directory() {
+    let root = std::env::temp_dir().join(format!(
+        "listener-wired-nested-latest-test-{}",
+        std::process::id()
+    ));
+    let older = root
+        .join("factory")
+        .join("listener-factory-1.0.5-20260814-120000");
+    let latest = root
+        .join("factory")
+        .join("listener-factory-1.0.5-20260814-220000");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&older).expect("create older factory package");
+    std::fs::create_dir_all(&latest).expect("create latest factory package");
+    write_test_factory_package(&older, "v1.0.4");
+    write_test_factory_package(&latest, "v1.0.5");
+
+    let loaded = load_wired_firmware_package_internal(&root)
+        .expect("load latest nested factory wired firmware package");
+    assert_eq!(loaded.version, "v1.0.5");
+    assert!(loaded.source_label.contains("20260814-220000"));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn load_wired_firmware_package_rejects_ota_zip() {
     let zip_path = std::env::temp_dir().join(format!(
         "listener-wired-reject-ota-zip-test-{}-{}.zip",

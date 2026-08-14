@@ -9,9 +9,9 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `package.json` | Build and release config | Build, updater and audit scripts |
 | `scripts/advance-preproduction-total-review.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/build-mac.sh` | Automation and audits | Node/PowerShell script tests |
-| `scripts/check-brand-residue.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/capture-live-wake-attempts.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/capture-live-wake-attempts.test.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-brand-residue.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-cloud-services.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-dark-mode.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-dirty-change-inventory.mjs` | Automation and audits | Node/PowerShell script tests |
@@ -60,8 +60,6 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/run-installed-audio-cdp.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-installed-audio-hidden.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-installed-device-settings-hidden.ps1` | Automation and audits | Node/PowerShell script tests |
-| `scripts/show-live-wake-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
-| `scripts/show-live-wake-acceptance.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-installed-ota-cdp.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-installed-ota-hidden.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-listener-1.0.4-regression.ps1` | Automation and audits | Node/PowerShell script tests |
@@ -70,6 +68,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/run-recording-consumption-physical-validation.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-speaker-verification-evaluation.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-v1.0.2-regression.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/show-live-wake-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/show-live-wake-acceptance.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/speaker-evaluation-manifest.example.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/validation/run_ble_recording_cancel_matrix.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-frontend.mjs` | Automation and audits | Node/PowerShell script tests |
@@ -170,8 +170,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator/dictation_preview.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_session.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_tests.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation_wake_polish.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_diagnostics.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_wake_polish.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/embedded_ble_runtime.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/hotkey_device_runtime.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/coordinator/qa.rs` | Core app | Build and targeted tests |
@@ -336,6 +336,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/pages/settings/ProvidersSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/RecordingSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/ShortcutsSection.tsx` | React UI | TypeScript build and visual smoke |
+| `src/pages/settings/VoiceprintEnrollmentWizard.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/shared.tsx` | React UI | TypeScript build and visual smoke |
 | `src/state/HotkeySettingsContext.tsx` | Core app | Build and targeted tests |
 | `src/state/useAppState.ts` | Core app | Build and targeted tests |

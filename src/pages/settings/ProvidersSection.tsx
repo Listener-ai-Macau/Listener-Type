@@ -184,7 +184,7 @@ function providerProxyModeLabel(
 
 // ─── ASR Presets ──────────────────────────────────────────────────────
 
-const ASR_DEFAULT_RESOURCE_ID = 'volc.bigasr.sauc.duration';
+const ASR_DEFAULT_RESOURCE_ID = 'volc.seedasr.sauc.duration';
 
 // `volcengine` / `bailian` 走自建流式客户端；其余走 OpenAI 兼容
 // `/audio/transcriptions`（`coordinator.rs::is_whisper_compatible_provider`）。

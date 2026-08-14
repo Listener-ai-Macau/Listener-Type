@@ -2670,7 +2670,7 @@ fn owner_enrollment_uses_a_dedicated_firmware_control_mode() {
 
     let enrollment = std::include_str!("../speaker_verification.rs");
     assert!(enrollment.contains("const ENROLLMENT_WAKE_STEPS: u64 = 3;"));
-    assert!(enrollment.contains("const ENROLLMENT_SECONDS: u64 = 15;"));
+    assert!(enrollment.contains("const ENROLLMENT_SECONDS: u64 = ENROLLMENT_WAKE_SECONDS;"));
     assert!(enrollment.contains("send_recording_control_enrollment(Duration::from_secs(4))"));
     assert!(enrollment.contains("capture_seconds_remaining"));
 }

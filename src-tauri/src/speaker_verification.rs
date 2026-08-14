@@ -13,6 +13,12 @@ pub struct VoiceprintStatus {
     pub state: String,
     pub progress: u8,
     pub capture_seconds_remaining: Option<u8>,
+    pub capture_step: Option<u8>,
+    pub capture_step_count: u8,
+    pub capture_elapsed_ms: u32,
+    pub step_speech_ms: Vec<u16>,
+    pub signal_level: u8,
+    pub capture_feedback: Option<String>,
     pub score: Option<f32>,
     pub threshold: f32,
     pub error: Option<String>,
@@ -224,13 +230,12 @@ fn adapt_session_speaker_profile(
     count
 }
 
-// 会话分段分类阈值。Target 下限仍是 0.42（与唤醒开闸一致），但 2026-08-09
-// 12:47:04 复现：第二个人的声音得分 0.426–0.58 全判 Target、持续刷新本人端点
-// 时钟 → 永不结束。引入置信余量带：[0.42, 0.55) 弱 Target 降为 Uncertain——
-// 不刷新本人时钟、也不冻结切换；只有 ≥0.55 的确信 Target 才刷新（见
-// volcengine.rs note_local_speaker_classification）。文字过滤口径不变。
+// 会话分段分类阈值。2026-08-09 的第二个人得分可达 0.426–0.58；而
+// 2026-08-14 installed session 1947 中，已经通过主人唤醒校验的同一说话人
+// 正文连续得到 0.307–0.337。中间分数只能作为 Uncertain，不能冻结并截断
+// 正文。仅 <=0.20 的强差异作为 NonTarget；>=0.55 才是确信 Target。
 const SESSION_SPEAKER_CONFIDENT_TARGET_MIN_SCORE: f32 = 0.55;
-const SESSION_SPEAKER_NON_TARGET_MAX_SCORE: f32 = 0.34;
+const SESSION_SPEAKER_NON_TARGET_MAX_SCORE: f32 = 0.20;
 
 fn session_speaker_classification_for_score(score: f32) -> SessionSpeakerClassification {
     if score >= SESSION_SPEAKER_CONFIDENT_TARGET_MIN_SCORE {
@@ -293,28 +298,27 @@ mod platform {
     const KEYRING_SERVICE: &str = "com.listener.type.voiceprint";
     const KEYRING_ACCOUNT: &str = "owner-template-v1";
     const KEYRING_SUPPLEMENTAL_ACCOUNT_PREFIX: &str = "owner-template-v2-";
-    // v3 enrollment stores independent fixed-phrase and free-speech banks. Keep
+    // v3 enrollment stores independent wake and session-comparison banks. Keep
     // the existing account prefix so upgrades can read/delete v1/v2 material,
     // but reserve enough protected entries for both banks.
     const MAX_SUPPLEMENTAL_TEMPLATES: usize = 7;
     const SAMPLE_RATE: i32 = 16_000;
     const VERIFICATION_MIN_SPEECH_MS: usize = 1_000;
-    // Xiaomi-style guided enrollment: three independent wake-phrase slots,
-    // followed by one longer free-speech slot. Keep one continuous device
-    // capture so the guidance does not introduce BLE start/stop races, but make
-    // the model banks follow the same time boundaries shown to the owner.
+    // Xiaomi-style guided enrollment: three independent wake-phrase slots. Keep
+    // one continuous device capture so the guidance does not introduce BLE
+    // start/stop races. The same three samples also seed the session-comparison
+    // bank, so model implementation details do not add a fourth user step.
     const ENROLLMENT_WAKE_STEP_SECONDS: u64 = 3;
     const ENROLLMENT_WAKE_STEPS: u64 = 3;
+    const ENROLLMENT_STEP_COUNT: usize = 3;
     const ENROLLMENT_WAKE_SECONDS: u64 = ENROLLMENT_WAKE_STEP_SECONDS * ENROLLMENT_WAKE_STEPS;
-    const ENROLLMENT_SESSION_MIN_SECONDS: u64 = 3;
-    const ENROLLMENT_SECONDS: u64 = 15;
+    const ENROLLMENT_SECONDS: u64 = ENROLLMENT_WAKE_SECONDS;
     const ENROLLMENT_MIN_SECONDS: usize = 5;
     const ENROLLMENT_FRAME_MS: usize = 100;
     const ENROLLMENT_MIN_ACTIVE_FRAMES: usize = 18;
     const TEMPLATE_WINDOW_MS: usize = 1_600;
     const ENROLLMENT_TEMPLATE_WINDOW_MS: usize = 1_000;
     const DUAL_TEMPLATE_WINDOWS_PER_BANK: usize = 3;
-    const DUAL_TEMPLATE_MIN_ACTIVE_FRAMES_PER_WINDOW: usize = 10;
     const ENROLLMENT_WAKE_MIN_ACTIVE_FRAMES_PER_STEP: usize = 6;
     // Product sensitivity: platform DEFAULT_SCORE_MILLI is 500 (0.50). Real-owner
     // wake in mild noise often scores ~0.43–0.55; 0.50 cut too many true hits.
@@ -356,7 +360,17 @@ mod platform {
         template_checked: bool,
         enrollment_phrase: Option<String>,
         enrollment_capture_started: Option<std::time::Instant>,
+        enrollment_live: EnrollmentLiveState,
         runtime: Option<Arc<SpeakerRuntime>>,
+    }
+
+    #[derive(Default)]
+    struct EnrollmentLiveState {
+        analyzed_bytes: usize,
+        step_speech_ms: [u16; 3],
+        signal_level: u8,
+        last_frame_active: bool,
+        last_frame_clipped: bool,
     }
 
     static STATE: Lazy<Mutex<State>> = Lazy::new(|| Mutex::new(State::default()));
@@ -601,6 +615,72 @@ mod platform {
             .collect()
     }
 
+    fn enrollment_step_for_elapsed_ms(elapsed_ms: usize) -> usize {
+        (elapsed_ms / (ENROLLMENT_WAKE_STEP_SECONDS as usize * 1_000))
+            .min(ENROLLMENT_STEP_COUNT - 1)
+    }
+
+    fn enrollment_step_target_ms(_step: usize) -> u16 {
+        (ENROLLMENT_WAKE_MIN_ACTIVE_FRAMES_PER_STEP * ENROLLMENT_FRAME_MS) as u16
+    }
+
+    fn enrollment_capture_feedback(
+        step: usize,
+        elapsed_ms: usize,
+        live: &EnrollmentLiveState,
+    ) -> &'static str {
+        if live.last_frame_clipped {
+            "too_loud"
+        } else if live.step_speech_ms[step] >= enrollment_step_target_ms(step) {
+            "good"
+        } else if live.last_frame_active {
+            "hearing"
+        } else if elapsed_ms > step * ENROLLMENT_WAKE_STEP_SECONDS as usize * 1_000 + 1_000
+            && live.step_speech_ms[step] < 200
+        {
+            "too_quiet"
+        } else {
+            "waiting"
+        }
+    }
+
+    /// Update the enrollment wizard with real signal evidence while the actor keeps
+    /// buffering one continuous BLE session. This is deliberately lightweight: it
+    /// analyzes each 100 ms frame once and never runs speaker/KWS inference on the
+    /// streaming actor.
+    pub fn observe_enrollment_capture(pcm: &[u8]) {
+        let frame_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_FRAME_MS / 1_000;
+        let mut state = STATE.lock();
+        if state.capture != Some(CaptureState::Capturing) {
+            return;
+        }
+        let mut offset = state.enrollment_live.analyzed_bytes;
+        while offset.saturating_add(frame_bytes) <= pcm.len() {
+            let frame = &pcm[offset..offset + frame_bytes];
+            let rms = frame_rms(frame, frame_bytes)
+                .first()
+                .copied()
+                .unwrap_or(0.0);
+            let peak = frame
+                .chunks_exact(2)
+                .map(|sample| i16::from_le_bytes([sample[0], sample[1]]).unsigned_abs())
+                .max()
+                .unwrap_or(0);
+            let step = enrollment_step_for_elapsed_ms(offset / 32);
+            let active = rms >= 60.0;
+            if active {
+                state.enrollment_live.step_speech_ms[step] = state.enrollment_live.step_speech_ms
+                    [step]
+                    .saturating_add(ENROLLMENT_FRAME_MS as u16);
+            }
+            state.enrollment_live.signal_level = ((rms / 12.0).round() as u16).min(100) as u8;
+            state.enrollment_live.last_frame_active = active;
+            state.enrollment_live.last_frame_clipped = peak >= 32_000;
+            offset += frame_bytes;
+        }
+        state.enrollment_live.analyzed_bytes = offset;
+    }
+
     fn active_speech_bounds(
         pcm: &[u8],
         frame_bytes: usize,
@@ -687,19 +767,6 @@ mod platform {
         session: Vec<Vec<u8>>,
     }
 
-    fn enrollment_capture_banks(pcm: &[u8]) -> Result<(&[u8], &[u8]), String> {
-        let bytes_per_second = SAMPLE_RATE as usize * 2;
-        let minimum_bytes =
-            bytes_per_second * (ENROLLMENT_WAKE_SECONDS + ENROLLMENT_SESSION_MIN_SECONDS) as usize;
-        if pcm.len() < minimum_bytes {
-            return Err(
-                "声纹录制提前结束。请按四个步骤完成三次唤醒词和最后一段自然语音。".to_string(),
-            );
-        }
-        let split = (bytes_per_second * ENROLLMENT_WAKE_SECONDS as usize).min(pcm.len()) & !1usize;
-        Ok((&pcm[..split], &pcm[split..]))
-    }
-
     fn enrollment_wake_step_slices(wake_pcm: &[u8]) -> Result<Vec<&[u8]>, String> {
         let step_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_WAKE_STEP_SECONDS as usize;
         let required_bytes = step_bytes * ENROLLMENT_WAKE_STEPS as usize;
@@ -749,39 +816,22 @@ mod platform {
         Ok(compacted)
     }
 
-    fn quality_template_windows(pcm: &[u8], label: &str) -> Result<Vec<Vec<u8>>, String> {
-        let frame_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_FRAME_MS / 1000;
-        let compacted = compact_active_speech_frames(pcm, frame_bytes)
-            .map_err(|_| format!("{label}没有检测到清晰人声，请靠近设备重新录制。"))?;
-        let windows = evenly_spaced_windows(
-            &compacted,
-            ENROLLMENT_TEMPLATE_WINDOW_MS,
-            DUAL_TEMPLATE_WINDOWS_PER_BANK,
-        );
-        if windows.len() != DUAL_TEMPLATE_WINDOWS_PER_BANK {
-            return Err(format!("{label}录音太短，请按提示完整录制。"));
-        }
-        for window in &windows {
-            let (_, _, active_frames, _, _, _) = active_speech_bounds(window, frame_bytes, 20.0)
-                .map_err(|_| format!("{label}没有检测到清晰人声，请靠近设备重新录制。"))?;
-            if active_frames < DUAL_TEMPLATE_MIN_ACTIVE_FRAMES_PER_WINDOW {
-                return Err(format!(
-                    "{label}有效人声不足 1 秒，请保持自然语速并完整说完。"
-                ));
-            }
-        }
-        Ok(windows.into_iter().map(<[u8]>::to_vec).collect())
-    }
-
     fn enrollment_template_windows(pcm: &[u8]) -> Result<EnrollmentTemplateWindows, String> {
         enrollment_speech_window(pcm)?;
-        let (wake_pcm, session_pcm) = enrollment_capture_banks(pcm)?;
+        let wake_pcm_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_WAKE_SECONDS as usize;
+        let wake_pcm = pcm
+            .get(..wake_pcm_bytes)
+            .ok_or_else(|| "声纹录制提前结束，请按提示完整说三次唤醒词。".to_string())?;
         let wake = enrollment_wake_step_slices(wake_pcm)?
             .into_iter()
             .enumerate()
             .map(|(index, step_pcm)| quality_wake_step_window(step_pcm, index + 1))
             .collect::<Result<Vec<_>, _>>()?;
-        let session = quality_template_windows(session_pcm, "自然语音")?;
+        // Speaker embeddings are phrase-independent. Reuse the three independently
+        // quality-gated and model-padded owner samples for the session bank instead
+        // of imposing a second, stricter free-speech-era gate that contradicts the
+        // visible 600 ms-per-step contract.
+        let session = wake.clone();
         Ok(EnrollmentTemplateWindows { wake, session })
     }
 
@@ -1092,7 +1142,7 @@ mod platform {
             .as_deref()
             .ok_or_else(|| "voiceprint template wake phrase is missing".to_string())?;
         if template.wake_embeddings.is_empty() || template.session_embeddings.is_empty() {
-            return Err("voiceprint template requires wake and free-speech banks".to_string());
+            return Err("voiceprint template requires wake and session banks".to_string());
         }
         let encoded = template
             .wake_embeddings
@@ -1253,6 +1303,22 @@ mod platform {
         } else {
             None
         };
+        let capture_elapsed_ms =
+            (state.enrollment_live.analyzed_bytes / 32).min(u32::MAX as usize) as u32;
+        let capture_step_index = enrollment_step_for_elapsed_ms(capture_elapsed_ms as usize);
+        let capture_step = matches!(
+            state.capture,
+            Some(CaptureState::Capturing | CaptureState::Processing)
+        )
+        .then_some((capture_step_index + 1) as u8);
+        let capture_feedback = (state.capture == Some(CaptureState::Capturing)).then(|| {
+            enrollment_capture_feedback(
+                capture_step_index,
+                capture_elapsed_ms as usize,
+                &state.enrollment_live,
+            )
+            .to_string()
+        });
         let progress = capture_seconds_remaining
             .map(|remaining| {
                 let elapsed = ENROLLMENT_SECONDS.saturating_sub(remaining as u64);
@@ -1273,6 +1339,12 @@ mod platform {
                 .to_string(),
             progress,
             capture_seconds_remaining,
+            capture_step,
+            capture_step_count: ENROLLMENT_STEP_COUNT as u8,
+            capture_elapsed_ms,
+            step_speech_ms: state.enrollment_live.step_speech_ms.to_vec(),
+            signal_level: state.enrollment_live.signal_level,
+            capture_feedback,
             score: state.last_score,
             threshold: VERIFICATION_THRESHOLD,
             error: state.error.clone(),
@@ -1342,6 +1414,7 @@ mod platform {
             state.last_score = None;
             state.enrollment_phrase = Some(wake_phrase.clone());
             state.enrollment_capture_started = None;
+            state.enrollment_live = EnrollmentLiveState::default();
         }
         if let Err(err) = ensure_runtime() {
             mark_error(&err);
@@ -1428,8 +1501,7 @@ mod platform {
             let windows = enrollment_template_windows(pcm)?;
             // Reject silence/short speech before invoking KWS, then validate the
             // phrase before persisting either template bank.
-            let (wake_pcm, _) = enrollment_capture_banks(pcm)?;
-            for (index, step_pcm) in enrollment_wake_step_slices(wake_pcm)?.iter().enumerate() {
+            for (index, step_pcm) in enrollment_wake_step_slices(pcm)?.iter().enumerate() {
                 crate::wake_phrase::calibrate(step_pcm, &phrase).map_err(|_| {
                     format!(
                         "第 {} 次没有识别到“{}”，请按每一步提示清晰重录。",
@@ -1453,7 +1525,7 @@ mod platform {
                 .map(|speech| {
                     runtime
                         .embedding(speech)
-                        .map_err(|err| format!("自然语音声纹特征提取失败，请重新录制：{err}"))
+                        .map_err(|err| format!("会话声纹特征提取失败，请重新录制：{err}"))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let template = SpeakerTemplate {
@@ -1689,12 +1761,40 @@ mod platform {
         state.error = None;
         state.enrollment_phrase = None;
         state.enrollment_capture_started = None;
+        state.enrollment_live = EnrollmentLiveState::default();
         log::info!(
             "[speaker-verification] owner template invalidated after wake phrase change previous={} next={}; re-enrollment required",
             previous,
             next
         );
         Ok(())
+    }
+
+    pub fn enrollment_should_process() -> bool {
+        matches!(
+            STATE.lock().capture,
+            Some(CaptureState::Armed | CaptureState::Capturing | CaptureState::Processing)
+        )
+    }
+
+    pub fn cancel_enrollment(wake_phrase: &str) -> Result<VoiceprintStatus, String> {
+        let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
+        let should_stop = {
+            let mut state = STATE.lock();
+            let should_stop = enrollment_capture_needs_host_stop(state.capture);
+            state.capture = Some(CaptureState::Idle);
+            state.progress = 0;
+            state.error = None;
+            state.enrollment_phrase = None;
+            state.enrollment_capture_started = None;
+            state.enrollment_live = EnrollmentLiveState::default();
+            should_stop
+        };
+        if should_stop {
+            crate::embedded_ble::send_recording_control_stop(Duration::from_secs(4))?;
+        }
+        log::info!("[speaker-verification] enrollment cancelled by owner");
+        Ok(status_for_phrase(&phrase))
     }
 
     pub fn delete_template() -> Result<VoiceprintStatus, String> {
@@ -1708,6 +1808,7 @@ mod platform {
         state.error = None;
         state.enrollment_phrase = None;
         state.enrollment_capture_started = None;
+        state.enrollment_live = EnrollmentLiveState::default();
         drop(state);
         Ok(status())
     }
@@ -1726,6 +1827,31 @@ mod platform {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn guided_enrollment_step_boundaries_match_the_three_visible_prompts() {
+            assert_eq!(enrollment_step_for_elapsed_ms(0), 0);
+            assert_eq!(enrollment_step_for_elapsed_ms(2_999), 0);
+            assert_eq!(enrollment_step_for_elapsed_ms(3_000), 1);
+            assert_eq!(enrollment_step_for_elapsed_ms(6_000), 2);
+            assert_eq!(enrollment_step_for_elapsed_ms(9_000), 2);
+            assert_eq!(enrollment_step_for_elapsed_ms(15_000), 2);
+            assert_eq!(enrollment_step_target_ms(0), 600);
+            assert_eq!(enrollment_step_target_ms(2), 600);
+        }
+
+        #[test]
+        fn guided_enrollment_feedback_uses_real_signal_evidence() {
+            let mut live = EnrollmentLiveState::default();
+            assert_eq!(enrollment_capture_feedback(0, 0, &live), "waiting");
+            assert_eq!(enrollment_capture_feedback(0, 1_200, &live), "too_quiet");
+            live.last_frame_active = true;
+            assert_eq!(enrollment_capture_feedback(0, 1_200, &live), "hearing");
+            live.step_speech_ms[0] = enrollment_step_target_ms(0);
+            assert_eq!(enrollment_capture_feedback(0, 1_200, &live), "good");
+            live.last_frame_clipped = true;
+            assert_eq!(enrollment_capture_feedback(0, 1_200, &live), "too_loud");
+        }
 
         #[test]
         fn template_binary_round_trip_is_normalized_and_compact() {
@@ -1857,36 +1983,29 @@ mod platform {
         }
 
         #[test]
-        fn enrollment_compacts_normal_pauses_before_dual_bank_windows() {
+        fn enrollment_accepts_three_minimum_length_phrases_with_volume_variation() {
             let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
-            // Three independent 3-second wake slots, each with natural pauses.
+            // Real owner acceptance produced 600-800 ms phrases at visibly different
+            // levels. Each 3-second slot must pass its own quality gate and then feed
+            // both banks without a hidden second one-second-per-window requirement.
             let mut samples = vec![0i16; frame_samples * 5];
-            samples.extend(vec![800i16; frame_samples * 10]);
-            samples.extend(vec![0i16; frame_samples * 15]);
+            samples.extend(vec![700i16; frame_samples * 8]);
+            samples.extend(vec![0i16; frame_samples * 17]);
             samples.extend(vec![0i16; frame_samples * 10]);
-            samples.extend(vec![-900i16; frame_samples * 10]);
-            samples.extend(vec![0i16; frame_samples * 10]);
-            samples.extend(vec![0i16; frame_samples * 5]);
-            samples.extend(vec![700i16; frame_samples * 10]);
+            samples.extend(vec![4_000i16; frame_samples * 8]);
+            samples.extend(vec![0i16; frame_samples * 12]);
+            samples.extend(vec![0i16; frame_samples * 7]);
+            samples.extend(vec![-700i16; frame_samples * 8]);
             samples.extend(vec![0i16; frame_samples * 15]);
-            // Free-speech slot: normal pauses are compacted before templates.
-            samples.extend(vec![0i16; frame_samples * 5]);
-            samples.extend(vec![-750i16; frame_samples * 10]);
-            samples.extend(vec![0i16; frame_samples * 5]);
-            samples.extend(vec![850i16; frame_samples * 10]);
-            samples.extend(vec![0i16; frame_samples * 5]);
-            samples.extend(vec![-800i16; frame_samples * 10]);
-            samples.extend(vec![0i16; frame_samples * 5]);
-            samples.extend(vec![750i16; frame_samples * 10]);
-            samples.extend(vec![0i16; frame_samples * 5]);
             let pcm = samples
                 .iter()
                 .flat_map(|sample| sample.to_le_bytes())
                 .collect::<Vec<_>>();
             let windows = enrollment_template_windows(&pcm)
-                .expect("normal phrase/sentence pauses must not fail template quality");
+                .expect("three accepted phrase samples must build both template banks");
             assert_eq!(windows.wake.len(), 3);
             assert_eq!(windows.session.len(), 3);
+            assert_eq!(windows.session, windows.wake);
             assert!(windows
                 .wake
                 .iter()
@@ -1895,16 +2014,15 @@ mod platform {
         }
 
         #[test]
-        fn enrollment_template_banks_follow_the_four_step_prompt_boundary() {
+        fn three_wake_steps_build_both_banks_without_a_fourth_prompt() {
             let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
-            let mut samples = vec![800i16; frame_samples * 90];
-            samples.extend(vec![-900i16; frame_samples * 60]);
+            let samples = vec![800i16; frame_samples * 90];
             let pcm = samples
                 .iter()
                 .flat_map(|sample| sample.to_le_bytes())
                 .collect::<Vec<_>>();
 
-            let windows = enrollment_template_windows(&pcm).expect("four-step enrollment");
+            let windows = enrollment_template_windows(&pcm).expect("three-step enrollment");
             assert!(windows
                 .wake
                 .iter()
@@ -1912,7 +2030,7 @@ mod platform {
             assert!(windows
                 .session
                 .iter()
-                .all(|window| i16::from_le_bytes([window[0], window[1]]) < 0));
+                .all(|window| i16::from_le_bytes([window[0], window[1]]) > 0));
         }
 
         #[test]
@@ -2636,10 +2754,10 @@ mod platform {
 pub(crate) use platform::prepare_runtime_assets;
 #[cfg(target_os = "windows")]
 pub use platform::{
-    begin_enrollment_processing, delete_template, fail_enrollment, finish_enrollment,
-    invalidate_for_phrase_change, is_enrolled_for_phrase, observe_session_speaker,
-    prepare_for_phrase, session_profile_from_wake, start_enrollment, status_for_phrase,
-    take_enrollment_arm, verify,
+    begin_enrollment_processing, cancel_enrollment, delete_template, enrollment_should_process,
+    fail_enrollment, finish_enrollment, invalidate_for_phrase_change, is_enrolled_for_phrase,
+    observe_enrollment_capture, observe_session_speaker, prepare_for_phrase,
+    session_profile_from_wake, start_enrollment, status_for_phrase, take_enrollment_arm, verify,
 };
 
 #[cfg(not(target_os = "windows"))]
@@ -2654,6 +2772,12 @@ pub fn status() -> VoiceprintStatus {
         state: "unavailable".into(),
         progress: 0,
         capture_seconds_remaining: None,
+        capture_step: None,
+        capture_step_count: 3,
+        capture_elapsed_ms: 0,
+        step_speech_ms: vec![0; 3],
+        signal_level: 0,
+        capture_feedback: None,
         score: None,
         threshold: 0.5,
         error: None,
@@ -2677,8 +2801,21 @@ pub fn take_enrollment_arm() -> bool {
 pub fn begin_enrollment_processing() {}
 
 #[cfg(not(target_os = "windows"))]
+pub fn observe_enrollment_capture(_pcm: &[u8]) {}
+
+#[cfg(not(target_os = "windows"))]
+pub fn enrollment_should_process() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn start_enrollment(_wake_phrase: &str) -> Result<VoiceprintStatus, String> {
     Err("voiceprint enrollment is currently available on Windows only".into())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn cancel_enrollment(_wake_phrase: &str) -> Result<VoiceprintStatus, String> {
+    Ok(status())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -2779,6 +2916,12 @@ mod tests {
             session_speaker_classification_for_score(0.20),
             SessionSpeakerClassification::NonTarget { .. }
         ));
+        for score in [0.294403, 0.307526, 0.331096, 0.336520] {
+            assert!(matches!(
+                session_speaker_classification_for_score(score),
+                SessionSpeakerClassification::Uncertain { .. }
+            ));
+        }
         assert!(matches!(
             session_speaker_classification_for_score(0.38),
             SessionSpeakerClassification::Uncertain { .. }
@@ -2814,7 +2957,7 @@ mod tests {
         ));
         assert!(matches!(
             session_speaker_classification_for_score(0.34),
-            SessionSpeakerClassification::NonTarget { .. }
+            SessionSpeakerClassification::Uncertain { .. }
         ));
     }
 

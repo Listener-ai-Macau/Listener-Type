@@ -61,6 +61,10 @@ fresh test binary, anti-regression contracts, **§1 always-latest Program Files 
 
 ### Voice wake / voiceprint (anti-regression)
 
+- Persistent voiceprint enrollment uses three guided samples of the current wake phrase
+  (about 9 seconds total), Xiaomi-style. Do not add a fourth free-speech prompt. The
+  three samples feed both wake and in-session speaker banks; raw enrollment audio is
+  discarded after protected templates are saved.
 - Deleting the voiceprint must **not** disable automatic wake. No-template path open-gates
   on phrase hit (`speaker_verification::verify` returns match when unenrolled).
 - `buffered_speaker_candidate_kind(VoiceActivation, _, enrolled=false)` must still be

@@ -540,6 +540,12 @@ export interface VoiceprintStatus {
   state: 'idle' | 'preparing' | 'armed' | 'capturing' | 'processing' | 'complete' | 'error' | 'unavailable';
   progress: number;
   captureSecondsRemaining: number | null;
+  captureStep: number | null;
+  captureStepCount: number;
+  captureElapsedMs: number;
+  stepSpeechMs: number[];
+  signalLevel: number;
+  captureFeedback: 'waiting' | 'hearing' | 'good' | 'too_quiet' | 'too_loud' | null;
   score: number | null;
   threshold: number;
   error: string | null;

@@ -224,6 +224,31 @@ assert.ok(
     deviceSectionSource.includes("t('settings.recording.voiceprintOpenGateDesc'"),
   'voiceprint UI must distinguish phrase-change re-enrollment from the open-to-any-speaker state',
 );
+const voiceprintWizardSource = readFileSync('src/pages/settings/VoiceprintEnrollmentWizard.tsx', 'utf8');
+assert.ok(
+  deviceSectionSource.includes('<VoiceprintEnrollmentWizard') &&
+    deviceSectionSource.includes('cancelVoiceprintEnrollment'),
+  'voiceprint enrollment must use the dedicated cancellable wizard instead of an inline timer',
+);
+assert.ok(
+  voiceprintWizardSource.includes('status?.signalLevel') &&
+    voiceprintWizardSource.includes('status?.stepSpeechMs') &&
+    voiceprintWizardSource.includes('voiceprintWizardFeedback'),
+  'voiceprint wizard must render live signal and per-step speech evidence',
+);
+assert.ok(
+  voiceprintWizardSource.includes('const STEP_TARGET_MS = [600, 600, 600] as const;') &&
+    voiceprintWizardSource.includes('Array.from({ length: 3 }') &&
+    voiceprintWizardSource.includes('total: 3') &&
+    !voiceprintWizardSource.includes('voiceprintWizardNaturalStep') &&
+    !voiceprintWizardSource.includes('voiceprintWizardSayNaturally'),
+  'voiceprint enrollment must stay a three-phrase flow without a fourth natural-speech step',
+);
+assert.ok(
+  voiceprintWizardSource.includes("phase === 'success'") &&
+    voiceprintWizardSource.includes("phase === 'error'"),
+  'voiceprint wizard must give explicit completion and retry outcomes',
+);
 
 const ipcSource = readFileSync('src/lib/ipc.ts', 'utf8');
 const commandsSource = [

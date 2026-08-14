@@ -596,6 +596,10 @@ struct BufferedSpeakerCandidate {
         tauri::async_runtime::JoinHandle<Result<crate::wake_phrase::StreamingDetector, String>>,
     >,
     pending_phrase_match: Option<PendingAutomaticPhraseMatch>,
+    /// A single borderline owner score is not enough to relax the enrolled
+    /// voiceprint gate. Keep evidence across the bounded verification snapshots.
+    owner_ambiguous_confirmations: u8,
+    owner_best_ambiguous_score: f32,
     #[cfg(target_os = "windows")]
     local_confirmation_task:
         Option<tauri::async_runtime::JoinHandle<Result<LocalWakeConfirmation, String>>>,
@@ -697,6 +701,17 @@ const EMBEDDED_ACTIVATION_SEGMENT_RACE_WINDOW: Duration = Duration::from_millis(
 const OWNER_VERIFICATION_START_MS: usize = 1_100;
 const OWNER_VERIFICATION_START_BYTES: usize = OWNER_VERIFICATION_START_MS * 32;
 const OWNER_VERIFICATION_SNAPSHOT_MS: [usize; 3] = [OWNER_VERIFICATION_START_MS, 1_800, 2_400];
+// The session classifier treats <=0.34 as explicit NonTarget. Preserve margin
+// above that boundary and require two phrase-backed snapshots before recovering
+// an enrolled owner below the normal 0.42 verification threshold.
+const OWNER_AMBIGUOUS_MIN_SCORE: f32 = 0.38;
+const OWNER_AMBIGUOUS_CONFIRMATIONS: u8 = 2;
+// Installed session 1980: local ASR confirmed the complete phrase at the start,
+// but the same enrolled owner scored 0.264/0.228 in a noisy real capture. Keep
+// an explicit low-score non-owner floor while allowing a complete local phrase
+// to recover after the 1.8s verification window. KWS-only evidence cannot use it.
+const OWNER_LOCAL_PHRASE_FALLBACK_MIN_SCORE: f32 = 0.20;
+const OWNER_LOCAL_PHRASE_FALLBACK_MIN_PCM_MS: usize = 1_800;
 // Real accepted captures complete the four-character Mandarin phrase at 0.8 s
 // (but not 0.7 s). Run the exact-start local confirmation speculatively here;
 // incomplete/absent results stay eligible for KWS and later ladder retries.
@@ -870,6 +885,50 @@ fn next_owner_verification_retry_ms(pcm_ms: usize) -> Option<usize> {
         .find(|snapshot_ms| *snapshot_ms > pcm_ms)
 }
 
+fn next_owner_verification_retry_after(
+    pcm_ms: usize,
+    verification: &Result<crate::speaker_verification::VerificationResult, String>,
+) -> Option<usize> {
+    match verification {
+        Ok(result) if result.matched => None,
+        // A short voiced span is a normal early-window condition, not a terminal
+        // identity decision. Other runtime errors stay fail-closed, but receive
+        // the same bounded 1.8s/2.4s retry ladder before final rejection.
+        Ok(_) | Err(_) => next_owner_verification_retry_ms(pcm_ms),
+    }
+}
+
+fn note_ambiguous_owner_evidence(
+    confirmations: &mut u8,
+    best_score: &mut f32,
+    phrase_signal: denzic_voice_activation_v1_core::PhraseSignal,
+    score: f32,
+) -> bool {
+    if phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::None
+        || score < OWNER_AMBIGUOUS_MIN_SCORE
+    {
+        *confirmations = 0;
+        *best_score = 0.0;
+        return false;
+    }
+
+    *confirmations = confirmations.saturating_add(1);
+    *best_score = best_score.max(score);
+    *confirmations >= OWNER_AMBIGUOUS_CONFIRMATIONS
+}
+
+fn local_phrase_can_recover_owner_gate(
+    phrase_signal: denzic_voice_activation_v1_core::PhraseSignal,
+    pcm_ms: usize,
+    verification: &Result<crate::speaker_verification::VerificationResult, String>,
+) -> bool {
+    phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript
+        && pcm_ms >= OWNER_LOCAL_PHRASE_FALLBACK_MIN_PCM_MS
+        && verification.as_ref().is_ok_and(|result| {
+            result.score >= OWNER_LOCAL_PHRASE_FALLBACK_MIN_SCORE
+        })
+}
+
 fn next_local_confirmation_snapshot_bytes(attempts: usize) -> Option<usize> {
     denzic_voice_activation_v1_core::confirmation_snapshot_ms(
         attempts,
@@ -952,9 +1011,12 @@ fn should_run_terminal_offline_recall(
     pcm_bytes: usize,
     local_absent_count: u8,
     local_kws_fusion_evidence: bool,
+    enrolled_owner_matched: bool,
 ) -> bool {
     pcm_bytes >= MIN_TERMINAL_OFFLINE_PCM_BYTES
-        && (local_kws_fusion_evidence || local_absent_count < TERMINAL_OFFLINE_SKIP_ABSENT_COUNT)
+        && (local_kws_fusion_evidence
+            || enrolled_owner_matched
+            || local_absent_count < TERMINAL_OFFLINE_SKIP_ABSENT_COUNT)
 }
 
 fn terminal_inflight_confirmation_remaining_ms(elapsed_ms: u64) -> u64 {

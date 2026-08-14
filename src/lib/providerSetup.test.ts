@@ -1,9 +1,17 @@
+import { readFileSync } from 'node:fs';
 import {
   areProvidersConfigured,
   classifyEmbeddedBleProbeError,
   classifyProviderConnectionError,
   shouldShowProviderSetupPrompt,
 } from './providerSetup.ts';
+
+const providersSectionSource = readFileSync('src/pages/settings/ProvidersSection.tsx', 'utf8');
+if (!providersSectionSource.includes(
+  "const ASR_DEFAULT_RESOURCE_ID = 'volc.seedasr.sauc.duration';",
+)) {
+  throw new Error('Volcengine UI default must use the owner-provisioned Seed ASR 2.0 hourly quota');
+}
 
 function assertEqual(actual: boolean, expected: boolean, name: string) {
   if (actual !== expected) {

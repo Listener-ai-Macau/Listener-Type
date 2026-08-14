@@ -879,8 +879,11 @@ impl OpenAICompatibleLLMProvider {
                 cancelled = true;
                 break;
             }
-            let chunk_opt = match tokio::time::timeout(polish_stream_idle_timeout(), response.chunk())
-                .await
+            let chunk_opt = match tokio::time::timeout(
+                polish_stream_idle_timeout(),
+                response.chunk(),
+            )
+            .await
             {
                 Ok(result) => result.map_err(|e| LLMError::Network(e.to_string()))?,
                 Err(_) => {
@@ -889,9 +892,7 @@ impl OpenAICompatibleLLMProvider {
                         delta_count,
                         full_text.chars().count()
                     );
-                    return Err(LLMError::Network(
-                        "polish stream idle timeout".to_string(),
-                    ));
+                    return Err(LLMError::Network("polish stream idle timeout".to_string()));
                 }
             };
             let Some(chunk) = chunk_opt else { break };

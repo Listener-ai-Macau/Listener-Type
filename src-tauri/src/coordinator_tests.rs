@@ -4219,9 +4219,15 @@ fn llm_stall_circuit_opens_after_two_failures_and_recovers() {
 
     assert!(!circuit.is_open(t0));
     circuit.note_failure(t0);
-    assert!(!circuit.is_open(t0), "first failure must not open the circuit");
+    assert!(
+        !circuit.is_open(t0),
+        "first failure must not open the circuit"
+    );
     circuit.note_failure(t0 + Duration::from_secs(1));
-    assert!(circuit.is_open(t0 + Duration::from_secs(2)), "second consecutive failure opens");
+    assert!(
+        circuit.is_open(t0 + Duration::from_secs(2)),
+        "second consecutive failure opens"
+    );
     assert!(
         circuit.is_open(t0 + Duration::from_secs(119)),
         "still open inside the 120s window"
@@ -4253,8 +4259,14 @@ fn llm_auth_rejection_notice_is_once_per_credential_fingerprint() {
     // 熔断打开后：同一指纹只取到一次提示资格；无关指纹不提示；换指纹重新允许。
     circuit.reject(11);
     assert!(circuit.take_notice(11));
-    assert!(!circuit.take_notice(11), "notice must be once per fingerprint");
-    assert!(!circuit.take_notice(12), "unrelated fingerprint must not notice");
+    assert!(
+        !circuit.take_notice(11),
+        "notice must be once per fingerprint"
+    );
+    assert!(
+        !circuit.take_notice(12),
+        "unrelated fingerprint must not notice"
+    );
     circuit.reject(12);
     assert!(circuit.take_notice(12), "new credential set notices again");
 }

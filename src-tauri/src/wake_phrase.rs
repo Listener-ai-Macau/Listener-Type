@@ -633,7 +633,10 @@ mod platform {
             let providers_path = dll_root.join("onnxruntime_providers_shared.dll");
             let sherpa_path = dll_root.join("sherpa-onnx-c-api.dll");
             let onnx = Library::new(&onnx_path).map_err(|err| {
-                format!("load wake onnxruntime {} failed: {err}", onnx_path.display())
+                format!(
+                    "load wake onnxruntime {} failed: {err}",
+                    onnx_path.display()
+                )
             })?;
             let providers = Library::new(&providers_path).map_err(|err| {
                 format!(
@@ -642,7 +645,10 @@ mod platform {
                 )
             })?;
             let sherpa = Library::new(&sherpa_path).map_err(|err| {
-                format!("load wake sherpa C API {} failed: {err}", sherpa_path.display())
+                format!(
+                    "load wake sherpa C API {} failed: {err}",
+                    sherpa_path.display()
+                )
             })?;
             macro_rules! sym {
                 ($name:literal, $ty:ty) => {
@@ -1135,9 +1141,7 @@ mod platform {
         let config = enrollment_calibration_config();
         detects(config.0, config.1)?
             .then_some(config)
-            .ok_or_else(|| {
-                "没有在声纹样本中识别到唤醒词，请用自然语速清晰重复三遍".to_string()
-            })
+            .ok_or_else(|| "没有在声纹样本中识别到唤醒词，请用自然语速清晰重复三遍".to_string())
     }
 
     pub fn calibrate(pcm: &[u8], phrase: &str) -> Result<(), String> {
@@ -1224,8 +1228,7 @@ mod platform {
             let mut calls = 0usize;
             let selected = validate_enrollment_phrase(|score, threshold| {
                 calls += 1;
-                Ok(score == BOOTSTRAP_KEYWORD_SCORE
-                    && threshold == BOOTSTRAP_KEYWORD_THRESHOLD)
+                Ok(score == BOOTSTRAP_KEYWORD_SCORE && threshold == BOOTSTRAP_KEYWORD_THRESHOLD)
             })
             .expect("bootstrap enrollment pass");
             assert_eq!(calls, 1);

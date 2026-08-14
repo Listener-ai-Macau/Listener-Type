@@ -3047,6 +3047,114 @@ fn phrase_hit_waits_for_real_owner_audio_without_requiring_a_pause() {
 }
 
 #[test]
+fn short_or_failed_early_owner_window_retries_before_fail_closed_reject() {
+    let short = Err("voiceprint audio is shorter than 1000 ms".to_string());
+    assert_eq!(
+        super::next_owner_verification_retry_after(1_111, &short),
+        Some(1_800)
+    );
+    assert_eq!(
+        super::next_owner_verification_retry_after(1_800, &short),
+        Some(2_400)
+    );
+    assert_eq!(
+        super::next_owner_verification_retry_after(2_400, &short),
+        None,
+        "verification errors remain fail-closed after the bounded retry ladder"
+    );
+
+    let matched = Ok(crate::speaker_verification::VerificationResult {
+        matched: true,
+        score: 0.58,
+    });
+    assert_eq!(
+        super::next_owner_verification_retry_after(1_111, &matched),
+        None
+    );
+}
+
+#[test]
+fn ambiguous_owner_requires_two_consistent_phrase_backed_snapshots() {
+    let mut confirmations = 0;
+    let mut best_score = 0.0;
+    assert!(!super::note_ambiguous_owner_evidence(
+        &mut confirmations,
+        &mut best_score,
+        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel,
+        0.3847,
+    ));
+    assert_eq!(confirmations, 1);
+    assert!(super::note_ambiguous_owner_evidence(
+        &mut confirmations,
+        &mut best_score,
+        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel,
+        0.3998,
+    ));
+    assert_eq!(confirmations, 2);
+    assert!((best_score - 0.3998).abs() < f32::EPSILON);
+}
+
+#[test]
+fn ambiguous_owner_recovery_rejects_single_or_explicit_non_target_evidence() {
+    let mut confirmations = 1;
+    let mut best_score = 0.40;
+    assert!(!super::note_ambiguous_owner_evidence(
+        &mut confirmations,
+        &mut best_score,
+        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel,
+        0.33,
+    ));
+    assert_eq!(confirmations, 0);
+    assert_eq!(best_score, 0.0);
+
+    assert!(!super::note_ambiguous_owner_evidence(
+        &mut confirmations,
+        &mut best_score,
+        denzic_voice_activation_v1_core::PhraseSignal::None,
+        0.60,
+    ));
+    assert_eq!(confirmations, 0);
+}
+
+#[test]
+fn complete_local_phrase_recovers_noisy_owner_but_never_kws_or_errors() {
+    let noisy_owner = Ok(crate::speaker_verification::VerificationResult {
+        matched: false,
+        score: 0.26448274,
+    });
+    assert!(!super::local_phrase_can_recover_owner_gate(
+        denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript,
+        1_799,
+        &noisy_owner,
+    ));
+    assert!(super::local_phrase_can_recover_owner_gate(
+        denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript,
+        1_809,
+        &noisy_owner,
+    ));
+    assert!(!super::local_phrase_can_recover_owner_gate(
+        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel,
+        2_400,
+        &noisy_owner,
+    ));
+
+    let explicit_non_owner = Ok(crate::speaker_verification::VerificationResult {
+        matched: false,
+        score: 0.153456,
+    });
+    assert!(!super::local_phrase_can_recover_owner_gate(
+        denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript,
+        2_400,
+        &explicit_non_owner,
+    ));
+    assert!(!super::local_phrase_can_recover_owner_gate(
+        denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript,
+        2_400,
+        &Err("voiceprint runtime failed".to_string()),
+    ));
+}
+
+#[test]
 fn local_confirmation_adds_context_with_a_strict_attempt_cap() {
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(0),
@@ -3845,20 +3953,30 @@ fn terminal_offline_recall_stops_after_initial_plus_focused_absence() {
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES - 2,
         0,
         false,
+        false,
     ));
     assert!(super::should_run_terminal_offline_recall(
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
         super::TERMINAL_OFFLINE_SKIP_ABSENT_COUNT - 1,
+        false,
         false,
     ));
     assert!(!super::should_run_terminal_offline_recall(
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
         super::TERMINAL_OFFLINE_SKIP_ABSENT_COUNT,
         false,
+        false,
     ));
     assert!(super::should_run_terminal_offline_recall(
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
         u8::MAX,
+        true,
+        false,
+    ));
+    assert!(super::should_run_terminal_offline_recall(
+        super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
+        u8::MAX,
+        false,
         true,
     ));
 
@@ -3868,7 +3986,7 @@ fn terminal_offline_recall_stops_after_initial_plus_focused_absence() {
             && stream.contains("terminal offline recall released actor after bounded wait")
             && stream.contains("terminal skip offline cascade reason={}")
             && stream.contains("candidate.local_absent_count.saturating_add(1)"),
-        "terminal offline recovery must remain bounded and repeated focused Absents must suppress hidden native work"
+        "terminal offline recovery must remain bounded; repeated focused Absents suppress ambient work but not one owner-backed independent KWS check"
     );
     assert_eq!(super::TERMINAL_OFFLINE_RECALL_BUDGET_MS, 500);
 }

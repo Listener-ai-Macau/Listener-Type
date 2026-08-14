@@ -83,7 +83,13 @@ fn preview_spoken_char_count(preview: Option<&str>) -> usize {
         .filter(|text| !text.is_empty())
         .map(|text| {
             text.chars()
-                .filter(|ch| !ch.is_whitespace() && !matches!(ch, '，' | ',' | '、' | '。' | '！' | '？' | '.' | '!' | '?' | '…'))
+                .filter(|ch| {
+                    !ch.is_whitespace()
+                        && !matches!(
+                            ch,
+                            '，' | ',' | '、' | '。' | '！' | '？' | '.' | '!' | '?' | '…'
+                        )
+                })
                 .count()
         })
         .unwrap_or(0)
@@ -122,8 +128,19 @@ fn preview_has_dangling_continuation(preview: Option<&str>) -> bool {
             ch.is_whitespace()
                 || matches!(
                     ch,
-                    '，' | ',' | '、' | '。' | '！' | '？' | '.' | '!' | '?' | '…' | ':' | '：'
-                        | ';' | '；'
+                    '，' | ','
+                        | '、'
+                        | '。'
+                        | '！'
+                        | '？'
+                        | '.'
+                        | '!'
+                        | '?'
+                        | '…'
+                        | ':'
+                        | '：'
+                        | ';'
+                        | '；'
                 )
         })
         .to_ascii_lowercase();
@@ -483,10 +500,9 @@ fn maybe_start_polish_prefetch(inner: &Arc<Inner>, session_id: SessionId) {
     if mode == PolishMode::Raw && !raw_uses_llm {
         return;
     }
-    let auth_blocked =
-        current_llm_auth_fingerprint()
-            .ok()
-            .is_some_and(current_llm_auth_is_rejected);
+    let auth_blocked = current_llm_auth_fingerprint()
+        .ok()
+        .is_some_and(current_llm_auth_is_rejected);
     if auth_blocked || llm_stall_circuit_open() {
         return;
     }
@@ -571,11 +587,7 @@ fn maybe_start_polish_prefetch(inner: &Arc<Inner>, session_id: SessionId) {
         result_notify.notify_one();
     });
     // 同会话只留一份预热；覆盖旧槽前先取消（防泄漏在后台跑满 8s 空转）。
-    if let Some((_, old)) = inner
-        .polish_prefetch
-        .lock()
-        .replace((session_id, prefetch))
-    {
+    if let Some((_, old)) = inner.polish_prefetch.lock().replace((session_id, prefetch)) {
         old.cancel.store(true, Ordering::SeqCst);
     }
     log::info!(
@@ -625,10 +637,8 @@ fn handle_target_speaker_update(
         mode_timeout_ms
     };
     let fusion_state = target_speaker_fusion_state(&update);
-    let endpoint_timeout_ms = target_speaker_endpoint_timeout_with_fusion(
-        fusion_state,
-        mode_endpoint_timeout_ms,
-    );
+    let endpoint_timeout_ms =
+        target_speaker_endpoint_timeout_with_fusion(fusion_state, mode_endpoint_timeout_ms);
     let stop_reason = target_speaker_inactive_stop_reason(endpoint_timeout_ms);
     let initial_body_wait_active =
         automatic_wake_initial_body_wait_active(inner, session_id, update.audio_duration_ms);
@@ -648,11 +658,8 @@ fn handle_target_speaker_update(
         return;
     }
 
-    let provider_stall_fallback = provider_stall_local_endpoint_due(
-        &update,
-        provider_stall_confirmed,
-        endpoint_timeout_ms,
-    );
+    let provider_stall_fallback =
+        provider_stall_local_endpoint_due(&update, provider_stall_confirmed, endpoint_timeout_ms);
     if provider_stall_fallback {
         log::info!(
             "[asr] target endpoint using bounded provider-stall fallback provider_audio_ms={:?} local_audio_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?} timeout_ms={endpoint_timeout_ms}",
@@ -742,9 +749,7 @@ fn local_speech_confidently_non_target(
 /// This is identity uncertainty, not evidence that the owner stopped talking.
 /// Keep the hold bounded at two seconds; explicit other-speaker evidence never
 /// enters this branch.
-fn has_uncertain_owner_identity_tail(
-    update: &crate::asr::volcengine::TargetSpeakerUpdate,
-) -> bool {
+fn has_uncertain_owner_identity_tail(update: &crate::asr::volcengine::TargetSpeakerUpdate) -> bool {
     if !update.local_speaker_tracking_enabled {
         return false;
     }
@@ -754,8 +759,7 @@ fn has_uncertain_owner_identity_tail(
         .is_some_and(|(target_ms, speech_ms)| {
             speech_ms > target_ms.saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
                 && speech_ms
-                    <= target_ms
-                        .saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
+                    <= target_ms.saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
                 && !local_speech_confidently_non_target(update, speech_ms)
         })
 }
@@ -856,8 +860,7 @@ fn target_speaker_endpoint_due_with_provider_stall(
         .local_target_speech_end_ms
         .zip(update.local_speech_end_ms)
         .is_some_and(|(target_ms, speech_ms)| {
-            speech_ms
-                > target_ms.saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
+            speech_ms > target_ms.saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
         });
     // Installed session 19df34c4: body text kept growing only in the provisional
     // channel while stable_attributed stayed on the wake phrase. A local target
@@ -1858,8 +1861,7 @@ async fn build_embedded_audio_asr_consumer(
                         && state.phase != SessionPhase::Idle
                 };
                 if still_current {
-                    let target: Arc<dyn crate::asr::AudioConsumer> =
-                        final_asr_for_open.clone();
+                    let target: Arc<dyn crate::asr::AudioConsumer> = final_asr_for_open.clone();
                     let retained_bytes = bridge.attach(target);
                     final_asr_for_open.mark_audio_delivery_failed(err.clone());
                     log::warn!(
@@ -2507,8 +2509,7 @@ async fn finish_end_session_after_stop_transition(
                     "[coord] empty final with sustained local speech evidence; retrying once with retained audio session_id={current_session_id}"
                 );
                 asr.cancel();
-                let retry_timeout =
-                    std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS);
+                let retry_timeout = std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS);
                 match tokio::time::timeout(retry_timeout, asr.replay_retained_audio_once()).await {
                     Ok(Ok(replayed)) if !replayed.text.trim().is_empty() => {
                         log::info!(
@@ -2540,8 +2541,7 @@ async fn finish_end_session_after_stop_transition(
     // preview over the false "没有识别到语音" failure path.
     if raw.text.trim().is_empty() {
         if let Some(preview) = current_embedded_audio_partial_preview(inner) {
-            let recovered =
-                filter_automatic_wake_text(inner, current_session_id, &preview, false);
+            let recovered = filter_automatic_wake_text(inner, current_session_id, &preview, false);
             if !recovered.trim().is_empty() {
                 log::warn!(
                     "[coord] empty ASR final recovered from partial preview session_id={} preview_chars={} recovered_chars={}",

@@ -1061,7 +1061,10 @@ pub fn find_factory_package_dir(path: &Path) -> Option<PathBuf> {
         .filter(|candidate| candidate.join("manifest.json").is_file())
         .collect::<Vec<_>>();
     candidates.sort();
-    candidates.into_iter().next()
+    // Factory package directory names end in sortable timestamps. Selecting
+    // the first entry silently flashed an older image whenever the caller's
+    // package root retained more than one build.
+    candidates.into_iter().next_back()
 }
 
 pub fn source_label_for_path(path: &Path, fallback: &str) -> String {
@@ -1171,7 +1174,7 @@ pub fn loaded_factory_package_from_manifest(
             (
                 otadata_region,
                 vec![
-                    "Factory package: wired flash auto-checks boot at 0x0, then writes bootloader, partition table, and app."
+                    "Factory package: wired flash writes and verifies bootloader, partition table, and app."
                         .to_string(),
                     "No separate Boot repair button is required; missing/corrupt boot is repaired as part of 有线刷入."
                         .to_string(),
@@ -1425,34 +1428,14 @@ pub fn run_wired_firmware_flash_with_progress(
         WIRED_FLASH_MODE, WIRED_FLASH_FREQUENCY, WIRED_FLASH_SIZE
     ));
 
-    // Auto boot health: owner should not need a separate "Boot 修复" button.
-    // Probe 0x0; full factory flash always rewrites bootloader when missing/corrupt.
-    match probe_wired_bootloader_magic(&mut flasher) {
-        Ok(WiredBootProbe::Present { magic }) => {
-            log.push_str(&format!(
-                "Boot check: present (magic=0x{magic:02x} at 0x0); full flash will still refresh bootloader/partition/app.\n"
-            ));
-        }
-        Ok(WiredBootProbe::MissingOrCorrupt { detail }) => {
-            log.push_str(&format!(
-                "Boot check: missing/corrupt ({detail}); full flash will auto-repair bootloader at 0x0 then write partition table + app.\n"
-            ));
-            emit_wired_firmware_stage(
-                progress_app_ref,
-                "flash",
-                "preparing",
-                Some(&loaded.version),
-                Some(&port),
-                20,
-                "Boot missing/corrupt — auto-repairing via full factory flash",
-            );
-        }
-        Err(err) => {
-            log.push_str(&format!(
-                "Boot check: probe skipped ({err}); full flash will still write bootloader.bin at 0x0.\n"
-            ));
-        }
-    }
+    /* A factory flash always writes bootloader.bin at 0x0, so a separate
+     * read-back probe is redundant. More importantly, espflash's read path can
+     * terminate the Windows GUI-subsystem CLI process after reporting a
+     * successful read, before partition/app writes begin. Connect/reset is the
+     * only preflight needed for boards without a BOOT button. */
+    log.push_str(
+        "Boot handling: full factory flash writes bootloader.bin at 0x0 without a separate read probe.\n",
+    );
 
     if !preserve_ota_data {
         if let Some((offset, size)) = loaded.otadata_region.as_ref() {
@@ -1532,6 +1515,16 @@ pub fn run_wired_firmware_flash_with_progress(
             .write_bins_to_flash(&segments, None)
             .map_err(|err| format!("Failed to write wired firmware image: {err}"))?;
     }
+    /* `write_bins_to_flash` requests a reset after the final segment, but the
+     * ESP32-S3 USB-Serial/JTAG port can remain in the stub on a board without a
+     * BOOT button. Repeat the idempotent run reset while the same port handle is
+     * still open so a successful Type flash always returns to the application. */
+    std::thread::sleep(Duration::from_millis(150));
+    flasher
+        .connection()
+        .reset_after(true)
+        .map_err(|err| format!("Firmware was written but the device did not restart: {err}"))?;
+    log.push_str("Issued explicit post-flash application reset.\n");
     for artifact in &prepared {
         log.push_str(&format!(
             "Wrote {} ({}) at 0x{:x}, {} bytes",

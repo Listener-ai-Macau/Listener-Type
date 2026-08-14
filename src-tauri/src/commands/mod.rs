@@ -135,6 +135,18 @@ pub async fn start_voiceprint_enrollment(
 }
 
 #[tauri::command]
+pub async fn cancel_voiceprint_enrollment(
+    coord: CoordinatorState<'_>,
+) -> Result<crate::speaker_verification::VoiceprintStatus, String> {
+    let wake_phrase = coord.prefs().get().voice_wake_phrase;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::speaker_verification::cancel_enrollment(&wake_phrase)
+    })
+    .await
+    .map_err(|err| format!("取消声纹登记任务失败: {err}"))?
+}
+
+#[tauri::command]
 pub async fn delete_voiceprint(
     coord: CoordinatorState<'_>,
 ) -> Result<crate::speaker_verification::VoiceprintStatus, String> {

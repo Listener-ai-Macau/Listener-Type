@@ -4087,17 +4087,13 @@ fn reconcile_llm_base_url_for_key(provider_id: &str, api_key: &str, base_url: &s
     }
     if provider_id == "deepseek" && endpoint_is_ark {
         if let Some(default) = llm_provider_default_endpoint("deepseek") {
-            log::warn!(
-                "[coord] active LLM is deepseek but endpoint is ARK; using {default}"
-            );
+            log::warn!("[coord] active LLM is deepseek but endpoint is ARK; using {default}");
             return default.to_string();
         }
     }
     if provider_id == "ark" && endpoint_is_deepseek && !looks_deepseek {
         if let Some(default) = llm_provider_default_endpoint("ark") {
-            log::warn!(
-                "[coord] active LLM is ark but endpoint is DeepSeek; using {default}"
-            );
+            log::warn!("[coord] active LLM is ark but endpoint is DeepSeek; using {default}");
             return default.to_string();
         }
     }

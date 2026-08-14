@@ -87,6 +87,12 @@ const mockVoiceprintStatus: VoiceprintStatus = {
   state: 'idle',
   progress: 0,
   captureSecondsRemaining: null,
+  captureStep: null,
+  captureStepCount: 3,
+  captureElapsedMs: 0,
+  stepSpeechMs: [0, 0, 0],
+  signalLevel: 0,
+  captureFeedback: null,
   score: null,
   threshold: 0.5,
   error: null,
@@ -106,6 +112,10 @@ export async function startVoiceprintEnrollment(): Promise<VoiceprintStatus> {
     progress: 35,
     captureSecondsRemaining: 15,
   }));
+}
+
+export async function cancelVoiceprintEnrollment(): Promise<VoiceprintStatus> {
+  return invokeOrMock('cancel_voiceprint_enrollment', undefined, () => mockVoiceprintStatus);
 }
 
 export async function deleteVoiceprint(): Promise<VoiceprintStatus> {
