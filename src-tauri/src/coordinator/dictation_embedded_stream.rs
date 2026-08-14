@@ -852,30 +852,8 @@ impl EmbeddedStreamingDictation {
                 }
             };
             candidate.kws_total_ms = candidate.kws_total_ms.saturating_add(final_kws_ms);
-            // Terminal verification used to run only after phrase detection. That
-            // meant four exploratory local-ASR Absents could skip the independent
-            // offline KWS cascade even when this same completed buffer was a strong
-            // match for the enrolled owner (production session 1932: score 0.522).
-            // Verify once up front and reuse the result for both the bounded recall
-            // decision and the final gate. Owner evidence only permits KWS to run;
-            // it is never treated as phrase evidence by itself.
-            let phrase_enrolled =
-                crate::speaker_verification::is_enrolled_for_phrase(&phrase);
-            let voiceprint_pcm = candidate.pcm.clone();
-            let voiceprint_phrase = phrase.clone();
-            let verification_task = tauri::async_runtime::spawn_blocking(move || {
-                let started = Instant::now();
-                let result =
-                    crate::speaker_verification::verify(&voiceprint_pcm, &voiceprint_phrase);
-                (result, started.elapsed().as_millis() as u64)
-            })
-            .await;
-            let (verification, voiceprint_ms) = match verification_task {
-                Ok(result) => result,
-                Err(err) => (Err(format!("声纹验证任务失败: {err}")), 0),
-            };
-            let enrolled_owner_matched = phrase_enrolled
-                && verification.as_ref().is_ok_and(|result| result.matched);
+            let (enrolled_owner_matched, verification, voiceprint_ms) =
+                terminal_owner_verification_for_recall(&candidate.pcm, &phrase).await;
             let mut phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
             let mut local_confirmation_ms = 0u64;
             #[cfg(target_os = "windows")]
@@ -2233,22 +2211,13 @@ impl EmbeddedStreamingDictation {
             Ok(result) => result,
             Err(err) => (Err(format!("声纹验证任务失败: {err}")), 0),
         };
-        let owner_matched_by_voiceprint = match &verification {
-            Ok(result) if result.matched => true,
-            Ok(result) => note_ambiguous_owner_evidence(
-                &mut candidate.owner_ambiguous_confirmations,
-                &mut candidate.owner_best_ambiguous_score,
-                phrase_signal,
-                result.score,
-            ),
-            Err(_) => false,
-        };
-        let owner_recovered_by_local_phrase = local_phrase_can_recover_owner_gate(
+        let (owner_matched, owner_recovered_by_local_phrase) = evaluate_owner_gate_evidence(
+            &mut candidate.owner_ambiguous_confirmations,
+            &mut candidate.owner_best_ambiguous_score,
             phrase_signal,
             pcm_ms,
             &verification,
         );
-        let owner_matched = owner_matched_by_voiceprint || owner_recovered_by_local_phrase;
         let total_ms = kws_ms
             .saturating_add(local_confirmation_ms)
             .saturating_add(voiceprint_ms);

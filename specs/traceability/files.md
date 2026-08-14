@@ -171,6 +171,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator/dictation_session.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_diagnostics.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_wake_owner_gate.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_polish.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/embedded_ble_runtime.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/hotkey_device_runtime.rs` | Global hotkeys | Hotkey tests and manual smoke |
