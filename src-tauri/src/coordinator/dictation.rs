@@ -745,24 +745,16 @@ fn target_speaker_update_has_live_owner_activity(
     if !update.target_activity_advanced && !update.pending_activity_advanced {
         return false;
     }
-    let audio_edge_ms = update
-        .audio_duration_ms
-        .into_iter()
-        .chain(update.provider_audio_duration_ms)
-        .max();
-    let owner_edge_ms = update
-        .target_speech_end_ms
-        .into_iter()
-        .chain(update.local_target_speech_end_ms)
-        .chain(update.stable_attributed_speech_end_ms)
-        .max();
+    let audio_edge_ms = update.audio_duration_ms.max(update.provider_audio_duration_ms);
+    let owner_edge_ms = update.target_speech_end_ms
+        .max(update.local_target_speech_end_ms)
+        .max(update.stable_attributed_speech_end_ms);
     audio_edge_ms
         .zip(owner_edge_ms)
         .is_some_and(|(audio, owner)| {
             audio.saturating_sub(owner) <= EMBEDDED_LIVE_OWNER_ACTIVITY_ALIGNMENT_MS
         })
 }
-
 fn target_speaker_endpoint_due(update: &crate::asr::volcengine::TargetSpeakerUpdate) -> bool {
     target_speaker_endpoint_due_with_timeout(update, EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS)
 }

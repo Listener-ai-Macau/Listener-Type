@@ -2357,11 +2357,7 @@ impl EmbeddedStreamingDictation {
         for pcm in candidate.pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
             session.consume_streaming_pcm(inner, pcm, None)?;
         }
-        // This method runs on the BLE notification actor. The active-capture
-        // control request is drained by that same actor, so awaiting it here
-        // deadlocks until the request timeout and also blocks VREC:SPEECH
-        // keepalives plus incoming PCM. Observe completion in a detached task
-        // and release the actor immediately.
+        // Awaiting actor-drained control here deadlocks PCM/VREC:SPEECH; observe it detached.
         let _recording_control_observer = tauri::async_runtime::spawn(async move {
             match recording_control_task.await {
                 Ok((Ok(()), elapsed_ms)) => log::info!(
