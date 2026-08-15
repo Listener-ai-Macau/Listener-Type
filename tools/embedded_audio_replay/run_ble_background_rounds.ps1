@@ -585,10 +585,18 @@ function Read-HistorySessions {
 }
 
 function Find-LatestEmbeddedHistorySession {
-    param([Parameter(Mandatory = $true)][datetime]$StartedAt)
+    param(
+        [Parameter(Mandatory = $true)][datetime]$StartedAt,
+        [string[]]$ExcludedSessionIds = @()
+    )
     $threshold = $StartedAt.ToUniversalTime().AddSeconds(-1)
     $candidates = @()
     foreach ($session in @(Read-HistorySessions)) {
+        $sessionId = [string](Get-PropertyValue $session "id")
+        if (-not [string]::IsNullOrWhiteSpace($sessionId) -and
+            $ExcludedSessionIds -contains $sessionId) {
+            continue
+        }
         if (-not $session.createdAt) {
             continue
         }
@@ -621,11 +629,14 @@ function Find-LatestEmbeddedHistorySession {
 function Wait-HistorySession {
     param(
         [Parameter(Mandatory = $true)][datetime]$StartedAt,
+        [string[]]$ExcludedSessionIds = @(),
         [int]$TimeoutSeconds = 20
     )
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
-        $session = Find-LatestEmbeddedHistorySession -StartedAt $StartedAt
+        $session = Find-LatestEmbeddedHistorySession `
+            -StartedAt $StartedAt `
+            -ExcludedSessionIds $ExcludedSessionIds
         if ($session) {
             return [pscustomobject]@{
                 session = $session
@@ -786,6 +797,14 @@ try {
             }
         }
 
+        # Snapshot IDs before the trigger. createdAt has only coarse timing on
+        # some migrated history entries, so a time window alone can select the
+        # previous round again when rounds begin close together.
+        $historySessionIdsBeforeRound = @(
+            Read-HistorySessions |
+                ForEach-Object { [string](Get-PropertyValue $_ "id") } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        )
         $roundStartedAt = Get-Date
         $effectiveRoundStartedAt = $roundStartedAt
         $fallbackTriggeredAt = $null
@@ -837,7 +856,10 @@ try {
         }
         foreach ($line in $stopLines) { $allSerialLines.Add("[${label}] $line") }
 
-        $historyResult = Wait-HistorySession -StartedAt $effectiveRoundStartedAt -TimeoutSeconds 20
+        $historyResult = Wait-HistorySession `
+            -StartedAt $effectiveRoundStartedAt `
+            -ExcludedSessionIds $historySessionIdsBeforeRound `
+            -TimeoutSeconds 20
         $roundLogText = Read-NewLogText -Path $logPath -Offset $logOffset
         $capturedLog += $roundLogText
         $session = $historyResult.session
