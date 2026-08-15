@@ -3368,11 +3368,47 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
             < body.find("begin_embedded_audio_dictation_session")
     );
     assert!(
-        body.find("begin_embedded_audio_dictation_session")
-            < body.find("recording_control_task.await")
+        body.find("session.consume_streaming_pcm") < body.find("let _recording_control_observer")
     );
+    assert!(
+        body.find("let _recording_control_observer") < body.find("recording_control_task.await")
+    );
+    assert!(
+        body.contains("tauri::async_runtime::spawn(async move"),
+        "automatic activation completion must be observed outside the BLE actor"
+    );
+    assert!(
+        !body.contains("let recording_control_ms = match recording_control_task.await"),
+        "the BLE notification actor must never await its own active-control queue"
+    );
+    assert!(body.contains("recording_control=detached"));
     assert!(body.contains("latency_target_ms=1000"));
     assert!(body.contains("latency_ceiling_ms=1200"));
+}
+
+#[test]
+fn automatic_activation_does_not_await_its_own_ble_actor_queue() {
+    let source = include_str!("dictation_embedded_stream.rs");
+    let start = source
+        .find("async fn try_release_automatic_candidate")
+        .expect("live automatic gate should exist");
+    let body = &source[start..];
+
+    let actor_pcm = body
+        .find("session.consume_streaming_pcm")
+        .expect("accepted candidate PCM must enter the formal session");
+    let detached_observer = body
+        .find("let _recording_control_observer")
+        .expect("activation result must have a detached observer");
+    let control_await = body
+        .find("recording_control_task.await")
+        .expect("detached observer must retain activation result logging");
+
+    assert!(actor_pcm < detached_observer);
+    assert!(detached_observer < control_await);
+    assert!(body.contains("tauri::async_runtime::spawn(async move"));
+    assert!(body.contains("recording_control=detached"));
+    assert!(!body.contains("let recording_control_ms = match recording_control_task.await"));
 }
 
 #[test]

@@ -2357,26 +2357,31 @@ impl EmbeddedStreamingDictation {
         for pcm in candidate.pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
             session.consume_streaming_pcm(inner, pcm, None)?;
         }
-        let recording_control_ms = match recording_control_task.await {
-            Ok((Ok(()), elapsed_ms)) => elapsed_ms,
-            Ok((Err(err), elapsed_ms)) => {
-                log::warn!(
-                    "[embedded-ble] accepted automatic recording LED activation failed after capsule release embedded_session_id={} elapsed_ms={}: {}",
+        // This method runs on the BLE notification actor. The active-capture
+        // control request is drained by that same actor, so awaiting it here
+        // deadlocks until the request timeout and also blocks VREC:SPEECH
+        // keepalives plus incoming PCM. Observe completion in a detached task
+        // and release the actor immediately.
+        let _recording_control_observer = tauri::async_runtime::spawn(async move {
+            match recording_control_task.await {
+                Ok((Ok(()), elapsed_ms)) => log::info!(
+                    "[embedded-ble] accepted automatic recording activation completed embedded_session_id={} elapsed_ms={}",
+                    embedded_session_id,
+                    elapsed_ms
+                ),
+                Ok((Err(err), elapsed_ms)) => log::warn!(
+                    "[embedded-ble] accepted automatic recording activation failed embedded_session_id={} elapsed_ms={}: {}",
                     embedded_session_id,
                     elapsed_ms,
                     err
-                );
-                elapsed_ms
+                ),
+                Err(err) => log::warn!(
+                    "[embedded-ble] accepted automatic recording activation task failed embedded_session_id={embedded_session_id}: {err}"
+                ),
             }
-            Err(err) => {
-                log::warn!(
-                    "[embedded-ble] accepted automatic recording LED activation task failed after capsule release embedded_session_id={embedded_session_id}: {err}"
-                );
-                0
-            }
-        };
+        });
         log::info!(
-            "[wake-phrase] live automatic session activated and released embedded_session_id={} phrase={} phrase_signal={:?} wake_end_s={:.3} post_wake_pcm_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} gate_total_ms={} recording_control_ms={} wake_to_capsule_request_ms={} latency_target_ms=1000 latency_target_pass={} latency_ceiling_ms=1200 latency_ceiling_pass={} phrase_tail_to_capsule_ms={} phrase_tail_target_ms=350 phrase_tail_target_pass={} phrase_tail_ceiling_ms=500 phrase_tail_ceiling_pass={}",
+            "[wake-phrase] live automatic session activated and released embedded_session_id={} phrase={} phrase_signal={:?} wake_end_s={:.3} post_wake_pcm_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} gate_total_ms={} recording_control=detached wake_to_capsule_request_ms={} latency_target_ms=1000 latency_target_pass={} latency_ceiling_ms=1200 latency_ceiling_pass={} phrase_tail_to_capsule_ms={} phrase_tail_target_ms=350 phrase_tail_target_pass={} phrase_tail_ceiling_ms=500 phrase_tail_ceiling_pass={}",
             embedded_session_id,
             phrase,
             phrase_signal,
@@ -2386,7 +2391,6 @@ impl EmbeddedStreamingDictation {
             local_confirmation_ms,
             voiceprint_ms,
             total_ms,
-            recording_control_ms,
             capsule_request_ms,
             latency_target_pass,
             latency_ceiling_pass,
