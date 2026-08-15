@@ -17,6 +17,12 @@ use crate::types::{ChineseScriptPreference, OutputLanguagePreference, PolishMode
 
 const DEFAULT_TEMPERATURE: f32 = 0.3;
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30;
+/// 从发出润色请求到收到第一段可显示正文的绝对上限。网络连接成功、HTTP 200、
+/// role-only SSE 和 keepalive 都不算“开始出字”；超过该时限就让上层立即插入 ASR
+/// 原文。2026-08-15 installed session f1ec66f6 在 ASR 已有 67 字时被 DeepSeek 的
+/// 21 秒空响应拖住，证明仅监控相邻 HTTP chunk 的 idle timeout 不够。
+/// 可用 `LISTENER_POLISH_START_TIMEOUT_MS`（100..=120_000）覆盖，供诊断/测试。
+const POLISH_STREAM_START_TIMEOUT: Duration = Duration::from_millis(1_500);
 /// 润色 SSE 的空转上限：provider 接了连接却长时间不出字时断流报错，让上层
 /// 立刻走原文直插，而不是让胶囊停在 polishing 等满 30s 总超时（2026-08-07
 /// deepseek 连续两次 stall：12s 空流 / 30s 无 delta，owner 体感「卡死」）。
@@ -24,6 +30,15 @@ const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30;
 /// `LISTENER_POLISH_IDLE_TIMEOUT_MS`（100..=120_000）覆盖，供诊断/测试。
 const POLISH_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(8);
 const BODY_PREVIEW_LIMIT: usize = 200;
+
+fn polish_stream_start_timeout() -> Duration {
+    std::env::var("LISTENER_POLISH_START_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|ms| (100..=120_000).contains(ms))
+        .map(Duration::from_millis)
+        .unwrap_or(POLISH_STREAM_START_TIMEOUT)
+}
 
 fn polish_stream_idle_timeout() -> Duration {
     std::env::var("LISTENER_POLISH_IDLE_TIMEOUT_MS")
@@ -846,7 +861,21 @@ impl OpenAICompatibleLLMProvider {
         }
         let request = request.json(&body);
 
-        let response = send_with_transient_retry(request).await?;
+        let first_content_deadline = tokio::time::Instant::now() + polish_stream_start_timeout();
+        let response = match tokio::time::timeout_at(
+            first_content_deadline,
+            send_with_transient_retry(request),
+        )
+        .await
+        {
+            Ok(result) => result?,
+            Err(_) => {
+                log::warn!(
+                    "[llm] polish stream start timeout before response headers; failing fast for raw-insert fallback"
+                );
+                return Err(LLMError::Network("polish stream start timeout".to_string()));
+            }
+        };
 
         let status = response.status();
         if !status.is_success() {
@@ -879,20 +908,33 @@ impl OpenAICompatibleLLMProvider {
                 cancelled = true;
                 break;
             }
-            let chunk_opt = match tokio::time::timeout(
-                polish_stream_idle_timeout(),
-                response.chunk(),
-            )
-            .await
-            {
+            let waiting_for_first_content = full_text.is_empty();
+            let chunk_timeout = if waiting_for_first_content {
+                first_content_deadline.saturating_duration_since(tokio::time::Instant::now())
+            } else {
+                polish_stream_idle_timeout()
+            };
+            if chunk_timeout.is_zero() {
+                log::warn!(
+                    "[llm] polish stream start timeout ({} non-content deltas/chunks observed); failing fast for raw-insert fallback",
+                    delta_count
+                );
+                return Err(LLMError::Network("polish stream start timeout".to_string()));
+            }
+            let chunk_opt = match tokio::time::timeout(chunk_timeout, response.chunk()).await {
                 Ok(result) => result.map_err(|e| LLMError::Network(e.to_string()))?,
                 Err(_) => {
+                    let reason = if waiting_for_first_content {
+                        "polish stream start timeout"
+                    } else {
+                        "polish stream idle timeout"
+                    };
                     log::warn!(
-                        "[llm] polish stream idle timeout ({} deltas, {} chars so far); failing fast for raw-insert fallback",
+                        "[llm] {reason} ({} deltas, {} chars so far); failing fast for raw-insert fallback",
                         delta_count,
                         full_text.chars().count()
                     );
-                    return Err(LLMError::Network("polish stream idle timeout".to_string()));
+                    return Err(LLMError::Network(reason.to_string()));
                 }
             };
             let Some(chunk) = chunk_opt else { break };
@@ -2490,25 +2532,144 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn polish_streaming_fails_fast_when_provider_stalls_without_deltas() {
-        // 2026-08-07：deepseek 接了连接却 30s 不出字，胶囊停在 polishing 直到
-        // 30s 总超时（owner 体感「卡死」）。空转上限应让流式润色快速失败，
-        // 由上层走原文直插。
+    async fn polish_streaming_fails_fast_when_response_headers_are_delayed() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _env = EnvSnapshot::capture(&["LISTENER_POLISH_START_TIMEOUT_MS"]);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let _request = read_http_request(&mut stream);
-            use std::io::Write;
+            thread::sleep(Duration::from_secs(30));
+        });
+
+        std::env::set_var("LISTENER_POLISH_START_TIMEOUT_MS", "300");
+        let started = std::time::Instant::now();
+        let provider = OpenAICompatibleLLMProvider::new(OpenAICompatibleConfig::new(
+            "ark",
+            "Ark",
+            format!("http://{}", addr),
+            "",
+            "test-model",
+        ));
+        let result = provider
+            .polish_streaming(
+                "原文",
+                PolishMode::Raw,
+                &[],
+                "",
+                &[],
+                ChineseScriptPreference::Auto,
+                OutputLanguagePreference::Auto,
+                None,
+                &[],
+                |_delta| {},
+                || false,
+            )
+            .await;
+
+        let err = result.expect_err("delayed response headers must fail");
+        assert!(
+            err.to_string().contains("polish stream start timeout"),
+            "unexpected error: {err}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        drop(server);
+    }
+
+    #[tokio::test]
+    async fn polish_streaming_fails_fast_when_provider_never_emits_content() {
+        // Installed session f1ec66f6 had a complete 67-character ASR result, but
+        // DeepSeek kept the HTTP 200 stream alive without a single content delta
+        // for about 21 seconds. Role/keepalive events must not reset the absolute
+        // first-content deadline.
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _env = EnvSnapshot::capture(&[
+            "LISTENER_POLISH_START_TIMEOUT_MS",
+            "LISTENER_POLISH_IDLE_TIMEOUT_MS",
+        ]);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _request = read_http_request(&mut stream);
+            let event = b"data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n";
             stream
                 .write_all(
                     b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n",
                 )
                 .unwrap();
-            // 挂住连接不出 SSE 数据（远超测试用的 300ms 空转上限）。
+            write!(stream, "{:X}\r\n", event.len()).unwrap();
+            stream.write_all(event).unwrap();
+            stream.write_all(b"\r\n").unwrap();
+            stream.flush().unwrap();
             thread::sleep(Duration::from_secs(30));
         });
 
+        std::env::set_var("LISTENER_POLISH_START_TIMEOUT_MS", "300");
+        std::env::set_var("LISTENER_POLISH_IDLE_TIMEOUT_MS", "5000");
+        let started = std::time::Instant::now();
+        let provider = OpenAICompatibleLLMProvider::new(OpenAICompatibleConfig::new(
+            "ark",
+            "Ark",
+            format!("http://{}", addr),
+            "",
+            "test-model",
+        ));
+        let result = provider
+            .polish_streaming(
+                "原文",
+                PolishMode::Raw,
+                &[],
+                "",
+                &[],
+                ChineseScriptPreference::Auto,
+                OutputLanguagePreference::Auto,
+                None,
+                &[],
+                |_delta| {},
+                || false,
+            )
+            .await;
+
+        let err = result.expect_err("content-free stream must fail");
+        assert!(
+            err.to_string().contains("polish stream start timeout"),
+            "unexpected error: {err}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        drop(server);
+    }
+
+    #[tokio::test]
+    async fn polish_streaming_fails_fast_when_provider_stalls_after_first_delta() {
+        // 2026-08-07：deepseek 接了连接却 30s 不出字，胶囊停在 polishing 直到
+        // 30s 总超时（owner 体感「卡死」）。首字后的空转上限仍应快速断流。
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _env = EnvSnapshot::capture(&[
+            "LISTENER_POLISH_START_TIMEOUT_MS",
+            "LISTENER_POLISH_IDLE_TIMEOUT_MS",
+        ]);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _request = read_http_request(&mut stream);
+            let event = "data: {\"choices\":[{\"delta\":{\"content\":\"已\"}}]}\n\n".as_bytes();
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n",
+                )
+                .unwrap();
+            write!(stream, "{:X}\r\n", event.len()).unwrap();
+            stream.write_all(event).unwrap();
+            stream.write_all(b"\r\n").unwrap();
+            stream.flush().unwrap();
+            // 首个正文 delta 后挂住（远超测试用的 300ms idle 上限）。
+            thread::sleep(Duration::from_secs(30));
+        });
+
+        std::env::set_var("LISTENER_POLISH_START_TIMEOUT_MS", "5000");
         std::env::set_var("LISTENER_POLISH_IDLE_TIMEOUT_MS", "300");
         let started = std::time::Instant::now();
         let provider = OpenAICompatibleLLMProvider::new(OpenAICompatibleConfig::new(
@@ -2533,7 +2694,6 @@ mod tests {
                 || false,
             )
             .await;
-        std::env::remove_var("LISTENER_POLISH_IDLE_TIMEOUT_MS");
 
         let err = result.expect_err("stalled stream must fail");
         assert!(

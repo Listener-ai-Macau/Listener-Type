@@ -52,6 +52,7 @@ const supportRs = read("src-tauri/src/coordinator/support.rs");
 const wakePolish = read("src-tauri/src/coordinator/dictation_wake_polish.rs");
 const deviceAi = read("src-tauri/src/coordinator/dictation_device_ai.rs");
 const coordinatorRs = read("src-tauri/src/coordinator.rs");
+const polishRs = read("src-tauri/src/polish.rs");
 const volcengineAsr = read("src-tauri/src/asr/volcengine.rs");
 const windowsImeSessionRs = read("src-tauri/src/windows_ime_session.rs");
 const deviceSection = read("src/pages/settings/DeviceSection.tsx");
@@ -384,8 +385,13 @@ gate("dual_bank_voiceprint_enrollment", () => {
   );
   mustMatch(
     speaker,
-    /DUAL_TEMPLATE_MIN_ACTIVE_FRAMES_PER_WINDOW:\s*usize\s*=\s*10/,
-    "each enrollment template contains at least 1000 ms active speech",
+    /ENROLLMENT_WAKE_MIN_ACTIVE_FRAMES_PER_STEP:\s*usize\s*=\s*6/,
+    "each of the three guided wake samples contains at least 600 ms active speech",
+  );
+  mustInclude(
+    speaker,
+    "let session = wake.clone();",
+    "the same three guided samples seed the wake and session banks without a fourth prompt",
   );
   mustInclude(
     speaker,
@@ -411,8 +417,8 @@ gate("dual_bank_voiceprint_enrollment", () => {
   );
   mustInclude(
     speaker,
-    "enrollment_compacts_normal_pauses_before_dual_bank_windows",
-    "normal enrollment pauses are compacted before quality gating",
+    "enrollment_accepts_three_minimum_length_phrases_with_volume_variation",
+    "three guided phrase samples pass per-step quality gating across normal volume variation",
   );
   mustInclude(
     speaker,
@@ -587,6 +593,29 @@ gate("snappy_insert_when_llm_auth_or_tsf_unavailable", () => {
     windowsImeSessionRs,
     "TSF not registered",
     "skip doomed ActivateProfile when TSF DLL is not installed",
+  );
+});
+
+gate("polish_first_content_fallback_1500ms", () => {
+  mustMatch(
+    polishRs,
+    /POLISH_STREAM_START_TIMEOUT:\s*Duration\s*=\s*Duration::from_millis\(1_500\)/,
+    "polish first-content deadline is 1500 ms",
+  );
+  mustInclude(
+    polishRs,
+    "first_content_deadline.saturating_duration_since",
+    "role-only and keepalive chunks cannot reset the first-content deadline",
+  );
+  mustInclude(
+    polishRs,
+    "polish_streaming_fails_fast_when_response_headers_are_delayed",
+    "delayed response-header regression",
+  );
+  mustInclude(
+    polishRs,
+    "polish_streaming_fails_fast_when_provider_never_emits_content",
+    "content-free HTTP 200/SSE regression",
   );
 });
 
