@@ -49,23 +49,13 @@ const WAKE_DIAGNOSTIC_RETENTION_MAX_BYTES: u64 = 32 * 1024 * 1024;
 const WAKE_DIAGNOSTIC_RETENTION_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const POST_DICTATION_KEY_DELAY: Duration = Duration::from_millis(60);
 const EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT: Duration = Duration::from_millis(300);
-// Owner dictation endpoint. Finished sentences use 1.0s for snappy completion
-// (1.0.4 contract). Incomplete body text (no 。？！) uses 1.5s; *very short*
-// incomplete body (≤4 spoken chars, e.g. "那你") holds 2.5s so mid-thought /
-// late ASR tails are not cut (installed 4ff44fc3). Only the wake/target
-// speaker's latest speech refreshes this clock — other people talking must
-// not lengthen auto-end.
+// Owner dictation endpoint. Once body speech has started, every preview shape
+// uses the established 1.0s inactivity contract. Do not make completion depend
+// on optimistic punctuation, body length, or an uncertain voiceprint vote: the
+// installed 1.0.5 ladder (1.5/2.0/2.5s) made the same spoken ending complete at
+// different speeds. Only the wake/target speaker's latest speech refreshes this
+// clock, so other people talking still cannot lengthen auto-end.
 const EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS: u64 = 1_000;
-const EMBEDDED_TARGET_SPEAKER_INCOMPLETE_BODY_END_TIMEOUT_MS: u64 = 1_500;
-// A wake-derived voice profile can temporarily classify the continuing owner
-// as Uncertain. Do not turn that uncertainty into a 1s hard stop: allow one
-// bounded extra second for a paused owner to resume. Confirmed NonTarget speech
-// keeps the normal endpoint so another person cannot hold recording open.
-const EMBEDDED_TARGET_SPEAKER_UNCERTAIN_TAIL_END_TIMEOUT_MS: u64 = 2_000;
-const EMBEDDED_TARGET_SPEAKER_SEMANTIC_CONTINUATION_END_TIMEOUT_MS: u64 = 2_000;
-const EMBEDDED_TARGET_SPEAKER_SHORT_BODY_END_TIMEOUT_MS: u64 = 2_500;
-// Spoken-content length at/under this is treated as "just started body".
-const EMBEDDED_SHORT_BODY_SPOKEN_CHARS: usize = 4;
 // Installed session 72519330: wake capsule → ~1.2s host auto-end on the wake
 // clock with empty body → "没有识别到语音". Initial body wait is only 700ms, so
 // 1.0s snappy endpoint after that treats "thinking after wake" as done. Keep
@@ -84,45 +74,7 @@ const EMBEDDED_PROVIDER_STALL_CONFIRM_MS: u64 = 1_000;
 // a stale two-pass boundary to extend recording.
 const EMBEDDED_LIVE_OWNER_ACTIVITY_ALIGNMENT_MS: u64 = 600;
 
-fn preview_spoken_char_count(preview: Option<&str>) -> usize {
-    preview
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .map(|text| {
-            text.chars()
-                .filter(|ch| {
-                    !ch.is_whitespace()
-                        && !matches!(
-                            ch,
-                            '，' | ',' | '、' | '。' | '！' | '？' | '.' | '!' | '?' | '…'
-                        )
-                })
-                .count()
-        })
-        .unwrap_or(0)
-}
-
-/// Endpoint timeout from body completeness.
-///
-/// Historical mistake: "ends with 。？！ → 2s" made *every* Chinese short
-/// dictation feel slow (cloud ASR almost always adds terminal punctuation).
-/// Correct polarity: finished sentences stay snappy 1.0s; incomplete body
-/// holds 1.5s; very short incomplete body holds 2.5s so late cloud tails can
-/// land (intermittent "那你"-only finals).
-fn target_speaker_end_timeout_ms_for_preview(preview: Option<&str>) -> u64 {
-    let has_body = preview.map(str::trim).is_some_and(|text| !text.is_empty());
-    // Streaming ASR may optimistically punctuate a dangling discourse marker
-    // ("然后。", "但是。", "最后。") as if the sentence had finished. Keep a
-    // bounded extra second for the clause that the speaker has clearly queued.
-    if has_body && preview_has_dangling_continuation(preview) {
-        return EMBEDDED_TARGET_SPEAKER_SEMANTIC_CONTINUATION_END_TIMEOUT_MS;
-    }
-    if has_body && !preview_ends_with_sentence_terminal(preview) {
-        if preview_spoken_char_count(preview) <= EMBEDDED_SHORT_BODY_SPOKEN_CHARS {
-            return EMBEDDED_TARGET_SPEAKER_SHORT_BODY_END_TIMEOUT_MS;
-        }
-        return EMBEDDED_TARGET_SPEAKER_INCOMPLETE_BODY_END_TIMEOUT_MS;
-    }
+fn target_speaker_end_timeout_ms_for_preview(_preview: Option<&str>) -> u64 {
     EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
 }
 
@@ -210,12 +162,6 @@ fn preview_ends_with_sentence_terminal(preview: Option<&str>) -> bool {
 fn target_speaker_inactive_stop_reason(timeout_ms: u64) -> &'static str {
     if timeout_ms >= EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS {
         "target_speaker_inactive_no_body_3000ms"
-    } else if timeout_ms >= EMBEDDED_TARGET_SPEAKER_SHORT_BODY_END_TIMEOUT_MS {
-        "target_speaker_inactive_2500ms"
-    } else if timeout_ms >= EMBEDDED_TARGET_SPEAKER_UNCERTAIN_TAIL_END_TIMEOUT_MS {
-        "target_speaker_guarded_tail_2000ms"
-    } else if timeout_ms >= EMBEDDED_TARGET_SPEAKER_INCOMPLETE_BODY_END_TIMEOUT_MS {
-        "target_speaker_inactive_1500ms"
     } else {
         "target_speaker_inactive_1000ms"
     }
@@ -745,8 +691,11 @@ fn target_speaker_update_has_live_owner_activity(
     if !update.target_activity_advanced && !update.pending_activity_advanced {
         return false;
     }
-    let audio_edge_ms = update.audio_duration_ms.max(update.provider_audio_duration_ms);
-    let owner_edge_ms = update.target_speech_end_ms
+    let audio_edge_ms = update
+        .audio_duration_ms
+        .max(update.provider_audio_duration_ms);
+    let owner_edge_ms = update
+        .target_speech_end_ms
         .max(update.local_target_speech_end_ms)
         .max(update.stable_attributed_speech_end_ms);
     audio_edge_ms
@@ -832,14 +781,10 @@ fn target_speaker_fusion_state(
 }
 
 fn target_speaker_endpoint_timeout_with_fusion(
-    fusion_state: TargetSpeakerFusionState,
+    _fusion_state: TargetSpeakerFusionState,
     mode_timeout_ms: u64,
 ) -> u64 {
-    if fusion_state == TargetSpeakerFusionState::UncertainOwnerTail {
-        mode_timeout_ms.max(EMBEDDED_TARGET_SPEAKER_UNCERTAIN_TAIL_END_TIMEOUT_MS)
-    } else {
-        mode_timeout_ms
-    }
+    mode_timeout_ms
 }
 
 /// Recent local speech energy that is not yet attributed as non-target. Used to

@@ -1417,7 +1417,7 @@ fn proactive_stop_accumulates_trailing_silence_only_after_body_started() {
 }
 
 #[test]
-fn finished_sentences_stay_snappy_incomplete_body_holds() {
+fn all_body_preview_shapes_keep_one_second_endpoint() {
     let base = crate::asr::volcengine::TargetSpeakerUpdate {
         speaker_id: Some("1".into()),
         target_speech_end_ms: Some(1_500),
@@ -1452,9 +1452,9 @@ fn finished_sentences_stay_snappy_incomplete_body_holds() {
         super::target_speaker_inactive_stop_reason(1_000),
         "target_speaker_inactive_1000ms"
     );
-    // Finished sentences with 。？！ stay snappy 1.0s (old "terminal→2s" made
-    // every Chinese short utterance feel slow). Incomplete body holds 1.5s so
-    // mid-thought pauses are not cut (installed "现在是进入" / "你帮").
+    // Every body preview shape uses the same 1.0s owner-inactivity contract.
+    // Punctuation, a dangling connector, or a short partial must not make the
+    // same spoken ending randomly take 1.5/2.0/2.5 seconds.
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("用全刷。")),
         1_000
@@ -1469,12 +1469,11 @@ fn finished_sentences_stay_snappy_incomplete_body_holds() {
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("我先检查一下，然后。")),
-        2_000,
-        "an optimistic full stop must not hide a dangling continuation",
+        1_000,
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("最后。")),
-        2_000,
+        1_000,
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("最后一句要完整。")),
@@ -1495,24 +1494,15 @@ fn finished_sentences_stay_snappy_incomplete_body_holds() {
     )));
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("你继续帮我看一下吧")),
-        1_500
+        1_000
     );
-    // 5 spoken chars → short-body ladder (≤4 is 2.5s).
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("现在是进入")),
-        1_500
+        1_000
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("那你")),
-        2_500
-    );
-    assert_eq!(
-        super::target_speaker_inactive_stop_reason(1_500),
-        "target_speaker_inactive_1500ms"
-    );
-    assert_eq!(
-        super::target_speaker_inactive_stop_reason(2_500),
-        "target_speaker_inactive_2500ms"
+        1_000
     );
     assert!(super::preview_ends_with_sentence_terminal(Some(
         "现在整体是一个什么进度？你跟我简单说一下。"
@@ -1922,13 +1912,13 @@ fn target_speaker_endpoint_uses_local_clock_only_for_a_clean_provider_stall() {
 }
 
 #[test]
-fn session_1378_uncertain_owner_tail_gets_bounded_resume_window() {
+fn owner_identity_uncertainty_does_not_slow_the_one_second_endpoint() {
     // Installed session 1378: the owner was locally confirmed through 2100 ms,
     // later speech energy reached 3100 ms with only Uncertain classifications,
     // and the provider still attributed the same speaker through 3612 ms. The
-    // old 1000 ms fallback stopped at local audio 5400 ms, cutting the resumed
-    // half-sentence. Identity uncertainty gets 2000 ms, but confirmed other
-    // speech keeps the normal 1000 ms endpoint.
+    // old 1.0.5 policy extended identity uncertainty to 2000 ms. The owner
+    // restored the product contract to one second for every body ending; the
+    // speaker state remains diagnostic and still protects attribution.
     let uncertain_tail = crate::asr::volcengine::TargetSpeakerUpdate {
         speaker_id: Some("0".into()),
         target_speech_end_ms: Some(3_612),
@@ -1952,8 +1942,8 @@ fn session_1378_uncertain_owner_tail_gets_bounded_resume_window() {
         super::target_speaker_fusion_state(&uncertain_tail),
         1_000,
     );
-    assert_eq!(timeout, 2_000);
-    assert!(!super::target_speaker_endpoint_due_with_provider_stall(
+    assert_eq!(timeout, 1_000);
+    assert!(super::target_speaker_endpoint_due_with_provider_stall(
         &uncertain_tail,
         true,
         timeout,
@@ -2282,24 +2272,18 @@ fn target_speaker_endpoint_waits_for_startup_body_calibration() {
 }
 
 #[test]
-fn incomplete_body_preview_uses_fifteen_hundred_ms_endpoint() {
-    // Very short incomplete body holds longer (installed "那你" mid-cut).
+fn incomplete_and_short_body_previews_keep_one_second_endpoint() {
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("你帮")),
-        2_500
+        1_000
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("那你")),
-        2_500
+        1_000
     );
-    assert_eq!(
-        super::target_speaker_inactive_stop_reason(2_500),
-        "target_speaker_inactive_2500ms"
-    );
-    // Longer incomplete body keeps 1.5s.
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("你继续帮我看一下吧")),
-        1_500
+        1_000
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("你帮。")),
