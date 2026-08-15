@@ -1144,6 +1144,25 @@ fn local_evidence_confirms_owner_absence(
         .collect::<String>();
     let wake_anchored_utterance =
         utterance_contains_normalized_phrase(utterance, &normalized_wake_phrase);
+    // Low-score Uncertain windows are only meaningful owner-absence evidence
+    // after this session's body tracker has demonstrated that it can positively
+    // recognize the owner at least once. Otherwise an enrollment/acoustic
+    // mismatch can leave every post-wake window Uncertain while the debounced
+    // identity still belongs to the verified wake speaker. Treating that
+    // never-calibrated run as a speaker switch destructively removed complete
+    // owner dictation in installed sessions 1 and 27 (the provider retained 56
+    // and 31 chars respectively, while filtering kept only the wake/tail).
+    //
+    // A real debounced identity departure remains fail-closed below regardless
+    // of whether a Target window was observed, and explicit Target-confirmed
+    // sessions retain the strict same-cloud-cluster isolation rule.
+    let session_has_stable_target = evidence.iter().any(|sample| {
+        sample.stable_target
+            && matches!(
+                sample.classification,
+                crate::speaker_verification::SessionSpeakerClassification::Target { .. }
+            )
+    });
     let mut overlap_count = 0u32;
     let mut target_votes = 0u32;
     let mut owner_absence_votes = 0u32;
@@ -1179,7 +1198,8 @@ fn local_evidence_confirms_owner_absence(
     if wake_anchored_utterance {
         return false;
     }
-    overlap_count > 0
+    session_has_stable_target
+        && overlap_count > 0
         && target_votes == 0
         && owner_absence_votes >= LOCAL_OWNER_ABSENCE_CONFIRMATIONS
 }
@@ -4812,6 +4832,66 @@ mod tests {
             &evidence,
             Some("开始录音"),
         );
+        assert_eq!(filtered.result["text"], result["text"]);
+        assert!(!filtered.stable_non_target_utterance_present);
+    }
+
+    #[test]
+    fn installed_session_27_keeps_body_when_tracker_never_calibrates_target() {
+        // Installed session 27 delivered every packet and the provider retained
+        // the complete 31-character result. The wake gate verified the owner,
+        // but every post-wake body window stayed debounced on that identity as
+        // Uncertain; none reached Target. A run that never positively calibrated
+        // must not reinterpret low Uncertain scores as a destructive speaker
+        // switch and leave only the short final tail.
+        let result = json!({
+            "text": "开始录音。前半段必须保留，停顿以后没什么问题啊。",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 0,
+                    "end_time": 1_402,
+                    "text": "开始录音。"
+                },
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 1_500,
+                    "end_time": 7_692,
+                    "text": "前半段必须保留，停顿以后没什么问题啊。"
+                }
+            ]
+        });
+        let evidence = [
+            (1_800, 0.344_265),
+            (2_200, 0.172_276_29),
+            (3_000, 0.432_747_87),
+            (4_200, 0.268_078),
+            (5_000, 0.308_645_78),
+            (6_400, 0.236_441_76),
+            (6_800, 0.235_123_95),
+        ]
+        .into_iter()
+        .map(|(audio_end_ms, score)| LocalSpeakerEvidence {
+            audio_end_ms,
+            classification: crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                score,
+            },
+            stable_target: true,
+        })
+        .collect::<Vec<_>>();
+        let mut target = None;
+
+        let filtered = filter_result_to_target_speaker_with_local_evidence(
+            &result,
+            &mut target,
+            true,
+            &evidence,
+            Some("开始录音"),
+        );
+
+        assert_eq!(target.as_deref(), Some("0"));
         assert_eq!(filtered.result["text"], result["text"]);
         assert!(!filtered.stable_non_target_utterance_present);
     }
