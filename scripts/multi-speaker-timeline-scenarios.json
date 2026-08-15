@@ -60,7 +60,7 @@
       "id": "owner_tail_survives_non_target_final_boundary",
       "kind": "overlap",
       "transcript_test": "protocol_final_preserves_owner_preview_after_non_target_tail_empties_boundaries",
-      "endpoint_test": "incomplete_body_preview_uses_fifteen_hundred_ms_endpoint"
+      "endpoint_test": "incomplete_and_short_body_previews_keep_one_second_endpoint"
     }
   ],
   "lifecycle_test": "session_actor_commands_apply_asr_cancel_timeout_and_empty_final_behavior"

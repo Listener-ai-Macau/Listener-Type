@@ -325,19 +325,35 @@ gate("standard_endpoint_still_1000ms_default", () => {
   mustInclude(
     dictation,
     "fn target_speaker_end_timeout_ms_for_preview",
-    "timeout selected from body completeness",
+    "body endpoint helper",
   );
-  // Incomplete body (no 。？！) may hold 1.5s; finished sentences stay 1.0s.
-  mustMatch(
-    dictation,
-    /EMBEDDED_TARGET_SPEAKER_INCOMPLETE_BODY_END_TIMEOUT_MS:\s*u64\s*=\s*1_500/,
-    "incomplete-body hold is 1500 ms",
-  );
-  mustInclude(dictation, "target_speaker_inactive_1500ms", "incomplete-body stop reason");
+  for (const forbidden of [
+    "EMBEDDED_TARGET_SPEAKER_INCOMPLETE_BODY_END_TIMEOUT_MS",
+    "EMBEDDED_TARGET_SPEAKER_UNCERTAIN_TAIL_END_TIMEOUT_MS",
+    "EMBEDDED_TARGET_SPEAKER_SEMANTIC_CONTINUATION_END_TIMEOUT_MS",
+    "EMBEDDED_TARGET_SPEAKER_SHORT_BODY_END_TIMEOUT_MS",
+    "target_speaker_inactive_1500ms",
+    "target_speaker_guarded_tail_2000ms",
+    "target_speaker_inactive_2500ms",
+  ]) {
+    if (dictation.includes(forbidden)) {
+      throw new Error(`body endpoint must not retain slow preview ladder: ${forbidden}`);
+    }
+  }
   mustInclude(
     dictationTests,
-    "incomplete_body_preview_uses_fifteen_hundred_ms_endpoint",
-    "incomplete-body unit test",
+    "all_body_preview_shapes_keep_one_second_endpoint",
+    "punctuation and semantic-continuation one-second unit test",
+  );
+  mustInclude(
+    dictationTests,
+    "incomplete_and_short_body_previews_keep_one_second_endpoint",
+    "incomplete and short-body one-second unit test",
+  );
+  mustInclude(
+    dictationTests,
+    "owner_identity_uncertainty_does_not_slow_the_one_second_endpoint",
+    "uncertain voiceprint one-second unit test",
   );
 });
 
