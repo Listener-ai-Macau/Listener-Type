@@ -2409,6 +2409,24 @@ mod tests {
         }
     }
 
+    async fn raw_polish(provider: &OpenAICompatibleLLMProvider) -> Result<String, LLMError> {
+        provider
+            .polish_streaming(
+                "原文",
+                PolishMode::Raw,
+                &[],
+                "",
+                &[],
+                ChineseScriptPreference::Auto,
+                OutputLanguagePreference::Auto,
+                None,
+                &[],
+                |_delta| {},
+                || false,
+            )
+            .await
+    }
+
     fn unique_codex_auth_path(label: &str) -> PathBuf {
         let id = CODEX_AUTH_FIXTURE_COUNTER.fetch_add(1, Ordering::SeqCst);
         std::env::temp_dir().join(format!(
@@ -2552,21 +2570,7 @@ mod tests {
             "",
             "test-model",
         ));
-        let result = provider
-            .polish_streaming(
-                "原文",
-                PolishMode::Raw,
-                &[],
-                "",
-                &[],
-                ChineseScriptPreference::Auto,
-                OutputLanguagePreference::Auto,
-                None,
-                &[],
-                |_delta| {},
-                || false,
-            )
-            .await;
+        let result = raw_polish(&provider).await;
 
         let err = result.expect_err("delayed response headers must fail");
         assert!(
@@ -2616,21 +2620,7 @@ mod tests {
             "",
             "test-model",
         ));
-        let result = provider
-            .polish_streaming(
-                "原文",
-                PolishMode::Raw,
-                &[],
-                "",
-                &[],
-                ChineseScriptPreference::Auto,
-                OutputLanguagePreference::Auto,
-                None,
-                &[],
-                |_delta| {},
-                || false,
-            )
-            .await;
+        let result = raw_polish(&provider).await;
 
         let err = result.expect_err("content-free stream must fail");
         assert!(
@@ -2679,21 +2669,7 @@ mod tests {
             "",
             "test-model",
         ));
-        let result = provider
-            .polish_streaming(
-                "原文",
-                PolishMode::Raw,
-                &[],
-                "",
-                &[],
-                ChineseScriptPreference::Auto,
-                OutputLanguagePreference::Auto,
-                None,
-                &[],
-                |_delta| {},
-                || false,
-            )
-            .await;
+        let result = raw_polish(&provider).await;
 
         let err = result.expect_err("stalled stream must fail");
         assert!(
