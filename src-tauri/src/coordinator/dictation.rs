@@ -2484,13 +2484,21 @@ async fn finish_end_session_after_stop_transition(
     // 下面的 emptyTranscript 护栏。replay_retained_audio_once 自带一次性闸。
     if raw.text.trim().is_empty() {
         if let Some(asr) = volcengine_for_empty_retry.as_ref() {
-            if asr.has_sustained_local_speech_evidence() {
+            let automatic_wake = automatic_wake_session_active(inner, current_session_id);
+            let retry_allowed = asr.has_sustained_local_speech_evidence()
+                || (!automatic_wake && asr.has_local_speech_evidence());
+            if retry_allowed {
                 log::warn!(
-                    "[coord] empty final with sustained local speech evidence; retrying once with retained audio session_id={current_session_id}"
+                    "[coord] empty final with local speech evidence; retrying once with bounded retained audio session_id={current_session_id} automatic_wake={automatic_wake}"
                 );
                 asr.cancel();
                 let retry_timeout = std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS);
-                match tokio::time::timeout(retry_timeout, asr.replay_retained_audio_once()).await {
+                match tokio::time::timeout(
+                    retry_timeout,
+                    asr.replay_retained_audio_once_for_empty_final(),
+                )
+                .await
+                {
                     Ok(Ok(replayed)) if !replayed.text.trim().is_empty() => {
                         log::info!(
                             "[coord] empty-spin retained-audio retry recovered session_id={} chars={}",
@@ -2580,7 +2588,11 @@ async fn finish_end_session_after_stop_transition(
             return Ok(());
         }
         let session = DictationSession {
-            id: Uuid::new_v4().to_string(),
+            // The WAV archive was written with `current_session_id` before
+            // ASR finalization. Keep History on the same identity even when
+            // the provider returns no text, otherwise it asks for a different
+            // `<id>.wav` and the captured recording cannot be loaded.
+            id: current_session_id.to_string(),
             created_at: Utc::now().to_rfc3339(),
             raw_transcript: raw.text.clone(),
             final_text: String::new(),

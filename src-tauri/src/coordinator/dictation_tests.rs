@@ -2477,6 +2477,43 @@ fn wake_only_expiry_is_handled_before_empty_transcript_failure_history() {
 }
 
 #[test]
+fn empty_transcript_history_keeps_the_archived_recording_session_id() {
+    let source = include_str!("dictation.rs");
+    let branch_start = source
+        .find("let wake_only_expired = automatic_wake_session_active")
+        .expect("empty-transcript branch exists");
+    let branch_tail = &source[branch_start..];
+    let history_start = branch_tail
+        .find("let session = DictationSession {")
+        .expect("empty-transcript history session exists");
+    let history_tail = &branch_tail[history_start..];
+    let history_end = history_tail
+        .find("};")
+        .expect("empty-transcript history session closes");
+    let history = &history_tail[..history_end];
+
+    assert!(history.contains("id: current_session_id.to_string()"));
+    assert!(!history.contains("id: Uuid::new_v4().to_string()"));
+}
+
+#[test]
+fn short_empty_recovery_never_broadens_the_automatic_wake_gate() {
+    let source = include_str!("dictation.rs");
+    let retry_start = source
+        .find("let automatic_wake = automatic_wake_session_active")
+        .expect("empty-final recovery gate exists");
+    let retry_tail = &source[retry_start..];
+    let retry_end = retry_tail
+        .find("asr.cancel();")
+        .expect("empty-final recovery dispatch exists");
+    let gate = &retry_tail[..retry_end];
+
+    assert!(gate.contains("asr.has_sustained_local_speech_evidence()"));
+    assert!(gate.contains("!automatic_wake && asr.has_local_speech_evidence()"));
+    assert!(retry_tail.contains("replay_retained_audio_once_for_empty_final()"));
+}
+
+#[test]
 fn automatic_wake_starts_initial_body_wait_at_visible_capsule_ack() {
     let coordinator = Coordinator::new();
     let session_id = new_session_id();

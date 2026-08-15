@@ -39,6 +39,13 @@ const WEBSOCKET_SEND_TIMEOUT: Duration = Duration::from_millis(1_200);
 // 重试的判定阈：本地音频至少 1.5s 且人声尾端正点距音频末尾不超过 0.5s。
 const EMPTY_SPIN_MIN_LOCAL_AUDIO_MS: u64 = 1_500;
 const EMPTY_SPIN_SPEECH_TAIL_SLACK_MS: u64 = 500;
+// A short physical-key dictation can contain real but very low-energy speech
+// which Volcengine rejects twice when replayed byte-for-byte. The normal live
+// path remains firmware-levelled and untouched. Only the single empty-final
+// recovery representation may use this bounded +9 dB lift, with the same
+// -3 dBFS peak ceiling used by the host safety limiter.
+const EMPTY_FINAL_REPLAY_MAX_GAIN: f64 = 2.818_382_931;
+const EMPTY_FINAL_REPLAY_PEAK_CEILING: f64 = i16::MAX as f64 * 0.707_945_784;
 // 建连是全文件唯一曾经无超时边界的网络操作：TCP 黑洞下会挂到 OS 级超时
 // （21s+），期间 stop/cancel 只能排队，proactive 末帧预算耗尽后丢稿。
 const WEBSOCKET_CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
@@ -119,6 +126,38 @@ fn classify_provider_error(code: u32, body: &str) -> VolcengineASRError {
 }
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+fn bounded_empty_final_replay_pcm(pcm: &[u8]) -> (Vec<u8>, f64, u16, u16) {
+    let peak_before = pcm
+        .chunks_exact(2)
+        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]).unsigned_abs())
+        .max()
+        .unwrap_or(0);
+    if peak_before == 0 {
+        return (pcm.to_vec(), 1.0, 0, 0);
+    }
+    let peak_limited_gain = EMPTY_FINAL_REPLAY_PEAK_CEILING / f64::from(peak_before);
+    let gain = EMPTY_FINAL_REPLAY_MAX_GAIN.min(peak_limited_gain);
+    if gain <= 1.0 {
+        return (pcm.to_vec(), 1.0, peak_before, peak_before);
+    }
+
+    let mut recovered = Vec::with_capacity(pcm.len());
+    for chunk in pcm.chunks_exact(2) {
+        let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+        let scaled = (f64::from(sample) * gain)
+            .round()
+            .clamp(i16::MIN as f64, i16::MAX as f64) as i16;
+        recovered.extend_from_slice(&scaled.to_le_bytes());
+    }
+    recovered.extend_from_slice(pcm.chunks_exact(2).remainder());
+    let peak_after = recovered
+        .chunks_exact(2)
+        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]).unsigned_abs())
+        .max()
+        .unwrap_or(0);
+    (recovered, gain, peak_before, peak_after)
+}
 type WsSink = futures_util::stream::SplitSink<WsStream, Message>;
 type SharedWriter = Arc<AsyncMutex<Option<WsSink>>>;
 type PartialTranscriptCallback = Arc<dyn Fn(String) + Send + Sync>;
@@ -1764,13 +1803,37 @@ impl VolcengineStreamingASR {
 
     pub async fn replay_retained_audio_once(&self) -> Result<RawTranscript, VolcengineASRError> {
         let (pcm, speaker_snapshot) = self.claim_retained_audio_for_replay()?;
+        self.replay_claimed_audio(pcm, speaker_snapshot, "exact", 1.0)
+            .await
+    }
+
+    pub async fn replay_retained_audio_once_for_empty_final(
+        &self,
+    ) -> Result<RawTranscript, VolcengineASRError> {
+        let (pcm, speaker_snapshot) = self.claim_retained_audio_for_replay()?;
+        let (pcm, gain, peak_before, peak_after) = bounded_empty_final_replay_pcm(&pcm);
+        log::warn!(
+            "[asr] empty-final recovery representation pcm_bytes={} gain={gain:.4} peak_before={peak_before} peak_after={peak_after}",
+            pcm.len()
+        );
+        self.replay_claimed_audio(pcm, speaker_snapshot, "empty-final", gain)
+            .await
+    }
+
+    async fn replay_claimed_audio(
+        &self,
+        pcm: Vec<u8>,
+        speaker_snapshot: RecoverySpeakerSnapshot,
+        reason: &'static str,
+        gain: f64,
+    ) -> Result<RawTranscript, VolcengineASRError> {
         let replay = Arc::new(Self::new_with_session_options(
             self.credentials.clone(),
             self.hotwords.clone(),
             self.session_options,
         ));
         log::warn!(
-            "[asr] live transport failed; starting one bounded full-audio recovery replay pcm_bytes={} audio_ms={}",
+            "[asr] starting one bounded full-audio recovery replay reason={reason} gain={gain:.4} pcm_bytes={} audio_ms={}",
             pcm.len(),
             pcm.len() as u64 / 32
         );
@@ -1816,6 +1879,15 @@ impl VolcengineStreamingASR {
         };
         audio_duration_ms >= EMPTY_SPIN_MIN_LOCAL_AUDIO_MS
             && speech_end_ms + EMPTY_SPIN_SPEECH_TAIL_SLACK_MS >= audio_duration_ms
+    }
+
+    /// Physical/manual short dictation recovery gate. The coordinator keeps
+    /// this out of automatic-wake sessions so a wake phrase by itself cannot
+    /// be amplified into fabricated body text.
+    pub fn has_local_speech_evidence(&self) -> bool {
+        let state = self.state.lock();
+        state.local_audio_duration_ms.unwrap_or(0) >= EMPTY_SPIN_MIN_LOCAL_AUDIO_MS
+            && state.local_speech_end_ms.is_some()
     }
 
     pub fn is_connected(&self) -> bool {
@@ -6309,6 +6381,35 @@ mod tests {
     }
 
     #[test]
+    fn empty_final_replay_gain_is_bounded_and_never_amplifies_silence_or_hot_pcm() {
+        let samples_to_pcm = |samples: &[i16]| {
+            samples
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>()
+        };
+
+        let silence = samples_to_pcm(&[0, 0, 0, 0]);
+        let (silence_out, silence_gain, _, _) = bounded_empty_final_replay_pcm(&silence);
+        assert_eq!(silence_out, silence);
+        assert_eq!(silence_gain, 1.0);
+
+        let quiet = samples_to_pcm(&[100, -100, 400, -400]);
+        let (_, quiet_gain, quiet_peak, quiet_after) = bounded_empty_final_replay_pcm(&quiet);
+        assert!((quiet_gain - EMPTY_FINAL_REPLAY_MAX_GAIN).abs() < 0.000_001);
+        assert_eq!(quiet_peak, 400);
+        assert_eq!(quiet_after, 1_127);
+        assert!(f64::from(quiet_after) <= EMPTY_FINAL_REPLAY_PEAK_CEILING.ceil());
+
+        let hot = samples_to_pcm(&[30_000, -30_000]);
+        let (hot_out, hot_gain, hot_peak, hot_after) = bounded_empty_final_replay_pcm(&hot);
+        assert_eq!(hot_out, hot);
+        assert_eq!(hot_gain, 1.0);
+        assert_eq!(hot_peak, 30_000);
+        assert_eq!(hot_after, 30_000);
+    }
+
+    #[test]
     fn uncertain_band_does_not_refresh_owner_endpoint_clock() {
         // F3 fixture（2026-08-09 12:47:04 弱 Target 序列 0.426–0.58）：置信
         // 余量带判 Uncertain 后不刷新本人端点时钟、也不冻结稳定身份；只有
@@ -6397,6 +6498,41 @@ mod tests {
         }
         assert!(!too_short.has_sustained_local_speech_evidence());
         assert!(!new_asr().has_sustained_local_speech_evidence());
+    }
+
+    #[test]
+    fn manual_short_empty_retry_requires_real_local_speech_and_enough_audio() {
+        let new_asr = || {
+            VolcengineStreamingASR::new(
+                VolcengineCredentials {
+                    app_id: "app".into(),
+                    access_token: "token".into(),
+                    resource_id: VolcengineCredentials::default_resource_id().into(),
+                },
+                Vec::new(),
+            )
+        };
+
+        let short_speech = new_asr();
+        {
+            let mut state = short_speech.state.lock();
+            state.local_audio_duration_ms = Some(2_120);
+            state.local_speech_end_ms = Some(400);
+        }
+        assert!(short_speech.has_local_speech_evidence());
+        assert!(!short_speech.has_sustained_local_speech_evidence());
+
+        let silence = new_asr();
+        silence.state.lock().local_audio_duration_ms = Some(2_120);
+        assert!(!silence.has_local_speech_evidence());
+
+        let too_short = new_asr();
+        {
+            let mut state = too_short.state.lock();
+            state.local_audio_duration_ms = Some(1_200);
+            state.local_speech_end_ms = Some(400);
+        }
+        assert!(!too_short.has_local_speech_evidence());
     }
 
     #[test]
