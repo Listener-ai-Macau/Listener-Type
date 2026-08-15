@@ -4748,6 +4748,43 @@ fn unresolved_local_speech_hold_is_capped_two_seconds_after_confirmed_owner() {
 }
 
 #[test]
+fn late_two_pass_boundary_does_not_refresh_firmware_speech_timer() {
+    let installed_session_36 = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(4_982),
+        provider_audio_duration_ms: Some(8_700),
+        audio_duration_ms: Some(8_800),
+        local_speech_end_ms: Some(8_400),
+        local_target_speech_end_ms: Some(5_400),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(7_622),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    assert!(!super::target_speaker_update_has_live_owner_activity(
+        &installed_session_36
+    ));
+    assert!(super::target_speaker_endpoint_due_with_timeout(
+        &installed_session_36,
+        1_500
+    ));
+
+    let live_preview_growth = crate::asr::volcengine::TargetSpeakerUpdate {
+        target_speech_end_ms: Some(8_450),
+        local_target_speech_end_ms: Some(8_800),
+        stable_attributed_speech_end_ms: Some(8_450),
+        pending_activity_advanced: true,
+        ..installed_session_36
+    };
+    assert!(super::target_speaker_update_has_live_owner_activity(
+        &live_preview_growth
+    ));
+}
+
+#[test]
 fn explicit_wake_diagnostic_sequence_stops_at_retention_limit() {
     assert_eq!(
         super::next_wake_diagnostic_capture_count(false, super::WAKE_DIAGNOSTIC_MAX_CANDIDATES),

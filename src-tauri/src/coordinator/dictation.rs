@@ -76,6 +76,13 @@ const EMBEDDED_PROVIDER_STALL_FALLBACK_LAG_MS: u64 = 500;
 // for one network blip. Require a full second of no provider coverage growth
 // before local-clock fallback may end the session.
 const EMBEDDED_PROVIDER_STALL_CONFIRM_MS: u64 = 1_000;
+// A provider may stabilize an old utterance several seconds after the owner
+// stopped. Treating that late bookkeeping update as live speech refreshes the
+// firmware's two-second safety timer and makes completion feel randomly slow.
+// Real preview growth refreshes the local owner clock at the current capture
+// edge, so a 600 ms alignment window retains live keepalives without allowing
+// a stale two-pass boundary to extend recording.
+const EMBEDDED_LIVE_OWNER_ACTIVITY_ALIGNMENT_MS: u64 = 600;
 
 fn preview_spoken_char_count(preview: Option<&str>) -> usize {
     preview
@@ -619,7 +626,18 @@ fn handle_target_speaker_update(
     update: crate::asr::volcengine::TargetSpeakerUpdate,
 ) {
     if update.target_activity_advanced || update.pending_activity_advanced {
-        note_embedded_asr_speech_activity(inner, session_id);
+        if target_speaker_update_has_live_owner_activity(&update) {
+            note_embedded_asr_speech_activity(inner, session_id);
+        } else {
+            log::info!(
+                "[asr] stale attributed activity did not refresh firmware endpoint provider_audio_ms={:?} local_audio_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?} stable_attributed_end_ms={:?}",
+                update.provider_audio_duration_ms,
+                update.audio_duration_ms,
+                update.target_speech_end_ms,
+                update.local_target_speech_end_ms,
+                update.stable_attributed_speech_end_ms,
+            );
+        }
     }
     let preview = current_embedded_audio_partial_preview(inner);
     // Prefer the live filtered preview if present; wake guard body_started is
@@ -719,6 +737,30 @@ fn handle_target_speaker_update(
             ),
         }
     });
+}
+
+fn target_speaker_update_has_live_owner_activity(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+) -> bool {
+    if !update.target_activity_advanced && !update.pending_activity_advanced {
+        return false;
+    }
+    let audio_edge_ms = update
+        .audio_duration_ms
+        .into_iter()
+        .chain(update.provider_audio_duration_ms)
+        .max();
+    let owner_edge_ms = update
+        .target_speech_end_ms
+        .into_iter()
+        .chain(update.local_target_speech_end_ms)
+        .chain(update.stable_attributed_speech_end_ms)
+        .max();
+    audio_edge_ms
+        .zip(owner_edge_ms)
+        .is_some_and(|(audio, owner)| {
+            audio.saturating_sub(owner) <= EMBEDDED_LIVE_OWNER_ACTIVITY_ALIGNMENT_MS
+        })
 }
 
 fn target_speaker_endpoint_due(update: &crate::asr::volcengine::TargetSpeakerUpdate) -> bool {

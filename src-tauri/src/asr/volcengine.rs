@@ -247,8 +247,9 @@ impl Default for AudioDeliveryReadiness {
 }
 
 use super::volcengine_transcript::{
-    is_unstable_initial_partial, merge_streaming_candidate, normalize_cjk_final_spacing_and_echoes,
-    normalized_result, transcript_candidate_from_result, trim_repeated_short_final_tail,
+    authoritative_final_supersedes_repeated_streaming_ledger, is_unstable_initial_partial,
+    merge_streaming_candidate, normalize_cjk_final_spacing_and_echoes, normalized_result,
+    transcript_candidate_from_result, trim_repeated_short_final_tail,
     trim_repeated_short_streaming_tail, TranscriptSegment,
 };
 
@@ -1104,6 +1105,7 @@ fn local_evidence_allows_utterance(
 fn local_evidence_supports_cloud_target(
     utterance: &Value,
     evidence: &[LocalSpeakerEvidence],
+    wake_speaker_phrase: Option<&str>,
 ) -> bool {
     let Some(end_ms) = utterance_end_ms(utterance) else {
         return false;
@@ -1122,17 +1124,26 @@ fn local_evidence_supports_cloud_target(
         }
         has_stable_owner_overlap = true;
     }
-    has_stable_owner_overlap && !local_evidence_confirms_owner_absence(utterance, evidence)
+    has_stable_owner_overlap
+        && !local_evidence_confirms_owner_absence(utterance, evidence, wake_speaker_phrase)
 }
 
 fn local_evidence_confirms_owner_absence(
     utterance: &Value,
     evidence: &[LocalSpeakerEvidence],
+    wake_speaker_phrase: Option<&str>,
 ) -> bool {
     let Some(end_ms) = utterance_end_ms(utterance) else {
         return false;
     };
     let start_ms = utterance_start_ms(utterance).unwrap_or(end_ms);
+    let normalized_wake_phrase = wake_speaker_phrase
+        .unwrap_or_default()
+        .chars()
+        .filter(|ch| ch.is_alphanumeric())
+        .collect::<String>();
+    let wake_anchored_utterance =
+        utterance_contains_normalized_phrase(utterance, &normalized_wake_phrase);
     let mut overlap_count = 0u32;
     let mut target_votes = 0u32;
     let mut owner_absence_votes = 0u32;
@@ -1156,6 +1167,17 @@ fn local_evidence_confirms_owner_absence(
         if sample.classification.score() <= LOCAL_OWNER_ABSENCE_MAX_SCORE {
             owner_absence_votes += 1;
         }
+    }
+    // Volcengine sometimes seals one long two-pass utterance containing both
+    // the confirmed wake and every clause after a natural pause. In that shape,
+    // a run of low-score `Uncertain` windows is not a separate speaker boundary:
+    // the tracker still owns the identity (`stable_target=true`). Rejecting the
+    // whole wake-anchored utterance deleted the owner's post-pause tail in
+    // installed session 52. A real debounced identity departure still returns
+    // above, while separate later utterances retain the strict owner-absence
+    // rule used for same-cloud-cluster multi-speaker isolation.
+    if wake_anchored_utterance {
+        return false;
     }
     overlap_count > 0
         && target_votes == 0
@@ -1282,7 +1304,11 @@ fn utterance_belongs_to_target(
     // Keep the baseline cloud-owner result through Uncertain and isolated noisy
     // NonTarget windows; only a locally debounced identity switch can veto it.
     if cloud_id_matches {
-        return local_evidence_supports_cloud_target(utterance, local_speaker_evidence);
+        return local_evidence_supports_cloud_target(
+            utterance,
+            local_speaker_evidence,
+            wake_speaker_phrase,
+        );
     }
 
     // Recover provider speaker-ID splits only with strict positive local owner
@@ -1430,7 +1456,11 @@ fn filter_result_to_target_speaker_with_local_evidence(
             utterances.iter().any(|utterance| {
                 utterance_is_stable(utterance)
                     && utterance_speaker_id(utterance).as_deref() == Some(target)
-                    && local_evidence_confirms_owner_absence(utterance, local_speaker_evidence)
+                    && local_evidence_confirms_owner_absence(
+                        utterance,
+                        local_speaker_evidence,
+                        wake_speaker_phrase,
+                    )
             })
         });
     // Unstable stream tails are only "pending owner text" when local evidence
@@ -2895,6 +2925,8 @@ impl VolcengineStreamingASR {
         let two_pass_empty_final = has_final && result_marks_two_pass_empty(result);
         let final_speaker_candidate_empty = has_final && candidate.text.trim().is_empty();
         let authoritative_two_pass = candidate.authoritative_cumulative && !two_pass_empty_final;
+        let authoritative_final_candidate = (has_final && authoritative_two_pass)
+            .then(|| (candidate.text.clone(), candidate.timed_segments.clone()));
         log::info!(
             "[asr] {} server metadata: {}",
             self.session_options.endpoint.label(),
@@ -2942,6 +2974,26 @@ impl VolcengineStreamingASR {
                 &state.best_transcript_segments,
                 candidate,
             );
+            // A no-segment optimistic ledger can keep winning inside the
+            // generic streaming merge before final fallback is considered.
+            // Restore the incoming two-pass authority at this boundary when
+            // the only extra ledger content is a repeated terminal revision.
+            if let Some((authoritative_text, authoritative_segments)) =
+                authoritative_final_candidate.as_ref()
+            {
+                if authoritative_final_supersedes_repeated_streaming_ledger(
+                    authoritative_text,
+                    &merged,
+                ) {
+                    log::warn!(
+                        "[asr] authoritative final replaced inflated streaming merge final_chars={} merged_chars={}",
+                        authoritative_text.chars().count(),
+                        merged.chars().count()
+                    );
+                    merged = authoritative_text.clone();
+                    segments = authoritative_segments.clone();
+                }
+            }
             // Hard multi-speaker isolation: never grow past the owner ceiling
             // while local identity is off the wake speaker.
             let (clamped_text, clamped_segments) =
@@ -2967,16 +3019,29 @@ impl VolcengineStreamingASR {
                 if let Some((fallback_text, fallback_segments)) =
                     confirmed_owner_final_preview_fallback(&state, &merged)
                 {
-                    log::warn!(
-                        "[asr] protocol final weaker than session ledger; committing {} accepted chars over {} retained chars (two_pass_empty={} final_empty={} isolation_frozen={})",
-                        fallback_text.chars().count(),
-                        merged.chars().count(),
-                        two_pass_empty_final,
-                        final_speaker_candidate_empty,
-                        state.owner_isolation_frozen
-                    );
-                    merged = fallback_text;
-                    segments = fallback_segments;
+                    if authoritative_two_pass
+                        && authoritative_final_supersedes_repeated_streaming_ledger(
+                            &merged,
+                            &fallback_text,
+                        )
+                    {
+                        log::warn!(
+                            "[asr] authoritative final rejected repeated streaming-ledger tail final_chars={} ledger_chars={}",
+                            merged.chars().count(),
+                            fallback_text.chars().count()
+                        );
+                    } else {
+                        log::warn!(
+                            "[asr] protocol final weaker than session ledger; committing {} accepted chars over {} retained chars (two_pass_empty={} final_empty={} isolation_frozen={})",
+                            fallback_text.chars().count(),
+                            merged.chars().count(),
+                            two_pass_empty_final,
+                            final_speaker_candidate_empty,
+                            state.owner_isolation_frozen
+                        );
+                        merged = fallback_text;
+                        segments = fallback_segments;
+                    }
                 }
             }
             let cleaned_streaming_tail = trim_repeated_short_streaming_tail(&merged);
@@ -3748,6 +3813,60 @@ mod tests {
             "这是一个明显更加完整而且已经稳定的正文"
         )
         .is_none());
+    }
+
+    #[test]
+    fn authoritative_final_frame_beats_inflated_repeated_session_ledger() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        let authoritative =
+            "开始录音你继续把那个脸和录音波这个东西给做完，然后告诉我验收一下，然后我现在可以有时间验收了。";
+        let inflated =
+            "开始录音你继续把那个脸和读音波这个东西给做完，然后告我验收一下，然后我现在可以有时间验收了那个脸和读音波这个东西给做完，然后告我验收一下";
+        {
+            let mut state = asr.state.lock();
+            state.best_transcript_text = inflated.into();
+            state.last_partial_text = inflated.into();
+            state.optimistic_preview_text = inflated.into();
+            state.target_speaker_id = Some("0".into());
+        }
+
+        let (tx, mut rx) = oneshot::channel();
+        asr.state.lock().final_tx = Some(tx);
+        let payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 10_960 },
+            "result": {
+                "text": authoritative,
+                "utterances": [{
+                    "additions": { "source": "two_pass", "speaker_id": "0" },
+                    "definite": true,
+                    "start_time": 0,
+                    "end_time": 7_622,
+                    "text": authoritative
+                }]
+            }
+        }))
+        .expect("incident final serializes");
+        let final_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::LastPacket,
+            Serialization::Json,
+            &payload,
+            None,
+        );
+
+        assert!(!asr.handle_frame(&final_frame));
+        let transcript = rx
+            .try_recv()
+            .expect("final should resolve")
+            .expect("authoritative final should succeed");
+        assert_eq!(transcript.text, authoritative);
     }
 
     #[test]
@@ -4695,6 +4814,81 @@ mod tests {
         );
         assert_eq!(filtered.result["text"], result["text"]);
         assert!(!filtered.stable_non_target_utterance_present);
+    }
+
+    #[test]
+    fn installed_session_52_keeps_post_pause_tail_inside_one_wake_anchored_utterance() {
+        // Installed acceptance session 52 uploaded 14.64 s with zero packet
+        // loss. Volcengine returned the complete prompt as one stable speaker-0
+        // utterance, but the local verifier stayed debounced on the owner while
+        // producing low-score Uncertain windows. Those windows must not erase
+        // the entire continuation merely because the provider did not split it
+        // into a second utterance at the pause.
+        let owner_text = "开始录音。请把蓝牙配对和自动结束这两个问题一起检查，然后告诉我检查结果。我现在停顿一下，继续说最后一句：这次内容只能出现一遍，不能凭空重复前面的句子。";
+        let result = json!({
+            "text": owner_text,
+            "utterances": [{
+                "additions": { "speaker_id": "0", "source": "two_pass" },
+                "definite": true,
+                "start_time": 0,
+                "end_time": 12_832,
+                "text": owner_text
+            }]
+        });
+        let evidence = [
+            (1_000, 0.513_517_26),
+            (6_500, 0.244_018_81),
+            (8_600, 0.220_224_95),
+            (9_000, 0.229_116_51),
+            (10_300, 0.235_262_33),
+            (10_800, 0.208_365_05),
+            (11_200, 0.217_355_97),
+            (12_000, 0.308_844_1),
+        ]
+        .into_iter()
+        .map(|(audio_end_ms, score)| LocalSpeakerEvidence {
+            audio_end_ms,
+            classification: crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                score,
+            },
+            stable_target: true,
+        })
+        .collect::<Vec<_>>();
+        let mut target = None;
+
+        let filtered = filter_result_to_target_speaker_with_local_evidence(
+            &result,
+            &mut target,
+            true,
+            &evidence,
+            Some("开始录音"),
+        );
+
+        assert_eq!(target.as_deref(), Some("0"));
+        assert_eq!(filtered.result["text"], owner_text);
+        assert_eq!(filtered.target_speech_end_ms, Some(12_832));
+        assert!(!filtered.stable_non_target_utterance_present);
+
+        // The exemption is only for a debounced owner. A real identity switch
+        // inside the same provider utterance remains hard exclusion evidence.
+        let mut switched_evidence = evidence;
+        switched_evidence.push(LocalSpeakerEvidence {
+            audio_end_ms: 12_400,
+            classification: crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                score: 0.18,
+            },
+            stable_target: false,
+        });
+        let mut switched_target = Some("0".to_string());
+        let switched = filter_result_to_target_speaker_with_local_evidence(
+            &result,
+            &mut switched_target,
+            true,
+            &switched_evidence,
+            Some("开始录音"),
+        );
+        assert_eq!(switched.result["text"], "");
+        assert!(switched.stable_non_target_utterance_present);
     }
 
     #[test]

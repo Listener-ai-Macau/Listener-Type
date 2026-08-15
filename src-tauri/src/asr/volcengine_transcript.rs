@@ -458,6 +458,64 @@ fn has_duplicate_tail_after_full_revision(candidate: &str, stable_full: &str) ->
     (distance as f64 / duplicate_len as f64) <= MAX_DUPLICATE_TAIL_CER
 }
 
+/// Returns true when a longer session ledger was inflated by a streaming
+/// revision that repeated an already-seen phrase at the end, while the
+/// provider's authoritative final still agrees with the ledger after that
+/// repeated tail is removed.
+///
+/// This is deliberately stricter than general transcript de-duplication. It
+/// is only used to decide whether a non-empty authoritative two-pass final may
+/// supersede the optimistic ledger. Ordinary partials and intentional
+/// repetition retained by the provider final are left untouched.
+pub(super) fn authoritative_final_supersedes_repeated_streaming_ledger(
+    authoritative_final: &str,
+    session_ledger: &str,
+) -> bool {
+    const MIN_FINAL_CHARS: usize = 12;
+    const MIN_REPEATED_TAIL_CHARS: usize = 12;
+    const MAX_REPEATED_TAIL_CHARS: usize = 48;
+    const MAX_FINAL_TO_CLEAN_LEDGER_CER: f64 = 0.22;
+
+    let final_compact = compact_transcript_for_duplicate_check(authoritative_final);
+    let ledger_compact = compact_transcript_for_duplicate_check(session_ledger);
+    let final_chars: Vec<char> = final_compact.chars().collect();
+    let ledger_chars: Vec<char> = ledger_compact.chars().collect();
+    if final_chars.len() < MIN_FINAL_CHARS
+        || ledger_chars.len() <= final_chars.len() + MIN_REPEATED_TAIL_CHARS
+    {
+        return false;
+    }
+
+    let max_tail = MAX_REPEATED_TAIL_CHARS
+        .min(ledger_chars.len() / 2)
+        .min(ledger_chars.len().saturating_sub(MIN_FINAL_CHARS));
+    for tail_len in (MIN_REPEATED_TAIL_CHARS..=max_tail).rev() {
+        let clean_len = ledger_chars.len() - tail_len;
+        let repeated_tail = &ledger_chars[clean_len..];
+        let appeared_earlier = ledger_chars[..clean_len]
+            .windows(tail_len)
+            .any(|window| window == repeated_tail);
+        if !appeared_earlier {
+            continue;
+        }
+
+        let clean_ledger: String = ledger_chars[..clean_len].iter().collect();
+        let length_gap = clean_len.abs_diff(final_chars.len());
+        let allowed_length_gap = 4usize.max(final_chars.len() / 5);
+        if length_gap > allowed_length_gap {
+            continue;
+        }
+        let distance = char_edit_distance(&final_compact, &clean_ledger);
+        let denominator = final_chars.len().max(clean_len);
+        if denominator > 0
+            && (distance as f64 / denominator as f64) <= MAX_FINAL_TO_CLEAN_LEDGER_CER
+        {
+            return true;
+        }
+    }
+    false
+}
+
 pub(super) fn trim_repeated_short_final_tail(text: &str) -> String {
     const MIN_SHORT_TAIL_CHARS: usize = 2;
     const MAX_SHORT_TAIL_CHARS: usize = 6;
@@ -1521,6 +1579,43 @@ mod tests {
         let duplicated = format!("{final_text}{duplicate_tail}");
 
         assert_eq!(choose_transcript_text(final_text, &duplicated), final_text);
+    }
+
+    #[test]
+    fn authoritative_final_rejects_real_repeated_streaming_ledger_tail() {
+        let authoritative_final =
+            "开始录音你继续把那个脸和录音波这个东西给做完，然后告诉我验收一下，然后我现在可以有时间验收了。";
+        let inflated_ledger =
+            "开始录音你继续把那个脸和读音波这个东西给做完，然后告我验收一下，然后我现在可以有时间验收了那个脸和读音波这个东西给做完，然后告我验收一下";
+
+        assert!(authoritative_final_supersedes_repeated_streaming_ledger(
+            authoritative_final,
+            inflated_ledger
+        ));
+    }
+
+    #[test]
+    fn authoritative_final_does_not_override_unrelated_longer_owner_ledger() {
+        assert!(!authoritative_final_supersedes_repeated_streaming_ledger(
+            "开始录音请把前面的内容整理好。",
+            "开始录音请把前面的内容整理好，然后继续检查后面的发布文件是否完整。"
+        ));
+    }
+
+    #[test]
+    fn authoritative_final_keeps_intentional_repetition_when_provider_retains_it() {
+        let repeated = "开始录音请确认第一遍，请确认第一遍，然后结束。";
+        assert!(!authoritative_final_supersedes_repeated_streaming_ledger(
+            repeated, repeated
+        ));
+    }
+
+    #[test]
+    fn short_authoritative_final_cannot_erase_repeated_looking_owner_ledger() {
+        assert!(!authoritative_final_supersedes_repeated_streaming_ledger(
+            "开始录音",
+            "开始录音请把这段完整内容保留下来请把这段完整内容保留下来"
+        ));
     }
 
     #[test]
