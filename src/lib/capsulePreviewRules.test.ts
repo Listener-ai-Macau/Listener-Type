@@ -123,8 +123,12 @@ assertEqual(
   'wake capsule should be visible on its first frame',
 );
 assertOk(
-  CAPSULE_APPEARANCE.enterAnimMs <= 120,
-  'wake capsule geometry should settle within 120 ms',
+  CAPSULE_APPEARANCE.enterAnimMs <= 60,
+  'wake capsule geometry should settle within a short response beat',
+);
+assertOk(
+  CAPSULE_APPEARANCE.initialScaleX >= 0.95,
+  'wake capsule should look full-sized on its first visible frame',
 );
 
 {

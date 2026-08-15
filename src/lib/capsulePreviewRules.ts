@@ -62,10 +62,12 @@ export const PREVIEW_BURST_REVEAL = {
 
 /** The wake capsule is visible immediately; only its geometry settles. */
 export const CAPSULE_APPEARANCE = {
-  // Keep well under 160ms so appear does not add another "wait tick" after the
-  // ~0.8–1.2s wake_to_capsule backend path.
-  enterAnimMs: 110,
+  // The backend-to-visible path is already about one frame on Windows. Keep
+  // the remaining geometry settle inside a short response beat so a
+  // confirmed wake reads as immediate instead of adding a second visual wait.
+  enterAnimMs: 55,
   initialOpacity: 1,
+  initialScaleX: 0.97,
 } as const;
 
 /**

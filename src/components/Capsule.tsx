@@ -992,8 +992,8 @@ export function Capsule() {
       <style>{`
         /* 入场首帧即完整可见，只让几何从中央快速展开。 */
         @keyframes capsule-in {
-          /* Less extreme scale so the first visible frame already looks "there". */
-          from { opacity: ${CAPSULE_APPEARANCE.initialOpacity}; transform: scaleX(.86) scaleY(.98); }
+          /* Start almost settled: the first frame should already read as a full capsule. */
+          from { opacity: ${CAPSULE_APPEARANCE.initialOpacity}; transform: scaleX(${CAPSULE_APPEARANCE.initialScaleX}) scaleY(.995); }
           to   { opacity: 1; transform: scaleX(1)   scaleY(1); }
         }
         /* 离场：scaleX 由 1 收回 0.18 + 整体向下偏移 8px + 淡出。
