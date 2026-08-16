@@ -311,18 +311,23 @@ impl EmbeddedStreamingDictation {
                             );
                         }
                         self.reset_for_next_session();
-                        return Ok(true);
+                        // A terminal device CANCEL ends only this logical candidate.
+                        // The continuous actor must keep waiting on the same notify
+                        // subscription; returning `true` makes it call
+                        // submission_result() after reset and manufacture a
+                        // misleading "尚未收到结束包" soft error.
+                        return Ok(!self.keep_listening_after_pipeline_errors);
                     }
                     // No host session and no candidate: keep notify (continuous path).
                     log::info!(
                         "[coord] embedded audio cancel without active stream work embedded_session_id={session_id}; keeping notify open"
                     );
                     self.reset_for_next_session();
-                    return Ok(true);
+                    return Ok(!self.keep_listening_after_pipeline_errors);
                 }
                 if self.keep_listening_after_pipeline_errors {
                     self.discard_active_session_after_user_cancel(inner);
-                    return Ok(true);
+                    return Ok(false);
                 }
                 self.abort_streaming_session(inner, session_id, "嵌入式音频会话已取消");
                 Err("嵌入式音频会话已取消".to_string())
@@ -335,7 +340,10 @@ impl EmbeddedStreamingDictation {
                 let message = format!("嵌入式音频会话错误: {error_code:?}");
                 if self.keep_listening_after_pipeline_errors {
                     self.discard_active_session_after_stream_error(inner, &message);
-                    return Ok(true);
+                    // State is already reset and the error has already been
+                    // recorded once. Keep the continuous actor pending instead
+                    // of asking it to build a submission from empty state.
+                    return Ok(false);
                 }
                 self.abort_streaming_session(inner, session_id, &message);
                 Err(message)

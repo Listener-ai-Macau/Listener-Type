@@ -2821,6 +2821,59 @@ fn embedded_streaming_background_listener_keeps_pipeline_error_policy_after_rese
     assert!(!EmbeddedStreamingDictation::default().keep_listening_after_pipeline_errors);
 }
 
+#[tokio::test]
+async fn background_terminal_cancel_resets_without_fake_incomplete_submission() {
+    let coordinator = Coordinator::new();
+    let mut streaming = EmbeddedStreamingDictation::background_listener();
+    streaming.embedded_session_id = Some(42);
+
+    let completed = streaming
+        .handle_ble_packet_actor_command(
+            &coordinator.inner,
+            StreamingSessionEvent::Cancelled {
+                session_id: 42,
+                expected_packet_count: 0,
+            },
+        )
+        .await
+        .expect("continuous cancel is handled without an error");
+
+    assert!(
+        !completed,
+        "continuous cancel keeps the actor pending instead of requesting an empty submission"
+    );
+    assert!(streaming.embedded_session_id.is_none());
+    assert!(streaming.session.is_none());
+    assert!(streaming.submission_result().is_err());
+}
+
+#[tokio::test]
+async fn background_terminal_error_is_recorded_once_without_empty_submission() {
+    let coordinator = Coordinator::new();
+    let mut streaming = EmbeddedStreamingDictation::background_listener();
+    streaming.embedded_session_id = Some(43);
+
+    let completed = streaming
+        .handle_ble_packet_actor_command(
+            &coordinator.inner,
+            StreamingSessionEvent::Error {
+                session_id: 43,
+                expected_packet_count: 0,
+                error_code: crate::embedded_audio::SessionErrorCode::Unknown(0xffff),
+            },
+        )
+        .await
+        .expect("continuous device error is contained without tearing down notify");
+
+    assert!(
+        !completed,
+        "continuous error keeps the actor pending instead of requesting an empty submission"
+    );
+    assert!(streaming.embedded_session_id.is_none());
+    assert!(streaming.session.is_none());
+    assert!(streaming.submission_result().is_err());
+}
+
 #[test]
 fn embedded_streaming_tail_chunk_remains_asr_input_until_the_session_drains() {
     let coordinator = Coordinator::new();
