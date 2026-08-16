@@ -330,6 +330,10 @@ struct SyncState {
     last_server_audio_duration_ms: Option<u64>,
     target_speaker_id: Option<String>,
     target_speech_end_ms: Option<u64>,
+    /// Stable end of the physical wake row. Unlike `target_speech_end_ms`,
+    /// this never advances with dictation and can safely anchor an immediate
+    /// provider speaker-cluster split across later streaming responses.
+    wake_target_speech_end_ms: Option<u64>,
     stable_attributed_speech_end_ms: Option<u64>,
     local_audio_duration_ms: Option<u64>,
     local_speech_end_ms: Option<u64>,
@@ -384,6 +388,7 @@ const LOCAL_ENDPOINT_STRONG_NON_TARGET_MAX_SCORE: f32 = 0.20;
 const LOCAL_OWNER_ABSENCE_MAX_SCORE: f32 = 0.30;
 const LOCAL_OWNER_ABSENCE_CONFIRMATIONS: u32 = 3;
 const MAX_WAKE_PHRASE_UTTERANCE_MS: u64 = 1_800;
+const MAX_WAKE_BODY_CLUSTER_SPLIT_GAP_MS: u64 = 500;
 // Volcengine session 768 emitted an exact wake-only row spanning 1,902 ms.
 // Permit that provider timing drift only for unenrolled/adaptive final recovery;
 // the normal speaker-attribution path keeps the stricter 1,800 ms boundary.
@@ -901,6 +906,7 @@ struct SpeakerFilteredResult {
     speaker_info_present: bool,
     stable_non_target_utterance_present: bool,
     target_speech_end_ms: Option<u64>,
+    wake_target_speech_end_ms: Option<u64>,
     stable_attributed_speech_end_ms: Option<u64>,
     pending_unattributed_text: String,
 }
@@ -1338,6 +1344,7 @@ fn utterance_belongs_to_target(
     local_speaker_evidence: &[LocalSpeakerEvidence],
     wake_speaker_phrase: Option<&str>,
     wake_speaker_end_ms: Option<u64>,
+    allow_immediate_wake_continuation: bool,
 ) -> bool {
     if !utterance_is_stable(utterance) {
         return false;
@@ -1370,8 +1377,30 @@ fn utterance_belongs_to_target(
         );
     }
 
-    // Recover provider speaker-ID splits only with strict positive local owner
-    // evidence. This intentionally stays stricter than the cloud-owner path.
+    // Volcengine can seal the physical wake as cluster 0, then immediately
+    // roll the same uninterrupted speaker's body into cluster 1. Session
+    // b6c7bd31 exposed the rolling-response form: later packets contained only
+    // the cluster-1 body, while every local identity sample still retained the
+    // verified wake owner (albeit Uncertain across phrases). Accept only the
+    // first, tightly contiguous post-wake boundary. A later speaker change, a
+    // gap, or any debounced local departure stays excluded.
+    let immediate_wake_continuation = allow_immediate_wake_continuation
+        && wake_speaker_end_ms.is_some_and(|wake_end_ms| {
+            utterance_start_ms(utterance).is_some_and(|start_ms| {
+                start_ms >= wake_end_ms.saturating_sub(200)
+                    && start_ms <= wake_end_ms.saturating_add(MAX_WAKE_BODY_CLUSTER_SPLIT_GAP_MS)
+            }) && local_evidence_supports_cloud_target(
+                utterance,
+                local_speaker_evidence,
+                wake_speaker_phrase,
+            )
+        });
+    if immediate_wake_continuation {
+        return true;
+    }
+
+    // Later provider speaker-ID splits still require strict positive local
+    // owner evidence so ordinary sequential room speech remains excluded.
     let local_target =
         local_evidence_allows_utterance(utterance, local_speaker_evidence, wake_speaker_phrase);
     local_target
@@ -1386,6 +1415,24 @@ fn filter_result_to_target_speaker_with_local_evidence(
     local_speaker_tracking_enabled: bool,
     local_speaker_evidence: &[LocalSpeakerEvidence],
     wake_speaker_phrase: Option<&str>,
+) -> SpeakerFilteredResult {
+    filter_result_to_target_speaker_with_local_evidence_and_anchor(
+        result,
+        target_speaker_id,
+        local_speaker_tracking_enabled,
+        local_speaker_evidence,
+        wake_speaker_phrase,
+        None,
+    )
+}
+
+fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
+    result: &Value,
+    target_speaker_id: &mut Option<String>,
+    local_speaker_tracking_enabled: bool,
+    local_speaker_evidence: &[LocalSpeakerEvidence],
+    wake_speaker_phrase: Option<&str>,
+    prior_wake_speaker_end_ms: Option<u64>,
 ) -> SpeakerFilteredResult {
     let mut filtered_result = result.clone();
     let utterances = result
@@ -1411,12 +1458,12 @@ fn filter_result_to_target_speaker_with_local_evidence(
             })
         };
     }
-    let wake_speaker_end_ms = target_speaker_id.as_deref().and_then(|target| {
+    let observed_wake_speaker_end_ms = target_speaker_id.as_deref().and_then(|target| {
         let normalized_phrase = wake_speaker_phrase?
             .chars()
             .filter(|ch| ch.is_alphanumeric())
             .collect::<String>();
-        let phrase_end_ms = utterances
+        utterances
             .iter()
             .filter(|utterance| {
                 utterance_is_stable(utterance)
@@ -1424,17 +1471,16 @@ fn filter_result_to_target_speaker_with_local_evidence(
                     && utterance_contains_normalized_phrase(utterance, &normalized_phrase)
             })
             .filter_map(utterance_end_ms)
-            .max();
-        if phrase_end_ms.is_some() || !local_speaker_tracking_enabled {
-            return phrase_end_ms;
+            .max()
+    });
+    let fallback_wake_speaker_end_ms = target_speaker_id.as_deref().and_then(|target| {
+        if observed_wake_speaker_end_ms.is_some() || !local_speaker_tracking_enabled {
+            return None;
         }
-
         // The cloud can recognize the physical wake as a near-homophone
         // (for example "此录音") and then split the same real speaker's body
-        // into a new diarization cluster. The local wake-speaker tracker has
-        // already bound `target`; use only that cluster's first stable segment
-        // as a bounded fallback wake edge. Later clusters still need positive
-        // local Target evidence, so this does not relax other-speaker isolation.
+        // into a new diarization cluster. This fallback is response-local and
+        // is never persisted as the verified physical-wake boundary.
         utterances
             .iter()
             .filter(|utterance| {
@@ -1444,6 +1490,20 @@ fn filter_result_to_target_speaker_with_local_evidence(
             .filter_map(utterance_end_ms)
             .min()
     });
+    let wake_speaker_end_ms = observed_wake_speaker_end_ms
+        .or(fallback_wake_speaker_end_ms)
+        .or(prior_wake_speaker_end_ms);
+    // Only the rolling-response shape needs the continuity exception: the
+    // verified wake was present in an earlier packet and this packet contains
+    // no stable row for that cluster. Full multi-utterance responses continue
+    // through the stricter existing A/B/A recovery path.
+    let allow_immediate_wake_continuation = prior_wake_speaker_end_ms.is_some()
+        && target_speaker_id.as_deref().is_some_and(|target| {
+            !utterances.iter().any(|utterance| {
+                utterance_is_stable(utterance)
+                    && utterance_speaker_id(utterance).as_deref() == Some(target)
+            })
+        });
 
     let selected = target_speaker_id
         .as_deref()
@@ -1458,6 +1518,7 @@ fn filter_result_to_target_speaker_with_local_evidence(
                         local_speaker_evidence,
                         wake_speaker_phrase,
                         wake_speaker_end_ms,
+                        allow_immediate_wake_continuation,
                     )
                 })
                 .cloned()
@@ -1502,6 +1563,7 @@ fn filter_result_to_target_speaker_with_local_evidence(
                     local_speaker_evidence,
                     wake_speaker_phrase,
                     wake_speaker_end_ms,
+                    allow_immediate_wake_continuation,
                 )
         })
     });
@@ -1537,6 +1599,7 @@ fn filter_result_to_target_speaker_with_local_evidence(
                     local_speaker_evidence,
                     wake_speaker_phrase,
                     wake_speaker_end_ms,
+                    allow_immediate_wake_continuation,
                 )
             }) {
                 return true;
@@ -1628,6 +1691,7 @@ fn filter_result_to_target_speaker_with_local_evidence(
         speaker_info_present,
         stable_non_target_utterance_present: stable_same_cluster_owner_absence_present,
         target_speech_end_ms,
+        wake_target_speech_end_ms: observed_wake_speaker_end_ms.or(prior_wake_speaker_end_ms),
         stable_attributed_speech_end_ms,
         pending_unattributed_text,
     }
@@ -1729,6 +1793,7 @@ struct RecoverySpeakerSnapshot {
     local_consecutive_strong_non_target: u8,
     local_speaker_evidence: Vec<LocalSpeakerEvidence>,
     wake_speaker_phrase: Option<String>,
+    wake_target_speech_end_ms: Option<u64>,
 }
 
 impl VolcengineStreamingASR {
@@ -1780,6 +1845,7 @@ impl VolcengineStreamingASR {
             local_consecutive_strong_non_target: state.local_consecutive_strong_non_target,
             local_speaker_evidence: state.local_speaker_evidence.clone(),
             wake_speaker_phrase: state.wake_speaker_phrase.clone(),
+            wake_target_speech_end_ms: state.wake_target_speech_end_ms,
         }
     }
 
@@ -1799,6 +1865,7 @@ impl VolcengineStreamingASR {
         state.local_consecutive_strong_non_target = snapshot.local_consecutive_strong_non_target;
         state.local_speaker_evidence = snapshot.local_speaker_evidence;
         state.wake_speaker_phrase = snapshot.wake_speaker_phrase;
+        state.wake_target_speech_end_ms = snapshot.wake_target_speech_end_ms;
     }
 
     pub async fn replay_retained_audio_once(&self) -> Result<RawTranscript, VolcengineASRError> {
@@ -2243,6 +2310,7 @@ impl VolcengineStreamingASR {
         state.owner_isolation_ceiling_text.clear();
         state.owner_isolation_ceiling_segments.clear();
         state.wake_speaker_phrase = Some(wake_phrase.to_string());
+        state.wake_target_speech_end_ms = None;
         log::info!("[asr] local session-speaker tracking anchored to wake speaker");
     }
 
@@ -2383,6 +2451,7 @@ impl VolcengineStreamingASR {
             st.last_server_audio_duration_ms = None;
             st.target_speaker_id = None;
             st.target_speech_end_ms = None;
+            st.wake_target_speech_end_ms = None;
             st.stable_attributed_speech_end_ms = None;
             st.local_audio_duration_ms = None;
             st.local_speech_end_ms = None;
@@ -2787,13 +2856,18 @@ impl VolcengineStreamingASR {
             let local_speaker_tracking_enabled = state.local_speaker_tracking_enabled;
             let local_speaker_evidence = state.local_speaker_evidence.clone();
             let wake_speaker_phrase = state.wake_speaker_phrase.clone();
-            let filtered = filter_result_to_target_speaker_with_local_evidence(
+            let prior_wake_speaker_end_ms = state.wake_target_speech_end_ms;
+            let filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
                 result,
                 &mut state.target_speaker_id,
                 local_speaker_tracking_enabled,
                 &local_speaker_evidence,
                 wake_speaker_phrase.as_deref(),
+                prior_wake_speaker_end_ms,
             );
+            if let Some(wake_end_ms) = filtered.wake_target_speech_end_ms {
+                state.wake_target_speech_end_ms = Some(wake_end_ms);
+            }
             if filtered.stable_non_target_utterance_present {
                 freeze_owner_isolation_at_filtered_result(&mut state, &filtered.result);
             }
@@ -4569,6 +4643,7 @@ mod tests {
             &evidence,
             Some("开始录音"),
             Some(1_000),
+            false,
         ));
 
         evidence.push(LocalSpeakerEvidence {
@@ -4586,6 +4661,7 @@ mod tests {
                 &evidence,
                 Some("开始录音"),
                 Some(1_000),
+                false,
             ),
             "a debounced identity switch must still reject the cloud-owner utterance"
         );
@@ -5534,6 +5610,132 @@ mod tests {
         assert_eq!(target.as_deref(), Some("0"));
         assert_eq!(filtered.result["text"], "首次命中复验只说这一次。");
         assert_eq!(filtered.target_speech_end_ms, Some(3962));
+    }
+
+    #[test]
+    fn installed_b6c7bd31_keeps_immediate_body_cluster_across_rolling_responses() {
+        // Production rolling responses first sealed the verified wake as
+        // speaker 0, then exposed only one growing speaker-1 body utterance in
+        // every later packet. Cross-phrase voiceprint scores stayed Uncertain,
+        // so requiring a fresh positive Target vote froze preview at 17 chars
+        // even though the body began 68 ms after the wake row.
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_local_speaker_tracking_started("开始录音");
+
+        let wake_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 1_800 },
+            "result": {
+                "text": "开始录音。",
+                "utterances": [{
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 0,
+                    "end_time": 1_032,
+                    "text": "开始录音。"
+                }]
+            }
+        }))
+        .expect("wake response serializes");
+        let wake_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::None,
+            Serialization::Json,
+            &wake_payload,
+            None,
+        );
+        assert!(asr.handle_frame(&wake_frame));
+        assert_eq!(asr.state.lock().wake_target_speech_end_ms, Some(1_032));
+
+        for (audio_end_ms, score) in [
+            (2_500, 0.330_394_54),
+            (3_300, 0.358_282_4),
+            (5_700, 0.281_194_36),
+            (9_400, 0.315_429_87),
+        ] {
+            asr.note_local_speaker_classification(
+                audio_end_ms,
+                crate::speaker_verification::SessionSpeakerClassification::Uncertain { score },
+            );
+        }
+
+        let full_text =
+            "开始录音。帮我看一下这个东西，胶囊弹得快不快，然后预览会卡，然后吞下半截字。";
+        let body_text = "帮我看一下这个东西，胶囊弹得快不快，然后预览会卡，然后吞下半截字。";
+        let body_result = json!({
+            "text": full_text,
+            "utterances": [{
+                "additions": { "speaker_id": "1", "source": "two_pass" },
+                "definite": true,
+                "start_time": 1_100,
+                "end_time": 9_862,
+                "text": body_text
+            }]
+        });
+        let mut target = Some("0".to_string());
+        let evidence = asr.state.lock().local_speaker_evidence.clone();
+        let filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &body_result,
+            &mut target,
+            true,
+            &evidence,
+            Some("开始录音"),
+            Some(1_032),
+        );
+        assert_eq!(filtered.result["text"], body_text);
+        assert_eq!(filtered.target_speech_end_ms, Some(9_862));
+
+        let previews = Arc::new(ParkingMutex::new(Vec::new()));
+        let callback_previews = Arc::clone(&previews);
+        asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
+            callback_previews.lock().push(text);
+        })));
+        let body_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 10_200 },
+            "result": body_result
+        }))
+        .expect("body response serializes");
+        let body_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::None,
+            Serialization::Json,
+            &body_payload,
+            None,
+        );
+        assert!(asr.handle_frame(&body_frame));
+        assert!(
+            previews
+                .lock()
+                .iter()
+                .any(|preview| preview.contains("吞下半截字")),
+            "rolling body cluster must keep advancing the capsule preview"
+        );
+
+        let late_other = json!({
+            "text": "旁人后来插话",
+            "utterances": [{
+                "additions": { "speaker_id": "2", "source": "two_pass" },
+                "definite": true,
+                "start_time": 11_000,
+                "end_time": 12_500,
+                "text": "旁人后来插话"
+            }]
+        });
+        let rejected = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &late_other,
+            &mut target,
+            true,
+            &evidence,
+            Some("开始录音"),
+            Some(1_032),
+        );
+        assert_eq!(rejected.result["text"], "");
     }
 
     #[test]

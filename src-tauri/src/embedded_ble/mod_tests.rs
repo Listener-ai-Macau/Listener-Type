@@ -359,6 +359,13 @@ fn type_heartbeat_runs_only_for_background_capture() {
     assert!(background);
 }
 
+#[test]
+fn heartbeat_recovery_restores_lossless_only_when_idle() {
+    assert!(windows_ble::should_restore_lossless_after_heartbeat_for_test(1, false));
+    assert!(!windows_ble::should_restore_lossless_after_heartbeat_for_test(0, false));
+    assert!(!windows_ble::should_restore_lossless_after_heartbeat_for_test(1, true));
+}
+
 #[cfg(target_os = "windows")]
 #[test]
 fn listener_ota_v1_blocks_cross_process_background_heartbeat() {

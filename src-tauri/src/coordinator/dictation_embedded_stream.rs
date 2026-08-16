@@ -442,6 +442,7 @@ impl EmbeddedStreamingDictation {
                 pending_phrase_match: None,
                 owner_ambiguous_confirmations: 0,
                 owner_best_ambiguous_score: 0.0,
+                owner_verification_task: None,
                 #[cfg(target_os = "windows")]
                 local_confirmation_task: None,
                 #[cfg(target_os = "windows")]
@@ -1709,6 +1710,7 @@ impl EmbeddedStreamingDictation {
                             KWS_SECONDARY_CONFIRM_BUDGET_MS
                         );
                     }
+                    maybe_prefetch_owner_verification(candidate, &phrase, embedded_session_id);
                 }
             }
             let wake_match = {
@@ -1727,12 +1729,20 @@ impl EmbeddedStreamingDictation {
                                 .pcm
                                 .len()
                                 .saturating_sub(window_origin_bytes);
-                            let exploratory_allowed = exploratory_local_confirmation_allowed(
-                                kws_hit.is_some(),
-                                candidate.local_absent_count,
-                                window_origin_bytes,
-                                candidate.local_confirmation_attempts,
-                            );
+                            let defer_exploratory =
+                                should_defer_exploratory_local_confirmation_for_fast_preroll(
+                                    kws_hit.is_some(),
+                                    candidate.local_confirmation_attempts,
+                                    window_pcm_bytes,
+                                    candidate.started_at.elapsed(),
+                                );
+                            let exploratory_allowed = !defer_exploratory
+                                && exploratory_local_confirmation_allowed(
+                                    kws_hit.is_some(),
+                                    candidate.local_absent_count,
+                                    window_origin_bytes,
+                                    candidate.local_confirmation_attempts,
+                                );
                             let ladder_snapshot = exploratory_allowed
                                 .then(|| {
                                     local_confirmation_snapshot_for_window(
@@ -2180,12 +2190,18 @@ impl EmbeddedStreamingDictation {
         let pcm_ms = pcm.len() / 32;
         let kws_ms = candidate.kws_total_ms;
         let voiceprint_phrase = phrase.clone();
-        let verification_task = tauri::async_runtime::spawn_blocking(move || {
-            let started = Instant::now();
-            let result = crate::speaker_verification::verify(&pcm, &voiceprint_phrase);
-            (result, started.elapsed().as_millis() as u64)
-        })
-        .await;
+        let prefetched_owner_task = candidate.owner_verification_task.take();
+        let verification_task = match prefetched_owner_task {
+            Some(task) => task.await,
+            None => {
+                tauri::async_runtime::spawn_blocking(move || {
+                    let started = Instant::now();
+                    let result = crate::speaker_verification::verify(&pcm, &voiceprint_phrase);
+                    (result, started.elapsed().as_millis() as u64)
+                })
+                .await
+            }
+        };
         let (verification, voiceprint_ms) = match verification_task {
             Ok(result) => result,
             Err(err) => (Err(format!("声纹验证任务失败: {err}")), 0),

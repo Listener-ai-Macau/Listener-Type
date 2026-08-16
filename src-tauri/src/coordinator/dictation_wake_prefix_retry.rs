@@ -42,6 +42,22 @@ const LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_BYTES: usize =
 const LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS: usize = 3;
 
 #[cfg(target_os = "windows")]
+fn should_defer_exploratory_local_confirmation_for_fast_preroll(
+    keyword_model_hit: bool,
+    attempts: usize,
+    pcm_bytes: usize,
+    elapsed: Duration,
+) -> bool {
+    let pcm_ms = pcm_bytes / 32;
+    let elapsed_ms = usize::try_from(elapsed.as_millis()).unwrap_or(usize::MAX);
+    !keyword_model_hit
+        && attempts == 0
+        && pcm_ms >= LOCAL_CONFIRMATION_START_MS
+        && pcm_ms < FAST_PREROLL_LOCAL_CONFIRM_DEFER_UNTIL_MS
+        && elapsed_ms.saturating_mul(2) < pcm_ms
+}
+
+#[cfg(target_os = "windows")]
 fn local_confirmation_prefix_retry_eligible(
     confirmation: &LocalWakeConfirmation,
     phrase_chars: usize,

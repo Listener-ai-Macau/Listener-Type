@@ -600,6 +600,15 @@ struct BufferedSpeakerCandidate {
     /// voiceprint gate. Keep evidence across the bounded verification snapshots.
     owner_ambiguous_confirmations: u8,
     owner_best_ambiguous_score: f32,
+    /// Voiceprint inference starts with the first live KWS hit and runs beside
+    /// the bounded local-ASR secondary check. The secondary keeps its existing
+    /// false-wake veto; this only removes the old serial 60 ms + inference wait.
+    owner_verification_task: Option<
+        tauri::async_runtime::JoinHandle<(
+            Result<crate::speaker_verification::VerificationResult, String>,
+            u64,
+        )>,
+    >,
     #[cfg(target_os = "windows")]
     local_confirmation_task:
         Option<tauri::async_runtime::JoinHandle<Result<LocalWakeConfirmation, String>>>,
@@ -641,8 +650,9 @@ struct BufferedSpeakerCandidate {
     /// Candidate PCM length (ms) at first live KWS hit — gates when an Absent
     /// may count toward hard-reject (phrase must have had time to finish).
     kws_first_hit_pcm_ms: Option<usize>,
-    /// Recording capsule shown at first KWS hit (before local ExactStart) so the
-    /// user is not left waiting with no UI while post-wake speech is already buffered.
+    /// Recording capsule shown after a local full-phrase confirmation (or an
+    /// open-gate KWS confirmation when no voiceprint is enrolled) while the
+    /// remaining automatic-wake gates continue.
     early_capsule_session_id: Option<SessionId>,
     kws_fed_bytes: usize,
     /// Absolute PCM offset represented by second 0 of the current detector.
@@ -708,6 +718,14 @@ const OWNER_VERIFICATION_SNAPSHOT_MS: [usize; 3] = [OWNER_VERIFICATION_START_MS,
 // incomplete/absent results stay eligible for KWS and later ladder retries.
 const LOCAL_CONFIRMATION_START_MS: usize = 800;
 const LOCAL_CONFIRMATION_START_BYTES: usize = LOCAL_CONFIRMATION_START_MS * 32;
+/* A negotiated firmware pre-roll burst can deliver several seconds of already
+ * captured audio in under one second. Starting the heavyweight exploratory
+ * local ASR at the ordinary 0.8 s PCM rung contends with BLE/KWS four times
+ * while that finite backlog drains. Let KWS consume the burst first; if it
+ * remains silent, one full-context local confirmation starts at 2.4 s PCM.
+ * Real-time/raw transport never meets the >2x condition and keeps the proven
+ * 0.8/1.4/1.6/2.0 s ladder unchanged. */
+const FAST_PREROLL_LOCAL_CONFIRM_DEFER_UNTIL_MS: usize = 2_400;
 // Keep the speculative verifier dense through the full phrase tail. The old
 // 1.8 -> 2.4 s gap left slow/quiet 0.8x utterances blind long enough to miss
 // the capsule latency target even though the same audio later verified. The
@@ -841,6 +859,7 @@ fn exploratory_local_confirmation_allowed(
     window_attempts == 0
 }
 
+#[cfg(target_os = "windows")]
 #[cfg(target_os = "windows")]
 fn local_confirmation_task_is_stale(
     task_origin_bytes: usize,

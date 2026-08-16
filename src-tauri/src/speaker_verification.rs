@@ -71,6 +71,13 @@ pub struct SessionSpeakerAdaptationGate {
 }
 
 const SESSION_SPEAKER_MIN_NON_TARGET_MS: usize = 1_000;
+// The ESP32 microphone's idle floor is normally around 60-150 RMS while real
+// speech windows in installed sessions are in the thousands.  A flat idle
+// window used to satisfy the relative VAD (all frames are equally "active"),
+// produce a low cosine score, and become a confident NonTarget observation.
+// Identity decisions need an absolute signal floor as well: below this level
+// the sample remains advisory/Uncertain and cannot end or erase a session.
+const SESSION_SPEAKER_MIN_IDENTITY_PEAK_RMS: f32 = 512.0;
 const SESSION_SPEAKER_ADAPT_MIN_SCORE: f32 = 0.50;
 const SESSION_SPEAKER_ADAPT_CONFIRMATIONS: usize = 2;
 const SESSION_SPEAKER_BOOTSTRAP_CONFIRMATIONS: usize = 3;
@@ -264,10 +271,25 @@ fn session_speaker_classification_for_evidence(
     }
 }
 
+fn session_speaker_classification_for_signal(
+    score: f32,
+    real_speech_ms: usize,
+    peak_rms: f32,
+) -> SessionSpeakerClassification {
+    let classification = session_speaker_classification_for_evidence(score, real_speech_ms);
+    if peak_rms < SESSION_SPEAKER_MIN_IDENTITY_PEAK_RMS {
+        SessionSpeakerClassification::Uncertain { score }
+    } else {
+        classification
+    }
+}
+
 #[cfg(target_os = "windows")]
 mod platform {
+    #[cfg(test)]
+    use super::session_speaker_classification_for_evidence;
     use super::{
-        session_speaker_classification_for_evidence, SessionSpeakerClassification,
+        session_speaker_classification_for_signal, SessionSpeakerClassification,
         SessionSpeakerObservation, SessionSpeakerProfile, VerificationResult, VoiceprintStatus,
     };
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -850,8 +872,17 @@ mod platform {
         let frame_count = pcm.len().div_ceil(frame_bytes);
         let mut first = first_active.saturating_sub(1);
         let mut last = (last_active + 2).min(frame_count);
-        let minimum_frames = VERIFICATION_MIN_SPEECH_MS.div_ceil(ENROLLMENT_FRAME_MS);
-        while last.saturating_sub(first) < minimum_frames {
+        // The final analysis frame may be partial. Counting frames made a nominal
+        // ten-frame window as short as 901 ms when speech ended at the live PCM
+        // tail, so the embedding layer rejected an otherwise ready owner check
+        // and the wake gate waited for the next 2.4 s retry snapshot. Expand by
+        // real bytes instead; the caller has already established that the full
+        // candidate contains at least `minimum_bytes`.
+        while (last * frame_bytes)
+            .min(pcm.len())
+            .saturating_sub(first * frame_bytes)
+            < minimum_bytes
+        {
             if first > 0 {
                 first -= 1;
             } else if last < frame_count {
@@ -1708,7 +1739,8 @@ mod platform {
         // Repeat-padding is valid for the embedding model, but a subsecond body
         // fragment does not contain enough independent speech to exclude the
         // stabilized speaker.
-        let classification = session_speaker_classification_for_evidence(score, real_speech_ms);
+        let classification =
+            session_speaker_classification_for_signal(score, real_speech_ms, peak_rms);
         log::info!(
             "[speaker-verification] local session sample real_speech_ms={real_speech_ms} speech_span_ms={speech_span_ms} model_input_ms={} peak_rms={peak_rms:.1} reference_rms={reference_rms:.1} inference_ms={inference_ms} score={score:.6} classification={classification:?}",
             model_pcm.len() / 32
@@ -2093,6 +2125,24 @@ mod platform {
             let window = verification_speech_window(&pcm).expect("verification window");
             assert!(window.len() < pcm.len());
             assert!(window.len() >= VERIFICATION_MIN_SPEECH_MS * 32);
+        }
+
+        #[test]
+        fn verification_window_keeps_model_floor_with_partial_live_tail_frame() {
+            let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
+            let mut samples = vec![0i16; frame_samples * 13];
+            samples.extend(vec![900i16; frame_samples * 8]);
+            samples.extend(vec![900i16; frame_samples * 8 / 10]);
+            let pcm = samples
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>();
+            assert_eq!(pcm.len() / 32, 2_180);
+            let window = verification_speech_window(&pcm).expect("verification window");
+            assert!(
+                window.len() >= VERIFICATION_MIN_SPEECH_MS * 32,
+                "partial live tail must not create a sub-model-floor owner window"
+            );
         }
 
         #[test]
@@ -2974,6 +3024,28 @@ mod tests {
         assert!(matches!(
             session_speaker_classification_for_evidence(0.55, 700),
             SessionSpeakerClassification::Target { score } if score == 0.55
+        ));
+    }
+
+    #[test]
+    fn flat_idle_noise_cannot_become_session_identity_evidence() {
+        // Installed session b6c7bd31 ended with two flat idle windows at
+        // peak_rms=70.7. The relative VAD counted all 1,200 ms as active and
+        // their low cosine scores became NonTarget, cutting the transcript.
+        for score in [0.176_024_97, 0.179_590_54, 0.80] {
+            assert!(matches!(
+                session_speaker_classification_for_signal(score, 1_200, 70.7),
+                SessionSpeakerClassification::Uncertain { score: actual }
+                    if actual == score
+            ));
+        }
+        assert!(matches!(
+            session_speaker_classification_for_signal(0.18, 1_200, 1_500.0),
+            SessionSpeakerClassification::NonTarget { score } if score == 0.18
+        ));
+        assert!(matches!(
+            session_speaker_classification_for_signal(0.60, 1_200, 1_500.0),
+            SessionSpeakerClassification::Target { score } if score == 0.60
         ));
     }
 

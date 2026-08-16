@@ -10,6 +10,41 @@ const OWNER_AMBIGUOUS_CONFIRMATIONS: u8 = 2;
 const OWNER_LOCAL_PHRASE_FALLBACK_MIN_SCORE: f32 = 0.20;
 const OWNER_LOCAL_PHRASE_FALLBACK_MIN_PCM_MS: usize = 1_800;
 
+fn should_prefetch_owner_verification(
+    phrase_enrolled: bool,
+    already_started: bool,
+    pcm_bytes: usize,
+) -> bool {
+    phrase_enrolled && !already_started && pcm_bytes >= OWNER_VERIFICATION_START_BYTES
+}
+
+fn maybe_prefetch_owner_verification(
+    candidate: &mut BufferedSpeakerCandidate,
+    phrase: &str,
+    embedded_session_id: u32,
+) {
+    let phrase_enrolled = crate::speaker_verification::is_enrolled_for_phrase(phrase);
+    if !should_prefetch_owner_verification(
+        phrase_enrolled,
+        candidate.owner_verification_task.is_some(),
+        candidate.pcm.len(),
+    ) {
+        return;
+    }
+    let pcm = candidate.pcm.clone();
+    let voiceprint_phrase = phrase.to_string();
+    candidate.owner_verification_task = Some(tauri::async_runtime::spawn_blocking(move || {
+        let started = Instant::now();
+        let result = crate::speaker_verification::verify(&pcm, &voiceprint_phrase);
+        (result, started.elapsed().as_millis() as u64)
+    }));
+    log::info!(
+        "[speaker-verification] owner check prefetched beside stage2 embedded_session_id={} pcm_ms={}",
+        embedded_session_id,
+        candidate.pcm.len() / 32
+    );
+}
+
 fn next_owner_verification_retry_after(
     pcm_ms: usize,
     verification: &Result<crate::speaker_verification::VerificationResult, String>,

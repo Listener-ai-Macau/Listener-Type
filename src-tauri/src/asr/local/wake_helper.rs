@@ -402,6 +402,60 @@ mod imp {
         }
     }
 
+    struct WakeTranscriptEvidence {
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation,
+        transcript_chars: usize,
+        diagnostics: RedactedPhraseDiagnostics,
+    }
+
+    fn transcript_evidence(text: &str, phrase: &str) -> WakeTranscriptEvidence {
+        WakeTranscriptEvidence {
+            phrase_relation: crate::wake_phrase::local_transcript_phrase_relation(text, phrase),
+            transcript_chars: text.chars().count(),
+            diagnostics: redacted_phrase_diagnostics(text, phrase),
+        }
+    }
+
+    /// Near-field owner speech normally needs no enhancement. Try the raw
+    /// waveform first so an already-complete wake phrase does not pay the
+    /// GTCRN pass before the capsule can appear. If raw audio misses, retain
+    /// the established enhanced-first decision semantics: enhanced evidence
+    /// owns relation/length while the better redacted phonetic diagnostic from
+    /// either pass is kept. Thus this changes latency, not acceptance policy.
+    fn transcribe_wake_evidence(
+        paraformer: &ParaformerRuntime,
+        wav_path: &std::path::Path,
+        phrase: &str,
+    ) -> Result<WakeTranscriptEvidence, String> {
+        if !paraformer.has_denoiser() {
+            return paraformer
+                .transcribe_wav(wav_path)
+                .map(|text| transcript_evidence(&text, phrase));
+        }
+
+        let raw = paraformer
+            .transcribe_wav_raw(wav_path)
+            .ok()
+            .map(|text| transcript_evidence(&text, phrase));
+        if raw
+            .as_ref()
+            .is_some_and(|evidence| phrase_relation_matches(evidence.phrase_relation))
+        {
+            return Ok(raw.expect("raw wake evidence exists after match check"));
+        }
+
+        let enhanced_text = paraformer.transcribe_wav(wav_path)?;
+        let mut enhanced = transcript_evidence(&enhanced_text, phrase);
+        if !phrase_relation_matches(enhanced.phrase_relation) {
+            if let Some(raw) = raw {
+                if raw.diagnostics.best_distance < enhanced.diagnostics.best_distance {
+                    enhanced.diagnostics = raw.diagnostics;
+                }
+            }
+        }
+        Ok(enhanced)
+    }
+
     pub fn run_helper() -> i32 {
         let warmup_started = Instant::now();
         let paraformer = match ParaformerRuntime::load_cached().and_then(|runtime| {
@@ -445,43 +499,19 @@ mod imp {
             } = request;
             let started = Instant::now();
             let wav_path = std::path::Path::new(&wav_path);
-            let transcript = paraformer.transcribe_wav(wav_path);
+            let transcript = transcribe_wake_evidence(&paraformer, wav_path, &phrase);
             let response = match transcript {
-                Ok(text) => {
-                    let mut phrase_relation =
-                        crate::wake_phrase::local_transcript_phrase_relation(&text, &phrase);
-                    let mut transcript_chars = text.chars().count();
-                    let mut diagnostics = redacted_phrase_diagnostics(&text, &phrase);
-                    // GTCRN is valuable for steady noise, but some short room
-                    // reflections smear wake phonemes. Only after the enhanced
-                    // pass misses, confirm once against the untouched waveform.
-                    if !phrase_relation_matches(phrase_relation) && paraformer.has_denoiser() {
-                        if let Ok(raw_text) = paraformer.transcribe_wav_raw(wav_path) {
-                            let raw_relation = crate::wake_phrase::local_transcript_phrase_relation(
-                                &raw_text, &phrase,
-                            );
-                            let raw_diagnostics = redacted_phrase_diagnostics(&raw_text, &phrase);
-                            if phrase_relation_matches(raw_relation) {
-                                phrase_relation = raw_relation;
-                                transcript_chars = raw_text.chars().count();
-                                diagnostics = raw_diagnostics;
-                            } else if raw_diagnostics.best_distance < diagnostics.best_distance {
-                                diagnostics = raw_diagnostics;
-                            }
-                        }
-                    }
-                    HelperResponse::Result {
-                        request_id,
-                        matched: phrase_relation_matches(phrase_relation),
-                        phrase_relation,
-                        transcript_chars,
-                        phonetic_prefix_units: diagnostics.prefix_units,
-                        phonetic_best_distance: diagnostics.best_distance,
-                        phonetic_best_window_start: diagnostics.best_window_start,
-                        inference_ms: started.elapsed().as_millis() as u64,
-                        error: None,
-                    }
-                }
+                Ok(evidence) => HelperResponse::Result {
+                    request_id,
+                    matched: phrase_relation_matches(evidence.phrase_relation),
+                    phrase_relation: evidence.phrase_relation,
+                    transcript_chars: evidence.transcript_chars,
+                    phonetic_prefix_units: evidence.diagnostics.prefix_units,
+                    phonetic_best_distance: evidence.diagnostics.best_distance,
+                    phonetic_best_window_start: evidence.diagnostics.best_window_start,
+                    inference_ms: started.elapsed().as_millis() as u64,
+                    error: None,
+                },
                 Err(err) => HelperResponse::Result {
                     request_id,
                     matched: false,
@@ -576,6 +606,23 @@ mod imp {
             let near = redacted_phrase_diagnostics("开始录像", "开始录音");
             assert_eq!(near.prefix_units, 3);
             assert_eq!(near.best_distance, 1);
+        }
+
+        #[test]
+        fn near_field_wake_checks_raw_audio_before_denoiser_fallback() {
+            let source = include_str!("wake_helper.rs");
+            let helper = source
+                .split("fn transcribe_wake_evidence")
+                .nth(1)
+                .and_then(|tail| tail.split("pub fn run_helper").next())
+                .expect("wake evidence helper source");
+            let raw = helper
+                .find(".transcribe_wav_raw(wav_path)")
+                .expect("raw pass");
+            let enhanced = helper
+                .find(".transcribe_wav(wav_path)?")
+                .expect("enhanced pass");
+            assert!(raw < enhanced, "near-field raw pass must stay first");
         }
 
         #[test]
@@ -721,21 +768,10 @@ mod imp {
             let wav = super::TempWavFile::create_without_context_padding(&boosted)
                 .expect("prepare matrix local-confirm WAV");
             let started = std::time::Instant::now();
-            let mut text = runtime
-                .transcribe_wav(wav.path())
+            let evidence = super::transcribe_wake_evidence(runtime, wav.path(), phrase)
                 .expect("matrix local ASR");
-            let mut relation = crate::wake_phrase::local_transcript_phrase_relation(&text, phrase);
-            if !phrase_relation_matches(relation) && runtime.has_denoiser() {
-                if let Ok(raw_text) = runtime.transcribe_wav_raw(wav.path()) {
-                    let raw_relation =
-                        crate::wake_phrase::local_transcript_phrase_relation(&raw_text, phrase);
-                    if phrase_relation_matches(raw_relation) {
-                        text = raw_text;
-                        relation = raw_relation;
-                    }
-                }
-            }
-            let transcript_chars = text.chars().filter(|ch| ch.is_alphanumeric()).count();
+            let relation = evidence.phrase_relation;
+            let transcript_chars = evidence.transcript_chars;
             let decision = denzic_voice_activation_v1_core::decide_completed_secondary(
                 denzic_voice_activation_v1_core::CompletedSecondaryInput {
                     relation,

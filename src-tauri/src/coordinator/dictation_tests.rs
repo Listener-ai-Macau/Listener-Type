@@ -2631,6 +2631,59 @@ fn rolling_local_confirmation_restarts_the_800ms_ladder_per_window() {
     );
 }
 
+#[cfg(target_os = "windows")]
+#[test]
+fn fast_preroll_defers_only_the_first_exploratory_local_confirmation() {
+    assert!(
+        super::should_defer_exploratory_local_confirmation_for_fast_preroll(
+            false,
+            0,
+            800 * 32,
+            Duration::from_millis(100),
+        )
+    );
+    assert!(
+        super::should_defer_exploratory_local_confirmation_for_fast_preroll(
+            false,
+            0,
+            2_399 * 32,
+            Duration::from_millis(900),
+        )
+    );
+    assert!(
+        !super::should_defer_exploratory_local_confirmation_for_fast_preroll(
+            false,
+            0,
+            2_400 * 32,
+            Duration::from_millis(900),
+        )
+    );
+    assert!(
+        !super::should_defer_exploratory_local_confirmation_for_fast_preroll(
+            false,
+            0,
+            800 * 32,
+            Duration::from_millis(500),
+        )
+    );
+    assert!(
+        !super::should_defer_exploratory_local_confirmation_for_fast_preroll(
+            true,
+            0,
+            800 * 32,
+            Duration::from_millis(100),
+        )
+    );
+    assert!(
+        !super::should_defer_exploratory_local_confirmation_for_fast_preroll(
+            false,
+            1,
+            800 * 32,
+            Duration::from_millis(100),
+        )
+    );
+}
+
 #[test]
 fn ambient_speech_bounds_each_window_but_never_disables_late_phrase_confirmation() {
     assert!(super::exploratory_local_confirmation_allowed(
@@ -3145,6 +3198,30 @@ fn short_or_failed_early_owner_window_retries_before_fail_closed_reject() {
         super::next_owner_verification_retry_after(1_111, &matched),
         None
     );
+}
+
+#[test]
+fn owner_verification_prefetch_requires_enrollment_and_a_real_model_window() {
+    assert!(!super::should_prefetch_owner_verification(
+        false,
+        false,
+        super::OWNER_VERIFICATION_START_BYTES,
+    ));
+    assert!(!super::should_prefetch_owner_verification(
+        true,
+        true,
+        super::OWNER_VERIFICATION_START_BYTES,
+    ));
+    assert!(!super::should_prefetch_owner_verification(
+        true,
+        false,
+        super::OWNER_VERIFICATION_START_BYTES - 2,
+    ));
+    assert!(super::should_prefetch_owner_verification(
+        true,
+        false,
+        super::OWNER_VERIFICATION_START_BYTES,
+    ));
 }
 
 #[test]

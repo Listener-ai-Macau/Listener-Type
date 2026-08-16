@@ -428,6 +428,23 @@ fn capture_notification_events_until_cancelled_impl(
                         log::info!(
                             "[embedded-ble] capture #{capture_id}: Type heartbeat recovered after {consecutive_type_heartbeat_failures} failure(s)"
                         );
+                        if should_restore_lossless_after_heartbeat(
+                            consecutive_type_heartbeat_failures,
+                            collector_has_active_recoverable_session(&collector),
+                        ) {
+                            if let Err(err) = cleanup.write_type_heartbeat(
+                                b"TYPE:AUDIO:LOSSLESS_RICE:3\n",
+                                "Type lossless audio capability recovery",
+                            ) {
+                                log::warn!(
+                                    "[embedded-ble] capture #{capture_id}: lossless audio capability recovery was not acknowledged; firmware will retain raw PCM: {err}"
+                                );
+                            } else {
+                                log::info!(
+                                    "[embedded-ble] capture #{capture_id}: lossless audio capability restored after heartbeat recovery"
+                                );
+                            }
+                        }
                     }
                     consecutive_type_heartbeat_failures = 0;
                     cleanup.mark_type_heartbeat_open();

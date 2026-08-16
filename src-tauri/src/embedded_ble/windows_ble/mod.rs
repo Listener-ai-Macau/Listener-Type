@@ -2145,6 +2145,13 @@ fn type_heartbeat_enabled_for_terminal_behavior(
     terminal_behavior == CaptureTerminalBehavior::ContinueListening
 }
 
+fn should_restore_lossless_after_heartbeat(
+    consecutive_failures: u32,
+    active_session: bool,
+) -> bool {
+    consecutive_failures > 0 && !active_session
+}
+
 #[cfg(test)]
 pub(super) fn active_capture_recovery_timing_for_test() -> (Duration, Duration) {
     (
@@ -2159,6 +2166,14 @@ pub(super) fn type_heartbeat_terminal_behavior_matrix_for_test() -> (bool, bool)
         type_heartbeat_enabled_for_terminal_behavior(CaptureTerminalBehavior::StopCapture),
         type_heartbeat_enabled_for_terminal_behavior(CaptureTerminalBehavior::ContinueListening),
     )
+}
+
+#[cfg(test)]
+pub(super) fn should_restore_lossless_after_heartbeat_for_test(
+    consecutive_failures: u32,
+    active_session: bool,
+) -> bool {
+    should_restore_lossless_after_heartbeat(consecutive_failures, active_session)
 }
 
 #[cfg(debug_assertions)]
