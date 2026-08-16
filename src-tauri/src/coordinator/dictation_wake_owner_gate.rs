@@ -3,6 +3,12 @@
 // an enrolled owner below the normal 0.42 verification threshold.
 const OWNER_AMBIGUOUS_MIN_SCORE: f32 = 0.38;
 const OWNER_AMBIGUOUS_CONFIRMATIONS: u8 = 2;
+// When local ASR has already confirmed the complete configured phrase, a
+// near-threshold owner score is stronger evidence than either signal alone.
+// Accept this narrow fusion on the first snapshot so a clean owner wake does
+// not wait for the 1.8s retry. KWS-only candidates still require the normal
+// voiceprint threshold or two consistent ambiguous snapshots.
+const OWNER_FAST_LOCAL_PHRASE_MIN_SCORE: f32 = 0.40;
 // Installed session 1980: local ASR confirmed the complete phrase at the start,
 // but the same enrolled owner scored 0.264/0.228 in a noisy real capture. Keep
 // an explicit low-score non-owner floor while allowing a complete local phrase
@@ -88,6 +94,16 @@ fn local_phrase_can_recover_owner_gate(
             .is_ok_and(|result| result.score >= OWNER_LOCAL_PHRASE_FALLBACK_MIN_SCORE)
 }
 
+fn local_phrase_can_fast_accept_owner_gate(
+    phrase_signal: denzic_voice_activation_v1_core::PhraseSignal,
+    verification: &Result<crate::speaker_verification::VerificationResult, String>,
+) -> bool {
+    phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript
+        && verification
+            .as_ref()
+            .is_ok_and(|result| result.score >= OWNER_FAST_LOCAL_PHRASE_MIN_SCORE)
+}
+
 fn evaluate_owner_gate_evidence(
     confirmations: &mut u8,
     best_score: &mut f32,
@@ -95,7 +111,9 @@ fn evaluate_owner_gate_evidence(
     pcm_ms: usize,
     verification: &Result<crate::speaker_verification::VerificationResult, String>,
 ) -> (bool, bool) {
-    let voiceprint_match = match verification {
+    let fast_phrase_recovery =
+        local_phrase_can_fast_accept_owner_gate(phrase_signal, verification);
+    let voiceprint_match = fast_phrase_recovery || match verification {
         Ok(result) if result.matched => true,
         Ok(result) => note_ambiguous_owner_evidence(
             confirmations,
@@ -105,8 +123,23 @@ fn evaluate_owner_gate_evidence(
         ),
         Err(_) => false,
     };
-    let phrase_recovery = local_phrase_can_recover_owner_gate(phrase_signal, pcm_ms, verification);
+    let phrase_recovery = fast_phrase_recovery
+        || local_phrase_can_recover_owner_gate(phrase_signal, pcm_ms, verification);
     (voiceprint_match || phrase_recovery, phrase_recovery)
+}
+
+fn evaluate_candidate_owner_gate(
+    candidate: &mut BufferedSpeakerCandidate,
+    phrase_signal: denzic_voice_activation_v1_core::PhraseSignal,
+    verification: &Result<crate::speaker_verification::VerificationResult, String>,
+) -> (bool, bool) {
+    evaluate_owner_gate_evidence(
+        &mut candidate.owner_ambiguous_confirmations,
+        &mut candidate.owner_best_ambiguous_score,
+        phrase_signal,
+        candidate.pcm.len() / 32,
+        verification,
+    )
 }
 
 // Run terminal verification before phrase recall. Otherwise repeated local-ASR

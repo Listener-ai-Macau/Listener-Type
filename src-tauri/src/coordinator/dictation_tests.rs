@@ -3306,6 +3306,78 @@ fn complete_local_phrase_recovers_noisy_owner_but_never_kws_or_errors() {
 }
 
 #[test]
+fn complete_local_phrase_fast_accepts_near_threshold_owner_only() {
+    // Installed session 212: the phrase was ExactStart and the freshly enrolled
+    // owner scored 0.402310. It must not wait for a second owner snapshot.
+    let near_owner = Ok(crate::speaker_verification::VerificationResult {
+        matched: false,
+        score: 0.402_310,
+    });
+    assert!(super::local_phrase_can_fast_accept_owner_gate(
+        denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript,
+        &near_owner,
+    ));
+    assert!(!super::local_phrase_can_fast_accept_owner_gate(
+        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel,
+        &near_owner,
+    ));
+
+    let low_non_owner = Ok(crate::speaker_verification::VerificationResult {
+        matched: false,
+        score: 0.399_999,
+    });
+    assert!(!super::local_phrase_can_fast_accept_owner_gate(
+        denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript,
+        &low_non_owner,
+    ));
+    assert!(!super::local_phrase_can_fast_accept_owner_gate(
+        denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript,
+        &Err("voiceprint runtime failed".to_string()),
+    ));
+}
+
+#[test]
+fn installed_terminal_session_210_uses_fused_owner_recovery() {
+    // Live terminal candidate 210: both phrase stages found an exact
+    // "开始录音", but the enrolled voiceprint varied to 0.343854 and the
+    // terminal call site used to bypass this shared recovery policy.
+    let verification = Ok(crate::speaker_verification::VerificationResult {
+        matched: false,
+        score: 0.343_854,
+    });
+    let mut confirmations = 0;
+    let mut best_score = 0.0;
+    let (owner_matched, recovered_by_phrase) = super::evaluate_owner_gate_evidence(
+        &mut confirmations,
+        &mut best_score,
+        denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript,
+        4_660,
+        &verification,
+    );
+    assert!(owner_matched);
+    assert!(recovered_by_phrase);
+
+    let (kws_only_owner, kws_only_recovered) = super::evaluate_owner_gate_evidence(
+        &mut confirmations,
+        &mut best_score,
+        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel,
+        4_660,
+        &verification,
+    );
+    assert!(!kws_only_owner);
+    assert!(!kws_only_recovered);
+
+    let stream = include_str!("dictation_embedded_stream.rs");
+    let terminal_gate = stream
+        .find("Installed sessions 210/212")
+        .expect("terminal regression annotation must remain");
+    assert!(
+        stream[terminal_gate..].contains("evaluate_candidate_owner_gate("),
+        "terminal gate must use the same fused owner policy as the live path"
+    );
+}
+
+#[test]
 fn local_confirmation_adds_context_with_a_strict_attempt_cap() {
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(0),

@@ -1272,18 +1272,23 @@ impl EmbeddedStreamingDictation {
                 .kws_total_ms
                 .saturating_add(local_confirmation_ms)
                 .saturating_add(voiceprint_ms);
+            // Installed sessions 210/212 proved terminal and live candidates
+            // must share one fused phrase/owner policy.
+            let effective_phrase_signal = wake_match
+                .as_ref()
+                .map(|_| phrase_signal)
+                .unwrap_or(denzic_voice_activation_v1_core::PhraseSignal::None);
+            let (owner_matched, owner_recovered_by_local_phrase) =
+                evaluate_candidate_owner_gate(&mut candidate, effective_phrase_signal, &verification);
             let gate_decision = denzic_voice_activation_v1_core::decide_gate(
                 denzic_voice_activation_v1_core::GateInput {
-                    phrase_signal: wake_match
-                        .as_ref()
-                        .map(|_| phrase_signal)
-                        .unwrap_or(denzic_voice_activation_v1_core::PhraseSignal::None),
-                    owner_match: verification.as_ref().ok().map(|result| result.matched),
+                    phrase_signal: effective_phrase_signal,
+                    owner_match: verification.as_ref().ok().map(|_| owner_matched),
                     terminal: true,
                 },
             );
             log::info!(
-                "[wake-phrase] automatic streaming gate embedded_session_id={} terminal=true pcm_ms={} kws_fed_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} total_compute_ms={} phrase_signal={:?} gate_decision={:?} owner_matched={}",
+                "[wake-phrase] automatic streaming gate embedded_session_id={} terminal=true pcm_ms={} kws_fed_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} total_compute_ms={} phrase_signal={:?} gate_decision={:?} owner_matched={} owner_recovered_by_local_phrase={}",
                 embedded_session_id,
                 candidate.pcm.len() / 32,
                 candidate.kws_fed_bytes,
@@ -1291,12 +1296,10 @@ impl EmbeddedStreamingDictation {
                 local_confirmation_ms,
                 voiceprint_ms,
                 total_ms,
-                wake_match
-                    .as_ref()
-                    .map(|_| phrase_signal)
-                    .unwrap_or(denzic_voice_activation_v1_core::PhraseSignal::None),
+                effective_phrase_signal,
                 gate_decision,
-                verification.as_ref().is_ok_and(|result| result.matched)
+                owner_matched,
+                owner_recovered_by_local_phrase
             );
             let Some(wake_match) = wake_match else {
                 log::info!(
@@ -2206,13 +2209,8 @@ impl EmbeddedStreamingDictation {
             Ok(result) => result,
             Err(err) => (Err(format!("声纹验证任务失败: {err}")), 0),
         };
-        let (owner_matched, owner_recovered_by_local_phrase) = evaluate_owner_gate_evidence(
-            &mut candidate.owner_ambiguous_confirmations,
-            &mut candidate.owner_best_ambiguous_score,
-            phrase_signal,
-            pcm_ms,
-            &verification,
-        );
+        let (owner_matched, owner_recovered_by_local_phrase) =
+            evaluate_candidate_owner_gate(candidate, phrase_signal, &verification);
         let total_ms = kws_ms
             .saturating_add(local_confirmation_ms)
             .saturating_add(voiceprint_ms);
