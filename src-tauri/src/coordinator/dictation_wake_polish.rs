@@ -614,6 +614,8 @@ struct BufferedSpeakerCandidate {
     local_confirmation_task_origin_bytes: usize,
     #[cfg(target_os = "windows")]
     local_confirmation_task_has_keyword_model_hit: bool,
+    #[cfg(target_os = "windows")]
+    local_confirmation_prefix_retry: LocalConfirmationPrefixRetryState,
     local_confirmation_attempts: usize,
     local_confirmation_last_snapshot_bytes: usize,
     /// First KWS hit schedules an immediate local confirm instead of waiting for

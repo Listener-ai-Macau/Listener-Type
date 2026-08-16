@@ -1285,6 +1285,7 @@ struct EmbeddedAudioDictationSession {
 
 include!("dictation_wake_diagnostics.rs");
 include!("dictation_wake_polish.rs");
+include!("dictation_wake_prefix_retry.rs");
 include!("dictation_wake_owner_gate.rs");
 
 include!("dictation_session.rs");

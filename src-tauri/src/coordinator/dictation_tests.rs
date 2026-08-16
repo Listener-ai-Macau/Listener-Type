@@ -3208,6 +3208,44 @@ fn local_confirmation_adds_context_with_a_strict_attempt_cap() {
     assert_eq!(super::next_local_confirmation_snapshot_bytes(7), None);
 }
 
+#[cfg(target_os = "windows")]
+#[test]
+fn strong_start_prefix_gets_one_non_authoritative_latency_followup() {
+    let partial = super::LocalWakeConfirmation {
+        matched: false,
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
+        transcript_chars: 2,
+        phonetic_prefix_units: 2,
+        phonetic_best_distance: 2,
+        phonetic_best_window_start: 0,
+        inference_ms: 150,
+        snapshot_pcm_ms: 1_600,
+        recovered_keyword_end_seconds: None,
+    };
+    assert!(super::local_confirmation_prefix_retry_eligible(&partial, 4));
+
+    let unrelated = super::LocalWakeConfirmation {
+        phonetic_prefix_units: 0,
+        phonetic_best_distance: 4,
+        ..partial
+    };
+    assert!(!super::local_confirmation_prefix_retry_eligible(
+        &unrelated, 4
+    ));
+
+    let later_window = super::LocalWakeConfirmation {
+        phonetic_best_window_start: 1,
+        ..partial
+    };
+    assert!(!super::local_confirmation_prefix_retry_eligible(
+        &later_window,
+        4
+    ));
+
+    assert_eq!(super::LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_MS, 140);
+    assert_eq!(super::LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS, 3);
+}
+
 #[test]
 fn device_key_start_takeover_pending_before_hidden_active() {
     let polish = include_str!("dictation_wake_polish.rs");
