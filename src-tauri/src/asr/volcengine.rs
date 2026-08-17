@@ -451,6 +451,26 @@ fn refresh_local_target_from_owner_preview_activity(state: &mut SyncState) -> bo
     true
 }
 
+fn refresh_local_target_from_owner_safe_provider_split(state: &mut SyncState) -> bool {
+    // The sequential-split verifier has already checked cloud ordering plus
+    // every overlapping local identity window. It is therefore stronger than
+    // an ordinary optimistic preview and may advance the owner endpoint even
+    // when the cross-phrase voiceprint never reaches the standalone Target
+    // threshold (session 1195).
+    if !state.local_speaker_stable_target || state.owner_isolation_frozen {
+        return false;
+    }
+    let Some(audio_ms) = latest_audio_duration_ms(state) else {
+        return false;
+    };
+    let previous = state.local_target_speech_end_ms.unwrap_or_default();
+    if audio_ms <= previous {
+        return false;
+    }
+    state.local_target_speech_end_ms = Some(audio_ms);
+    true
+}
+
 fn local_speaker_allows_optimistic_preview(state: &SyncState) -> bool {
     if !state.local_speaker_tracking_enabled {
         return true;
@@ -628,7 +648,7 @@ fn final_wake_only_provider_gap_is_owner_safe(
 /// have local evidence, and every overlapping local sample must still hold the
 /// wake identity without a single NonTarget classification. This also covers
 /// provider A/B/A cluster drift.
-fn final_sequential_speaker_split_gap_is_owner_safe(
+fn sequential_speaker_split_gap_is_owner_safe(
     state: &SyncState,
     provider_result: &Value,
     target_text: &str,
@@ -637,7 +657,6 @@ fn final_sequential_speaker_split_gap_is_owner_safe(
         || !state.local_speaker_stable_target
         || state.owner_isolation_frozen
         || state.local_consecutive_non_target != 0
-        || state.local_non_target_speech_end_ms.is_some()
         || target_text.trim().is_empty()
     {
         return false;
@@ -731,6 +750,7 @@ fn final_sequential_speaker_split_gap_is_owner_safe(
             })
             .collect::<Vec<_>>();
         !overlapping.is_empty()
+            && !local_non_target_vetoes_split_utterance(state, start_ms, end_ms)
             && overlapping.iter().all(|sample| {
                 sample.stable_target
                     && !matches!(
@@ -738,6 +758,53 @@ fn final_sequential_speaker_split_gap_is_owner_safe(
                         crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. }
                     )
             })
+    })
+}
+
+fn local_non_target_vetoes_split_utterance(
+    state: &SyncState,
+    utterance_start_ms: u64,
+    utterance_end_ms: u64,
+) -> bool {
+    let sample_center =
+        |audio_end_ms: u64| audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+    let inside = |center_ms: u64| center_ms >= utterance_start_ms && center_ms <= utterance_end_ms;
+
+    // The raw newest classification is useful only when its physical window
+    // overlaps this provider utterance. Session 1195 ended with low-level room
+    // noise classified NonTarget several seconds after the owner's final word;
+    // the old global check discarded the already-complete owner tail.
+    let newest_raw_non_target_overlaps = matches!(
+        state.local_speaker_classification.as_ref(),
+        Some(crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. })
+    ) && state
+        .local_speaker_evidence
+        .last()
+        .is_some_and(|sample| inside(sample_center(sample.audio_end_ms)));
+    if newest_raw_non_target_overlaps {
+        return true;
+    }
+
+    let Some(non_target_audio_end_ms) = state.local_non_target_speech_end_ms else {
+        return false;
+    };
+    let non_target_center_ms = sample_center(non_target_audio_end_ms);
+    if !inside(non_target_center_ms) {
+        return false;
+    }
+
+    // Endpoint NonTarget is intentionally sensitive and can fire twice on the
+    // enrolled owner's cross-phrase acoustics. Treat it as a transcript veto
+    // only while it remains unrecovered inside the same cloud utterance. A
+    // later owner-compatible stable window (> absence threshold) proves that
+    // the debounced wake identity continued; it does not weaken isolation for
+    // a sustained real second speaker.
+    !state.local_speaker_evidence.iter().any(|sample| {
+        let center_ms = sample_center(sample.audio_end_ms);
+        center_ms > non_target_center_ms
+            && inside(center_ms)
+            && sample.stable_target
+            && sample.classification.score() > LOCAL_OWNER_ABSENCE_MAX_SCORE
     })
 }
 
@@ -2929,8 +2996,75 @@ impl VolcengineStreamingASR {
         }
         self.emit_target_speaker_update(target_speaker_update);
 
-        let pending_unattributed_speech =
-            !speaker_filtered_result.pending_unattributed_text.is_empty();
+        // The provider can split one uninterrupted owner into speaker 0 for
+        // the wake phrase and speaker 1 for the body. The final path already
+        // restores that sequential body when every overlapping local window
+        // still owns the verified wake identity. Apply the same evidence to
+        // live display: otherwise the provider has useful text for seconds,
+        // but the capsule remains blank until the final packet (installed
+        // session 239). This does not broaden committed output beyond the
+        // existing final rule and still rejects overlap or any local
+        // NonTarget evidence.
+        let owner_safe_provider_split_preview =
+            !has_final && !speaker_filtered_result.stable_non_target_utterance_present && {
+                let target_text = speaker_filtered_result
+                    .result
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let state = self.state.lock();
+                sequential_speaker_split_gap_is_owner_safe(&state, result, target_text)
+            };
+        let pending_unattributed_speech = owner_safe_provider_split_preview
+            || !speaker_filtered_result.pending_unattributed_text.is_empty();
+        // A provider packet can first expose a safe target prefix while a
+        // foreign/provisional tail is pending, then seal that tail as another
+        // speaker. The target prefix is already in the protected session
+        // ledger, but it was intentionally hidden during the provisional
+        // packet. Publish it once the pending channel clears; otherwise the
+        // later packet has no text delta and the capsule can stay blank.
+        if !has_final
+            && !pending_unattributed_speech
+            && self
+                .session_options
+                .endpoint
+                .emits_stream_preview_before_final()
+        {
+            let filtered_target_preview = speaker_filtered_result
+                .result
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let settled_preview = {
+                let mut state = self.state.lock();
+                let best = if filtered_target_preview.trim().is_empty() {
+                    state.best_transcript_text.clone()
+                } else {
+                    filtered_target_preview
+                };
+                let best_len = spoken_content_len(&best);
+                let visible_len = spoken_content_len(&state.last_emitted_preview_text);
+                if !best.trim().is_empty()
+                    && best != state.last_emitted_preview_text
+                    && best_len >= visible_len
+                {
+                    state.last_emitted_preview_text = best.clone();
+                    state.partial_updates_seen += 1;
+                    Some(best)
+                } else {
+                    None
+                }
+            };
+            if let Some(preview) = settled_preview {
+                log::info!(
+                    "[asr] settled target preview published after provisional speaker tail chars={}",
+                    preview.chars().count()
+                );
+                self.emit_partial_transcript(&preview);
+                self.emit_streaming_event(VolcengineStreamingEvent::Partial(preview));
+            }
+        }
         if !has_final
             && pending_unattributed_speech
             && {
@@ -2943,7 +3077,11 @@ impl VolcengineStreamingASR {
                 .emits_stream_preview_before_final()
         {
             let optimistic_candidate =
-                transcript_candidate_from_result(&speaker_filtered_result.optimistic_result);
+                transcript_candidate_from_result(if owner_safe_provider_split_preview {
+                    result
+                } else {
+                    &speaker_filtered_result.optimistic_result
+                });
             let optimistic_preview = {
                 let mut state = self.state.lock();
                 let (mut merged, segments) = merge_streaming_candidate(
@@ -2968,8 +3106,19 @@ impl VolcengineStreamingASR {
                         commit_session_transcript_if_stronger(&mut state, &merged, segments);
                     }
                 }
-                let preview_holds_endpoint =
-                    should_emit && refresh_local_target_from_owner_preview_activity(&mut state);
+                if owner_safe_provider_split_preview {
+                    // Once cloud A/B drift is corroborated by the retained wake
+                    // identity, this text is no longer an unattributed tail.
+                    // Keeping it pending blocked the 1 s owner endpoint even as
+                    // the complete preview was already safe to display.
+                    state.pending_unattributed_text.clear();
+                }
+                let preview_holds_endpoint = should_emit
+                    && if owner_safe_provider_split_preview {
+                        refresh_local_target_from_owner_safe_provider_split(&mut state)
+                    } else {
+                        refresh_local_target_from_owner_preview_activity(&mut state)
+                    };
                 if should_emit {
                     state.last_emitted_preview_text = merged.clone();
                     state.partial_updates_seen += 1;
@@ -2979,6 +3128,12 @@ impl VolcengineStreamingASR {
                 }
             };
             if let Some((preview, preview_holds_endpoint)) = optimistic_preview {
+                if owner_safe_provider_split_preview {
+                    log::info!(
+                        "[asr] owner-safe sequential provider split admitted to live preview chars={}",
+                        preview.chars().count()
+                    );
+                }
                 if preview_holds_endpoint {
                     let update = {
                         let state = self.state.lock();
@@ -3020,7 +3175,7 @@ impl VolcengineStreamingASR {
                     .unwrap_or_default();
                 let state = self.state.lock();
                 final_wake_only_provider_gap_is_owner_safe(&state, result, target_text)
-                    || final_sequential_speaker_split_gap_is_owner_safe(&state, result, target_text)
+                    || sequential_speaker_split_gap_is_owner_safe(&state, result, target_text)
             };
         let prefer_final_optimistic = has_final
             && !prefer_final_provider_text
@@ -5975,13 +6130,34 @@ mod tests {
         })
         .collect();
 
-        assert!(final_sequential_speaker_split_gap_is_owner_safe(
+        assert!(sequential_speaker_split_gap_is_owner_safe(
+            &state,
+            &result,
+            target_text,
+        ));
+
+        // Installed session 1195: two sensitive endpoint-only NonTarget votes
+        // occurred mid-body, owner-compatible windows recovered afterward, and
+        // the raw final classification came from quiet room noise after the
+        // provider's last word. Neither may globally erase the sequential body.
+        state.local_non_target_speech_end_ms = Some(8_000);
+        state.local_speaker_evidence.push(LocalSpeakerEvidence {
+            audio_end_ms: 16_000,
+            classification: crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                score: 0.10,
+            },
+            stable_target: true,
+        });
+        state.local_speaker_classification = Some(
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.10 },
+        );
+        assert!(sequential_speaker_split_gap_is_owner_safe(
             &state,
             &result,
             target_text,
         ));
         state.local_speaker_profile_adaptive = false;
-        assert!(final_sequential_speaker_split_gap_is_owner_safe(
+        assert!(sequential_speaker_split_gap_is_owner_safe(
             &state,
             &result,
             target_text,
@@ -6023,6 +6199,112 @@ mod tests {
     }
 
     #[test]
+    fn installed_session_239_previews_owner_safe_sequential_split_before_final() {
+        // The provider already had the body while the capsule remained blank:
+        // wake phrase was stable speaker 0, continuous owner body was stable
+        // speaker 1, and cross-phrase enrolled scores were Uncertain while the
+        // debounced identity never left the owner. The identical evidence was
+        // accepted only at protocol final, causing a ~5.9 s first preview.
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_local_speaker_tracking_started("开始录音");
+
+        let wake_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 1_400 },
+            "result": {
+                "text": "开始录音。",
+                "utterances": [{
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 40,
+                    "end_time": 1_002,
+                    "text": "开始录音。"
+                }]
+            }
+        }))
+        .expect("wake packet serializes");
+        let wake_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::None,
+            Serialization::Json,
+            &wake_payload,
+            None,
+        );
+        assert!(asr.handle_frame(&wake_frame));
+
+        for (audio_end_ms, score) in [
+            (2_200, 0.545_882_17),
+            (3_200, 0.478_489_1),
+            (4_200, 0.412_334_65),
+        ] {
+            asr.note_local_speaker_classification(
+                audio_end_ms,
+                crate::speaker_verification::SessionSpeakerClassification::Uncertain { score },
+            );
+        }
+
+        let previews = Arc::new(ParkingMutex::new(Vec::new()));
+        let callback_previews = Arc::clone(&previews);
+        asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
+            callback_previews.lock().push(text);
+        })));
+        let endpoint_updates = Arc::new(ParkingMutex::new(Vec::new()));
+        let callback_endpoint_updates = Arc::clone(&endpoint_updates);
+        asr.set_target_speaker_update_callback(Some(Arc::new(move |update| {
+            callback_endpoint_updates.lock().push(update);
+        })));
+        let expected = "开始录音。窗口不要报错，预览文字要及时稳定出现。";
+        let body_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 4_600 },
+            "result": {
+                "text": expected,
+                "utterances": [
+                    {
+                        "additions": { "speaker_id": "0", "source": "two_pass" },
+                        "definite": true,
+                        "start_time": 40,
+                        "end_time": 1_002,
+                        "text": "开始录音。"
+                    },
+                    {
+                        "additions": { "speaker_id": "1", "source": "two_pass" },
+                        "definite": true,
+                        "start_time": 1_120,
+                        "end_time": 4_200,
+                        "text": "窗口不要报错，预览文字要及时稳定出现。"
+                    }
+                ]
+            }
+        }))
+        .expect("session 239 preview serializes");
+        let body_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::None,
+            Serialization::Json,
+            &body_payload,
+            None,
+        );
+        assert!(asr.handle_frame(&body_frame));
+        assert_eq!(previews.lock().last().map(String::as_str), Some(expected));
+        let updates = endpoint_updates.lock();
+        let released = updates
+            .iter()
+            .rev()
+            .find(|update| update.local_target_speech_end_ms.is_some())
+            .expect("owner-safe split preview should advance the owner endpoint");
+        assert!(
+            !released.pending_unattributed_speech,
+            "corroborated owner text must not keep the endpoint pending"
+        );
+    }
+
+    #[test]
     fn adaptive_split_recovery_rejects_real_or_overlapping_other_speaker() {
         let sequential = json!({
             "text": "开始录音。主讲人第一句保持完整。旁边的人不应该被写进去。",
@@ -6060,7 +6342,7 @@ mod tests {
             stable_target: true,
         });
         assert!(
-            !final_sequential_speaker_split_gap_is_owner_safe(&state, &sequential, &target_text,),
+            !sequential_speaker_split_gap_is_owner_safe(&state, &sequential, &target_text,),
             "local NonTarget evidence must keep a real second speaker excluded"
         );
 
@@ -6068,14 +6350,14 @@ mod tests {
             crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: 0.4 };
         state.local_non_target_speech_end_ms = Some(5_600);
         assert!(
-            !final_sequential_speaker_split_gap_is_owner_safe(&state, &sequential, &target_text,),
+            !sequential_speaker_split_gap_is_owner_safe(&state, &sequential, &target_text,),
             "confirmed adaptive NonTarget speech must reject provider-wide tail recovery"
         );
         state.local_non_target_speech_end_ms = None;
         let mut overlapping = sequential;
         overlapping["utterances"][1]["start_time"] = json!(3900);
         assert!(
-            !final_sequential_speaker_split_gap_is_owner_safe(&state, &overlapping, &target_text,),
+            !sequential_speaker_split_gap_is_owner_safe(&state, &overlapping, &target_text,),
             "overlapping cloud speakers must never be merged into the owner transcript"
         );
     }

@@ -167,10 +167,12 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator/dictation_embedded_stream_completion.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_embedded_stream_session.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_embedded_submit.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_endpoint_clock.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_preview.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_session.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_diagnostics.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_wake_fusion.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_owner_gate.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_polish.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_prefix_retry.rs` | Core app | Build and targeted tests |

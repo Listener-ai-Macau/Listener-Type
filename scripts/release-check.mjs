@@ -11,6 +11,7 @@ const checks = [
   ['operator note triage gate', 'npm run check:preproduction-operator-notes'],
   ['preproduction bench contract', 'npm run check:preproduction-bench-contract'],
   ['recording low-latency regression contract', 'npm run check:recording-latency'],
+  ['live wake, endpoint, preview and final-integrity contract', 'npm run check:live-wake-endpoint'],
   ['OTA speed log parser contract', 'npm run check:ota-speed-log-contract'],
   ['performance baseline contract', 'npm run check:performance-baselines'],
   ['multi-speaker timeline regressions', 'npm run check:multi-speaker-timelines'],

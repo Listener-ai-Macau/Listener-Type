@@ -155,6 +155,7 @@ assert.match(script, /Get-WinEvent[\s\S]*Windows\\\.Devices\\\.Bluetooth\\\.dll[
 assert.match(releaseCheck, /check:dirty-inventory/, "release:check must classify dirty work before the clean-worktree gate reports release blockage");
 assert.match(releaseCheck, /check:guard-commits/, "release:check must keep regression guards linked to recoverable repository commits");
 assert.match(releaseCheck, /check:repo-hygiene/, "release:check must require a clean worktree before publishing or final review");
+assert.match(releaseCheck, /check:live-wake-endpoint/, "release:check must protect accepted wake, preview, automatic endpoint, and final-integrity behavior");
 assert.doesNotMatch(script, /Description = "Listener Type latest local release build"/, "desktop shortcut must not advertise or target the repo build output");
 assert.match(script, /Cargo build jobs left at Cargo default parallelism/, "script should advertise default Cargo parallelism");
 assert.doesNotMatch(script, /set `"CARGO_BUILD_JOBS=1`"/, "default packaging must not force serial Cargo builds");

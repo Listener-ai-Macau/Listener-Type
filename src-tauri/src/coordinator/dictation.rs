@@ -74,80 +74,7 @@ const EMBEDDED_PROVIDER_STALL_CONFIRM_MS: u64 = 1_000;
 // a stale two-pass boundary to extend recording.
 const EMBEDDED_LIVE_OWNER_ACTIVITY_ALIGNMENT_MS: u64 = 600;
 
-fn target_speaker_end_timeout_ms_for_preview(_preview: Option<&str>) -> u64 {
-    EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
-}
-
-fn preview_has_dangling_continuation(preview: Option<&str>) -> bool {
-    let Some(text) = preview.map(str::trim).filter(|text| !text.is_empty()) else {
-        return false;
-    };
-    let lexical_tail = text
-        .trim_end_matches(|ch: char| {
-            ch.is_whitespace()
-                || matches!(
-                    ch,
-                    '，' | ','
-                        | '、'
-                        | '。'
-                        | '！'
-                        | '？'
-                        | '.'
-                        | '!'
-                        | '?'
-                        | '…'
-                        | ':'
-                        | '：'
-                        | ';'
-                        | '；'
-                )
-        })
-        .to_ascii_lowercase();
-    const DANGLING_SUFFIXES: &[&str] = &[
-        "然后",
-        "但是",
-        "不过",
-        "而且",
-        "并且",
-        "另外",
-        "还有",
-        "接着",
-        "最后",
-        "所以",
-        "因此",
-        "因为",
-        "如果",
-        "假如",
-        "虽然",
-        "可是",
-        "或者",
-        "以及",
-        "就是",
-        "也就是",
-        "比如",
-        "例如",
-        "首先",
-        "其次",
-        "至于",
-        "那么",
-        "那这样的话",
-        "换句话说",
-        "and",
-        "but",
-        "because",
-        "so",
-        "then",
-        "finally",
-        "also",
-    ];
-    DANGLING_SUFFIXES.iter().any(|suffix| {
-        if suffix.is_ascii() {
-            lexical_tail.split_whitespace().last() == Some(*suffix)
-        } else {
-            lexical_tail.ends_with(suffix)
-        }
-    })
-}
+include!("dictation_endpoint_clock.rs");
 
 fn preview_ends_with_sentence_terminal(preview: Option<&str>) -> bool {
     let Some(text) = preview.map(str::trim).filter(|s| !s.is_empty()) else {
@@ -570,7 +497,20 @@ fn handle_target_speaker_update(
     session_id: SessionId,
     stop_dispatched: &Arc<AtomicBool>,
     update: crate::asr::volcengine::TargetSpeakerUpdate,
+    settled_wall_clock_due: bool,
 ) {
+    let session_active = {
+        let state = inner.state.lock();
+        state.session_id == session_id
+            && !state.cancelled
+            && matches!(
+                state.phase,
+                SessionPhase::Starting | SessionPhase::Listening
+            )
+    };
+    if !session_active {
+        return;
+    }
     if update.target_activity_advanced || update.pending_activity_advanced {
         if target_speaker_update_has_live_owner_activity(&update) {
             note_embedded_asr_speech_activity(inner, session_id);
@@ -608,12 +548,14 @@ fn handle_target_speaker_update(
         automatic_wake_initial_body_wait_active(inner, session_id, update.audio_duration_ms);
     let provider_stall_confirmed =
         provider_progress_stalled(inner, session_id, &update, Instant::now());
+    let provider_clock_endpoint_due = target_speaker_endpoint_due_with_provider_stall(
+        &update,
+        provider_stall_confirmed,
+        endpoint_timeout_ms,
+    );
+    let settled_wall_clock_endpoint_due = body_started && settled_wall_clock_due;
     let endpoint_due = !initial_body_wait_active
-        && target_speaker_endpoint_due_with_provider_stall(
-            &update,
-            provider_stall_confirmed,
-            endpoint_timeout_ms,
-        );
+        && (provider_clock_endpoint_due || settled_wall_clock_endpoint_due);
     if !endpoint_due
         || stop_dispatched
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -624,6 +566,15 @@ fn handle_target_speaker_update(
 
     let provider_stall_fallback =
         provider_stall_local_endpoint_due(&update, provider_stall_confirmed, endpoint_timeout_ms);
+    if settled_wall_clock_endpoint_due && !provider_clock_endpoint_due {
+        log::info!(
+            "[asr] target endpoint using settled-text wall clock provider_audio_ms={:?} local_audio_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?} timeout_ms={endpoint_timeout_ms}",
+            update.provider_audio_duration_ms,
+            update.audio_duration_ms,
+            update.target_speech_end_ms,
+            update.local_target_speech_end_ms
+        );
+    }
     if provider_stall_fallback {
         log::info!(
             "[asr] target endpoint using bounded provider-stall fallback provider_audio_ms={:?} local_audio_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?} timeout_ms={endpoint_timeout_ms}",
@@ -651,6 +602,7 @@ fn handle_target_speaker_update(
     }
 
     let inner = Arc::clone(inner);
+    let stop_dispatched = Arc::clone(stop_dispatched);
     let early_final_asr = clone_volcengine_asr_for_session(&inner, session_id);
     async_runtime::spawn(async move {
         let stop_future = request_embedded_ble_recording_stop_from_host(&inner, stop_reason);
@@ -661,11 +613,11 @@ fn handle_target_speaker_update(
             let started = Instant::now();
             match asr.send_last_frame().await {
                 Ok(()) => log::info!(
-                    "[asr] proactive endpoint final frame sent session_id={session_id} provider_stall_fallback={provider_stall_fallback} elapsed_ms={}",
+                    "[asr] proactive endpoint final frame sent session_id={session_id} provider_stall_fallback={provider_stall_fallback} settled_wall_clock_fallback={settled_wall_clock_endpoint_due} elapsed_ms={}",
                     started.elapsed().as_millis()
                 ),
                 Err(err) => log::warn!(
-                    "[asr] proactive endpoint final frame failed session_id={session_id} provider_stall_fallback={provider_stall_fallback} elapsed_ms={} error={err}",
+                    "[asr] proactive endpoint final frame failed session_id={session_id} provider_stall_fallback={provider_stall_fallback} settled_wall_clock_fallback={settled_wall_clock_endpoint_due} elapsed_ms={} error={err}",
                     started.elapsed().as_millis()
                 ),
             }
@@ -675,12 +627,21 @@ fn handle_target_speaker_update(
             Ok(true) => log::info!(
                 "[embedded-ble] target-speaker auto-stop sent session_id={session_id} reason={stop_reason}"
             ),
-            Ok(false) => log::debug!(
-                "[embedded-ble] target-speaker auto-stop ignored for inactive session_id={session_id} reason={stop_reason}"
-            ),
-            Err(err) => log::warn!(
-                "[embedded-ble] target-speaker auto-stop failed session_id={session_id} reason={stop_reason}: {err}"
-            ),
+            Ok(false) => {
+                // A transient Starting/Listening ownership race must not burn
+                // the one-shot endpoint latch forever. A later provider/local
+                // update may retry while the same session is still active.
+                stop_dispatched.store(false, Ordering::SeqCst);
+                log::info!(
+                    "[embedded-ble] target-speaker auto-stop not dispatched; retry armed session_id={session_id} reason={stop_reason}"
+                );
+            }
+            Err(err) => {
+                stop_dispatched.store(false, Ordering::SeqCst);
+                log::warn!(
+                    "[embedded-ble] target-speaker auto-stop failed; retry armed session_id={session_id} reason={stop_reason}: {err}"
+                );
+            }
         }
     });
 }
@@ -904,9 +865,6 @@ fn provider_stall_local_endpoint_due(
     let Some(cloud_target_end_ms) = update.target_speech_end_ms else {
         return false;
     };
-    let Some(local_target_end_ms) = update.local_target_speech_end_ms else {
-        return false;
-    };
     if !provider_stall_confirmed
         || !update.local_speaker_tracking_enabled
         || update.pending_unattributed_speech
@@ -924,11 +882,30 @@ fn provider_stall_local_endpoint_due(
         return false;
     }
 
+    // An enrolled wake can establish the cloud owner while every later local
+    // window is too weak to score Target. Requiring a local Target boundary in
+    // that state disabled the provider-stall fallback entirely (installed
+    // session 1026). Once the newest local speech is explicitly NonTarget, it
+    // is safe to retain the cloud owner boundary; the other speaker must not
+    // keep the owner's recording open. Unclassified ongoing energy still
+    // requires a local Target boundary and therefore remains protected from
+    // mid-sentence cuts.
+    let local_latest_is_non_target = update
+        .local_speech_end_ms
+        .is_some_and(|speech_ms| local_speech_confidently_non_target(update, speech_ms));
+    if update.local_target_speech_end_ms.is_none() && !local_latest_is_non_target {
+        return false;
+    }
+
     // A newer locally confirmed target tail is authoritative only after that
     // newer boundary has itself been inactive for the full endpoint interval.
     // This preserves quiet tails without waiting forever for a stalled provider
     // to repeat coverage it has already stopped reporting.
-    let newest_target_end_ms = cloud_target_end_ms.max(local_target_end_ms);
+    let newest_target_end_ms = update
+        .local_target_speech_end_ms
+        .map_or(cloud_target_end_ms, |local_target_end_ms| {
+            cloud_target_end_ms.max(local_target_end_ms)
+        });
     local_audio_ms.saturating_sub(newest_target_end_ms) >= endpoint_timeout_ms
 }
 
@@ -1087,24 +1064,69 @@ fn set_volcengine_preview_callbacks(
     inner: &Arc<Inner>,
     session_id: SessionId,
 ) {
+    let stop_dispatched = Arc::new(AtomicBool::new(false));
+    let endpoint_clock = Arc::new(Mutex::new(SettledTargetEndpointClock::default()));
+
     let inner_for_stream = Arc::clone(inner);
+    let stop_for_stream = Arc::clone(&stop_dispatched);
+    let clock_for_stream = Arc::clone(&endpoint_clock);
     asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
         update_embedded_audio_partial_preview(&inner_for_stream, session_id, text);
+        arm_settled_target_endpoint_for_visible_body(
+            &inner_for_stream,
+            session_id,
+            &stop_for_stream,
+            &clock_for_stream,
+        );
     })));
 
     let inner_for_partial = Arc::clone(inner);
+    let stop_for_partial = Arc::clone(&stop_dispatched);
+    let clock_for_partial = Arc::clone(&endpoint_clock);
     asr.set_final_intermediate_transcript_callback(Some(Arc::new(move |update| {
         update_embedded_audio_partial_preview_from_final_supplement(
             &inner_for_partial,
             session_id,
             update,
         );
+        arm_settled_target_endpoint_for_visible_body(
+            &inner_for_partial,
+            session_id,
+            &stop_for_partial,
+            &clock_for_partial,
+        );
     })));
 
-    let stop_dispatched = Arc::new(AtomicBool::new(false));
     let inner_for_speaker = Arc::clone(inner);
+    let clock_for_speaker = Arc::clone(&endpoint_clock);
     asr.set_target_speaker_update_callback(Some(Arc::new(move |update| {
-        handle_target_speaker_update(&inner_for_speaker, session_id, &stop_dispatched, update);
+        let body_started = automatic_wake_body_started(&inner_for_speaker, session_id)
+            || current_embedded_audio_partial_preview(&inner_for_speaker)
+                .as_deref()
+                .is_some_and(|text| !text.trim().is_empty());
+        let now = Instant::now();
+        let (settled_wall_clock_due, generation) = {
+            let mut clock = clock_for_speaker.lock();
+            let generation = clock.observe(&update, body_started, now);
+            let due = clock.is_due(now, EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS);
+            (due, generation)
+        };
+        handle_target_speaker_update(
+            &inner_for_speaker,
+            session_id,
+            &stop_dispatched,
+            update,
+            settled_wall_clock_due,
+        );
+        if let Some(generation) = generation {
+            schedule_settled_target_endpoint_timer(
+                &inner_for_speaker,
+                session_id,
+                &stop_dispatched,
+                &clock_for_speaker,
+                generation,
+            );
+        }
     })));
 }
 
@@ -1285,6 +1307,7 @@ struct EmbeddedAudioDictationSession {
 
 include!("dictation_wake_diagnostics.rs");
 include!("dictation_wake_polish.rs");
+include!("dictation_wake_fusion.rs");
 include!("dictation_wake_prefix_retry.rs");
 include!("dictation_wake_owner_gate.rs");
 
@@ -1615,6 +1638,7 @@ fn show_early_wake_recording_capsule(inner: &Arc<Inner>, candidate: &mut Buffere
             None => return,
         }
     };
+    candidate.early_capsule_request_ms = Some(candidate.started_at.elapsed().as_millis() as u64);
     publish_dictation_capsule(
         inner,
         session_id,

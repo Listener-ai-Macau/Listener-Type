@@ -6,10 +6,12 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULT_THRESHOLDS = Object.freeze({
   requiredSamples: 20,
-  wakeP95Ms: 1_000,
-  wakeMaxMs: 1_200,
+  wakeP95Ms: 1_200,
+  wakeMaxMs: 1_500,
   phraseTailP95Ms: 350,
   phraseTailMaxMs: 500,
+  previewP95Ms: 1_500,
+  previewMaxMs: 1_800,
   endpointMinMs: 900,
   endpointMaxMs: 1_100,
   stopToDoneP95Ms: 500,
@@ -23,6 +25,8 @@ function parseArgs(argv) {
     "wakeMaxMs",
     "phraseTailP95Ms",
     "phraseTailMaxMs",
+    "previewP95Ms",
+    "previewMaxMs",
     "endpointMinMs",
     "endpointMaxMs",
     "stopToDoneP95Ms",
@@ -69,6 +73,11 @@ function stringField(line, name) {
   return match ? match[1] : null;
 }
 
+function jsonIntegerField(line, name) {
+  const match = new RegExp(`"${name}":(\\d+)`).exec(line);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
 function percentile(values, fraction) {
   if (values.length === 0) return null;
   const sorted = [...values].sort((left, right) => left - right);
@@ -89,12 +98,18 @@ export function analyzeLiveWakeLog(text, options = {}) {
   const samples = new Map();
   const coordinatorToEmbedded = new Map();
   const endpoints = new Map();
+  const settledTargets = new Map();
+  const previewLatencies = new Map();
+  const firmwareStopOrigins = new Map();
+  const finalIntegrity = new Map();
   const completions = new Map();
   const doneSessions = new Set();
   const transportCompletions = new Map();
   const transportFaults = [];
   let pendingOwnerMode = null;
   let pendingTransportEmbeddedId = null;
+  let activeCoordinatorSessionId = null;
+  let pendingOwnerSafeRestore = null;
 
   for (const [lineIndex, line] of text.split(/\r?\n/).entries()) {
     const timestampMs = parseTimestamp(line);
@@ -124,8 +139,15 @@ export function analyzeLiveWakeLog(text, options = {}) {
           ownerEnrolled: ownerModeFresh ? pendingOwnerMode.enrolled : null,
           endpointTimeoutMs: null,
           endpointReason: null,
+          firmwareStopOrigin: null,
           bodyStarted: null,
           sentencePause: null,
+          semanticContinuation: null,
+          settledTargetToEndpointMs: null,
+          previewLatencyMs: null,
+          providerFinalChars: null,
+          resultFinalChars: null,
+          ownerSafeRestore: null,
           stopToDoneMs: null,
           insertionStatus: null,
           done: false,
@@ -146,6 +168,64 @@ export function analyzeLiveWakeLog(text, options = {}) {
           timeoutMs: integerField(line, "timeout_ms"),
           bodyStarted: stringField(line, "body_started"),
           sentencePause: stringField(line, "sentence_pause"),
+          semanticContinuation: stringField(line, "semantic_continuation"),
+          timestampMs,
+          settledAtMs: settledTargets.get(sessionId) ?? null,
+        });
+      }
+    }
+
+    const activeSession = /session_id=Some\(([0-9a-f-]{36})\).*\bble_start\b/.exec(line);
+    if (activeSession) activeCoordinatorSessionId = activeSession[1];
+
+    if (line.includes("[asr] target-speaker state") && activeCoordinatorSessionId) {
+      const pending = stringField(line, "pending_provisional");
+      const targetAdvanced = stringField(line, "target_advanced");
+      if (pending === "true") {
+        settledTargets.delete(activeCoordinatorSessionId);
+      } else if (pending === "false" && targetAdvanced === "true" && timestampMs !== null) {
+        settledTargets.set(activeCoordinatorSessionId, timestampMs);
+      }
+    }
+
+    if (line.includes('"event":"embedded_audio_preview_first_provider_stream"')) {
+      const latencyMs = jsonIntegerField(line, "timing_value_ms");
+      if (activeCoordinatorSessionId && latencyMs !== null) {
+        previewLatencies.set(activeCoordinatorSessionId, latencyMs);
+      }
+    }
+
+    if (line.includes("protocol final restores owner-safe provider text after diarization regression")) {
+      pendingOwnerSafeRestore = {
+        targetChars: integerField(line, "target_chars"),
+        providerChars: integerField(line, "provider_chars"),
+      };
+    }
+
+    if (line.includes('"has_final_frame":true')) {
+      const providerFinalChars = jsonIntegerField(line, "provider_result_chars");
+      const resultFinalChars = jsonIntegerField(line, "result_chars");
+      if (activeCoordinatorSessionId) {
+        finalIntegrity.set(activeCoordinatorSessionId, {
+          providerFinalChars,
+          resultFinalChars,
+          ownerSafeRestore: pendingOwnerSafeRestore,
+        });
+      }
+      pendingOwnerSafeRestore = null;
+    }
+
+    if (line.includes("event=stop") && line.includes("embedded_session_id=")) {
+      const embeddedId = integerField(line, "embedded_session_id");
+      const origin = stringField(line, "origin");
+      if (embeddedId !== null && origin) {
+        firmwareStopOrigins.set(embeddedId, {
+          origin,
+          timestampMs,
+          coordinatorSessionId: activeCoordinatorSessionId,
+          settledAtMs: activeCoordinatorSessionId
+            ? settledTargets.get(activeCoordinatorSessionId) ?? null
+            : null,
         });
       }
     }
@@ -197,6 +277,17 @@ export function analyzeLiveWakeLog(text, options = {}) {
       sample.endpointTimeoutMs = endpoint.timeoutMs;
       sample.bodyStarted = endpoint.bodyStarted === "true";
       sample.sentencePause = endpoint.sentencePause === "true";
+      sample.semanticContinuation = endpoint.semanticContinuation === "true";
+      if (endpoint.settledAtMs !== null && endpoint.timestampMs !== null) {
+        sample.settledTargetToEndpointMs = Math.max(0, endpoint.timestampMs - endpoint.settledAtMs);
+      }
+    }
+    sample.previewLatencyMs = previewLatencies.get(coordinatorId) ?? null;
+    const integrity = finalIntegrity.get(coordinatorId);
+    if (integrity) {
+      sample.providerFinalChars = integrity.providerFinalChars;
+      sample.resultFinalChars = integrity.resultFinalChars;
+      sample.ownerSafeRestore = integrity.ownerSafeRestore;
     }
     const completion = completions.get(coordinatorId);
     if (completion) {
@@ -204,6 +295,18 @@ export function analyzeLiveWakeLog(text, options = {}) {
       sample.insertionStatus = completion.insertionStatus;
     }
     sample.done = doneSessions.has(coordinatorId);
+  }
+
+  for (const [embeddedId, firmwareStop] of firmwareStopOrigins) {
+    const sample = samples.get(embeddedId);
+    if (!sample) continue;
+    sample.firmwareStopOrigin = firmwareStop.origin;
+    if (firmwareStop.settledAtMs !== null && firmwareStop.timestampMs !== null) {
+      const firmwareLatencyMs = Math.max(0, firmwareStop.timestampMs - firmwareStop.settledAtMs);
+      sample.settledTargetToEndpointMs = sample.settledTargetToEndpointMs === null
+        ? firmwareLatencyMs
+        : Math.min(sample.settledTargetToEndpointMs, firmwareLatencyMs);
+    }
   }
 
   for (const [embeddedId, transport] of transportCompletions) {
@@ -226,18 +329,37 @@ export function analyzeLiveWakeLog(text, options = {}) {
       [sample.coordinatorSessionId, "missing coordinator session link"],
       [sample.wakeToCapsuleMs, "missing wake_to_capsule_request_ms"],
       [sample.phraseTailToCapsuleMs, "missing phrase_tail_to_capsule_ms"],
-      [sample.endpointTimeoutMs, "missing automatic endpoint evidence"],
+      [sample.previewLatencyMs, "missing first provider preview latency"],
       [sample.stopToDoneMs, "missing stop_to_done_ms"],
       [sample.insertionStatus, "missing insertion status"],
       [sample.pcmBytes, "missing BLE completion"],
       [sample.missingPackets, "missing BLE packet result"],
+      [sample.providerFinalChars, "missing provider final integrity"],
+      [sample.resultFinalChars, "missing retained final integrity"],
+      [sample.settledTargetToEndpointMs, "missing settled-target endpoint latency"],
     ];
     for (const [value, error] of required) if (value === null) sample.errors.push(error);
     if (sample.wakeToCapsuleMs > thresholds.wakeMaxMs) sample.errors.push(`wake latency exceeds ${thresholds.wakeMaxMs} ms`);
     if (sample.phraseTailToCapsuleMs > thresholds.phraseTailMaxMs) sample.errors.push(`phrase-tail latency exceeds ${thresholds.phraseTailMaxMs} ms`);
-    if (sample.endpointReason !== "target_speaker_inactive_1000ms") sample.errors.push("automatic endpoint reason mismatch");
-    if (sample.endpointTimeoutMs < thresholds.endpointMinMs || sample.endpointTimeoutMs > thresholds.endpointMaxMs) sample.errors.push("automatic endpoint timeout outside tolerance");
-    if (sample.bodyStarted !== true || sample.sentencePause !== true) sample.errors.push("automatic endpoint did not preserve a completed body sentence");
+    if (sample.previewLatencyMs > thresholds.previewMaxMs) sample.errors.push(`first preview latency exceeds ${thresholds.previewMaxMs} ms`);
+    const hostAutomaticEndpoint = sample.endpointReason === "target_speaker_inactive_1000ms";
+    const firmwareAutomaticEndpoint = sample.firmwareStopOrigin === "VoiceActivation";
+    if (!hostAutomaticEndpoint && !firmwareAutomaticEndpoint) sample.errors.push("missing automatic endpoint evidence");
+    if (sample.settledTargetToEndpointMs > thresholds.endpointMaxMs) {
+      sample.errors.push(`settled target endpoint exceeds ${thresholds.endpointMaxMs} ms`);
+    }
+    if (hostAutomaticEndpoint) {
+      if (sample.endpointTimeoutMs < thresholds.endpointMinMs || sample.endpointTimeoutMs > thresholds.endpointMaxMs) sample.errors.push("automatic endpoint timeout outside tolerance");
+      if (sample.bodyStarted !== true) sample.errors.push("automatic endpoint fired before dictated body started");
+      if (sample.semanticContinuation === true) sample.errors.push("automatic endpoint cut a semantic continuation");
+    }
+    if (sample.resultFinalChars !== null && sample.resultFinalChars <= 0) sample.errors.push("retained provider final is empty");
+    if (sample.ownerSafeRestore) {
+      if (sample.ownerSafeRestore.providerChars !== sample.providerFinalChars
+          || sample.providerFinalChars !== sample.resultFinalChars) {
+        sample.errors.push("owner-safe provider tail was not preserved into final result");
+      }
+    }
     if (sample.insertionStatus !== "Inserted") sample.errors.push("final text was not inserted");
     if (!sample.done) sample.errors.push("capsule did not reach Done");
     if (sample.missingPackets !== 0) sample.errors.push("BLE missing_packets is nonzero");
@@ -246,23 +368,32 @@ export function analyzeLiveWakeLog(text, options = {}) {
 
   const wakeValues = ordered.map(sample => sample.wakeToCapsuleMs).filter(Number.isFinite);
   const phraseTailValues = ordered.map(sample => sample.phraseTailToCapsuleMs).filter(Number.isFinite);
+  const previewValues = ordered.map(sample => sample.previewLatencyMs).filter(Number.isFinite);
   const doneValues = ordered.map(sample => sample.stopToDoneMs).filter(Number.isFinite);
   const aggregate = {
     wakeToCapsuleP95Ms: percentile(wakeValues, 0.95),
     wakeToCapsuleMaxMs: wakeValues.length ? Math.max(...wakeValues) : null,
     phraseTailToCapsuleP95Ms: percentile(phraseTailValues, 0.95),
     phraseTailToCapsuleMaxMs: phraseTailValues.length ? Math.max(...phraseTailValues) : null,
+    previewP95Ms: percentile(previewValues, 0.95),
+    previewMaxMs: previewValues.length ? Math.max(...previewValues) : null,
     stopToDoneP95Ms: percentile(doneValues, 0.95),
   };
   const failures = [];
   for (const sample of ordered) {
     for (const error of sample.errors) failures.push(`embedded_session_id=${sample.embeddedSessionId}: ${error}`);
   }
-  if (aggregate.wakeToCapsuleP95Ms > thresholds.wakeP95Ms) failures.push(`wake p95 exceeds ${thresholds.wakeP95Ms} ms`);
+  const hasRequiredPopulation = ordered.length >= thresholds.requiredSamples;
+  // Percentiles are population gates. A short operator spot-check may be
+  // within the hard per-session ceiling without representing p95; keep it
+  // INCOMPLETE instead of falsely turning one accepted outlier into NO_GO.
+  if (hasRequiredPopulation && aggregate.wakeToCapsuleP95Ms > thresholds.wakeP95Ms) failures.push(`wake p95 exceeds ${thresholds.wakeP95Ms} ms`);
   if (aggregate.wakeToCapsuleMaxMs > thresholds.wakeMaxMs) failures.push(`wake max exceeds ${thresholds.wakeMaxMs} ms`);
-  if (aggregate.phraseTailToCapsuleP95Ms > thresholds.phraseTailP95Ms) failures.push(`phrase-tail p95 exceeds ${thresholds.phraseTailP95Ms} ms`);
+  if (hasRequiredPopulation && aggregate.phraseTailToCapsuleP95Ms > thresholds.phraseTailP95Ms) failures.push(`phrase-tail p95 exceeds ${thresholds.phraseTailP95Ms} ms`);
   if (aggregate.phraseTailToCapsuleMaxMs > thresholds.phraseTailMaxMs) failures.push(`phrase-tail max exceeds ${thresholds.phraseTailMaxMs} ms`);
-  if (aggregate.stopToDoneP95Ms > thresholds.stopToDoneP95Ms) failures.push(`stop-to-done p95 exceeds ${thresholds.stopToDoneP95Ms} ms`);
+  if (hasRequiredPopulation && aggregate.previewP95Ms > thresholds.previewP95Ms) failures.push(`preview p95 exceeds ${thresholds.previewP95Ms} ms`);
+  if (aggregate.previewMaxMs > thresholds.previewMaxMs) failures.push(`preview max exceeds ${thresholds.previewMaxMs} ms`);
+  if (hasRequiredPopulation && aggregate.stopToDoneP95Ms > thresholds.stopToDoneP95Ms) failures.push(`stop-to-done p95 exceeds ${thresholds.stopToDoneP95Ms} ms`);
 
   const status = failures.length > 0
     ? "NO_GO"

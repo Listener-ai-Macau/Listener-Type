@@ -466,6 +466,7 @@ impl EmbeddedStreamingDictation {
                 kws_first_hit_at: None,
                 kws_first_hit_pcm_ms: None,
                 early_capsule_session_id: None,
+                early_capsule_request_ms: None,
                 kws_fed_bytes: 0,
                 kws_stream_origin_bytes: 0,
                 kws_total_ms: 0,
@@ -904,15 +905,21 @@ impl EmbeddedStreamingDictation {
                                     phrase_signal =
                                         denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
                                     Some(found)
+                                } else if let Some(signal) =
+                                    enrolled_terminal_kws_phonetic_fusion_signal(
+                                    enrolled_owner_matched,
+                                    &result,
+                                    phrase.chars().count(),
+                                    embedded_session_id,
+                                )
+                                {
+                                    phrase_signal = signal;
+                                    Some(found)
                                 } else if !crate::speaker_verification::is_enrolled_for_phrase(
                                     &phrase,
                                 ) {
-                                    // Open-gate (no voiceprint): KWS already hit 「开始录音」
-                                    // but local ASR on device PCM often returns Absent
-                                    // (busy helper, short window, board mic). Prefer
-                                    // KeywordModel recall over terminal reject — owner
-                                    // reported wake not sensitive / worse after
-                                    // precision-only Absent reject.
+                                    // Without a voiceprint, preserve KWS recall when
+                                    // the short local-ASR confirmation is absent.
                                     log::info!(
                                         "[wake-phrase] terminal stage2 Absent fail-open KeywordModel open-gate embedded_session_id={} prior_absent_count={} transcript_chars={}",
                                         embedded_session_id,
@@ -923,7 +930,6 @@ impl EmbeddedStreamingDictation {
                                         denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
                                     Some(found)
                                 } else {
-                                    // Enrolled: keep precision — stage2 Absent rejects KWS.
                                     log::info!(
                                         "[wake-phrase] terminal stage2 Absent reject KWS embedded_session_id={} prior_absent_count={} (anti false-wake enrolled)",
                                         embedded_session_id,
@@ -2306,16 +2312,16 @@ impl EmbeddedStreamingDictation {
         let wake_anchor_offset =
             wake_speaker_anchor_pcm_offset_bytes(wake_match.end_seconds, candidate.pcm.len());
         candidate.pcm.drain(..wake_anchor_offset);
-        let capsule_request_ms = candidate.started_at.elapsed().as_millis() as u64;
+        let capsule_request_ms = candidate
+            .early_capsule_request_ms
+            .unwrap_or_else(|| candidate.started_at.elapsed().as_millis() as u64);
         let latency = denzic_observability_v1_core::assess_duration_ms(
             capsule_request_ms,
             denzic_observability_v1_core::PerformanceBudget {
-                target_ms: 1_000,
-                ceiling_ms: 1_200,
+                target_ms: 1_200,
+                ceiling_ms: 1_500,
             },
         );
-        let latency_target_pass = latency.target_pass;
-        let latency_ceiling_pass = latency.ceiling_pass;
         let phrase_tail_to_capsule_ms =
             wake_phrase_tail_to_capsule_ms(wake_match.end_seconds, capsule_request_ms);
         let phrase_tail_latency = denzic_observability_v1_core::assess_duration_ms(
@@ -2370,7 +2376,7 @@ impl EmbeddedStreamingDictation {
             }
         });
         log::info!(
-            "[wake-phrase] live automatic session activated and released embedded_session_id={} phrase={} phrase_signal={:?} wake_end_s={:.3} post_wake_pcm_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} gate_total_ms={} recording_control=detached wake_to_capsule_request_ms={} latency_target_ms=1000 latency_target_pass={} latency_ceiling_ms=1200 latency_ceiling_pass={} phrase_tail_to_capsule_ms={} phrase_tail_target_ms=350 phrase_tail_target_pass={} phrase_tail_ceiling_ms=500 phrase_tail_ceiling_pass={}",
+            "[wake-phrase] live automatic session activated and released embedded_session_id={} phrase={} phrase_signal={:?} wake_end_s={:.3} post_wake_pcm_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} gate_total_ms={} recording_control=detached wake_to_capsule_request_ms={} latency_target_ms=1200 latency_target_pass={} latency_ceiling_ms=1500 latency_ceiling_pass={} phrase_tail_to_capsule_ms={} phrase_tail_target_ms=350 phrase_tail_target_pass={} phrase_tail_ceiling_ms=500 phrase_tail_ceiling_pass={}",
             embedded_session_id,
             phrase,
             phrase_signal,
@@ -2381,8 +2387,8 @@ impl EmbeddedStreamingDictation {
             voiceprint_ms,
             total_ms,
             capsule_request_ms,
-            latency_target_pass,
-            latency_ceiling_pass,
+            latency.target_pass,
+            latency.ceiling_pass,
             phrase_tail_to_capsule_ms,
             phrase_tail_latency.target_pass,
             phrase_tail_latency.ceiling_pass

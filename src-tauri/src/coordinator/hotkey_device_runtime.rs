@@ -1772,8 +1772,18 @@ async fn request_embedded_ble_recording_start_from_host(
     let session_id = {
         let mut state = inner.state.lock();
         match state.phase {
-            SessionPhase::Idle => begin_session_state(&mut state, None, capture_frontmost_app())
-                .ok_or_else(|| "Listener BLE recording start ignored while idle".to_string())?,
+            // A terminal voice-wake continuation opens the real dictation
+            // session from Idle. Preserve the foreground window at that
+            // boundary so completion can return text to the app the user was
+            // speaking into. Passing `None` here made every terminal
+            // continuation fall back to the clipboard even though the capsule
+            // itself was deliberately shown without activation.
+            SessionPhase::Idle => begin_session_state(
+                &mut state,
+                capture_focus_target(),
+                capture_frontmost_app(),
+            )
+            .ok_or_else(|| "Listener BLE recording start ignored while idle".to_string())?,
             SessionPhase::Starting | SessionPhase::Listening => state.session_id,
             phase => {
                 return Err(format!(

@@ -1513,6 +1513,138 @@ fn all_body_preview_shapes_keep_one_second_endpoint() {
 }
 
 #[test]
+fn settled_target_wall_clock_ends_one_second_after_visible_stable_text() {
+    let started = std::time::Instant::now();
+    let stable = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("1".into()),
+        target_speech_end_ms: Some(4_082),
+        provider_audio_duration_ms: Some(4_600),
+        audio_duration_ms: Some(4_700),
+        local_speech_end_ms: Some(4_700),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(4_082),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    let generation = clock
+        .observe(&stable, true, started)
+        .expect("stable visible owner text arms the wall clock");
+
+    let noisy_local_update = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(7_900),
+        local_speech_end_ms: Some(7_900),
+        target_activity_advanced: false,
+        ..stable
+    };
+    assert_eq!(
+        clock.observe(
+            &noisy_local_update,
+            true,
+            started + std::time::Duration::from_millis(999),
+        ),
+        None,
+        "low-level local energy must not rearm settled owner text",
+    );
+    assert!(clock
+        .due_update(
+            generation,
+            started + std::time::Duration::from_millis(999),
+            1_000,
+        )
+        .is_none());
+    assert!(clock
+        .due_update(
+            generation,
+            started + std::time::Duration::from_millis(1_000),
+            1_000,
+        )
+        .is_some());
+}
+
+#[test]
+fn settled_target_wall_clock_cancels_for_provisional_tail_and_rearms_when_stable() {
+    let started = std::time::Instant::now();
+    let stable = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("1".into()),
+        target_speech_end_ms: Some(4_900),
+        provider_audio_duration_ms: Some(5_200),
+        audio_duration_ms: Some(5_300),
+        local_speech_end_ms: Some(5_200),
+        local_target_speech_end_ms: Some(5_200),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(4_900),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    let first_generation = clock
+        .observe(&stable, true, started)
+        .expect("first stable boundary arms");
+
+    let pending = crate::asr::volcengine::TargetSpeakerUpdate {
+        pending_unattributed_speech: true,
+        pending_activity_advanced: true,
+        target_activity_advanced: false,
+        audio_duration_ms: Some(5_900),
+        local_speech_end_ms: Some(5_900),
+        ..stable.clone()
+    };
+    assert!(clock
+        .observe(
+            &pending,
+            true,
+            started + std::time::Duration::from_millis(700),
+        )
+        .is_none());
+    assert!(clock
+        .due_update(
+            first_generation,
+            started + std::time::Duration::from_millis(1_100),
+            1_000,
+        )
+        .is_none());
+
+    let final_stable = crate::asr::volcengine::TargetSpeakerUpdate {
+        target_speech_end_ms: Some(6_300),
+        provider_audio_duration_ms: Some(6_700),
+        audio_duration_ms: Some(6_800),
+        local_speech_end_ms: Some(6_300),
+        local_target_speech_end_ms: Some(6_300),
+        stable_attributed_speech_end_ms: Some(6_300),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        ..stable
+    };
+    let settled_at = started + std::time::Duration::from_millis(1_200);
+    let final_generation = clock
+        .observe(&final_stable, true, settled_at)
+        .expect("final stable boundary rearms from its own publication time");
+    assert!(clock
+        .due_update(
+            final_generation,
+            settled_at + std::time::Duration::from_millis(999),
+            1_000,
+        )
+        .is_none());
+    assert!(clock
+        .due_update(
+            final_generation,
+            settled_at + std::time::Duration::from_millis(1_000),
+            1_000,
+        )
+        .is_some());
+}
+
+#[test]
 fn target_speaker_endpoint_requires_one_second_without_that_speaker() {
     let update = crate::asr::volcengine::TargetSpeakerUpdate {
         speaker_id: Some("1".into()),
@@ -1853,6 +1985,49 @@ fn target_speaker_endpoint_uses_local_clock_only_for_a_clean_provider_stall() {
         1_000,
     ));
 
+    // Installed session 1026: cloud had already established the owner, the
+    // provider then stalled, and repeated local windows confirmed that the
+    // continuing room voice was somebody else. There was no local Target vote,
+    // so the old fallback could never auto-end and recording hung until click.
+    let confirmed_other_without_local_target = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("1".into()),
+        target_speech_end_ms: Some(9_042),
+        provider_audio_duration_ms: Some(9_500),
+        audio_duration_ms: Some(13_400),
+        local_speech_end_ms: Some(13_400),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: Some(13_400),
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(9_042),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    assert!(super::provider_stall_local_endpoint_due(
+        &confirmed_other_without_local_target,
+        true,
+        1_000,
+    ));
+    assert!(super::target_speaker_endpoint_due_with_provider_stall(
+        &confirmed_other_without_local_target,
+        true,
+        1_000,
+    ));
+
+    let unclassified_owner_may_still_be_talking = crate::asr::volcengine::TargetSpeakerUpdate {
+        local_non_target_speech_end_ms: None,
+        ..confirmed_other_without_local_target
+    };
+    assert!(
+        !super::provider_stall_local_endpoint_due(
+            &unclassified_owner_may_still_be_talking,
+            true,
+            1_000,
+        ),
+        "cloud stalls must not cut ongoing unclassified owner speech"
+    );
+
     let newer_local_target_one_ms_before = crate::asr::volcengine::TargetSpeakerUpdate {
         target_speech_end_ms: Some(4_572),
         provider_audio_duration_ms: Some(5_200),
@@ -2166,6 +2341,24 @@ fn terminal_wake_body_guard_is_bound_before_recording_capsule_emit() {
         .find("emit_capsule_for_session")
         .expect("recording capsule emit");
     assert!(bind < emit);
+}
+
+#[test]
+fn terminal_wake_continuation_captures_original_windows_insertion_target() {
+    // Installed session 237 completed ASR successfully but showed the
+    // clipboard/error capsule because the host-start path explicitly created
+    // the real session with `focus_target=None`.
+    let source = include_str!("hotkey_device_runtime.rs");
+    let start = source
+        .find("async fn request_embedded_ble_recording_start_from_host")
+        .expect("host start function");
+    let end = source[start..]
+        .find("async fn handle_device_translation_action")
+        .map(|offset| start + offset)
+        .expect("next function boundary");
+    let body = &source[start..end];
+    assert!(body.contains("capture_focus_target()"));
+    assert!(!body.contains("begin_session_state(&mut state, None"));
 }
 
 #[test]
@@ -3643,8 +3836,9 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
         "the BLE notification actor must never await its own active-control queue"
     );
     assert!(body.contains("recording_control=detached"));
-    assert!(body.contains("latency_target_ms=1000"));
-    assert!(body.contains("latency_ceiling_ms=1200"));
+    assert!(body.contains("early_capsule_request_ms"));
+    assert!(body.contains("latency_target_ms=1200"));
+    assert!(body.contains("latency_ceiling_ms=1500"));
 }
 
 #[test]
@@ -4315,6 +4509,17 @@ fn phonetic_near_match_requires_independent_kws_and_never_wakes_alone() {
         ..near
     };
     assert!(!super::phonetic_near_phrase_evidence(&too_short, 4));
+    assert!(super::enrolled_terminal_kws_can_accept_phonetic_near(
+        true, &near, 4
+    ));
+    assert!(
+        !super::enrolled_terminal_kws_can_accept_phonetic_near(false, &near, 4),
+        "a non-owner KWS hit must not use phonetic-near recovery"
+    );
+    assert!(
+        !super::enrolled_terminal_kws_can_accept_phonetic_near(true, &too_far, 4),
+        "owner voiceprint alone must not relax a non-near transcript"
+    );
 
     use super::TerminalInflightLocalDecision::{AcceptLocal, PreserveKwsFusion, RecordAbsent};
     let exact = super::LocalWakeConfirmation {

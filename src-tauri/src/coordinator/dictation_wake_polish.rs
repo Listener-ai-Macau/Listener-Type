@@ -650,10 +650,10 @@ struct BufferedSpeakerCandidate {
     /// Candidate PCM length (ms) at first live KWS hit — gates when an Absent
     /// may count toward hard-reject (phrase must have had time to finish).
     kws_first_hit_pcm_ms: Option<usize>,
-    /// Recording capsule shown after a local full-phrase confirmation (or an
-    /// open-gate KWS confirmation when no voiceprint is enrolled) while the
-    /// remaining automatic-wake gates continue.
+    /// Early Recording capsule while the remaining automatic-wake gates run.
     early_capsule_session_id: Option<SessionId>,
+    /// Candidate elapsed time at the first real Recording publish.
+    early_capsule_request_ms: Option<u64>,
     kws_fed_bytes: usize,
     /// Absolute PCM offset represented by second 0 of the current detector.
     /// Long ambient candidates rotate the detector with overlap so later wake

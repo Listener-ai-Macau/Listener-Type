@@ -138,7 +138,12 @@ for (const token of [
   "optimistic_preview_text: String",
   "optimistic_preview_segments: Vec<TranscriptSegment>",
   "last_emitted_preview_text: String",
-  "transcript_candidate_from_result(&speaker_filtered_result.optimistic_result)",
+  "let owner_safe_provider_split_preview =",
+  "sequential_speaker_split_gap_is_owner_safe(&state, result, target_text)",
+  "transcript_candidate_from_result(if owner_safe_provider_split_preview",
+  "&speaker_filtered_result.optimistic_result",
+  "state.pending_unattributed_text.clear();",
+  "owner-safe sequential provider split admitted to live preview",
   "state.best_transcript_text = merged.clone();",
   "state.last_partial_text = merged.clone();",
 ]) {

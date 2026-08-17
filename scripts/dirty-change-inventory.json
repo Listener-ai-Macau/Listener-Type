@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-11",
-  "purpose": "Classifies every current dirty Listener Type/Firmware path while the 1.0.4 recording and wake refinement is in progress. Release gates still require clean worktrees; this inventory prevents mystery dirty changes during focused repair/review.",
+  "updated_at": "2026-08-17",
+  "purpose": "Classifies every current dirty Listener Type/Firmware path while the 1.0.5 recording, wake, endpoint, and release refinement is in progress. Release gates still require clean worktrees; this inventory prevents mystery dirty changes during focused repair/review.",
   "entries": [
     {
       "id": "repo_hygiene_and_review_traceability",
@@ -84,13 +84,17 @@
       "patterns": [
         "scripts/check-embedded-ble-processing-led.mjs",
         "scripts/check-recording-low-latency-regression.mjs",
+        "scripts/check-live-wake-endpoint.mjs",
+        "scripts/check-live-wake-endpoint.test.mjs",
         "scripts/check-volcengine-low-latency-preview.mjs",
         "src-tauri/src/asr/*.rs",
         "src-tauri/src/cli.rs",
         "src-tauri/src/coordinator.rs",
         "src-tauri/src/coordinator/dictation.rs",
+        "src-tauri/src/coordinator/dictation_endpoint_clock.rs",
         "src-tauri/src/coordinator/dictation_preview.rs",
         "src-tauri/src/coordinator/dictation_embedded_stream_completion.rs",
+        "src-tauri/src/coordinator/hotkey_device_runtime.rs",
         "src-tauri/src/embedded_ble.rs",
         "src-tauri/src/lib.rs",
         "src-tauri/src/persistence.rs",
@@ -287,6 +291,7 @@
         "src-tauri/src/coordinator/dictation_embedded_stream.rs",
         "src-tauri/src/coordinator/dictation_tests.rs",
         "src-tauri/src/coordinator/dictation_wake_polish.rs",
+        "src-tauri/src/coordinator/dictation_wake_fusion.rs",
         "src-tauri/src/embedded_ble/windows_ble/mod.rs",
         "tools/generate_wake_104_matrix.py",
         "tools/verify_wake_104_matrix.py"
