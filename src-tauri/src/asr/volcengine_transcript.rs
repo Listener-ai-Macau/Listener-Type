@@ -775,7 +775,7 @@ fn is_initial_hesitation_partial(compact: &str) -> bool {
     )
 }
 
-fn is_same_prefix_streaming_revision(previous: &str, current: &str) -> bool {
+pub(super) fn is_same_prefix_streaming_revision(previous: &str, current: &str) -> bool {
     const MIN_COMMON_PREFIX_CHARS: usize = 10;
     let previous_compact = compact_transcript_for_duplicate_check(previous);
     let current_compact = compact_transcript_for_duplicate_check(current);

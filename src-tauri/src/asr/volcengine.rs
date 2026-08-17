@@ -287,10 +287,10 @@ impl Default for AudioDeliveryReadiness {
 
 use super::volcengine_transcript::{
     authoritative_final_supersedes_repeated_streaming_ledger, is_unstable_initial_partial,
-    merge_streaming_candidate, normalize_cjk_final_spacing_and_echoes, normalized_result,
-    transcript_candidate_from_result, trim_repeated_short_final_tail,
-    trim_repeated_short_streaming_tail, TranscriptSegment,
+    normalize_cjk_final_spacing_and_echoes, normalized_result, transcript_candidate_from_result,
+    trim_repeated_short_final_tail, trim_repeated_short_streaming_tail, TranscriptSegment,
 };
+use super::volcengine_untimed_merge::merge_streaming_candidate_with_untimed_window;
 
 /// Sync state shared across the receive loop, the public API, and the
 /// audio-consumer fast path.
@@ -318,11 +318,13 @@ struct SyncState {
     /// 火山流式响应会反复发送同一 utterance 起点的修订文本。用时间戳合并这些片段，
     /// 避免把同一段尾巴当作新内容追加，导致胶囊预览和最终插入重复膨胀。
     best_transcript_segments: Vec<TranscriptSegment>,
+    best_untimed_window: String,
     /// Speaker attribution lags behind the provider's streaming text. Keep a
     /// display-only merge here so the capsule can advance without promoting
     /// provisional words into the authoritative/final transcript.
     optimistic_preview_text: String,
     optimistic_preview_segments: Vec<TranscriptSegment>,
+    optimistic_untimed_window: String,
     last_emitted_preview_text: String,
     /// 最新服务端响应已处理的音频时长。two-pass 终帧可能只给最后一个 utterance 的
     /// 词时间戳，但 `audio_info.duration` 仍覆盖整段音频；收尾时应优先采用这项
@@ -1387,9 +1389,11 @@ fn freeze_owner_isolation_at_filtered_result(state: &mut SyncState, filtered_res
     // filtered owner text so protocol-final fallback cannot restore that tail.
     state.best_transcript_text = candidate.text.clone();
     state.best_transcript_segments = candidate.timed_segments.clone();
+    state.best_untimed_window.clear();
     state.last_partial_text = candidate.text.clone();
     state.optimistic_preview_text = candidate.text;
     state.optimistic_preview_segments = candidate.timed_segments;
+    state.optimistic_untimed_window.clear();
     log::info!(
         "[asr] owner isolation froze at filtered stable utterances ceiling_chars={} reason=stable_same_cluster_owner_absence",
         state.owner_isolation_ceiling_text.chars().count()
@@ -2512,8 +2516,10 @@ impl VolcengineStreamingASR {
             st.last_partial_text.clear();
             st.best_transcript_text.clear();
             st.best_transcript_segments.clear();
+            st.best_untimed_window.clear();
             st.optimistic_preview_text.clear();
             st.optimistic_preview_segments.clear();
+            st.optimistic_untimed_window.clear();
             st.last_emitted_preview_text.clear();
             st.last_server_audio_duration_ms = None;
             st.target_speaker_id = None;
@@ -3084,11 +3090,13 @@ impl VolcengineStreamingASR {
                 });
             let optimistic_preview = {
                 let mut state = self.state.lock();
-                let (mut merged, segments) = merge_streaming_candidate(
-                    &state.optimistic_preview_text,
-                    &state.optimistic_preview_segments,
-                    optimistic_candidate,
-                );
+                let (mut merged, segments, untimed_window) =
+                    merge_streaming_candidate_with_untimed_window(
+                        &state.optimistic_preview_text,
+                        &state.optimistic_preview_segments,
+                        &state.optimistic_untimed_window,
+                        optimistic_candidate,
+                    );
                 merged = trim_repeated_short_streaming_tail(&merged);
                 let owner_preview_allowed = local_speaker_allows_optimistic_preview(&state);
                 let should_emit = owner_preview_allowed
@@ -3098,6 +3106,7 @@ impl VolcengineStreamingASR {
                 if !merged.trim().is_empty() && owner_preview_allowed {
                     state.optimistic_preview_text = merged.clone();
                     state.optimistic_preview_segments = segments.clone();
+                    state.optimistic_untimed_window = untimed_window;
                     // Only promote into best_transcript after the wake speaker is
                     // locally confirmed. Unlocked speakerless early text stays
                     // preview-only until that identity exists; session_committed
@@ -3290,11 +3299,14 @@ impl VolcengineStreamingASR {
         }
         let (full_text, partial_changed, preview_holds_endpoint) = {
             let mut state = self.state.lock();
-            let (mut merged, mut segments) = merge_streaming_candidate(
-                &state.best_transcript_text,
-                &state.best_transcript_segments,
-                candidate,
-            );
+            let (mut merged, mut segments, untimed_window) =
+                merge_streaming_candidate_with_untimed_window(
+                    &state.best_transcript_text,
+                    &state.best_transcript_segments,
+                    &state.best_untimed_window,
+                    candidate,
+                );
+            state.best_untimed_window = untimed_window;
             // A no-segment optimistic ledger can keep winning inside the
             // generic streaming merge before final fallback is considered.
             // Restore the incoming two-pass authority at this boundary when
@@ -3411,6 +3423,7 @@ impl VolcengineStreamingASR {
                 if !preserve_owner_preview && (!has_final || merged_len >= preview_len) {
                     state.optimistic_preview_text = merged.clone();
                     state.optimistic_preview_segments = state.best_transcript_segments.clone();
+                    state.optimistic_untimed_window.clear();
                 }
             }
             let preview_holds_endpoint = !has_final

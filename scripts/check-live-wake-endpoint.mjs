@@ -100,6 +100,7 @@ export function analyzeLiveWakeLog(text, options = {}) {
   const endpoints = new Map();
   const settledTargets = new Map();
   const previewLatencies = new Map();
+  const previewGrowth = new Map();
   const firmwareStopOrigins = new Map();
   const finalIntegrity = new Map();
   const completions = new Map();
@@ -145,6 +146,7 @@ export function analyzeLiveWakeLog(text, options = {}) {
           semanticContinuation: null,
           settledTargetToEndpointMs: null,
           previewLatencyMs: null,
+          previewInflationBursts: 0,
           providerFinalChars: null,
           resultFinalChars: null,
           ownerSafeRestore: null,
@@ -177,6 +179,39 @@ export function analyzeLiveWakeLog(text, options = {}) {
 
     const activeSession = /session_id=Some\(([0-9a-f-]{36})\).*\bble_start\b/.exec(line);
     if (activeSession) activeCoordinatorSessionId = activeSession[1];
+
+    const partial = /event=asr_partial\b.*\bchars=(\d+)/.exec(line);
+    if (partial && activeCoordinatorSessionId) {
+      const growth = previewGrowth.get(activeCoordinatorSessionId) ?? {
+        lastPreviewChars: null,
+        lastProviderChars: null,
+        pendingPreviewChars: null,
+        consecutiveInflation: 0,
+        maxConsecutiveInflation: 0,
+      };
+      growth.pendingPreviewChars = Number.parseInt(partial[1], 10);
+      previewGrowth.set(activeCoordinatorSessionId, growth);
+    }
+
+    if (line.includes('"has_final_frame":false') && activeCoordinatorSessionId) {
+      const providerChars = jsonIntegerField(line, "provider_result_chars");
+      const growth = previewGrowth.get(activeCoordinatorSessionId);
+      if (growth?.pendingPreviewChars !== null && providerChars !== null) {
+        if (growth.lastPreviewChars !== null && growth.lastProviderChars !== null) {
+          const previewDelta = growth.pendingPreviewChars - growth.lastPreviewChars;
+          const providerDelta = providerChars - growth.lastProviderChars;
+          const inflated = previewDelta >= 10 && previewDelta > Math.max(8, providerDelta + 8);
+          growth.consecutiveInflation = inflated ? growth.consecutiveInflation + 1 : 0;
+          growth.maxConsecutiveInflation = Math.max(
+            growth.maxConsecutiveInflation,
+            growth.consecutiveInflation,
+          );
+        }
+        growth.lastPreviewChars = growth.pendingPreviewChars;
+        growth.lastProviderChars = providerChars;
+        growth.pendingPreviewChars = null;
+      }
+    }
 
     if (line.includes("[asr] target-speaker state") && activeCoordinatorSessionId) {
       const pending = stringField(line, "pending_provisional");
@@ -283,6 +318,8 @@ export function analyzeLiveWakeLog(text, options = {}) {
       }
     }
     sample.previewLatencyMs = previewLatencies.get(coordinatorId) ?? null;
+    sample.previewInflationBursts =
+      previewGrowth.get(coordinatorId)?.maxConsecutiveInflation ?? 0;
     const integrity = finalIntegrity.get(coordinatorId);
     if (integrity) {
       sample.providerFinalChars = integrity.providerFinalChars;
@@ -342,6 +379,9 @@ export function analyzeLiveWakeLog(text, options = {}) {
     if (sample.wakeToCapsuleMs > thresholds.wakeMaxMs) sample.errors.push(`wake latency exceeds ${thresholds.wakeMaxMs} ms`);
     if (sample.phraseTailToCapsuleMs > thresholds.phraseTailMaxMs) sample.errors.push(`phrase-tail latency exceeds ${thresholds.phraseTailMaxMs} ms`);
     if (sample.previewLatencyMs > thresholds.previewMaxMs) sample.errors.push(`first preview latency exceeds ${thresholds.previewMaxMs} ms`);
+    if (sample.previewInflationBursts >= 2) {
+      sample.errors.push("streaming preview repeatedly outgrew the provider revision window");
+    }
     const hostAutomaticEndpoint = sample.endpointReason === "target_speaker_inactive_1000ms";
     const firmwareAutomaticEndpoint = sample.firmwareStopOrigin === "VoiceActivation";
     if (!hostAutomaticEndpoint && !firmwareAutomaticEndpoint) sample.errors.push("missing automatic endpoint evidence");

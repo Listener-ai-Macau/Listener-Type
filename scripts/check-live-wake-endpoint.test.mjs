@@ -32,6 +32,16 @@ function sampleLines(index, overrides = {}) {
   if (overrides.ownerSafeRestore) {
     lines.push(`${timestamp} [INFO] [asr] protocol final restores owner-safe provider text after diarization regression target_chars=${overrides.restoreTargetChars ?? 5} provider_chars=${overrides.restoreProviderChars ?? providerFinalChars}`);
   }
+  if (overrides.repeatedPreviewInflation) {
+    lines.push(
+      `${timestamp} [INFO] [timeline] event=asr_partial session_id=Some(${coordinatorId}) chars=46`,
+      `${timestamp} [INFO] [asr] authoritative_bidirectional server metadata: {"has_final_frame":false,"provider_result_chars":49,"result_chars":0}`,
+      `${timestamp} [INFO] [timeline] event=asr_partial session_id=Some(${coordinatorId}) chars=64`,
+      `${timestamp} [INFO] [asr] authoritative_bidirectional server metadata: {"has_final_frame":false,"provider_result_chars":50,"result_chars":0}`,
+      `${timestamp} [INFO] [timeline] event=asr_partial session_id=Some(${coordinatorId}) chars=86`,
+      `${timestamp} [INFO] [asr] authoritative_bidirectional server metadata: {"has_final_frame":false,"provider_result_chars":54,"result_chars":0}`,
+    );
+  }
   lines.push(
     `${timestamp} [INFO] [asr] authoritative_bidirectional server metadata: {"has_final_frame":true,"provider_result_chars":${providerFinalChars},"result_chars":${resultFinalChars}}`,
   );
@@ -133,6 +143,14 @@ test("rejects owner-safe provider tail restoration that shrinks again at final",
   }]])));
   assert.equal(report.status, "NO_GO");
   assert.match(report.failures.join("\n"), /owner-safe provider tail was not preserved/);
+});
+
+test("rejects repeated preview growth that outruns small provider window revisions", () => {
+  const report = analyzeLiveWakeLog(fixture(20, new Map([[5, {
+    repeatedPreviewInflation: true,
+  }]])));
+  assert.equal(report.status, "NO_GO");
+  assert.match(report.failures.join("\n"), /preview repeatedly outgrew the provider revision window/);
 });
 
 test("applies the stop-to-done requirement as p95 rather than an invented max", () => {

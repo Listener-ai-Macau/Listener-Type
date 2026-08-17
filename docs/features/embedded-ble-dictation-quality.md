@@ -16,6 +16,8 @@
 
 新增 10 个 table tests 覆盖：标点差异、空文本 fallback、单字符边界、JSON 数组解析等场景。总计 30 个 transcript 测试。
 
+无 utterance 时间戳时，`volcengine_untimed_merge.rs` 额外跟踪当前滚动窗口：第一次窗口移动按重叠续接，同一窗口的后续修订只替换尾窗，防止长句预览和最终插入重复膨胀；不重叠的新句仍正常追加。
+
 ### 2. BLE Smoke Report Schema
 
 Tai 固化了 `run_ble_stream_smoke.ps1` 输出字段分类（required / optional / diagnostic），文档在 `tools/embedded_audio_replay/README.md`。
@@ -40,6 +42,7 @@ Capsule.tsx 已改用共享常量，不再有硬编码魔法数字。
 | 变更 | 文件 |
 |------|------|
 | Transcript 合并纯函数 | `src-tauri/src/asr/volcengine_transcript.rs` |
+| 无时间戳滚动窗口合并 | `src-tauri/src/asr/volcengine_untimed_merge.rs` |
 | Transcript 合并测试 | 同上 `#[cfg(test)] mod tests` |
 | Volcengine session（瘦身） | `src-tauri/src/asr/volcengine.rs` |
 | 胶囊 Preview 规则 | `src/lib/capsulePreviewRules.ts` |

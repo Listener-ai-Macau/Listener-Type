@@ -11,6 +11,7 @@ pub mod local;
 pub mod volcengine;
 mod volcengine_platform;
 mod volcengine_transcript;
+mod volcengine_untimed_merge;
 pub mod wav;
 pub mod whisper;
 
