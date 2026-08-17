@@ -196,7 +196,7 @@ export function analyzeLiveWakeLog(text, options = {}) {
     if (line.includes('"has_final_frame":false') && activeCoordinatorSessionId) {
       const providerChars = jsonIntegerField(line, "provider_result_chars");
       const growth = previewGrowth.get(activeCoordinatorSessionId);
-      if (growth?.pendingPreviewChars !== null && providerChars !== null) {
+      if (growth && growth.pendingPreviewChars !== null && providerChars !== null) {
         if (growth.lastPreviewChars !== null && growth.lastProviderChars !== null) {
           const previewDelta = growth.pendingPreviewChars - growth.lastPreviewChars;
           const providerDelta = providerChars - growth.lastProviderChars;

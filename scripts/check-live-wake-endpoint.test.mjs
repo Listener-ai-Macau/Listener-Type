@@ -78,6 +78,20 @@ test("reports a clean short run as incomplete instead of pass", () => {
   assert.equal(report.failures.length, 0);
 });
 
+test("ignores continuation lines from a session that began before the cutoff", () => {
+  const beforeCutoff = sampleLines(0).slice(0, 3).join("\n");
+  const afterCutoff = [
+    "2026-08-12T12:01:00.000Z [INFO] [asr] authoritative_bidirectional server metadata: {\"has_final_frame\":false,\"provider_result_chars\":12,\"result_chars\":0}",
+    "2026-08-12T12:01:00.100Z [INFO] [timeline] event=asr_partial session_id=Some(00000000-0000-4000-8000-000000000000) chars=12",
+  ].join("\n");
+  const report = analyzeLiveWakeLog(`${beforeCutoff}\n${afterCutoff}`, {
+    after: "2026-08-12T12:00:30.000Z",
+  });
+  assert.equal(report.status, "INCOMPLETE");
+  assert.equal(report.sampleCount, 0);
+  assert.equal(report.failures.length, 0);
+});
+
 test("marks open-gate evidence without pretending it is enrolled-owner evidence", () => {
   const report = analyzeLiveWakeLog(fixture(1, new Map([[0, { openGate: true }]])));
   assert.equal(report.openGateSamples, 1);
