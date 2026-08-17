@@ -1699,7 +1699,7 @@ fn target_speaker_endpoint_requires_one_second_without_that_speaker() {
     ));
 
     let stale_non_target_classification = crate::asr::volcengine::TargetSpeakerUpdate {
-        local_non_target_speech_end_ms: Some(2_899),
+        local_non_target_speech_end_ms: Some(2_399),
         ..unresolved_recent_local.clone()
     };
     assert!(!super::target_speaker_endpoint_due(
@@ -2011,6 +2011,38 @@ fn target_speaker_endpoint_uses_local_clock_only_for_a_clean_provider_stall() {
     ));
     assert!(super::target_speaker_endpoint_due_with_provider_stall(
         &confirmed_other_without_local_target,
+        true,
+        1_000,
+    ));
+
+    // Installed session 1831: the provider froze at 8.9 s after the owner had
+    // ended at 7.4 s. The overlapping local verifier confirmed the continuing
+    // room speaker at 13.9 s while the newer VAD edge was already about 14.3 s.
+    // One verifier cadence of measurement lag must still count as confirmed
+    // other-speaker activity, otherwise the stalled cloud clock holds recording
+    // open until the user clicks stop.
+    let installed_interferer_with_classifier_lag = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(7_402),
+        provider_audio_duration_ms: Some(8_900),
+        audio_duration_ms: Some(14_300),
+        local_speech_end_ms: Some(14_300),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: Some(13_900),
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(8_562),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    assert!(super::provider_stall_local_endpoint_due(
+        &installed_interferer_with_classifier_lag,
+        true,
+        1_000,
+    ));
+    assert!(super::target_speaker_endpoint_due_with_provider_stall(
+        &installed_interferer_with_classifier_lag,
         true,
         1_000,
     ));

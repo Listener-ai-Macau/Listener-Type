@@ -100,7 +100,14 @@ fn target_speaker_inactive_stop_reason(timeout_ms: u64) -> &'static str {
 const EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS: u64 = 3_000;
 const EMBEDDED_TERMINAL_WAKE_CONTINUATION_TTL: Duration = Duration::from_secs(6);
 const EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS: u64 = 200;
-const EMBEDDED_LOCAL_SPEAKER_CLASSIFICATION_SLACK_MS: u64 = 100;
+// The local speaker verifier runs on overlapping windows and reports roughly
+// every 400 ms. Its classified audio edge therefore legitimately trails the
+// newest VAD speech edge by one cadence. Installed multi-speaker session 1831
+// had a confirmed NonTarget edge at 13.9 s while the live speech clock was
+// already near 14.3 s; the former 100 ms allowance treated that sustained room
+// speaker as unclassified owner speech and disabled provider-stall auto-end.
+// Keep this below two verifier cadences so stale evidence still expires.
+const EMBEDDED_LOCAL_SPEAKER_CLASSIFICATION_SLACK_MS: u64 = 600;
 // F4（2026-08-09 12:47:04）：旁人连续说话时未归属本地语音不断前进，会把
 // 自动结束无限挂起。挂起以最后一次归属语音 +6s 封顶；本人正常说话的分类
 // 滞后远小于 6s，不受影响。
