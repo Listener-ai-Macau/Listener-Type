@@ -4,6 +4,7 @@ import {
   PREVIEW_FINAL_TRANSITION,
   LAYOUT_RULES,
   PREVIEW_BURST_REVEAL,
+  previewRevealIntervalMs,
   CAPSULE_APPEARANCE,
   buildPreviewRevealFrames,
   shouldShowStopAcknowledgement,
@@ -156,6 +157,17 @@ assertEqual(
   1,
   'short append should apply immediately',
 );
+
+{
+  const frames = buildPreviewRevealFrames('预览', '预览文字');
+  assertEqual(frames.length, 2, 'two appended characters should reveal separately');
+  const intervalMs = previewRevealIntervalMs(frames.length);
+  assertOk(intervalMs >= 16, 'reveal interval must remain visible for at least one frame');
+  assertOk(
+    intervalMs * (frames.length - 1) <= PREVIEW_BURST_REVEAL.maxCatchUpMs,
+    'reveal must catch up within the bounded latency budget',
+  );
+}
 
 {
   const current = '你好';

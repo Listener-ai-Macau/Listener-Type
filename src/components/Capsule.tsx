@@ -13,6 +13,7 @@ import { getCapsuleDisplayMessage } from '../lib/capsuleDisplayMessage';
 import {
   buildPreviewRevealFrames,
   CAPSULE_APPEARANCE,
+  previewRevealIntervalMs,
   truncatePreview,
   PREVIEW_FINAL_TRANSITION,
   shouldShowStopAcknowledgement,
@@ -541,7 +542,7 @@ export function Capsule() {
   const previewTargetRef = useRef<string | undefined>(DEV_CAPSULE_PREVIEW_MESSAGE);
   const previewSessionIdRef = useRef<string | null>(null);
   const previewRevealFramesRef = useRef<string[]>([]);
-  const previewRevealFrameRef = useRef<number | null>(null);
+  const previewRevealFrameRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const capsuleOrderingRef = useRef(createCapsuleOrderingTracker());
   const capsuleIngressTraceRef = useRef<{
     elapsedMs: number;
@@ -589,7 +590,7 @@ export function Capsule() {
 
   const clearPreviewRevealFrame = () => {
     if (previewRevealFrameRef.current !== null) {
-      cancelAnimationFrame(previewRevealFrameRef.current);
+      clearTimeout(previewRevealFrameRef.current);
       previewRevealFrameRef.current = null;
     }
     previewRevealFramesRef.current = [];
@@ -605,16 +606,17 @@ export function Capsule() {
   };
 
   const schedulePreviewReveal = () => {
+    const intervalMs = previewRevealIntervalMs(previewRevealFramesRef.current.length + 1);
     const revealNextFrame = () => {
       previewRevealFrameRef.current = null;
       const next = previewRevealFramesRef.current.shift();
       if (next !== undefined) commitMessage(next);
       if (previewRevealFramesRef.current.length > 0) {
-        previewRevealFrameRef.current = requestAnimationFrame(revealNextFrame);
+        previewRevealFrameRef.current = setTimeout(revealNextFrame, intervalMs);
       }
     };
     if (previewRevealFramesRef.current.length > 0) {
-      previewRevealFrameRef.current = requestAnimationFrame(revealNextFrame);
+      previewRevealFrameRef.current = setTimeout(revealNextFrame, intervalMs);
     }
   };
 

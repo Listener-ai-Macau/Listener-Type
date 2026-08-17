@@ -55,10 +55,17 @@ export const PREVIEW_DEDUP_POLICY = 'exact-match' as const;
  * only that visual append into a bounded number of rendering frames.
  */
 export const PREVIEW_BURST_REVEAL = {
-  minimumAppendChars: 3,
+  minimumAppendChars: 2,
   maxFrames: 8,
   maxCatchUpMs: 160,
 } as const;
+
+/** Space reveal frames across the existing catch-up budget instead of
+ * consuming them at display refresh rate, which still looks like one burst. */
+export function previewRevealIntervalMs(frameCount: number): number {
+  if (frameCount <= 1) return 0;
+  return Math.max(16, Math.floor(PREVIEW_BURST_REVEAL.maxCatchUpMs / frameCount));
+}
 
 /** The wake capsule is visible immediately; only its geometry settles. */
 export const CAPSULE_APPEARANCE = {
