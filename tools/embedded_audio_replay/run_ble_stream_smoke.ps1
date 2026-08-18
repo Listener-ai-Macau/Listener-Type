@@ -1066,6 +1066,9 @@ function Measure-SourceCaptureCoupling {
                     $right.Add($capture.values[$captureIndex])
                 }
             }
+            if ($left.Count -lt 8) {
+                continue
+            }
             $correlation = Get-PearsonCorrelation -Left ([double[]]$left.ToArray()) -Right ([double[]]$right.ToArray())
             if ($null -ne $correlation -and $correlation -gt $bestCorrelation) {
                 $bestCorrelation = $correlation
@@ -2861,6 +2864,7 @@ if (-not $WavPath) {
     $WavPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.wav"
 }
 $WavPath = Resolve-RepoPath $WavPath
+$ttsLeadingSilenceAppliedMs = 0
 if (-not (Test-Path $WavPath)) {
     if ($SilentAudio) {
         New-SilenceWave -Path $WavPath -DurationMs $SilentAudioMs
@@ -2868,6 +2872,7 @@ if (-not (Test-Path $WavPath)) {
         New-TtsWave -Text $Sentence -Path $WavPath -PreferredVoice $VoiceName -Rate $TtsRate
         Boost-WavPcm16 -Path $WavPath -Gain $TtsGain
         Add-WavPcm16LeadingSilence -Path $WavPath -DurationMs $TtsLeadingSilenceMs
+        $ttsLeadingSilenceAppliedMs = $TtsLeadingSilenceMs
     }
 }
 Write-SmokeTrace "wav_ready path=$WavPath sentence=$Sentence profile=$AudioProfile rate=$TtsRate gain=$TtsGain silent=$([bool]$SilentAudio)"
@@ -3595,7 +3600,7 @@ try {
         wav_path = $WavPath
         tts_rate = $TtsRate
         tts_gain = $TtsGain
-        tts_leading_silence_ms = $TtsLeadingSilenceMs
+        tts_leading_silence_ms = $ttsLeadingSilenceAppliedMs
         random_sentence_count = $RandomSentenceCount
         silent_audio = [bool]$SilentAudio
         silent_audio_ms = $SilentAudioMs
@@ -3735,7 +3740,7 @@ try {
         wav_path = $WavPath
         tts_rate = $TtsRate
         tts_gain = $TtsGain
-        tts_leading_silence_ms = $TtsLeadingSilenceMs
+        tts_leading_silence_ms = $ttsLeadingSilenceAppliedMs
         random_sentence_count = $RandomSentenceCount
         silent_audio = [bool]$SilentAudio
         silent_audio_ms = $SilentAudioMs
