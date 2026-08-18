@@ -70,7 +70,10 @@ const EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS: u64 = 2_500;
 const EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS: u64 = 900;
 const EMBEDDED_SETTLED_TARGET_SCHEDULING_ALLOWANCE_MS: u64 =
     EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS - EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS;
-const EMBEDDED_DANGLING_FIRMWARE_KEEPALIVE_INTERVAL_MS: u64 = 800;
+// Leave enough room for the BLE command's 300ms acknowledgement timeout before
+// firmware reaches its fixed 1.0s silence fallback. At 800ms the worst case was
+// 1.1s, so a valid paused continuation could still lose the race and be cut.
+const EMBEDDED_DANGLING_FIRMWARE_KEEPALIVE_INTERVAL_MS: u64 = 600;
 // Installed session 72519330: wake capsule → ~1.2s host auto-end on the wake
 // clock with empty body → "没有识别到语音". Initial body wait is only 700ms, so
 // 1.0s snappy endpoint after that treats "thinking after wake" as done. Keep

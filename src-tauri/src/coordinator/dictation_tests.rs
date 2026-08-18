@@ -1741,6 +1741,12 @@ fn settled_target_wall_clock_keeps_scheduling_allowance_below_public_endpoint() 
 
 #[test]
 fn dangling_continuation_gets_bounded_pause_without_slowing_complete_text() {
+    assert!(
+        super::EMBEDDED_DANGLING_FIRMWARE_KEEPALIVE_INTERVAL_MS
+            + (super::EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT.as_millis() as u64)
+            < super::EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+        "firmware keepalive must finish before its one-second silence fallback"
+    );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("我先看一下，然后")),
         super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
