@@ -40,38 +40,75 @@ function Read-AppendedLogText {
         [long]$Offset
     )
 
-    $stream = [System.IO.FileStream]::new(
-        $Path,
-        [System.IO.FileMode]::Open,
-        [System.IO.FileAccess]::Read,
-        [System.IO.FileShare]::ReadWrite
-    )
     try {
-        if ($stream.Length -le $Offset) {
-            return ''
+        $stream = [System.IO.FileStream]::new(
+            $Path,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
+            ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
+        )
+        try {
+            if ($stream.Length -le $Offset) {
+                return ''
+            }
+            [void]$stream.Seek($Offset, [System.IO.SeekOrigin]::Begin)
+            $remaining = [int]($stream.Length - $Offset)
+            $buffer = [byte[]]::new($remaining)
+            $read = $stream.Read($buffer, 0, $remaining)
+            return [System.Text.Encoding]::UTF8.GetString($buffer, 0, $read)
         }
-        [void]$stream.Seek($Offset, [System.IO.SeekOrigin]::Begin)
-        $remaining = [int]($stream.Length - $Offset)
-        $buffer = [byte[]]::new($remaining)
-        $read = $stream.Read($buffer, 0, $remaining)
-        return [System.Text.Encoding]::UTF8.GetString($buffer, 0, $read)
+        finally {
+            $stream.Dispose()
+        }
     }
-    finally {
-        $stream.Dispose()
+    catch [System.IO.IOException] {
+        # Listener can rotate or reopen its log between timer ticks. Treat that
+        # as a transient empty read; the 100 ms timer will retry without
+        # surfacing a WinForms unhandled-exception dialog to the operator.
+        return ''
     }
 }
 
 function Get-LatestFrontendCapsuleState {
-    $text = [System.IO.File]::ReadAllText($resolvedLogPath)
-    $matches = [regex]::Matches(
-        $text,
-        'source=frontend\.capsule event=event_received state=(recording|transcribing|polishing|done|error|idle)',
-        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
-    )
-    if ($matches.Count -eq 0) {
+    try {
+        $logLength = ([System.IO.FileInfo]::new($resolvedLogPath)).Length
+    }
+    catch [System.IO.IOException] {
         return 'unknown'
     }
-    return $matches[$matches.Count - 1].Groups[1].Value.ToLowerInvariant()
+    $tailBytes = 256KB
+    $tailOffset = [Math]::Max(0L, $logLength - $tailBytes)
+    $text = Read-AppendedLogText -Path $resolvedLogPath -Offset $tailOffset
+    $statePattern =
+        'source=frontend\.capsule event=event_received state=(recording|transcribing|polishing|done|error|idle)'
+    $matches = [regex]::Matches(
+        $text,
+        $statePattern,
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+    )
+    if ($matches.Count -gt 0) {
+        $script:lastKnownCapsuleState =
+            $matches[$matches.Count - 1].Groups[1].Value.ToLowerInvariant()
+        return $script:lastKnownCapsuleState
+    }
+
+    # A noisy room can append megabytes of rejected wake candidates after the
+    # last capsule transition. On the first lookup only, fall back to the whole
+    # log so the operator still starts from the real latest state. Later timer
+    # ticks reuse that state and only inspect the bounded tail above.
+    if ($script:lastKnownCapsuleState -eq 'unknown' -and $tailOffset -gt 0) {
+        $fullText = Read-AppendedLogText -Path $resolvedLogPath -Offset 0
+        $matches = [regex]::Matches(
+            $fullText,
+            $statePattern,
+            [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+        )
+        if ($matches.Count -gt 0) {
+            $script:lastKnownCapsuleState =
+                $matches[$matches.Count - 1].Groups[1].Value.ToLowerInvariant()
+        }
+    }
+    return $script:lastKnownCapsuleState
 }
 
 function Write-MarkerArtifact {
@@ -99,6 +136,7 @@ $script:roundSettleAt = $null
 $script:roundLogOffset = 0L
 $script:roundCandidateId = $null
 $script:startedAt = [DateTime]::UtcNow.ToString('o')
+$script:lastKnownCapsuleState = 'unknown'
 
 $form = [System.Windows.Forms.Form]::new()
 $form.Text = 'Listener 唤醒验收'

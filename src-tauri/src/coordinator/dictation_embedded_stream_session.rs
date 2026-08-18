@@ -2,6 +2,43 @@
 // Included into `coordinator::dictation` via `include!`.
 
 impl EmbeddedStreamingDictation {
+    fn background_listener() -> Self {
+        Self {
+            keep_listening_after_pipeline_errors: true,
+            ..Self::default()
+        }
+    }
+
+    async fn handle_notification(
+        &mut self,
+        inner: &Arc<Inner>,
+        notification: &[u8],
+    ) -> Result<bool, String> {
+        let event = self
+            .collector
+            .handle_notification(notification)
+            .map_err(|err| format!("嵌入式音频流式包解析失败: {err}"))?;
+        self.handle_ble_packet_actor_command(inner, event).await
+    }
+
+    async fn handle_ble_packet_actor_command(
+        &mut self,
+        inner: &Arc<Inner>,
+        event: crate::embedded_audio::StreamingSessionEvent,
+    ) -> Result<bool, String> {
+        let event_detail = embedded_ble_session_event_detail(&event);
+        let trace_timeline = embedded_ble_session_event_should_trace(&event);
+        dispatch_embedded_ble_session_actor_command_with_trace(
+            inner,
+            EmbeddedBleSessionActorCommand::BlePacket,
+            self.session.as_ref().map(|session| session.session_id),
+            event_detail,
+            trace_timeline,
+            |_| (),
+        );
+        self.apply_ble_packet_actor_command(inner, event).await
+    }
+
     async fn begin_session_if_needed(
         &mut self,
         inner: &Arc<Inner>,

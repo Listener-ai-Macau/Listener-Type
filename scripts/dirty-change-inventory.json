@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-17",
+  "updated_at": "2026-08-18",
   "purpose": "Classifies every current dirty Listener Type/Firmware path while the 1.0.5 recording, wake, endpoint, and release refinement is in progress. Release gates still require clean worktrees; this inventory prevents mystery dirty changes during focused repair/review.",
   "entries": [
     {
@@ -79,20 +79,27 @@
         ".cache/validation/preproduction-human-review-20260710-094721/preproduction-human-review-summary.json",
         ".cache/validation/preproduction-human-review-20260710-094721/preproduction-operator-note-triage.json",
         "npm run check:recording-latency PASS",
-        "npm run check:performance-baselines PASS"
+        "npm run check:performance-baselines PASS",
+        "cargo test: 1167 tests, 1141 passed, 26 ignored, 0 failed",
+        "20 target-speaker overlap cases PASS with minimum owner recall 1.0 and maximum contamination 0.0"
       ],
       "patterns": [
         "scripts/check-embedded-ble-processing-led.mjs",
         "scripts/check-recording-low-latency-regression.mjs",
         "scripts/check-live-wake-endpoint.mjs",
         "scripts/check-live-wake-endpoint.test.mjs",
+        "scripts/run-target-speaker-overlap-regressions.mjs",
+        "scripts/show-live-wake-acceptance.ps1",
+        "scripts/show-live-wake-acceptance.test.mjs",
         "scripts/check-volcengine-low-latency-preview.mjs",
         "src-tauri/src/asr/*.rs",
         "src-tauri/src/cli.rs",
         "src-tauri/src/coordinator.rs",
         "src-tauri/src/coordinator/dictation.rs",
         "src-tauri/src/coordinator/dictation_endpoint_clock.rs",
+        "src-tauri/src/coordinator/dictation_wake_prefix_retry.rs",
         "src-tauri/src/coordinator/dictation_preview.rs",
+        "src-tauri/src/coordinator/dictation_embedded_stream_session.rs",
         "src-tauri/src/coordinator/dictation_embedded_stream_completion.rs",
         "src-tauri/src/coordinator/hotkey_device_runtime.rs",
         "src-tauri/src/embedded_ble.rs",

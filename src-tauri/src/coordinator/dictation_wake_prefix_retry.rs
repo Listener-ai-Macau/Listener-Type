@@ -121,6 +121,25 @@ fn record_local_confirmation_absent(
         confirmation.transcript_chars,
         phrase_chars,
     );
+    if !prefix_retry
+        && overlap_degraded_owner_phrase_evidence(
+            confirmation,
+            phrase_chars,
+            task_origin_bytes,
+        )
+    {
+        candidate.local_owner_overlap_near_confirmations = candidate
+            .local_owner_overlap_near_confirmations
+            .saturating_add(1);
+        log::info!(
+            "[wake-phrase] overlap-degraded owner phrase evidence embedded_session_id={} count={}/{} prefix_units={} distance={}",
+            embedded_session_id,
+            candidate.local_owner_overlap_near_confirmations,
+            OWNER_OVERLAP_NEAR_CONFIRMATIONS_REQUIRED,
+            confirmation.phonetic_prefix_units,
+            confirmation.phonetic_best_distance
+        );
+    }
     candidate.local_kws_fusion_evidence |= phonetic_near;
     if !prefix_retry {
         candidate.local_absent_count = candidate.local_absent_count.saturating_add(1);

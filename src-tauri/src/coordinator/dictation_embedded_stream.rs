@@ -2,43 +2,6 @@
 // Included into `coordinator::dictation` via `include!`.
 
 impl EmbeddedStreamingDictation {
-    fn background_listener() -> Self {
-        Self {
-            keep_listening_after_pipeline_errors: true,
-            ..Self::default()
-        }
-    }
-
-    async fn handle_notification(
-        &mut self,
-        inner: &Arc<Inner>,
-        notification: &[u8],
-    ) -> Result<bool, String> {
-        let event = self
-            .collector
-            .handle_notification(notification)
-            .map_err(|err| format!("嵌入式音频流式包解析失败: {err}"))?;
-        self.handle_ble_packet_actor_command(inner, event).await
-    }
-
-    async fn handle_ble_packet_actor_command(
-        &mut self,
-        inner: &Arc<Inner>,
-        event: crate::embedded_audio::StreamingSessionEvent,
-    ) -> Result<bool, String> {
-        let event_detail = embedded_ble_session_event_detail(&event);
-        let trace_timeline = embedded_ble_session_event_should_trace(&event);
-        dispatch_embedded_ble_session_actor_command_with_trace(
-            inner,
-            EmbeddedBleSessionActorCommand::BlePacket,
-            self.session.as_ref().map(|session| session.session_id),
-            event_detail,
-            trace_timeline,
-            |_| (),
-        );
-        self.apply_ble_packet_actor_command(inner, event).await
-    }
-
     async fn apply_ble_packet_actor_command(
         &mut self,
         inner: &Arc<Inner>,
@@ -461,6 +424,7 @@ impl EmbeddedStreamingDictation {
                 kws_local_absent_count: 0,
                 local_absent_count: 0,
                 local_kws_fusion_evidence: false,
+                local_owner_overlap_near_confirmations: 0,
                 #[cfg(target_os = "windows")]
                 local_absent_coverage: None,
                 kws_first_hit_at: None,
@@ -872,7 +836,7 @@ impl EmbeddedStreamingDictation {
             if let Some((result, _, _)) = terminal_completed_local_confirmation.as_ref() {
                 local_confirmation_ms = local_confirmation_ms.saturating_add(result.inference_ms);
             }
-            let wake_match = match wake_match.map(|found| {
+            let mut wake_match = match wake_match.map(|found| {
                 offset_streaming_wake_match(found, stream_origin_bytes)
             }) {
                 Ok(Some(found)) => {
@@ -1274,6 +1238,28 @@ impl EmbeddedStreamingDictation {
                     return Ok(true);
                 }
             };
+            if wake_match.is_none()
+                && enrolled_owner_repeated_overlap_near_can_accept(
+                    enrolled_owner_matched,
+                    candidate.local_owner_overlap_near_confirmations,
+                )
+            {
+                // Mono overlap cannot reconstruct the missing two characters,
+                // so recover only after three expanding, start-aligned local
+                // confirmations agree on the phrase prefix and the persistent
+                // enrolled voiceprint independently identifies the owner.
+                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                wake_match = Some(crate::wake_phrase::Match {
+                    end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
+                    matched_keyword: None,
+                });
+                log::info!(
+                    "[wake-phrase] terminal enrolled owner recovered overlap-degraded phrase embedded_session_id={} confirmations={} end_s={:.3}",
+                    embedded_session_id,
+                    candidate.local_owner_overlap_near_confirmations,
+                    LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS
+                );
+            }
             let total_ms = candidate
                 .kws_total_ms
                 .saturating_add(local_confirmation_ms)
@@ -1670,6 +1656,7 @@ impl EmbeddedStreamingDictation {
                         candidate.kws_first_hit_at.is_some(),
                         candidate.local_confirmation_window_origin_bytes,
                         stream_origin_bytes,
+                        candidate.local_confirmation_attempts,
                     ) {
                         candidate.local_confirmation_window_origin_bytes = stream_origin_bytes;
                         candidate.local_confirmation_attempts = 0;

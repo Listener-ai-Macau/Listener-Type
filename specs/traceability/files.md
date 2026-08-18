@@ -67,6 +67,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/run-multi-speaker-timeline-regressions.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-recording-consumption-physical-validation.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-speaker-verification-evaluation.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/run-target-speaker-overlap-regressions.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-v1.0.2-regression.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-live-wake-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-live-wake-acceptance.test.mjs` | Automation and audits | Node/PowerShell script tests |

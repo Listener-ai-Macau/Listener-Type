@@ -56,6 +56,13 @@ const EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT: Duration = Duration::from_millis(300
 // different speeds. Only the wake/target speaker's latest speech refreshes this
 // clock, so other people talking still cannot lengthen auto-end.
 const EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS: u64 = 1_000;
+// A settled-text timer shares the async runtime with BLE and ASR callbacks.
+// Arm it slightly before the public one-second endpoint so ordinary Windows
+// scheduling jitter still dispatches at about 1.0 s (live 577 measured
+// 1,141 ms from a nominal 1,000 ms timer; live 578 lost the race to firmware).
+// The stop reason and provider/audio-clock policy remain the one-second
+// contract; only this wall-clock wake-up receives the scheduling allowance.
+const EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS: u64 = 900;
 // Installed session 72519330: wake capsule → ~1.2s host auto-end on the wake
 // clock with empty body → "没有识别到语音". Initial body wait is only 700ms, so
 // 1.0s snappy endpoint after that treats "thinking after wake" as done. Keep
@@ -1073,6 +1080,7 @@ fn set_volcengine_preview_callbacks(
 ) {
     let stop_dispatched = Arc::new(AtomicBool::new(false));
     let endpoint_clock = Arc::new(Mutex::new(SettledTargetEndpointClock::default()));
+    start_settled_target_endpoint_watchdog(inner, session_id, &stop_dispatched, &endpoint_clock);
 
     let inner_for_stream = Arc::clone(inner);
     let stop_for_stream = Arc::clone(&stop_dispatched);
@@ -1115,7 +1123,7 @@ fn set_volcengine_preview_callbacks(
         let (settled_wall_clock_due, generation) = {
             let mut clock = clock_for_speaker.lock();
             let generation = clock.observe(&update, body_started, now);
-            let due = clock.is_due(now, EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS);
+            let due = clock.is_due(now, EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS);
             (due, generation)
         };
         handle_target_speaker_update(

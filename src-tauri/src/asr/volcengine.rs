@@ -341,8 +341,17 @@ struct SyncState {
     local_speech_end_ms: Option<u64>,
     local_target_speech_end_ms: Option<u64>,
     local_non_target_speech_end_ms: Option<u64>,
+    /// Endpoint-grade owner-absence boundary. This advances only after a
+    /// low-score run has persisted long enough to distinguish a continuing
+    /// second speaker from the real owner's two-window cross-phrase dip.
+    local_sustained_non_target_speech_end_ms: Option<u64>,
     local_speaker_classification: Option<crate::speaker_verification::SessionSpeakerClassification>,
     local_speaker_tracking_enabled: bool,
+    /// The automatic wake gate already matched the persisted owner voiceprint.
+    /// Keep this separate from `local_target_confirmed`: the former identifies
+    /// the wake speaker, while the latter requires a positive body-window match
+    /// and remains the stricter authority for refreshing the owner endpoint.
+    local_wake_owner_verified: bool,
     /// True when the session identity was inferred from the short wake audio
     /// instead of a user-enrolled voiceprint. This profile is useful as a hint,
     /// but is not reliable enough to erase provider-recognized dictation.
@@ -355,6 +364,8 @@ struct SyncState {
     /// very-low-score windows may still mark current speech as another person
     /// for endpointing, but must never freeze/delete provider-recognized text.
     local_consecutive_strong_non_target: u8,
+    local_owner_absence_run_started_ms: Option<u64>,
+    local_owner_absence_run_confirmed: bool,
     local_speaker_evidence: Vec<LocalSpeakerEvidence>,
     wake_speaker_phrase: Option<String>,
     speaker_info_present: bool,
@@ -379,6 +390,10 @@ const LOCAL_SPEAKER_SWITCH_CONFIRMATIONS: u8 = 2;
 const LOCAL_SPEAKER_EVIDENCE_LIMIT: usize = 64;
 const LOCAL_SPEAKER_WINDOW_MS: u64 = 1_200;
 const LOCAL_ENDPOINT_STRONG_NON_TARGET_MAX_SCORE: f32 = 0.20;
+const LOCAL_ENDPOINT_OWNER_ABSENCE_CONTINUATION_MAX_SCORE: f32 = 0.30;
+// Three 400 ms overlapping low-score observations are enough to distinguish
+// sustained other speech from the two-window startup dip seen in session 2024.
+const LOCAL_ENDPOINT_OWNER_ABSENCE_MIN_RUN_MS: u64 = 800;
 // A cloud speaker id can collapse two real people into the same cluster. Do
 // not trust that id for a later stable utterance when the local verifier saw a
 // sustained owner-absence run over the whole utterance. Keep this deliberately
@@ -416,7 +431,10 @@ fn target_speaker_update_from_state(
         audio_duration_ms: latest_audio_duration_ms(state),
         local_speech_end_ms: state.local_speech_end_ms,
         local_target_speech_end_ms: state.local_target_speech_end_ms,
-        local_non_target_speech_end_ms: state.local_non_target_speech_end_ms,
+        // Keep transcript filtering's immediate advisory boundary private.
+        // Endpointing sees only the sustained owner-absence boundary so the
+        // installed session-2024 two-window owner dip cannot stop recording.
+        local_non_target_speech_end_ms: state.local_sustained_non_target_speech_end_ms,
         local_speaker_tracking_enabled: state.local_speaker_tracking_enabled,
         stable_attributed_speech_end_ms: state.stable_attributed_speech_end_ms,
         target_activity_advanced,
@@ -1247,6 +1265,24 @@ fn local_evidence_confirms_owner_absence(
     evidence: &[LocalSpeakerEvidence],
     wake_speaker_phrase: Option<&str>,
 ) -> bool {
+    local_evidence_confirms_owner_absence_with_verified_wake(
+        utterance,
+        evidence,
+        wake_speaker_phrase,
+        false,
+        false,
+        None,
+    )
+}
+
+fn local_evidence_confirms_owner_absence_with_verified_wake(
+    utterance: &Value,
+    evidence: &[LocalSpeakerEvidence],
+    wake_speaker_phrase: Option<&str>,
+    wake_owner_verified: bool,
+    local_speaker_profile_adaptive: bool,
+    confirmed_non_target_speech_end_ms: Option<u64>,
+) -> bool {
     let Some(end_ms) = utterance_end_ms(utterance) else {
         return false;
     };
@@ -1277,6 +1313,20 @@ fn local_evidence_confirms_owner_absence(
                 crate::speaker_verification::SessionSpeakerClassification::Target { .. }
             )
     });
+    // The wake gate is already a positive persisted-owner observation, but it
+    // must not by itself delete later text: cross-phrase scores can be low for
+    // the real owner.  Promote it to owner-absence authority only when the
+    // enrolled (non-adaptive) body verifier also produced two consecutive
+    // <=0.20 NonTarget windows inside this exact provider utterance.  Three
+    // overlapping <=0.30 samples below then form the independent duration
+    // check. This recovers the installed failure where another person reused
+    // cloud speaker 0 without requiring a lucky positive body-window first.
+    let confirmed_non_target_overlaps_utterance = wake_owner_verified
+        && !local_speaker_profile_adaptive
+        && confirmed_non_target_speech_end_ms.is_some_and(|audio_end_ms| {
+            let sample_center_ms = audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+            sample_center_ms >= start_ms && sample_center_ms <= end_ms
+        });
     let mut overlap_count = 0u32;
     let mut target_votes = 0u32;
     let mut owner_absence_votes = 0u32;
@@ -1312,7 +1362,7 @@ fn local_evidence_confirms_owner_absence(
     if wake_anchored_utterance {
         return false;
     }
-    session_has_stable_target
+    (session_has_stable_target || confirmed_non_target_overlaps_utterance)
         && overlap_count > 0
         && target_votes == 0
         && owner_absence_votes >= LOCAL_OWNER_ABSENCE_CONFIRMATIONS
@@ -1480,6 +1530,54 @@ fn utterance_belongs_to_target(
         })
 }
 
+fn utterance_belongs_to_verified_target(
+    utterance: &Value,
+    target_speaker_id: &str,
+    local_speaker_tracking_enabled: bool,
+    local_speaker_evidence: &[LocalSpeakerEvidence],
+    wake_speaker_phrase: Option<&str>,
+    wake_speaker_end_ms: Option<u64>,
+    allow_immediate_wake_continuation: bool,
+    wake_owner_verified: bool,
+    local_speaker_profile_adaptive: bool,
+    confirmed_non_target_speech_end_ms: Option<u64>,
+) -> bool {
+    let baseline_belongs = utterance_belongs_to_target(
+        utterance,
+        target_speaker_id,
+        local_speaker_tracking_enabled,
+        local_speaker_evidence,
+        wake_speaker_phrase,
+        wake_speaker_end_ms,
+        allow_immediate_wake_continuation,
+    );
+    let verified_wake_anchor_belongs = !baseline_belongs
+        && wake_owner_verified
+        && utterance_speaker_id(utterance).as_deref() == Some(target_speaker_id)
+        && wake_speaker_phrase.is_some_and(|phrase| {
+            let normalized_phrase = phrase
+                .chars()
+                .filter(|ch| ch.is_alphanumeric())
+                .collect::<String>();
+            utterance_contains_normalized_phrase(utterance, &normalized_phrase)
+        });
+    if !baseline_belongs && !verified_wake_anchor_belongs {
+        return false;
+    }
+    // Cloud can reuse the owner's speaker id for the next real person. The
+    // verified-wake path supplies the missing identity authority, while the
+    // sustained per-utterance low-score checks keep ordinary owner dips safe.
+    !(utterance_speaker_id(utterance).as_deref() == Some(target_speaker_id)
+        && local_evidence_confirms_owner_absence_with_verified_wake(
+            utterance,
+            local_speaker_evidence,
+            wake_speaker_phrase,
+            wake_owner_verified,
+            local_speaker_profile_adaptive,
+            confirmed_non_target_speech_end_ms,
+        ))
+}
+
 fn filter_result_to_target_speaker_with_local_evidence(
     result: &Value,
     target_speaker_id: &mut Option<String>,
@@ -1494,6 +1592,9 @@ fn filter_result_to_target_speaker_with_local_evidence(
         local_speaker_evidence,
         wake_speaker_phrase,
         None,
+        false,
+        false,
+        None,
     )
 }
 
@@ -1504,6 +1605,9 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
     local_speaker_evidence: &[LocalSpeakerEvidence],
     wake_speaker_phrase: Option<&str>,
     prior_wake_speaker_end_ms: Option<u64>,
+    wake_owner_verified: bool,
+    local_speaker_profile_adaptive: bool,
+    confirmed_non_target_speech_end_ms: Option<u64>,
 ) -> SpeakerFilteredResult {
     let mut filtered_result = result.clone();
     let utterances = result
@@ -1582,7 +1686,7 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
             utterances
                 .iter()
                 .filter(|utterance| {
-                    utterance_belongs_to_target(
+                    utterance_belongs_to_verified_target(
                         utterance,
                         target,
                         local_speaker_tracking_enabled,
@@ -1590,6 +1694,9 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
                         wake_speaker_phrase,
                         wake_speaker_end_ms,
                         allow_immediate_wake_continuation,
+                        wake_owner_verified,
+                        local_speaker_profile_adaptive,
+                        confirmed_non_target_speech_end_ms,
                     )
                 })
                 .cloned()
@@ -1627,7 +1734,7 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
         utterances.iter().any(|utterance| {
             utterance_is_stable(utterance)
                 && utterance_speaker_id(utterance).is_some()
-                && !utterance_belongs_to_target(
+                && !utterance_belongs_to_verified_target(
                     utterance,
                     target,
                     local_speaker_tracking_enabled,
@@ -1635,6 +1742,9 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
                     wake_speaker_phrase,
                     wake_speaker_end_ms,
                     allow_immediate_wake_continuation,
+                    wake_owner_verified,
+                    local_speaker_profile_adaptive,
+                    confirmed_non_target_speech_end_ms,
                 )
         })
     });
@@ -1648,10 +1758,13 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
             utterances.iter().any(|utterance| {
                 utterance_is_stable(utterance)
                     && utterance_speaker_id(utterance).as_deref() == Some(target)
-                    && local_evidence_confirms_owner_absence(
+                    && local_evidence_confirms_owner_absence_with_verified_wake(
                         utterance,
                         local_speaker_evidence,
                         wake_speaker_phrase,
+                        wake_owner_verified,
+                        local_speaker_profile_adaptive,
+                        confirmed_non_target_speech_end_ms,
                     )
             })
         });
@@ -1663,7 +1776,7 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
         .iter()
         .filter(|utterance| {
             if target_speaker_id.as_deref().is_some_and(|target| {
-                utterance_belongs_to_target(
+                utterance_belongs_to_verified_target(
                     utterance,
                     target,
                     local_speaker_tracking_enabled,
@@ -1671,6 +1784,9 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
                     wake_speaker_phrase,
                     wake_speaker_end_ms,
                     allow_immediate_wake_continuation,
+                    wake_owner_verified,
+                    local_speaker_profile_adaptive,
+                    confirmed_non_target_speech_end_ms,
                 )
             }) {
                 return true;
@@ -1854,14 +1970,18 @@ struct RecoverySpeakerSnapshot {
     local_speech_end_ms: Option<u64>,
     local_target_speech_end_ms: Option<u64>,
     local_non_target_speech_end_ms: Option<u64>,
+    local_sustained_non_target_speech_end_ms: Option<u64>,
     local_speaker_classification: Option<crate::speaker_verification::SessionSpeakerClassification>,
     local_speaker_tracking_enabled: bool,
+    local_wake_owner_verified: bool,
     local_speaker_profile_adaptive: bool,
     local_speaker_stable_target: bool,
     local_target_confirmed: bool,
     local_consecutive_target: u8,
     local_consecutive_non_target: u8,
     local_consecutive_strong_non_target: u8,
+    local_owner_absence_run_started_ms: Option<u64>,
+    local_owner_absence_run_confirmed: bool,
     local_speaker_evidence: Vec<LocalSpeakerEvidence>,
     wake_speaker_phrase: Option<String>,
     wake_target_speech_end_ms: Option<u64>,
@@ -1906,14 +2026,19 @@ impl VolcengineStreamingASR {
             local_speech_end_ms: state.local_speech_end_ms,
             local_target_speech_end_ms: state.local_target_speech_end_ms,
             local_non_target_speech_end_ms: state.local_non_target_speech_end_ms,
+            local_sustained_non_target_speech_end_ms: state
+                .local_sustained_non_target_speech_end_ms,
             local_speaker_classification: state.local_speaker_classification.clone(),
             local_speaker_tracking_enabled: state.local_speaker_tracking_enabled,
+            local_wake_owner_verified: state.local_wake_owner_verified,
             local_speaker_profile_adaptive: state.local_speaker_profile_adaptive,
             local_speaker_stable_target: state.local_speaker_stable_target,
             local_target_confirmed: state.local_target_confirmed,
             local_consecutive_target: state.local_consecutive_target,
             local_consecutive_non_target: state.local_consecutive_non_target,
             local_consecutive_strong_non_target: state.local_consecutive_strong_non_target,
+            local_owner_absence_run_started_ms: state.local_owner_absence_run_started_ms,
+            local_owner_absence_run_confirmed: state.local_owner_absence_run_confirmed,
             local_speaker_evidence: state.local_speaker_evidence.clone(),
             wake_speaker_phrase: state.wake_speaker_phrase.clone(),
             wake_target_speech_end_ms: state.wake_target_speech_end_ms,
@@ -1926,14 +2051,19 @@ impl VolcengineStreamingASR {
         state.local_speech_end_ms = snapshot.local_speech_end_ms;
         state.local_target_speech_end_ms = snapshot.local_target_speech_end_ms;
         state.local_non_target_speech_end_ms = snapshot.local_non_target_speech_end_ms;
+        state.local_sustained_non_target_speech_end_ms =
+            snapshot.local_sustained_non_target_speech_end_ms;
         state.local_speaker_classification = snapshot.local_speaker_classification;
         state.local_speaker_tracking_enabled = snapshot.local_speaker_tracking_enabled;
+        state.local_wake_owner_verified = snapshot.local_wake_owner_verified;
         state.local_speaker_profile_adaptive = snapshot.local_speaker_profile_adaptive;
         state.local_speaker_stable_target = snapshot.local_speaker_stable_target;
         state.local_target_confirmed = snapshot.local_target_confirmed;
         state.local_consecutive_target = snapshot.local_consecutive_target;
         state.local_consecutive_non_target = snapshot.local_consecutive_non_target;
         state.local_consecutive_strong_non_target = snapshot.local_consecutive_strong_non_target;
+        state.local_owner_absence_run_started_ms = snapshot.local_owner_absence_run_started_ms;
+        state.local_owner_absence_run_confirmed = snapshot.local_owner_absence_run_confirmed;
         state.local_speaker_evidence = snapshot.local_speaker_evidence;
         state.wake_speaker_phrase = snapshot.wake_speaker_phrase;
         state.wake_target_speech_end_ms = snapshot.wake_target_speech_end_ms;
@@ -2214,10 +2344,18 @@ impl VolcengineStreamingASR {
                 crate::speaker_verification::SessionSpeakerClassification::NonTarget { score }
                     if score <= LOCAL_ENDPOINT_STRONG_NON_TARGET_MAX_SCORE
             );
+            let owner_absence_band =
+                classification.score() <= LOCAL_ENDPOINT_OWNER_ABSENCE_CONTINUATION_MAX_SCORE;
             if endpoint_strong_non_target {
+                if state.local_consecutive_strong_non_target == 0
+                    && !state.local_owner_absence_run_confirmed
+                {
+                    state.local_owner_absence_run_started_ms = Some(audio_duration_ms);
+                }
                 state.local_consecutive_strong_non_target =
                     state.local_consecutive_strong_non_target.saturating_add(1);
                 if state.local_consecutive_strong_non_target >= LOCAL_SPEAKER_SWITCH_CONFIRMATIONS {
+                    state.local_owner_absence_run_confirmed = true;
                     state.local_non_target_speech_end_ms = Some(
                         state
                             .local_non_target_speech_end_ms
@@ -2225,8 +2363,37 @@ impl VolcengineStreamingASR {
                             .max(audio_duration_ms),
                     );
                 }
+            } else if state.local_owner_absence_run_confirmed && owner_absence_band {
+                // Once two strong negatives agree, keep low-score Uncertain
+                // windows in the same run. Session 752 produced this exact
+                // shape while a second person continued speaking; the older
+                // real-owner startup dip recovered above 0.30 immediately.
+                state.local_consecutive_strong_non_target = 0;
+                state.local_non_target_speech_end_ms = Some(
+                    state
+                        .local_non_target_speech_end_ms
+                        .unwrap_or_default()
+                        .max(audio_duration_ms),
+                );
             } else {
                 state.local_consecutive_strong_non_target = 0;
+                state.local_owner_absence_run_started_ms = None;
+                state.local_owner_absence_run_confirmed = false;
+            }
+            if state.local_owner_absence_run_confirmed
+                && state
+                    .local_owner_absence_run_started_ms
+                    .is_some_and(|started_ms| {
+                        audio_duration_ms.saturating_sub(started_ms)
+                            >= LOCAL_ENDPOINT_OWNER_ABSENCE_MIN_RUN_MS
+                    })
+            {
+                state.local_sustained_non_target_speech_end_ms = Some(
+                    state
+                        .local_sustained_non_target_speech_end_ms
+                        .unwrap_or_default()
+                        .max(audio_duration_ms),
+                );
             }
             // Both wake-derived and enrolled phrase templates have produced
             // severe cross-phrase false negatives on the same owner's natural
@@ -2368,21 +2535,39 @@ impl VolcengineStreamingASR {
     }
 
     pub fn note_local_speaker_tracking_started(&self, wake_phrase: &str) {
+        self.note_local_speaker_tracking_started_with_owner(wake_phrase, false);
+    }
+
+    pub fn note_verified_local_speaker_tracking_started(&self, wake_phrase: &str) {
+        self.note_local_speaker_tracking_started_with_owner(wake_phrase, true);
+    }
+
+    fn note_local_speaker_tracking_started_with_owner(
+        &self,
+        wake_phrase: &str,
+        wake_owner_verified: bool,
+    ) {
         let mut state = self.state.lock();
         state.local_speaker_tracking_enabled = true;
+        state.local_wake_owner_verified = wake_owner_verified;
         state.local_speaker_profile_adaptive = false;
         state.local_speaker_stable_target = true;
         state.local_target_confirmed = false;
         state.local_consecutive_target = 0;
         state.local_consecutive_non_target = 0;
         state.local_consecutive_strong_non_target = 0;
+        state.local_owner_absence_run_started_ms = None;
+        state.local_owner_absence_run_confirmed = false;
+        state.local_sustained_non_target_speech_end_ms = None;
         state.local_speaker_evidence.clear();
         state.owner_isolation_frozen = false;
         state.owner_isolation_ceiling_text.clear();
         state.owner_isolation_ceiling_segments.clear();
         state.wake_speaker_phrase = Some(wake_phrase.to_string());
         state.wake_target_speech_end_ms = None;
-        log::info!("[asr] local session-speaker tracking anchored to wake speaker");
+        log::info!(
+            "[asr] local session-speaker tracking anchored to wake speaker wake_owner_verified={wake_owner_verified}"
+        );
     }
 
     pub(crate) fn set_streaming_event_callback(&self, callback: Option<StreamingEventCallback>) {
@@ -2530,12 +2715,17 @@ impl VolcengineStreamingASR {
             st.local_speech_end_ms = None;
             st.local_target_speech_end_ms = None;
             st.local_non_target_speech_end_ms = None;
+            st.local_sustained_non_target_speech_end_ms = None;
             st.local_speaker_classification = None;
             st.local_speaker_tracking_enabled = local_speaker_tracking_requested;
+            st.local_wake_owner_verified = false;
             st.local_speaker_stable_target = local_speaker_tracking_requested;
             st.local_target_confirmed = false;
             st.local_consecutive_target = 0;
             st.local_consecutive_non_target = 0;
+            st.local_consecutive_strong_non_target = 0;
+            st.local_owner_absence_run_started_ms = None;
+            st.local_owner_absence_run_confirmed = false;
             st.local_speaker_evidence.clear();
             st.owner_isolation_frozen = false;
             st.owner_isolation_ceiling_text.clear();
@@ -2930,6 +3120,9 @@ impl VolcengineStreamingASR {
             let local_speaker_evidence = state.local_speaker_evidence.clone();
             let wake_speaker_phrase = state.wake_speaker_phrase.clone();
             let prior_wake_speaker_end_ms = state.wake_target_speech_end_ms;
+            let wake_owner_verified = state.local_wake_owner_verified;
+            let local_speaker_profile_adaptive = state.local_speaker_profile_adaptive;
+            let confirmed_non_target_speech_end_ms = state.local_non_target_speech_end_ms;
             let filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
                 result,
                 &mut state.target_speaker_id,
@@ -2937,6 +3130,9 @@ impl VolcengineStreamingASR {
                 &local_speaker_evidence,
                 wake_speaker_phrase.as_deref(),
                 prior_wake_speaker_end_ms,
+                wake_owner_verified,
+                local_speaker_profile_adaptive,
+                confirmed_non_target_speech_end_ms,
             );
             if let Some(wake_end_ms) = filtered.wake_target_speech_end_ms {
                 state.wake_target_speech_end_ms = Some(wake_end_ms);
@@ -5095,6 +5291,93 @@ mod tests {
     }
 
     #[test]
+    fn verified_wake_excludes_same_cloud_other_without_lucky_body_target() {
+        // Field regression: the persisted owner passed the wake gate, but the
+        // first body windows never reached Target. A later real person reused
+        // cloud speaker 0 and produced a sustained very-low enrolled score.
+        // The accepted wake must provide identity authority for this session;
+        // requiring a separate lucky body Target lets the other person leak.
+        let result = json!({
+            "text": "开始录音。主人第一句。旁人的话不能放进去。",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 0,
+                    "end_time": 5_100,
+                    "text": "开始录音。主人第一句。"
+                },
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 5_700,
+                    "end_time": 9_600,
+                    "text": "旁人的话不能放进去。"
+                }
+            ]
+        });
+        let evidence = vec![
+            LocalSpeakerEvidence {
+                audio_end_ms: 6_800,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.19,
+                    },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 7_200,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.16,
+                    },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 7_600,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.12,
+                    },
+                stable_target: true,
+            },
+        ];
+        let mut target = None;
+        let filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &result,
+            &mut target,
+            true,
+            &evidence,
+            Some("开始录音"),
+            None,
+            true,
+            false,
+            Some(7_600),
+        );
+        assert_eq!(target.as_deref(), Some("0"));
+        assert_eq!(filtered.result["text"], "开始录音。主人第一句。");
+        assert!(filtered.stable_non_target_utterance_present);
+
+        let mut adaptive_target = None;
+        let adaptive = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &result,
+            &mut adaptive_target,
+            true,
+            &evidence,
+            Some("开始录音"),
+            None,
+            true,
+            true,
+            Some(7_600),
+        );
+        assert_eq!(
+            adaptive.result["text"], result["text"],
+            "a wake-derived adaptive profile must remain non-destructive"
+        );
+        assert!(!adaptive.stable_non_target_utterance_present);
+    }
+
+    #[test]
     fn brief_low_score_dip_does_not_exclude_same_speaker_continuation() {
         let result = json!({
             "text": "开始录音。第一句。停顿以后还是主人第二句。",
@@ -5433,14 +5716,34 @@ mod tests {
             13_000,
             crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.112 },
         );
+        {
+            let state = asr.state.lock();
+            assert_eq!(state.local_non_target_speech_end_ms, Some(13_000));
+            assert_eq!(state.local_sustained_non_target_speech_end_ms, None);
+            assert_eq!(
+                target_speaker_update_from_state(&state, false, false)
+                    .local_non_target_speech_end_ms,
+                None,
+                "two strong windows alone remain advisory for endpointing"
+            );
+        }
+        asr.note_local_speaker_classification(
+            13_400,
+            crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: 0.24 },
+        );
 
         let state = asr.state.lock();
         assert!(state.local_speaker_stable_target);
         assert!(!state.owner_isolation_frozen);
-        assert_eq!(state.local_non_target_speech_end_ms, Some(13_000));
+        assert_eq!(state.local_non_target_speech_end_ms, Some(13_400));
+        assert_eq!(state.local_sustained_non_target_speech_end_ms, Some(13_400));
+        assert_eq!(
+            target_speaker_update_from_state(&state, false, false).local_non_target_speech_end_ms,
+            Some(13_400)
+        );
         assert!(matches!(
             state.local_speaker_classification,
-            Some(crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. })
+            Some(crate::speaker_verification::SessionSpeakerClassification::Uncertain { .. })
         ));
     }
 
@@ -5490,6 +5793,7 @@ mod tests {
             assert!(!state.local_target_confirmed);
             assert_eq!(state.local_target_speech_end_ms, None);
             assert_eq!(state.local_non_target_speech_end_ms, Some(2_300));
+            assert_eq!(state.local_sustained_non_target_speech_end_ms, None);
             assert!(!state.owner_isolation_frozen);
         }
 
@@ -5855,6 +6159,9 @@ mod tests {
             &evidence,
             Some("开始录音"),
             Some(1_032),
+            false,
+            false,
+            None,
         );
         assert_eq!(filtered.result["text"], body_text);
         assert_eq!(filtered.target_speech_end_ms, Some(9_862));
@@ -5902,6 +6209,9 @@ mod tests {
             &evidence,
             Some("开始录音"),
             Some(1_032),
+            false,
+            false,
+            None,
         );
         assert_eq!(rejected.result["text"], "");
     }

@@ -9,6 +9,16 @@ mod speaker_verification {
         NonTarget { score: f32 },
         Uncertain { score: f32 },
     }
+
+    impl SessionSpeakerClassification {
+        pub fn score(self) -> f32 {
+            match self {
+                Self::Target { score } | Self::NonTarget { score } | Self::Uncertain { score } => {
+                    score
+                }
+            }
+        }
+    }
 }
 
 // The shared production client contains an ignored live cadence test which

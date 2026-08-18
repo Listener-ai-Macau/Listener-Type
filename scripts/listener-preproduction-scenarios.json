@@ -3,6 +3,20 @@
   "version": "1.0.2",
   "purpose": "Canonical Listener 1.0.2 preproduction physical acceptance scenarios. Human, bench, regression, and release audit gates must use this file as the scenario source of truth.",
   "pending_operator_steering": {
+    "listener_settled_endpoint_watchdog_20260817": {
+      "status": "machine_fix_pending_installed_owner_sample",
+      "recorded_at": "2026-08-17T19:00:00+08:00",
+      "source": "Product-owner report: accepted recording sometimes remains Listening after speech has settled instead of ending automatically.",
+      "requirement": "Once authoritative target-speaker text has settled, the desktop must dispatch exactly one host stop after 1000 ms of unchanged target text even if an older one-shot endpoint callback runs after a newer generation was scheduled. A session-scoped watchdog must evaluate the same guarded endpoint clock without extending the deadline, accepting non-target room speech as owner activity, or creating duplicate stops.",
+      "machine_gates": [
+        "a deterministic callback-order regression proves an obsolete timer generation cannot strand the newest settled deadline",
+        "the watchdog exits when the session becomes inactive or a stop has already been dispatched and shares the existing compare-and-swap duplicate-stop latch",
+        "all coordinator library tests and the fixed multi-speaker timeline matrix pass",
+        "an installed Program Files sample records settled target text to host stop in 900-1100 ms and reaches terminal Done without a manual stop"
+      ],
+      "evidence_boundary": "Persist anonymous session IDs, monotonic timing, stop reason, packet counts, package hashes, and pass/fail summaries only. Do not retain spoken text or audio in release evidence.",
+      "acceptance_boundary": "Source tests and an installed MSI prove the race repair but do not replace the required real-device sample or final owner acceptance."
+    },
     "listener_dual_bank_voiceprint_and_multi_speaker_calibration_20260810": {
       "status": "active_owner_direction",
       "recorded_at": "2026-08-10T18:18:00+08:00",

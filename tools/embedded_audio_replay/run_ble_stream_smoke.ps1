@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("serial-toggle", "serial-cancel", "desktop-cancel", "desktop-confirm", "manual-key", "generated-key3")]
+    [ValidateSet("serial-toggle", "serial-cancel", "desktop-cancel", "desktop-confirm", "manual-key", "generated-key3", "ble-control")]
     [string]$TriggerMode = "serial-toggle",
     [string]$Port = "COM3",
     [string]$DeviceName = "listener",
@@ -24,6 +24,7 @@ param(
     [string]$VoiceName = "Microsoft Huihui Desktop",
     [int]$TtsRate = 0,
     [double]$TtsGain = 4.0,
+    [int]$TtsLeadingSilenceMs = 500,
     [int]$PlaybackVolumePercent = 70,
     [string]$ListenerExe,
     [string]$FirmwareRepo,
@@ -1076,10 +1077,13 @@ function Measure-SourceCaptureCoupling {
         if ($bestCorrelation -le -2.0) {
             return [ordered]@{ status = "unavailable"; reason = "insufficient_pcm_envelope" }
         }
+        $minimumUsefulCorrelation = 0.60
         return [ordered]@{
             status = "available"
             method = "pcm16_mean_abs_envelope_100ms_max_pearson_lag_3s"
             max_envelope_correlation = [Math]::Round($bestCorrelation, 4)
+            minimum_useful_correlation = $minimumUsefulCorrelation
+            stimulus_coupled = $bestCorrelation -ge $minimumUsefulCorrelation
             best_lag_ms = $bestLagFrames * 100
             overlap_frames = $bestOverlapFrames
             source_frames = $source.values.Length
@@ -2649,6 +2653,87 @@ function New-SilenceWave {
     }
 }
 
+function Add-WavPcm16LeadingSilence {
+    param(
+        [string]$Path,
+        [int]$DurationMs
+    )
+
+    if ($DurationMs -le 0) {
+        return
+    }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -lt 44 -or
+        [System.Text.Encoding]::ASCII.GetString($bytes, 0, 4) -ne "RIFF" -or
+        [System.Text.Encoding]::ASCII.GetString($bytes, 8, 4) -ne "WAVE") {
+        throw "TTS fixture is not a valid RIFF/WAVE file: $Path"
+    }
+
+    $offset = 12
+    $sampleRate = 0
+    $blockAlign = 0
+    $bitsPerSample = 0
+    $channels = 0
+    $dataChunkSizeOffset = -1
+    $dataOffset = -1
+    $dataSize = -1
+    while ($offset + 8 -le $bytes.Length) {
+        $chunkId = [System.Text.Encoding]::ASCII.GetString($bytes, $offset, 4)
+        $chunkSize = [BitConverter]::ToInt32($bytes, $offset + 4)
+        $chunkDataOffset = $offset + 8
+        if ($chunkSize -lt 0 -or $chunkDataOffset + $chunkSize -gt $bytes.Length) {
+            throw "TTS fixture contains an invalid WAVE chunk: $Path"
+        }
+        if ($chunkId -eq "fmt " -and $chunkSize -ge 16) {
+            $audioFormat = [BitConverter]::ToInt16($bytes, $chunkDataOffset)
+            $channels = [BitConverter]::ToInt16($bytes, $chunkDataOffset + 2)
+            $sampleRate = [BitConverter]::ToInt32($bytes, $chunkDataOffset + 4)
+            $blockAlign = [BitConverter]::ToInt16($bytes, $chunkDataOffset + 12)
+            $bitsPerSample = [BitConverter]::ToInt16($bytes, $chunkDataOffset + 14)
+            if ($audioFormat -ne 1) {
+                throw "TTS fixture must use PCM audio: $Path"
+            }
+        } elseif ($chunkId -eq "data") {
+            $dataChunkSizeOffset = $offset + 4
+            $dataOffset = $chunkDataOffset
+            $dataSize = $chunkSize
+            break
+        }
+        $offset = $chunkDataOffset + $chunkSize + ($chunkSize % 2)
+    }
+    if ($sampleRate -ne 16000 -or $channels -ne 1 -or $bitsPerSample -ne 16 -or
+        $blockAlign -ne 2 -or $dataOffset -lt 0 -or $dataSize -lt 0) {
+        throw "TTS fixture must be PCM 16 kHz mono 16-bit: $Path"
+    }
+
+    $silenceSamples = [int][System.Math]::Ceiling($sampleRate * ($DurationMs / 1000.0))
+    $silenceBytes = $silenceSamples * $blockAlign
+    $expanded = New-Object byte[] ($bytes.Length + $silenceBytes)
+    [System.Buffer]::BlockCopy($bytes, 0, $expanded, 0, $dataOffset)
+    [System.Buffer]::BlockCopy(
+        $bytes,
+        $dataOffset,
+        $expanded,
+        $dataOffset + $silenceBytes,
+        $bytes.Length - $dataOffset
+    )
+    [System.Buffer]::BlockCopy(
+        [BitConverter]::GetBytes([int]($dataSize + $silenceBytes)),
+        0,
+        $expanded,
+        $dataChunkSizeOffset,
+        4
+    )
+    [System.Buffer]::BlockCopy(
+        [BitConverter]::GetBytes([int]($expanded.Length - 8)),
+        0,
+        $expanded,
+        4,
+        4
+    )
+    [System.IO.File]::WriteAllBytes($Path, $expanded)
+}
+
 function Boost-WavPcm16 {
     param(
         [string]$Path,
@@ -2782,6 +2867,7 @@ if (-not (Test-Path $WavPath)) {
     } else {
         New-TtsWave -Text $Sentence -Path $WavPath -PreferredVoice $VoiceName -Rate $TtsRate
         Boost-WavPcm16 -Path $WavPath -Gain $TtsGain
+        Add-WavPcm16LeadingSilence -Path $WavPath -DurationMs $TtsLeadingSilenceMs
     }
 }
 Write-SmokeTrace "wav_ready path=$WavPath sentence=$Sentence profile=$AudioProfile rate=$TtsRate gain=$TtsGain silent=$([bool]$SilentAudio)"
@@ -2822,7 +2908,9 @@ if (-not (Test-Path $ListenerExe)) {
     throw "Listener executable not found after cargo build: $ListenerExe"
 }
 
-if (-not $NoResetBeforeCapture) {
+if ($TriggerMode -eq "ble-control") {
+    Write-SmokeTrace "serial_setup_skipped trigger=ble-control"
+} elseif (-not $NoResetBeforeCapture) {
     Write-SmokeTrace "serial_reset_start"
     Reset-SerialTarget -PortName $Port
     Start-Sleep -Seconds 2
@@ -2900,10 +2988,12 @@ $generatedKeyCommand = switch ($TriggerMode) {
     default { $null }
 }
 $usesSerialSignal = @("serial-toggle", "serial-cancel", "desktop-cancel", "desktop-confirm", "generated-key3") -contains $TriggerMode
-$usesTypeControlSignal = $TriggerMode -eq "generated-key3"
+$usesTypeControlSignal = @("generated-key3", "ble-control") -contains $TriggerMode
 $serialStartCommand = if ($generatedKeyCommand) { $generatedKeyCommand } else { "~VREC:TOGGLE" }
 $serialEndCommand = if ($TriggerMode -eq "serial-cancel") {
     "~VREC:CANCEL"
+} elseif ($TriggerMode -eq "ble-control") {
+    "VREC:STOP"
 } elseif (@("desktop-cancel", "desktop-confirm") -contains $TriggerMode) {
     ""
 } else {
@@ -3047,7 +3137,12 @@ try {
             }
             $foregroundBeforeCapsule = Get-ForegroundWindowSnapshot
             Write-ForegroundTrace -Label "before_capsule" -Snapshot $foregroundBeforeCapsule
-            if ($usesSerialSignal) {
+            if ($TriggerMode -eq "ble-control") {
+                Set-Content -Path $typeControlStartSignalPath -Value "start" -Encoding ASCII
+                $recordingStarted = $true
+                $timeline["type_control_start_signal_at_utc"] = Get-SmokeUtcNow
+                Write-SmokeTrace "type_control_start_signal_written"
+            } elseif ($usesSerialSignal) {
                 Set-Content -Path $serialStartSignalPath -Value "start" -Encoding ASCII
                 if ($usesTypeControlSignal) {
                     Start-Sleep -Milliseconds 120
@@ -3123,6 +3218,12 @@ try {
                     throw ([string]$desktopCancelReport.error)
                 }
                 Write-SmokeTrace "desktop_${desktopButton}_requested"
+            } elseif ($TriggerMode -eq "ble-control") {
+                Start-Sleep -Milliseconds $PostPlaybackRecordMs
+                Set-Content -Path $typeControlStopSignalPath -Value "stop" -Encoding ASCII
+                $recordingStarted = $false
+                $timeline["type_control_stop_signal_at_utc"] = Get-SmokeUtcNow
+                Write-SmokeTrace "type_control_stop_signal_written"
             } elseif ($usesSerialSignal) {
                 Start-Sleep -Milliseconds $PostPlaybackRecordMs
                 if ($usesTypeControlSignal) {
@@ -3494,6 +3595,7 @@ try {
         wav_path = $WavPath
         tts_rate = $TtsRate
         tts_gain = $TtsGain
+        tts_leading_silence_ms = $TtsLeadingSilenceMs
         random_sentence_count = $RandomSentenceCount
         silent_audio = [bool]$SilentAudio
         silent_audio_ms = $SilentAudioMs
@@ -3568,10 +3670,12 @@ try {
                 Write-SmokeTrace "catch_type_control_stop_signal_written"
                 Start-Sleep -Milliseconds 160
             }
-            Set-Content -Path $serialStopSignalPath -Value "stop" -Encoding ASCII
-            Write-SmokeTrace "catch_serial_stop_signal_written"
-            $serialReport = Wait-SerialRecordingWindow -Window $serialWindow
-            $serialWindow = $null
+            if ($usesSerialSignal) {
+                Set-Content -Path $serialStopSignalPath -Value "stop" -Encoding ASCII
+                Write-SmokeTrace "catch_serial_stop_signal_written"
+                $serialReport = Wait-SerialRecordingWindow -Window $serialWindow
+                $serialWindow = $null
+            }
         } catch {
             Write-Warning "Failed to finish serial recording window: $_"
         }
@@ -3631,6 +3735,7 @@ try {
         wav_path = $WavPath
         tts_rate = $TtsRate
         tts_gain = $TtsGain
+        tts_leading_silence_ms = $TtsLeadingSilenceMs
         random_sentence_count = $RandomSentenceCount
         silent_audio = [bool]$SilentAudio
         silent_audio_ms = $SilentAudioMs

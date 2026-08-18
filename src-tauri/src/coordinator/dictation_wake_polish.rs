@@ -153,7 +153,11 @@ impl EmbeddedAudioDictationSession {
         wake_phrase: String,
     ) {
         if let Some(asr) = self.volcengine_asr.as_ref() {
-            asr.note_local_speaker_tracking_started(&wake_phrase);
+            // Every call site is reached only after the automatic wake path has
+            // accepted the persisted owner voiceprint. Preserve that verified
+            // identity into body isolation; a positive body window is still
+            // required separately for endpoint refresh.
+            asr.note_verified_local_speaker_tracking_started(&wake_phrase);
         }
         self.local_speaker_tracker = Some(LocalSessionSpeakerTracker::from_wake(
             wake_pcm,
@@ -640,6 +644,11 @@ struct BufferedSpeakerCandidate {
     /// near-match. It never wakes by itself, but keeps the bounded terminal KWS
     /// cascade available after older-window Absents.
     local_kws_fusion_evidence: bool,
+    /// Overlap-degraded local ASR can preserve only the start-aligned first
+    /// half of 「开始录音」 while the enrolled owner still verifies. Count only
+    /// repeated origin-zero confirmations; terminal policy may combine three
+    /// of them with the independent enrolled voiceprint.
+    local_owner_overlap_near_confirmations: u8,
     /// Absolute PCM interval inspected by the newest non-stale local Absent.
     /// A KWS fallback may not override it when it already covered that hit.
     #[cfg(target_os = "windows")]
@@ -828,8 +837,18 @@ fn should_advance_local_confirmation_window(
     keyword_model_hit: bool,
     current_origin_bytes: usize,
     next_origin_bytes: usize,
+    local_confirmation_attempts: usize,
 ) -> bool {
-    rotated && !keyword_model_hit && next_origin_bytes > current_origin_bytes
+    // A fast BLE pre-roll can reach the first KWS rotation before the deferred
+    // 2.4 s exploratory confirmation has run. Preserve origin zero for that
+    // first confirmation or the wake phrase at the head of the pre-roll is
+    // discarded before local ASR ever sees it.
+    let initial_full_context_confirmation_pending =
+        current_origin_bytes == 0 && local_confirmation_attempts == 0;
+    rotated
+        && !keyword_model_hit
+        && next_origin_bytes > current_origin_bytes
+        && !initial_full_context_confirmation_pending
 }
 
 #[cfg(target_os = "windows")]
@@ -1035,34 +1054,6 @@ fn refined_wake_end_seconds(
             end_pad_seconds: WAKE_END_PAD_SECONDS,
             local_endpoint_max_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
         },
-    )
-}
-
-#[cfg(target_os = "windows")]
-fn local_confirmation_can_activate(
-    has_keyword_model_hit: bool,
-    relation: crate::wake_phrase::LocalPhraseRelation,
-) -> bool {
-    denzic_voice_activation_v1_core::local_confirmation_can_activate(
-        has_keyword_model_hit,
-        relation,
-    )
-}
-
-#[cfg(target_os = "windows")]
-fn secondary_fallback_can_accept_keyword(
-    keyword_model_hit: bool,
-    explicit_absent_count: u8,
-) -> bool {
-    matches!(
-        denzic_voice_activation_v1_core::decide_secondary_fallback(
-            denzic_voice_activation_v1_core::SecondaryFallbackInput {
-                keyword_model_hit,
-                explicit_absent_count,
-                secondary_unavailable_or_timed_out: true,
-            },
-        ),
-        denzic_voice_activation_v1_core::SecondaryFallbackDecision::AcceptKeywordModel
     )
 }
 

@@ -12,15 +12,54 @@ struct SettledTargetEndpointClock {
     generation: u64,
     armed_target_end_ms: Option<u64>,
     armed_at: Option<Instant>,
+    armed_from_visible_body_fallback: bool,
+    /// A provisional cloud tail normally cancels the owner endpoint. Preserve
+    /// its original deadline out of band so a later sustained-local-other
+    /// decision can restore that deadline instead of starting another wait.
+    paused_armed_target_end_ms: Option<u64>,
+    paused_armed_at: Option<Instant>,
     latest_update: Option<crate::asr::volcengine::TargetSpeakerUpdate>,
     pending_was_seen: bool,
 }
 
+const RECENT_STRONG_NON_TARGET_WINDOW_MS: u64 = 900;
+
+fn update_has_recent_strong_non_target(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+) -> bool {
+    let Some(non_target_end_ms) = update.local_non_target_speech_end_ms else {
+        return false;
+    };
+    if update
+        .local_target_speech_end_ms
+        .is_some_and(|target_end_ms| target_end_ms > non_target_end_ms)
+    {
+        return false;
+    }
+    let latest_audio_ms = update
+        .audio_duration_ms
+        .into_iter()
+        .chain(update.provider_audio_duration_ms)
+        .max()
+        .unwrap_or(non_target_end_ms);
+    latest_audio_ms.saturating_sub(non_target_end_ms) <= RECENT_STRONG_NON_TARGET_WINDOW_MS
+}
+
 impl SettledTargetEndpointClock {
-    fn cancel_arm(&mut self) {
+    fn pause_arm_for_provisional_tail(&mut self) {
+        if let Some(armed_at) = self.armed_at {
+            self.paused_armed_target_end_ms = self.armed_target_end_ms;
+            self.paused_armed_at = Some(armed_at);
+        }
         self.generation = self.generation.wrapping_add(1);
         self.armed_target_end_ms = None;
         self.armed_at = None;
+        self.armed_from_visible_body_fallback = false;
+    }
+
+    fn clear_paused_arm(&mut self) {
+        self.paused_armed_target_end_ms = None;
+        self.paused_armed_at = None;
     }
 
     /// Returns a generation token when a new one-second timer must be started.
@@ -31,10 +70,11 @@ impl SettledTargetEndpointClock {
         now: Instant,
     ) -> Option<u64> {
         self.latest_update = Some(update.clone());
-        if update.pending_unattributed_speech {
+        let recent_strong_non_target = update_has_recent_strong_non_target(update);
+        if update.pending_unattributed_speech && !recent_strong_non_target {
             self.pending_was_seen = true;
             if self.armed_at.is_some() {
-                self.cancel_arm();
+                self.pause_arm_for_provisional_tail();
             }
             return None;
         }
@@ -42,20 +82,48 @@ impl SettledTargetEndpointClock {
         let stable_target_end_ms = (update.speaker_info_present && update.speaker_id.is_some())
             .then_some(update.target_speech_end_ms)
             .flatten();
-        let should_rearm = body_started
-            && stable_target_end_ms.is_some()
+        let stable_target_should_rearm = stable_target_end_ms.is_some()
             && (update.target_activity_advanced
                 || self.pending_was_seen
                 || self.armed_at.is_none()
                 || self.armed_target_end_ms != stable_target_end_ms);
+        // Some valid Volcengine previews arrive before diarization publishes a
+        // speaker id. Once visible body text exists, arm a wall-clock fallback
+        // instead of leaving the session entirely dependent on noisy firmware
+        // VAD. A provisional tail still cancels the clock above.
+        let unattributed_visible_body_should_arm =
+            stable_target_end_ms.is_none() && self.armed_at.is_none();
+        // Two consecutive very-low voiceprint windows identify current room
+        // speech as a likely second speaker. Keep the already-running owner
+        // timer in that state: provider diarization can temporarily fold both
+        // people into one speaker id, and allowing either provider growth or
+        // preview growth to re-arm here makes auto-end wait forever. This is
+        // endpoint-only; it does not discard or rewrite recognized text.
+        let should_rearm = body_started
+            && (stable_target_should_rearm || unattributed_visible_body_should_arm)
+            && (!recent_strong_non_target || self.armed_at.is_none());
         self.pending_was_seen = false;
         if !should_rearm {
             return None;
         }
 
+        let restore_paused_owner_deadline = recent_strong_non_target
+            && self.armed_at.is_none()
+            && self.paused_armed_at.is_some();
         self.generation = self.generation.wrapping_add(1);
-        self.armed_target_end_ms = stable_target_end_ms;
-        self.armed_at = Some(now);
+        if restore_paused_owner_deadline {
+            self.armed_target_end_ms = self.paused_armed_target_end_ms;
+            self.armed_at = self.paused_armed_at;
+            // The paused boundary already came from visible owner text, and
+            // the current frame now has sustained local other-speaker proof.
+            // Do not require that provisional frame to repeat the cloud id.
+            self.armed_from_visible_body_fallback = true;
+        } else {
+            self.armed_target_end_ms = stable_target_end_ms;
+            self.armed_at = Some(now);
+            self.armed_from_visible_body_fallback = stable_target_end_ms.is_none();
+        }
+        self.clear_paused_arm();
         Some(self.generation)
     }
 
@@ -75,28 +143,68 @@ impl SettledTargetEndpointClock {
         self.latest_update
             .as_ref()
             .filter(|update| {
-                !update.pending_unattributed_speech
-                    && update.speaker_info_present
-                    && update.speaker_id.is_some()
-                    && update.target_speech_end_ms.is_some()
+                (!update.pending_unattributed_speech
+                    || update_has_recent_strong_non_target(update))
+                    && (self.armed_from_visible_body_fallback
+                        || (update.speaker_info_present
+                            && update.speaker_id.is_some()
+                            && update.target_speech_end_ms.is_some()))
             })
             .cloned()
     }
 
     fn arm_latest_for_visible_body(&mut self, now: Instant) -> Option<u64> {
         let update = self.latest_update.clone()?;
-        self.observe(&update, true, now)
+        let recent_strong_non_target = update_has_recent_strong_non_target(&update);
+        if update.pending_unattributed_speech && !recent_strong_non_target {
+            self.pending_was_seen = true;
+            if self.armed_at.is_some() {
+                self.pause_arm_for_provisional_tail();
+            }
+            return None;
+        }
+        if self.armed_at.is_some() && recent_strong_non_target {
+            return None;
+        }
+        let stable_target_end_ms = (update.speaker_info_present && update.speaker_id.is_some())
+            .then_some(update.target_speech_end_ms)
+            .flatten();
+        let restore_paused_owner_deadline =
+            recent_strong_non_target && self.paused_armed_at.is_some();
+        self.generation = self.generation.wrapping_add(1);
+        if restore_paused_owner_deadline {
+            self.armed_target_end_ms = self.paused_armed_target_end_ms;
+            self.armed_at = self.paused_armed_at;
+            self.armed_from_visible_body_fallback = true;
+        } else {
+            self.armed_target_end_ms = stable_target_end_ms;
+            self.armed_at = Some(now);
+            self.armed_from_visible_body_fallback = stable_target_end_ms.is_none();
+        }
+        self.clear_paused_arm();
+        Some(self.generation)
     }
 
     fn is_due(&self, now: Instant, timeout_ms: u64) -> bool {
         self.armed_at.is_some_and(|armed_at| {
             now.saturating_duration_since(armed_at) >= Duration::from_millis(timeout_ms)
         }) && self.latest_update.as_ref().is_some_and(|update| {
-            !update.pending_unattributed_speech
-                && update.speaker_info_present
-                && update.speaker_id.is_some()
-                && update.target_speech_end_ms.is_some()
+            (!update.pending_unattributed_speech || update_has_recent_strong_non_target(update))
+                && (self.armed_from_visible_body_fallback
+                    || (update.speaker_info_present
+                        && update.speaker_id.is_some()
+                        && update.target_speech_end_ms.is_some()))
         })
+    }
+
+    fn latest_due_update(
+        &self,
+        now: Instant,
+        timeout_ms: u64,
+    ) -> Option<crate::asr::volcengine::TargetSpeakerUpdate> {
+        self.is_due(now, timeout_ms)
+            .then(|| self.latest_update.clone())
+            .flatten()
     }
 }
 
@@ -187,18 +295,72 @@ fn schedule_settled_target_endpoint_timer(
     let endpoint_clock = Arc::clone(endpoint_clock);
     async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(
-            EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+            EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS,
         ))
         .await;
         let update = endpoint_clock.lock().due_update(
             generation,
             Instant::now(),
-            EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+            EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS,
         );
         let Some(update) = update else {
             return;
         };
         handle_target_speaker_update(&inner, session_id, &stop_dispatched, update, true);
+    });
+}
+
+/// Session-scoped fallback for callback-order races.
+///
+/// Provider frames can synchronously emit a speaker update, a streaming
+/// preview, and a two-pass supplement. Each can re-arm the generation-based
+/// timer. A later local identity update may then invalidate the last queued
+/// generation without producing another provider callback, leaving the
+/// recording to the firmware's multi-second fallback. Polling the same guarded
+/// clock keeps the one-second contract deterministic; `stop_dispatched` still
+/// guarantees that this cannot issue a duplicate stop.
+fn start_settled_target_endpoint_watchdog(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    stop_dispatched: &Arc<AtomicBool>,
+    endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
+) {
+    let inner = Arc::clone(inner);
+    let stop_dispatched = Arc::clone(stop_dispatched);
+    let endpoint_clock = Arc::clone(endpoint_clock);
+    async_runtime::spawn(async move {
+        const POLL_INTERVAL: Duration = Duration::from_millis(50);
+        loop {
+            tokio::time::sleep(POLL_INTERVAL).await;
+            if stop_dispatched.load(Ordering::SeqCst) {
+                return;
+            }
+            let session_active = {
+                let state = inner.state.lock();
+                state.session_id == session_id
+                    && !state.cancelled
+                    && matches!(
+                        state.phase,
+                        SessionPhase::Starting | SessionPhase::Listening
+                    )
+            };
+            if !session_active {
+                return;
+            }
+            let update = endpoint_clock.lock().latest_due_update(
+                Instant::now(),
+                EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS,
+            );
+            if let Some(update) = update {
+                handle_target_speaker_update(
+                    &inner,
+                    session_id,
+                    &stop_dispatched,
+                    update,
+                    true,
+                );
+            }
+        }
     });
 }
 

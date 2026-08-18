@@ -20,5 +20,8 @@ pub struct DictionaryHotword {
 #[path = "../../../../src-tauri/src/asr/volcengine_transcript.rs"]
 pub mod volcengine_transcript;
 
+#[path = "../../../../src-tauri/src/asr/volcengine_untimed_merge.rs"]
+pub mod volcengine_untimed_merge;
+
 #[path = "../../../../src-tauri/src/asr/volcengine.rs"]
 pub mod volcengine;

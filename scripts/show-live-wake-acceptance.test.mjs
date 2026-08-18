@@ -16,6 +16,17 @@ test("popup captures explicit operator markers and preserves a missing candidate
   assert.match(source, /正在等待 Listener 从 \$currentState 回到 idle/);
 });
 
+test("popup reads the live Listener log without fighting its writer", () => {
+  assert.doesNotMatch(source, /ReadAllText/);
+  assert.match(source, /FileShare\]::ReadWrite -bor \[System\.IO\.FileShare\]::Delete/);
+  assert.match(source, /catch \[System\.IO\.IOException\]/);
+  assert.match(source, /\$tailBytes = 256KB/);
+  assert.match(source, /Read-AppendedLogText -Path \$resolvedLogPath -Offset \$tailOffset/);
+  assert.match(source, /\$script:lastKnownCapsuleState = 'unknown'/);
+  assert.match(source, /\$script:lastKnownCapsuleState -eq 'unknown' -and \$tailOffset -gt 0/);
+  assert.match(source, /Read-AppendedLogText -Path \$resolvedLogPath -Offset 0/);
+});
+
 test("popup artifact contains no audio or transcript payload", () => {
   assert.doesNotMatch(source, /\.wav|transcriptText|audioData|pcmData/i);
   assert.match(source, /不保存音频或转写内容/);

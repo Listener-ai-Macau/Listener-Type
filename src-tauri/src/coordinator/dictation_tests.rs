@@ -1564,6 +1564,262 @@ fn settled_target_wall_clock_ends_one_second_after_visible_stable_text() {
             1_000,
         )
         .is_some());
+    assert!(clock
+        .latest_due_update(started + std::time::Duration::from_millis(1_000), 1_000,)
+        .is_some());
+}
+
+#[test]
+fn settled_target_wall_clock_keeps_scheduling_allowance_below_public_endpoint() {
+    assert_eq!(super::EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS, 1_000);
+    assert_eq!(super::EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS, 900);
+    assert!(
+        super::EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS
+            < super::EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+    );
+}
+
+#[test]
+fn settled_target_watchdog_survives_obsolete_timer_generation() {
+    let started = std::time::Instant::now();
+    let stable = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(6_002),
+        provider_audio_duration_ms: Some(6_700),
+        audio_duration_ms: Some(6_700),
+        local_speech_end_ms: Some(6_600),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(6_002),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    let obsolete_generation = clock
+        .observe(&stable, true, started)
+        .expect("first callback arms the clock");
+    let active_generation = clock
+        .arm_latest_for_visible_body(started + std::time::Duration::from_millis(1))
+        .expect("same provider frame may re-arm from the preview callback");
+    assert_ne!(obsolete_generation, active_generation);
+
+    let due_at = started + std::time::Duration::from_millis(1_001);
+    assert!(clock
+        .due_update(obsolete_generation, due_at, 1_000)
+        .is_none());
+    assert!(clock.latest_due_update(due_at, 1_000).is_some());
+}
+
+#[test]
+fn visible_body_without_cloud_speaker_identity_still_ends_after_one_second() {
+    let started = std::time::Instant::now();
+    let unattributed = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: None,
+        target_speech_end_ms: None,
+        provider_audio_duration_ms: Some(2_100),
+        audio_duration_ms: Some(2_300),
+        local_speech_end_ms: Some(2_300),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: None,
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: false,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    assert_eq!(
+        clock.observe(&unattributed, false, started),
+        None,
+        "speaker metadata alone must not arm before visible body text",
+    );
+    let generation = clock
+        .arm_latest_for_visible_body(started)
+        .expect("visible body arms the unattributed fallback");
+
+    let noisy_room_update = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(10_000),
+        audio_duration_ms: Some(10_200),
+        local_speech_end_ms: Some(10_200),
+        ..unattributed
+    };
+    assert_eq!(
+        clock.observe(
+            &noisy_room_update,
+            true,
+            started + std::time::Duration::from_millis(999),
+        ),
+        None,
+        "unattributed room energy must not postpone visible owner text forever",
+    );
+    assert!(clock
+        .due_update(
+            generation,
+            started + std::time::Duration::from_millis(999),
+            1_000,
+        )
+        .is_none());
+    assert!(clock
+        .latest_due_update(started + std::time::Duration::from_millis(1_000), 1_000)
+        .is_some());
+}
+
+#[test]
+fn strong_second_speaker_cannot_keep_rearming_visible_owner_text() {
+    let started = std::time::Instant::now();
+    let owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(3_000),
+        provider_audio_duration_ms: Some(3_200),
+        audio_duration_ms: Some(3_200),
+        local_speech_end_ms: Some(3_200),
+        local_target_speech_end_ms: Some(3_000),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(3_000),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    let owner_generation = clock
+        .observe(&owner, true, started)
+        .expect("visible owner text arms the endpoint clock");
+
+    // The provider incorrectly grows the same cloud speaker while two
+    // consecutive strong local windows identify the current voice as someone
+    // else. Neither the provider callback nor the preview callback may extend
+    // the owner's one-second deadline.
+    let mixed_room_growth = crate::asr::volcengine::TargetSpeakerUpdate {
+        target_speech_end_ms: Some(3_700),
+        provider_audio_duration_ms: Some(3_800),
+        audio_duration_ms: Some(3_800),
+        local_speech_end_ms: Some(3_800),
+        local_non_target_speech_end_ms: Some(3_800),
+        stable_attributed_speech_end_ms: Some(3_700),
+        target_activity_advanced: true,
+        ..owner
+    };
+    assert_eq!(
+        clock.observe(
+            &mixed_room_growth,
+            true,
+            started + std::time::Duration::from_millis(600),
+        ),
+        None,
+    );
+    assert_eq!(
+        clock.arm_latest_for_visible_body(started + std::time::Duration::from_millis(700)),
+        None,
+    );
+    assert!(clock
+        .due_update(
+            owner_generation,
+            started + std::time::Duration::from_millis(1_000),
+            1_000,
+        )
+        .is_some());
+}
+
+#[test]
+fn sustained_second_speaker_can_end_while_cloud_tail_stays_provisional() {
+    // Installed session 752: the owner body was already visible, then a nearby
+    // second person kept the provider's unattributed tail growing for 4.8 s.
+    // Sustained endpoint-grade owner absence must keep that provisional cloud
+    // tail from cancelling the owner-only wall clock.
+    let started = std::time::Instant::now();
+    let owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(3_000),
+        provider_audio_duration_ms: Some(3_200),
+        audio_duration_ms: Some(3_200),
+        local_speech_end_ms: Some(3_200),
+        local_target_speech_end_ms: Some(3_000),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(3_000),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let pending_other = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: None,
+        target_speech_end_ms: None,
+        provider_audio_duration_ms: Some(3_900),
+        audio_duration_ms: Some(4_000),
+        local_speech_end_ms: Some(4_000),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: Some(3_900),
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: None,
+        target_activity_advanced: false,
+        pending_unattributed_speech: true,
+        pending_activity_advanced: true,
+        speaker_info_present: false,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    let owner_generation = clock
+        .observe(&owner, true, started)
+        .expect("visible owner text arms the endpoint clock");
+
+    let provisional_other = crate::asr::volcengine::TargetSpeakerUpdate {
+        local_non_target_speech_end_ms: None,
+        ..pending_other.clone()
+    };
+    assert_eq!(
+        clock.observe(
+            &provisional_other,
+            true,
+            started + std::time::Duration::from_millis(200),
+        ),
+        None,
+        "unresolved provisional speech pauses the owner deadline"
+    );
+    assert!(clock
+        .due_update(
+            owner_generation,
+            started + std::time::Duration::from_millis(900),
+            900,
+        )
+        .is_none());
+
+    let restored_generation = clock
+        .observe(
+            &pending_other,
+            true,
+            started + std::time::Duration::from_millis(800),
+        )
+        .expect("sustained other speech restores the original owner deadline");
+
+    let continuing_other = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(4_700),
+        audio_duration_ms: Some(4_800),
+        local_speech_end_ms: Some(4_800),
+        local_non_target_speech_end_ms: Some(4_800),
+        ..pending_other
+    };
+    assert_eq!(
+        clock.observe(
+            &continuing_other,
+            true,
+            started + std::time::Duration::from_millis(850),
+        ),
+        None,
+        "continuing room speech must not re-arm the owner deadline"
+    );
+    assert!(clock
+        .due_update(
+            restored_generation,
+            started + std::time::Duration::from_millis(900),
+            900,
+        )
+        .is_some());
 }
 
 #[test]
@@ -2840,11 +3096,25 @@ fn rolling_wake_match_keeps_absolute_candidate_boundary() {
 #[test]
 fn rolling_local_confirmation_restarts_the_800ms_ladder_per_window() {
     let origin = 1_000 * 32;
+    // Fast pre-roll must not rotate away the wake phrase before its deferred
+    // first full-context local confirmation has run.
+    assert!(!super::should_advance_local_confirmation_window(
+        true, false, 0, origin, 0
+    ));
+    // Once the initial window has been examined, later ambient windows keep
+    // rolling and restart their bounded confirmation ladder.
     assert!(super::should_advance_local_confirmation_window(
-        true, false, 0, origin
+        true, false, 0, origin, 1
     ));
     assert!(!super::should_advance_local_confirmation_window(
-        true, true, 0, origin
+        true, true, 0, origin, 1
+    ));
+    assert!(super::should_advance_local_confirmation_window(
+        true,
+        false,
+        origin,
+        2_000 * 32,
+        0
     ));
     assert_eq!(
         super::local_confirmation_snapshot_for_window(1_799 * 32, origin, 0),
@@ -4592,6 +4862,46 @@ fn phonetic_near_match_requires_independent_kws_and_never_wakes_alone() {
     );
 }
 
+#[cfg(target_os = "windows")]
+#[test]
+fn repeated_start_aligned_half_phrase_requires_enrolled_owner_for_overlap_recovery() {
+    let overlap = super::LocalWakeConfirmation {
+        matched: false,
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
+        transcript_chars: 5,
+        phonetic_prefix_units: 2,
+        phonetic_best_distance: 2,
+        phonetic_best_window_start: 0,
+        inference_ms: 205,
+        snapshot_pcm_ms: 2_439,
+        recovered_keyword_end_seconds: None,
+    };
+    assert!(super::overlap_degraded_owner_phrase_evidence(
+        &overlap, 4, 0,
+    ));
+    assert!(!super::overlap_degraded_owner_phrase_evidence(
+        &overlap,
+        4,
+        1_000 * 32,
+    ));
+    let too_far = super::LocalWakeConfirmation {
+        phonetic_best_distance: 3,
+        ..overlap
+    };
+    assert!(!super::overlap_degraded_owner_phrase_evidence(
+        &too_far, 4, 0,
+    ));
+    assert!(!super::enrolled_owner_repeated_overlap_near_can_accept(
+        false, 3,
+    ));
+    assert!(!super::enrolled_owner_repeated_overlap_near_can_accept(
+        true, 2,
+    ));
+    assert!(super::enrolled_owner_repeated_overlap_near_can_accept(
+        true, 3,
+    ));
+}
+
 #[test]
 fn terminal_wait_budget_counts_time_already_spent_by_the_inflight_confirmation() {
     assert_eq!(super::terminal_inflight_confirmation_remaining_ms(0), 250);
@@ -4980,6 +5290,11 @@ fn every_automatic_wake_path_seeds_session_speaker_tracking() {
         body.matches("start_local_speaker_tracking(").count(),
         3,
         "live, terminal-with-body, and terminal-continuation wake paths must bind endpointing to the wake speaker"
+    );
+    let wake_polish = include_str!("dictation_wake_polish.rs");
+    assert!(
+        wake_polish.contains("note_verified_local_speaker_tracking_started(&wake_phrase)"),
+        "accepted automatic wake identity must survive into body isolation"
     );
 
     let continuation_take = body
