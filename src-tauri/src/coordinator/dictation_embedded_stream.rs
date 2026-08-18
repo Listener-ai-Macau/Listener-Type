@@ -1853,11 +1853,20 @@ impl EmbeddedStreamingDictation {
                             .as_ref()
                             .map(|candidate| candidate.local_confirmation_window_origin_bytes)
                             .unwrap_or_default();
-                        if local_confirmation_task_is_stale(
+                        let stale = local_confirmation_task_is_stale(
                             task_origin_bytes,
                             current_window_origin_bytes,
                             task_has_keyword_model_hit,
-                        ) {
+                        );
+                        let stale_positive = match &task_result {
+                            Ok(Ok(result)) => stale_local_confirmation_can_activate(
+                                stale,
+                                result,
+                                task_has_keyword_model_hit,
+                            ),
+                            _ => false,
+                        };
+                        if stale && !stale_positive {
                             log::info!(
                                 "[wake-phrase] stale local confirmation discarded embedded_session_id={} task_origin_pcm_ms={} current_origin_pcm_ms={}",
                                 embedded_session_id,
@@ -1866,6 +1875,14 @@ impl EmbeddedStreamingDictation {
                             );
                             None
                         } else {
+                        if stale_positive {
+                            log::info!(
+                                "[wake-phrase] stale positive local confirmation preserved embedded_session_id={} task_origin_pcm_ms={} current_origin_pcm_ms={}",
+                                embedded_session_id,
+                                task_origin_bytes / 32,
+                                current_window_origin_bytes / 32
+                            );
+                        }
                         match task_result {
                             Ok(Ok(result)) => {
                                 local_confirmation_ms = result.inference_ms;

@@ -406,6 +406,14 @@ const LOCAL_OWNER_ABSENCE_MAX_SCORE: f32 = 0.30;
 const LOCAL_OWNER_ABSENCE_CONFIRMATIONS: u32 = 3;
 const MAX_WAKE_PHRASE_UTTERANCE_MS: u64 = 1_800;
 const MAX_WAKE_BODY_CLUSTER_SPLIT_GAP_MS: u64 = 500;
+// Volcengine's two-pass diarization can place adjacent same-speaker clusters a
+// little on top of each other even when the PCM contains a clean pause. Field
+// session 1705 kept the verified owner locally but dropped the whole second
+// clause because the strict `next_start >= previous_end` check treated that
+// timestamp jitter as simultaneous speech. Only an enrolled, wake-verified
+// owner with a positively confirmed body may use this tolerance; explicit
+// local NonTarget evidence and larger/real overlaps remain fail-closed.
+const MAX_VERIFIED_OWNER_CLUSTER_HANDOFF_OVERLAP_MS: u64 = 200;
 // Volcengine session 768 emitted an exact wake-only row spanning 1,902 ms.
 // Permit that provider timing drift only for unenrolled/adaptive final recovery;
 // the normal speaker-attribution path keeps the stricter 1,800 ms boundary.
@@ -713,12 +721,20 @@ fn sequential_speaker_split_gap_is_owner_safe(
         return false;
     }
     stable_utterances.sort_by_key(|utterance| utterance_start_ms(utterance));
+    let verified_owner_handoff = state.local_wake_owner_verified
+        && !state.local_speaker_profile_adaptive
+        && state.local_target_confirmed;
     if stable_utterances.windows(2).any(|pair| {
         let previous_end_ms = utterance_end_ms(pair[0]);
         let next_start_ms = utterance_start_ms(pair[1]);
         previous_end_ms
             .zip(next_start_ms)
-            .map_or(true, |(end_ms, start_ms)| start_ms < end_ms)
+            .map_or(true, |(end_ms, start_ms)| {
+                start_ms < end_ms
+                    && (!verified_owner_handoff
+                        || end_ms.saturating_sub(start_ms)
+                            > MAX_VERIFIED_OWNER_CLUSTER_HANDOFF_OVERLAP_MS)
+            })
     }) {
         return false;
     }
@@ -1910,6 +1926,30 @@ fn provider_response_metadata(
                 }
                 utterances.len()
             });
+    // Keep enough structure to diagnose diarization boundary regressions
+    // without ever writing transcript content to disk. Session 1705 could only
+    // be narrowed to a cloud cluster handoff from aggregate character counts;
+    // final speaker/timing metadata makes the next occurrence machine-auditable.
+    let final_speaker_timeline = has_final_frame.then(|| {
+        result
+            .get("utterances")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(|utterance| {
+                json!({
+                    "speaker_id": utterance_speaker_id(utterance),
+                    "start_ms": utterance_start_ms(utterance),
+                    "end_ms": utterance_end_ms(utterance),
+                    "chars": utterance
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .map_or(0, |text| text.chars().count()),
+                    "stable": utterance_is_stable(utterance),
+                })
+            })
+            .collect::<Vec<_>>()
+    });
     json!({
         "audio_duration_ms": server_audio_duration_ms(json),
         "sources": sources,
@@ -1925,6 +1965,7 @@ fn provider_response_metadata(
             .get("text")
             .and_then(Value::as_str)
             .map_or(0, |text| text.chars().count()),
+        "final_speaker_timeline": final_speaker_timeline,
     })
 }
 
@@ -4053,7 +4094,11 @@ mod tests {
             "result": {
                 "text": "private transcript",
                 "utterances": [{
-                    "additions": { "source": "two_pass" }
+                    "additions": { "source": "two_pass", "speaker_id": "7" },
+                    "definite": true,
+                    "start_time": 120,
+                    "end_time": 1_480,
+                    "text": "private transcript"
                 }]
             }
         });
@@ -4066,7 +4111,18 @@ mod tests {
         assert_eq!(metadata["authoritative_two_pass"], true);
         assert_eq!(metadata["provider_result_chars"], 18);
         assert_eq!(metadata["result_chars"], 18);
+        assert_eq!(metadata["final_speaker_timeline"], Value::Null);
         assert!(!metadata.to_string().contains("private transcript"));
+
+        let final_metadata = provider_response_metadata(&json, &json["result"], true, true);
+        assert_eq!(
+            final_metadata["final_speaker_timeline"][0]["speaker_id"],
+            "7"
+        );
+        assert_eq!(final_metadata["final_speaker_timeline"][0]["start_ms"], 120);
+        assert_eq!(final_metadata["final_speaker_timeline"][0]["end_ms"], 1_480);
+        assert_eq!(final_metadata["final_speaker_timeline"][0]["chars"], 18);
+        assert!(!final_metadata.to_string().contains("private transcript"));
     }
 
     #[test]
@@ -6682,6 +6738,82 @@ mod tests {
         assert!(
             !sequential_speaker_split_gap_is_owner_safe(&state, &overlapping, &target_text,),
             "overlapping cloud speakers must never be merged into the owner transcript"
+        );
+    }
+
+    #[test]
+    fn installed_session_1705_allows_only_small_verified_owner_handoff_overlap() {
+        let mut result = json!({
+            "text": "开始录音。现在还能顺利地唤醒吗？自动结束还是一般般。",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 40,
+                    "end_time": 6982,
+                    "text": "开始录音。现在还能顺利地唤醒吗？"
+                },
+                {
+                    "additions": { "speaker_id": "2", "source": "two_pass" },
+                    "definite": true,
+                    // Two-pass boundaries may overlap slightly even though the
+                    // physical speaker paused before continuing.
+                    "start_time": 6860,
+                    "end_time": 10192,
+                    "text": "自动结束还是一般般。"
+                }
+            ]
+        });
+        let target_text = result["utterances"][0]["text"]
+            .as_str()
+            .expect("target utterance text")
+            .to_string();
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_wake_owner_verified: true,
+            local_speaker_profile_adaptive: false,
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            target_speaker_id: Some("1".into()),
+            wake_speaker_phrase: Some("开始录音".into()),
+            ..Default::default()
+        };
+        state.local_speaker_evidence = [7_500, 7_900, 8_300, 8_700, 9_100, 9_500, 9_900, 10_300]
+            .into_iter()
+            .map(|audio_end_ms| LocalSpeakerEvidence {
+                audio_end_ms,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.31,
+                    },
+                stable_target: true,
+            })
+            .collect();
+
+        assert!(sequential_speaker_split_gap_is_owner_safe(
+            &state,
+            &result,
+            &target_text,
+        ));
+
+        state.local_wake_owner_verified = false;
+        assert!(
+            !sequential_speaker_split_gap_is_owner_safe(&state, &result, &target_text),
+            "an unverified/adaptive profile must not weaken overlap isolation"
+        );
+        state.local_wake_owner_verified = true;
+        result["utterances"][1]["start_time"] = json!(6680);
+        assert!(
+            !sequential_speaker_split_gap_is_owner_safe(&state, &result, &target_text),
+            "a 302 ms overlap remains simultaneous speech and must be rejected"
+        );
+        result["utterances"][1]["start_time"] = json!(6860);
+        state.local_speaker_classification = Some(
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.18 },
+        );
+        assert!(
+            !sequential_speaker_split_gap_is_owner_safe(&state, &result, &target_text),
+            "confirmed local non-target evidence still vetoes a small cloud overlap"
         );
     }
 

@@ -1417,7 +1417,7 @@ fn proactive_stop_accumulates_trailing_silence_only_after_body_started() {
 }
 
 #[test]
-fn all_body_preview_shapes_keep_one_second_endpoint() {
+fn body_preview_endpoint_extends_only_explicit_dangling_continuations() {
     let base = crate::asr::volcengine::TargetSpeakerUpdate {
         speaker_id: Some("1".into()),
         target_speech_end_ms: Some(1_500),
@@ -1452,9 +1452,8 @@ fn all_body_preview_shapes_keep_one_second_endpoint() {
         super::target_speaker_inactive_stop_reason(1_000),
         "target_speaker_inactive_1000ms"
     );
-    // Every body preview shape uses the same 1.0s owner-inactivity contract.
-    // Punctuation, a dangling connector, or a short partial must not make the
-    // same spoken ending randomly take 1.5/2.0/2.5 seconds.
+    // Complete/open body shapes keep the same 1.0s owner-inactivity contract.
+    // Only an explicit dangling connector receives the bounded thinking pause.
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("用全刷。")),
         1_000
@@ -1469,11 +1468,11 @@ fn all_body_preview_shapes_keep_one_second_endpoint() {
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("我先检查一下，然后。")),
-        1_000,
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS,
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("最后。")),
-        1_000,
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS,
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("最后一句要完整。")),
@@ -1570,6 +1569,167 @@ fn settled_target_wall_clock_ends_one_second_after_visible_stable_text() {
 }
 
 #[test]
+fn settled_target_wall_clock_does_not_cut_a_fresh_unattributed_owner_tail() {
+    // Real hardware regression f45064eb: provider text settled near 9.7 s,
+    // then its utterance-boundary frame carried no new text while local PCM
+    // and speech continued through 11.38 s. The old wall-clock path ignored
+    // that fresh local speech and stopped halfway through the spoken sentence.
+    let started = std::time::Instant::now();
+    let stable = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(9_700),
+        provider_audio_duration_ms: Some(9_700),
+        audio_duration_ms: Some(9_700),
+        local_speech_end_ms: Some(9_700),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: false,
+        stable_attributed_speech_end_ms: Some(9_700),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.note_visible_body_boundary(false, 33, started);
+    let generation = clock
+        .observe(&stable, true, started)
+        .expect("stable visible owner text arms the wall clock");
+
+    let continuing_local_speech = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(10_400),
+        audio_duration_ms: Some(12_380),
+        local_speech_end_ms: Some(12_380),
+        target_activity_advanced: false,
+        ..stable
+    };
+    assert_eq!(
+        clock.observe(
+            &continuing_local_speech,
+            true,
+            started + std::time::Duration::from_millis(850),
+        ),
+        None,
+        "local speech does not re-arm the settled-text deadline",
+    );
+    assert!(clock
+        .due_update(
+            generation,
+            started + std::time::Duration::from_millis(1_000),
+            1_000,
+        )
+        .is_none());
+    assert!(clock
+        .latest_due_update(started + std::time::Duration::from_millis(1_000), 1_000)
+        .is_none());
+
+    let confirmed_other = crate::asr::volcengine::TargetSpeakerUpdate {
+        local_non_target_speech_end_ms: Some(12_380),
+        local_speaker_tracking_enabled: true,
+        ..continuing_local_speech
+    };
+    assert_eq!(
+        clock.observe(
+            &confirmed_other,
+            true,
+            started + std::time::Duration::from_millis(1_010),
+        ),
+        None,
+    );
+    assert!(
+        clock
+            .latest_due_update(started + std::time::Duration::from_millis(1_010), 1_000)
+            .is_some(),
+        "confirmed other speech must not hold the owner endpoint",
+    );
+}
+
+#[test]
+fn settled_target_wall_clock_bridges_a_manual_terminal_supplement_without_slowing_short_commands() {
+    let started = std::time::Instant::now();
+    let stable = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(16_332),
+        provider_audio_duration_ms: Some(16_800),
+        audio_duration_ms: Some(16_800),
+        local_speech_end_ms: Some(16_800),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: false,
+        stable_attributed_speech_end_ms: Some(16_332),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.note_visible_body_boundary(false, 40, started);
+    clock
+        .observe(&stable, true, started)
+        .expect("open manual preview arms the wall clock");
+
+    let terminal_at = started + std::time::Duration::from_millis(100);
+    // Real hardware session 7db3f128 first exposed a 31-character open
+    // provider preview, then speaker attribution shrank it to a 6-character
+    // terminal supplement while speech and PCM were still advancing.
+    clock.note_visible_body_boundary(true, 6, terminal_at);
+    let generation = clock
+        .arm_latest_for_visible_body(terminal_at)
+        .expect("terminal supplement rearms the visible-body clock");
+    let continuing = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(18_400),
+        audio_duration_ms: Some(18_500),
+        local_speech_end_ms: Some(18_500),
+        target_activity_advanced: false,
+        ..stable.clone()
+    };
+    assert_eq!(
+        clock.observe(
+            &continuing,
+            true,
+            started + std::time::Duration::from_millis(900),
+        ),
+        None,
+    );
+    assert!(clock
+        .due_update(
+            generation,
+            terminal_at + std::time::Duration::from_millis(900),
+            900,
+        )
+        .is_none());
+    assert!(clock
+        .due_update(
+            generation,
+            terminal_at + std::time::Duration::from_millis(3_000),
+            900,
+        )
+        .is_some());
+
+    let mut terminal_first = super::SettledTargetEndpointClock::default();
+    terminal_first.note_visible_body_boundary(false, 3, started);
+    terminal_first.note_visible_body_boundary(true, 4, started);
+    let terminal_first_short_command = crate::asr::volcengine::TargetSpeakerUpdate {
+        target_speech_end_ms: Some(942),
+        provider_audio_duration_ms: Some(4_400),
+        audio_duration_ms: Some(4_500),
+        local_speech_end_ms: Some(4_400),
+        stable_attributed_speech_end_ms: Some(3_902),
+        ..stable
+    };
+    let short_generation = terminal_first
+        .observe(&terminal_first_short_command, true, started)
+        .expect("terminal-first short command arms normally");
+    assert!(terminal_first
+        .due_update(
+            short_generation,
+            started + std::time::Duration::from_millis(900),
+            900,
+        )
+        .is_some());
+}
+
+#[test]
 fn settled_target_wall_clock_keeps_scheduling_allowance_below_public_endpoint() {
     assert_eq!(super::EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS, 1_000);
     assert_eq!(super::EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS, 900);
@@ -1580,6 +1740,98 @@ fn settled_target_wall_clock_keeps_scheduling_allowance_below_public_endpoint() 
 }
 
 #[test]
+fn dangling_continuation_gets_bounded_pause_without_slowing_complete_text() {
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(Some("我先看一下，然后")),
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
+    );
+    assert_eq!(
+        super::settled_target_wall_clock_timeout_ms(
+            super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
+        ),
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS - 100
+    );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(Some("我已经说完了。")),
+        super::EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+    );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(Some("普通一句话")),
+        super::EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+    );
+}
+
+#[test]
+fn enrolled_noise_tail_cannot_hold_settled_owner_past_uncertainty_ceiling() {
+    let started = std::time::Instant::now();
+    let owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(5_602),
+        provider_audio_duration_ms: Some(6_500),
+        audio_duration_ms: Some(6_500),
+        local_speech_end_ms: Some(6_500),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(5_602),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.note_visible_body_boundary(false, 34, started);
+    let generation = clock
+        .observe(&owner, true, started)
+        .expect("settled owner arms endpoint");
+    assert!(
+        clock
+            .due_update(
+                generation,
+                started + std::time::Duration::from_millis(1_000),
+                900,
+            )
+            .is_none(),
+        "recent uncertain tail still protects a pause"
+    );
+
+    let low_level_noise = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(9_300),
+        audio_duration_ms: Some(9_300),
+        local_speech_end_ms: Some(9_300),
+        target_activity_advanced: false,
+        ..owner
+    };
+    assert_eq!(
+        clock.observe(
+            &low_level_noise,
+            true,
+            started + std::time::Duration::from_millis(2_100),
+        ),
+        None
+    );
+    assert!(
+        clock
+            .latest_due_update(started + std::time::Duration::from_millis(2_100), 900)
+            .is_some(),
+        "unclassified energy past the two-second ceiling cannot keep recording alive"
+    );
+}
+
+#[test]
+fn visible_body_never_lets_the_provider_clock_bypass_the_guarded_wall_clock() {
+    assert!(!super::target_speaker_endpoint_due_after_visible_body_gate(
+        true, true, false,
+    ));
+    assert!(super::target_speaker_endpoint_due_after_visible_body_gate(
+        true, true, true,
+    ));
+    assert!(super::target_speaker_endpoint_due_after_visible_body_gate(
+        false, true, false,
+    ));
+}
+
+#[test]
 fn settled_target_watchdog_survives_obsolete_timer_generation() {
     let started = std::time::Instant::now();
     let stable = crate::asr::volcengine::TargetSpeakerUpdate {
@@ -1587,7 +1839,10 @@ fn settled_target_watchdog_survives_obsolete_timer_generation() {
         target_speech_end_ms: Some(6_002),
         provider_audio_duration_ms: Some(6_700),
         audio_duration_ms: Some(6_700),
-        local_speech_end_ms: Some(6_600),
+        // This fixture exercises timer generations, not an active speech
+        // tail. Keep local speech at the settled owner boundary so the
+        // endpoint is genuinely due.
+        local_speech_end_ms: Some(6_002),
         local_target_speech_end_ms: None,
         local_non_target_speech_end_ms: None,
         local_speaker_tracking_enabled: true,
@@ -3245,6 +3500,40 @@ fn rolling_local_confirmation_discards_only_stale_exploratory_tasks() {
         old_origin,
         current_origin,
         true
+    ));
+
+    let exact = super::LocalWakeConfirmation {
+        matched: true,
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::ExactStart,
+        transcript_chars: 4,
+        phonetic_prefix_units: 4,
+        phonetic_best_distance: 0,
+        phonetic_best_window_start: 0,
+        inference_ms: 200,
+        snapshot_pcm_ms: 2_000,
+        recovered_keyword_end_seconds: Some(0.8),
+    };
+    assert!(super::stale_local_confirmation_can_activate(
+        true, &exact, false
+    ));
+
+    let present_later = super::LocalWakeConfirmation {
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::PresentLater,
+        ..exact
+    };
+    assert!(!super::stale_local_confirmation_can_activate(
+        true,
+        &present_later,
+        false
+    ));
+
+    let absent = super::LocalWakeConfirmation {
+        matched: false,
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
+        ..present_later
+    };
+    assert!(!super::stale_local_confirmation_can_activate(
+        true, &absent, false
     ));
 }
 

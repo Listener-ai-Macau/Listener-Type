@@ -237,6 +237,31 @@ fn adapt_session_speaker_profile(
     count
 }
 
+/// Add the already-verified wake voice as a session-only reference for an
+/// enrolled owner. Persistent enrollment may have been recorded at another
+/// distance, volume, or on another day; comparing natural dictation only with
+/// those old wake-phrase samples left otherwise valid owner speech in the
+/// Uncertain band for an entire session. The fresh exemplar is safe to use
+/// here because the automatic wake gate has already matched the persisted
+/// owner template before `session_profile_from_wake` is called.
+///
+/// This deliberately does not change `adaptive`: enrolled profiles still
+/// cannot learn from later body windows, and this exemplar is never persisted.
+fn append_verified_wake_session_exemplar(
+    embeddings: &mut Vec<Vec<f32>>,
+    verified_wake_embedding: Vec<f32>,
+) -> bool {
+    if embeddings.is_empty()
+        || embeddings.len() >= SESSION_SPEAKER_MAX_EMBEDDINGS
+        || verified_wake_embedding.len() != embeddings[0].len()
+        || verified_wake_embedding.is_empty()
+    {
+        return false;
+    }
+    embeddings.push(verified_wake_embedding);
+    true
+}
+
 // 会话分段分类阈值。2026-08-09 的第二个人得分可达 0.426–0.58；而
 // 2026-08-14 installed session 1947 中，已经通过主人唤醒校验的同一说话人
 // 正文连续得到 0.307–0.337。中间分数只能作为 Uncertain，不能冻结并截断
@@ -1682,13 +1707,50 @@ mod platform {
                 .filter(|template| template_matches_phrase(template, &phrase))
                 .map(|template| template.session_embeddings.clone())
         };
-        if let Some(embeddings) = enrolled {
+        if let Some(mut embeddings) = enrolled {
+            match verified_wake_session_embedding(pcm, wake_end_seconds) {
+                Ok((verified_wake_embedding, source_speech_ms, model_input_ms, inference_ms)) => {
+                    let added = super::append_verified_wake_session_exemplar(
+                        &mut embeddings,
+                        verified_wake_embedding,
+                    );
+                    log::info!(
+                        "[speaker-verification] enrolled session target prepared phrase={} wake_end_ms={} speech_ms={} model_input_ms={} inference_ms={inference_ms} persisted_exemplars={} live_verified_exemplar_added={added}",
+                        phrase,
+                        (wake_end_seconds * 1000.0).round() as u64,
+                        source_speech_ms,
+                        model_input_ms,
+                        embeddings.len().saturating_sub(usize::from(added)),
+                    );
+                }
+                Err(err) => log::warn!(
+                    "[speaker-verification] live verified wake exemplar unavailable; preserving enrolled session bank: {err}"
+                ),
+            }
             return Ok(SessionSpeakerProfile {
                 embeddings: Arc::new(embeddings),
                 adaptive: false,
             });
         }
+        let (verified_wake_embedding, source_speech_ms, model_input_ms, inference_ms) =
+            verified_wake_session_embedding(pcm, wake_end_seconds)?;
+        log::info!(
+            "[speaker-verification] ephemeral session target prepared phrase={} wake_end_ms={} speech_ms={} model_input_ms={} inference_ms={inference_ms}",
+            phrase,
+            (wake_end_seconds * 1000.0).round() as u64,
+            source_speech_ms,
+            model_input_ms,
+        );
+        Ok(SessionSpeakerProfile {
+            embeddings: Arc::new(vec![verified_wake_embedding]),
+            adaptive: true,
+        })
+    }
 
+    fn verified_wake_session_embedding(
+        pcm: &[u8],
+        wake_end_seconds: f32,
+    ) -> Result<(Vec<f32>, usize, usize, u128), String> {
         let wake_end_bytes =
             ((wake_end_seconds.max(0.0) * 32_000.0).round() as usize).min(pcm.len()) & !1usize;
         let profile_end_bytes = wake_end_bytes.saturating_add(250 * 32).min(pcm.len()) & !1usize;
@@ -1700,21 +1762,16 @@ mod platform {
         let speech = session_speaker_speech_window(focused)?;
         let source_speech_ms = speech.len() / 32;
         let model_pcm = pad_session_speaker_pcm(speech);
+        let model_input_ms = model_pcm.len() / 32;
         let runtime = ensure_runtime()?;
         let inference_started = std::time::Instant::now();
         let embedding = runtime.embedding(&model_pcm)?;
-        let inference_ms = inference_started.elapsed().as_millis();
-        log::info!(
-            "[speaker-verification] ephemeral session target prepared phrase={} wake_end_ms={} speech_ms={} model_input_ms={} inference_ms={inference_ms}",
-            phrase,
-            (wake_end_seconds * 1000.0).round() as u64,
+        Ok((
+            embedding,
             source_speech_ms,
-            model_pcm.len() / 32
-        );
-        Ok(SessionSpeakerProfile {
-            embeddings: Arc::new(vec![embedding]),
-            adaptive: true,
-        })
+            model_input_ms,
+            inference_started.elapsed().as_millis(),
+        ))
     }
 
     pub fn observe_session_speaker(
@@ -3047,6 +3104,43 @@ mod tests {
             session_speaker_classification_for_signal(0.60, 1_200, 1_500.0),
             SessionSpeakerClassification::Target { score } if score == 0.60
         ));
+    }
+
+    #[test]
+    fn enrolled_session_adds_one_verified_wake_exemplar_without_becoming_adaptive() {
+        let mut embeddings = vec![vec![1.0, 0.0], vec![0.9, 0.1], vec![0.8, 0.2]];
+        assert!(append_verified_wake_session_exemplar(
+            &mut embeddings,
+            vec![0.7, 0.3],
+        ));
+        assert_eq!(embeddings.len(), SESSION_SPEAKER_MAX_EMBEDDINGS);
+        assert_eq!(embeddings.last(), Some(&vec![0.7, 0.3]));
+
+        assert!(
+            !append_verified_wake_session_exemplar(&mut embeddings, vec![0.6, 0.4]),
+            "the session bank must stay bounded"
+        );
+        let profile = SessionSpeakerProfile {
+            embeddings: Arc::new(embeddings),
+            adaptive: false,
+        };
+        assert!(!profile.is_adaptive());
+    }
+
+    #[test]
+    fn verified_wake_exemplar_rejects_empty_or_wrong_dimension_banks() {
+        let mut empty = Vec::new();
+        assert!(!append_verified_wake_session_exemplar(
+            &mut empty,
+            vec![1.0, 0.0],
+        ));
+
+        let mut enrolled = vec![vec![1.0, 0.0]];
+        assert!(!append_verified_wake_session_exemplar(
+            &mut enrolled,
+            vec![1.0],
+        ));
+        assert_eq!(enrolled.len(), 1);
     }
 
     #[test]
