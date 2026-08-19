@@ -63,7 +63,7 @@ impl SettledTargetEndpointClock {
             EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
         );
         // For an enrolled tracker, low-level energy is bounded by the existing
-        // two-second uncertainty ceiling so room noise cannot hold the session.
+        // one-second uncertainty ceiling so room noise cannot hold the session.
         // Apply that ceiling to wall time as well as the provider audio clock:
         // the provider can stop publishing speaker frames while local audio
         // remains Uncertain, leaving `latest_update` permanently stale.

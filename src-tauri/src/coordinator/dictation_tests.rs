@@ -1794,11 +1794,21 @@ fn enrolled_noise_tail_cannot_hold_settled_owner_past_uncertainty_ceiling() {
         clock
             .due_update(
                 generation,
-                started + std::time::Duration::from_millis(1_000),
+                started + std::time::Duration::from_millis(999),
                 900,
             )
             .is_none(),
-        "recent uncertain tail still protects a pause"
+        "recent uncertain tail still protects a sub-second pause"
+    );
+    assert!(
+        clock
+            .due_update(
+                generation,
+                started + std::time::Duration::from_millis(1_000),
+                900,
+            )
+            .is_some(),
+        "uncertain room energy cannot extend the one-second owner endpoint"
     );
 
     let low_level_noise = crate::asr::volcengine::TargetSpeakerUpdate {
@@ -1812,15 +1822,15 @@ fn enrolled_noise_tail_cannot_hold_settled_owner_past_uncertainty_ceiling() {
         clock.observe(
             &low_level_noise,
             true,
-            started + std::time::Duration::from_millis(2_100),
+            started + std::time::Duration::from_millis(1_100),
         ),
         None
     );
     assert!(
         clock
-            .latest_due_update(started + std::time::Duration::from_millis(2_100), 900)
+            .latest_due_update(started + std::time::Duration::from_millis(1_100), 900)
             .is_some(),
-        "unclassified energy past the two-second ceiling cannot keep recording alive"
+        "unclassified energy past the one-second ceiling cannot keep recording alive"
     );
 }
 
@@ -1852,11 +1862,11 @@ fn stale_uncertain_speaker_frame_cannot_hold_settled_owner_forever() {
         clock
             .due_update(
                 generation,
-                started + std::time::Duration::from_millis(1_000),
+                started + std::time::Duration::from_millis(999),
                 900,
             )
             .is_none(),
-        "a fresh uncertain tail still gets its bounded owner-continuation window"
+        "a fresh uncertain tail still gets a sub-second owner-continuation window"
     );
     assert!(
         clock
@@ -2248,9 +2258,7 @@ fn target_speaker_endpoint_requires_one_second_without_that_speaker() {
         stable_attributed_speech_end_ms: Some(1_500),
         ..due.clone()
     };
-    assert!(!super::target_speaker_endpoint_due(
-        &unresolved_recent_local
-    ));
+    assert!(super::target_speaker_endpoint_due(&unresolved_recent_local));
 
     // Confirmed other-speaker energy does not refresh the owner clock: once the
     // owner has been inactive for 1000 ms, auto-end proceeds while others talk.
@@ -2267,7 +2275,7 @@ fn target_speaker_endpoint_requires_one_second_without_that_speaker() {
         local_non_target_speech_end_ms: Some(2_399),
         ..unresolved_recent_local.clone()
     };
-    assert!(!super::target_speaker_endpoint_due(
+    assert!(super::target_speaker_endpoint_due(
         &stale_non_target_classification
     ));
 
@@ -5861,9 +5869,9 @@ async fn activation_segment_race_guard_does_not_break_normal_stop_paths() {
 }
 
 #[test]
-fn unresolved_local_speech_hold_is_capped_two_seconds_after_confirmed_owner() {
+fn unresolved_local_speech_hold_is_capped_one_second_after_confirmed_owner() {
     // F4 fixture（2026-08-09 12:47:04）：旁人连续说话，本地未归属人声持续推进，
-    // 旧逻辑会把自动结束无限挂起。挂起以最后一次确认本人语音 +2s 封顶。
+    // 旧逻辑会把自动结束无限挂起。挂起以最后一次确认本人语音 +1s 封顶。
     let base = crate::asr::volcengine::TargetSpeakerUpdate {
         speaker_id: Some("1".into()),
         target_speech_end_ms: Some(10_000),
@@ -5879,7 +5887,7 @@ fn unresolved_local_speech_hold_is_capped_two_seconds_after_confirmed_owner() {
         pending_activity_advanced: false,
         speaker_info_present: true,
     };
-    // cap 内（本人 10s + 2s = 12s；未归属人声尾端 11s、且仍在 1.0s 窗口内 recent）
+    // cap 内（本人 10s + 1s = 11s；未归属人声尾端 11s、且仍在 1.0s 窗口内 recent）
     // → 仍阻挡结束（本人说话分类滞后不受影响的通道保留）。
     let within_cap = crate::asr::volcengine::TargetSpeakerUpdate {
         provider_audio_duration_ms: Some(11_500),
@@ -5892,7 +5900,7 @@ fn unresolved_local_speech_hold_is_capped_two_seconds_after_confirmed_owner() {
         1_000
     ));
     assert!(!super::target_speaker_endpoint_due(&within_cap));
-    // cap 外（未归属人声尾端推进到 19.9s > 12s 封顶）→ 不再阻挡，端点可按
+    // cap 外（未归属人声尾端推进到 19.9s > 11s 封顶）→ 不再阻挡，端点可按
     // 1.0s 合同触发。
     assert!(!super::has_unresolved_recent_local_speech(&base, 1_000));
     assert!(super::target_speaker_endpoint_due(&base));

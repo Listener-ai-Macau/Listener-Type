@@ -106,10 +106,13 @@ const EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS: u64 = 200;
 // speaker as unclassified owner speech and disabled provider-stall auto-end.
 // Keep this below two verifier cadences so stale evidence still expires.
 const EMBEDDED_LOCAL_SPEAKER_CLASSIFICATION_SLACK_MS: u64 = 600;
-// F4（2026-08-09 12:47:04）：旁人连续说话时未归属本地语音不断前进，会把
-// 自动结束无限挂起。挂起以最后一次归属语音 +6s 封顶；本人正常说话的分类
-// 滞后远小于 6s，不受影响。
-const EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS: u64 = 2_000;
+// Unresolved local energy is not enough to override the product's one-second
+// owner endpoint.  The verifier reports roughly every 400 ms, so one second
+// still gives a genuine owner continuation at least two chances to refresh the
+// confirmed Target boundary.  Keeping the older two-second uncertainty window
+// made Type miss its own endpoint and lose the race to firmware at ~1.23 s in
+// installed sessions 2860/2876.
+const EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS: u64 = 1_000;
 static EMBEDDED_ASR_SPEECH_ACTIVITY_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 fn should_restore_clipboard_after_dictation(
@@ -700,8 +703,8 @@ fn local_speech_confidently_non_target(
 /// The owner was confirmed earlier, then the newest speech-energy window moved
 /// beyond that local Target boundary without becoming a confirmed NonTarget.
 /// This is identity uncertainty, not evidence that the owner stopped talking.
-/// Keep the hold bounded at two seconds; explicit other-speaker evidence never
-/// enters this branch.
+/// Keep the hold bounded by the one-second owner endpoint; explicit
+/// other-speaker evidence never enters this branch.
 fn has_uncertain_owner_identity_tail(update: &crate::asr::volcengine::TargetSpeakerUpdate) -> bool {
     if !update.local_speaker_tracking_enabled {
         return false;
