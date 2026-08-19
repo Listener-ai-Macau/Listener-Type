@@ -300,6 +300,11 @@ struct Inner {
     /// 嵌入式 BLE 流式 ASR 的最近一次 partial preview。只用于胶囊视觉反馈；
     /// 光标仍只在 final text 完成后写入。
     embedded_audio_partial_preview: Mutex<Option<String>>,
+    /// Latest capsule-only provisional preview. Unlike
+    /// `embedded_audio_partial_preview`, this may contain a still-unsettled
+    /// diarization tail and must never participate in endpointing, transcript
+    /// recovery, hotword repair, or final insertion.
+    embedded_audio_visual_preview: Mutex<Option<String>>,
     /// Session-scoped activation-prefix and initial-body guard. Manual sessions
     /// never arm this guard.
     embedded_audio_automatic_wake_guard: Mutex<Option<AutomaticWakeGuard>>,
@@ -684,6 +689,7 @@ impl Coordinator {
                     embedded_audio_stats: Mutex::new(None),
                     embedded_audio_final_result: Mutex::new(None),
                     embedded_audio_partial_preview: Mutex::new(None),
+                    embedded_audio_visual_preview: Mutex::new(None),
                     embedded_audio_automatic_wake_guard: Mutex::new(None),
                     embedded_audio_provider_progress_guard: Mutex::new(None),
                     embedded_audio_terminal_wake_continuation: Mutex::new(None),
@@ -771,6 +777,7 @@ impl Coordinator {
                 embedded_audio_stats: Mutex::new(None),
                 embedded_audio_final_result: Mutex::new(None),
                 embedded_audio_partial_preview: Mutex::new(None),
+                embedded_audio_visual_preview: Mutex::new(None),
                 embedded_audio_automatic_wake_guard: Mutex::new(None),
                 embedded_audio_provider_progress_guard: Mutex::new(None),
                 embedded_audio_terminal_wake_continuation: Mutex::new(None),

@@ -255,6 +255,7 @@ fn clear_embedded_audio_stats(inner: &Arc<Inner>) {
 
 fn clear_embedded_audio_partial_preview(inner: &Arc<Inner>) {
     *inner.embedded_audio_partial_preview.lock() = None;
+    *inner.embedded_audio_visual_preview.lock() = None;
     *inner.embedded_audio_last_capsule_level.lock() = 0.0;
 }
 

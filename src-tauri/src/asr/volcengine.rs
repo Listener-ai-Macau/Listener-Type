@@ -161,6 +161,7 @@ fn bounded_empty_final_replay_pcm(pcm: &[u8]) -> (Vec<u8>, f64, u16, u16) {
 type WsSink = futures_util::stream::SplitSink<WsStream, Message>;
 type SharedWriter = Arc<AsyncMutex<Option<WsSink>>>;
 type PartialTranscriptCallback = Arc<dyn Fn(String) + Send + Sync>;
+type VisualPartialTranscriptCallback = Arc<dyn Fn(String) + Send + Sync>;
 type FinalIntermediateTranscriptCallback = Arc<dyn Fn(FinalIntermediateTranscript) + Send + Sync>;
 type TargetSpeakerUpdateCallback = Arc<dyn Fn(TargetSpeakerUpdate) + Send + Sync>;
 type StreamingEventCallback = Arc<dyn Fn(VolcengineStreamingEvent) + Send + Sync>;
@@ -326,6 +327,10 @@ struct SyncState {
     optimistic_preview_segments: Vec<TranscriptSegment>,
     optimistic_untimed_window: String,
     last_emitted_preview_text: String,
+    /// Capsule-only provisional text. This ledger is intentionally separate
+    /// from every authoritative/optimistic transcript ledger so a visual
+    /// cadence improvement cannot leak into endpointing or final insertion.
+    last_emitted_visual_preview_text: String,
     /// 最新服务端响应已处理的音频时长。two-pass 终帧可能只给最后一个 utterance 的
     /// 词时间戳，但 `audio_info.duration` 仍覆盖整段音频；收尾时应优先采用这项
     /// 传输级覆盖证据，避免把已返回的完整文本误判为截断。
@@ -517,6 +522,42 @@ fn local_speaker_allows_optimistic_preview(state: &SyncState) -> bool {
         state.local_speaker_classification.as_ref(),
         Some(crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. })
     )
+}
+
+fn display_only_provisional_preview_candidate(
+    state: &mut SyncState,
+    provider_result: &Value,
+    pending_unattributed_speech: bool,
+) -> Option<String> {
+    if !pending_unattributed_speech
+        || !state.local_speaker_tracking_enabled
+        || !state.local_wake_owner_verified
+        || !state.local_speaker_stable_target
+        || state.owner_isolation_frozen
+        || state.local_owner_absence_run_confirmed
+        || state.local_non_target_speech_end_ms.is_some()
+        || matches!(
+            state.local_speaker_classification.as_ref(),
+            Some(crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. })
+        )
+    {
+        return None;
+    }
+    let candidate = provider_result
+        .get("text")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())?;
+    let authoritative_len = spoken_content_len(&state.last_emitted_preview_text);
+    let visual_len = spoken_content_len(&state.last_emitted_visual_preview_text);
+    let candidate_len = spoken_content_len(candidate);
+    if candidate_len <= authoritative_len.max(visual_len)
+        || candidate == state.last_emitted_visual_preview_text
+    {
+        return None;
+    }
+    state.last_emitted_visual_preview_text = candidate.to_string();
+    Some(candidate.to_string())
 }
 
 fn local_speaker_allows_owner_endpoint_refresh(state: &SyncState) -> bool {
@@ -1975,6 +2016,7 @@ pub struct VolcengineStreamingASR {
     session_options: VolcengineSessionOptions,
     state: ParkingMutex<SyncState>,
     partial_callback: ParkingMutex<Option<PartialTranscriptCallback>>,
+    visual_partial_callback: ParkingMutex<Option<VisualPartialTranscriptCallback>>,
     final_intermediate_callback: ParkingMutex<Option<FinalIntermediateTranscriptCallback>>,
     target_speaker_update_callback: ParkingMutex<Option<TargetSpeakerUpdateCallback>>,
     streaming_event_callback: ParkingMutex<Option<StreamingEventCallback>>,
@@ -2044,6 +2086,7 @@ impl VolcengineStreamingASR {
             session_options,
             state: ParkingMutex::new(SyncState::default()),
             partial_callback: ParkingMutex::new(None),
+            visual_partial_callback: ParkingMutex::new(None),
             final_intermediate_callback: ParkingMutex::new(None),
             target_speaker_update_callback: ParkingMutex::new(None),
             streaming_event_callback: ParkingMutex::new(None),
@@ -2329,6 +2372,13 @@ impl VolcengineStreamingASR {
         callback: Option<Arc<dyn Fn(String) + Send + Sync>>,
     ) {
         *self.partial_callback.lock() = callback;
+    }
+
+    pub fn set_visual_partial_transcript_callback(
+        &self,
+        callback: Option<Arc<dyn Fn(String) + Send + Sync>>,
+    ) {
+        *self.visual_partial_callback.lock() = callback;
     }
 
     pub fn set_final_intermediate_transcript_callback(
@@ -2617,6 +2667,13 @@ impl VolcengineStreamingASR {
 
     fn emit_partial_transcript(&self, text: &str) {
         let callback = self.partial_callback.lock().clone();
+        if let Some(callback) = callback {
+            callback(text.to_string());
+        }
+    }
+
+    fn emit_visual_partial_transcript(&self, text: &str) {
+        let callback = self.visual_partial_callback.lock().clone();
         if let Some(callback) = callback {
             callback(text.to_string());
         }
@@ -3405,6 +3462,39 @@ impl VolcengineStreamingASR {
                 );
                 self.emit_partial_transcript(&preview);
                 self.emit_streaming_event(VolcengineStreamingEvent::Partial(preview));
+            }
+        }
+        // Cloud diarization can temporarily seal the verified owner's body as
+        // another speaker while a newer raw tail is still provisional. The
+        // strict owner ledger correctly withholds that tail, but withholding
+        // every intermediate packet makes the capsule jump from (for example)
+        // 22 to 56 characters several seconds later. Publish the growing raw
+        // provider text through a dedicated visual-only callback while the
+        // persisted wake identity remains debounced as owner and there is no
+        // NonTarget/owner-absence evidence. This callback is deliberately not
+        // the product partial callback: it cannot refresh endpoint clocks,
+        // repair/fallback the final, or enter insertion.
+        if !has_final
+            && !owner_safe_provider_split_preview
+            && self
+                .session_options
+                .endpoint
+                .emits_stream_preview_before_final()
+        {
+            let visual_preview = {
+                let mut state = self.state.lock();
+                display_only_provisional_preview_candidate(
+                    &mut state,
+                    result,
+                    pending_unattributed_speech,
+                )
+            };
+            if let Some(preview) = visual_preview {
+                log::info!(
+                    "[asr] display-only provisional preview published chars={} endpoint_refresh=false final_ledger=false",
+                    preview.chars().count()
+                );
+                self.emit_visual_partial_transcript(&preview);
             }
         }
         // Streaming partials may only see the first stable utterance
@@ -4898,6 +4988,47 @@ mod tests {
             crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.2 },
         );
         assert!(!local_speaker_allows_optimistic_preview(&state));
+    }
+
+    #[test]
+    fn diarization_pending_visual_preview_advances_without_touching_final_or_endpoint_ledgers() {
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_wake_owner_verified: true,
+            local_speaker_stable_target: true,
+            local_speaker_classification: Some(
+                crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                    score: 0.33,
+                },
+            ),
+            last_emitted_preview_text: "开始录音。这是已确认的主讲人前半句。".into(),
+            best_transcript_text: "开始录音。这是已确认的主讲人前半句。".into(),
+            local_target_speech_end_ms: Some(6_800),
+            ..SyncState::default()
+        };
+        let provider = json!({
+            "text": "开始录音。这是已确认的主讲人前半句，后半句仍然在逐字增长。"
+        });
+        let best_before = state.best_transcript_text.clone();
+        let endpoint_before = state.local_target_speech_end_ms;
+
+        let visual = display_only_provisional_preview_candidate(&mut state, &provider, true)
+            .expect("verified owner uncertainty should permit visual-only cadence");
+        assert_eq!(visual, provider["text"]);
+        assert_eq!(state.best_transcript_text, best_before);
+        assert_eq!(state.local_target_speech_end_ms, endpoint_before);
+        assert!(state.optimistic_preview_text.is_empty());
+
+        state.local_speaker_classification = Some(
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.1 },
+        );
+        let longer_foreign = json!({
+            "text": "开始录音。这是已确认的主讲人前半句，后半句仍然在逐字增长。旁人说话不得继续显示。"
+        });
+        assert!(
+            display_only_provisional_preview_candidate(&mut state, &longer_foreign, true).is_none(),
+            "explicit NonTarget evidence must close the visual-only gate"
+        );
     }
 
     #[test]
