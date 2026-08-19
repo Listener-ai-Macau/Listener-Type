@@ -165,6 +165,7 @@ impl SettledTargetEndpointClock {
                     self.armed_from_visible_body_fallback,
                     self.latest_visible_body_ends_terminal,
                     self.manual_terminal_bridge_until,
+                    armed_at,
                     now,
                 )
             })
@@ -204,14 +205,17 @@ impl SettledTargetEndpointClock {
     }
 
     fn is_due(&self, now: Instant, timeout_ms: u64) -> bool {
-        self.armed_at.is_some_and(|armed_at| {
-            now.saturating_duration_since(armed_at) >= Duration::from_millis(timeout_ms)
-        }) && self.latest_update.as_ref().is_some_and(|update| {
+        let Some(armed_at) = self.armed_at else {
+            return false;
+        };
+        now.saturating_duration_since(armed_at) >= Duration::from_millis(timeout_ms)
+            && self.latest_update.as_ref().is_some_and(|update| {
             Self::update_allows_endpoint(
                 update,
                 self.armed_from_visible_body_fallback,
                 self.latest_visible_body_ends_terminal,
                 self.manual_terminal_bridge_until,
+                armed_at,
                 now,
             )
         })

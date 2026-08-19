@@ -52,6 +52,7 @@ impl SettledTargetEndpointClock {
         armed_from_visible_body_fallback: bool,
         latest_visible_body_ends_terminal: Option<bool>,
         manual_terminal_bridge_until: Option<Instant>,
+        armed_at: Instant,
         now: Instant,
     ) -> bool {
         // A boundary frame can settle the preview before a continuing clause.
@@ -63,11 +64,20 @@ impl SettledTargetEndpointClock {
         );
         // For an enrolled tracker, low-level energy is bounded by the existing
         // two-second uncertainty ceiling so room noise cannot hold the session.
+        // Apply that ceiling to wall time as well as the provider audio clock:
+        // the provider can stop publishing speaker frames while local audio
+        // remains Uncertain, leaving `latest_update` permanently stale.
+        let uncertain_tail_within_wall_ceiling = now.saturating_duration_since(armed_at)
+            < Duration::from_millis(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS);
         let bounded_unclassified_local_speech = if update.local_speaker_tracking_enabled
             && (update.target_speech_end_ms.is_some()
                 || update.local_target_speech_end_ms.is_some())
         {
-            has_unresolved_recent_local_speech(update, EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS)
+            uncertain_tail_within_wall_ceiling
+                && has_unresolved_recent_local_speech(
+                    update,
+                    EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+                )
         } else {
             fresh_unclassified_local_speech
         };

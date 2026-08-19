@@ -1825,6 +1825,54 @@ fn enrolled_noise_tail_cannot_hold_settled_owner_past_uncertainty_ceiling() {
 }
 
 #[test]
+fn stale_uncertain_speaker_frame_cannot_hold_settled_owner_forever() {
+    let started = std::time::Instant::now();
+    let stale_uncertain_tail = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(5_032),
+        provider_audio_duration_ms: Some(5_800),
+        audio_duration_ms: Some(5_800),
+        local_speech_end_ms: Some(5_800),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(5_032),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.note_visible_body_boundary(false, 18, started);
+    let generation = clock
+        .observe(&stale_uncertain_tail, true, started)
+        .expect("settled owner arms endpoint");
+
+    assert!(
+        clock
+            .due_update(
+                generation,
+                started + std::time::Duration::from_millis(1_000),
+                900,
+            )
+            .is_none(),
+        "a fresh uncertain tail still gets its bounded owner-continuation window"
+    );
+    assert!(
+        clock
+            .latest_due_update(
+                started
+                    + std::time::Duration::from_millis(
+                        super::EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS,
+                    ),
+                900,
+            )
+            .is_some(),
+        "a stale provider snapshot must expire on wall time even without another speaker frame"
+    );
+}
+
+#[test]
 fn visible_body_never_lets_the_provider_clock_bypass_the_guarded_wall_clock() {
     assert!(!super::target_speaker_endpoint_due_after_visible_body_gate(
         true, true, false,
