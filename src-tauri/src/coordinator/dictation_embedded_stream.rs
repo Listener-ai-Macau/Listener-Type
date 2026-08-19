@@ -1858,14 +1858,11 @@ impl EmbeddedStreamingDictation {
                             current_window_origin_bytes,
                             task_has_keyword_model_hit,
                         );
-                        let stale_positive = match &task_result {
-                            Ok(Ok(result)) => stale_local_confirmation_can_activate(
-                                stale,
-                                result,
-                                task_has_keyword_model_hit,
-                            ),
-                            _ => false,
-                        };
+                        let stale_positive = matches!(
+                            &task_result,
+                            Ok(Ok(result))
+                                if stale_local_confirmation_can_activate(stale, result, task_has_keyword_model_hit)
+                        );
                         if stale && !stale_positive {
                             log::info!(
                                 "[wake-phrase] stale local confirmation discarded embedded_session_id={} task_origin_pcm_ms={} current_origin_pcm_ms={}",
@@ -1875,16 +1872,16 @@ impl EmbeddedStreamingDictation {
                             );
                             None
                         } else {
-                        if stale_positive {
-                            log::info!(
-                                "[wake-phrase] stale positive local confirmation preserved embedded_session_id={} task_origin_pcm_ms={} current_origin_pcm_ms={}",
-                                embedded_session_id,
-                                task_origin_bytes / 32,
-                                current_window_origin_bytes / 32
-                            );
-                        }
-                        match task_result {
-                            Ok(Ok(result)) => {
+                            if stale_positive {
+                                log::info!(
+                                    "[wake-phrase] stale positive local confirmation preserved embedded_session_id={} task_origin_pcm_ms={} current_origin_pcm_ms={}",
+                                    embedded_session_id,
+                                    task_origin_bytes / 32,
+                                    current_window_origin_bytes / 32
+                                );
+                            }
+                            match task_result {
+                                Ok(Ok(result)) => {
                                 local_confirmation_ms = result.inference_ms;
                                 log::info!(
                                         "[wake-phrase] stage2 local confirm finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} phonetic_prefix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={} window_origin_pcm_ms={} kws_hit={}",

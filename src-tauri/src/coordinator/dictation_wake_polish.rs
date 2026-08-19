@@ -879,7 +879,6 @@ fn exploratory_local_confirmation_allowed(
 }
 
 #[cfg(target_os = "windows")]
-#[cfg(target_os = "windows")]
 fn local_confirmation_task_is_stale(
     task_origin_bytes: usize,
     current_origin_bytes: usize,
@@ -887,26 +886,17 @@ fn local_confirmation_task_is_stale(
 ) -> bool {
     !task_has_keyword_model_hit && task_origin_bytes < current_origin_bytes
 }
-
 #[cfg(target_os = "windows")]
 fn stale_local_confirmation_can_activate(
     stale: bool,
     result: &LocalWakeConfirmation,
     task_has_keyword_model_hit: bool,
 ) -> bool {
-    // Window rotation invalidates negative/ambiguous evidence because a newer
-    // window may contain a later wake phrase. It must not invalidate a positive
-    // exact-start result that was already being inferred when rotation fired.
-    // Keeping only the ordinary activation-grade result preserves the existing
-    // false-wake boundary (PresentLater and Absent remain unusable here).
+    // Rotation discards ambiguous evidence, not a completed activation-grade positive.
     stale
         && result.matched
-        && local_confirmation_can_activate(
-            task_has_keyword_model_hit,
-            result.phrase_relation,
-        )
+        && local_confirmation_can_activate(task_has_keyword_model_hit, result.phrase_relation)
 }
-
 fn offset_streaming_wake_match(
     found: Option<crate::wake_phrase::Match>,
     stream_origin_bytes: usize,

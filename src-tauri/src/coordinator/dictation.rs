@@ -56,11 +56,6 @@ const EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT: Duration = Duration::from_millis(300
 // different speeds. Only the wake/target speaker's latest speech refreshes this
 // clock, so other people talking still cannot lengthen auto-end.
 const EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS: u64 = 1_000;
-// A short, explicit continuation word is different from an ordinary complete
-// utterance. Give “然后/但是/另外/所以…” one natural thinking pause without
-// slowing every recording. The host also keeps the firmware's fixed one-second
-// silence fallback alive only inside this bounded window (see endpoint clock).
-const EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS: u64 = 2_500;
 // A settled-text timer shares the async runtime with BLE and ASR callbacks.
 // Arm it slightly before the public one-second endpoint so ordinary Windows
 // scheduling jitter still dispatches at about 1.0 s (live 577 measured
@@ -68,12 +63,6 @@ const EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS: u64 = 2_500;
 // The stop reason and provider/audio-clock policy remain the one-second
 // contract; only this wall-clock wake-up receives the scheduling allowance.
 const EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS: u64 = 900;
-const EMBEDDED_SETTLED_TARGET_SCHEDULING_ALLOWANCE_MS: u64 =
-    EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS - EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS;
-// Leave enough room for the BLE command's 300ms acknowledgement timeout before
-// firmware reaches its fixed 1.0s silence fallback. At 800ms the worst case was
-// 1.1s, so a valid paused continuation could still lose the race and be cut.
-const EMBEDDED_DANGLING_FIRMWARE_KEEPALIVE_INTERVAL_MS: u64 = 600;
 // Installed session 72519330: wake capsule → ~1.2s host auto-end on the wake
 // clock with empty body → "没有识别到语音". Initial body wait is only 700ms, so
 // 1.0s snappy endpoint after that treats "thinking after wake" as done. Keep
@@ -93,16 +82,7 @@ const EMBEDDED_PROVIDER_STALL_CONFIRM_MS: u64 = 1_000;
 const EMBEDDED_LIVE_OWNER_ACTIVITY_ALIGNMENT_MS: u64 = 600;
 
 include!("dictation_endpoint_clock.rs");
-
-fn preview_ends_with_sentence_terminal(preview: Option<&str>) -> bool {
-    let Some(text) = preview.map(str::trim).filter(|s| !s.is_empty()) else {
-        return false;
-    };
-    text.chars()
-        .rev()
-        .find(|ch| !ch.is_whitespace())
-        .is_some_and(|ch| matches!(ch, '。' | '！' | '？' | '.' | '!' | '?' | '…'))
-}
+include!("dictation_endpoint_policy.rs");
 
 fn target_speaker_inactive_stop_reason(timeout_ms: u64) -> &'static str {
     if timeout_ms >= EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS {
@@ -673,20 +653,6 @@ fn handle_target_speaker_update(
             }
         }
     });
-}
-
-fn target_speaker_endpoint_due_after_visible_body_gate(
-    body_started: bool,
-    provider_clock_endpoint_due: bool,
-    settled_wall_clock_endpoint_due: bool,
-) -> bool {
-    // Once body text is visible, a provider frame can clear its provisional
-    // tail while retaining an old speaker boundary. The provider audio clock
-    // is then technically overdue and used to stop on that same frame, before
-    // the guarded settled-text clock could observe another second of local
-    // speech. Make the guarded wall clock authoritative for visible body text.
-    // Provider-clock endpointing remains available for no-body abandonment.
-    settled_wall_clock_endpoint_due || (!body_started && provider_clock_endpoint_due)
 }
 
 fn target_speaker_update_has_live_owner_activity(

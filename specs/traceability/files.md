@@ -170,6 +170,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator/dictation_embedded_stream_session.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_embedded_submit.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_endpoint_clock.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_endpoint_policy.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_preview.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_session.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_tests.rs` | Core app | Build and targeted tests |
