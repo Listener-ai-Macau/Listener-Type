@@ -97,6 +97,52 @@ for (const key of ["all_force_raw", "no_streaming_polish_or_401", "no_transport_
     fail(`recording speed baseline must keep ${key}=true`);
   }
 }
+const acceptedLive = recording.owner_accepted_live_sample;
+if (acceptedLive?.accepted !== true) {
+  fail("recording baseline must retain the owner-accepted live session 2732");
+}
+for (const key of [
+  "wake_to_capsule_request_ms",
+  "first_provider_preview_ms",
+  "stop_to_done_ms",
+  "capsule_done_to_idle_ms",
+  "inserted_chars",
+  "missing_packets",
+]) {
+  requireNumber(acceptedLive[key], `owner-accepted live recording ${key}`);
+}
+if (acceptedLive.wake_to_capsule_request_ms > 1200) {
+  fail("owner-accepted wake-to-capsule baseline must stay within the 1200 ms target");
+}
+if (acceptedLive.first_provider_preview_ms > 1500) {
+  fail("owner-accepted first-preview baseline must stay within the 1500 ms target");
+}
+if (acceptedLive.stop_to_done_ms > 500) {
+  fail("owner-accepted stop-to-Done baseline must stay within the 500 ms target");
+}
+if (acceptedLive.missing_packets !== 0 || acceptedLive.insertion_status !== "Inserted") {
+  fail("owner-accepted live recording must retain zero packet loss and successful insertion");
+}
+if (acceptedLive.clipboard_result !== "stored" || acceptedLive.automatic_stop_origin !== "VoiceActivation") {
+  fail("owner-accepted live recording must retain non-blocking clipboard storage and automatic stop");
+}
+if (!/^96caab7[0-9a-f]*$/i.test(acceptedLive.type_commit ?? "")) {
+  fail("owner-accepted live recording must remain tied to the accepted Type commit");
+}
+if (acceptedLive.evidence !== "docs/release/evidence/1.0.5-owner-accepted-live-wake-20260819.json") {
+  fail("owner-accepted live recording must retain its privacy-safe evidence path");
+}
+let acceptedLiveEvidence;
+try {
+  acceptedLiveEvidence = JSON.parse(readFileSync(join(repoRoot, acceptedLive.evidence), "utf8"));
+} catch (error) {
+  fail(`owner-accepted live recording evidence must remain readable: ${error.message}`);
+}
+if (acceptedLiveEvidence.embedded_session_id !== 2732
+    || acceptedLiveEvidence.metrics?.stop_to_done_ms !== acceptedLive.stop_to_done_ms
+    || acceptedLiveEvidence.metrics?.wake_to_capsule_request_ms !== acceptedLive.wake_to_capsule_request_ms) {
+  fail("owner-accepted live recording evidence no longer matches the protected baseline");
+}
 for (const token of [
   "run_embedded_audio_file_smoke.ps1",
   "Program Files\\Listener Type\\listener-type.exe",

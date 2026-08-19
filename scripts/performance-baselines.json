@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-15",
+  "updated_at": "2026-08-19",
   "contracts": {
     "device_settings_compact_write": {
       "accepted": true,
@@ -24,6 +24,20 @@
       "all_force_raw": true,
       "no_streaming_polish_or_401": true,
       "no_transport_errors": true,
+      "owner_accepted_live_sample": {
+        "accepted": true,
+        "evidence": "docs/release/evidence/1.0.5-owner-accepted-live-wake-20260819.json",
+        "type_commit": "96caab7",
+        "wake_to_capsule_request_ms": 773,
+        "first_provider_preview_ms": 857,
+        "stop_to_done_ms": 167,
+        "capsule_done_to_idle_ms": 393,
+        "inserted_chars": 37,
+        "missing_packets": 0,
+        "insertion_status": "Inserted",
+        "clipboard_result": "stored",
+        "automatic_stop_origin": "VoiceActivation"
+      },
       "validation_command": "npm run check:recording-latency; pwsh -NoProfile -File .\\tools\\embedded_audio_replay\\run_embedded_audio_file_smoke.ps1 -ListenerExe \"C:\\Program Files\\Listener Type\\listener-type.exe\" -UseExistingInstance -AccuracyWarningOnly <short/fast/long wavs>; parse listener-type.log to enforce force raw, no streaming polish/401, no transport timeout, preview <=2000 ms, Done <=1200 ms"
     },
     "ble_rename_recovery": {

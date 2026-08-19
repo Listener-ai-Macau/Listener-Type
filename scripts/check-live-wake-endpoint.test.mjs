@@ -117,6 +117,22 @@ test("keeps the accepted 1456 ms real-capsule baseline below the hard ceiling", 
   assert.equal(report.failures.length, 0);
 });
 
+test("preserves the owner-accepted installed session 2732 experience baseline", () => {
+  const report = analyzeLiveWakeLog(fixture(1, new Map([[0, {
+    wakeMs: 773,
+    previewMs: 857,
+    doneMs: 167,
+    firmwareAutomatic: true,
+  }]])));
+  assert.equal(report.status, "INCOMPLETE", report.failures.join("\n"));
+  assert.equal(report.failures.length, 0);
+  assert.equal(report.samples[0].wakeToCapsuleMs, 773);
+  assert.equal(report.samples[0].previewLatencyMs, 857);
+  assert.equal(report.samples[0].stopToDoneMs, 167);
+  assert.equal(report.samples[0].missingPackets, 0);
+  assert.equal(report.samples[0].insertionStatus, "Inserted");
+});
+
 test("accepts firmware VoiceActivation stop as an automatic endpoint", () => {
   const report = analyzeLiveWakeLog(fixture(1, new Map([[0, { firmwareAutomatic: true }]])));
   assert.equal(report.status, "INCOMPLETE", report.failures.join("\n"));

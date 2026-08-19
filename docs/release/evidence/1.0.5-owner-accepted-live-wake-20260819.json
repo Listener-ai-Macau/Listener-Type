@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "accepted_at": "2026-08-19T03:02:20Z",
+  "product_version": "1.0.5",
+  "type_commit": "96caab7",
+  "installed_exe_sha256": "0720D6E23D20C484BF33735EFAD23BB552F2DF8AFB3B9560AB1988B14235E8EA",
+  "msi_sha256": "6D0FF7887E0D0A881E934B39D930A7A5251A92039A10488ED877C3AAB3D329E0",
+  "embedded_session_id": 2732,
+  "coordinator_session_id": "967f4583-c366-4665-a9eb-ec80095958b7",
+  "owner_acceptance": "体验很好；以后都用这次的体验作为基准去修。",
+  "metrics": {
+    "wake_to_capsule_request_ms": 773,
+    "first_provider_preview_ms": 857,
+    "stop_to_done_ms": 167,
+    "capsule_done_to_idle_ms": 393,
+    "inserted_chars": 37,
+    "missing_packets": 0,
+    "insertion_status": "Inserted",
+    "clipboard_result": "stored",
+    "automatic_stop_origin": "VoiceActivation"
+  },
+  "future_regression_contract": {
+    "wake_to_capsule_p95_max_ms": 1200,
+    "wake_to_capsule_hard_max_ms": 1500,
+    "first_provider_preview_p95_max_ms": 1500,
+    "first_provider_preview_hard_max_ms": 1800,
+    "stop_to_done_p95_max_ms": 500,
+    "settled_owner_endpoint_min_ms": 900,
+    "settled_owner_endpoint_max_ms": 1100,
+    "require_inserted": true,
+    "require_zero_missing_packets": true,
+    "require_capsule_done": true,
+    "require_clipboard_and_device_led_not_to_block_done": true
+  },
+  "privacy": "No audio or transcript body is retained; only timing, status, character count, build identity, and correlation identifiers are recorded."
+}
