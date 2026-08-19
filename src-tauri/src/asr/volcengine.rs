@@ -384,6 +384,33 @@ struct SyncState {
     owner_isolation_ceiling_segments: Vec<TranscriptSegment>,
 }
 
+#[derive(Clone, Debug)]
+struct PendingSessionSpeakerAnchor {
+    tracking_enabled: bool,
+    wake_owner_verified: bool,
+    profile_adaptive: bool,
+    wake_phrase: Option<String>,
+}
+
+impl PendingSessionSpeakerAnchor {
+    fn capture(state: &SyncState) -> Self {
+        Self {
+            tracking_enabled: state.local_speaker_tracking_enabled,
+            wake_owner_verified: state.local_wake_owner_verified,
+            profile_adaptive: state.local_speaker_profile_adaptive,
+            wake_phrase: state.wake_speaker_phrase.clone(),
+        }
+    }
+
+    fn restore_after_stream_reset(self, state: &mut SyncState) {
+        state.local_speaker_tracking_enabled = self.tracking_enabled;
+        state.local_wake_owner_verified = self.tracking_enabled && self.wake_owner_verified;
+        state.local_speaker_profile_adaptive = self.tracking_enabled && self.profile_adaptive;
+        state.local_speaker_stable_target = self.tracking_enabled;
+        state.wake_speaker_phrase = self.wake_phrase;
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct LocalSpeakerEvidence {
     audio_end_ms: u64,
@@ -2783,8 +2810,13 @@ impl VolcengineStreamingASR {
         // Reset sync state for the new session.
         {
             let mut st = self.state.lock();
-            let local_speaker_tracking_requested = st.local_speaker_tracking_enabled;
-            let wake_speaker_phrase = st.wake_speaker_phrase.clone();
+            // Automatic wake configures the verified owner anchor immediately
+            // before opening the cloud stream. Preserve that pending-session
+            // configuration across the transport reset: clearing
+            // `local_wake_owner_verified` here made the strict owner ledger keep
+            // the body provisional while the visual-only ledger also refused to
+            // render it, leaving the capsule blank until provider settlement.
+            let pending_speaker_anchor = PendingSessionSpeakerAnchor::capture(&st);
             st.pending_audio.clear();
             st.next_sequence = 1;
             st.bytes_sent = 0;
@@ -2804,6 +2836,7 @@ impl VolcengineStreamingASR {
             st.optimistic_preview_segments.clear();
             st.optimistic_untimed_window.clear();
             st.last_emitted_preview_text.clear();
+            st.last_emitted_visual_preview_text.clear();
             st.last_server_audio_duration_ms = None;
             st.target_speaker_id = None;
             st.target_speech_end_ms = None;
@@ -2815,9 +2848,7 @@ impl VolcengineStreamingASR {
             st.local_non_target_speech_end_ms = None;
             st.local_sustained_non_target_speech_end_ms = None;
             st.local_speaker_classification = None;
-            st.local_speaker_tracking_enabled = local_speaker_tracking_requested;
-            st.local_wake_owner_verified = false;
-            st.local_speaker_stable_target = local_speaker_tracking_requested;
+            pending_speaker_anchor.restore_after_stream_reset(&mut st);
             st.local_target_confirmed = false;
             st.local_consecutive_target = 0;
             st.local_consecutive_non_target = 0;
@@ -2828,9 +2859,14 @@ impl VolcengineStreamingASR {
             st.owner_isolation_frozen = false;
             st.owner_isolation_ceiling_text.clear();
             st.owner_isolation_ceiling_segments.clear();
-            st.wake_speaker_phrase = wake_speaker_phrase;
             st.speaker_info_present = false;
             st.pending_unattributed_text.clear();
+            log::info!(
+                "[asr] stream reset preserved pending speaker anchor local_tracking={} wake_owner_verified={} profile_adaptive={}",
+                st.local_speaker_tracking_enabled,
+                st.local_wake_owner_verified,
+                st.local_speaker_profile_adaptive,
+            );
         }
         self.pending_sends.store(0, Ordering::SeqCst);
         self.pending_sends_high_water.store(0, Ordering::SeqCst);
@@ -4988,6 +5024,39 @@ mod tests {
             crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.2 },
         );
         assert!(!local_speaker_allows_optimistic_preview(&state));
+    }
+
+    #[test]
+    fn stream_reset_preserves_the_pending_verified_wake_anchor() {
+        let configured = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_wake_owner_verified: true,
+            local_speaker_profile_adaptive: false,
+            wake_speaker_phrase: Some("开始录音".into()),
+            ..SyncState::default()
+        };
+        let anchor = PendingSessionSpeakerAnchor::capture(&configured);
+        let mut reset = SyncState::default();
+
+        anchor.restore_after_stream_reset(&mut reset);
+
+        assert!(reset.local_speaker_tracking_enabled);
+        assert!(reset.local_wake_owner_verified);
+        assert!(!reset.local_speaker_profile_adaptive);
+        assert!(reset.local_speaker_stable_target);
+        assert_eq!(reset.wake_speaker_phrase.as_deref(), Some("开始录音"));
+
+        let disabled = SyncState {
+            local_speaker_tracking_enabled: false,
+            local_wake_owner_verified: true,
+            local_speaker_profile_adaptive: true,
+            ..SyncState::default()
+        };
+        let mut reset_disabled = SyncState::default();
+        PendingSessionSpeakerAnchor::capture(&disabled)
+            .restore_after_stream_reset(&mut reset_disabled);
+        assert!(!reset_disabled.local_wake_owner_verified);
+        assert!(!reset_disabled.local_speaker_profile_adaptive);
     }
 
     #[test]
