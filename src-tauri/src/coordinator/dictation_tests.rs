@@ -4637,6 +4637,25 @@ fn clipboard_retention_takes_precedence_over_restore() {
 }
 
 #[test]
+fn final_clipboard_retention_cannot_hold_capsule_completion_for_seconds() {
+    assert!(
+        super::FINAL_CLIPBOARD_RETENTION_FOREGROUND_BUDGET <= std::time::Duration::from_millis(100)
+    );
+    let source = include_str!("dictation_session.rs");
+    let start = source
+        .find("async fn retain_final_clipboard_with_foreground_budget")
+        .expect("bounded final clipboard helper should exist");
+    let end = source[start..]
+        .find("pub(super) async fn handle_pressed_edge")
+        .map(|offset| start + offset)
+        .expect("session lifecycle should follow clipboard retention helper");
+    let body = &source[start..end];
+    assert!(body.contains("spawn_blocking"));
+    assert!(body.contains("tokio::time::timeout"));
+    assert!(body.contains("(false, \"pending\")"));
+}
+
+#[test]
 fn voice_activation_stop_never_counts_as_user_initiated() {
     assert!(!embedded_audio_stop_is_user_initiated(Some(
         crate::embedded_audio::SessionStopOrigin::VoiceActivation

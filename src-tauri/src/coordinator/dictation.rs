@@ -3060,24 +3060,10 @@ async fn finish_end_session_after_stop_transition(
     };
     restore_prepared_windows_ime_session(inner, current_session_id);
 
-    let clipboard_retention_satisfied = if retain_plain_dictation {
-        if inner.inserter.copy_fallback(&polished) == InsertStatus::Failed {
-            log::warn!(
-                "[coord] final clipboard retention failed session_id={} chars={}",
-                current_session_id,
-                polished.chars().count()
-            );
-            false
-        } else {
-            log::info!(
-                "[coord] final clipboard retention complete session_id={} chars={}",
-                current_session_id,
-                polished.chars().count()
-            );
-            true
-        }
+    let (clipboard_retention_satisfied, clipboard_result) = if retain_plain_dictation {
+        retain_final_clipboard_with_foreground_budget(inner, current_session_id, &polished).await
     } else {
-        true
+        (true, "disabled")
     };
 
     let mut post_dictation_key_result = "not_eligible";
@@ -3124,13 +3110,6 @@ async fn finish_end_session_after_stop_transition(
             );
         }
     }
-    let clipboard_result = if !retain_plain_dictation {
-        "disabled"
-    } else if clipboard_retention_satisfied {
-        "stored"
-    } else {
-        "failed"
-    };
     let stop_to_done_ms = take_stop_to_done_ms(inner, current_session_id);
     if let Some(ms) = stop_to_done_ms {
         log::info!(

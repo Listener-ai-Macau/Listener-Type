@@ -1,6 +1,59 @@
 // Press/release/begin/start recorder session lifecycle.
 // Included into `coordinator::dictation` via `include!`.
 
+// Clipboard owners on Windows may keep OpenClipboard unavailable for several
+// seconds. Final text retention is useful, but it must not hold the visible
+// dictation completion path after text has already been inserted.
+const FINAL_CLIPBOARD_RETENTION_FOREGROUND_BUDGET: Duration = Duration::from_millis(100);
+
+async fn retain_final_clipboard_with_foreground_budget(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    text: &str,
+) -> (bool, &'static str) {
+    let inner = Arc::clone(inner);
+    let text = text.to_string();
+    let chars = text.chars().count();
+    let copy_task = async_runtime::spawn_blocking(move || {
+        let status = inner.inserter.copy_fallback(&text);
+        if status == InsertStatus::Failed {
+            log::warn!(
+                "[coord] final clipboard retention failed session_id={} chars={}",
+                session_id,
+                chars
+            );
+        } else {
+            log::info!(
+                "[coord] final clipboard retention complete session_id={} chars={}",
+                session_id,
+                chars
+            );
+        }
+        status
+    });
+
+    match tokio::time::timeout(FINAL_CLIPBOARD_RETENTION_FOREGROUND_BUDGET, copy_task).await {
+        Ok(Ok(InsertStatus::Failed)) => (false, "failed"),
+        Ok(Ok(_)) => (true, "stored"),
+        Ok(Err(error)) => {
+            log::warn!(
+                "[coord] final clipboard retention task failed session_id={session_id}: {error}"
+            );
+            (false, "failed")
+        }
+        Err(_) => {
+            // Dropping a Tokio JoinHandle detaches its blocking task. It keeps
+            // trying to retain the text without delaying InsertionComplete.
+            log::warn!(
+                "[coord] final clipboard retention deferred session_id={} foreground_budget_ms={}",
+                session_id,
+                FINAL_CLIPBOARD_RETENTION_FOREGROUND_BUDGET.as_millis()
+            );
+            (false, "pending")
+        }
+    }
+}
+
 pub(super) async fn handle_pressed_edge(inner: &Arc<Inner>) {
     let was_held = inner.hotkey_trigger_held.swap(true, Ordering::SeqCst);
     if !was_held {
