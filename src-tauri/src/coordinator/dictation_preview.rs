@@ -44,6 +44,111 @@ fn reconcile_final_transcript_with_preview_hotwords(
     corrected
 }
 
+/// Recover only characters that a warm local decode can insert around an
+/// otherwise unchanged cloud transcript. This is intentionally much stricter
+/// than a general ASR merge: every cloud alphanumeric character must occur in
+/// order in the local text, no cloud character can be replaced, one-character
+/// disagreements are rejected (Paraformer can hallucinate those), and the
+/// total addition is tightly bounded. Punctuation from the authoritative cloud
+/// result is preserved verbatim.
+fn recover_local_shadow_omissions(cloud: &str, local: &str) -> Option<String> {
+    fn units(text: &str) -> Vec<(char, usize, usize)> {
+        text.char_indices()
+            .filter_map(|(start, ch)| {
+                ch.is_alphanumeric().then_some((
+                    if ch.is_ascii() {
+                        ch.to_ascii_lowercase()
+                    } else {
+                        ch
+                    },
+                    start,
+                    start + ch.len_utf8(),
+                ))
+            })
+            .collect()
+    }
+
+    let cloud_units = units(cloud);
+    let local_units = units(local);
+    if cloud_units.len() < 10 || local_units.len() <= cloud_units.len() {
+        return None;
+    }
+
+    let mut matched_local = Vec::with_capacity(cloud_units.len());
+    let mut local_cursor = 0usize;
+    for (cloud_ch, _, _) in &cloud_units {
+        let relative = local_units[local_cursor..]
+            .iter()
+            .position(|(local_ch, _, _)| local_ch == cloud_ch)?;
+        let matched = local_cursor + relative;
+        matched_local.push(matched);
+        local_cursor = matched + 1;
+    }
+
+    let mut additions = Vec::<(usize, String)>::new();
+    let mut added_chars = 0usize;
+    for cloud_index in 0..=cloud_units.len() {
+        let local_start = if cloud_index == 0 {
+            0
+        } else {
+            matched_local[cloud_index - 1] + 1
+        };
+        let local_end = if cloud_index == cloud_units.len() {
+            local_units.len()
+        } else {
+            matched_local[cloud_index]
+        };
+        if local_start == local_end {
+            continue;
+        }
+        let gap_len = local_end - local_start;
+        // A single added character is more likely to be a local-model
+        // insertion (the public overlap sample produced exactly one) than a
+        // trustworthy cloud omission. Large/busy gaps can be another speaker.
+        if gap_len < 2 || gap_len > 8 {
+            return None;
+        }
+        if (cloud_index == 0 || cloud_index == cloud_units.len()) && gap_len > 6 {
+            return None;
+        }
+        added_chars += gap_len;
+        let text: String = local_units[local_start..local_end]
+            .iter()
+            .map(|(ch, _, _)| *ch)
+            .collect();
+        additions.push((cloud_index, text));
+    }
+
+    let allowed_added_chars = (cloud_units.len() / 5).clamp(2, 12);
+    if additions.is_empty() || additions.len() > 2 || added_chars > allowed_added_chars {
+        return None;
+    }
+
+    let mut additions = additions.into_iter().peekable();
+    let mut recovered = String::with_capacity(cloud.len() + added_chars * 3);
+    let mut copied_until = 0usize;
+    for cloud_index in 0..=cloud_units.len() {
+        let insertion_offset = if cloud_index < cloud_units.len() {
+            cloud_units[cloud_index].1
+        } else {
+            cloud_units.last()?.2
+        };
+        if insertion_offset > copied_until {
+            recovered.push_str(&cloud[copied_until..insertion_offset]);
+            copied_until = insertion_offset;
+        }
+        while additions
+            .peek()
+            .is_some_and(|(before_index, _)| *before_index == cloud_index)
+        {
+            let (_, addition) = additions.next().expect("peeked local shadow addition");
+            recovered.push_str(&addition);
+        }
+    }
+    recovered.push_str(&cloud[copied_until..]);
+    (recovered != cloud).then_some(recovered)
+}
+
 fn ascii_alphanumeric_key(text: &str) -> String {
     text.chars()
         .filter(|ch| ch.is_ascii_alphanumeric())

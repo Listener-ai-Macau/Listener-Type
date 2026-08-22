@@ -43,6 +43,7 @@ function gate(id, fn) {
 
 const dictation = read("src-tauri/src/coordinator/dictation.rs");
 const dictationTests = read("src-tauri/src/coordinator/dictation_tests.rs");
+const dictationPreview = read("src-tauri/src/coordinator/dictation_preview.rs");
 const typesRs = read("src-tauri/src/types.rs");
 const packageJson = read("package.json");
 const startupScript = read("scripts/check-type-startup-reconnect-speed.ps1");
@@ -55,6 +56,7 @@ const deviceAi = read("src-tauri/src/coordinator/dictation_device_ai.rs");
 const coordinatorRs = read("src-tauri/src/coordinator.rs");
 const polishRs = read("src-tauri/src/polish.rs");
 const volcengineAsr = read("src-tauri/src/asr/volcengine.rs");
+const wakeHelper = read("src-tauri/src/asr/local/wake_helper.rs");
 const windowsImeSessionRs = read("src-tauri/src/windows_ime_session.rs");
 const deviceSection = read("src/pages/settings/DeviceSection.tsx");
 const capsuleTsx = read("src/components/Capsule.tsx");
@@ -704,18 +706,18 @@ gate("multi_speaker_owner_isolation", () => {
   );
   mustInclude(
     volcengineAsr,
-    "short_hard_mismatch_pair_isolates_transcript_without_changing_endpoint_clock",
-    "short extreme mismatch isolates only transcript growth",
+    "short_hard_mismatch_pair_is_non_destructive_without_provider_boundary",
+    "short extreme mismatch cannot erase owner text without provider corroboration",
   );
   mustInclude(
     volcengineAsr,
-    "stage_owner_isolation_checkpoint",
-    "first extreme mismatch checkpoints the authoritative owner ledger",
+    "extreme_local_pair_waits_for_provider_boundary_without_erasing_owner_growth",
+    "mixed local windows must preserve growing owner text",
   );
   mustInclude(
     volcengineAsr,
-    "freeze_owner_isolation_from_staged_checkpoint",
-    "confirmed mismatch rolls every transcript ledger back to the checkpoint",
+    "confirmed extreme local mismatch kept non-destructive pending provider utterance boundary",
+    "local-only mismatch must wait for a stable provider boundary",
   );
   mustInclude(
     volcengineAsr,
@@ -726,6 +728,44 @@ gate("multi_speaker_owner_isolation", () => {
     readFileSync(join(typeRoot, "src-tauri", "src", "asr", "volcengine_untimed_merge.rs"), "utf8"),
     "installed_session_230_growing_cumulative_revisions_never_inflate_preview",
     "growing untimed provider revisions cannot inflate then collapse the preview",
+  );
+});
+
+gate("local_shadow_omission_recovery_is_bounded_and_non_rewriting", () => {
+  mustInclude(
+    volcengineAsr,
+    "permits_local_shadow_omission_recovery",
+    "shadow recovery requires a verified wake owner and no other-speaker evidence",
+  );
+  mustInclude(
+    volcengineAsr,
+    "LOCAL_SHADOW_OWNER_END_ALIGNMENT_MS: u64 = 600",
+    "cloud and local owner endpoints must align before local text can affect output",
+  );
+  mustInclude(
+    dictation,
+    "LOCAL_SHADOW_ASR_TOTAL_BUDGET_MS: u64 = 850",
+    "local shadow decode has a hard total latency budget",
+  );
+  mustInclude(
+    wakeHelper,
+    "transcribe_if_ready",
+    "finalization can reuse only the already-warm local helper",
+  );
+  mustInclude(
+    dictationPreview,
+    "recover_local_shadow_omissions",
+    "local shadow output is handled by the omission-only merge",
+  );
+  mustInclude(
+    dictationTests,
+    "local_shadow_rejects_single_character_model_insertions",
+    "one-character local hallucinations cannot change cloud text",
+  );
+  mustInclude(
+    dictationTests,
+    "local_shadow_rejects_rewrites_and_large_other_speaker_gaps",
+    "rewrites and possible other-speaker spans remain excluded",
   );
 });
 

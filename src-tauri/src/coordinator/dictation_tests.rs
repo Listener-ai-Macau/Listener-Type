@@ -6290,3 +6290,54 @@ fn production_default_resolves_zero_wake_diagnostic_targets_for_one_hundred_cand
         Some(std::path::PathBuf::from("D:\\listener-wake-diag"))
     );
 }
+
+#[test]
+fn local_shadow_recovers_bounded_middle_and_tail_omissions_without_rewriting_cloud_text() {
+    let cloud = "我现在准备测试这个录音系统的完整效果，看看最后结尾是否正常。";
+    let local = "我现在认真准备测试这个录音系统的完整效果看看最后完整结尾是否正常";
+    assert_eq!(
+        super::recover_local_shadow_omissions(cloud, local).as_deref(),
+        Some("我现在认真准备测试这个录音系统的完整效果，看看最后完整结尾是否正常。")
+    );
+}
+
+#[test]
+fn local_shadow_rejects_single_character_model_insertions() {
+    assert_eq!(
+        super::recover_local_shadow_omissions(
+            "我们要做一个说话人识别的测试。",
+            "我们要做一个说话人力识别的测试",
+        ),
+        None,
+        "the observed Paraformer one-character insertion must not alter cloud text"
+    );
+}
+
+#[test]
+fn local_shadow_rejects_observed_public_overlap_interferer_tail() {
+    assert_eq!(
+        super::recover_local_shadow_omissions(
+            "我们要做一个说话人识别的测试。",
+            "我们要做一个说话人识别的测试年度演讲",
+        ),
+        None,
+        "the real local overlap decode must not restore the interfering speaker tail"
+    );
+}
+
+#[test]
+fn local_shadow_rejects_rewrites_and_large_other_speaker_gaps() {
+    assert_eq!(
+        super::recover_local_shadow_omissions("今天检查录音是否完整。", "今天检测录音是否完整",),
+        None,
+        "a local substitution is not omission evidence"
+    );
+    assert_eq!(
+        super::recover_local_shadow_omissions(
+            "本人第一句然后本人第二句。",
+            "本人第一句旁边的人连续说了很长一段无关内容然后本人第二句",
+        ),
+        None,
+        "a long overlap gap can be another speaker and must never be restored"
+    );
+}

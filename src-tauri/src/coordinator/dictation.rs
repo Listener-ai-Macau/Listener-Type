@@ -74,6 +74,14 @@ const EMBEDDED_PROVIDER_STALL_FALLBACK_LAG_MS: u64 = 500;
 // for one network blip. Require a full second of no provider coverage growth
 // before local-clock fallback may end the session.
 const EMBEDDED_PROVIDER_STALL_CONFIRM_MS: u64 = 1_000;
+// The warm Paraformer helper measured 341 ms on a 6 s Chinese overlap sample.
+// Start it in parallel with cloud finalization and give the whole shadow path a
+// bounded budget, so omission recovery cannot bring back the old multi-second
+// Done delay. Long dictations remain cloud-authoritative.
+const LOCAL_SHADOW_ASR_MIN_AUDIO_MS: usize = 2_000;
+const LOCAL_SHADOW_ASR_MAX_AUDIO_MS: usize = 20_000;
+const LOCAL_SHADOW_ASR_HELPER_TIMEOUT_MS: u64 = 800;
+const LOCAL_SHADOW_ASR_TOTAL_BUDGET_MS: u64 = 850;
 // A provider may stabilize an old utterance several seconds after the owner
 // stopped. Treating that late bookkeeping update as live speech refreshes the
 // firmware's two-second safety timer and makes completion feel randomly slow.
@@ -2433,6 +2441,26 @@ async fn finish_end_session_after_stop_transition(
         ActiveAsr::Volcengine(asr) => Some(Arc::clone(asr)),
         _ => None,
     };
+    #[cfg(target_os = "windows")]
+    let mut local_shadow_task = volcengine_for_empty_retry
+        .as_ref()
+        .filter(|asr| asr.may_run_local_shadow_decode())
+        .and_then(|asr| {
+            let pcm = asr.retained_pcm_snapshot();
+            let audio_ms = pcm.len() / 32;
+            (LOCAL_SHADOW_ASR_MIN_AUDIO_MS..=LOCAL_SHADOW_ASR_MAX_AUDIO_MS)
+                .contains(&audio_ms)
+                .then(|| {
+                    let started = Instant::now();
+                    let task = tauri::async_runtime::spawn_blocking(move || {
+                        crate::asr::local::wake_helper::transcribe_if_ready(
+                            &pcm,
+                            Duration::from_millis(LOCAL_SHADOW_ASR_HELPER_TIMEOUT_MS),
+                        )
+                    });
+                    (started, audio_ms, task)
+                })
+        });
     let raw = match asr {
         ActiveAsr::Volcengine(asr) => {
             debug_assert!(uses_global_timeout);
@@ -2732,6 +2760,81 @@ async fn finish_end_session_after_stop_transition(
                     recovered.chars().count()
                 );
                 raw.text = recovered;
+            }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    if !raw.text.trim().is_empty() {
+        if let Some((started, audio_ms, task)) = local_shadow_task.take() {
+            let total_budget = Duration::from_millis(LOCAL_SHADOW_ASR_TOTAL_BUDGET_MS);
+            let remaining = total_budget.saturating_sub(started.elapsed());
+            if !remaining.is_zero() {
+                match tokio::time::timeout(remaining, task).await {
+                    Ok(Ok(Ok(shadow))) => {
+                        let local = filter_automatic_wake_text(
+                            inner,
+                            current_session_id,
+                            &shadow.text,
+                            false,
+                        );
+                        let owner_end_aligned = volcengine_for_empty_retry
+                            .as_ref()
+                            .is_some_and(|asr| asr.permits_local_shadow_omission_recovery());
+                        if owner_end_aligned {
+                            if let Some(recovered) =
+                                recover_local_shadow_omissions(&raw.text, &local)
+                            {
+                                log::info!(
+                                    "[coord] local shadow recovered bounded cloud omissions session_id={} cloud_chars={} local_chars={} recovered_chars={} audio_ms={} inference_ms={} total_ms={}",
+                                    current_session_id,
+                                    raw.text.chars().count(),
+                                    local.chars().count(),
+                                    recovered.chars().count(),
+                                    audio_ms,
+                                    shadow.inference_ms,
+                                    started.elapsed().as_millis()
+                                );
+                                raw.text = recovered;
+                            } else {
+                                log::info!(
+                                    "[coord] local shadow kept cloud authoritative session_id={} cloud_chars={} local_chars={} audio_ms={} inference_ms={} total_ms={}",
+                                    current_session_id,
+                                    raw.text.chars().count(),
+                                    local.chars().count(),
+                                    audio_ms,
+                                    shadow.inference_ms,
+                                    started.elapsed().as_millis()
+                                );
+                            }
+                        } else {
+                            log::info!(
+                                "[coord] local shadow discarded because owner end clocks did not align session_id={} cloud_chars={} local_chars={} audio_ms={} inference_ms={} total_ms={}",
+                                current_session_id,
+                                raw.text.chars().count(),
+                                local.chars().count(),
+                                audio_ms,
+                                shadow.inference_ms,
+                                started.elapsed().as_millis()
+                            );
+                        }
+                    }
+                    Ok(Ok(Err(error))) => {
+                        log::debug!(
+                            "[coord] local shadow unavailable; cloud remains authoritative session_id={current_session_id}: {error}"
+                        );
+                    }
+                    Ok(Err(error)) => {
+                        log::warn!(
+                            "[coord] local shadow worker failed session_id={current_session_id}: {error}"
+                        );
+                    }
+                    Err(_) => {
+                        log::info!(
+                            "[coord] local shadow exceeded {} ms total budget; cloud remains authoritative session_id={current_session_id}",
+                            LOCAL_SHADOW_ASR_TOTAL_BUDGET_MS
+                        );
+                    }
+                }
             }
         }
     }

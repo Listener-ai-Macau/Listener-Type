@@ -38,6 +38,7 @@ const WEBSOCKET_SEND_TIMEOUT: Duration = Duration::from_millis(1_200);
 // 10210ms 但 result_chars 停在 2）——终稿空但本地整段持续人声时允许一次留存
 // 重试的判定阈：本地音频至少 1.5s 且人声尾端正点距音频末尾不超过 0.5s。
 const EMPTY_SPIN_MIN_LOCAL_AUDIO_MS: u64 = 1_500;
+const LOCAL_SHADOW_OWNER_END_ALIGNMENT_MS: u64 = 600;
 const EMPTY_SPIN_SPEECH_TAIL_SLACK_MS: u64 = 500;
 // A short physical-key dictation can contain real but very low-energy speech
 // which Volcengine rejects twice when replayed byte-for-byte. The normal live
@@ -365,10 +366,11 @@ struct SyncState {
     local_target_confirmed: bool,
     local_consecutive_target: u8,
     local_consecutive_non_target: u8,
-    /// Independent transcript-only hysteresis. It must never reuse the
-    /// endpoint identity counters: one extreme short window is still a
-    /// transient endpoint observation, while two enrolled-owner mismatches may
-    /// safely freeze only future transcript growth.
+    /// Independent transcript-only evidence counter. It must never reuse the
+    /// endpoint identity counters. Even two extreme windows only stage a
+    /// checkpoint: a mixed owner+room window can score as a severe mismatch,
+    /// so destructive rollback waits for a stable provider utterance boundary
+    /// that agrees with the local owner-absence timeline.
     local_consecutive_transcript_hard_non_target: u8,
     /// Session voiceprint negatives are advisory for transcript ownership. Two
     /// very-low-score windows may still mark current speech as another person
@@ -1595,63 +1597,6 @@ fn freeze_owner_isolation_ledger(state: &mut SyncState) {
     );
 }
 
-/// Save the last authoritative owner transcript as soon as the first extreme
-/// enrolled-owner mismatch arrives. Provider text can advance between the
-/// first and second verifier windows, so taking the ceiling only after the
-/// confirmation pair risks preserving the other person's first words.
-///
-/// The checkpoint deliberately uses `best_transcript_*`, not the longer visual
-/// / optimistic ledger: the latter is allowed to show unattributed text while
-/// provider diarization catches up. An empty authoritative ledger is not a safe
-/// rollback target; in that case we wait for a later hard window instead of
-/// deleting the owner's first sentence.
-fn stage_owner_isolation_checkpoint(state: &mut SyncState) -> bool {
-    if !state.local_speaker_tracking_enabled
-        || state.owner_isolation_frozen
-        || state.best_transcript_text.trim().is_empty()
-    {
-        return false;
-    }
-    state.owner_isolation_ceiling_text = state.best_transcript_text.clone();
-    state.owner_isolation_ceiling_segments = state.best_transcript_segments.clone();
-    log::info!(
-        "[asr] staged owner isolation checkpoint ceiling_chars={} reason=first_extreme_owner_mismatch",
-        state.owner_isolation_ceiling_text.chars().count()
-    );
-    true
-}
-
-/// Confirm a previously staged checkpoint and immediately roll every transcript
-/// ledger back to it. This prevents a provider update racing between the two
-/// local verifier windows from leaking foreign words into protocol-final
-/// fallback or insertion.
-fn freeze_owner_isolation_from_staged_checkpoint(state: &mut SyncState) -> bool {
-    if !state.local_speaker_tracking_enabled
-        || state.owner_isolation_frozen
-        || state.owner_isolation_ceiling_text.trim().is_empty()
-    {
-        return false;
-    }
-    let ceiling_text = state.owner_isolation_ceiling_text.clone();
-    let ceiling_segments = state.owner_isolation_ceiling_segments.clone();
-    state.best_transcript_text = ceiling_text.clone();
-    state.best_transcript_segments = ceiling_segments.clone();
-    state.best_untimed_window.clear();
-    state.last_partial_text = ceiling_text.clone();
-    state.optimistic_preview_text = ceiling_text.clone();
-    state.optimistic_preview_segments = ceiling_segments;
-    state.optimistic_untimed_window.clear();
-    state.last_emitted_preview_text = ceiling_text.clone();
-    state.last_emitted_visual_preview_text = ceiling_text;
-    state.pending_unattributed_text.clear();
-    state.owner_isolation_frozen = true;
-    log::info!(
-        "[asr] owner isolation froze at staged checkpoint ceiling_chars={} reason=confirmed_extreme_owner_mismatch",
-        state.owner_isolation_ceiling_text.chars().count()
-    );
-    true
-}
-
 /// Freeze at the provider's already-filtered owner utterances when cloud
 /// diarization reused the owner's speaker id for a locally rejected later
 /// utterance. This is stronger than a raw voiceprint negative: a stable
@@ -2435,6 +2380,45 @@ impl VolcengineStreamingASR {
             && state.local_speech_end_ms.is_some()
     }
 
+    /// Memory-only copy of the exact PCM already sent to this session. The
+    /// coordinator uses it for a bounded, local shadow decode while the cloud
+    /// final is in flight. Nothing is persisted and the session remains the
+    /// sole owner of the authoritative provider transcript.
+    pub fn retained_pcm_snapshot(&self) -> Vec<u8> {
+        self.retained_pcm.lock().clone()
+    }
+
+    /// A shadow decode may help recover cloud omissions only for a wake-owned
+    /// session that has never produced evidence of another speaker. Once local
+    /// isolation has seen a non-target boundary, the safer behavior is to keep
+    /// the already-filtered cloud ledger and never reintroduce text from the
+    /// mixed waveform.
+    pub fn may_run_local_shadow_decode(&self) -> bool {
+        let state = self.state.lock();
+        state.local_speaker_tracking_enabled
+            && state.local_wake_owner_verified
+            && state.local_non_target_speech_end_ms.is_none()
+            && state.local_sustained_non_target_speech_end_ms.is_none()
+            && !state.owner_isolation_frozen
+    }
+
+    pub fn permits_local_shadow_omission_recovery(&self) -> bool {
+        let state = self.state.lock();
+        let owner_only = state.local_speaker_tracking_enabled
+            && state.local_wake_owner_verified
+            && state.local_target_confirmed
+            && state.local_non_target_speech_end_ms.is_none()
+            && state.local_sustained_non_target_speech_end_ms.is_none()
+            && !state.owner_isolation_frozen;
+        let owner_end_aligned = state
+            .target_speech_end_ms
+            .zip(state.local_target_speech_end_ms)
+            .is_some_and(|(cloud_end, local_end)| {
+                cloud_end.abs_diff(local_end) <= LOCAL_SHADOW_OWNER_END_ALIGNMENT_MS
+            });
+        owner_only && owner_end_aligned
+    }
+
     pub fn is_connected(&self) -> bool {
         self.state.lock().is_connected
     }
@@ -2706,23 +2690,15 @@ impl VolcengineStreamingASR {
                 && state.local_wake_owner_verified
                 && !state.local_speaker_profile_adaptive;
             if transcript_hard_non_target_applies {
-                if state.local_consecutive_transcript_hard_non_target == 0 {
-                    if stage_owner_isolation_checkpoint(&mut state) {
-                        state.local_consecutive_transcript_hard_non_target = 1;
-                    } else {
-                        log::info!(
-                            "[asr] extreme owner mismatch stayed advisory because no authoritative owner checkpoint exists"
-                        );
-                    }
-                } else {
-                    state.local_consecutive_transcript_hard_non_target = state
-                        .local_consecutive_transcript_hard_non_target
-                        .saturating_add(1);
-                    if state.local_consecutive_transcript_hard_non_target
-                        >= LOCAL_SPEAKER_SWITCH_CONFIRMATIONS
-                    {
-                        freeze_owner_isolation_from_staged_checkpoint(&mut state);
-                    }
+                state.local_consecutive_transcript_hard_non_target = state
+                    .local_consecutive_transcript_hard_non_target
+                    .saturating_add(1);
+                if state.local_consecutive_transcript_hard_non_target
+                    == LOCAL_SPEAKER_SWITCH_CONFIRMATIONS
+                {
+                    log::info!(
+                        "[asr] confirmed extreme local mismatch kept non-destructive pending provider utterance boundary"
+                    );
                 }
             } else {
                 state.local_consecutive_transcript_hard_non_target = 0;
@@ -8063,7 +8039,41 @@ mod tests {
     }
 
     #[test]
-    fn extreme_non_target_pair_freezes_only_future_mixed_growth() {
+    fn local_shadow_recovery_requires_verified_owner_and_zero_other_speaker_evidence() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        assert!(!asr.may_run_local_shadow_decode());
+        assert!(!asr.permits_local_shadow_omission_recovery());
+
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        assert!(asr.may_run_local_shadow_decode());
+        assert!(!asr.permits_local_shadow_omission_recovery());
+        {
+            let mut state = asr.state.lock();
+            state.local_target_confirmed = true;
+            state.target_speech_end_ms = Some(7_912);
+            state.local_target_speech_end_ms = Some(7_700);
+        }
+        assert!(asr.permits_local_shadow_omission_recovery());
+
+        asr.state.lock().local_target_speech_end_ms = Some(6_900);
+        assert!(!asr.permits_local_shadow_omission_recovery());
+        asr.state.lock().local_target_speech_end_ms = Some(7_700);
+        asr.state.lock().local_non_target_speech_end_ms = Some(4_000);
+        assert!(!asr.permits_local_shadow_omission_recovery());
+        asr.state.lock().local_non_target_speech_end_ms = None;
+        asr.state.lock().owner_isolation_frozen = true;
+        assert!(!asr.permits_local_shadow_omission_recovery());
+    }
+
+    #[test]
+    fn extreme_local_pair_waits_for_provider_boundary_without_erasing_owner_growth() {
         let asr = VolcengineStreamingASR::new(
             VolcengineCredentials {
                 app_id: "app".into(),
@@ -8083,8 +8093,10 @@ mod tests {
         use crate::speaker_verification::SessionSpeakerClassification as Classification;
         asr.note_local_speaker_classification(5_950, Classification::NonTarget { score: -0.029 });
         {
-            // Reproduce the provider race: foreign words arrive after the first
-            // hard mismatch but before the second verifier window confirms it.
+            // Reproduce the destructive race: owner text advances after the
+            // first hard mismatch but before the second verifier window. A
+            // mixed owner+room window can produce exactly this score shape, so
+            // local evidence alone must not roll the transcript backward.
             let mut state = asr.state.lock();
             state.best_transcript_text = "本人说完了旁人第一句".into();
             state.optimistic_preview_text = "本人说完了旁人第一句".into();
@@ -8095,12 +8107,13 @@ mod tests {
 
         let state = asr.state.lock();
         assert!(state.local_speaker_stable_target);
-        assert!(state.owner_isolation_frozen);
-        assert_eq!(state.owner_isolation_ceiling_text, "本人说完了");
-        assert_eq!(state.best_transcript_text, "本人说完了");
-        assert_eq!(state.optimistic_preview_text, "本人说完了");
-        assert_eq!(state.last_partial_text, "本人说完了");
-        assert_eq!(state.last_emitted_preview_text, "本人说完了");
+        assert!(!state.owner_isolation_frozen);
+        assert!(state.owner_isolation_ceiling_text.is_empty());
+        assert_eq!(state.local_consecutive_transcript_hard_non_target, 2);
+        assert_eq!(state.best_transcript_text, "本人说完了旁人第一句");
+        assert_eq!(state.optimistic_preview_text, "本人说完了旁人第一句");
+        assert_eq!(state.last_partial_text, "本人说完了旁人第一句");
+        assert_eq!(state.last_emitted_preview_text, "本人说完了旁人第一句");
     }
 
     #[test]
@@ -8138,7 +8151,7 @@ mod tests {
     }
 
     #[test]
-    fn short_hard_mismatch_pair_isolates_transcript_without_changing_endpoint_clock() {
+    fn short_hard_mismatch_pair_is_non_destructive_without_provider_boundary() {
         let asr = VolcengineStreamingASR::new(
             VolcengineCredentials {
                 app_id: "app".into(),
@@ -8166,8 +8179,10 @@ mod tests {
 
         let state = asr.state.lock();
         assert!(state.local_speaker_stable_target);
-        assert!(state.owner_isolation_frozen);
-        assert_eq!(state.owner_isolation_ceiling_text, "只保留本人正文");
+        assert!(!state.owner_isolation_frozen);
+        assert!(state.owner_isolation_ceiling_text.is_empty());
+        assert_eq!(state.best_transcript_text, "只保留本人正文");
+        assert_eq!(state.local_consecutive_transcript_hard_non_target, 2);
         assert_eq!(state.local_consecutive_non_target, 0);
         assert_eq!(state.local_consecutive_strong_non_target, 0);
         assert!(!state.local_owner_absence_run_confirmed);
@@ -8976,6 +8991,154 @@ mod tests {
         eprintln!(
             "provider_cadence_probe_status={}",
             if all_succeeded { "PASS" } else { "NO_GO" }
+        );
+    }
+
+    /// Runs the same provider diarization and local session-voiceprint path as
+    /// an installed automatic-wake session.  This is deliberately ignored:
+    /// callers must supply consented/public 16 kHz PCM fixtures and installed
+    /// provider credentials explicitly.  It exists to prevent overlap tests
+    /// from accidentally measuring only the provider's unfiltered transcript.
+    #[tokio::test]
+    #[ignore = "requires explicit public owner/mix PCM and installed Volcengine credentials"]
+    async fn live_target_speaker_filter_probe_uses_real_local_observations() {
+        use crate::persistence::{CredentialAccount, CredentialsVault};
+        use std::fs;
+        use std::path::PathBuf;
+
+        let owner_pcm_path = std::env::var("LISTENER_TARGET_OWNER_PCM_PATH")
+            .expect("LISTENER_TARGET_OWNER_PCM_PATH is required");
+        let mix_pcm_path = std::env::var("LISTENER_TARGET_MIX_PCM_PATH")
+            .expect("LISTENER_TARGET_MIX_PCM_PATH is required");
+        let summary_path = std::env::var("LISTENER_TARGET_FILTER_SUMMARY_PATH")
+            .expect("LISTENER_TARGET_FILTER_SUMMARY_PATH is required");
+        let wake_phrase =
+            std::env::var("LISTENER_TARGET_WAKE_PHRASE").unwrap_or_else(|_| "我们要做".to_string());
+        let owner_pcm = fs::read(&owner_pcm_path).expect("read owner PCM");
+        let mix_pcm = fs::read(&mix_pcm_path).expect("read overlap PCM");
+        for (label, pcm) in [("owner", &owner_pcm), ("mix", &mix_pcm)] {
+            assert!(
+                !pcm.is_empty() && pcm.len() % 2 == 0,
+                "{label} PCM must be nonempty 16-bit audio"
+            );
+            assert!(
+                pcm.len() <= 60_000 * BYTES_PER_MS as usize,
+                "{label} PCM must not exceed 60 seconds"
+            );
+        }
+
+        let credential = |account| {
+            CredentialsVault::get(account)
+                .expect("read installed Volcengine credential")
+                .filter(|value| !value.trim().is_empty())
+                .expect("installed Volcengine credential is required")
+        };
+        let credentials = VolcengineCredentials {
+            app_id: credential(CredentialAccount::VolcengineAppKey),
+            access_token: credential(CredentialAccount::VolcengineAccessKey),
+            resource_id: credential(CredentialAccount::VolcengineResourceId),
+        };
+        let owner_duration_seconds = owner_pcm.len() as f32 / 32_000.0;
+        let profile_phrase = wake_phrase.clone();
+        let profile = tokio::task::spawn_blocking(move || {
+            crate::speaker_verification::session_profile_from_wake(
+                &owner_pcm,
+                owner_duration_seconds,
+                &profile_phrase,
+            )
+        })
+        .await
+        .expect("join public owner profile task")
+        .expect("build public owner session profile");
+
+        let asr = Arc::new(VolcengineStreamingASR::new_with_session_options(
+            credentials,
+            Vec::new(),
+            VolcengineSessionOptions::default(),
+        ));
+        // Model the installed path after the persisted owner gate accepted the
+        // wake.  The public fixture profile itself is ephemeral, so explicitly
+        // mark the ASR-side policy as verified/non-adaptive for this probe.
+        asr.note_verified_local_speaker_tracking_started(&wake_phrase);
+        asr.note_local_speaker_profile_adaptive(false);
+        asr.open_session().await.expect("open provider session");
+        asr.mark_audio_delivery_ready();
+
+        let mut rolling = Vec::<u8>::with_capacity((LOCAL_SPEAKER_WINDOW_MS * 32) as usize);
+        let mut next_observation_ms = 1_000u64;
+        let mut observations = Vec::<serde_json::Value>::new();
+        let mut audio_end_ms = 0u64;
+        for chunk in mix_pcm.chunks(TARGET_AUDIO_CHUNK_BYTES) {
+            audio_end_ms = audio_end_ms.saturating_add((chunk.len() as u64) / 32);
+            rolling.extend_from_slice(chunk);
+            let window_bytes = (LOCAL_SPEAKER_WINDOW_MS * 32) as usize;
+            if rolling.len() > window_bytes {
+                let overflow = (rolling.len() - window_bytes + 1) & !1usize;
+                rolling.drain(..overflow);
+            }
+            let has_signal = chunk
+                .chunks_exact(2)
+                .map(|sample| i16::from_le_bytes([sample[0], sample[1]]).unsigned_abs())
+                .max()
+                .unwrap_or_default()
+                >= 512;
+            asr.note_local_audio_activity(audio_end_ms, has_signal);
+            if has_signal && audio_end_ms >= next_observation_ms && rolling.len() >= 1_000 * 32 {
+                if let Ok(observation) =
+                    crate::speaker_verification::observe_session_speaker(&profile, &rolling)
+                {
+                    observations.push(serde_json::json!({
+                        "audioEndMs": audio_end_ms,
+                        "score": observation.classification.score(),
+                        "classification": format!("{:?}", observation.classification),
+                        "transcriptHardNonTarget": observation.transcript_hard_non_target,
+                    }));
+                    asr.note_local_speaker_observation(
+                        audio_end_ms,
+                        observation.classification,
+                        observation.transcript_hard_non_target,
+                    );
+                }
+                next_observation_ms = audio_end_ms.saturating_add(400);
+            }
+            asr.consume_pcm_chunk(chunk);
+            tokio::time::sleep(Duration::from_millis(
+                (chunk.len() as f64 / BYTES_PER_MS).round().max(1.0) as u64,
+            ))
+            .await;
+        }
+        asr.send_last_frame().await.expect("send final frame");
+        let final_result = asr
+            .await_final_result_with_timeout(Duration::from_secs(20))
+            .await
+            .expect("receive filtered final");
+        let state = asr.state.lock();
+        let report = serde_json::json!({
+            "status": if final_result.text.trim().is_empty() { "FAIL" } else { "PASS" },
+            "wakePhrase": wake_phrase,
+            "ownerProfileAdaptive": profile.is_adaptive(),
+            "inputDurationMs": audio_end_ms,
+            "filteredTranscript": final_result.text,
+            "filteredChars": final_result.text.chars().count(),
+            "targetSpeakerId": state.target_speaker_id,
+            "speakerInfoPresent": state.speaker_info_present,
+            "ownerIsolationFrozen": state.owner_isolation_frozen,
+            "ownerIsolationCeilingChars": state.owner_isolation_ceiling_text.chars().count(),
+            "observations": observations,
+        });
+        drop(state);
+        let summary_path = PathBuf::from(summary_path);
+        if let Some(parent) = summary_path.parent() {
+            fs::create_dir_all(parent).expect("create target-filter summary directory");
+        }
+        fs::write(
+            &summary_path,
+            serde_json::to_vec_pretty(&report).expect("serialize target-filter report"),
+        )
+        .expect("write target-filter report");
+        eprintln!(
+            "target_speaker_filter_probe_report={}",
+            summary_path.display()
         );
     }
 }

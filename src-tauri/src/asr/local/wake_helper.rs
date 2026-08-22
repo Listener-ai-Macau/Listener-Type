@@ -36,6 +36,12 @@ mod imp {
         pub inference_ms: u64,
     }
 
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ShadowTranscriptResult {
+        pub text: String,
+        pub inference_ms: u64,
+    }
+
     #[derive(Debug, Serialize, Deserialize)]
     #[serde(tag = "kind", rename_all = "snake_case")]
     enum HelperRequest {
@@ -43,6 +49,10 @@ mod imp {
             request_id: String,
             wav_path: String,
             phrase: String,
+        },
+        Transcribe {
+            request_id: String,
+            wav_path: String,
         },
     }
 
@@ -62,6 +72,12 @@ mod imp {
             phonetic_prefix_units: usize,
             phonetic_best_distance: usize,
             phonetic_best_window_start: usize,
+            inference_ms: u64,
+            error: Option<String>,
+        },
+        Transcript {
+            request_id: String,
+            text: String,
             inference_ms: u64,
             error: Option<String>,
         },
@@ -264,6 +280,69 @@ mod imp {
             }
         }
 
+        fn transcribe_if_ready(
+            &self,
+            pcm: &[u8],
+            timeout: Duration,
+        ) -> Result<ShadowTranscriptResult, String> {
+            if pcm.is_empty() {
+                return Err("local shadow ASR received empty PCM".to_string());
+            }
+            // Finalization is latency-sensitive. It may reuse the already-warm
+            // wake helper, but must never cold-start a model or queue behind a
+            // wake confirmation after the user has stopped speaking.
+            let mut process_slot = self
+                .process
+                .try_lock()
+                .ok_or_else(|| super::WAKE_HELPER_BUSY_ERROR_CODE.to_string())?;
+            let Some(process) = process_slot.as_mut() else {
+                return Err("local_shadow_helper_not_ready".to_string());
+            };
+            if !process.is_running() {
+                *process_slot = None;
+                return Err("local_shadow_helper_not_ready".to_string());
+            }
+
+            let wav = TempWavFile::create_without_context_padding(pcm)
+                .map_err(|err| format!("prepare local shadow ASR WAV: {err:#}"))?;
+            let request_id = Uuid::new_v4().to_string();
+            let request = HelperRequest::Transcribe {
+                request_id: request_id.clone(),
+                wav_path: wav.path().to_string_lossy().into_owned(),
+            };
+            if let Err(err) = process.send(&request) {
+                *process_slot = None;
+                return Err(err);
+            }
+            let response = match process.receive(timeout) {
+                Ok(response) => response,
+                Err(err) => {
+                    *process_slot = None;
+                    return Err(err);
+                }
+            };
+            match response {
+                HelperResponse::Transcript {
+                    request_id: response_id,
+                    text,
+                    inference_ms,
+                    error,
+                } if response_id == request_id => {
+                    if let Some(error) = error {
+                        Err(error)
+                    } else {
+                        Ok(ShadowTranscriptResult { text, inference_ms })
+                    }
+                }
+                response => {
+                    *process_slot = None;
+                    Err(format!(
+                        "local shadow ASR returned mismatched response: {response:?}"
+                    ))
+                }
+            }
+        }
+
         fn ensure_process(
             process_slot: &mut Option<HelperProcess>,
         ) -> Result<&mut HelperProcess, String> {
@@ -297,6 +376,13 @@ mod imp {
         timeout: Duration,
     ) -> Result<WakeHelperResult, String> {
         client().confirm(pcm, phrase, timeout)
+    }
+
+    pub fn transcribe_if_ready(
+        pcm: &[u8],
+        timeout: Duration,
+    ) -> Result<ShadowTranscriptResult, String> {
+        client().transcribe_if_ready(pcm, timeout)
     }
 
     fn emit_response(response: &HelperResponse) -> Result<(), String> {
@@ -492,37 +578,63 @@ mod imp {
                 Ok(request) => request,
                 Err(_) => continue,
             };
-            let HelperRequest::Confirm {
-                request_id,
-                wav_path,
-                phrase,
-            } = request;
-            let started = Instant::now();
-            let wav_path = std::path::Path::new(&wav_path);
-            let transcript = transcribe_wake_evidence(&paraformer, wav_path, &phrase);
-            let response = match transcript {
-                Ok(evidence) => HelperResponse::Result {
+            let response = match request {
+                HelperRequest::Confirm {
                     request_id,
-                    matched: phrase_relation_matches(evidence.phrase_relation),
-                    phrase_relation: evidence.phrase_relation,
-                    transcript_chars: evidence.transcript_chars,
-                    phonetic_prefix_units: evidence.diagnostics.prefix_units,
-                    phonetic_best_distance: evidence.diagnostics.best_distance,
-                    phonetic_best_window_start: evidence.diagnostics.best_window_start,
-                    inference_ms: started.elapsed().as_millis() as u64,
-                    error: None,
-                },
-                Err(err) => HelperResponse::Result {
+                    wav_path,
+                    phrase,
+                } => {
+                    let started = Instant::now();
+                    let transcript = transcribe_wake_evidence(
+                        &paraformer,
+                        std::path::Path::new(&wav_path),
+                        &phrase,
+                    );
+                    match transcript {
+                        Ok(evidence) => HelperResponse::Result {
+                            request_id,
+                            matched: phrase_relation_matches(evidence.phrase_relation),
+                            phrase_relation: evidence.phrase_relation,
+                            transcript_chars: evidence.transcript_chars,
+                            phonetic_prefix_units: evidence.diagnostics.prefix_units,
+                            phonetic_best_distance: evidence.diagnostics.best_distance,
+                            phonetic_best_window_start: evidence.diagnostics.best_window_start,
+                            inference_ms: started.elapsed().as_millis() as u64,
+                            error: None,
+                        },
+                        Err(err) => HelperResponse::Result {
+                            request_id,
+                            matched: false,
+                            phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
+                            transcript_chars: 0,
+                            phonetic_prefix_units: 0,
+                            phonetic_best_distance: 0,
+                            phonetic_best_window_start: 0,
+                            inference_ms: started.elapsed().as_millis() as u64,
+                            error: Some(format!("{err:#}")),
+                        },
+                    }
+                }
+                HelperRequest::Transcribe {
                     request_id,
-                    matched: false,
-                    phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
-                    transcript_chars: 0,
-                    phonetic_prefix_units: 0,
-                    phonetic_best_distance: 0,
-                    phonetic_best_window_start: 0,
-                    inference_ms: started.elapsed().as_millis() as u64,
-                    error: Some(format!("{err:#}")),
-                },
+                    wav_path,
+                } => {
+                    let started = Instant::now();
+                    match paraformer.transcribe_wav_raw(std::path::Path::new(&wav_path)) {
+                        Ok(text) => HelperResponse::Transcript {
+                            request_id,
+                            text,
+                            inference_ms: started.elapsed().as_millis() as u64,
+                            error: None,
+                        },
+                        Err(err) => HelperResponse::Transcript {
+                            request_id,
+                            text: String::new(),
+                            inference_ms: started.elapsed().as_millis() as u64,
+                            error: Some(format!("{err:#}")),
+                        },
+                    }
+                }
             };
             if emit_response(&response).is_err() {
                 break;
@@ -556,7 +668,7 @@ mod imp {
         }
 
         #[test]
-        fn helper_protocol_exposes_match_metadata_without_transcript_text() {
+        fn wake_confirmation_protocol_exposes_match_metadata_without_transcript_text() {
             let request = HelperRequest::Confirm {
                 request_id: "request-1".into(),
                 wav_path: "input.wav".into(),
@@ -579,6 +691,25 @@ mod imp {
             assert!(request_json.contains("开始录音"));
             assert!(!response_json.contains("开始录音"));
             assert!(!response_json.contains("transcript_text"));
+        }
+
+        #[test]
+        fn shadow_transcript_protocol_is_separate_from_wake_confirmation() {
+            let request = HelperRequest::Transcribe {
+                request_id: "request-2".into(),
+                wav_path: "input.wav".into(),
+            };
+            let response = HelperResponse::Transcript {
+                request_id: "request-2".into(),
+                text: "只用于本机终稿漏字校验".into(),
+                inference_ms: 321,
+                error: None,
+            };
+
+            let request_json = serde_json::to_string(&request).unwrap();
+            let response_json = serde_json::to_string(&response).unwrap();
+            assert!(request_json.contains("transcribe"));
+            assert!(response_json.contains("只用于本机终稿漏字校验"));
         }
 
         #[test]
@@ -1241,7 +1372,9 @@ mod imp {
 
 #[cfg(target_os = "windows")]
 #[allow(unused_imports)]
-pub use imp::{confirm, preload, run_helper, WakeHelperResult};
+pub use imp::{
+    confirm, preload, run_helper, transcribe_if_ready, ShadowTranscriptResult, WakeHelperResult,
+};
 
 #[cfg(not(target_os = "windows"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1252,6 +1385,13 @@ pub struct WakeHelperResult {
     pub phonetic_prefix_units: usize,
     pub phonetic_best_distance: usize,
     pub phonetic_best_window_start: usize,
+    pub inference_ms: u64,
+}
+
+#[cfg(not(target_os = "windows"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShadowTranscriptResult {
+    pub text: String,
     pub inference_ms: u64,
 }
 
@@ -1267,6 +1407,14 @@ pub fn confirm(
     _timeout: std::time::Duration,
 ) -> Result<WakeHelperResult, String> {
     Err("local wake helper is only available on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn transcribe_if_ready(
+    _pcm: &[u8],
+    _timeout: std::time::Duration,
+) -> Result<ShadowTranscriptResult, String> {
+    Err("local shadow ASR is only available on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
