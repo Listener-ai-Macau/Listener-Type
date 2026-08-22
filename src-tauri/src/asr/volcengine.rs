@@ -1511,6 +1511,63 @@ fn freeze_owner_isolation_ledger(state: &mut SyncState) {
     );
 }
 
+/// Save the last authoritative owner transcript as soon as the first extreme
+/// enrolled-owner mismatch arrives. Provider text can advance between the
+/// first and second verifier windows, so taking the ceiling only after the
+/// confirmation pair risks preserving the other person's first words.
+///
+/// The checkpoint deliberately uses `best_transcript_*`, not the longer visual
+/// / optimistic ledger: the latter is allowed to show unattributed text while
+/// provider diarization catches up. An empty authoritative ledger is not a safe
+/// rollback target; in that case we wait for a later hard window instead of
+/// deleting the owner's first sentence.
+fn stage_owner_isolation_checkpoint(state: &mut SyncState) -> bool {
+    if !state.local_speaker_tracking_enabled
+        || state.owner_isolation_frozen
+        || state.best_transcript_text.trim().is_empty()
+    {
+        return false;
+    }
+    state.owner_isolation_ceiling_text = state.best_transcript_text.clone();
+    state.owner_isolation_ceiling_segments = state.best_transcript_segments.clone();
+    log::info!(
+        "[asr] staged owner isolation checkpoint ceiling_chars={} reason=first_extreme_owner_mismatch",
+        state.owner_isolation_ceiling_text.chars().count()
+    );
+    true
+}
+
+/// Confirm a previously staged checkpoint and immediately roll every transcript
+/// ledger back to it. This prevents a provider update racing between the two
+/// local verifier windows from leaking foreign words into protocol-final
+/// fallback or insertion.
+fn freeze_owner_isolation_from_staged_checkpoint(state: &mut SyncState) -> bool {
+    if !state.local_speaker_tracking_enabled
+        || state.owner_isolation_frozen
+        || state.owner_isolation_ceiling_text.trim().is_empty()
+    {
+        return false;
+    }
+    let ceiling_text = state.owner_isolation_ceiling_text.clone();
+    let ceiling_segments = state.owner_isolation_ceiling_segments.clone();
+    state.best_transcript_text = ceiling_text.clone();
+    state.best_transcript_segments = ceiling_segments.clone();
+    state.best_untimed_window.clear();
+    state.last_partial_text = ceiling_text.clone();
+    state.optimistic_preview_text = ceiling_text.clone();
+    state.optimistic_preview_segments = ceiling_segments;
+    state.optimistic_untimed_window.clear();
+    state.last_emitted_preview_text = ceiling_text.clone();
+    state.last_emitted_visual_preview_text = ceiling_text;
+    state.pending_unattributed_text.clear();
+    state.owner_isolation_frozen = true;
+    log::info!(
+        "[asr] owner isolation froze at staged checkpoint ceiling_chars={} reason=confirmed_extreme_owner_mismatch",
+        state.owner_isolation_ceiling_text.chars().count()
+    );
+    true
+}
+
 /// Freeze at the provider's already-filtered owner utterances when cloud
 /// diarization reused the owner's speaker id for a locally rejected later
 /// utterance. This is stronger than a raw voiceprint negative: a stable
@@ -1548,6 +1605,8 @@ fn unfreeze_owner_isolation_ledger(state: &mut SyncState) {
         return;
     }
     state.owner_isolation_frozen = false;
+    state.owner_isolation_ceiling_text.clear();
+    state.owner_isolation_ceiling_segments.clear();
     log::info!("[asr] owner isolation unfrozen after Target restabilized");
 }
 
@@ -2105,6 +2164,9 @@ struct RecoverySpeakerSnapshot {
     local_speaker_evidence: Vec<LocalSpeakerEvidence>,
     wake_speaker_phrase: Option<String>,
     wake_target_speech_end_ms: Option<u64>,
+    owner_isolation_frozen: bool,
+    owner_isolation_ceiling_text: String,
+    owner_isolation_ceiling_segments: Vec<TranscriptSegment>,
 }
 
 impl VolcengineStreamingASR {
@@ -2165,6 +2227,9 @@ impl VolcengineStreamingASR {
             local_speaker_evidence: state.local_speaker_evidence.clone(),
             wake_speaker_phrase: state.wake_speaker_phrase.clone(),
             wake_target_speech_end_ms: state.wake_target_speech_end_ms,
+            owner_isolation_frozen: state.owner_isolation_frozen,
+            owner_isolation_ceiling_text: state.owner_isolation_ceiling_text.clone(),
+            owner_isolation_ceiling_segments: state.owner_isolation_ceiling_segments.clone(),
         }
     }
 
@@ -2192,6 +2257,9 @@ impl VolcengineStreamingASR {
         state.local_speaker_evidence = snapshot.local_speaker_evidence;
         state.wake_speaker_phrase = snapshot.wake_speaker_phrase;
         state.wake_target_speech_end_ms = snapshot.wake_target_speech_end_ms;
+        state.owner_isolation_frozen = snapshot.owner_isolation_frozen;
+        state.owner_isolation_ceiling_text = snapshot.owner_isolation_ceiling_text;
+        state.owner_isolation_ceiling_segments = snapshot.owner_isolation_ceiling_segments;
     }
 
     pub async fn replay_retained_audio_once(&self) -> Result<RawTranscript, VolcengineASRError> {
@@ -2554,16 +2622,30 @@ impl VolcengineStreamingASR {
                 && state.local_wake_owner_verified
                 && !state.local_speaker_profile_adaptive;
             if transcript_hard_non_target_applies {
-                state.local_consecutive_transcript_hard_non_target = state
-                    .local_consecutive_transcript_hard_non_target
-                    .saturating_add(1);
-                if state.local_consecutive_transcript_hard_non_target
-                    >= LOCAL_SPEAKER_SWITCH_CONFIRMATIONS
-                {
-                    freeze_owner_isolation_ledger(&mut state);
+                if state.local_consecutive_transcript_hard_non_target == 0 {
+                    if stage_owner_isolation_checkpoint(&mut state) {
+                        state.local_consecutive_transcript_hard_non_target = 1;
+                    } else {
+                        log::info!(
+                            "[asr] extreme owner mismatch stayed advisory because no authoritative owner checkpoint exists"
+                        );
+                    }
+                } else {
+                    state.local_consecutive_transcript_hard_non_target = state
+                        .local_consecutive_transcript_hard_non_target
+                        .saturating_add(1);
+                    if state.local_consecutive_transcript_hard_non_target
+                        >= LOCAL_SPEAKER_SWITCH_CONFIRMATIONS
+                    {
+                        freeze_owner_isolation_from_staged_checkpoint(&mut state);
+                    }
                 }
             } else {
                 state.local_consecutive_transcript_hard_non_target = 0;
+                if !state.owner_isolation_frozen {
+                    state.owner_isolation_ceiling_text.clear();
+                    state.owner_isolation_ceiling_segments.clear();
+                }
             }
             let effective_classification = match classification {
                 crate::speaker_verification::SessionSpeakerClassification::NonTarget { score } => {
@@ -7679,6 +7761,15 @@ mod tests {
         }
         use crate::speaker_verification::SessionSpeakerClassification as Classification;
         asr.note_local_speaker_classification(5_950, Classification::NonTarget { score: -0.029 });
+        {
+            // Reproduce the provider race: foreign words arrive after the first
+            // hard mismatch but before the second verifier window confirms it.
+            let mut state = asr.state.lock();
+            state.best_transcript_text = "本人说完了旁人第一句".into();
+            state.optimistic_preview_text = "本人说完了旁人第一句".into();
+            state.last_partial_text = "本人说完了旁人第一句".into();
+            state.last_emitted_preview_text = "本人说完了旁人第一句".into();
+        }
         asr.note_local_speaker_classification(6_350, Classification::NonTarget { score: 0.077 });
 
         let state = asr.state.lock();
@@ -7686,6 +7777,43 @@ mod tests {
         assert!(state.owner_isolation_frozen);
         assert_eq!(state.owner_isolation_ceiling_text, "本人说完了");
         assert_eq!(state.best_transcript_text, "本人说完了");
+        assert_eq!(state.optimistic_preview_text, "本人说完了");
+        assert_eq!(state.last_partial_text, "本人说完了");
+        assert_eq!(state.last_emitted_preview_text, "本人说完了");
+    }
+
+    #[test]
+    fn isolated_extreme_mismatch_discards_staged_checkpoint_without_rollback() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        {
+            let mut state = asr.state.lock();
+            state.local_speaker_stable_target = true;
+            state.local_target_confirmed = true;
+            state.best_transcript_text = "本人第一句".into();
+            state.optimistic_preview_text = "本人第一句".into();
+        }
+        use crate::speaker_verification::SessionSpeakerClassification as Classification;
+        asr.note_local_speaker_classification(4_000, Classification::NonTarget { score: 0.05 });
+        {
+            let mut state = asr.state.lock();
+            state.best_transcript_text = "本人第一句本人第二句".into();
+            state.optimistic_preview_text = "本人第一句本人第二句".into();
+        }
+        asr.note_local_speaker_classification(4_400, Classification::Uncertain { score: 0.35 });
+
+        let state = asr.state.lock();
+        assert!(!state.owner_isolation_frozen);
+        assert_eq!(state.local_consecutive_transcript_hard_non_target, 0);
+        assert!(state.owner_isolation_ceiling_text.is_empty());
+        assert_eq!(state.best_transcript_text, "本人第一句本人第二句");
     }
 
     #[test]
@@ -7833,7 +7961,9 @@ mod tests {
             state.local_speaker_stable_target = false;
             state.local_target_confirmed = true;
             state.local_consecutive_non_target = 2;
+            state.local_consecutive_transcript_hard_non_target = 1;
             state.wake_speaker_phrase = Some("开始录音".into());
+            state.owner_isolation_ceiling_text = "本人恢复检查点".into();
             state.local_speaker_evidence.push(LocalSpeakerEvidence {
                 audio_end_ms: 10_600,
                 classification:
@@ -7861,8 +7991,10 @@ mod tests {
         assert_eq!(state.local_target_speech_end_ms, Some(9_000));
         assert_eq!(state.local_non_target_speech_end_ms, Some(10_600));
         assert_eq!(state.local_consecutive_non_target, 2);
+        assert_eq!(state.local_consecutive_transcript_hard_non_target, 1);
         assert_eq!(state.local_speaker_evidence.len(), 1);
         assert_eq!(state.wake_speaker_phrase.as_deref(), Some("开始录音"));
+        assert_eq!(state.owner_isolation_ceiling_text, "本人恢复检查点");
     }
 
     #[test]

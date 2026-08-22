@@ -672,6 +672,26 @@ gate("multi_speaker_owner_isolation", () => {
     "short_hard_mismatch_pair_isolates_transcript_without_changing_endpoint_clock",
     "short extreme mismatch isolates only transcript growth",
   );
+  mustInclude(
+    volcengineAsr,
+    "stage_owner_isolation_checkpoint",
+    "first extreme mismatch checkpoints the authoritative owner ledger",
+  );
+  mustInclude(
+    volcengineAsr,
+    "freeze_owner_isolation_from_staged_checkpoint",
+    "confirmed mismatch rolls every transcript ledger back to the checkpoint",
+  );
+  mustInclude(
+    volcengineAsr,
+    "isolated_extreme_mismatch_discards_staged_checkpoint_without_rollback",
+    "one transient mismatch cannot roll back continued owner speech",
+  );
+  mustInclude(
+    readFileSync(join(typeRoot, "src-tauri", "src", "asr", "volcengine_untimed_merge.rs"), "utf8"),
+    "installed_session_230_growing_cumulative_revisions_never_inflate_preview",
+    "growing untimed provider revisions cannot inflate then collapse the preview",
+  );
 });
 
 gate("multi_speaker_unit_tests_green", () => {
