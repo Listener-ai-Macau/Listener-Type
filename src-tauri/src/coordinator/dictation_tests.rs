@@ -4346,29 +4346,38 @@ fn local_confirmation_adds_context_with_a_strict_attempt_cap() {
     );
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(1),
-        Some(1_400 * 32)
+        Some(1_800 * 32)
     );
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(2),
-        Some(1_600 * 32)
-    );
-    assert_eq!(
-        super::next_local_confirmation_snapshot_bytes(3),
         Some(2_000 * 32)
     );
     assert_eq!(
-        super::next_local_confirmation_snapshot_bytes(4),
+        super::next_local_confirmation_snapshot_bytes(3),
         Some(2_400 * 32)
     );
     assert_eq!(
-        super::next_local_confirmation_snapshot_bytes(5),
+        super::next_local_confirmation_snapshot_bytes(4),
         Some(3_000 * 32)
     );
     assert_eq!(
-        super::next_local_confirmation_snapshot_bytes(6),
+        super::next_local_confirmation_snapshot_bytes(5),
         Some(5_000 * 32)
     );
-    assert_eq!(super::next_local_confirmation_snapshot_bytes(7), None);
+    assert_eq!(super::next_local_confirmation_snapshot_bytes(6), None);
+}
+
+#[test]
+fn local_confirmation_ladder_does_not_block_the_complete_phrase_window() {
+    // Installed 569/578/583: the 1.4 s inference was still running when the
+    // useful 1.8 s phrase tail arrived. The helper is single-flight, so that
+    // rung increased latency instead of recall.
+    let snapshots = (0..6)
+        .map(|attempt| super::next_local_confirmation_snapshot_bytes(attempt).unwrap() / 32)
+        .collect::<Vec<_>>();
+    assert_eq!(snapshots, vec![800, 1_800, 2_000, 2_400, 3_000, 5_000]);
+    assert!(!snapshots.contains(&1_400));
+    assert!(!snapshots.contains(&1_600));
 }
 
 #[cfg(target_os = "windows")]
@@ -4406,7 +4415,7 @@ fn strong_start_prefix_gets_one_non_authoritative_latency_followup() {
     ));
 
     assert_eq!(super::LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_MS, 140);
-    assert_eq!(super::LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS, 3);
+    assert_eq!(super::LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS, 2);
 }
 
 #[test]

@@ -39,7 +39,7 @@ const LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_MS: usize = 140;
 const LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_BYTES: usize =
     LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_MS * 32;
 #[cfg(target_os = "windows")]
-const LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS: usize = 3;
+const LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS: usize = 2;
 
 #[cfg(target_os = "windows")]
 fn should_defer_exploratory_local_confirmation_for_fast_preroll(

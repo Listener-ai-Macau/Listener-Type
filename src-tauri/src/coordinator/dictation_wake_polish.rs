@@ -741,19 +741,20 @@ const LOCAL_CONFIRMATION_START_BYTES: usize = LOCAL_CONFIRMATION_START_MS * 32;
  * local ASR at the ordinary 0.8 s PCM rung contends with BLE/KWS four times
  * while that finite backlog drains. Let KWS consume the burst first; if it
  * remains silent, one full-context local confirmation starts at 2.4 s PCM.
- * Real-time/raw transport never meets the >2x condition and keeps the proven
- * 0.8/1.4/1.6/2.0 s ladder unchanged. */
+ * Real-time/raw transport never meets the >2x condition and keeps the bounded
+ * 0.8/1.8/2.0 s ladder unchanged. */
 const FAST_PREROLL_LOCAL_CONFIRM_DEFER_UNTIL_MS: usize = 2_400;
-// Keep the speculative verifier dense through the full phrase tail. The old
-// 1.8 -> 2.4 s gap left slow/quiet 0.8x utterances blind long enough to miss
-// the capsule latency target even though the same audio later verified. The
-// 1.6 s rung also starts as soon as the real 1.4 s pass normally releases the
-// helper; waiting until 1.75 s added ~90-150 ms of idle latency and pushed the
-// fixed product matrix above its 1 s p95 budget under real-device CPU timing.
-const LOCAL_CONFIRMATION_SNAPSHOT_MS: [usize; 7] = [
+// The isolated Paraformer helper is deliberately single-flight. Installed
+// sessions 569/578/583 showed that the old 1.4 s exploratory pass occupied it
+// for 168-186 ms while the complete phrase arrived, pushing the useful 1.6 s
+// pass out to 1.7-1.84 s PCM and the capsule to ~1.4 s wall time. Across the
+// installed log the 1.4 s rung ran 30 times and its only match had already
+// overshot to 3.633 s PCM. Keep the 0.8 s fast-speech check, then wait for a
+// realistic complete-phrase window at 1.8 s. A strong start prefix gets the
+// existing 140 ms new-audio retry, so slow speech does not wait for 2.0 s.
+const LOCAL_CONFIRMATION_SNAPSHOT_MS: [usize; 6] = [
     LOCAL_CONFIRMATION_START_MS,
-    1_400,
-    1_600,
+    1_800,
     2_000,
     2_400,
     3_000,
@@ -811,7 +812,7 @@ const KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2;
 const LOCAL_ABSENT_KEYWORD_TAIL_SLACK_MS: usize = 300;
 const LOCAL_ABSENT_KEYWORD_TAIL_SLACK_BYTES: usize = LOCAL_ABSENT_KEYWORD_TAIL_SLACK_MS * 32;
 /// Ordinary room speech can keep firmware VA sessions open for ~4.5 s. Limit
-/// the initial candidate to the 0.8/1.4/1.6/2.0 s ladder, then allow exactly
+/// the initial candidate to the 0.8/1.8/2.0 s ladder, then allow exactly
 /// one focused confirmation in every later rolling window. Real device captures
 /// carry ~1 s pre-roll, so an older candidate-wide Absent cap permanently
 /// disabled recognition after the first few windows. Per-window work stays

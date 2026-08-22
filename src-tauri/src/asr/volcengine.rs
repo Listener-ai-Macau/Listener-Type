@@ -6991,6 +6991,120 @@ mod tests {
     }
 
     #[test]
+    fn installed_session_621_keeps_one_owner_split_across_three_cloud_ids() {
+        // Installed session 621 was one continuous verified-owner utterance,
+        // but the provider relabelled it 0 -> 1 -> 2 -> 2. CAM++ recognized
+        // only the first windows as Target and left the natural-speech body in
+        // the Uncertain band. Cloud cluster identity is not a persistent human
+        // identity, so that shape must preserve the complete provider text
+        // while every local window still holds the debounced owner identity.
+        let full = "开始录音。会有时候会吞字，就很奇怪，是不是这个模型不太行，就是为了避免这个多人识别，然后把自己也变成第二个人了，这个要修一下，体验太差了。";
+        let result = json!({
+            "text": full,
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 172,
+                    "end_time": 1_012,
+                    "text": "开始录音。"
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 1_172,
+                    "end_time": 1_782,
+                    "text": "会有时候会吞字，"
+                },
+                {
+                    "additions": { "speaker_id": "2", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 1_852,
+                    "end_time": 4_262,
+                    "text": "就很奇怪，是不是这个模型不太行，就是为了避免这个多人识别，"
+                },
+                {
+                    "additions": { "speaker_id": "2", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 4_262,
+                    "end_time": 8_632,
+                    "text": "然后把自己也变成第二个人了，这个要修一下，体验太差了。"
+                }
+            ]
+        });
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_wake_owner_verified: true,
+            local_speaker_profile_adaptive: false,
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            target_speaker_id: Some("0".into()),
+            wake_speaker_phrase: Some("开始录音".into()),
+            ..SyncState::default()
+        };
+        state.local_speaker_evidence = [
+            (1_200, 0.808),
+            (1_600, 0.787),
+            (2_200, 0.48),
+            (3_000, 0.41),
+            (4_200, 0.37),
+            (5_400, 0.44),
+            (6_600, 0.39),
+            (7_800, 0.43),
+            (8_800, 0.40),
+        ]
+        .into_iter()
+        .map(|(audio_end_ms, score)| LocalSpeakerEvidence {
+            audio_end_ms,
+            classification: if score >= 0.55 {
+                crate::speaker_verification::SessionSpeakerClassification::Target { score }
+            } else {
+                crate::speaker_verification::SessionSpeakerClassification::Uncertain { score }
+            },
+            stable_target: true,
+        })
+        .collect();
+
+        let target_text = "开始录音。";
+        assert!(sequential_speaker_split_gap_is_owner_safe(
+            &state,
+            &result,
+            target_text,
+        ));
+
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        *asr.state.lock() = state;
+        let (tx, mut rx) = oneshot::channel();
+        asr.state.lock().final_tx = Some(tx);
+        let final_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 10_322 },
+            "result": result,
+        }))
+        .expect("session 621 final serializes");
+        let final_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::LastPacket,
+            Serialization::Json,
+            &final_payload,
+            None,
+        );
+
+        assert!(!asr.handle_frame(&final_frame));
+        let transcript = rx
+            .try_recv()
+            .expect("session 621 final should resolve")
+            .expect("one owner split across three cloud ids should remain complete");
+        assert_eq!(transcript.text, full);
+    }
+
+    #[test]
     fn owner_acceptance_final_recovers_locally_verified_unsegmented_tail() {
         // Owner acceptance 2026-08-22: all 7.36 s of PCM arrived, the provider
         // text reached the complete sentence, but final utterances stopped at
