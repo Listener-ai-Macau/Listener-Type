@@ -131,12 +131,21 @@ impl SettledTargetEndpointClock {
         } else {
             fresh_unclassified_local_speech
         };
-        // Open clauses and a bounded manual terminal bridge retain fresh owner
-        // speech. Confirmed NonTarget speech remains excluded by the helper.
+        // An enrolled owner may begin the next sentence immediately after a
+        // provider-added terminal mark. Installed session 531 still had local
+        // speech at the live audio edge (and no NonTarget evidence), yet the
+        // terminal preview let the settled clock stop mid-utterance. For an
+        // enrolled tracker, retain that bounded owner-compatible speech no
+        // matter how the previous preview was punctuated. Manual sessions keep
+        // the narrower open-clause/terminal-bridge policy. Real silence still
+        // expires on the original endpoint timeout; this does not extend it.
+        let enrolled_owner_established = update.local_speaker_tracking_enabled
+            && (update.target_speech_end_ms.is_some()
+                || update.local_target_speech_end_ms.is_some());
         let active_body_still_speaking = bounded_unclassified_local_speech
-            && (latest_visible_body_ends_terminal == Some(false)
-                || (!update.local_speaker_tracking_enabled
-                    && manual_terminal_bridge_until.is_some_and(|until| now < until)));
+            && (enrolled_owner_established
+                || latest_visible_body_ends_terminal == Some(false)
+                || manual_terminal_bridge_until.is_some_and(|until| now < until));
         !active_body_still_speaking
             && (!update.pending_unattributed_speech
                 || update_has_recent_strong_non_target(update))

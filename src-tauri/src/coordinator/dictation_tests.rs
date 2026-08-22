@@ -1645,6 +1645,103 @@ fn settled_target_wall_clock_does_not_cut_a_fresh_unattributed_owner_tail() {
 }
 
 #[test]
+fn installed_session_531_terminal_preview_does_not_cut_continuing_enrolled_owner() {
+    let started = std::time::Instant::now();
+    let owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(2_762),
+        provider_audio_duration_ms: Some(3_100),
+        audio_duration_ms: Some(3_200),
+        local_speech_end_ms: Some(3_200),
+        local_target_speech_end_ms: Some(2_700),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(2_762),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.note_visible_body_boundary(true, 14, started);
+    let generation = clock
+        .observe(&owner, true, started)
+        .expect("terminal owner preview arms the ordinary endpoint clock");
+
+    let continuing_owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(4_000),
+        audio_duration_ms: Some(4_000),
+        local_speech_end_ms: Some(4_000),
+        target_activity_advanced: false,
+        ..owner.clone()
+    };
+    assert_eq!(
+        clock.observe(
+            &continuing_owner,
+            true,
+            started + std::time::Duration::from_millis(850),
+        ),
+        None,
+    );
+    assert!(
+        clock
+            .due_update(
+                generation,
+                started + std::time::Duration::from_millis(900),
+                900,
+            )
+            .is_none(),
+        "terminal punctuation must not override live enrolled-owner speech",
+    );
+
+    let owner_now_quiet = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(5_000),
+        audio_duration_ms: Some(5_000),
+        local_speech_end_ms: Some(4_000),
+        ..continuing_owner.clone()
+    };
+    assert_eq!(
+        clock.observe(
+            &owner_now_quiet,
+            true,
+            started + std::time::Duration::from_millis(1_000),
+        ),
+        None,
+    );
+    assert!(
+        clock
+            .latest_due_update(started + std::time::Duration::from_millis(1_000), 900)
+            .is_some(),
+        "the original one-second silence endpoint must remain unchanged",
+    );
+
+    let confirmed_other = crate::asr::volcengine::TargetSpeakerUpdate {
+        local_non_target_speech_end_ms: Some(4_000),
+        ..continuing_owner
+    };
+    let mut other_clock = super::SettledTargetEndpointClock::default();
+    other_clock.note_visible_body_boundary(true, 14, started);
+    let other_generation = other_clock
+        .observe(&owner, true, started)
+        .expect("owner preview arms the other-speaker control clock");
+    other_clock.observe(
+        &confirmed_other,
+        true,
+        started + std::time::Duration::from_millis(850),
+    );
+    assert!(
+        other_clock
+            .due_update(
+                other_generation,
+                started + std::time::Duration::from_millis(900),
+                900,
+            )
+            .is_some(),
+        "confirmed other speech must not hold the owner's recording open",
+    );
+}
+
+#[test]
 fn settled_target_wall_clock_bridges_a_manual_terminal_supplement_without_slowing_short_commands() {
     let started = std::time::Instant::now();
     let stable = crate::asr::volcengine::TargetSpeakerUpdate {
