@@ -1,6 +1,6 @@
 use std::fs;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use crate::coordinator_state::{
@@ -49,6 +49,7 @@ const WAKE_DIAGNOSTIC_RETENTION_MAX_BYTES: u64 = 32 * 1024 * 1024;
 const WAKE_DIAGNOSTIC_RETENTION_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const POST_DICTATION_KEY_DELAY: Duration = Duration::from_millis(60);
 const EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT: Duration = Duration::from_millis(300);
+const EMBEDDED_ASR_SPEECH_ACTIVITY_MAX_QUEUE_AGE: Duration = Duration::from_millis(600);
 // Owner dictation endpoint. Once body speech has started, every preview shape
 // uses the established 1.0s inactivity contract. Do not make completion depend
 // on optimistic punctuation, body length, or an uncertain voiceprint vote: the
@@ -110,7 +111,60 @@ const EMBEDDED_LOCAL_SPEAKER_CLASSIFICATION_SLACK_MS: u64 = 600;
 // 自动结束无限挂起。挂起以最后一次归属语音 +6s 封顶；本人正常说话的分类
 // 滞后远小于 6s，不受影响。
 const EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS: u64 = 2_000;
-static EMBEDDED_ASR_SPEECH_ACTIVITY_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+struct EmbeddedAsrSpeechActivityJob {
+    inner: Weak<Inner>,
+    session_id: SessionId,
+    coalesced: bool,
+    queued_at: Instant,
+}
+
+struct LatestSpeechActivityQueue<T> {
+    in_flight: bool,
+    pending: Option<T>,
+}
+
+impl<T> Default for LatestSpeechActivityQueue<T> {
+    fn default() -> Self {
+        Self {
+            in_flight: false,
+            pending: None,
+        }
+    }
+}
+
+impl<T> LatestSpeechActivityQueue<T> {
+    /// Retain the newest refresh while one BLE write is in flight. Returning
+    /// `true` transfers ownership of draining the queue to the caller.
+    fn enqueue(&mut self, job: T) -> bool {
+        self.pending = Some(job);
+        if self.in_flight {
+            false
+        } else {
+            self.in_flight = true;
+            true
+        }
+    }
+
+    /// Called only by the active drain worker. Clearing `in_flight` under the
+    /// same lock makes enqueue-vs-finish race-free.
+    fn take_pending_or_finish(&mut self) -> Option<T> {
+        match self.pending.take() {
+            Some(job) => Some(job),
+            None => {
+                self.in_flight = false;
+                None
+            }
+        }
+    }
+}
+
+fn embedded_asr_speech_activity_queue(
+) -> &'static Mutex<LatestSpeechActivityQueue<EmbeddedAsrSpeechActivityJob>> {
+    static QUEUE: OnceLock<Mutex<LatestSpeechActivityQueue<EmbeddedAsrSpeechActivityJob>>> =
+        OnceLock::new();
+    QUEUE.get_or_init(|| Mutex::new(LatestSpeechActivityQueue::default()))
+}
 
 fn should_restore_clipboard_after_dictation(
     prefs: &UserPreferences,
@@ -335,25 +389,76 @@ fn note_embedded_asr_speech_activity(inner: &Arc<Inner>, session_id: SessionId) 
                 SessionPhase::Starting | SessionPhase::Listening
             )
     };
-    if !active
-        || EMBEDDED_ASR_SPEECH_ACTIVITY_IN_FLIGHT
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-    {
+    if !active {
         return;
     }
 
-    async_runtime::spawn_blocking(move || {
+    let should_spawn = {
+        let mut queue = embedded_asr_speech_activity_queue().lock();
+        let coalesced = queue.in_flight;
+        queue.enqueue(EmbeddedAsrSpeechActivityJob {
+            inner: Arc::downgrade(inner),
+            session_id,
+            coalesced,
+            queued_at: Instant::now(),
+        })
+    };
+    if !should_spawn {
+        return;
+    }
+
+    async_runtime::spawn_blocking(move || loop {
+        let Some(job) = embedded_asr_speech_activity_queue()
+            .lock()
+            .take_pending_or_finish()
+        else {
+            break;
+        };
+        let Some(inner) = job.inner.upgrade() else {
+            continue;
+        };
+        if job.queued_at.elapsed() >= EMBEDDED_ASR_SPEECH_ACTIVITY_MAX_QUEUE_AGE {
+            log::warn!(
+                "[embedded-ble] discarded stale coalesced speech refresh session_id={} queued_ms={}",
+                job.session_id,
+                job.queued_at.elapsed().as_millis()
+            );
+            continue;
+        }
+        let session_still_active = {
+            let state = inner.state.lock();
+            state.session_id == job.session_id
+                && !state.cancelled
+                && matches!(
+                    state.phase,
+                    SessionPhase::Starting | SessionPhase::Listening
+                )
+        };
+        let still_active = session_still_active
+            && embedded_ble_host_recording_control_context_active(&inner)
+            && !embedded_audio_stop_feedback_latched(&inner);
+        if !still_active {
+            continue;
+        }
+
+        let started = Instant::now();
         let result = crate::embedded_ble::send_recording_control_speech_activity(
             EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT,
         );
-        EMBEDDED_ASR_SPEECH_ACTIVITY_IN_FLIGHT.store(false, Ordering::SeqCst);
         match result {
+            Ok(()) if job.coalesced => log::info!(
+                "[embedded-ble] coalesced recognized speech refresh delivered session_id={} elapsed_ms={}",
+                job.session_id,
+                started.elapsed().as_millis()
+            ),
             Ok(()) => log::debug!(
-                "[embedded-ble] recognized speech refreshed auto-stop timeout session_id={session_id}"
+                "[embedded-ble] recognized speech refreshed auto-stop timeout session_id={} elapsed_ms={}",
+                job.session_id,
+                started.elapsed().as_millis()
             ),
             Err(err) => log::warn!(
-                "[embedded-ble] recognized speech refresh failed session_id={session_id}: {err}"
+                "[embedded-ble] recognized speech refresh failed session_id={}: {err}",
+                job.session_id
             ),
         }
     });

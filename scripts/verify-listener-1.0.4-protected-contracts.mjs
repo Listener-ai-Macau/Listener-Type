@@ -112,6 +112,11 @@ gate("target_speaker_end_1000ms", () => {
     "preview_growth_firmware_refresh_rejects_punctuation_stale_and_other_speaker",
     "punctuation, stale speech, and other speakers cannot prolong the endpoint",
   );
+  mustInclude(
+    dictationTests,
+    "firmware_speech_refresh_coalesces_latest_instead_of_dropping_it",
+    "a fresh owner edge cannot be dropped behind an older in-flight BLE refresh",
+  );
 });
 
 gate("wake_only_body_initial_wait_3000ms", () => {

@@ -6077,6 +6077,28 @@ fn preview_growth_firmware_refresh_rejects_punctuation_stale_and_other_speaker()
 }
 
 #[test]
+fn firmware_speech_refresh_coalesces_latest_instead_of_dropping_it() {
+    let mut queue = super::LatestSpeechActivityQueue::default();
+
+    assert!(queue.enqueue(1));
+    assert!(!queue.enqueue(2));
+    assert!(!queue.enqueue(3));
+    assert_eq!(queue.take_pending_or_finish(), Some(3));
+    assert_eq!(queue.take_pending_or_finish(), None);
+
+    assert!(queue.enqueue(4));
+    assert_eq!(queue.take_pending_or_finish(), Some(4));
+    assert_eq!(queue.take_pending_or_finish(), None);
+
+    assert!(
+        super::EMBEDDED_ASR_SPEECH_ACTIVITY_MAX_QUEUE_AGE
+            + super::EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT
+            < std::time::Duration::from_millis(super::EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS),
+        "a coalesced refresh must either arrive before the one-second endpoint or be discarded"
+    );
+}
+
+#[test]
 fn explicit_wake_diagnostic_sequence_stops_at_retention_limit() {
     assert_eq!(
         super::next_wake_diagnostic_capture_count(false, super::WAKE_DIAGNOSTIC_MAX_CANDIDATES),
