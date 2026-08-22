@@ -758,6 +758,30 @@ fn sequential_speaker_split_gap_is_owner_safe(
     provider_result: &Value,
     target_text: &str,
 ) -> bool {
+    sequential_speaker_split_gap_is_owner_safe_internal(state, provider_result, target_text, false)
+}
+
+/// Final two-pass frames sometimes seal only the already-attributed prefix in
+/// `utterances` while `result.text` still contains the recognized suffix. The
+/// ordinary sequential-split gate intentionally rejects that schema during
+/// live preview because the untimed suffix could still be room speech. At the
+/// protocol-final boundary an enrolled, wake-verified owner may recover it
+/// only when multiple local windows cover the omitted tail and every one still
+/// holds the owner identity without a NonTarget/absence veto.
+fn final_unsegmented_provider_tail_is_owner_safe(
+    state: &SyncState,
+    provider_result: &Value,
+    target_text: &str,
+) -> bool {
+    sequential_speaker_split_gap_is_owner_safe_internal(state, provider_result, target_text, true)
+}
+
+fn sequential_speaker_split_gap_is_owner_safe_internal(
+    state: &SyncState,
+    provider_result: &Value,
+    target_text: &str,
+    allow_final_unsegmented_tail: bool,
+) -> bool {
     if !state.local_speaker_tracking_enabled
         || !state.local_speaker_stable_target
         || state.owner_isolation_frozen
@@ -819,7 +843,13 @@ fn sequential_speaker_split_gap_is_owner_safe(
         .iter()
         .filter_map(|utterance| utterance.get("text").and_then(Value::as_str))
         .collect::<String>();
-    if normalize(&attributed_text) != normalized_provider {
+    let normalized_attributed = normalize(&attributed_text);
+    let has_unsegmented_provider_tail = normalized_attributed != normalized_provider;
+    if has_unsegmented_provider_tail
+        && (!allow_final_unsegmented_tail
+            || normalized_attributed.is_empty()
+            || !normalized_provider.starts_with(&normalized_attributed))
+    {
         return false;
     }
     let target_utterances = stable_utterances
@@ -846,7 +876,7 @@ fn sequential_speaker_split_gap_is_owner_safe(
     if normalize(&attributed_target_text) != normalized_target {
         return false;
     }
-    split_utterances.iter().all(|utterance| {
+    let split_utterances_are_owner_safe = split_utterances.iter().all(|utterance| {
         let (Some(start_ms), Some(end_ms)) =
             (utterance_start_ms(utterance), utterance_end_ms(utterance))
         else {
@@ -871,7 +901,61 @@ fn sequential_speaker_split_gap_is_owner_safe(
                         crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. }
                     )
             })
-    })
+    });
+    if !split_utterances_are_owner_safe {
+        return false;
+    }
+    if !has_unsegmented_provider_tail {
+        return true;
+    }
+
+    // Untimed provider text is never admitted from an adaptive wake-derived
+    // profile. Require the persisted owner voiceprint plus a positive body
+    // confirmation and at least two debounced owner windows physically after
+    // the last cloud-attributed row. This is the exact shape observed in the
+    // 2026-08-22 owner acceptance: provider text reached 28 chars, final
+    // utterances sealed at 18, and two later local owner windows covered the
+    // missing suffix while BLE delivered the complete 7.36 s recording.
+    if !state.local_wake_owner_verified
+        || state.local_speaker_profile_adaptive
+        || !state.local_target_confirmed
+        || state.local_owner_absence_run_confirmed
+    {
+        return false;
+    }
+    let Some(tail_start_ms) = stable_utterances
+        .iter()
+        .filter_map(|utterance| utterance_end_ms(utterance))
+        .max()
+    else {
+        return false;
+    };
+    let Some(tail_speech_end_ms) = state.local_speech_end_ms else {
+        return false;
+    };
+    if tail_speech_end_ms <= tail_start_ms
+        || local_non_target_vetoes_split_utterance(state, tail_start_ms, tail_speech_end_ms)
+    {
+        return false;
+    }
+    let tail_owner_windows = state
+        .local_speaker_evidence
+        .iter()
+        .filter(|sample| {
+            let sample_center_ms = sample
+                .audio_end_ms
+                .saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+            sample_center_ms > tail_start_ms && sample_center_ms <= tail_speech_end_ms
+        })
+        .collect::<Vec<_>>();
+    tail_owner_windows.len() >= 2
+        && tail_owner_windows.iter().all(|sample| {
+            sample.stable_target
+                && !matches!(
+                    sample.classification,
+                    crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. }
+                )
+        })
 }
 
 fn local_non_target_vetoes_split_utterance(
@@ -3676,6 +3760,7 @@ impl VolcengineStreamingASR {
                 let state = self.state.lock();
                 final_wake_only_provider_gap_is_owner_safe(&state, result, target_text)
                     || sequential_speaker_split_gap_is_owner_safe(&state, result, target_text)
+                    || final_unsegmented_provider_tail_is_owner_safe(&state, result, target_text)
             };
         let prefer_final_optimistic = has_final
             && !prefer_final_provider_text
@@ -6903,6 +6988,128 @@ mod tests {
             transcript.text,
             "开始录音。再检查一下整个东西还有没有什么别的问题。比如说录音、绘画日志之类的，然后我再说一下，没什么问题就这样吧，这个产品现在浏览好像卡住了。"
         );
+    }
+
+    #[test]
+    fn owner_acceptance_final_recovers_locally_verified_unsegmented_tail() {
+        // Owner acceptance 2026-08-22: all 7.36 s of PCM arrived, the provider
+        // text reached the complete sentence, but final utterances stopped at
+        // “苹果香蕉必须保留”. Diarization also split the same enrolled owner
+        // across three sequential speaker ids. The final-only recovery must
+        // keep the locally covered suffix without weakening live room-speech
+        // isolation.
+        let full = "开始录音嗯啊苹果香蕉必须保留然后继续说完整的后半句";
+        let result = json!({
+            "text": full,
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 80,
+                    "end_time": 520,
+                    "text": "开始录音"
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 560,
+                    "end_time": 962,
+                    "text": "嗯啊"
+                },
+                {
+                    "additions": { "speaker_id": "2", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 962,
+                    "end_time": 3_822,
+                    "text": "苹果香蕉必须保留"
+                }
+            ]
+        });
+        let evidence = [1_200, 1_800, 2_600, 3_400, 4_600, 5_400, 6_200]
+            .into_iter()
+            .map(|audio_end_ms| LocalSpeakerEvidence {
+                audio_end_ms,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.42,
+                    },
+                stable_target: true,
+            })
+            .collect::<Vec<_>>();
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_wake_owner_verified: true,
+            local_speaker_profile_adaptive: false,
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            local_speaker_classification: Some(
+                crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                    score: 0.42,
+                },
+            ),
+            local_speaker_evidence: evidence,
+            local_speech_end_ms: Some(6_500),
+            target_speaker_id: Some("0".into()),
+            wake_speaker_phrase: Some("开始录音".into()),
+            ..SyncState::default()
+        };
+
+        assert!(!sequential_speaker_split_gap_is_owner_safe(
+            &state,
+            &result,
+            "开始录音",
+        ));
+        assert!(final_unsegmented_provider_tail_is_owner_safe(
+            &state,
+            &result,
+            "开始录音",
+        ));
+
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        state.last_server_audio_duration_ms = Some(7_360);
+        *asr.state.lock() = state;
+        let (tx, mut rx) = oneshot::channel();
+        asr.state.lock().final_tx = Some(tx);
+        let payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 7_360 },
+            "result": result.clone(),
+        }))
+        .expect("owner acceptance final serializes");
+        let frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::LastPacket,
+            Serialization::Json,
+            &payload,
+            None,
+        );
+
+        assert!(!asr.handle_frame(&frame));
+        let transcript = rx
+            .try_recv()
+            .expect("owner acceptance final should resolve")
+            .expect("locally verified tail should remain successful");
+        assert_eq!(transcript.text, full);
+
+        let mut rejected = asr.state.lock();
+        rejected.local_speaker_evidence.push(LocalSpeakerEvidence {
+            audio_end_ms: 5_800,
+            classification: crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                score: 0.08,
+            },
+            stable_target: true,
+        });
+        assert!(!final_unsegmented_provider_tail_is_owner_safe(
+            &rejected,
+            &result,
+            "开始录音",
+        ));
     }
 
     #[test]

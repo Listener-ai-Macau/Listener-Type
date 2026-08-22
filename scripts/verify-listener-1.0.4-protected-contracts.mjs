@@ -684,6 +684,16 @@ gate("multi_speaker_owner_isolation", () => {
   );
   mustInclude(
     volcengineAsr,
+    "final_unsegmented_provider_tail_is_owner_safe",
+    "verified owner final must retain a provider suffix omitted by diarization rows",
+  );
+  mustInclude(
+    volcengineAsr,
+    "owner_acceptance_final_recovers_locally_verified_unsegmented_tail",
+    "owner tail-loss acceptance incident remains covered by a full final-path test",
+  );
+  mustInclude(
+    volcengineAsr,
     "local_consecutive_transcript_hard_non_target",
     "transcript isolation must not reuse endpoint identity hysteresis",
   );
