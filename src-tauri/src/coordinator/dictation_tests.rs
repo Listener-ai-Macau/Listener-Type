@@ -5986,6 +5986,97 @@ fn late_two_pass_boundary_does_not_refresh_firmware_speech_timer() {
 }
 
 #[test]
+fn installed_session_363_preview_growth_renews_firmware_before_one_second() {
+    let update = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(9_662),
+        provider_audio_duration_ms: Some(10_700),
+        audio_duration_ms: Some(10_800),
+        local_speech_end_ms: Some(10_200),
+        local_target_speech_end_ms: Some(9_700),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(9_662),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+
+    assert!(super::authoritative_preview_growth_has_recent_owner_speech(
+        &update,
+        Some("这句话仍然在连续增长到六十四个正文字符"),
+        Some("这句话仍然在连续增长到六十七个正文字符而且没有停"),
+    ));
+    assert!(super::has_unresolved_recent_local_speech(&update, 1_000));
+    assert!(!super::target_speaker_endpoint_due_with_timeout(
+        &update, 1_000,
+    ));
+}
+
+#[test]
+fn preview_growth_firmware_refresh_rejects_punctuation_stale_and_other_speaker() {
+    let base = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(9_662),
+        provider_audio_duration_ms: Some(10_700),
+        audio_duration_ms: Some(10_800),
+        local_speech_end_ms: Some(10_200),
+        local_target_speech_end_ms: Some(9_700),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(9_662),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    assert!(
+        !super::authoritative_preview_growth_has_recent_owner_speech(
+            &base,
+            Some("本人说完了"),
+            Some("本人说完了。"),
+        )
+    );
+
+    let stale = crate::asr::volcengine::TargetSpeakerUpdate {
+        local_speech_end_ms: Some(9_700),
+        ..base.clone()
+    };
+    assert!(
+        !super::authoritative_preview_growth_has_recent_owner_speech(
+            &stale,
+            Some("本人说了第一句"),
+            Some("本人说了第一句但这是迟到修订"),
+        )
+    );
+
+    let confirmed_other = crate::asr::volcengine::TargetSpeakerUpdate {
+        local_non_target_speech_end_ms: Some(10_200),
+        ..base.clone()
+    };
+    assert!(
+        !super::authoritative_preview_growth_has_recent_owner_speech(
+            &confirmed_other,
+            Some("本人说了第一句"),
+            Some("本人说了第一句旁人正在继续"),
+        )
+    );
+
+    let provider_other = crate::asr::volcengine::TargetSpeakerUpdate {
+        stable_attributed_speech_end_ms: Some(10_300),
+        ..base
+    };
+    assert!(
+        !super::authoritative_preview_growth_has_recent_owner_speech(
+            &provider_other,
+            Some("本人说了第一句"),
+            Some("本人说了第一句房间里还有声音"),
+        )
+    );
+}
+
+#[test]
 fn explicit_wake_diagnostic_sequence_stops_at_retention_limit() {
     assert_eq!(
         super::next_wake_diagnostic_capture_count(false, super::WAKE_DIAGNOSTIC_MAX_CANDIDATES),

@@ -46,6 +46,56 @@ fn update_has_fresh_unclassified_local_speech(
         })
 }
 
+/// A provider two-pass frame can add real body words while retaining a
+/// slightly older utterance boundary. The settled-text clock is rearmed by the
+/// preview callback, but firmware owns an independent one-second safety
+/// endpoint and otherwise keeps counting from the previous `VREC:SPEECH`.
+///
+/// Refresh that firmware clock only when the authoritative preview gained
+/// lexical content and the same update still has recent owner-compatible local
+/// speech. This deliberately excludes punctuation-only revisions, provider
+/// bookkeeping after another speaker, and explicit local NonTarget evidence.
+fn authoritative_preview_growth_has_recent_owner_speech(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    previous_preview: Option<&str>,
+    current_preview: Option<&str>,
+) -> bool {
+    let previous_chars = previous_preview
+        .map(embedded_audio_partial_preview_stability_key)
+        .map_or(0, |text| text.chars().count());
+    let current_chars = current_preview
+        .map(embedded_audio_partial_preview_stability_key)
+        .map_or(0, |text| text.chars().count());
+    if current_chars <= previous_chars || update.pending_unattributed_speech {
+        return false;
+    }
+
+    let owner_established = update.target_speech_end_ms.is_some()
+        || update.local_target_speech_end_ms.is_some();
+    let provider_other_speaker_advanced = update
+        .target_speech_end_ms
+        .zip(update.stable_attributed_speech_end_ms)
+        .is_some_and(|(target_ms, attributed_ms)| attributed_ms > target_ms);
+    if !owner_established
+        || provider_other_speaker_advanced
+        || update_has_recent_strong_non_target(update)
+    {
+        return false;
+    }
+
+    let latest_audio_ms = update
+        .audio_duration_ms
+        .into_iter()
+        .chain(update.provider_audio_duration_ms)
+        .max();
+    latest_audio_ms
+        .zip(update.local_speech_end_ms)
+        .is_some_and(|(audio_ms, speech_ms)| {
+            audio_ms.saturating_sub(speech_ms) < EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+                && !local_speech_confidently_non_target(update, speech_ms)
+        })
+}
+
 impl SettledTargetEndpointClock {
     fn update_allows_endpoint(
         update: &crate::asr::volcengine::TargetSpeakerUpdate,

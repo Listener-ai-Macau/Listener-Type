@@ -1081,13 +1081,32 @@ fn set_volcengine_preview_callbacks(
     let stop_for_stream = Arc::clone(&stop_dispatched);
     let clock_for_stream = Arc::clone(&endpoint_clock);
     asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
-        update_embedded_audio_partial_preview(&inner_for_stream, session_id, text);
+        let previous_preview = current_embedded_audio_partial_preview(&inner_for_stream);
+        let preview_changed =
+            update_embedded_audio_partial_preview(&inner_for_stream, session_id, text);
+        let current_preview = current_embedded_audio_partial_preview(&inner_for_stream);
+        let refresh_firmware_speech = preview_changed
+            && clock_for_stream.lock().latest_update.as_ref().is_some_and(|update| {
+                authoritative_preview_growth_has_recent_owner_speech(
+                    update,
+                    previous_preview.as_deref(),
+                    current_preview.as_deref(),
+                )
+            });
         arm_settled_target_endpoint_for_visible_body(
             &inner_for_stream,
             session_id,
             &stop_for_stream,
             &clock_for_stream,
         );
+        if refresh_firmware_speech {
+            log::info!(
+                "[asr] authoritative preview growth refreshed firmware speech protection session_id={session_id} previous_chars={} current_chars={}",
+                previous_preview.as_deref().map_or(0, |text| text.chars().count()),
+                current_preview.as_deref().map_or(0, |text| text.chars().count()),
+            );
+            note_embedded_asr_speech_activity(&inner_for_stream, session_id);
+        }
     })));
 
     let inner_for_visual_stream = Arc::clone(inner);
@@ -1099,17 +1118,35 @@ fn set_volcengine_preview_callbacks(
     let stop_for_partial = Arc::clone(&stop_dispatched);
     let clock_for_partial = Arc::clone(&endpoint_clock);
     asr.set_final_intermediate_transcript_callback(Some(Arc::new(move |update| {
-        update_embedded_audio_partial_preview_from_final_supplement(
+        let previous_preview = current_embedded_audio_partial_preview(&inner_for_partial);
+        let preview_changed = update_embedded_audio_partial_preview_from_final_supplement(
             &inner_for_partial,
             session_id,
             update,
         );
+        let current_preview = current_embedded_audio_partial_preview(&inner_for_partial);
+        let refresh_firmware_speech = preview_changed
+            && clock_for_partial.lock().latest_update.as_ref().is_some_and(|update| {
+                authoritative_preview_growth_has_recent_owner_speech(
+                    update,
+                    previous_preview.as_deref(),
+                    current_preview.as_deref(),
+                )
+            });
         arm_settled_target_endpoint_for_visible_body(
             &inner_for_partial,
             session_id,
             &stop_for_partial,
             &clock_for_partial,
         );
+        if refresh_firmware_speech {
+            log::info!(
+                "[asr] authoritative final supplement growth refreshed firmware speech protection session_id={session_id} previous_chars={} current_chars={}",
+                previous_preview.as_deref().map_or(0, |text| text.chars().count()),
+                current_preview.as_deref().map_or(0, |text| text.chars().count()),
+            );
+            note_embedded_asr_speech_activity(&inner_for_partial, session_id);
+        }
     })));
 
     let inner_for_speaker = Arc::clone(inner);

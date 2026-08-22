@@ -97,6 +97,21 @@ gate("target_speaker_end_1000ms", () => {
     "target speaker end timeout 1000 ms",
   );
   mustInclude(dictation, "target_speaker_inactive_1000ms", "auto-stop reason string");
+  mustInclude(
+    dictation,
+    "authoritative_preview_growth_has_recent_owner_speech",
+    "real owner text growth renews the independent firmware endpoint clock",
+  );
+  mustInclude(
+    dictationTests,
+    "installed_session_363_preview_growth_renews_firmware_before_one_second",
+    "installed session 363 cannot stop 640 ms after continuing owner speech",
+  );
+  mustInclude(
+    dictationTests,
+    "preview_growth_firmware_refresh_rejects_punctuation_stale_and_other_speaker",
+    "punctuation, stale speech, and other speakers cannot prolong the endpoint",
+  );
 });
 
 gate("wake_only_body_initial_wait_3000ms", () => {
