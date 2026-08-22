@@ -2166,8 +2166,39 @@ pub struct VolcengineStreamingASR {
 fn target_speaker_final_required(
     physical_interference_detected: bool,
     sustained_non_target_seen: bool,
+    degraded_owner_tail_seen: bool,
 ) -> bool {
-    physical_interference_detected || sustained_non_target_seen
+    physical_interference_detected || sustained_non_target_seen || degraded_owner_tail_seen
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+fn degraded_owner_tail_suggests_interference(evidence: &[LocalSpeakerEvidence]) -> bool {
+    const TAIL_WINDOWS: usize = 4;
+    const MIN_BASELINE_SCORE: f32 = 0.60;
+    const REPEATED_DROP: f32 = 0.12;
+    const SEVERE_DROP: f32 = 0.18;
+    const MIN_DEGRADED_WINDOWS: usize = 3;
+
+    if evidence.len() < TAIL_WINDOWS + 3 {
+        return false;
+    }
+    let tail_start = evidence.len() - TAIL_WINDOWS;
+    let baseline_peak = evidence[..tail_start]
+        .iter()
+        .map(|sample| sample.classification.score())
+        .fold(0.0f32, f32::max);
+    if baseline_peak < MIN_BASELINE_SCORE {
+        return false;
+    }
+    let tail = &evidence[tail_start..];
+    let degraded = tail
+        .iter()
+        .filter(|sample| sample.classification.score() + REPEATED_DROP <= baseline_peak)
+        .count();
+    let severe = tail
+        .iter()
+        .any(|sample| sample.classification.score() + SEVERE_DROP <= baseline_peak);
+    degraded >= MIN_DEGRADED_WINDOWS && severe
 }
 
 #[derive(Clone)]
@@ -2268,13 +2299,19 @@ impl VolcengineStreamingASR {
         let Some(stream) = stream else {
             return Ok(None);
         };
-        let sustained_non_target_seen = {
+        let (sustained_non_target_seen, degraded_owner_tail_seen) = {
             let state = self.state.lock();
-            state.local_sustained_non_target_speech_end_ms.is_some()
+            (
+                state.local_sustained_non_target_speech_end_ms.is_some(),
+                degraded_owner_tail_suggests_interference(&state.local_speaker_evidence),
+            )
         };
         let physical_interference_detected = stream.interference_detected();
-        if !target_speaker_final_required(physical_interference_detected, sustained_non_target_seen)
-        {
+        if !target_speaker_final_required(
+            physical_interference_detected,
+            sustained_non_target_seen,
+            degraded_owner_tail_seen,
+        ) {
             stream.cancel();
             log::info!(
                 "[target-speaker] no physical or explicit non-owner evidence; preserving low-latency primary final"
@@ -2282,9 +2319,10 @@ impl VolcengineStreamingASR {
             return Ok(None);
         }
         log::info!(
-            "[target-speaker] awaiting owner-only final physical_overlap={} explicit_non_target={}",
+            "[target-speaker] awaiting owner-only final physical_overlap={} sustained_non_target={} degraded_owner_tail={}",
             physical_interference_detected,
-            sustained_non_target_seen
+            sustained_non_target_seen,
+            degraded_owner_tail_seen
         );
         match tokio::time::timeout(Duration::from_secs(12), stream.finish()).await {
             Ok(result) => result,
@@ -4391,9 +4429,43 @@ mod tests {
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     #[test]
     fn target_speaker_final_wait_is_reserved_for_real_interference() {
-        assert!(!target_speaker_final_required(false, false));
-        assert!(target_speaker_final_required(true, false));
-        assert!(target_speaker_final_required(false, true));
+        assert!(!target_speaker_final_required(false, false, false));
+        assert!(target_speaker_final_required(true, false, false));
+        assert!(target_speaker_final_required(false, true, false));
+        assert!(target_speaker_final_required(false, false, true));
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn sustained_tail_score_collapse_triggers_late_overlap_filter_only() {
+        fn timeline(scores: &[f32]) -> Vec<LocalSpeakerEvidence> {
+            scores
+                .iter()
+                .enumerate()
+                .map(|(index, score)| LocalSpeakerEvidence {
+                    audio_end_ms: 1_000 + index as u64 * 400,
+                    classification: if *score >= 0.55 {
+                        crate::speaker_verification::SessionSpeakerClassification::Target {
+                            score: *score,
+                        }
+                    } else {
+                        crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                            score: *score,
+                        }
+                    },
+                    stable_target: *score >= 0.55,
+                })
+                .collect()
+        }
+
+        let clean = timeline(&[
+            0.559, 0.524, 0.648, 0.737, 0.696, 0.706, 0.718, 0.786, 0.819, 0.890, 0.909,
+        ]);
+        let late_overlap = timeline(&[
+            0.559, 0.524, 0.648, 0.737, 0.696, 0.706, 0.709, 0.626, 0.491, 0.557, 0.556,
+        ]);
+        assert!(!degraded_owner_tail_suggests_interference(&clean));
+        assert!(degraded_owner_tail_suggests_interference(&late_overlap));
     }
 
     #[test]
@@ -9346,5 +9418,6 @@ mod tests {
             "target_speaker_filter_probe_report={}",
             summary_path.display()
         );
+        assert!(passed, "target-speaker filter probe report is FAIL");
     }
 }
