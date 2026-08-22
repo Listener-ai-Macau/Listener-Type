@@ -5252,6 +5252,72 @@ fn phonetic_near_match_requires_independent_kws_and_never_wakes_alone() {
 
 #[cfg(target_os = "windows")]
 #[test]
+fn terminal_owner_local_near_recovery_matches_installed_session_501_without_broadening_wake() {
+    let installed_session_501 = super::LocalWakeConfirmation {
+        matched: false,
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
+        transcript_chars: 15,
+        phonetic_prefix_units: 3,
+        phonetic_best_distance: 1,
+        phonetic_best_window_start: 0,
+        inference_ms: 872,
+        snapshot_pcm_ms: 5_000,
+        recovered_keyword_end_seconds: None,
+    };
+    assert!(super::enrolled_terminal_local_near_can_accept(
+        true,
+        &installed_session_501,
+        4,
+        0,
+    ));
+    assert!(!super::enrolled_terminal_local_near_can_accept(
+        false,
+        &installed_session_501,
+        4,
+        0,
+    ));
+    assert!(!super::enrolled_terminal_local_near_can_accept(
+        true,
+        &installed_session_501,
+        4,
+        1_020 * 32,
+    ));
+
+    let only_said_incomplete_phrase = super::LocalWakeConfirmation {
+        transcript_chars: 3,
+        ..installed_session_501
+    };
+    assert!(!super::enrolled_terminal_local_near_can_accept(
+        true,
+        &only_said_incomplete_phrase,
+        4,
+        0,
+    ));
+    let two_units_wrong = super::LocalWakeConfirmation {
+        phonetic_prefix_units: 2,
+        phonetic_best_distance: 2,
+        ..installed_session_501
+    };
+    assert!(!super::enrolled_terminal_local_near_can_accept(
+        true,
+        &two_units_wrong,
+        4,
+        0,
+    ));
+    let phrase_like_text_later = super::LocalWakeConfirmation {
+        phonetic_best_window_start: 1,
+        ..installed_session_501
+    };
+    assert!(!super::enrolled_terminal_local_near_can_accept(
+        true,
+        &phrase_like_text_later,
+        4,
+        0,
+    ));
+}
+
+#[cfg(target_os = "windows")]
+#[test]
 fn repeated_start_aligned_half_phrase_requires_enrolled_owner_for_overlap_recovery() {
     let overlap = super::LocalWakeConfirmation {
         matched: false,

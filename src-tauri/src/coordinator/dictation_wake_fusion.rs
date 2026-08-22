@@ -38,6 +38,29 @@ fn enrolled_terminal_kws_can_accept_phonetic_near(
 }
 
 #[cfg(target_os = "windows")]
+fn enrolled_terminal_local_near_can_accept(
+    enrolled_owner_matched: bool,
+    confirmation: &LocalWakeConfirmation,
+    phrase_chars: usize,
+    task_origin_bytes: usize,
+) -> bool {
+    // Installed incident 501: the full terminal transcript began with 3/4
+    // wake-phrase phonetic units at edit distance one and the enrolled owner
+    // independently matched, but both KWS paths missed. Recover only this
+    // terminal, start-aligned owner case. Requiring body text after the phrase
+    // prevents an incomplete "开始录" from becoming a wake by itself.
+    let minimum_prefix_units = phrase_chars.saturating_sub(1).max(1);
+    enrolled_owner_matched
+        && !confirmation.matched
+        && confirmation.phrase_relation == crate::wake_phrase::LocalPhraseRelation::Absent
+        && task_origin_bytes == 0
+        && confirmation.phonetic_best_window_start == 0
+        && confirmation.phonetic_prefix_units >= minimum_prefix_units
+        && confirmation.phonetic_best_distance <= PHONETIC_NEAR_MAX_DISTANCE
+        && confirmation.transcript_chars > phrase_chars
+}
+
+#[cfg(target_os = "windows")]
 fn enrolled_terminal_kws_phonetic_fusion_signal(
     enrolled_owner_matched: bool,
     confirmation: &LocalWakeConfirmation,

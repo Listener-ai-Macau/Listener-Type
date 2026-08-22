@@ -961,6 +961,25 @@ impl EmbeddedStreamingDictation {
                     let terminal_local_match = terminal_completed_local_confirmation
                         .take()
                         .and_then(|(result, task_origin_bytes, task_has_keyword_model_hit)| {
+                            if enrolled_terminal_local_near_can_accept(
+                                enrolled_owner_matched,
+                                &result,
+                                phrase.chars().count(),
+                                task_origin_bytes,
+                            ) {
+                                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                                log::info!(
+                                    "[wake-phrase] terminal enrolled owner recovered start-aligned local near-match embedded_session_id={} prefix_units={} distance={} transcript_chars={}",
+                                    embedded_session_id,
+                                    result.phonetic_prefix_units,
+                                    result.phonetic_best_distance,
+                                    result.transcript_chars
+                                );
+                                return Some(crate::wake_phrase::Match {
+                                    end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
+                                    matched_keyword: None,
+                                });
+                            }
                             match terminal_inflight_local_decision(
                                 &result,
                                 task_has_keyword_model_hit,
@@ -1191,6 +1210,24 @@ impl EmbeddedStreamingDictation {
                                                         );
                                                     Some(crate::wake_phrase::Match {
                                                         end_seconds,
+                                                        matched_keyword: None,
+                                                    })
+                                                } else if enrolled_terminal_local_near_can_accept(
+                                                    enrolled_owner_matched,
+                                                    &result,
+                                                    phrase.chars().count(),
+                                                    0,
+                                                ) {
+                                                    phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                                                    log::info!(
+                                                        "[wake-phrase] terminal enrolled owner recovered start-aligned local near-match embedded_session_id={} prefix_units={} distance={} transcript_chars={}",
+                                                        embedded_session_id,
+                                                        result.phonetic_prefix_units,
+                                                        result.phonetic_best_distance,
+                                                        result.transcript_chars
+                                                    );
+                                                    Some(crate::wake_phrase::Match {
+                                                        end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
                                                         matched_keyword: None,
                                                     })
                                                 } else {
