@@ -268,13 +268,13 @@ $timer.Add_Tick({
     if ($script:ordinal -ge $Attempts) {
         Write-MarkerArtifact -Completed:$true
         $roundLabel.Text = "已完成 $Attempts/$Attempts 轮"
-        $statusLabel.Text = "验收标注已保存。请回到 Codex 回复：5次测完"
+        $statusLabel.Text = "验收标注已保存。请回到 Codex 回复：$Attempts 次测完"
         $statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(39, 103, 73)
         $startButton.Text = '验收标注完成'
         $startButton.Enabled = $false
         $closeButton.Text = '关闭'
         [System.Windows.Forms.MessageBox]::Show(
-            "5 次标注已完成。`n请回到 Codex 回复：5次测完",
+            "$Attempts 次标注已完成。`n请回到 Codex 回复：$Attempts 次测完",
             'Listener 唤醒验收',
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Information
