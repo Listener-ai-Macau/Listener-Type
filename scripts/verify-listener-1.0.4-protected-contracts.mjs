@@ -49,6 +49,7 @@ const startupScript = read("scripts/check-type-startup-reconnect-speed.ps1");
 const otaSpeedTest = read("scripts/check-ota-transfer-speed-log.test.mjs");
 const firmwareOtaTs = read("src/lib/firmwareOta.test.ts");
 const supportRs = read("src-tauri/src/coordinator/support.rs");
+const endpointPolicy = read("src-tauri/src/coordinator/dictation_endpoint_policy.rs");
 const wakePolish = read("src-tauri/src/coordinator/dictation_wake_polish.rs");
 const deviceAi = read("src-tauri/src/coordinator/dictation_device_ai.rs");
 const coordinatorRs = read("src-tauri/src/coordinator.rs");
@@ -324,7 +325,7 @@ gate("standard_endpoint_still_1000ms_default", () => {
   );
   mustInclude(dictation, "target_speaker_inactive_1000ms", "standard stop reason");
   mustInclude(
-    dictation,
+    dictation + endpointPolicy,
     "fn target_speaker_end_timeout_ms_for_preview",
     "body endpoint helper",
   );
@@ -343,8 +344,8 @@ gate("standard_endpoint_still_1000ms_default", () => {
   }
   mustInclude(
     dictationTests,
-    "all_body_preview_shapes_keep_one_second_endpoint",
-    "punctuation and semantic-continuation one-second unit test",
+    "body_preview_endpoint_extends_only_explicit_dangling_continuations",
+    "complete previews keep one second while explicit dangling continuations stay bounded",
   );
   mustInclude(
     dictationTests,
@@ -655,6 +656,21 @@ gate("multi_speaker_owner_isolation", () => {
     volcengineAsr,
     "installed_session_768_recovers_raw_body_without_prior_stable_attribution",
     "wake-only provider final must recover the recognized owner body",
+  );
+  mustInclude(
+    volcengineAsr,
+    "local_consecutive_transcript_hard_non_target",
+    "transcript isolation must not reuse endpoint identity hysteresis",
+  );
+  mustInclude(
+    volcengineAsr,
+    "moderate_same_owner_negative_pair_remains_advisory",
+    "same-owner low-score regression remains protected",
+  );
+  mustInclude(
+    volcengineAsr,
+    "short_hard_mismatch_pair_isolates_transcript_without_changing_endpoint_clock",
+    "short extreme mismatch isolates only transcript growth",
   );
 });
 

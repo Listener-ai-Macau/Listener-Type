@@ -365,6 +365,11 @@ struct SyncState {
     local_target_confirmed: bool,
     local_consecutive_target: u8,
     local_consecutive_non_target: u8,
+    /// Independent transcript-only hysteresis. It must never reuse the
+    /// endpoint identity counters: one extreme short window is still a
+    /// transient endpoint observation, while two enrolled-owner mismatches may
+    /// safely freeze only future transcript growth.
+    local_consecutive_transcript_hard_non_target: u8,
     /// Session voiceprint negatives are advisory for transcript ownership. Two
     /// very-low-score windows may still mark current speech as another person
     /// for endpointing, but must never freeze/delete provider-recognized text.
@@ -375,10 +380,10 @@ struct SyncState {
     wake_speaker_phrase: Option<String>,
     speaker_info_present: bool,
     pending_unattributed_text: String,
-    /// Hard multi-speaker isolation: once local identity leaves the owner
-    /// (stable_target → false), freeze the owner ledger so later polluted
-    /// cloud finals / optimistic growth cannot re-expand room speech into the
-    /// insert path. Cleared only after Target is stable again.
+    /// Hard multi-speaker isolation: provider/local dual-gate evidence or two
+    /// enrolled-owner extreme mismatches freeze the owner ledger so later
+    /// polluted cloud finals / optimistic growth cannot re-expand room speech
+    /// into the insert path. Cleared only after fresh Target evidence.
     owner_isolation_frozen: bool,
     owner_isolation_ceiling_text: String,
     owner_isolation_ceiling_segments: Vec<TranscriptSegment>,
@@ -422,6 +427,10 @@ const LOCAL_SPEAKER_SWITCH_CONFIRMATIONS: u8 = 2;
 const LOCAL_SPEAKER_EVIDENCE_LIMIT: usize = 64;
 const LOCAL_SPEAKER_WINDOW_MS: u64 = 1_200;
 const LOCAL_ENDPOINT_STRONG_NON_TARGET_MAX_SCORE: f32 = 0.20;
+// Transcript isolation is deliberately stricter than endpointing. Only an
+// extreme mismatch may freeze future transcript growth; ordinary same-owner
+// cross-phrase dips (observed around 0.17) remain advisory.
+const LOCAL_TRANSCRIPT_HARD_NON_TARGET_MAX_SCORE: f32 = 0.10;
 const LOCAL_ENDPOINT_OWNER_ABSENCE_CONTINUATION_MAX_SCORE: f32 = 0.30;
 // Three 400 ms overlapping low-score observations are enough to distinguish
 // sustained other speech from the two-window startup dip seen in session 2024.
@@ -2089,6 +2098,7 @@ struct RecoverySpeakerSnapshot {
     local_target_confirmed: bool,
     local_consecutive_target: u8,
     local_consecutive_non_target: u8,
+    local_consecutive_transcript_hard_non_target: u8,
     local_consecutive_strong_non_target: u8,
     local_owner_absence_run_started_ms: Option<u64>,
     local_owner_absence_run_confirmed: bool,
@@ -2147,6 +2157,8 @@ impl VolcengineStreamingASR {
             local_target_confirmed: state.local_target_confirmed,
             local_consecutive_target: state.local_consecutive_target,
             local_consecutive_non_target: state.local_consecutive_non_target,
+            local_consecutive_transcript_hard_non_target: state
+                .local_consecutive_transcript_hard_non_target,
             local_consecutive_strong_non_target: state.local_consecutive_strong_non_target,
             local_owner_absence_run_started_ms: state.local_owner_absence_run_started_ms,
             local_owner_absence_run_confirmed: state.local_owner_absence_run_confirmed,
@@ -2172,6 +2184,8 @@ impl VolcengineStreamingASR {
         state.local_target_confirmed = snapshot.local_target_confirmed;
         state.local_consecutive_target = snapshot.local_consecutive_target;
         state.local_consecutive_non_target = snapshot.local_consecutive_non_target;
+        state.local_consecutive_transcript_hard_non_target =
+            snapshot.local_consecutive_transcript_hard_non_target;
         state.local_consecutive_strong_non_target = snapshot.local_consecutive_strong_non_target;
         state.local_owner_absence_run_started_ms = snapshot.local_owner_absence_run_started_ms;
         state.local_owner_absence_run_confirmed = snapshot.local_owner_absence_run_confirmed;
@@ -2455,6 +2469,24 @@ impl VolcengineStreamingASR {
         audio_duration_ms: u64,
         classification: crate::speaker_verification::SessionSpeakerClassification,
     ) {
+        let transcript_hard_non_target = matches!(
+            classification,
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score }
+                if score <= LOCAL_TRANSCRIPT_HARD_NON_TARGET_MAX_SCORE
+        );
+        self.note_local_speaker_observation(
+            audio_duration_ms,
+            classification,
+            transcript_hard_non_target,
+        );
+    }
+
+    pub fn note_local_speaker_observation(
+        &self,
+        audio_duration_ms: u64,
+        classification: crate::speaker_verification::SessionSpeakerClassification,
+        transcript_hard_non_target: bool,
+    ) {
         let (update, stable_target, effective_classification, endpoint_strong_non_target) = {
             let mut state = self.state.lock();
             let endpoint_strong_non_target = matches!(
@@ -2513,14 +2545,26 @@ impl VolcengineStreamingASR {
                         .max(audio_duration_ms),
                 );
             }
-            // Both wake-derived and enrolled phrase templates have produced
-            // severe cross-phrase false negatives on the same owner's natural
-            // dictation. Installed session 2024 received 41 provider chars, but
-            // two enrolled-template scores (0.174/0.172) froze the owner ledger
-            // and turned the final into empty text. Keep all negative session
-            // voiceprint evidence advisory for transcript ownership. It remains
-            // available above for endpointing; destructive speaker exclusion is
-            // reserved for explicit provider diarization evidence.
+            // Moderate cross-phrase negatives stay advisory: installed session
+            // 2024 received 41 provider chars, but 0.174/0.172 owner scores used
+            // to freeze the ledger and produce an empty final. Keep the new
+            // extreme-mismatch channel independent from identity/endpoint
+            // hysteresis and enable it only for a persisted enrolled owner.
+            let transcript_hard_non_target_applies = transcript_hard_non_target
+                && state.local_wake_owner_verified
+                && !state.local_speaker_profile_adaptive;
+            if transcript_hard_non_target_applies {
+                state.local_consecutive_transcript_hard_non_target = state
+                    .local_consecutive_transcript_hard_non_target
+                    .saturating_add(1);
+                if state.local_consecutive_transcript_hard_non_target
+                    >= LOCAL_SPEAKER_SWITCH_CONFIRMATIONS
+                {
+                    freeze_owner_isolation_ledger(&mut state);
+                }
+            } else {
+                state.local_consecutive_transcript_hard_non_target = 0;
+            }
             let effective_classification = match classification {
                 crate::speaker_verification::SessionSpeakerClassification::NonTarget { score } => {
                     crate::speaker_verification::SessionSpeakerClassification::Uncertain { score }
@@ -2634,7 +2678,7 @@ impl VolcengineStreamingASR {
             )
         };
         log::info!(
-            "[asr] local session-speaker evidence classification={classification:?} effective={effective_classification:?} stable_target={stable_target} endpoint_strong_non_target={endpoint_strong_non_target} audio_end_ms={audio_duration_ms}"
+            "[asr] local session-speaker evidence classification={classification:?} effective={effective_classification:?} stable_target={stable_target} endpoint_strong_non_target={endpoint_strong_non_target} transcript_hard_non_target={transcript_hard_non_target} audio_end_ms={audio_duration_ms}"
         );
         if update.speaker_id.is_some() || update.local_speaker_tracking_enabled {
             self.emit_target_speaker_update(update);
@@ -2673,6 +2717,7 @@ impl VolcengineStreamingASR {
         state.local_target_confirmed = false;
         state.local_consecutive_target = 0;
         state.local_consecutive_non_target = 0;
+        state.local_consecutive_transcript_hard_non_target = 0;
         state.local_consecutive_strong_non_target = 0;
         state.local_owner_absence_run_started_ms = None;
         state.local_owner_absence_run_confirmed = false;
@@ -2852,6 +2897,7 @@ impl VolcengineStreamingASR {
             st.local_target_confirmed = false;
             st.local_consecutive_target = 0;
             st.local_consecutive_non_target = 0;
+            st.local_consecutive_transcript_hard_non_target = 0;
             st.local_consecutive_strong_non_target = 0;
             st.local_owner_absence_run_started_ms = None;
             st.local_owner_absence_run_confirmed = false;
@@ -7584,6 +7630,100 @@ mod tests {
         asr.note_local_speaker_classification(3_600, Classification::Target { score: 0.58 });
         assert_eq!(asr.state.lock().local_target_speech_end_ms, Some(3_600));
         assert!(asr.state.lock().local_speaker_stable_target);
+    }
+
+    #[test]
+    fn moderate_same_owner_negative_pair_remains_advisory() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        {
+            let mut state = asr.state.lock();
+            state.local_speaker_stable_target = true;
+            state.local_target_confirmed = true;
+            state.best_transcript_text = "本人完整正文".into();
+        }
+        use crate::speaker_verification::SessionSpeakerClassification as Classification;
+        asr.note_local_speaker_classification(4_000, Classification::NonTarget { score: 0.174 });
+        asr.note_local_speaker_classification(4_400, Classification::NonTarget { score: 0.172 });
+
+        let state = asr.state.lock();
+        assert!(state.local_speaker_stable_target);
+        assert!(!state.owner_isolation_frozen);
+        assert_eq!(state.best_transcript_text, "本人完整正文");
+    }
+
+    #[test]
+    fn extreme_non_target_pair_freezes_only_future_mixed_growth() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        {
+            let mut state = asr.state.lock();
+            state.local_speaker_stable_target = true;
+            state.local_target_confirmed = true;
+            state.best_transcript_text = "本人说完了".into();
+            state.optimistic_preview_text = "本人说完了".into();
+        }
+        use crate::speaker_verification::SessionSpeakerClassification as Classification;
+        asr.note_local_speaker_classification(5_950, Classification::NonTarget { score: -0.029 });
+        asr.note_local_speaker_classification(6_350, Classification::NonTarget { score: 0.077 });
+
+        let state = asr.state.lock();
+        assert!(state.local_speaker_stable_target);
+        assert!(state.owner_isolation_frozen);
+        assert_eq!(state.owner_isolation_ceiling_text, "本人说完了");
+        assert_eq!(state.best_transcript_text, "本人说完了");
+    }
+
+    #[test]
+    fn short_hard_mismatch_pair_isolates_transcript_without_changing_endpoint_clock() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        {
+            let mut state = asr.state.lock();
+            state.local_speaker_stable_target = true;
+            state.local_target_confirmed = true;
+            state.best_transcript_text = "只保留本人正文".into();
+            state.optimistic_preview_text = "只保留本人正文".into();
+        }
+        use crate::speaker_verification::SessionSpeakerClassification as Classification;
+        asr.note_local_speaker_observation(
+            5_950,
+            Classification::Uncertain { score: -0.029 },
+            true,
+        );
+        assert!(!asr.state.lock().owner_isolation_frozen);
+        asr.note_local_speaker_observation(6_350, Classification::Uncertain { score: 0.077 }, true);
+
+        let state = asr.state.lock();
+        assert!(state.local_speaker_stable_target);
+        assert!(state.owner_isolation_frozen);
+        assert_eq!(state.owner_isolation_ceiling_text, "只保留本人正文");
+        assert_eq!(state.local_consecutive_non_target, 0);
+        assert_eq!(state.local_consecutive_strong_non_target, 0);
+        assert!(!state.local_owner_absence_run_confirmed);
+        assert_eq!(state.local_non_target_speech_end_ms, None);
+        assert_eq!(state.local_sustained_non_target_speech_end_ms, None);
     }
 
     #[test]

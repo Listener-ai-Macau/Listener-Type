@@ -58,6 +58,7 @@ impl LocalSessionSpeakerTracker {
     ) -> Option<(
         u64,
         crate::speaker_verification::SessionSpeakerClassification,
+        bool,
     )> {
         self.rolling_pcm.extend_from_slice(pcm);
         if self.rolling_pcm.len() > LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES {
@@ -94,7 +95,11 @@ impl LocalSessionSpeakerTracker {
             match rx.try_recv() {
                 Ok(Ok(result)) => {
                     self.adaptation_gate.note(result.0, result.1.clone());
-                    completed = Some((result.0, result.1.classification));
+                    completed = Some((
+                        result.0,
+                        result.1.classification,
+                        result.1.transcript_hard_non_target,
+                    ));
                     self.classification_rx = None;
                 }
                 Ok(Err(err)) => {
@@ -274,10 +279,14 @@ impl EmbeddedAudioDictationSession {
         ) {
             asr.note_local_speaker_profile_adaptive(adaptive);
         }
-        if let (Some(asr), Some((audio_end_ms, classification))) =
+        if let (Some(asr), Some((audio_end_ms, classification, transcript_hard_non_target))) =
             (self.volcengine_asr.as_ref(), local_speaker_evidence)
         {
-            asr.note_local_speaker_classification(audio_end_ms, classification);
+            asr.note_local_speaker_observation(
+                audio_end_ms,
+                classification,
+                transcript_hard_non_target,
+            );
         }
 
         // 改A: track sustained trailing silence AFTER the body has started so the
