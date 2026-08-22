@@ -21,7 +21,11 @@ const nonOwner = resolve(fixtures, "non_owner-clean-long-01.wav");
 const cases = Array.from({ length: 20 }, (_, index) => ({
   id: `overlap-${String(index + 1).padStart(2, "0")}`,
   nonOwnerDelayMs: [120, 220, 350, 500, 700, 900, 1100, 1350, 1550, 1800][index % 10],
-  nonOwnerGainDb: [-15, -12, -10, -8, -6][Math.floor(index / 4) % 5],
+  // Product acceptance must include an ordinary nearby conversation, not
+  // only a background voice that is 6-15 dB quieter than the owner. The final
+  // four cases deliberately make the interferer 3 dB louder so a PASS cannot
+  // be manufactured by source-level imbalance.
+  nonOwnerGainDb: [-12, -6, -3, 0, 3][Math.floor(index / 4) % 5],
   ownerGainDb: [0, -1, 1, 0][index % 4],
 }));
 
