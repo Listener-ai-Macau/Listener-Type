@@ -523,23 +523,11 @@ fn refresh_local_target_from_owner_preview_activity(state: &mut SyncState) -> bo
 }
 
 fn refresh_local_target_from_owner_safe_provider_split(state: &mut SyncState) -> bool {
-    // The sequential-split verifier has already checked cloud ordering plus
-    // every overlapping local identity window. It is therefore stronger than
-    // an ordinary optimistic preview and may advance the owner endpoint even
-    // when the cross-phrase voiceprint never reaches the standalone Target
-    // threshold (session 1195).
-    if !state.local_speaker_stable_target || state.owner_isolation_frozen {
-        return false;
-    }
-    let Some(audio_ms) = latest_audio_duration_ms(state) else {
-        return false;
-    };
-    let previous = state.local_target_speech_end_ms.unwrap_or_default();
-    if audio_ms <= previous {
-        return false;
-    }
-    state.local_target_speech_end_ms = Some(audio_ms);
-    true
+    // A sequential cloud split is sufficient to recover/display text, but it
+    // is not independent proof that the latest sound still belongs to the
+    // owner. Reuse the strict Target-only refresh gate so an Uncertain room
+    // voice cannot keep auto-end alive through provider preview growth.
+    refresh_local_target_from_owner_preview_activity(state)
 }
 
 fn local_speaker_allows_optimistic_preview(state: &SyncState) -> bool {
@@ -6339,6 +6327,41 @@ mod tests {
     }
 
     #[test]
+    fn uncertain_sequential_provider_split_cannot_refresh_owner_endpoint() {
+        // Installed session 7942d10e exposed a circular hold: cloud speaker
+        // A/B text was admitted using debounced Uncertain windows, then that
+        // preview refreshed the owner clock as if identity were confirmed.
+        // Text recovery may remain available, but only a current Target sample
+        // can extend the owner endpoint.
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            local_speaker_classification: Some(
+                crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                    score: 0.37,
+                },
+            ),
+            local_target_speech_end_ms: Some(4_922),
+            local_audio_duration_ms: Some(8_940),
+            last_server_audio_duration_ms: Some(8_552),
+            ..Default::default()
+        };
+
+        assert!(!refresh_local_target_from_owner_safe_provider_split(
+            &mut state
+        ));
+        assert_eq!(state.local_target_speech_end_ms, Some(4_922));
+
+        state.local_speaker_classification =
+            Some(crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.62 });
+        assert!(refresh_local_target_from_owner_safe_provider_split(
+            &mut state
+        ));
+        assert_eq!(state.local_target_speech_end_ms, Some(8_940));
+    }
+
+    #[test]
     fn other_person_speech_does_not_lengthen_owner_auto_end() {
         let asr = VolcengineStreamingASR::new(
             VolcengineCredentials {
@@ -7203,7 +7226,7 @@ mod tests {
     }
 
     #[test]
-    fn installed_session_239_previews_owner_safe_sequential_split_before_final() {
+    fn installed_session_239_previews_split_without_uncertain_endpoint_refresh() {
         // The provider already had the body while the capsule remained blank:
         // wake phrase was stable speaker 0, continuous owner body was stable
         // speaker 1, and cross-phrase enrolled scores were Uncertain while the
@@ -7297,14 +7320,66 @@ mod tests {
         assert!(asr.handle_frame(&body_frame));
         assert_eq!(previews.lock().last().map(String::as_str), Some(expected));
         let updates = endpoint_updates.lock();
-        let released = updates
-            .iter()
-            .rev()
-            .find(|update| update.local_target_speech_end_ms.is_some())
-            .expect("owner-safe split preview should advance the owner endpoint");
         assert!(
-            !released.pending_unattributed_speech,
+            updates
+                .iter()
+                .any(|update| !update.pending_unattributed_speech),
             "corroborated owner text must not keep the endpoint pending"
+        );
+        assert!(
+            updates
+                .iter()
+                .all(|update| update.local_target_speech_end_ms.is_none()),
+            "Uncertain split preview may render but must not extend the owner endpoint"
+        );
+        drop(updates);
+
+        // A later positive owner window restores endpoint authority without
+        // taking away the low-latency split preview above.
+        asr.note_local_speaker_classification(
+            5_200,
+            crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.62 },
+        );
+        endpoint_updates.lock().clear();
+        let continued = "开始录音。窗口不要报错，预览文字要及时稳定出现，然后继续。";
+        let continued_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 5_600 },
+            "result": {
+                "text": continued,
+                "utterances": [
+                    {
+                        "additions": { "speaker_id": "0", "source": "two_pass" },
+                        "definite": true,
+                        "start_time": 40,
+                        "end_time": 1_002,
+                        "text": "开始录音。"
+                    },
+                    {
+                        "additions": { "speaker_id": "1", "source": "two_pass" },
+                        "definite": true,
+                        "start_time": 1_120,
+                        "end_time": 5_200,
+                        "text": "窗口不要报错，预览文字要及时稳定出现，然后继续。"
+                    }
+                ]
+            }
+        }))
+        .expect("session 239 continued preview serializes");
+        let continued_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::None,
+            Serialization::Json,
+            &continued_payload,
+            None,
+        );
+        assert!(asr.handle_frame(&continued_frame));
+        assert_eq!(previews.lock().last().map(String::as_str), Some(continued));
+        assert!(
+            endpoint_updates
+                .lock()
+                .iter()
+                .any(|update| update.local_target_speech_end_ms.is_some()),
+            "a current Target sample should restore owner endpoint refresh"
         );
     }
 

@@ -46,6 +46,29 @@ fn update_has_fresh_unclassified_local_speech(
         })
 }
 
+fn update_has_fresh_unclassified_local_speech_after_owner(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    endpoint_timeout_ms: u64,
+) -> bool {
+    let confirmed_owner_end_ms = update
+        .target_speech_end_ms
+        .into_iter()
+        .chain(update.local_target_speech_end_ms)
+        .max()
+        .unwrap_or_default();
+    confirmed_owner_end_ms > 0
+        && update
+            .audio_duration_ms
+            .zip(update.local_speech_end_ms)
+            .is_some_and(|(audio_ms, speech_ms)| {
+                speech_ms
+                    > confirmed_owner_end_ms
+                        .saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
+                    && audio_ms.saturating_sub(speech_ms) < endpoint_timeout_ms
+                    && !local_speech_confidently_non_target(update, speech_ms)
+            })
+}
+
 /// A provider two-pass frame can add real body words while retaining a
 /// slightly older utterance boundary. The settled-text clock is rearmed by the
 /// preview callback, but firmware owns an independent one-second safety
@@ -120,9 +143,22 @@ impl SettledTargetEndpointClock {
         let uncertain_tail_within_wall_ceiling = now.saturating_duration_since(armed_at)
             < Duration::from_millis(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS);
         let bounded_unclassified_local_speech = if update.local_speaker_tracking_enabled
-            && (update.target_speech_end_ms.is_some()
-                || update.local_target_speech_end_ms.is_some())
+            && update.local_target_speech_end_ms.is_some()
         {
+            // Once the settled wall clock is armed, the wall deadline itself
+            // is the bound. Do not additionally measure from an older target
+            // embedding edge: installed session 531 was still speaking at the
+            // live audio edge, but that redundant bound cut it at 900 ms.
+            uncertain_tail_within_wall_ceiling
+                && update_has_fresh_unclassified_local_speech_after_owner(
+                    update,
+                    EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+                )
+        } else if update.local_speaker_tracking_enabled && update.target_speech_end_ms.is_some() {
+            // Cloud attribution without a positive local owner edge is weaker:
+            // retain only speech close to that owner boundary. Otherwise fresh
+            // room energy could consume the whole uncertainty wall after every
+            // settled command. The wall bound also expires a stale snapshot.
             uncertain_tail_within_wall_ceiling
                 && has_unresolved_recent_local_speech(
                     update,
