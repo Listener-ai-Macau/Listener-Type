@@ -8,6 +8,8 @@
 pub mod bailian;
 mod frame;
 pub mod local;
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+pub(crate) mod target_speaker_extraction;
 pub mod volcengine;
 mod volcengine_platform;
 mod volcengine_transcript;

@@ -507,6 +507,25 @@ mod platform {
         Ok(model)
     }
 
+    /// Reuse the exact ONNX Runtime already verified for the local KWS stack.
+    /// Target-speaker extraction must not load a second ABI in this process.
+    pub fn onnx_runtime_dll_path() -> Result<PathBuf, String> {
+        let model = model_root()?;
+        let runtime_root = model
+            .parent()
+            .and_then(Path::parent)
+            .ok_or_else(|| "wake phrase runtime path is invalid".to_string())?;
+        let path = runtime_root.join("onnxruntime.dll");
+        if path.is_file() {
+            Ok(path)
+        } else {
+            Err(format!(
+                "wake phrase ONNX runtime missing: {}",
+                path.display()
+            ))
+        }
+    }
+
     fn phrase_tokens_with_tone(phrase: &str, with_tone: bool) -> Result<Vec<String>, String> {
         let initials = [
             "zh", "ch", "sh", "b", "p", "m", "f", "d", "t", "n", "l", "g", "k", "h", "j", "q", "x",

@@ -163,6 +163,8 @@ impl EmbeddedAudioDictationSession {
             // identity into body isolation; a positive body window is still
             // required separately for endpoint refresh.
             asr.note_verified_local_speaker_tracking_started(&wake_phrase);
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            asr.start_target_speaker_extraction(&wake_pcm, wake_end_seconds);
         }
         self.local_speaker_tracker = Some(LocalSessionSpeakerTracker::from_wake(
             wake_pcm,

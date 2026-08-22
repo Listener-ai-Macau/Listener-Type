@@ -1,0 +1,37 @@
+Listener Type target-speaker extraction model notice
+
+File: wesep-bsrnn-voicefilter-3s-int8.onnx
+SHA-256: 10D709E513DD3C18351ABDD1342AC53C032738E32692A74552946DB5896DD6A9
+
+This file is an INT8 ONNX conversion of the WeSep BSRNN ECAPA VoxCeleb1
+target-speaker extraction checkpoint published by the WeNet community:
+
+  https://github.com/wenet-e2e/wesep
+  https://www.modelscope.cn/datasets/wenet/wesep_pretrained_models
+
+The conversion separates the original PyTorch STFT/ISTFT operations from the
+neural-network core and quantizes eligible weights. Listener Type performs the
+equivalent STFT/ISTFT locally. No training data is included.
+
+The embedded ECAPA speaker model and target-speaker model were trained on
+VoxCeleb. WeSpeaker documents that VoxCeleb pretrained models follow the
+Creative Commons Attribution 4.0 International license of their corresponding
+dataset:
+
+  https://github.com/wenet-e2e/wespeaker/blob/master/docs/pretrained.md
+  https://creativecommons.org/licenses/by/4.0/legalcode.en
+
+Required attribution:
+
+  J. S. Chung, A. Nagrani and A. Zisserman,
+  "VoxCeleb2: Deep Speaker Recognition," INTERSPEECH 2018.
+
+  A. Nagrani, J. S. Chung and A. Zisserman,
+  "VoxCeleb: a large-scale speaker identification dataset," INTERSPEECH 2017.
+
+  S. Wang et al., "WeSep: A Scalable and Flexible Toolkit Towards Generalizable
+  Target Speaker Extraction," INTERSPEECH 2024.
+
+The model is supplied without warranty. This notice does not imply endorsement
+of Listener Type by the upstream authors or dataset creators.
+

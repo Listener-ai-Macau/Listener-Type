@@ -2478,7 +2478,7 @@ async fn finish_end_session_after_stop_transition(
                 }
                 Err(error) => Err((error, false)),
             };
-            match primary {
+            let primary_result = match primary {
                 Ok(result) => result,
                 Err((primary_error, _)) if primary_error.permits_full_audio_replay() => {
                     log::warn!(
@@ -2528,6 +2528,36 @@ async fn finish_end_session_after_stop_transition(
                     }
                     return Err(primary_error.to_string());
                 }
+            };
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            {
+                match asr.await_target_speaker_final().await {
+                    Ok(Some(target)) if !target.text.trim().is_empty() => {
+                        log::info!(
+                            "[target-speaker] owner-only final selected primary_chars={} target_chars={}",
+                            primary_result.text.chars().count(),
+                            target.text.chars().count()
+                        );
+                        target
+                    }
+                    Ok(Some(_)) => {
+                        log::warn!(
+                            "[target-speaker] empty owner-only final; preserving successful primary transcript"
+                        );
+                        primary_result
+                    }
+                    Ok(None) => primary_result,
+                    Err(err) => {
+                        log::warn!(
+                            "[target-speaker] owner-only final unavailable; preserving primary transcript: {err}"
+                        );
+                        primary_result
+                    }
+                }
+            }
+            #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
+            {
+                primary_result
             }
         }
         ActiveAsr::Whisper(w) => {

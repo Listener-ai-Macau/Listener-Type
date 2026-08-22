@@ -416,6 +416,20 @@ pub fn run() {
                             .unwrap_or_else(|_| Err("声纹预热线程异常退出".to_string())),
                         None => Ok(()),
                     };
+                    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+                    if enrolled {
+                        std::thread::Builder::new()
+                            .name("target-speaker-preload".to_string())
+                            .spawn(|| match crate::asr::target_speaker_extraction::warm_up() {
+                                Ok(()) => log::info!(
+                                    "[target-speaker] extraction model prepared in background"
+                                ),
+                                Err(err) => log::warn!(
+                                    "[target-speaker] extraction model unavailable; primary dictation remains active: {err}"
+                                ),
+                            })
+                            .ok();
+                    }
                     match (wake_result, speaker_result) {
                         (Ok(()), Ok(())) => log::info!(
                             "[wake-phrase] automatic wake prepared enrolled={} elapsed_ms={}",

@@ -4,7 +4,7 @@ version = "1.0.5"
 description = "Listener Type — local voice input that types where your cursor is"
 authors = ["Listener Type"]
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.88"
 
 [lib]
 name = "listener_type_lib"
@@ -38,6 +38,7 @@ env_logger = "0.11"
 simplelog = "0.12"
 parking_lot = "0.12"
 once_cell = "1"
+kaldi-native-fbank = "0.1.0"
 pinyin = "0.10"
 serialport = "4.7"
 espflash = { version = "=3.2.0", default-features = false, features = ["serialport"] }
@@ -92,6 +93,7 @@ libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 base64 = "0.22"
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "load-dynamic", "api-24"] }
 bzip2 = "0.4"
 foundry-local-sdk = { version = "1.1.0", features = ["winml"] }
 libloading = "0.8"
@@ -128,8 +130,9 @@ winreg = "0.52"
 window-vibrancy = "0.7"
 
 [features]
-default = ["custom-protocol"]
+default = ["custom-protocol", "target-speaker-extraction"]
 custom-protocol = ["tauri/custom-protocol"]
+target-speaker-extraction = []
 
 # release 编译在这个 23GB 机器上单 rustc LLVM 阶段会 OOM（STATUS_STACK_BUFFER_OVERRUN）。
 # 提高 codegen-units 把单 crate 拆成更小的 LLVM 模块，降低峰值内存，代价是极小的跨单元优化损失。

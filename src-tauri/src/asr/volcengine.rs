@@ -2157,6 +2157,17 @@ pub struct VolcengineStreamingASR {
     /// small for dictation sessions and does not affect device memory.
     retained_pcm: ParkingMutex<Vec<u8>>,
     recovery_replay_started: AtomicBool,
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    target_speaker_stream:
+        ParkingMutex<Option<Arc<super::target_speaker_extraction::TargetSpeakerStream>>>,
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+fn target_speaker_final_required(
+    physical_interference_detected: bool,
+    sustained_non_target_seen: bool,
+) -> bool {
+    physical_interference_detected || sustained_non_target_seen
 }
 
 #[derive(Clone)]
@@ -2216,6 +2227,71 @@ impl VolcengineStreamingASR {
             final_frame_result: OnceCell::new(),
             retained_pcm: ParkingMutex::new(Vec::new()),
             recovery_replay_started: AtomicBool::new(false),
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            target_speaker_stream: ParkingMutex::new(None),
+        }
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    pub fn start_target_speaker_extraction(&self, wake_pcm: &[u8], wake_end_seconds: f32) {
+        let enrollment = super::target_speaker_extraction::wake_phrase_enrollment_pcm(
+            wake_pcm,
+            wake_end_seconds,
+        );
+        if enrollment.len() < 16_000 {
+            log::warn!(
+                "[target-speaker] owner-only stream skipped: enrollment_ms={}",
+                enrollment.len() / 32
+            );
+            return;
+        }
+        let mut slot = self.target_speaker_stream.lock();
+        if slot.is_some() {
+            return;
+        }
+        *slot = Some(
+            super::target_speaker_extraction::TargetSpeakerStream::start(
+                self.credentials.clone(),
+                self.hotwords.clone(),
+                enrollment,
+            ),
+        );
+        log::info!(
+            "[target-speaker] owner-only stream armed model_sha256={}",
+            super::target_speaker_extraction::MODEL_SHA256
+        );
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    pub async fn await_target_speaker_final(&self) -> Result<Option<RawTranscript>, String> {
+        let stream = self.target_speaker_stream.lock().take();
+        let Some(stream) = stream else {
+            return Ok(None);
+        };
+        let sustained_non_target_seen = {
+            let state = self.state.lock();
+            state.local_sustained_non_target_speech_end_ms.is_some()
+        };
+        let physical_interference_detected = stream.interference_detected();
+        if !target_speaker_final_required(physical_interference_detected, sustained_non_target_seen)
+        {
+            stream.cancel();
+            log::info!(
+                "[target-speaker] no physical or explicit non-owner evidence; preserving low-latency primary final"
+            );
+            return Ok(None);
+        }
+        log::info!(
+            "[target-speaker] awaiting owner-only final physical_overlap={} explicit_non_target={}",
+            physical_interference_detected,
+            sustained_non_target_seen
+        );
+        match tokio::time::timeout(Duration::from_secs(12), stream.finish()).await {
+            Ok(result) => result,
+            Err(_) => {
+                stream.cancel();
+                Err("target-speaker owner-only stream timed out".to_string())
+            }
         }
     }
 
@@ -3303,6 +3379,10 @@ impl VolcengineStreamingASR {
     }
 
     pub fn cancel(&self) {
+        #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+        if let Some(stream) = self.target_speaker_stream.lock().take() {
+            stream.cancel();
+        }
         self.mark_audio_delivery_cancelled();
         let runtime = {
             let mut st = self.state.lock();
@@ -4142,6 +4222,12 @@ impl AudioConsumer for VolcengineStreamingASR {
         if !pcm.is_empty() && !self.state.lock().finishing {
             self.retained_pcm.lock().extend_from_slice(pcm);
         }
+        #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+        if !pcm.is_empty() {
+            if let Some(stream) = self.target_speaker_stream.lock().as_ref().cloned() {
+                stream.consume_pcm_chunk(pcm);
+            }
+        }
         // 单 worker 串行 send 模式：在 state 锁内 drain 并分配 seq（seq 单调），
         // 然后把 (seq, chunk) push 进 mpsc。worker 端按入队顺序 send，
         // 哪怕跨多个 consume 调用、多个 spawn 也不会再有 writer 锁竞争。
@@ -4301,6 +4387,14 @@ fn hotword_context(entries: &[DictionaryHotword]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn target_speaker_final_wait_is_reserved_for_real_interference() {
+        assert!(!target_speaker_final_required(false, false));
+        assert!(target_speaker_final_required(true, false));
+        assert!(target_speaker_final_required(false, true));
+    }
 
     #[test]
     fn pending_send_high_water_retains_the_peak() {
@@ -8002,6 +8096,7 @@ mod tests {
         assert_eq!(&retained[first.len()..], tail.as_slice());
     }
 
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     #[tokio::test]
     async fn retained_audio_recovery_is_strictly_one_shot() {
         let asr = VolcengineStreamingASR::new(
@@ -9087,6 +9182,11 @@ mod tests {
             .expect("LISTENER_TARGET_MIX_PCM_PATH is required");
         let summary_path = std::env::var("LISTENER_TARGET_FILTER_SUMMARY_PATH")
             .expect("LISTENER_TARGET_FILTER_SUMMARY_PATH is required");
+        let expected_text = std::env::var("LISTENER_TARGET_EXPECTED_TEXT")
+            .expect("LISTENER_TARGET_EXPECTED_TEXT is required");
+        let filter_expected = std::env::var("LISTENER_TARGET_FILTER_EXPECTED")
+            .map(|value| value == "1")
+            .unwrap_or(true);
         let wake_phrase =
             std::env::var("LISTENER_TARGET_WAKE_PHRASE").unwrap_or_else(|_| "我们要做".to_string());
         let owner_pcm = fs::read(&owner_pcm_path).expect("read owner PCM");
@@ -9115,9 +9215,10 @@ mod tests {
         };
         let owner_duration_seconds = owner_pcm.len() as f32 / 32_000.0;
         let profile_phrase = wake_phrase.clone();
+        let owner_for_profile = owner_pcm.clone();
         let profile = tokio::task::spawn_blocking(move || {
             crate::speaker_verification::session_profile_from_wake(
-                &owner_pcm,
+                &owner_for_profile,
                 owner_duration_seconds,
                 &profile_phrase,
             )
@@ -9125,6 +9226,12 @@ mod tests {
         .await
         .expect("join public owner profile task")
         .expect("build public owner session profile");
+        // Match product startup ordering: KWS/speaker runtime first, target
+        // extraction preload second, both before the wake-owned body starts.
+        let warm_started = Instant::now();
+        crate::asr::target_speaker_extraction::warm_up()
+            .expect("prepare target-speaker model before paced capture");
+        let warm_up_elapsed_ms = warm_started.elapsed().as_millis();
 
         let asr = Arc::new(VolcengineStreamingASR::new_with_session_options(
             credentials,
@@ -9136,6 +9243,7 @@ mod tests {
         // mark the ASR-side policy as verified/non-adaptive for this probe.
         asr.note_verified_local_speaker_tracking_started(&wake_phrase);
         asr.note_local_speaker_profile_adaptive(false);
+        asr.start_target_speaker_extraction(&owner_pcm, owner_duration_seconds);
         asr.open_session().await.expect("open provider session");
         asr.mark_audio_delivery_ready();
 
@@ -9182,19 +9290,42 @@ mod tests {
             ))
             .await;
         }
+        let finalization_started = Instant::now();
         asr.send_last_frame().await.expect("send final frame");
         let final_result = asr
             .await_final_result_with_timeout(Duration::from_secs(20))
             .await
             .expect("receive filtered final");
+        let primary_final_elapsed_ms = finalization_started.elapsed().as_millis();
+        let target_result = asr
+            .await_target_speaker_final()
+            .await
+            .expect("receive target-speaker selection result");
+        let target_final_elapsed_ms = finalization_started.elapsed().as_millis();
+        let selected_text = target_result
+            .as_ref()
+            .map(|target| target.text.as_str())
+            .unwrap_or(final_result.text.as_str())
+            .to_string();
+        let passed = selected_text.trim() == expected_text.trim()
+            && target_result.is_some() == filter_expected;
         let state = asr.state.lock();
         let report = serde_json::json!({
-            "status": if final_result.text.trim().is_empty() { "FAIL" } else { "PASS" },
+            "status": if passed { "PASS" } else { "FAIL" },
             "wakePhrase": wake_phrase,
             "ownerProfileAdaptive": profile.is_adaptive(),
             "inputDurationMs": audio_end_ms,
             "filteredTranscript": final_result.text,
             "filteredChars": final_result.text.chars().count(),
+            "expectedOwnerTranscript": expected_text,
+            "targetFilterExpected": filter_expected,
+            "targetFilterUsed": target_result.is_some(),
+            "targetExtractedTranscript": target_result.as_ref().map(|target| target.text.as_str()),
+            "targetExtractedChars": target_result.as_ref().map(|target| target.text.chars().count()),
+            "selectedTranscript": selected_text,
+            "primaryFinalElapsedMs": primary_final_elapsed_ms,
+            "targetFinalElapsedMs": target_final_elapsed_ms,
+            "modelWarmUpElapsedMs": warm_up_elapsed_ms,
             "targetSpeakerId": state.target_speaker_id,
             "speakerInfoPresent": state.speaker_info_present,
             "ownerIsolationFrozen": state.owner_isolation_frozen,
