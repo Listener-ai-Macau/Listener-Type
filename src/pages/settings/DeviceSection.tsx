@@ -711,7 +711,7 @@ function DeviceFirmwareSettingsCard() {
                 </div>
                 <div className={`ol-voiceprint-status${voiceprint?.requiresReenrollment ? ' is-warning' : ''}`}>
                   {voiceprint?.requiresReenrollment
-                    ? t('settings.recording.voiceprintReenrollDesc', '唤醒词已更换。重新录制前，任何人说对新唤醒词都可以启动。')
+                    ? t('settings.recording.voiceprintReenrollDesc', '声纹格式或唤醒词已更新，请重新录制。重新录制前，任何人说对唤醒词都可以启动。')
                     : voiceprint?.enrolled
                       ? t('settings.recording.voiceprintReadyDesc')
                       : t('settings.recording.voiceprintOpenGateDesc')}

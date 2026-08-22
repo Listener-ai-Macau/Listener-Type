@@ -620,7 +620,7 @@ export const zhTW: typeof zhCN = {
       voiceprintReadyDesc: '已啟用本機聲紋驗證；其他人說話不會進入轉寫，也不會拖長自動結束。',
       voiceprintOpenGateDesc: '未錄製聲紋：任何人說對目前喚醒詞都可以啟動。辦公室建議錄聲紋，減少誤喚醒。',
       voiceprintNoisyHint: '嘈雜環境提示：靠近裝置說喚醒詞；錄製聲紋後更穩。',
-      voiceprintReenrollDesc: '喚醒詞已更換。重新錄製前，任何人說對新喚醒詞都可以啟動。',
+      voiceprintReenrollDesc: '聲紋格式或喚醒詞已更新，請重新錄製。重新錄製前，任何人說對喚醒詞都可以啟動。',
       voiceprintPreparing: '準備中',
       voiceprintCapturing: '請依提示分別說三遍「{{phrase}}」',
       voiceprintProcessing: '驗證中',

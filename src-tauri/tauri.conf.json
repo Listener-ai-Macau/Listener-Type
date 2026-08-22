@@ -87,6 +87,7 @@
     "active": true,
     "resources": [
       "resources/models/wesep-bsrnn-voicefilter-3s-int8.onnx",
+      "resources/models/wesep-speaker-encoder-int8.onnx",
       "resources/models/wesep-bsrnn-voicefilter-3s-int8.LICENSE.txt"
     ],
     "targets": [

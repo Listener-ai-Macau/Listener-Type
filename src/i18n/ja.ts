@@ -571,7 +571,7 @@ export const ja: typeof zhCN = {
       voiceprintReadyDesc: 'ローカル声紋認証が有効です。他の話者は文字起こしに入らず、自動終了も延長しません。',
       voiceprintOpenGateDesc: '声紋未登録：現在のウェイクフレーズを言えば誰でも開始できます。共有オフィスでは声紋登録を推奨します。',
       voiceprintNoisyHint: '騒がしい場所：デバイスに近づいてウェイクフレーズを言い、声紋登録すると安定します。',
-      voiceprintReenrollDesc: 'ウェイクフレーズが変更されました。声紋を再登録するまでは誰でも新しいフレーズで開始できます。',
+      voiceprintReenrollDesc: '声紋形式またはウェイクフレーズが更新されました。再登録するまでは誰でもウェイクフレーズで開始できます。',
       voiceprintPreparing: '準備中',
       voiceprintCapturing: '表示に従って「{{phrase}}」を3回話してください',
       voiceprintProcessing: '確認中',

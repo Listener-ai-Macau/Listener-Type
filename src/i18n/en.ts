@@ -613,7 +613,7 @@ export const en: typeof zhCN = {
       voiceprintReadyDesc: 'Local voiceprint verification is active. Others will not enter the transcript or extend auto-end.',
       voiceprintOpenGateDesc: 'No voiceprint: anyone who says the current wake phrase can start. Enroll a voiceprint in shared offices.',
       voiceprintNoisyHint: 'Noisy room tip: speak closer to the device; a voiceprint is more reliable.',
-      voiceprintReenrollDesc: 'The wake phrase changed. Anyone can use the new phrase until you record your voiceprint again.',
+      voiceprintReenrollDesc: 'The voiceprint format or wake phrase changed. Record it again; until then, anyone can use the wake phrase.',
       voiceprintPreparing: 'Preparing',
       voiceprintCapturing: 'Follow the prompts to say “{{phrase}}” 3 times',
       voiceprintProcessing: 'Verifying',

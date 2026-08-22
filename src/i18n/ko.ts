@@ -571,7 +571,7 @@ export const ko: typeof zhCN = {
       voiceprintReadyDesc: '로컬 음성 지문 확인이 활성화되었습니다. 다른 사람은 전사에 들어가지 않으며 자동 종료도 늘리지 않습니다.',
       voiceprintOpenGateDesc: '음성 지문 미등록: 현재 호출 문구를 말하면 누구나 시작할 수 있습니다. 사무실에서는 음성 지문 등록을 권장합니다.',
       voiceprintNoisyHint: '시끄러운 환경: 기기에 가까이 대고 호출 문구를 말하세요. 음성 지문을 등록하면 더 안정적입니다.',
-      voiceprintReenrollDesc: '호출 문구가 변경되었습니다. 음성 지문을 다시 녹음하기 전에는 누구나 새 문구로 시작할 수 있습니다.',
+      voiceprintReenrollDesc: '음성 지문 형식 또는 호출 문구가 업데이트되었습니다. 다시 녹음하기 전에는 누구나 호출 문구로 시작할 수 있습니다.',
       voiceprintPreparing: '준비 중',
       voiceprintCapturing: '안내에 따라 “{{phrase}}”를 세 번 말해 주세요',
       voiceprintProcessing: '확인 중',

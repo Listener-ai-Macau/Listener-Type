@@ -2391,6 +2391,56 @@ fn begin_stop_session_transition(inner: &Arc<Inner>, user_initiated: bool) -> Di
     )
 }
 
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+fn select_target_speaker_final(
+    primary: RawTranscript,
+    target_result: Result<Option<RawTranscript>, String>,
+    filter_required: bool,
+) -> RawTranscript {
+    match target_result {
+        Ok(Some(target)) if !target.text.trim().is_empty() => {
+            log::info!(
+                "[target-speaker] owner-only final selected primary_chars={} target_chars={}",
+                primary.text.chars().count(),
+                target.text.chars().count()
+            );
+            target
+        }
+        Ok(Some(target)) if filter_required => {
+            log::warn!(
+                "[target-speaker] empty owner-only final under confirmed interference; refusing contaminated primary transcript"
+            );
+            target
+        }
+        Ok(Some(_)) => primary,
+        Ok(None) if filter_required => {
+            log::warn!(
+                "[target-speaker] required owner-only final unavailable; refusing contaminated primary transcript"
+            );
+            RawTranscript {
+                text: String::new(),
+                duration_ms: primary.duration_ms,
+            }
+        }
+        Ok(None) => primary,
+        Err(err) if filter_required => {
+            log::warn!(
+                "[target-speaker] required owner-only final failed; refusing contaminated primary transcript: {err}"
+            );
+            RawTranscript {
+                text: String::new(),
+                duration_ms: primary.duration_ms,
+            }
+        }
+        Err(err) => {
+            log::warn!(
+                "[target-speaker] owner-only final unavailable; preserving primary transcript: {err}"
+            );
+            primary
+        }
+    }
+}
+
 async fn finish_end_session_after_stop_transition(
     inner: &Arc<Inner>,
     transition: DictationTransition,
@@ -2461,6 +2511,10 @@ async fn finish_end_session_after_stop_transition(
                     (started, audio_ms, task)
                 })
         });
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    let mut target_speaker_filter_required = false;
+    #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
+    let target_speaker_filter_required = false;
     let raw = match asr {
         ActiveAsr::Volcengine(asr) => {
             debug_assert!(uses_global_timeout);
@@ -2531,29 +2585,13 @@ async fn finish_end_session_after_stop_transition(
             };
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             {
-                match asr.await_target_speaker_final().await {
-                    Ok(Some(target)) if !target.text.trim().is_empty() => {
-                        log::info!(
-                            "[target-speaker] owner-only final selected primary_chars={} target_chars={}",
-                            primary_result.text.chars().count(),
-                            target.text.chars().count()
-                        );
-                        target
-                    }
-                    Ok(Some(_)) => {
-                        log::warn!(
-                            "[target-speaker] empty owner-only final; preserving successful primary transcript"
-                        );
-                        primary_result
-                    }
-                    Ok(None) => primary_result,
-                    Err(err) => {
-                        log::warn!(
-                            "[target-speaker] owner-only final unavailable; preserving primary transcript: {err}"
-                        );
-                        primary_result
-                    }
-                }
+                let target_result = asr.await_target_speaker_final().await;
+                target_speaker_filter_required = asr.target_speaker_filter_was_required();
+                select_target_speaker_final(
+                    primary_result,
+                    target_result,
+                    target_speaker_filter_required,
+                )
             }
             #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
             {
@@ -2710,7 +2748,7 @@ async fn finish_end_session_after_stop_transition(
     let mut raw = raw;
 
     #[cfg(any(debug_assertions, test))]
-    if raw.text.trim().is_empty() {
+    if raw.text.trim().is_empty() && !target_speaker_filter_required {
         if let Some(debug_text) = debug_transcript_override_text() {
             log::info!(
                 "[coord] using debug transcript override (chars={})",
@@ -2734,7 +2772,7 @@ async fn finish_end_session_after_stop_transition(
     // audio_duration 正常增长，但终稿只有唤醒词残段）。终稿空且本地证据显示
     // 整段持续人声时，用 retained_pcm 向新 ASR 会话有界重试一次；仍空才走
     // 下面的 emptyTranscript 护栏。replay_retained_audio_once 自带一次性闸。
-    if raw.text.trim().is_empty() {
+    if raw.text.trim().is_empty() && !target_speaker_filter_required {
         if let Some(asr) = volcengine_for_empty_retry.as_ref() {
             let automatic_wake = automatic_wake_session_active(inner, current_session_id);
             let retry_allowed = asr.has_sustained_local_speech_evidence()
@@ -2779,7 +2817,7 @@ async fn finish_end_session_after_stop_transition(
     // Live multi-speaker finals can collapse to empty after speaker filtering
     // even when the capsule already streamed a long owner preview. Prefer that
     // preview over the false "没有识别到语音" failure path.
-    if raw.text.trim().is_empty() {
+    if raw.text.trim().is_empty() && !target_speaker_filter_required {
         if let Some(preview) = current_embedded_audio_partial_preview(inner) {
             let recovered = filter_automatic_wake_text(inner, current_session_id, &preview, false);
             if !recovered.trim().is_empty() {

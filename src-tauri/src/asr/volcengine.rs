@@ -2160,6 +2160,8 @@ pub struct VolcengineStreamingASR {
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     target_speaker_stream:
         ParkingMutex<Option<Arc<super::target_speaker_extraction::TargetSpeakerStream>>>,
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    target_speaker_filter_required: AtomicBool,
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -2260,22 +2262,35 @@ impl VolcengineStreamingASR {
             recovery_replay_started: AtomicBool::new(false),
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             target_speaker_stream: ParkingMutex::new(None),
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            target_speaker_filter_required: AtomicBool::new(false),
         }
     }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-    pub fn start_target_speaker_extraction(&self, wake_pcm: &[u8], wake_end_seconds: f32) {
-        let enrollment = super::target_speaker_extraction::wake_phrase_enrollment_pcm(
-            wake_pcm,
-            wake_end_seconds,
-        );
-        if enrollment.len() < 16_000 {
-            log::warn!(
-                "[target-speaker] owner-only stream skipped: enrollment_ms={}",
-                enrollment.len() / 32
-            );
-            return;
-        }
+    pub fn start_target_speaker_extraction(&self, wake_phrase: &str) {
+        let embedding = match crate::speaker_verification::target_speaker_embedding_for_phrase(
+            wake_phrase,
+        ) {
+            Ok(Some(embedding)) => embedding,
+            Ok(None) => {
+                log::warn!(
+                    "[target-speaker] owner-only stream skipped: persistent target-speaker enrollment is missing; re-enrollment required"
+                );
+                return;
+            }
+            Err(err) => {
+                log::warn!(
+                    "[target-speaker] owner-only stream skipped: persistent enrollment unavailable: {err}"
+                );
+                return;
+            }
+        };
+        self.start_target_speaker_extraction_with_embedding(embedding);
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    fn start_target_speaker_extraction_with_embedding(&self, embedding: Vec<f32>) {
         let mut slot = self.target_speaker_stream.lock();
         if slot.is_some() {
             return;
@@ -2284,13 +2299,19 @@ impl VolcengineStreamingASR {
             super::target_speaker_extraction::TargetSpeakerStream::start(
                 self.credentials.clone(),
                 self.hotwords.clone(),
-                enrollment,
+                embedding,
             ),
         );
         log::info!(
-            "[target-speaker] owner-only stream armed model_sha256={}",
-            super::target_speaker_extraction::MODEL_SHA256
+            "[target-speaker] owner-only stream armed encoder_sha256={} separator_sha256={}",
+            super::target_speaker_extraction::ENCODER_MODEL_SHA256,
+            super::target_speaker_extraction::SEPARATOR_MODEL_SHA256
         );
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    pub fn target_speaker_filter_was_required(&self) -> bool {
+        self.target_speaker_filter_required.load(Ordering::SeqCst)
     }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -2318,6 +2339,8 @@ impl VolcengineStreamingASR {
             );
             return Ok(None);
         }
+        self.target_speaker_filter_required
+            .store(true, Ordering::SeqCst);
         log::info!(
             "[target-speaker] awaiting owner-only final physical_overlap={} sustained_non_target={} degraded_owner_tail={}",
             physical_interference_detected,
@@ -9315,7 +9338,12 @@ mod tests {
         // mark the ASR-side policy as verified/non-adaptive for this probe.
         asr.note_verified_local_speaker_tracking_started(&wake_phrase);
         asr.note_local_speaker_profile_adaptive(false);
-        asr.start_target_speaker_extraction(&owner_pcm, owner_duration_seconds);
+        let target_embedding =
+            crate::asr::target_speaker_extraction::speaker_embedding_from_enrollment_pcm(
+                &owner_pcm,
+            )
+            .expect("encode public target-speaker enrollment");
+        asr.start_target_speaker_extraction_with_embedding(target_embedding);
         asr.open_session().await.expect("open provider session");
         asr.mark_audio_delivery_ready();
 

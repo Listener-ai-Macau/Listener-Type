@@ -611,7 +611,7 @@ export const zhCN = {
       voiceprintReadyDesc: '已启用本机声纹校验；旁人说话不会进入转写，也不会拖长自动结束。',
       voiceprintOpenGateDesc: '未录制声纹：任何人说对当前唤醒词都可以启动。办公室建议录声纹，减少误唤醒。',
       voiceprintNoisyHint: '嘈杂环境提示：靠近设备说唤醒词；录制声纹后更稳。',
-      voiceprintReenrollDesc: '唤醒词已更换。重新录制前，任何人说对新唤醒词都可以启动。',
+      voiceprintReenrollDesc: '声纹格式或唤醒词已更新，请重新录制。重新录制前，任何人说对唤醒词都可以启动。',
       voiceprintPreparing: '准备中',
       voiceprintCapturing: '请按提示分别说三遍“{{phrase}}”',
       voiceprintProcessing: '校验中',

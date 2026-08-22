@@ -357,6 +357,9 @@ mod platform {
     const RUNTIME_VERSION: &str = "1.13.1";
     const MODEL_NAME: &str = "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx";
     const MODEL_SHA256: &str = "F682B514C05D947EE3FA91CD6EC6C5C7543479A128373FA29B1FAEDCCD21FD11";
+    const TARGET_SPEAKER_MODEL_SHA256: &str =
+        "9CEC30564E3A87746BDD44108779EDDF5323CD9ED4BD0966B64883A6EEBBF46E";
+    const TARGET_SPEAKER_EMBEDDING_DIMENSION: usize = 192;
     const RUNTIME_ARCHIVE_SHA256: &str =
         "6760B0E25EAAD0DADFFBA9029B1270778E0DBFD43F314CF070B2F9C1DCB4AF25";
     const MODEL_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx";
@@ -461,12 +464,14 @@ mod platform {
     enum TemplatePurpose {
         WakePhrase,
         FreeSpeech,
+        TargetSpeaker,
     }
 
     #[derive(Debug, Clone)]
     struct SpeakerTemplate {
         wake_embeddings: Vec<Vec<f32>>,
         session_embeddings: Vec<Vec<f32>>,
+        target_speaker_embedding: Option<Vec<f32>>,
         phrase: Option<String>,
         invalidated: bool,
     }
@@ -1157,9 +1162,13 @@ mod platform {
         for value in embedding {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
+        let model_sha256 = match purpose {
+            TemplatePurpose::WakePhrase | TemplatePurpose::FreeSpeech => MODEL_SHA256,
+            TemplatePurpose::TargetSpeaker => TARGET_SPEAKER_MODEL_SHA256,
+        };
         serde_json::to_string(&StoredTemplate {
-            version: 3,
-            model_sha256: MODEL_SHA256.to_string(),
+            version: 4,
+            model_sha256: model_sha256.to_string(),
             dimension: embedding.len(),
             embedding_base64: BASE64.encode(bytes),
             phrase: Some(phrase.to_string()),
@@ -1172,7 +1181,14 @@ mod platform {
     fn decode_template(value: &str) -> Result<SpeakerTemplate, String> {
         let stored: StoredTemplate = serde_json::from_str(value)
             .map_err(|err| format!("voiceprint template damaged: {err}"))?;
-        if !matches!(stored.version, 1 | 2 | 3) || stored.model_sha256 != MODEL_SHA256 {
+        if !matches!(stored.version, 1 | 2 | 3 | 4) {
+            return Err("voiceprint template is incompatible with the current model".to_string());
+        }
+        let expected_model_sha256 = match stored.purpose {
+            Some(TemplatePurpose::TargetSpeaker) => TARGET_SPEAKER_MODEL_SHA256,
+            _ => MODEL_SHA256,
+        };
+        if stored.model_sha256 != expected_model_sha256 {
             return Err("voiceprint template is incompatible with the current model".to_string());
         }
         if stored.version >= 2
@@ -1193,19 +1209,30 @@ mod platform {
             .chunks_exact(4)
             .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
             .collect::<Vec<_>>();
-        normalize(&mut embedding)?;
-        let (wake_embeddings, session_embeddings) = match stored.purpose {
-            Some(TemplatePurpose::WakePhrase) => (vec![embedding], Vec::new()),
-            Some(TemplatePurpose::FreeSpeech) => (Vec::new(), vec![embedding]),
+        if embedding.iter().any(|value| !value.is_finite()) {
+            return Err("voiceprint template contains a non-finite value".to_string());
+        }
+        if stored.purpose == Some(TemplatePurpose::TargetSpeaker) {
+            if embedding.len() != TARGET_SPEAKER_EMBEDDING_DIMENSION {
+                return Err("target-speaker template dimension is invalid".to_string());
+            }
+        } else {
+            normalize(&mut embedding)?;
+        }
+        let (wake_embeddings, session_embeddings, target_speaker_embedding) = match stored.purpose {
+            Some(TemplatePurpose::WakePhrase) => (vec![embedding], Vec::new(), None),
+            Some(TemplatePurpose::FreeSpeech) => (Vec::new(), vec![embedding], None),
+            Some(TemplatePurpose::TargetSpeaker) => (Vec::new(), Vec::new(), Some(embedding)),
             None => {
                 // v1/v2 had one undifferentiated bank. Preserve compatibility
                 // until the owner re-enrolls with the dual-template prompt.
-                (vec![embedding.clone()], vec![embedding])
+                (vec![embedding.clone()], vec![embedding], None)
             }
         };
         Ok(SpeakerTemplate {
             wake_embeddings,
             session_embeddings,
+            target_speaker_embedding,
             phrase: stored.phrase,
             invalidated: stored.invalidated,
         })
@@ -1218,6 +1245,10 @@ mod platform {
             .ok_or_else(|| "voiceprint template wake phrase is missing".to_string())?;
         if template.wake_embeddings.is_empty() || template.session_embeddings.is_empty() {
             return Err("voiceprint template requires wake and session banks".to_string());
+        }
+        #[cfg(feature = "target-speaker-extraction")]
+        if template.target_speaker_embedding.is_none() {
+            return Err("voiceprint template requires a target-speaker bank".to_string());
         }
         let encoded = template
             .wake_embeddings
@@ -1236,6 +1267,14 @@ mod platform {
                     phrase,
                     template.invalidated,
                     TemplatePurpose::FreeSpeech,
+                )
+            }))
+            .chain(template.target_speaker_embedding.iter().map(|embedding| {
+                encode_template(
+                    embedding,
+                    phrase,
+                    template.invalidated,
+                    TemplatePurpose::TargetSpeaker,
                 )
             }))
             .collect::<Result<Vec<_>, _>>()?;
@@ -1292,6 +1331,15 @@ mod platform {
                                 {
                                     template.wake_embeddings.extend(extra.wake_embeddings);
                                     template.session_embeddings.extend(extra.session_embeddings);
+                                    if let Some(target) = extra.target_speaker_embedding {
+                                        if template.target_speaker_embedding.is_none() {
+                                            template.target_speaker_embedding = Some(target);
+                                        } else {
+                                            log::warn!(
+                                                "[speaker-verification] ignored duplicate target-speaker template index={index}"
+                                            );
+                                        }
+                                    }
                                 }
                                 Ok(_) => log::warn!(
                                     "[speaker-verification] ignored supplemental owner template index={index}: wake phrase binding differs"
@@ -1368,7 +1416,11 @@ mod platform {
             .template
             .as_ref()
             .is_some_and(|template| template_matches_phrase(template, &phrase));
-        let requires_reenrollment = state.template.is_some() && !enrolled;
+        let requires_reenrollment = state.template.as_ref().is_some_and(|template| {
+            !template_matches_phrase(template, &phrase)
+                || (cfg!(feature = "target-speaker-extraction")
+                    && template.target_speaker_embedding.is_none())
+        });
         let capture_seconds_remaining = if state.capture == Some(CaptureState::Capturing) {
             state.enrollment_capture_started.map(|started| {
                 ENROLLMENT_SECONDS
@@ -1603,9 +1655,21 @@ mod platform {
                         .map_err(|err| format!("会话声纹特征提取失败，请重新录制：{err}"))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            #[cfg(feature = "target-speaker-extraction")]
+            let target_speaker_embedding = {
+                let target_enrollment_pcm = windows.wake.concat();
+                crate::asr::target_speaker_extraction::speaker_embedding_from_enrollment_pcm(
+                    &target_enrollment_pcm,
+                )
+                .map(Some)
+                .map_err(|err| format!("多人隔离声纹特征提取失败，请重新录制：{err}"))?
+            };
+            #[cfg(not(feature = "target-speaker-extraction"))]
+            let target_speaker_embedding = None;
             let template = SpeakerTemplate {
                 wake_embeddings,
                 session_embeddings,
+                target_speaker_embedding,
                 phrase: Some(phrase.clone()),
                 invalidated: false,
             };
@@ -1709,6 +1773,20 @@ mod platform {
             matched: matches!(decision.action, Action::Release),
             score,
         })
+    }
+
+    #[cfg(feature = "target-speaker-extraction")]
+    pub fn target_speaker_embedding_for_phrase(
+        wake_phrase: &str,
+    ) -> Result<Option<Vec<f32>>, String> {
+        let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
+        let mut state = STATE.lock();
+        load_template_for_phrase_locked(&mut state, &phrase);
+        Ok(state
+            .template
+            .as_ref()
+            .filter(|template| template_matches_phrase(template, &phrase))
+            .and_then(|template| template.target_speaker_embedding.clone()))
     }
 
     pub fn session_profile_from_wake(
@@ -1975,6 +2053,7 @@ mod platform {
             let decoded = decode_template(&encoded).unwrap();
             assert!((cosine(&embedding, &decoded.wake_embeddings[0]).unwrap() - 1.0).abs() < 1e-5);
             assert!(decoded.session_embeddings.is_empty());
+            assert!(decoded.target_speaker_embedding.is_none());
             assert_eq!(decoded.phrase.as_deref(), Some("小爱同学"));
             assert!(!decoded.invalidated);
         }
@@ -1990,6 +2069,21 @@ mod platform {
             .unwrap();
             assert!(free.wake_embeddings.is_empty());
             assert_eq!(free.session_embeddings.len(), 1);
+
+            let target = (0..TARGET_SPEAKER_EMBEDDING_DIMENSION)
+                .map(|value| value as f32 / 100.0 - 0.5)
+                .collect::<Vec<_>>();
+            let decoded_target = decode_template(
+                &encode_template(&target, "开始录音", false, TemplatePurpose::TargetSpeaker)
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                decoded_target.target_speaker_embedding.as_deref(),
+                Some(target.as_slice())
+            );
+            assert!(decoded_target.wake_embeddings.is_empty());
+            assert!(decoded_target.session_embeddings.is_empty());
 
             let mut bytes = Vec::new();
             for value in &embedding {
@@ -2036,6 +2130,7 @@ mod platform {
             let template = SpeakerTemplate {
                 wake_embeddings: vec![vec![1.0, 0.0]],
                 session_embeddings: vec![vec![1.0, 0.0]],
+                target_speaker_embedding: None,
                 phrase: Some("小爱同学".into()),
                 invalidated: false,
             };
@@ -2881,6 +2976,8 @@ mod platform {
 
 #[cfg(target_os = "windows")]
 pub(crate) use platform::prepare_runtime_assets;
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+pub(crate) use platform::target_speaker_embedding_for_phrase;
 #[cfg(target_os = "windows")]
 pub use platform::{
     begin_enrollment_processing, cancel_enrollment, delete_template, enrollment_should_process,

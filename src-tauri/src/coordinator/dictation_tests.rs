@@ -6341,3 +6341,50 @@ fn local_shadow_rejects_rewrites_and_large_other_speaker_gaps() {
         "a long overlap gap can be another speaker and must never be restored"
     );
 }
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+#[test]
+fn confirmed_interference_never_restores_the_unfiltered_primary_transcript() {
+    fn primary() -> crate::asr::RawTranscript {
+        crate::asr::RawTranscript {
+            text: "开始录音旁边的人连续说了很长一段无关内容".into(),
+            duration_ms: 7_462,
+        }
+    }
+
+    let empty_target = crate::asr::RawTranscript {
+        text: String::new(),
+        duration_ms: 7_462,
+    };
+    assert!(
+        super::select_target_speaker_final(primary(), Ok(Some(empty_target)), true)
+            .text
+            .is_empty()
+    );
+    assert!(
+        super::select_target_speaker_final(primary(), Ok(None), true)
+            .text
+            .is_empty()
+    );
+    assert!(
+        super::select_target_speaker_final(primary(), Err("separator failed".into()), true)
+            .text
+            .is_empty()
+    );
+    assert_eq!(
+        super::select_target_speaker_final(primary(), Ok(None), false).text,
+        "开始录音旁边的人连续说了很长一段无关内容"
+    );
+    assert_eq!(
+        super::select_target_speaker_final(
+            primary(),
+            Ok(Some(crate::asr::RawTranscript {
+                text: "这是主人完整说的话".into(),
+                duration_ms: 7_462,
+            })),
+            true,
+        )
+        .text,
+        "这是主人完整说的话"
+    );
+}

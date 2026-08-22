@@ -31,18 +31,28 @@ const FFT_BINS: usize = FFT_SIZE / 2 + 1;
 const STFT_FRAMES: usize = 376;
 const ENROLLMENT_FRAMES: usize = 300;
 const FBANK_BINS: usize = 80;
+pub(crate) const SPEAKER_EMBEDDING_DIMENSION: usize = 192;
 const STRONG_INTERFERENCE_RESIDUAL_RATIO: f64 = 0.03;
-const MODEL_FILE_NAME: &str = "wesep-bsrnn-voicefilter-3s-int8.onnx";
-pub(crate) const MODEL_SHA256: &str =
-    "10D709E513DD3C18351ABDD1342AC53C032738E32692A74552946DB5896DD6A9";
+const SEPARATOR_MODEL_FILE_NAME: &str = "wesep-bsrnn-voicefilter-3s-int8.onnx";
+const ENCODER_MODEL_FILE_NAME: &str = "wesep-speaker-encoder-int8.onnx";
+pub(crate) const SEPARATOR_MODEL_SHA256: &str =
+    "1BFA3C60EA58288DE6947C62D6A49FBA9AEEE20BFBCE0B0415504F506F3F20B4";
+pub(crate) const ENCODER_MODEL_SHA256: &str =
+    "9CEC30564E3A87746BDD44108779EDDF5323CD9ED4BD0966B64883A6EEBBF46E";
 
-static SESSION: OnceCell<Mutex<Session>> = OnceCell::new();
+static ENCODER_SESSION: OnceCell<Mutex<Session>> = OnceCell::new();
+static SEPARATOR_SESSION: OnceCell<Mutex<Session>> = OnceCell::new();
 
 fn ensure_ort_environment() -> Result<(), String> {
     static ENVIRONMENT: OnceCell<()> = OnceCell::new();
     ENVIRONMENT
         .get_or_try_init(|| {
-            let runtime = crate::wake_phrase::onnx_runtime_dll_path()?;
+            let runtime = std::env::var("LISTENER_ONNX_RUNTIME_DLL")
+                .ok()
+                .map(std::path::PathBuf::from)
+                .filter(|path| path.is_file())
+                .map(Ok)
+                .unwrap_or_else(crate::wake_phrase::onnx_runtime_dll_path)?;
             let builder = ort::init_from(&runtime).map_err(|err| {
                 format!(
                     "load target-speaker ONNX Runtime {} failed: {err}",
@@ -55,20 +65,25 @@ fn ensure_ort_environment() -> Result<(), String> {
         .map(|_| ())
 }
 
-fn session() -> Result<&'static Mutex<Session>, String> {
-    SESSION.get_or_try_init(|| {
+fn load_session(
+    slot: &'static OnceCell<Mutex<Session>>,
+    environment_variable: &str,
+    model_file_name: &str,
+    label: &str,
+) -> Result<&'static Mutex<Session>, String> {
+    slot.get_or_try_init(|| {
         ensure_ort_environment()?;
-        let model = model_path()?;
+        let model = model_path(environment_variable, model_file_name)?;
         let session = Session::builder()
-            .map_err(|err| format!("build target-speaker session failed: {err}"))?
+            .map_err(|err| format!("build target-speaker {label} session failed: {err}"))?
             .with_intra_threads(8)
-            .map_err(|err| format!("configure target-speaker threads failed: {err}"))?
+            .map_err(|err| format!("configure target-speaker {label} threads failed: {err}"))?
             .with_inter_threads(1)
-            .map_err(|err| format!("configure target-speaker scheduler failed: {err}"))?
+            .map_err(|err| format!("configure target-speaker {label} scheduler failed: {err}"))?
             .commit_from_file(&model)
             .map_err(|err| {
                 format!(
-                    "load target-speaker model {} failed: {err}",
+                    "load target-speaker {label} model {} failed: {err}",
                     model.display()
                 )
             })?;
@@ -76,12 +91,34 @@ fn session() -> Result<&'static Mutex<Session>, String> {
     })
 }
 
-pub(crate) fn warm_up() -> Result<(), String> {
-    session().map(|_| ())
+fn encoder_session() -> Result<&'static Mutex<Session>, String> {
+    load_session(
+        &ENCODER_SESSION,
+        "LISTENER_TARGET_SPEAKER_ENCODER_MODEL",
+        ENCODER_MODEL_FILE_NAME,
+        "encoder",
+    )
 }
 
-fn model_path() -> Result<std::path::PathBuf, String> {
-    if let Ok(path) = std::env::var("LISTENER_TARGET_SPEAKER_MODEL") {
+fn separator_session() -> Result<&'static Mutex<Session>, String> {
+    load_session(
+        &SEPARATOR_SESSION,
+        "LISTENER_TARGET_SPEAKER_MODEL",
+        SEPARATOR_MODEL_FILE_NAME,
+        "separator",
+    )
+}
+
+pub(crate) fn warm_up() -> Result<(), String> {
+    encoder_session()?;
+    separator_session().map(|_| ())
+}
+
+fn model_path(
+    environment_variable: &str,
+    model_file_name: &str,
+) -> Result<std::path::PathBuf, String> {
+    if let Ok(path) = std::env::var(environment_variable) {
         let path = std::path::PathBuf::from(path);
         if path.is_file() {
             return Ok(path);
@@ -89,7 +126,7 @@ fn model_path() -> Result<std::path::PathBuf, String> {
     }
     let development = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("resources/models")
-        .join(MODEL_FILE_NAME);
+        .join(model_file_name);
     if development.is_file() {
         return Ok(development);
     }
@@ -99,9 +136,9 @@ fn model_path() -> Result<std::path::PathBuf, String> {
         .parent()
         .ok_or_else(|| "target-speaker executable has no parent directory".to_string())?;
     for candidate in [
-        root.join("resources/models").join(MODEL_FILE_NAME),
-        root.join("models").join(MODEL_FILE_NAME),
-        root.join(MODEL_FILE_NAME),
+        root.join("resources/models").join(model_file_name),
+        root.join("models").join(model_file_name),
+        root.join(model_file_name),
     ] {
         if candidate.is_file() {
             return Ok(candidate);
@@ -244,7 +281,7 @@ fn samples_to_pcm(samples: &[f32], valid_samples: usize) -> Vec<u8> {
 }
 
 pub(crate) struct TargetSpeakerExtractor {
-    speaker_fbank: Vec<f32>,
+    speaker_embedding: Vec<f32>,
 }
 
 pub(crate) struct ExtractedChunk {
@@ -255,9 +292,19 @@ pub(crate) struct ExtractedChunk {
 
 impl TargetSpeakerExtractor {
     pub(crate) fn new(enrollment_pcm: &[u8]) -> Result<Self, String> {
-        Ok(Self {
-            speaker_fbank: enrollment_fbank(enrollment_pcm)?,
-        })
+        Self::from_embedding(speaker_embedding_from_enrollment_pcm(enrollment_pcm)?)
+    }
+
+    pub(crate) fn from_embedding(speaker_embedding: Vec<f32>) -> Result<Self, String> {
+        if speaker_embedding.len() != SPEAKER_EMBEDDING_DIMENSION
+            || speaker_embedding.iter().any(|value| !value.is_finite())
+        {
+            return Err(format!(
+                "invalid target-speaker embedding dimension={} expected={SPEAKER_EMBEDDING_DIMENSION}",
+                speaker_embedding.len()
+            ));
+        }
+        Ok(Self { speaker_embedding })
     }
 
     pub(crate) fn extract_chunk(&self, pcm: &[u8]) -> Result<Vec<u8>, String> {
@@ -284,17 +331,17 @@ impl TargetSpeakerExtractor {
         ))
         .map_err(|err| format!("create target-speaker mixture tensor failed: {err}"))?;
         let speaker_tensor = TensorRef::from_array_view((
-            [1usize, ENROLLMENT_FRAMES, FBANK_BINS],
-            self.speaker_fbank.as_slice(),
+            [1usize, SPEAKER_EMBEDDING_DIMENSION],
+            self.speaker_embedding.as_slice(),
         ))
-        .map_err(|err| format!("create target-speaker enrollment tensor failed: {err}"))?;
+        .map_err(|err| format!("create target-speaker embedding tensor failed: {err}"))?;
         let started = Instant::now();
         let output = {
-            let mut session = session()?.lock();
+            let mut session = separator_session()?.lock();
             let outputs = session
                 .run(ort::inputs![
                     "mix_stft_ri" => mix_tensor,
-                    "speaker_fbank" => speaker_tensor
+                    "speaker_logits" => speaker_tensor
                 ])
                 .map_err(|err| format!("run target-speaker model failed: {err}"))?;
             let (shape, values) = outputs["target_stft_ri"]
@@ -348,6 +395,30 @@ impl TargetSpeakerExtractor {
             mixture_energy,
         })
     }
+}
+
+pub(crate) fn speaker_embedding_from_enrollment_pcm(pcm: &[u8]) -> Result<Vec<f32>, String> {
+    let speaker_fbank = enrollment_fbank(pcm)?;
+    let tensor = TensorRef::from_array_view((
+        [1usize, ENROLLMENT_FRAMES, FBANK_BINS],
+        speaker_fbank.as_slice(),
+    ))
+    .map_err(|err| format!("create target-speaker enrollment tensor failed: {err}"))?;
+    let mut session = encoder_session()?.lock();
+    let outputs = session
+        .run(ort::inputs!["speaker_fbank" => tensor])
+        .map_err(|err| format!("run target-speaker encoder failed: {err}"))?;
+    let (shape, values) = outputs["speaker_logits"]
+        .try_extract_tensor::<f32>()
+        .map_err(|err| format!("decode target-speaker embedding failed: {err}"))?;
+    if shape.as_ref() != [1_i64, SPEAKER_EMBEDDING_DIMENSION as i64] {
+        return Err(format!(
+            "unexpected target-speaker embedding shape: {shape:?}"
+        ));
+    }
+    let embedding = values.to_vec();
+    TargetSpeakerExtractor::from_embedding(embedding.clone())?;
+    Ok(embedding)
 }
 
 pub(crate) fn wake_phrase_enrollment_pcm(wake_pcm: &[u8], wake_end_seconds: f32) -> Vec<u8> {
@@ -417,7 +488,7 @@ impl TargetSpeakerStream {
     pub(crate) fn start(
         credentials: crate::asr::VolcengineCredentials,
         hotwords: Vec<crate::asr::DictionaryHotword>,
-        enrollment_pcm: Vec<u8>,
+        speaker_embedding: Vec<f32>,
     ) -> Arc<Self> {
         let (audio_tx, mut audio_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let interference_detected = Arc::new(AtomicBool::new(false));
@@ -426,10 +497,10 @@ impl TargetSpeakerStream {
         let worker_secondary_asr = Arc::clone(&secondary_asr);
         let worker = tauri::async_runtime::spawn(async move {
             let extractor = tauri::async_runtime::spawn_blocking(move || {
-                TargetSpeakerExtractor::new(&enrollment_pcm)
+                TargetSpeakerExtractor::from_embedding(speaker_embedding)
             })
             .await
-            .map_err(|err| format!("target-speaker enrollment task failed: {err}"))??;
+            .map_err(|err| format!("target-speaker embedding task failed: {err}"))??;
             let extractor = Arc::new(extractor);
             let mut buffered = Vec::with_capacity(CHUNK_BYTES * 2);
             let mut staged_pcm = Vec::new();
