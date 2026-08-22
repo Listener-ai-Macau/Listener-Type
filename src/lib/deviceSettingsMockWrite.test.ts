@@ -265,8 +265,8 @@ assert.ok(
 );
 assert.match(
   ipcSource,
-  /removeFillerWords:\s*true,[\s\S]*sendKeyAfterDictation:\s*false,/,
-  'Type defaults must remove filler words while keeping post-dictation submission disabled',
+  /removeFillerWords:\s*false,[\s\S]*removeFillerWordsDefaultMigrated:\s*true,[\s\S]*sendKeyAfterDictation:\s*false,/,
+  'Type defaults must preserve filler words while keeping post-dictation submission disabled',
 );
 assert.match(
   ipcSource,

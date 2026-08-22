@@ -444,6 +444,14 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
                 .and_then(|flag| flag.as_bool())
         })
         .unwrap_or(false);
+    let remove_filler_words_default_migrated = raw_prefs
+        .as_ref()
+        .and_then(|value| {
+            value
+                .get("removeFillerWordsDefaultMigrated")
+                .and_then(|flag| flag.as_bool())
+        })
+        .unwrap_or(false);
     if !active_asr_provider_default_migrated {
         prefs.active_asr_provider_default_migrated = true;
     }
@@ -453,6 +461,7 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
         || !device_key_led_default_migrated
         || !device_led_brightness_102_default_migrated
         || !active_asr_provider_default_migrated
+        || !remove_filler_words_default_migrated
     {
         match serde_json::to_vec_pretty(&prefs)
             .context("encode prefs failed")
@@ -2821,6 +2830,39 @@ mod tests {
         assert_eq!(
             saved
                 .get("streamingInsertDefaultMigrated")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn incorrect_filler_default_is_disabled_once_and_marker_is_persisted() {
+        let tmp: PathBuf = std::env::temp_dir().join(format!(
+            "listener-type-filler-prefs-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("preferences.json");
+        fs::write(&path, r#"{"removeFillerWords":true}"#).expect("write legacy prefs");
+
+        let prefs = read_preferences(&path).expect("read prefs");
+        assert!(!prefs.remove_filler_words);
+        assert!(prefs.remove_filler_words_default_migrated);
+
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("read saved prefs"))
+                .expect("decode saved prefs");
+        assert_eq!(
+            saved
+                .get("removeFillerWords")
+                .and_then(|value| value.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            saved
+                .get("removeFillerWordsDefaultMigrated")
                 .and_then(|value| value.as_bool()),
             Some(true)
         );

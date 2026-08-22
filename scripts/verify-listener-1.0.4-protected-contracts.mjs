@@ -250,7 +250,12 @@ gate("default_settings", () => {
     "default embedded BLE input",
   );
   mustInclude(typesRs, "restore_clipboard_after_paste: true", "restore clipboard default on");
-  mustInclude(typesRs, "remove_filler_words: true", "filler removal default on");
+  mustInclude(typesRs, "remove_filler_words: false", "filler removal default off");
+  mustInclude(
+    typesRs,
+    "remove_filler_words_default_migrated: true",
+    "filler removal default migration marker",
+  );
 });
 
 gate("notify_ready_3000", () => {

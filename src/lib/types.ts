@@ -411,6 +411,8 @@ export interface UserPreferences {
   copyDictationToClipboard: boolean;
   /** 从预览和最终文本中移除独立的犹豫语气词。默认关闭。 */
   removeFillerWords: boolean;
+  /** 已应用一次性的默认关闭迁移。 */
+  removeFillerWordsDefaultMigrated: boolean;
   /** 普通听写成功插入后自动发送提交按键。默认关闭。 */
   sendKeyAfterDictation: boolean;
   /** 自动提交使用的按键。 */

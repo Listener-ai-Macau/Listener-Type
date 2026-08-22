@@ -170,7 +170,8 @@ let mockSettings: UserPreferences = {
   llmThinkingEnabled: false,
   restoreClipboardAfterPaste: true,
   copyDictationToClipboard: true,
-  removeFillerWords: true,
+  removeFillerWords: false,
+  removeFillerWordsDefaultMigrated: true,
   sendKeyAfterDictation: false,
   postDictationKey: 'enter',
   voiceWakePhrase: '开始录音',
@@ -402,6 +403,10 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
     },
     dictationInputSource: prefs.dictationInputSource ?? 'embeddedBle',
     dictationInputSourceUserOverridden: prefs.dictationInputSourceUserOverridden ?? false,
+    removeFillerWords: prefs.removeFillerWordsDefaultMigrated
+      ? prefs.removeFillerWords
+      : false,
+    removeFillerWordsDefaultMigrated: true,
     deviceCustomKeys: {
       key1: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeys?.key1, fallbackDeviceKeys.key1),
       key2: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeys?.key2, fallbackDeviceKeys.key2),
