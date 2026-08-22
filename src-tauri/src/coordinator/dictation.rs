@@ -1090,6 +1090,11 @@ fn set_volcengine_preview_callbacks(
         );
     })));
 
+    let inner_for_visual_stream = Arc::clone(inner);
+    asr.set_visual_partial_transcript_callback(Some(Arc::new(move |text| {
+        update_embedded_audio_visual_preview(&inner_for_visual_stream, session_id, text);
+    })));
+
     let inner_for_partial = Arc::clone(inner);
     let stop_for_partial = Arc::clone(&stop_dispatched);
     let clock_for_partial = Arc::clone(&endpoint_clock);
@@ -1169,6 +1174,14 @@ include!("dictation_device_ai.rs");
 
 pub(super) fn current_embedded_audio_partial_preview(inner: &Arc<Inner>) -> Option<String> {
     inner.embedded_audio_partial_preview.lock().clone()
+}
+
+fn current_embedded_audio_visual_preview(inner: &Arc<Inner>) -> Option<String> {
+    inner
+        .embedded_audio_visual_preview
+        .lock()
+        .clone()
+        .or_else(|| current_embedded_audio_partial_preview(inner))
 }
 
 include!("dictation_preview.rs");

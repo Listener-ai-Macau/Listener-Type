@@ -14,8 +14,8 @@ use super::{
     embedded_ble_session_event_should_trace, embedded_ble_stream_idle_timeout,
     embedded_pcm_capsule_level, embedded_pcm_rms_and_peak, embedded_pcm_visual_level,
     embedded_streaming_chunk_is_asr_input, emit_embedded_audio_transcribing_if_active,
-    end_embedded_ble_session, filter_automatic_wake_text, finalize_polished_text,
-    finish_dictation_pipeline_error, finish_dictation_timeout,
+    end_embedded_ble_session, filter_automatic_wake_text, filter_dictation_visual_preview_text,
+    finalize_polished_text, finish_dictation_pipeline_error, finish_dictation_timeout,
     install_embedded_ble_listener_cancel, mark_embedded_ble_listener_ready,
     normalize_embedded_pcm_for_asr, normalize_embedded_streaming_pcm_for_asr,
     polish_prefetch_adoptable, preserve_recording_transcript, provider_preview_change,
@@ -3213,6 +3213,32 @@ fn automatic_wake_no_body_uses_longer_endpoint_timeout() {
         super::target_speaker_inactive_stop_reason(1_000),
         "target_speaker_inactive_1000ms"
     );
+}
+
+#[test]
+fn visual_only_preview_strips_wake_without_starting_endpoint_body_clock() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    arm_automatic_wake_text_guard(
+        &coordinator.inner,
+        session_id,
+        "开始录音".to_string(),
+        1_200,
+    );
+
+    assert_eq!(
+        filter_dictation_visual_preview_text(
+            &coordinator.inner,
+            session_id,
+            "开始录音。这是尚未确认的胶囊临时预览。",
+        ),
+        "这是尚未确认的胶囊临时预览。"
+    );
+    assert!(
+        !automatic_wake_body_started(&coordinator.inner, session_id),
+        "display-only text must not shorten the three-second no-body guard"
+    );
+    assert!(current_embedded_audio_partial_preview(&coordinator.inner).is_none());
 }
 
 #[test]

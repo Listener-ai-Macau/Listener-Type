@@ -140,6 +140,7 @@ fn update_embedded_audio_partial_preview(
                 return false;
             };
             *slot = Some(provider_preview.clone());
+            *inner.embedded_audio_visual_preview.lock() = Some(provider_preview.clone());
             let emitted =
                 emit_embedded_audio_partial_preview_if_active(inner, session_id, provider_preview);
             if emitted {
@@ -150,6 +151,36 @@ fn update_embedded_audio_partial_preview(
                 );
             }
             emitted
+        },
+    )
+}
+
+/// Publish a diarization-pending provider tail to the capsule without
+/// promoting it into the authoritative preview ledger. The ASR layer permits
+/// this only while the verified wake identity remains debounced as the owner
+/// and no NonTarget evidence is present. It may therefore improve visual
+/// cadence, but cannot extend the endpoint or enter final insertion/recovery.
+fn update_embedded_audio_visual_preview(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    text: String,
+) -> bool {
+    let preview = filter_dictation_visual_preview_text(inner, session_id, &text);
+    if preview.is_empty() {
+        return false;
+    }
+    dispatch_embedded_ble_session_actor_command(
+        inner,
+        EmbeddedBleSessionActorCommand::AsrPartial,
+        Some(session_id),
+        format!("visual_provisional chars={}", preview.chars().count()),
+        |_| {
+            let mut slot = inner.embedded_audio_visual_preview.lock();
+            let Some(provider_preview) = provider_preview_change(slot.as_deref(), &preview) else {
+                return false;
+            };
+            *slot = Some(provider_preview.clone());
+            emit_embedded_audio_partial_preview_if_active(inner, session_id, provider_preview)
         },
     )
 }
@@ -179,6 +210,7 @@ fn update_embedded_audio_partial_preview_from_final_supplement(
                 return false;
             };
             *slot = Some(provider_preview.clone());
+            *inner.embedded_audio_visual_preview.lock() = Some(provider_preview.clone());
             let emitted =
                 emit_embedded_audio_partial_preview_if_active(inner, session_id, provider_preview);
             if emitted {
@@ -1002,6 +1034,30 @@ fn filter_dictation_preview_text(inner: &Arc<Inner>, session_id: SessionId, text
     }
 }
 
+fn filter_dictation_visual_preview_text(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    text: &str,
+) -> String {
+    // Do not call `filter_automatic_wake_text`: a display-only tail must not
+    // latch body_started or otherwise influence the endpoint state machine.
+    let phrase = inner
+        .embedded_audio_automatic_wake_guard
+        .lock()
+        .as_ref()
+        .filter(|guard| guard.session_id == session_id)
+        .map(|guard| guard.phrase.clone());
+    let text = phrase.map_or_else(
+        || preserve_recording_transcript(text),
+        |phrase| strip_automatic_activation_prefix(text, &phrase, true),
+    );
+    if inner.prefs.get().remove_filler_words {
+        remove_standalone_dictation_fillers(&text)
+    } else {
+        text
+    }
+}
+
 fn embedded_audio_partial_preview_repeats_recent_short_tail(
     current_key: &str,
     candidate_key: &str,
@@ -1188,6 +1244,6 @@ pub(super) fn request_embedded_audio_stop_feedback(
     emit_embedded_audio_transcribing_if_active(
         inner,
         session_id,
-        current_embedded_audio_partial_preview(inner),
+        current_embedded_audio_visual_preview(inner),
     )
 }
