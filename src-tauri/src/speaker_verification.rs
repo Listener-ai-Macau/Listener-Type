@@ -347,6 +347,7 @@ mod platform {
     use parking_lot::Mutex;
     use serde::{Deserialize, Serialize};
     use sha2::{Digest, Sha256};
+    use std::borrow::Cow;
     use std::ffi::{c_char, c_void, CString};
     use std::fs;
     use std::io::{BufReader, Read};
@@ -382,6 +383,12 @@ mod platform {
     const ENROLLMENT_STEP_COUNT: usize = 3;
     const ENROLLMENT_WAKE_SECONDS: u64 = ENROLLMENT_WAKE_STEP_SECONDS * ENROLLMENT_WAKE_STEPS;
     const ENROLLMENT_SECONDS: u64 = ENROLLMENT_WAKE_SECONDS;
+    // The host stops at the nine-second boundary, but the last BLE audio packet
+    // can arrive just before the control STOP (the observed failure was 20 ms
+    // short with zero missing packets). Tolerate only that bounded transport
+    // tail and pad it with silence; a genuinely missing third phrase still goes
+    // through the per-step speech and KWS gates below.
+    const ENROLLMENT_TRANSPORT_TAIL_TOLERANCE_MS: usize = 250;
     const ENROLLMENT_MIN_SECONDS: usize = 5;
     const ENROLLMENT_FRAME_MS: usize = 100;
     const ENROLLMENT_MIN_ACTIVE_FRAMES: usize = 18;
@@ -852,6 +859,30 @@ mod platform {
             .collect())
     }
 
+    fn normalized_enrollment_wake_pcm(pcm: &[u8]) -> Result<Cow<'_, [u8]>, String> {
+        let required_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_WAKE_SECONDS as usize;
+        if pcm.len() >= required_bytes {
+            return Ok(Cow::Borrowed(&pcm[..required_bytes]));
+        }
+
+        let tolerance_bytes =
+            SAMPLE_RATE as usize * 2 * ENROLLMENT_TRANSPORT_TAIL_TOLERANCE_MS / 1_000;
+        let missing_bytes = required_bytes - pcm.len();
+        if missing_bytes > tolerance_bytes {
+            return Err("声纹录制提前结束，请按提示完整说三次唤醒词。".to_string());
+        }
+
+        let mut normalized = Vec::with_capacity(required_bytes);
+        normalized.extend_from_slice(pcm);
+        normalized.resize(required_bytes, 0);
+        log::info!(
+            "[speaker-verification] tolerated bounded enrollment transport tail missing_bytes={} missing_ms={}",
+            missing_bytes,
+            missing_bytes / 32
+        );
+        Ok(Cow::Owned(normalized))
+    }
+
     fn quality_wake_step_window(pcm: &[u8], step: usize) -> Result<Vec<u8>, String> {
         let frame_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_FRAME_MS / 1000;
         let compacted = compact_active_speech_frames(pcm, frame_bytes)
@@ -889,11 +920,8 @@ mod platform {
 
     fn enrollment_template_windows(pcm: &[u8]) -> Result<EnrollmentTemplateWindows, String> {
         enrollment_speech_window(pcm)?;
-        let wake_pcm_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_WAKE_SECONDS as usize;
-        let wake_pcm = pcm
-            .get(..wake_pcm_bytes)
-            .ok_or_else(|| "声纹录制提前结束，请按提示完整说三次唤醒词。".to_string())?;
-        let wake = enrollment_wake_step_slices(wake_pcm)?
+        let wake_pcm = normalized_enrollment_wake_pcm(pcm)?;
+        let wake = enrollment_wake_step_slices(wake_pcm.as_ref())?
             .into_iter()
             .enumerate()
             .map(|(index, step_pcm)| quality_wake_step_window(step_pcm, index + 1))
@@ -1628,7 +1656,11 @@ mod platform {
             let windows = enrollment_template_windows(pcm)?;
             // Reject silence/short speech before invoking KWS, then validate the
             // phrase before persisting either template bank.
-            for (index, step_pcm) in enrollment_wake_step_slices(pcm)?.iter().enumerate() {
+            let wake_pcm = normalized_enrollment_wake_pcm(pcm)?;
+            for (index, step_pcm) in enrollment_wake_step_slices(wake_pcm.as_ref())?
+                .iter()
+                .enumerate()
+            {
                 crate::wake_phrase::calibrate(step_pcm, &phrase).map_err(|_| {
                     format!(
                         "第 {} 次没有识别到“{}”，请按每一步提示清晰重录。",
@@ -2217,6 +2249,44 @@ mod platform {
                 .iter()
                 .chain(&windows.session)
                 .all(|window| window.len() >= VERIFICATION_MIN_SPEECH_MS * 32));
+        }
+
+        #[test]
+        fn enrollment_accepts_a_bounded_ble_transport_tail_shortfall() {
+            let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
+            let mut samples = Vec::new();
+            for amplitude in [800i16, 1_200, -900] {
+                samples.extend(vec![0i16; frame_samples * 8]);
+                samples.extend(vec![amplitude; frame_samples * 8]);
+                samples.extend(vec![0i16; frame_samples * 14]);
+            }
+            // Reproduce the real 2026-08-23 capture: 287,360 bytes (8.98 s)
+            // instead of the nominal 288,000 bytes, with zero missing packets.
+            samples.truncate(samples.len() - SAMPLE_RATE as usize * 20 / 1_000);
+            let pcm = samples
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>();
+
+            assert_eq!(pcm.len(), 287_360);
+            let windows = enrollment_template_windows(&pcm)
+                .expect("a packet-boundary tail shortfall must not discard three valid phrases");
+            assert_eq!(windows.wake.len(), 3);
+        }
+
+        #[test]
+        fn enrollment_rejects_more_than_the_bounded_transport_tail() {
+            let required_samples = SAMPLE_RATE as usize * ENROLLMENT_WAKE_SECONDS as usize;
+            let missing_samples =
+                SAMPLE_RATE as usize * (ENROLLMENT_TRANSPORT_TAIL_TOLERANCE_MS + 50) / 1_000;
+            let pcm = vec![800i16; required_samples - missing_samples]
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>();
+
+            let error = enrollment_template_windows(&pcm)
+                .expect_err("a genuinely early stop must remain rejected");
+            assert!(error.contains("提前结束"), "unexpected error: {error}");
         }
 
         #[test]
