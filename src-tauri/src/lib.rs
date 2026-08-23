@@ -53,6 +53,45 @@ mod windows_ime_profile;
 mod windows_ime_protocol;
 mod windows_ime_session;
 
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+pub fn run_target_speaker_filter_diagnostic(
+    enrollment_pcm_path: &std::path::Path,
+    mixture_pcm_path: &std::path::Path,
+    output_pcm_path: &std::path::Path,
+) -> Result<(), String> {
+    let trace_path = output_pcm_path.with_extension("trace.txt");
+    let trace = |stage: &str| {
+        let _ = std::fs::write(&trace_path, stage);
+    };
+    trace("reading_pcm");
+    let enrollment = std::fs::read(enrollment_pcm_path)
+        .map_err(|err| format!("read target-speaker enrollment PCM failed: {err}"))?;
+    let mixture = std::fs::read(mixture_pcm_path)
+        .map_err(|err| format!("read target-speaker mixture PCM failed: {err}"))?;
+    trace("warming_models");
+    asr::target_speaker_extraction::warm_up()?;
+    // Production warms these sessions on a dedicated background thread and
+    // later runs inference from Tokio's blocking pool. Mirror that lifecycle:
+    // immediate first inference on the GUI entry thread can strand ORT's
+    // freshly-created worker pool before the Tauri runtime exists.
+    std::thread::sleep(Duration::from_millis(250));
+    trace("running_filter");
+    let output = std::thread::Builder::new()
+        .name("target-speaker-diagnostic".to_string())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            asr::target_speaker_extraction::extract_enrolled_owner_pcm(&enrollment, &mixture)
+        })
+        .map_err(|err| format!("spawn target-speaker diagnostic failed: {err}"))?
+        .join()
+        .map_err(|_| "target-speaker diagnostic thread panicked".to_string())??;
+    trace("writing_output");
+    std::fs::write(output_pcm_path, output)
+        .map_err(|err| format!("write target-speaker output PCM failed: {err}"))?;
+    trace("complete");
+    Ok(())
+}
+
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::mpsc;

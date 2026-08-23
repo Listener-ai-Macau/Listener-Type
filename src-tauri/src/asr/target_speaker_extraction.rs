@@ -430,6 +430,21 @@ pub(crate) fn extract_enrolled_owner_wake_candidate(
     })
 }
 
+pub(crate) fn extract_enrolled_owner_pcm(
+    enrollment_pcm: &[u8],
+    mixture_pcm: &[u8],
+) -> Result<Vec<u8>, String> {
+    if mixture_pcm.is_empty() {
+        return Err("target-speaker mixture is empty".to_string());
+    }
+    let extractor = TargetSpeakerExtractor::new(enrollment_pcm)?;
+    let mut output = Vec::with_capacity(mixture_pcm.len());
+    for chunk in mixture_pcm.chunks(CHUNK_BYTES) {
+        output.extend(extractor.extract_chunk_with_metrics(chunk)?.pcm);
+    }
+    Ok(output)
+}
+
 pub(crate) fn speaker_embedding_from_enrollment_pcm(pcm: &[u8]) -> Result<Vec<f32>, String> {
     let speaker_fbank = enrollment_fbank(pcm)?;
     let tensor = TensorRef::from_array_view((
