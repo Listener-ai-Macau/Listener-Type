@@ -258,7 +258,11 @@ mod tests {
     fn call_sites_route_through_recording_gate() {
         let support = include_str!("support.rs");
         let session = include_str!("dictation_session.rs");
-        let stream = include_str!("dictation_embedded_stream.rs");
+        let stream = concat!(
+            include_str!("dictation_embedded_stream.rs"),
+            "\n",
+            include_str!("dictation_embedded_candidate_begin.rs")
+        );
         let device = include_str!("hotkey_device_runtime.rs");
         let ble = include_str!("embedded_ble_runtime.rs");
 

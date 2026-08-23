@@ -4447,7 +4447,13 @@ fn device_key_start_takeover_pending_before_hidden_active() {
 #[test]
 fn hidden_candidate_marked_active_before_detector_init() {
     // Device-key promote depends on ACTIVE during StreamingDetector::new (~2s).
-    let stream = include_str!("dictation_embedded_stream.rs");
+    let stream = concat!(
+        include_str!("dictation_embedded_stream.rs"),
+        "\n",
+        include_str!("dictation_embedded_candidate_begin.rs"),
+        "\n",
+        include_str!("dictation_embedded_detector_init.rs")
+    );
     let begin = stream
         .find("async fn begin_candidate_or_session")
         .expect("begin_candidate_or_session");
@@ -4466,7 +4472,7 @@ fn hidden_candidate_marked_active_before_detector_init() {
         body.contains("detector_deferred") && body.contains("wake_detector_init"),
         "detector init must be deferred so PCM buffers during StreamingDetector::new"
     );
-    let stream_all = include_str!("dictation_embedded_stream.rs");
+    let stream_all = stream;
     let dictation = include_str!("dictation.rs");
     assert!(
         stream_all.contains("show_early_wake_recording_capsule")
@@ -4553,6 +4559,12 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
         "
 ",
         include_str!("dictation_embedded_stream.rs"),
+        "
+",
+        include_str!("dictation_embedded_candidate_begin.rs"),
+        "
+",
+        include_str!("dictation_embedded_detector_init.rs"),
         "
 ",
         include_str!("dictation_embedded_stream_completion.rs")
@@ -5808,7 +5820,9 @@ fn volcengine_preview_and_final_share_the_authoritative_session() {
         include_str!("dictation_embedded_submit.rs"),
         "
 ",
-        include_str!("dictation_embedded_stream.rs")
+        include_str!("dictation_embedded_stream.rs"),
+        "\n",
+        include_str!("dictation_volcengine_callbacks.rs")
     );
     assert!(source.contains(
         "authoritative optimized-bidirectional ASR ready; preview and final share one provider session"
