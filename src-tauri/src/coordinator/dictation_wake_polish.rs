@@ -624,6 +624,18 @@ struct BufferedSpeakerCandidate {
             u64,
         )>,
     >,
+    /// Strong continuous Mandarin can hide the owner's phrase from both raw
+    /// KWS and local ASR. Run one bounded, enrolled-owner extraction beside the
+    /// established raw path; it may release only after the extracted output
+    /// independently passes both phrase and voiceprint verification.
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    target_wake_extraction_task: Option<
+        tauri::async_runtime::JoinHandle<
+            Result<crate::asr::target_speaker_extraction::ExtractedWakeCandidate, String>,
+        >,
+    >,
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    target_wake_extraction_attempted: bool,
     #[cfg(target_os = "windows")]
     local_confirmation_task:
         Option<tauri::async_runtime::JoinHandle<Result<LocalWakeConfirmation, String>>>,
@@ -688,6 +700,16 @@ struct PendingAutomaticPhraseMatch {
     phrase_signal: denzic_voice_activation_v1_core::PhraseSignal,
     local_confirmation_ms: u64,
     owner_verification_start_ms: usize,
+    owner_verified_by_extraction: bool,
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+struct ExtractedOwnerWakeEvidence {
+    wake_match: crate::wake_phrase::Match,
+    local_confirmation_ms: u64,
+    extraction_ms: u64,
+    owner_score: f32,
+    residual_ratio: f64,
 }
 
 #[cfg(target_os = "windows")]
@@ -738,6 +760,12 @@ const OWNER_VERIFICATION_SNAPSHOT_MS: [usize; 3] = [OWNER_VERIFICATION_START_MS,
 // incomplete/absent results stay eligible for KWS and later ladder retries.
 const LOCAL_CONFIRMATION_START_MS: usize = 800;
 const LOCAL_CONFIRMATION_START_BYTES: usize = LOCAL_CONFIRMATION_START_MS * 32;
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+const TARGET_WAKE_EXTRACTION_START_MS: usize = 2_400;
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+const TARGET_WAKE_EXTRACTION_START_BYTES: usize = TARGET_WAKE_EXTRACTION_START_MS * 32;
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+const TARGET_WAKE_EXTRACTION_TERMINAL_WAIT_MS: u64 = 2_200;
 /* A negotiated firmware pre-roll burst can deliver several seconds of already
  * captured audio in under one second. Starting the heavyweight exploratory
  * local ASR at the ordinary 0.8 s PCM rung contends with BLE/KWS four times

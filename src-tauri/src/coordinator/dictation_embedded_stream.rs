@@ -54,6 +54,15 @@ impl EmbeddedStreamingDictation {
                     }
                     candidate.pcm.extend_from_slice(&chunk.pcm);
                     if candidate.kind == BufferedSpeakerCandidateKind::Enrollment { crate::speaker_verification::observe_enrollment_capture(&candidate.pcm); }
+                    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+                    if candidate.kind == BufferedSpeakerCandidateKind::Verification {
+                        let phrase = inner.prefs.get().voice_wake_phrase;
+                        maybe_start_target_wake_extraction(
+                            candidate,
+                            &phrase,
+                            chunk_session_id,
+                        );
+                    }
                     if self
                         .promote_hidden_candidate_if_requested(inner, chunk_session_id)
                         .await?
@@ -406,6 +415,10 @@ impl EmbeddedStreamingDictation {
                 owner_ambiguous_confirmations: 0,
                 owner_best_ambiguous_score: 0.0,
                 owner_verification_task: None,
+                #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+                target_wake_extraction_task: None,
+                #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+                target_wake_extraction_attempted: false,
                 #[cfg(target_os = "windows")]
                 local_confirmation_task: None,
                 #[cfg(target_os = "windows")]
@@ -1297,6 +1310,33 @@ impl EmbeddedStreamingDictation {
                     LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS
                 );
             }
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            let mut owner_verified_by_extraction = false;
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            if wake_match.is_none() {
+                if let Some(evidence) = terminal_target_wake_evidence(
+                    &mut candidate,
+                    inner,
+                    &phrase,
+                    embedded_session_id,
+                )
+                .await
+                {
+                    local_confirmation_ms = local_confirmation_ms
+                        .saturating_add(evidence.local_confirmation_ms);
+                    phrase_signal =
+                        denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                    wake_match = Some(evidence.wake_match);
+                    owner_verified_by_extraction = true;
+                    log::info!(
+                        "[target-speaker] terminal extracted enrolled-owner wake recovered embedded_session_id={} extraction_ms={} owner_score={:.6} residual_ratio={:.6}",
+                        embedded_session_id,
+                        evidence.extraction_ms,
+                        evidence.owner_score,
+                        evidence.residual_ratio
+                    );
+                }
+            }
             let total_ms = candidate
                 .kws_total_ms
                 .saturating_add(local_confirmation_ms)
@@ -1307,8 +1347,13 @@ impl EmbeddedStreamingDictation {
                 .as_ref()
                 .map(|_| phrase_signal)
                 .unwrap_or(denzic_voice_activation_v1_core::PhraseSignal::None);
-            let (owner_matched, owner_recovered_by_local_phrase) =
+            let (mut owner_matched, mut owner_recovered_by_local_phrase) =
                 evaluate_candidate_owner_gate(&mut candidate, effective_phrase_signal, &verification);
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            if owner_verified_by_extraction {
+                owner_matched = true;
+                owner_recovered_by_local_phrase = true;
+            }
             let gate_decision = denzic_voice_activation_v1_core::decide_gate(
                 denzic_voice_activation_v1_core::GateInput {
                     phrase_signal: effective_phrase_signal,
@@ -1547,6 +1592,70 @@ impl EmbeddedStreamingDictation {
         inner: &Arc<Inner>,
         embedded_session_id: u32,
     ) -> Result<bool, String> {
+        #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+        {
+            let completed_task = self.speaker_candidate.as_mut().and_then(|candidate| {
+                candidate
+                    .target_wake_extraction_task
+                    .as_ref()
+                    .is_some_and(|task| task.inner().is_finished())
+                    .then(|| candidate.target_wake_extraction_task.take())
+                    .flatten()
+            });
+            if let Some(task) = completed_task {
+                let phrase = inner.prefs.get().voice_wake_phrase;
+                let evidence = match task.await {
+                    Ok(Ok(extracted)) => evaluate_target_wake_extraction(
+                        inner,
+                        extracted,
+                        &phrase,
+                        embedded_session_id,
+                    )
+                    .await
+                    .unwrap_or_else(|err| {
+                        log::warn!(
+                            "[target-speaker] live owner wake evidence failed embedded_session_id={embedded_session_id}: {err}"
+                        );
+                        None
+                    }),
+                    Ok(Err(err)) => {
+                        log::warn!(
+                            "[target-speaker] live owner wake extraction failed embedded_session_id={embedded_session_id}: {err}"
+                        );
+                        None
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "[target-speaker] live owner wake extraction task failed embedded_session_id={embedded_session_id}: {err}"
+                        );
+                        None
+                    }
+                };
+                if let Some(evidence) = evidence {
+                    let candidate = self
+                        .speaker_candidate
+                        .as_mut()
+                        .ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
+                    if candidate.pending_phrase_match.is_none() {
+                        log::info!(
+                            "[target-speaker] extracted enrolled-owner wake accepted as pending phrase embedded_session_id={} extraction_ms={} owner_score={:.6} residual_ratio={:.6}",
+                            embedded_session_id,
+                            evidence.extraction_ms,
+                            evidence.owner_score,
+                            evidence.residual_ratio
+                        );
+                        candidate.pending_phrase_match = Some(PendingAutomaticPhraseMatch {
+                            wake_match: evidence.wake_match,
+                            phrase_signal:
+                                denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript,
+                            local_confirmation_ms: evidence.local_confirmation_ms,
+                            owner_verification_start_ms: OWNER_VERIFICATION_START_MS,
+                            owner_verified_by_extraction: true,
+                        });
+                    }
+                }
+            }
+        }
         let pending_phrase_match = {
             let Some(candidate) = self.speaker_candidate.as_mut() else {
                 return Ok(false);
@@ -1563,8 +1672,13 @@ impl EmbeddedStreamingDictation {
             }
         };
         let phrase = inner.prefs.get().voice_wake_phrase;
-        let (wake_match, phrase_signal, local_confirmation_ms, kws_step_ms) = if let Some(pending) =
-            pending_phrase_match
+        let (
+            wake_match,
+            phrase_signal,
+            local_confirmation_ms,
+            kws_step_ms,
+            owner_verified_by_extraction,
+        ) = if let Some(pending) = pending_phrase_match
         {
             log::info!(
                     "[wake-phrase] pending phrase hit reached real owner window embedded_session_id={} pcm_ms={} owner_window_ms={}",
@@ -1580,6 +1694,7 @@ impl EmbeddedStreamingDictation {
                 pending.phrase_signal,
                 pending.local_confirmation_ms,
                 0,
+                pending.owner_verified_by_extraction,
             )
         } else {
             if !self
@@ -2218,6 +2333,7 @@ impl EmbeddedStreamingDictation {
                     phrase_signal,
                     local_confirmation_ms,
                     owner_verification_start_ms: OWNER_VERIFICATION_START_MS,
+                    owner_verified_by_extraction: false,
                 });
                 return Ok(false);
             }
@@ -2226,6 +2342,7 @@ impl EmbeddedStreamingDictation {
                 phrase_signal,
                 local_confirmation_ms,
                 kws_step_ms,
+                false,
             )
         };
 
@@ -2253,8 +2370,12 @@ impl EmbeddedStreamingDictation {
             Ok(result) => result,
             Err(err) => (Err(format!("声纹验证任务失败: {err}")), 0),
         };
-        let (owner_matched, owner_recovered_by_local_phrase) =
+        let (mut owner_matched, mut owner_recovered_by_local_phrase) =
             evaluate_candidate_owner_gate(candidate, phrase_signal, &verification);
+        if owner_verified_by_extraction {
+            owner_matched = true;
+            owner_recovered_by_local_phrase = true;
+        }
         let total_ms = kws_ms
             .saturating_add(local_confirmation_ms)
             .saturating_add(voiceprint_ms);
@@ -2292,6 +2413,7 @@ impl EmbeddedStreamingDictation {
                     phrase_signal,
                     local_confirmation_ms,
                     owner_verification_start_ms: retry_ms,
+                    owner_verified_by_extraction,
                 });
                 log::info!(
                     "[wake-phrase] phrase hit retained for owner retry embedded_session_id={} pcm_ms={} next_owner_window_ms={} verification={:?}",

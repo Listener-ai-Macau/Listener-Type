@@ -170,3 +170,161 @@ async fn terminal_owner_verification_for_recall(
     let matched = enrolled && verification.as_ref().is_ok_and(|result| result.matched);
     (matched, verification, elapsed_ms)
 }
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+fn maybe_start_target_wake_extraction(
+    candidate: &mut BufferedSpeakerCandidate,
+    phrase: &str,
+    embedded_session_id: u32,
+) {
+    if candidate.kind != BufferedSpeakerCandidateKind::Verification
+        || candidate.target_wake_extraction_attempted
+        || candidate.pcm.len() < TARGET_WAKE_EXTRACTION_START_BYTES
+    {
+        return;
+    }
+    candidate.target_wake_extraction_attempted = true;
+    let embedding = match crate::speaker_verification::target_speaker_embedding_for_phrase(phrase) {
+        Ok(Some(embedding)) => embedding,
+        Ok(None) => return,
+        Err(err) => {
+            log::warn!(
+                "[target-speaker] wake extraction skipped embedded_session_id={embedded_session_id}: {err}"
+            );
+            return;
+        }
+    };
+    let pcm = candidate.pcm.clone();
+    candidate.target_wake_extraction_task = Some(tauri::async_runtime::spawn_blocking(move || {
+        crate::asr::target_speaker_extraction::extract_enrolled_owner_wake_candidate(
+            &pcm, embedding,
+        )
+    }));
+    log::info!(
+        "[target-speaker] owner wake extraction started embedded_session_id={} source_pcm_ms={}",
+        embedded_session_id,
+        candidate.pcm.len() / 32
+    );
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+async fn evaluate_target_wake_extraction(
+    inner: &Arc<Inner>,
+    extracted: crate::asr::target_speaker_extraction::ExtractedWakeCandidate,
+    phrase: &str,
+    embedded_session_id: u32,
+) -> Result<Option<ExtractedOwnerWakeEvidence>, String> {
+    let confirmation_task = spawn_local_wake_confirmation(
+        inner,
+        extracted.pcm.clone(),
+        phrase.to_string(),
+        true,
+    );
+    let verify_pcm = extracted.pcm;
+    let verify_phrase = phrase.to_string();
+    let verification_task = tauri::async_runtime::spawn_blocking(move || {
+        crate::speaker_verification::verify(&verify_pcm, &verify_phrase)
+    });
+    let (confirmation, verification) = tokio::join!(confirmation_task, verification_task);
+    let confirmation = confirmation
+        .map_err(|err| format!("target-speaker wake confirmation task failed: {err}"))??;
+    let verification = verification
+        .map_err(|err| format!("target-speaker wake verification task failed: {err}"))??;
+    let phrase_matched = confirmation.matched
+        && local_confirmation_can_activate(false, confirmation.phrase_relation);
+    log::info!(
+        "[target-speaker] owner wake extraction evaluated embedded_session_id={} source_pcm_ms={} extraction_ms={} local_ms={} phrase_matched={} phrase_relation={:?} owner_matched={} owner_score={:.6} residual_ratio={:.6}",
+        embedded_session_id,
+        extracted.source_pcm_ms,
+        extracted.inference_ms,
+        confirmation.inference_ms,
+        phrase_matched,
+        confirmation.phrase_relation,
+        verification.matched,
+        verification.score,
+        extracted.residual_ratio
+    );
+    if !target_extracted_wake_can_activate(phrase_matched, verification.matched) {
+        return Ok(None);
+    }
+    let wake_match = crate::wake_phrase::Match {
+        end_seconds: refined_wake_end_seconds(
+            0.0,
+            &confirmation,
+            phrase.chars().count(),
+        ),
+        matched_keyword: None,
+    };
+    Ok(Some(ExtractedOwnerWakeEvidence {
+        wake_match,
+        local_confirmation_ms: confirmation.inference_ms,
+        extraction_ms: extracted.inference_ms,
+        owner_score: verification.score,
+        residual_ratio: extracted.residual_ratio,
+    }))
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+fn target_extracted_wake_can_activate(phrase_matched: bool, owner_matched: bool) -> bool {
+    phrase_matched && owner_matched
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+async fn terminal_target_wake_evidence(
+    candidate: &mut BufferedSpeakerCandidate,
+    inner: &Arc<Inner>,
+    phrase: &str,
+    embedded_session_id: u32,
+) -> Option<ExtractedOwnerWakeEvidence> {
+    let mut task = candidate.target_wake_extraction_task.take()?;
+    let already_finished = task.inner().is_finished();
+    let outcome = if already_finished {
+        Some(task.await)
+    } else {
+        match tokio::time::timeout(
+            Duration::from_millis(TARGET_WAKE_EXTRACTION_TERMINAL_WAIT_MS),
+            &mut task,
+        )
+        .await
+        {
+            Ok(result) => Some(result),
+            Err(_) => {
+                task.abort();
+                log::info!(
+                    "[target-speaker] terminal owner wake extraction exceeded budget embedded_session_id={} budget_ms={}",
+                    embedded_session_id,
+                    TARGET_WAKE_EXTRACTION_TERMINAL_WAIT_MS
+                );
+                None
+            }
+        }
+    };
+    match outcome {
+        Some(Ok(Ok(extracted))) => evaluate_target_wake_extraction(
+            inner,
+            extracted,
+            phrase,
+            embedded_session_id,
+        )
+        .await
+        .unwrap_or_else(|err| {
+            log::warn!(
+                "[target-speaker] terminal owner wake evidence failed embedded_session_id={embedded_session_id}: {err}"
+            );
+            None
+        }),
+        Some(Ok(Err(err))) => {
+            log::warn!(
+                "[target-speaker] terminal owner wake extraction failed embedded_session_id={embedded_session_id}: {err}"
+            );
+            None
+        }
+        Some(Err(err)) => {
+            log::warn!(
+                "[target-speaker] terminal owner wake extraction task failed embedded_session_id={embedded_session_id}: {err}"
+            );
+            None
+        }
+        None => None,
+    }
+}

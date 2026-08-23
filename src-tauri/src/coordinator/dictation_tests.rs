@@ -6388,3 +6388,12 @@ fn confirmed_interference_never_restores_the_unfiltered_primary_transcript() {
         "这是主人完整说的话"
     );
 }
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+#[test]
+fn extracted_wake_requires_both_exact_phrase_and_enrolled_owner() {
+    assert!(super::target_extracted_wake_can_activate(true, true));
+    assert!(!super::target_extracted_wake_can_activate(true, false));
+    assert!(!super::target_extracted_wake_can_activate(false, true));
+    assert!(!super::target_extracted_wake_can_activate(false, false));
+}

@@ -290,6 +290,13 @@ pub(crate) struct ExtractedChunk {
     pub(crate) mixture_energy: f64,
 }
 
+pub(crate) struct ExtractedWakeCandidate {
+    pub(crate) pcm: Vec<u8>,
+    pub(crate) residual_ratio: f64,
+    pub(crate) inference_ms: u64,
+    pub(crate) source_pcm_ms: usize,
+}
+
 impl TargetSpeakerExtractor {
     pub(crate) fn new(enrollment_pcm: &[u8]) -> Result<Self, String> {
         Self::from_embedding(speaker_embedding_from_enrollment_pcm(enrollment_pcm)?)
@@ -395,6 +402,32 @@ impl TargetSpeakerExtractor {
             mixture_energy,
         })
     }
+}
+
+/// Extract one bounded owner-wake snapshot before the ordinary phrase gate.
+/// This is intentionally separate from `TargetSpeakerStream`: wake recovery
+/// must not open a cloud stream, and the caller still requires both an exact
+/// local phrase result and an enrolled-owner verification on this output.
+pub(crate) fn extract_enrolled_owner_wake_candidate(
+    pcm: &[u8],
+    speaker_embedding: Vec<f32>,
+) -> Result<ExtractedWakeCandidate, String> {
+    if pcm.is_empty() {
+        return Err("target-speaker wake candidate is empty".to_string());
+    }
+    let bounded_len = pcm.len().min(CHUNK_BYTES) & !1usize;
+    let bounded = &pcm[..bounded_len];
+    let extractor = TargetSpeakerExtractor::from_embedding(speaker_embedding)?;
+    let started = Instant::now();
+    let extracted = extractor.extract_chunk_with_metrics(bounded)?;
+    let inference_ms = started.elapsed().as_millis() as u64;
+    let residual_ratio = extracted.residual_energy / extracted.mixture_energy.max(1e-12);
+    Ok(ExtractedWakeCandidate {
+        pcm: extracted.pcm,
+        residual_ratio,
+        inference_ms,
+        source_pcm_ms: bounded_len / 32,
+    })
 }
 
 pub(crate) fn speaker_embedding_from_enrollment_pcm(pcm: &[u8]) -> Result<Vec<f32>, String> {
