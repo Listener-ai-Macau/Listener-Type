@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const root = process.cwd();
 const volcengine = readFileSync(
@@ -10,20 +10,19 @@ const transcript = readFileSync(
   join(root, "src-tauri", "src", "asr", "volcengine_transcript.rs"),
   "utf8",
 );
+function readExpandedIncludes(path, stack = []) {
+  if (stack.includes(path)) throw new Error(`recursive Rust include: ${[...stack, path].join(" -> ")}`);
+  return readFileSync(path, "utf8").replace(/include!\("([^"]+)"\);/gu, (token, nested) => {
+    const nestedPath = join(dirname(path), nested);
+    return existsSync(nestedPath) ? readExpandedIncludes(nestedPath, [...stack, path]) : token;
+  });
+}
+
+const dictationRoot = join(root, "src-tauri", "src", "coordinator");
 const dictation = [
-  "dictation.rs",
-  "dictation_preview.rs",
-  "dictation_device_ai.rs",
-  "dictation_wake_polish.rs",
-  "dictation_session.rs",
-  "dictation_embedded_submit.rs",
-  "dictation_embedded_stream.rs",
-  "dictation_tests.rs",
-]
-  .map((name) =>
-    readFileSync(join(root, "src-tauri", "src", "coordinator", name), "utf8"),
-  )
-  .join("\n");
+  readExpandedIncludes(join(dictationRoot, "dictation.rs")),
+  readFileSync(join(dictationRoot, "dictation_tests.rs"), "utf8"),
+].join("\n");
 
 function fail(message) {
   throw new Error(message);

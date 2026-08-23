@@ -1,12 +1,19 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
 const root = process.cwd();
 function readConcat(paths) {
   return paths.map((p) => readFileSync(p, "utf8")).join("\n");
+}
+function readExpandedIncludes(path, stack = []) {
+  if (stack.includes(path)) throw new Error(`recursive Rust include: ${[...stack, path].join(" -> ")}`);
+  return readFileSync(path, "utf8").replace(/include!\("([^"]+)"\);/gu, (token, nested) => {
+    const nestedPath = join(dirname(path), nested);
+    return existsSync(nestedPath) ? readExpandedIncludes(nestedPath, [...stack, path]) : token;
+  });
 }
 const embeddedBleDir = join(root, "src-tauri", "src", "embedded_ble");
 const embeddedBle = readConcat([
@@ -31,16 +38,10 @@ const coordinator = readConcat([
   join(coordinatorDir, "resources.rs"),
   join(coordinatorDir, "qa.rs"),
 ]);
-const dictation = readConcat([
-  join(coordinatorDir, "dictation.rs"),
-  join(coordinatorDir, "dictation_preview.rs"),
-  join(coordinatorDir, "dictation_device_ai.rs"),
-  join(coordinatorDir, "dictation_wake_polish.rs"),
-  join(coordinatorDir, "dictation_session.rs"),
-  join(coordinatorDir, "dictation_embedded_submit.rs"),
-  join(coordinatorDir, "dictation_embedded_stream.rs"),
-  join(coordinatorDir, "dictation_tests.rs"),
-]);
+const dictation = [
+  readExpandedIncludes(join(coordinatorDir, "dictation.rs")),
+  readFileSync(join(coordinatorDir, "dictation_tests.rs"), "utf8"),
+].join("\n");
 const cliPath = join(root, "src-tauri", "src", "cli.rs");
 const cli = readFileSync(cliPath, "utf8");
 const libPath = join(root, "src-tauri", "src", "lib.rs");

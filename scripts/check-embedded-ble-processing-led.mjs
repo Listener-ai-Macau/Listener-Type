@@ -1,7 +1,14 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const repoRoot = process.cwd();
+function readExpandedIncludes(path, stack = []) {
+  if (stack.includes(path)) throw new Error(`recursive Rust include: ${[...stack, path].join(" -> ")}`);
+  return readFileSync(path, "utf8").replace(/include!\("([^"]+)"\);/gu, (token, nested) => {
+    const nestedPath = join(dirname(path), nested);
+    return existsSync(nestedPath) ? readExpandedIncludes(nestedPath, [...stack, path]) : token;
+  });
+}
 // Implementations live under windows_ble/; thin wrappers in mod.rs must not win indexOf.
 const embeddedBleDir = join(repoRoot, "src-tauri", "src", "embedded_ble");
 const source = [
@@ -18,17 +25,7 @@ const source = [
   readFileSync(join(embeddedBleDir, "mod.rs"), "utf8"),
 ].join("\n");
 const dictationDir = join(repoRoot, "src-tauri", "src", "coordinator");
-const dictationSource = [
-  "dictation.rs",
-  "dictation_preview.rs",
-  "dictation_device_ai.rs",
-  "dictation_wake_polish.rs",
-  "dictation_session.rs",
-  "dictation_embedded_submit.rs",
-  "dictation_embedded_stream.rs",
-]
-  .map((name) => readFileSync(join(dictationDir, name), "utf8"))
-  .join("\n");
+const dictationSource = readExpandedIncludes(join(dictationDir, "dictation.rs"));
 
 const processingStart = source.indexOf("pub fn send_recording_processing_state");
 const processingEnd = source.indexOf("pub fn send_ec11_rotation_mode", processingStart);
