@@ -825,6 +825,35 @@ fn take_terminal_wake_continuation(
     take_terminal_wake_continuation_at(inner, session_id, Instant::now())
 }
 
+fn terminal_wake_continuation_waiting_for_audio(inner: &Arc<Inner>) -> Option<SessionId> {
+    terminal_wake_continuation_waiting_for_audio_at(inner, Instant::now())
+}
+
+fn terminal_wake_continuation_waiting_for_audio_at(
+    inner: &Arc<Inner>,
+    now: Instant,
+) -> Option<SessionId> {
+    let (bound_session_id, expired) = {
+        let mut slot = inner.embedded_audio_terminal_wake_continuation.lock();
+        let Some(continuation) = slot.as_ref() else {
+            return None;
+        };
+        if continuation.expires_at <= now {
+            *slot = None;
+            (None, true)
+        } else {
+            (continuation.session_id, false)
+        }
+    };
+    if expired {
+        clear_automatic_wake_text_guard(inner);
+        return None;
+    }
+    let session_id = bound_session_id?;
+    let state = inner.state.lock();
+    (state.phase == SessionPhase::Starting && state.session_id == session_id).then_some(session_id)
+}
+
 fn take_terminal_wake_continuation_at(
     inner: &Arc<Inner>,
     session_id: SessionId,
@@ -2093,7 +2122,33 @@ async fn finish_end_session_after_stop_transition(
         ActiveAsr::Volcengine(asr) => {
             debug_assert!(uses_global_timeout);
             let timeout_duration = std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS);
-            let primary = match asr.send_last_frame().await {
+            let send_result = asr.send_last_frame().await;
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            let (primary, target_result) = match send_result {
+                Ok(()) => {
+                    // The target stream has already processed every complete
+                    // three-second chunk during capture. Close its tail while
+                    // the primary provider produces its final result instead
+                    // of serially paying both waits after the user stops.
+                    tokio::join!(
+                        async {
+                            match tokio::time::timeout(timeout_duration, asr.await_final_result())
+                                .await
+                            {
+                                Ok(result) => result.map_err(|error| (error, false)),
+                                Err(_) => Err((
+                                    crate::asr::volcengine::VolcengineASRError::FinalResultTimeout,
+                                    true,
+                                )),
+                            }
+                        },
+                        asr.await_target_speaker_final(),
+                    )
+                }
+                Err(error) => (Err((error, false)), Ok(None)),
+            };
+            #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
+            let primary = match send_result {
                 Ok(()) => {
                     // 添加全局超时保护：防止 await_final_result() 永远挂起
                     match tokio::time::timeout(timeout_duration, asr.await_final_result()).await {
@@ -2159,7 +2214,6 @@ async fn finish_end_session_after_stop_transition(
             };
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             {
-                let target_result = asr.await_target_speaker_final().await;
                 target_speaker_filter_required = asr.target_speaker_filter_was_required();
                 select_target_speaker_final(
                     primary_result,

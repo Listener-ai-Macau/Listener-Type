@@ -160,7 +160,12 @@ assertEqual(
 
 {
   const frames = buildPreviewRevealFrames('预览', '预览文字');
-  assertEqual(frames.length, 2, 'two appended characters should reveal separately');
+  assertEqual(frames.length, 1, 'two-character provider updates should render immediately');
+}
+
+{
+  const frames = buildPreviewRevealFrames('预览', '预览文字流');
+  assertEqual(frames.length, 3, 'three-character provider bursts should still reveal progressively');
   const intervalMs = previewRevealIntervalMs(frames.length);
   assertOk(intervalMs >= 16, 'reveal interval must remain visible for at least one frame');
   assertOk(

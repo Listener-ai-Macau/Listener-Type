@@ -817,6 +817,7 @@ impl EmbeddedStreamingDictation {
                                     result.transcript_chars
                                 );
                                 return Some(crate::wake_phrase::Match {
+                                    start_seconds: None,
                                     end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
                                     matched_keyword: None,
                                 });
@@ -839,6 +840,7 @@ impl EmbeddedStreamingDictation {
                                     };
                                     phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
                                     Some(crate::wake_phrase::Match {
+                                        start_seconds: None,
                                         end_seconds: refined_end,
                                         matched_keyword: None,
                                     })
@@ -1050,6 +1052,7 @@ impl EmbeddedStreamingDictation {
                                                             phrase.chars().count(),
                                                         );
                                                     Some(crate::wake_phrase::Match {
+                                                        start_seconds: None,
                                                         end_seconds,
                                                         matched_keyword: None,
                                                     })
@@ -1068,6 +1071,7 @@ impl EmbeddedStreamingDictation {
                                                         result.transcript_chars
                                                     );
                                                     Some(crate::wake_phrase::Match {
+                                                        start_seconds: None,
                                                         end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
                                                         matched_keyword: None,
                                                     })
@@ -1128,6 +1132,7 @@ impl EmbeddedStreamingDictation {
                 // enrolled voiceprint independently identifies the owner.
                 phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
                 wake_match = Some(crate::wake_phrase::Match {
+                    start_seconds: None,
                     end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
                     matched_keyword: None,
                 });
@@ -1274,7 +1279,11 @@ impl EmbeddedStreamingDictation {
                 post_wake_pcm_offset_bytes(wake_match.end_seconds, candidate.pcm.len());
             let post_wake_pcm_bytes = candidate.pcm.len().saturating_sub(post_wake_offset);
             let wake_anchor_offset =
-                wake_speaker_anchor_pcm_offset_bytes(wake_match.end_seconds, candidate.pcm.len());
+                wake_speaker_anchor_pcm_offset_bytes(
+                    wake_match.start_seconds,
+                    wake_match.end_seconds,
+                    candidate.pcm.len(),
+                );
             candidate.pcm.drain(..wake_anchor_offset);
             // Terminal accept often happens after the device already auto-stopped.
             // Opening a host dictation session with <1s post-wake scrap produces
@@ -1913,6 +1922,9 @@ impl EmbeddedStreamingDictation {
                                         show_early_wake_recording_capsule(inner, candidate);
                                     }
                                     Some(crate::wake_phrase::Match {
+                                        start_seconds: kws_hit
+                                            .as_ref()
+                                            .and_then(|found| found.start_seconds),
                                         end_seconds: refined_end,
                                         matched_keyword: kws_hit
                                             .and_then(|found| found.matched_keyword),
@@ -2298,7 +2310,11 @@ impl EmbeddedStreamingDictation {
             post_wake_pcm_offset_bytes(wake_match.end_seconds, candidate.pcm.len());
         let post_wake_pcm_bytes = candidate.pcm.len().saturating_sub(post_wake_offset);
         let wake_anchor_offset =
-            wake_speaker_anchor_pcm_offset_bytes(wake_match.end_seconds, candidate.pcm.len());
+            wake_speaker_anchor_pcm_offset_bytes(
+                wake_match.start_seconds,
+                wake_match.end_seconds,
+                candidate.pcm.len(),
+            );
         candidate.pcm.drain(..wake_anchor_offset);
         let capsule_request_ms = candidate
             .early_capsule_request_ms

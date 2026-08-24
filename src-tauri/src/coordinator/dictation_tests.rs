@@ -1645,6 +1645,87 @@ fn settled_target_wall_clock_does_not_cut_a_fresh_unattributed_owner_tail() {
 }
 
 #[test]
+fn settled_target_wall_clock_rearms_on_fresh_local_owner_boundary() {
+    // Installed multi-interference session c96a7159: cloud diarization stayed
+    // at 3182 ms while the enrolled local verifier confirmed the owner through
+    // 4500 ms. At local audio 4600 ms the old wall clock was already due and
+    // stopped in the middle of the second sentence.
+    let started = std::time::Instant::now();
+    let first_owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(3_182),
+        provider_audio_duration_ms: Some(3_500),
+        audio_duration_ms: Some(3_600),
+        local_speech_end_ms: Some(3_600),
+        local_target_speech_end_ms: Some(2_900),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(3_182),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.note_visible_body_boundary(true, 8, started);
+    let obsolete_generation = clock
+        .observe(&first_owner, true, started)
+        .expect("first owner boundary arms endpoint");
+
+    let continuing_owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(4_300),
+        audio_duration_ms: Some(4_600),
+        local_speech_end_ms: Some(4_600),
+        local_target_speech_end_ms: Some(4_500),
+        target_activity_advanced: false,
+        ..first_owner
+    };
+    let current_generation = clock
+        .observe(
+            &continuing_owner,
+            true,
+            started + std::time::Duration::from_millis(965),
+        )
+        .expect("fresh local Target boundary must rearm endpoint");
+    assert_ne!(current_generation, obsolete_generation);
+    assert!(clock
+        .due_update(
+            obsolete_generation,
+            started + std::time::Duration::from_millis(1_000),
+            900,
+        )
+        .is_none());
+    assert!(clock
+        .due_update(
+            current_generation,
+            started + std::time::Duration::from_millis(1_864),
+            900,
+        )
+        .is_none());
+    assert!(clock
+        .due_update(
+            current_generation,
+            started + std::time::Duration::from_millis(1_865),
+            900,
+        )
+        .is_some());
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+#[test]
+fn heavy_wake_separation_requires_independent_partial_phrase_evidence() {
+    assert!(!super::target_wake_extraction_has_weak_phrase_evidence(
+        false, 0,
+    ));
+    assert!(super::target_wake_extraction_has_weak_phrase_evidence(
+        true, 0,
+    ));
+    assert!(super::target_wake_extraction_has_weak_phrase_evidence(
+        false, 1,
+    ));
+}
+
+#[test]
 fn installed_session_531_terminal_preview_does_not_cut_continuing_enrolled_owner() {
     let started = std::time::Instant::now();
     let owner = crate::asr::volcengine::TargetSpeakerUpdate {
@@ -3022,6 +3103,62 @@ fn terminal_wake_continuation_expiry_or_session_mismatch_cannot_leak() {
 }
 
 #[test]
+fn bound_terminal_wake_continuation_routes_next_device_segment_to_body() {
+    // Installed session ca5c63d3 reproduced the regression: terminal wake
+    // opened a visible Starting session, but the next VoiceActivation segment
+    // was buffered as a second wake candidate and the capsule hung for 25s.
+    let coordinator = Coordinator::new();
+    let started = Instant::now();
+    let session_id = new_session_id();
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = session_id;
+        state.phase = SessionPhase::Starting;
+    }
+    assert!(super::stage_terminal_wake_continuation_at(
+        &coordinator.inner,
+        vec![3u8; 32_000],
+        0.8,
+        "开始录音".into(),
+        started
+    ));
+    assert!(super::bind_terminal_wake_continuation_session_at(
+        &coordinator.inner,
+        session_id,
+        started + Duration::from_millis(1)
+    ));
+    assert_eq!(
+        super::terminal_wake_continuation_waiting_for_audio_at(
+            &coordinator.inner,
+            started + Duration::from_millis(2)
+        ),
+        Some(session_id)
+    );
+
+    coordinator.inner.state.lock().phase = SessionPhase::Idle;
+    assert_eq!(
+        super::terminal_wake_continuation_waiting_for_audio_at(
+            &coordinator.inner,
+            started + Duration::from_millis(3)
+        ),
+        None,
+        "only the bound Starting session may claim the next device segment"
+    );
+}
+
+#[test]
+fn terminal_wake_body_route_precedes_voice_activation_candidate_classification() {
+    let source = include_str!("dictation_embedded_candidate_begin.rs");
+    let route = source
+        .find("terminal_wake_continuation_waiting_for_audio")
+        .expect("terminal continuation body route");
+    let classify = source
+        .find("buffered_speaker_candidate_kind")
+        .expect("ordinary VoiceActivation candidate classifier");
+    assert!(route < classify);
+}
+
+#[test]
 fn terminal_wake_body_guard_is_bound_before_recording_capsule_emit() {
     let source = include_str!("hotkey_device_runtime.rs");
     let start = source
@@ -3517,11 +3654,13 @@ fn long_ambient_wake_candidate_rotates_with_overlap_until_phrase_hit() {
 #[test]
 fn rolling_wake_match_keeps_absolute_candidate_boundary() {
     let found = crate::wake_phrase::Match {
+        start_seconds: Some(0.10),
         end_seconds: 0.75,
         matched_keyword: Some("开始录音".into()),
     };
     let adjusted = super::offset_streaming_wake_match(Some(found), 1_500 * 32)
         .expect("rolling detector match");
+    assert!((adjusted.start_seconds.expect("keyword start") - 1.60).abs() < f32::EPSILON);
     assert!((adjusted.end_seconds - 2.25).abs() < f32::EPSILON);
 }
 
@@ -5504,25 +5643,39 @@ fn terminal_consumes_the_running_confirmation_before_applying_absent_skip() {
 }
 
 #[test]
-fn automatic_wake_discards_pre_wake_pcm_for_local_transcript() {
-    // Preserve only a bounded wake-speaker anchor, never the long ambient prefix.
+fn automatic_wake_keeps_exact_keyword_segment_but_bounds_local_transcript_fallback() {
+    // Keyword-model matches preserve their known segment start so the cloud
+    // does not begin halfway through the wake phrase and swallow the first body
+    // words. Local-transcript recovery has no start boundary and must retain
+    // only the historical bounded tail.
     assert_eq!(super::post_wake_pcm_offset_bytes(0.0, 32_000), 0);
     assert_eq!(
         super::post_wake_pcm_offset_bytes(10.24, 400_000),
         ((10.24_f32 + 0.12) * 32_000.0) as usize
     );
-    assert_eq!(super::wake_speaker_anchor_pcm_offset_bytes(0.76, 64_000), 0);
     assert_eq!(
-        super::wake_speaker_anchor_pcm_offset_bytes(3.255, 128_000),
+        super::wake_speaker_anchor_pcm_offset_bytes(None, 0.76, 64_000),
+        0
+    );
+    assert_eq!(
+        super::wake_speaker_anchor_pcm_offset_bytes(None, 3.255, 128_000),
         ((3.255_f32 * 32_000.0).round() as usize - 800 * 32) & !1usize
+    );
+    assert_eq!(
+        super::wake_speaker_anchor_pcm_offset_bytes(Some(0.24), 1.84, 100_000),
+        120 * 32
+    );
+    assert_eq!(
+        super::wake_speaker_anchor_pcm_offset_bytes(Some(2.0), 1.84, 100_000),
+        ((1.84_f32 * 32_000.0).round() as usize - 800 * 32) & !1usize
     );
     let stream = include_str!("dictation_embedded_stream.rs");
     assert!(
-        stream.contains("wake_speaker_anchor_pcm_offset_bytes(wake_match.end_seconds")
+        stream.contains("wake_match.start_seconds,")
             && !stream.contains(
                 "phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::KeywordModel {\n                    ((wake_match.end_seconds"
             ),
-        "LocalTranscript and KeywordModel must share the bounded wake-speaker anchor"
+        "keyword start must reach the ASR anchor without reintroducing the old phrase-signal branch"
     );
 }
 

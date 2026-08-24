@@ -389,6 +389,10 @@ struct SyncState {
     owner_isolation_frozen: bool,
     owner_isolation_ceiling_text: String,
     owner_isolation_ceiling_segments: Vec<TranscriptSegment>,
+    /// Final provider text attributed only to the wake-bound speaker when the
+    /// same final also contains a distinct stable speaker. This is a safe
+    /// fallback if physical separation drops a large owner tail.
+    distinct_speaker_target_final_text: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -863,7 +867,18 @@ fn sequential_speaker_split_gap_is_owner_safe_internal(
         .iter()
         .filter_map(|utterance| utterance.get("text").and_then(Value::as_str))
         .collect::<String>();
-    if normalize(&attributed_target_text) != normalized_target {
+    let normalized_attributed_target = normalize(&attributed_target_text);
+    let original_target_only_shape = normalized_attributed_target == normalized_target;
+    let response_local_body_alias_shape = normalized_target
+        .starts_with(&normalized_attributed_target)
+        && normalized_attributed.starts_with(&normalized_target);
+    // The response-local immediate-body alias may already have admitted the
+    // first safe split cluster. In that shape `target_text` is a contiguous
+    // prefix longer than the provider's original wake-cluster text. Preserve
+    // the existing all-split local-evidence validation below so later clusters
+    // (and a final unsegmented suffix) are recovered only when every window is
+    // still owned and no NonTarget veto exists.
+    if !original_target_only_shape && !response_local_body_alias_shape {
         return false;
     }
     let split_utterances_are_owner_safe = split_utterances.iter().all(|utterance| {
@@ -1158,7 +1173,9 @@ struct SpeakerFilteredResult {
     result: Value,
     optimistic_result: Value,
     speaker_info_present: bool,
+    response_local_body_alias_present: bool,
     stable_non_target_utterance_present: bool,
+    stable_other_speaker_present: bool,
     target_speech_end_ms: Option<u64>,
     wake_target_speech_end_ms: Option<u64>,
     stable_attributed_speech_end_ms: Option<u64>,
@@ -1747,6 +1764,41 @@ fn utterance_belongs_to_verified_target(
         ))
 }
 
+fn utterance_belongs_to_verified_target_or_body_alias(
+    utterance: &Value,
+    target_speaker_id: &str,
+    immediate_body_speaker_id: Option<&str>,
+    local_speaker_tracking_enabled: bool,
+    local_speaker_evidence: &[LocalSpeakerEvidence],
+    wake_speaker_phrase: Option<&str>,
+    wake_speaker_end_ms: Option<u64>,
+    allow_immediate_wake_continuation: bool,
+    wake_owner_verified: bool,
+    local_speaker_profile_adaptive: bool,
+    confirmed_non_target_speech_end_ms: Option<u64>,
+) -> bool {
+    let utterance_speaker = utterance_speaker_id(utterance);
+    let body_alias_matches =
+        immediate_body_speaker_id.is_some_and(|alias| utterance_speaker.as_deref() == Some(alias));
+    let effective_target = if body_alias_matches {
+        immediate_body_speaker_id.unwrap_or(target_speaker_id)
+    } else {
+        target_speaker_id
+    };
+    utterance_belongs_to_verified_target(
+        utterance,
+        effective_target,
+        local_speaker_tracking_enabled,
+        local_speaker_evidence,
+        wake_speaker_phrase,
+        wake_speaker_end_ms,
+        allow_immediate_wake_continuation && !body_alias_matches,
+        wake_owner_verified,
+        local_speaker_profile_adaptive,
+        confirmed_non_target_speech_end_ms,
+    )
+}
+
 fn filter_result_to_target_speaker_with_local_evidence(
     result: &Value,
     target_speaker_id: &mut Option<String>,
@@ -1837,10 +1889,9 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
     let wake_speaker_end_ms = observed_wake_speaker_end_ms
         .or(fallback_wake_speaker_end_ms)
         .or(prior_wake_speaker_end_ms);
-    // Only the rolling-response shape needs the continuity exception: the
+    // The rolling-response shape needs the continuity exception when the
     // verified wake was present in an earlier packet and this packet contains
-    // no stable row for that cluster. Full multi-utterance responses continue
-    // through the stricter existing A/B/A recovery path.
+    // no stable row for that cluster.
     let allow_immediate_wake_continuation = prior_wake_speaker_end_ms.is_some()
         && target_speaker_id.as_deref().is_some_and(|target| {
             !utterances.iter().any(|utterance| {
@@ -1849,15 +1900,52 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
             })
         });
 
+    // A full final response can contain both the short physical-wake cluster
+    // and a new cluster for the same uninterrupted owner body. Keep that new
+    // id as a response-local alias only: the wake must have been verified, the
+    // boundary must be tightly contiguous, and local identity evidence for the
+    // first body utterance must still retain the owner. Subsequent utterances
+    // with that same alias are independently checked against local evidence.
+    // Never persist the alias, so an ordinary later speaker-id change cannot
+    // silently replace the wake anchor in following provider responses.
+    let immediate_body_speaker_id = if wake_owner_verified && local_speaker_tracking_enabled {
+        target_speaker_id.as_deref().and_then(|target| {
+            let wake_end_ms = wake_speaker_end_ms?;
+            utterances
+                .iter()
+                .filter(|utterance| utterance_is_stable(utterance))
+                .filter_map(|utterance| {
+                    let speaker_id = utterance_speaker_id(utterance)?;
+                    if speaker_id == target {
+                        return None;
+                    }
+                    let start_ms = utterance_start_ms(utterance)?;
+                    (start_ms >= wake_end_ms.saturating_sub(200)
+                        && start_ms
+                            <= wake_end_ms.saturating_add(MAX_WAKE_BODY_CLUSTER_SPLIT_GAP_MS)
+                        && local_evidence_supports_cloud_target(
+                            utterance,
+                            local_speaker_evidence,
+                            wake_speaker_phrase,
+                        ))
+                    .then_some(speaker_id)
+                })
+                .next()
+        })
+    } else {
+        None
+    };
+
     let selected = target_speaker_id
         .as_deref()
         .map(|target| {
             utterances
                 .iter()
                 .filter(|utterance| {
-                    utterance_belongs_to_verified_target(
+                    utterance_belongs_to_verified_target_or_body_alias(
                         utterance,
                         target,
+                        immediate_body_speaker_id.as_deref(),
                         local_speaker_tracking_enabled,
                         local_speaker_evidence,
                         wake_speaker_phrase,
@@ -1903,9 +1991,10 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
         utterances.iter().any(|utterance| {
             utterance_is_stable(utterance)
                 && utterance_speaker_id(utterance).is_some()
-                && !utterance_belongs_to_verified_target(
+                && !utterance_belongs_to_verified_target_or_body_alias(
                     utterance,
                     target,
+                    immediate_body_speaker_id.as_deref(),
                     local_speaker_tracking_enabled,
                     local_speaker_evidence,
                     wake_speaker_phrase,
@@ -1945,9 +2034,10 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
         .iter()
         .filter(|utterance| {
             if target_speaker_id.as_deref().is_some_and(|target| {
-                utterance_belongs_to_verified_target(
+                utterance_belongs_to_verified_target_or_body_alias(
                     utterance,
                     target,
+                    immediate_body_speaker_id.as_deref(),
                     local_speaker_tracking_enabled,
                     local_speaker_evidence,
                     wake_speaker_phrase,
@@ -2045,7 +2135,9 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
         result: filtered_result,
         optimistic_result,
         speaker_info_present,
+        response_local_body_alias_present: immediate_body_speaker_id.is_some(),
         stable_non_target_utterance_present: stable_same_cluster_owner_absence_present,
+        stable_other_speaker_present,
         target_speech_end_ms,
         wake_target_speech_end_ms: observed_wake_speaker_end_ms.or(prior_wake_speaker_end_ms),
         stable_attributed_speech_end_ms,
@@ -2174,32 +2266,92 @@ fn target_speaker_final_required(
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+fn target_speaker_filter_required_after_finish(
+    filter_required: bool,
+    clean_primary_certified: bool,
+) -> bool {
+    filter_required && !clean_primary_certified
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+fn recover_incomplete_separator_final_from_distinct_provider_track(
+    separator: Result<Option<RawTranscript>, String>,
+    provider_target: Option<RawTranscript>,
+) -> Result<Option<RawTranscript>, String> {
+    let Some(provider_target) = provider_target.filter(|target| !target.text.trim().is_empty())
+    else {
+        return separator;
+    };
+    match separator {
+        Ok(Some(target)) => {
+            let target_chars = spoken_content_len(&target.text);
+            let provider_chars = spoken_content_len(&provider_target.text);
+            if target_chars == 0
+                || target_chars.saturating_mul(5) < provider_chars.saturating_mul(4)
+            {
+                log::warn!(
+                    "[target-speaker] separated final lost owner coverage; using distinct provider target track target_chars={} provider_target_chars={}",
+                    target_chars,
+                    provider_chars
+                );
+                Ok(Some(provider_target))
+            } else {
+                Ok(Some(target))
+            }
+        }
+        Ok(None) => Ok(None),
+        Err(err) => {
+            log::warn!(
+                "[target-speaker] separator final failed but distinct provider target track is available; using provider target: {err}"
+            );
+            Ok(Some(provider_target))
+        }
+    }
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 fn degraded_owner_tail_suggests_interference(evidence: &[LocalSpeakerEvidence]) -> bool {
     const TAIL_WINDOWS: usize = 4;
+    // The first two observations still contain the accepted wake phrase. An
+    // enrolled wake-phrase embedding naturally scores those windows much
+    // higher than arbitrary body speech. Treating that phrase-specific peak as
+    // the body baseline made a completely steady owner body look like a late
+    // speaker change and synchronously ran the separator during finalization.
+    const WAKE_ANCHOR_WINDOWS: usize = 2;
     const MIN_BASELINE_SCORE: f32 = 0.60;
     const REPEATED_DROP: f32 = 0.12;
     const SEVERE_DROP: f32 = 0.18;
     const MIN_DEGRADED_WINDOWS: usize = 3;
 
-    if evidence.len() < TAIL_WINDOWS + 3 {
+    let Some(body_evidence) = evidence.get(WAKE_ANCHOR_WINDOWS..) else {
+        return false;
+    };
+    if body_evidence.len() < TAIL_WINDOWS + 3 {
         return false;
     }
-    let tail_start = evidence.len() - TAIL_WINDOWS;
-    let baseline_peak = evidence[..tail_start]
+    let tail_start = body_evidence.len() - TAIL_WINDOWS;
+    let mut baseline_scores = body_evidence[..tail_start]
         .iter()
         .map(|sample| sample.classification.score())
-        .fold(0.0f32, f32::max);
-    if baseline_peak < MIN_BASELINE_SCORE {
+        .collect::<Vec<_>>();
+    baseline_scores.sort_by(f32::total_cmp);
+    // Use the upper quartile rather than a single peak. One unusually strong
+    // phrase/window must not turn normal cross-phrase score variation into an
+    // interference verdict, while a sustained late collapse from a stable
+    // body baseline still triggers the separator.
+    let reference_index = baseline_scores.len().saturating_sub(1) * 3 / 4;
+    let baseline_reference = baseline_scores[reference_index];
+    if baseline_reference < MIN_BASELINE_SCORE {
         return false;
     }
-    let tail = &evidence[tail_start..];
+    let tail = &body_evidence[tail_start..];
     let degraded = tail
         .iter()
-        .filter(|sample| sample.classification.score() + REPEATED_DROP <= baseline_peak)
+        .filter(|sample| sample.classification.score() + REPEATED_DROP <= baseline_reference)
         .count();
     let severe = tail
         .iter()
-        .any(|sample| sample.classification.score() + SEVERE_DROP <= baseline_peak);
+        .any(|sample| sample.classification.score() + SEVERE_DROP <= baseline_reference);
     degraded >= MIN_DEGRADED_WINDOWS && severe
 }
 
@@ -2348,7 +2500,41 @@ impl VolcengineStreamingASR {
             degraded_owner_tail_seen
         );
         match tokio::time::timeout(Duration::from_secs(12), stream.finish()).await {
-            Ok(result) => result,
+            Ok(result) => {
+                // `TargetSpeakerStream::finish()` returns `Ok(None)` only when
+                // the separator measured a clean owner stream and deliberately
+                // kept the low-latency primary ASR. A degraded tail score can
+                // trigger this final check in an otherwise clean session; do
+                // not leave `filter_required` armed and erase that certified
+                // primary transcript in the coordinator.
+                let clean_primary_certified = matches!(&result, Ok(None));
+                let filter_required =
+                    target_speaker_filter_required_after_finish(true, clean_primary_certified);
+                self.target_speaker_filter_required
+                    .store(filter_required, Ordering::SeqCst);
+                if clean_primary_certified {
+                    log::info!(
+                        "[target-speaker] clean primary certified by separator; preserving primary final"
+                    );
+                }
+                let provider_target = {
+                    let state = self.state.lock();
+                    state
+                        .distinct_speaker_target_final_text
+                        .clone()
+                        .map(|text| RawTranscript {
+                            text,
+                            duration_ms: state
+                                .start
+                                .map(|start| start.elapsed().as_millis() as u64)
+                                .unwrap_or_default(),
+                        })
+                };
+                recover_incomplete_separator_final_from_distinct_provider_track(
+                    result,
+                    provider_target,
+                )
+            }
             Err(_) => {
                 stream.cancel();
                 Err("target-speaker owner-only stream timed out".to_string())
@@ -3172,6 +3358,7 @@ impl VolcengineStreamingASR {
             st.owner_isolation_frozen = false;
             st.owner_isolation_ceiling_text.clear();
             st.owner_isolation_ceiling_segments.clear();
+            st.distinct_speaker_target_final_text = None;
             st.speaker_info_present = false;
             st.pending_unattributed_text.clear();
             log::info!(
@@ -3590,6 +3777,26 @@ impl VolcengineStreamingASR {
             }
             if filtered.stable_non_target_utterance_present {
                 freeze_owner_isolation_at_filtered_result(&mut state, &filtered.result);
+            }
+            if has_final
+                && (filtered.stable_other_speaker_present
+                    || filtered.response_local_body_alias_present)
+            {
+                let target_text = filtered
+                    .result
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .trim();
+                if !target_text.is_empty() {
+                    state.distinct_speaker_target_final_text = Some(target_text.to_string());
+                    if filtered.response_local_body_alias_present {
+                        log::info!(
+                            "[target-speaker] verified contiguous body alias retained as provider owner track chars={}",
+                            target_text.chars().count()
+                        );
+                    }
+                }
             }
             let previous_end_ms = state.target_speech_end_ms;
             let previous_pending_text = std::mem::take(&mut state.pending_unattributed_text);
@@ -4460,6 +4667,55 @@ mod tests {
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     #[test]
+    fn clean_separator_result_disarms_required_filter_without_weakening_fail_closed_paths() {
+        assert!(!target_speaker_filter_required_after_finish(true, true));
+        assert!(target_speaker_filter_required_after_finish(true, false));
+        assert!(!target_speaker_filter_required_after_finish(false, false));
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn incomplete_separator_final_uses_explicit_distinct_provider_target_track() {
+        let selected = recover_incomplete_separator_final_from_distinct_provider_track(
+            Ok(Some(RawTranscript {
+                text: "开始录音现在是主人第一句".into(),
+                duration_ms: 11_440,
+            })),
+            Some(RawTranscript {
+                text: "开始录音现在是主人第一句现在继续说主人第二句最后这句话也不能丢".into(),
+                duration_ms: 11_440,
+            }),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            selected.text,
+            "开始录音现在是主人第一句现在继续说主人第二句最后这句话也不能丢"
+        );
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn complete_separator_final_remains_authoritative_over_provider_track() {
+        let selected = recover_incomplete_separator_final_from_distinct_provider_track(
+            Ok(Some(RawTranscript {
+                text: "开始录音这是主人完整说的话".into(),
+                duration_ms: 7_462,
+            })),
+            Some(RawTranscript {
+                text: "开始录音这是主人完整说的话啊".into(),
+                duration_ms: 7_462,
+            }),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(selected.text, "开始录音这是主人完整说的话");
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
     fn sustained_tail_score_collapse_triggers_late_overlap_filter_only() {
         fn timeline(scores: &[f32]) -> Vec<LocalSpeakerEvidence> {
             scores
@@ -4489,6 +4745,34 @@ mod tests {
         ]);
         assert!(!degraded_owner_tail_suggests_interference(&clean));
         assert!(degraded_owner_tail_suggests_interference(&late_overlap));
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn wake_phrase_score_spike_does_not_force_separator_for_steady_owner_body() {
+        // Installed session 784214e1: the wake phrase scored 0.93/0.84, while
+        // the same owner's free-form body stayed steadily around 0.4-0.53.
+        // Comparing the tail with the wake-specific peak delayed Done by the
+        // 1.3 s separator tail inference even though no non-target or physical
+        // overlap evidence existed.
+        let evidence = [
+            0.935, 0.845, 0.445, 0.464, 0.444, 0.483, 0.486, 0.479, 0.446, 0.412, 0.497, 0.528,
+            0.399, 0.409, 0.451, 0.461, 0.465, 0.509, 0.484,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, score)| LocalSpeakerEvidence {
+            audio_end_ms: 1_200 + index as u64 * 400,
+            classification: if score >= 0.55 {
+                crate::speaker_verification::SessionSpeakerClassification::Target { score }
+            } else {
+                crate::speaker_verification::SessionSpeakerClassification::Uncertain { score }
+            },
+            stable_target: true,
+        })
+        .collect::<Vec<_>>();
+
+        assert!(!degraded_owner_tail_suggests_interference(&evidence));
     }
 
     #[test]
@@ -6871,6 +7155,203 @@ mod tests {
             None,
         );
         assert_eq!(rejected.result["text"], "");
+    }
+
+    #[test]
+    fn installed_session_353_keeps_verified_owner_after_full_final_cluster_split() {
+        // Installed session 353 returned the physical wake as speaker 0 and
+        // split the uninterrupted owner body into two stable speaker-1 rows.
+        // The first body row began only 360 ms after the wake ended, while the
+        // local verifier retained the owner for the complete body. Pinning the
+        // provider id to speaker 0 reduced the final to the wake phrase and the
+        // subsequent wake-prefix removal produced an empty transcript.
+        let wake = "开始录音。";
+        let body_first = "我现在说的这一整段正文不能因为云端换了编号就被删除。";
+        let body_last = "停顿以后最后这一句话也必须完整保留。";
+        let result = json!({
+            "text": format!("{wake}{body_first}{body_last}"),
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 142,
+                    "end_time": 1_022,
+                    "text": wake
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 1_382,
+                    "end_time": 6_502,
+                    "text": body_first
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 6_502,
+                    "end_time": 10_732,
+                    "text": body_last
+                }
+            ]
+        });
+        let evidence = vec![
+            LocalSpeakerEvidence {
+                audio_end_ms: 1_300,
+                classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                    score: 0.73,
+                },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 2_300,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.42,
+                    },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 4_200,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.38,
+                    },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 6_100,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.41,
+                    },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 7_600,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.36,
+                    },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 10_200,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                        score: 0.40,
+                    },
+                stable_target: true,
+            },
+        ];
+        let mut target = Some("0".to_string());
+
+        let filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &result,
+            &mut target,
+            true,
+            &evidence,
+            Some("开始录音"),
+            Some(1_022),
+            true,
+            false,
+            None,
+        );
+
+        assert_eq!(target.as_deref(), Some("0"), "wake anchor stays persistent");
+        assert_eq!(
+            filtered.result["text"],
+            format!("{wake}{body_first}{body_last}")
+        );
+        assert_eq!(filtered.target_speech_end_ms, Some(10_732));
+        assert!(!filtered.stable_other_speaker_present);
+        assert!(filtered.response_local_body_alias_present);
+
+        #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+        {
+            let separated_wake_only = RawTranscript {
+                text: wake.to_string(),
+                duration_ms: 10_732,
+            };
+            let provider_owner_track = RawTranscript {
+                text: filtered.result["text"]
+                    .as_str()
+                    .expect("filtered owner text")
+                    .to_string(),
+                duration_ms: 10_732,
+            };
+            let recovered = recover_incomplete_separator_final_from_distinct_provider_track(
+                Ok(Some(separated_wake_only)),
+                Some(provider_owner_track),
+            )
+            .expect("provider owner track recovery succeeds")
+            .expect("provider owner track remains available");
+            assert_eq!(recovered.text, format!("{wake}{body_first}{body_last}"));
+        }
+    }
+
+    #[test]
+    fn full_final_cluster_alias_requires_tight_boundary_and_retained_owner() {
+        let make_result = |body_start_ms| {
+            json!({
+                "text": "开始录音。旁人后来才说话。",
+                "utterances": [
+                    {
+                        "additions": { "speaker_id": "0", "source": "two_pass" },
+                        "definite": true,
+                        "start_time": 100,
+                        "end_time": 1_000,
+                        "text": "开始录音。"
+                    },
+                    {
+                        "additions": { "speaker_id": "1", "source": "two_pass" },
+                        "definite": true,
+                        "start_time": body_start_ms,
+                        "end_time": 4_000,
+                        "text": "旁人后来才说话。"
+                    }
+                ]
+            })
+        };
+        let retained_owner = vec![LocalSpeakerEvidence {
+            audio_end_ms: 2_600,
+            classification: crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                score: 0.42,
+            },
+            stable_target: true,
+        }];
+        let mut target = Some("0".to_string());
+        let late = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &make_result(1_700),
+            &mut target,
+            true,
+            &retained_owner,
+            Some("开始录音"),
+            Some(1_000),
+            true,
+            false,
+            None,
+        );
+        assert_eq!(late.result["text"], "开始录音。");
+
+        let departed_owner = vec![LocalSpeakerEvidence {
+            audio_end_ms: 2_000,
+            classification: crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                score: 0.12,
+            },
+            stable_target: false,
+        }];
+        let contiguous = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &make_result(1_200),
+            &mut target,
+            true,
+            &departed_owner,
+            Some("开始录音"),
+            Some(1_000),
+            true,
+            false,
+            Some(2_000),
+        );
+        assert_eq!(contiguous.result["text"], "开始录音。");
     }
 
     #[test]
@@ -9392,22 +9873,35 @@ mod tests {
         }
         let finalization_started = Instant::now();
         asr.send_last_frame().await.expect("send final frame");
-        let final_result = asr
-            .await_final_result_with_timeout(Duration::from_secs(20))
-            .await
-            .expect("receive filtered final");
-        let primary_final_elapsed_ms = finalization_started.elapsed().as_millis();
-        let target_result = asr
-            .await_target_speaker_final()
-            .await
-            .expect("receive target-speaker selection result");
-        let target_final_elapsed_ms = finalization_started.elapsed().as_millis();
+        let (primary, target) = tokio::join!(
+            async {
+                let result = asr
+                    .await_final_result_with_timeout(Duration::from_secs(20))
+                    .await
+                    .expect("receive filtered final");
+                (result, finalization_started.elapsed().as_millis())
+            },
+            async {
+                let result = asr
+                    .await_target_speaker_final()
+                    .await
+                    .expect("receive target-speaker selection result");
+                (result, finalization_started.elapsed().as_millis())
+            },
+        );
+        let (final_result, primary_final_elapsed_ms) = primary;
+        let (target_result, target_final_elapsed_ms) = target;
         let selected_text = target_result
             .as_ref()
             .map(|target| target.text.as_str())
             .unwrap_or(final_result.text.as_str())
             .to_string();
-        let passed = selected_text.trim() == expected_text.trim()
+        let spoken = |text: &str| {
+            text.chars()
+                .filter(|character| character.is_alphanumeric())
+                .collect::<String>()
+        };
+        let passed = spoken(&selected_text) == spoken(&expected_text)
             && target_result.is_some() == filter_expected;
         let state = asr.state.lock();
         let report = serde_json::json!({

@@ -33,6 +33,19 @@ const ENROLLMENT_FRAMES: usize = 300;
 const FBANK_BINS: usize = 80;
 pub(crate) const SPEAKER_EMBEDDING_DIMENSION: usize = 192;
 const STRONG_INTERFERENCE_RESIDUAL_RATIO: f64 = 0.03;
+// The separated waveform has scale/sign ambiguity. Restore it to the mixture
+// projection before ASR, but keep a hard ceiling so a nearly-silent target
+// estimate cannot amplify separator residue into speech-like noise.
+const MAX_ALIGNMENT_GAIN: f64 = 4.0;
+// Public cross-utterance Chinese probes put separated owner chunks at
+// similarity 0.600-0.818, while every non-owner-only tail stays at
+// 0.184-0.323. Installed-device owner evidence has dipped to 0.361, so the
+// hard mismatch ceiling deliberately stops at 0.35. The wider 0.35-0.42 band
+// still requires low separator energy; that keeps an uncertain owner chunk
+// audible instead of reviving the historic tail-truncation regression.
+const EXTRACTED_HARD_NON_TARGET_MAX_SIMILARITY: f32 = 0.35;
+const EXTRACTED_SOFT_NON_TARGET_MAX_SIMILARITY: f32 = 0.42;
+const EXTRACTED_NON_TARGET_MAX_ENERGY_RATIO: f64 = 0.025;
 const SEPARATOR_MODEL_FILE_NAME: &str = "wesep-bsrnn-voicefilter-3s-int8.onnx";
 const ENCODER_MODEL_FILE_NAME: &str = "wesep-speaker-encoder-int8.onnx";
 pub(crate) const SEPARATOR_MODEL_SHA256: &str =
@@ -280,6 +293,38 @@ fn samples_to_pcm(samples: &[f32], valid_samples: usize) -> Vec<u8> {
         .collect()
 }
 
+fn bounded_alignment_gain(gain: f64) -> f64 {
+    if gain.is_finite() {
+        gain.clamp(-MAX_ALIGNMENT_GAIN, MAX_ALIGNMENT_GAIN)
+    } else {
+        1.0
+    }
+}
+
+fn average_speaker_embeddings(embeddings: &[Vec<f32>]) -> Result<Vec<f32>, String> {
+    if embeddings.is_empty()
+        || embeddings
+            .iter()
+            .any(|embedding| embedding.len() != SPEAKER_EMBEDDING_DIMENSION)
+    {
+        return Err("target-speaker enrollment produced an invalid embedding bank".to_string());
+    }
+    let mut average = vec![0.0f32; SPEAKER_EMBEDDING_DIMENSION];
+    for embedding in embeddings {
+        if embedding.iter().any(|value| !value.is_finite()) {
+            return Err("target-speaker enrollment produced a non-finite embedding".to_string());
+        }
+        for (mean, value) in average.iter_mut().zip(embedding) {
+            *mean += *value;
+        }
+    }
+    let divisor = embeddings.len() as f32;
+    for value in &mut average {
+        *value /= divisor;
+    }
+    Ok(average)
+}
+
 pub(crate) struct TargetSpeakerExtractor {
     speaker_embedding: Vec<f32>,
 }
@@ -288,6 +333,59 @@ pub(crate) struct ExtractedChunk {
     pub(crate) pcm: Vec<u8>,
     pub(crate) residual_energy: f64,
     pub(crate) mixture_energy: f64,
+    pub(crate) target_to_mix_energy: f64,
+    pub(crate) target_similarity: Option<f32>,
+}
+
+impl ExtractedChunk {
+    fn confidently_non_target(&self) -> bool {
+        self.target_similarity.is_some_and(|similarity| {
+            similarity < EXTRACTED_HARD_NON_TARGET_MAX_SIMILARITY
+                || (similarity < EXTRACTED_SOFT_NON_TARGET_MAX_SIMILARITY
+                    && self.target_to_mix_energy < EXTRACTED_NON_TARGET_MAX_ENERGY_RATIO)
+        })
+    }
+
+    fn suppress_confident_non_target(&mut self, context: &str) -> bool {
+        if !self.confidently_non_target() {
+            return false;
+        }
+        log::info!(
+            "[target-speaker] suppressing confident non-target extracted chunk context={context} valid_ms={} target_similarity={:?} target_to_mix_energy={:.6}",
+            self.pcm.len() / 32,
+            self.target_similarity,
+            self.target_to_mix_energy,
+        );
+        self.pcm.fill(0);
+        true
+    }
+
+    fn supports_physical_interference_measurement(&self) -> bool {
+        // Residual energy only means "another physical source" when the
+        // separator first produced a credible estimate of the enrolled owner.
+        // If the target branch is near-silent or embeds as a different speaker,
+        // mixture-minus-target is merely separator failure and naturally looks
+        // like a large residual. Installed session 486 exposed that exact false
+        // positive: every extracted owner chunk was suppressed, yet a 14.9%
+        // residual opened the authoritative secondary ASR and erased a clean
+        // 53-character primary transcript with an empty result.
+        self.target_similarity.is_some() && !self.confidently_non_target()
+    }
+}
+
+fn accumulate_physical_interference_evidence(
+    extracted: &ExtractedChunk,
+    residual_energy: &mut f64,
+    mixture_energy: &mut f64,
+    evidence_chunks: &mut usize,
+) -> bool {
+    if !extracted.supports_physical_interference_measurement() {
+        return false;
+    }
+    *residual_energy += extracted.residual_energy;
+    *mixture_energy += extracted.mixture_energy;
+    *evidence_chunks += 1;
+    true
 }
 
 pub(crate) struct ExtractedWakeCandidate {
@@ -391,15 +489,32 @@ impl TargetSpeakerExtractor {
         // The checkpoint can return an arbitrary target scale/sign. Fit one
         // scalar before measuring what the owner estimate cannot explain.
         let gain = dot / target_energy.max(1e-12);
+        let output_gain = bounded_alignment_gain(gain);
         let residual_energy = mixture
             .iter()
             .zip(target)
             .map(|(left, right)| (*left as f64 - gain * *right as f64).powi(2))
             .sum::<f64>();
+        let aligned_target = target
+            .iter()
+            .map(|sample| (*sample as f64 * output_gain) as f32)
+            .collect::<Vec<_>>();
+        let pcm = samples_to_pcm(&aligned_target, valid_samples);
+        let target_similarity = speaker_embedding_from_single_window(&pcm)
+            .ok()
+            .and_then(|embedding| cosine_similarity(&self.speaker_embedding, &embedding));
+        let target_to_mix_energy = target_energy / mixture_energy.max(1e-12);
+        log::info!(
+            "[target-speaker] chunk calibration valid_ms={} raw_gain={gain:.6} output_gain={output_gain:.6} target_to_mix_energy={target_to_mix_energy:.6} target_similarity={:?}",
+            valid_samples / 16,
+            target_similarity
+        );
         Ok(ExtractedChunk {
-            pcm: samples_to_pcm(target, valid_samples),
+            pcm,
             residual_energy,
             mixture_energy,
+            target_to_mix_energy,
+            target_similarity,
         })
     }
 }
@@ -434,18 +549,66 @@ pub(crate) fn extract_enrolled_owner_pcm(
     enrollment_pcm: &[u8],
     mixture_pcm: &[u8],
 ) -> Result<Vec<u8>, String> {
+    extract_enrolled_owner_pcm_with_report(enrollment_pcm, mixture_pcm).map(|(pcm, _)| pcm)
+}
+
+pub(crate) fn extract_enrolled_owner_pcm_with_report(
+    enrollment_pcm: &[u8],
+    mixture_pcm: &[u8],
+) -> Result<(Vec<u8>, String), String> {
     if mixture_pcm.is_empty() {
         return Err("target-speaker mixture is empty".to_string());
     }
     let extractor = TargetSpeakerExtractor::new(enrollment_pcm)?;
     let mut output = Vec::with_capacity(mixture_pcm.len());
-    for chunk in mixture_pcm.chunks(CHUNK_BYTES) {
-        output.extend(extractor.extract_chunk_with_metrics(chunk)?.pcm);
+    let mut report = String::from(
+        "chunk,valid_ms,target_similarity,target_to_mix_energy,residual_ratio,suppressed\n",
+    );
+    for (index, chunk) in mixture_pcm.chunks(CHUNK_BYTES).enumerate() {
+        let mut extracted = extractor.extract_chunk_with_metrics(chunk)?;
+        let similarity = extracted
+            .target_similarity
+            .map(|value| format!("{value:.6}"))
+            .unwrap_or_else(|| "unknown".to_string());
+        let residual_ratio = extracted.residual_energy / extracted.mixture_energy.max(1e-12);
+        let suppressed = extracted.suppress_confident_non_target("diagnostic");
+        report.push_str(&format!(
+            "{index},{},{similarity},{:.6},{residual_ratio:.6},{suppressed}\n",
+            chunk.len() / 32,
+            extracted.target_to_mix_energy,
+        ));
+        output.extend(extracted.pcm);
     }
-    Ok(output)
+    Ok((output, report))
 }
 
-pub(crate) fn speaker_embedding_from_enrollment_pcm(pcm: &[u8]) -> Result<Vec<f32>, String> {
+fn cosine_similarity(left: &[f32], right: &[f32]) -> Option<f32> {
+    if left.len() != right.len() || left.is_empty() {
+        return None;
+    }
+    let dot = left
+        .iter()
+        .zip(right)
+        .map(|(a, b)| *a as f64 * *b as f64)
+        .sum::<f64>();
+    let left_norm = left
+        .iter()
+        .map(|value| (*value as f64).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    let right_norm = right
+        .iter()
+        .map(|value| (*value as f64).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    let denominator = left_norm * right_norm;
+    if denominator <= f64::EPSILON {
+        return None;
+    }
+    Some((dot / denominator) as f32)
+}
+
+fn speaker_embedding_from_single_window(pcm: &[u8]) -> Result<Vec<f32>, String> {
     let speaker_fbank = enrollment_fbank(pcm)?;
     let tensor = TensorRef::from_array_view((
         [1usize, ENROLLMENT_FRAMES, FBANK_BINS],
@@ -467,6 +630,18 @@ pub(crate) fn speaker_embedding_from_enrollment_pcm(pcm: &[u8]) -> Result<Vec<f3
     let embedding = values.to_vec();
     TargetSpeakerExtractor::from_embedding(embedding.clone())?;
     Ok(embedding)
+}
+
+pub(crate) fn speaker_embedding_from_enrollment_pcm(pcm: &[u8]) -> Result<Vec<f32>, String> {
+    if pcm.len() <= CHUNK_BYTES {
+        return speaker_embedding_from_single_window(pcm);
+    }
+    let embeddings = pcm
+        .chunks(CHUNK_BYTES)
+        .filter(|window| window.len() >= SAMPLE_RATE)
+        .map(speaker_embedding_from_single_window)
+        .collect::<Result<Vec<_>, _>>()?;
+    average_speaker_embeddings(&embeddings)
 }
 
 pub(crate) fn wake_phrase_enrollment_pcm(wake_pcm: &[u8], wake_end_seconds: f32) -> Vec<u8> {
@@ -494,20 +669,29 @@ async fn feed_extracted_chunk(
     staged_pcm: &mut Vec<u8>,
     credentials: &crate::asr::VolcengineCredentials,
     hotwords: &[crate::asr::DictionaryHotword],
-    extracted: ExtractedChunk,
+    mut extracted: ExtractedChunk,
     residual_energy: &mut f64,
     mixture_energy: &mut f64,
+    interference_evidence_chunks: &mut usize,
     interference_detected: &AtomicBool,
     secondary_slot: &Mutex<Option<Arc<crate::asr::VolcengineStreamingASR>>>,
 ) -> Result<(), String> {
-    *residual_energy += extracted.residual_energy;
-    *mixture_energy += extracted.mixture_energy;
+    let measurement_valid = accumulate_physical_interference_evidence(
+        &extracted,
+        residual_energy,
+        mixture_energy,
+        interference_evidence_chunks,
+    );
+    extracted.suppress_confident_non_target("stream");
     if let Some(asr) = secondary.as_ref() {
         asr.consume_pcm_chunk(&extracted.pcm);
         return Ok(());
     }
 
     staged_pcm.extend_from_slice(&extracted.pcm);
+    if !measurement_valid {
+        return Ok(());
+    }
     let residual_ratio = *residual_energy / mixture_energy.max(1e-12);
     if residual_ratio < STRONG_INTERFERENCE_RESIDUAL_RATIO {
         return Ok(());
@@ -554,6 +738,7 @@ impl TargetSpeakerStream {
             let mut staged_pcm = Vec::new();
             let mut residual_energy = 0.0f64;
             let mut mixture_energy = 0.0f64;
+            let mut interference_evidence_chunks = 0usize;
             let mut secondary = None;
             while let Some(pcm) = audio_rx.recv().await {
                 buffered.extend_from_slice(&pcm);
@@ -574,6 +759,7 @@ impl TargetSpeakerStream {
                         extracted,
                         &mut residual_energy,
                         &mut mixture_energy,
+                        &mut interference_evidence_chunks,
                         &worker_interference_detected,
                         &worker_secondary_asr,
                     )
@@ -595,10 +781,21 @@ impl TargetSpeakerStream {
                     extracted,
                     &mut residual_energy,
                     &mut mixture_energy,
+                    &mut interference_evidence_chunks,
                     &worker_interference_detected,
                     &worker_secondary_asr,
                 )
                 .await?;
+            }
+            if interference_evidence_chunks == 0 {
+                if let Some(asr) = secondary {
+                    asr.cancel();
+                }
+                worker_secondary_asr.lock().take();
+                log::warn!(
+                    "[target-speaker] separator produced no owner-valid interference evidence; preserving primary final"
+                );
+                return Ok(None);
             }
             let residual_ratio = residual_energy / mixture_energy.max(1e-12);
             if residual_ratio < STRONG_INTERFERENCE_RESIDUAL_RATIO {
@@ -692,6 +889,100 @@ mod tests {
         let stft = stft_compute(&stft_options(), &waveform).unwrap();
         assert_eq!(stft.n_fft / 2 + 1, FFT_BINS);
         assert_eq!(stft.num_frames, STFT_FRAMES);
+    }
+
+    #[test]
+    fn alignment_gain_is_finite_and_bounded() {
+        assert_eq!(bounded_alignment_gain(2.5), 2.5);
+        assert_eq!(bounded_alignment_gain(9.0), MAX_ALIGNMENT_GAIN);
+        assert_eq!(bounded_alignment_gain(-9.0), -MAX_ALIGNMENT_GAIN);
+        assert_eq!(bounded_alignment_gain(f64::NAN), 1.0);
+    }
+
+    #[test]
+    fn enrollment_bank_averages_every_guided_take() {
+        let first = vec![1.0; SPEAKER_EMBEDDING_DIMENSION];
+        let second = vec![3.0; SPEAKER_EMBEDDING_DIMENSION];
+        let third = vec![5.0; SPEAKER_EMBEDDING_DIMENSION];
+        let average = average_speaker_embeddings(&[first, second, third]).unwrap();
+        assert!(average
+            .iter()
+            .all(|value| (*value - 3.0).abs() < f32::EPSILON));
+    }
+
+    fn classified_chunk(similarity: Option<f32>, energy_ratio: f64) -> ExtractedChunk {
+        ExtractedChunk {
+            pcm: vec![1, 2, 3, 4],
+            residual_energy: 1.0,
+            mixture_energy: 2.0,
+            target_to_mix_energy: energy_ratio,
+            target_similarity: similarity,
+        }
+    }
+
+    #[test]
+    fn hard_mismatch_or_dual_soft_evidence_can_suppress_a_chunk() {
+        assert!(classified_chunk(Some(0.30), 0.002).confidently_non_target());
+        assert!(classified_chunk(Some(0.32), 0.041).confidently_non_target());
+        assert!(!classified_chunk(Some(0.65), 0.002).confidently_non_target());
+        assert!(classified_chunk(Some(0.38), 0.002).confidently_non_target());
+        assert!(!classified_chunk(Some(0.38), 0.037).confidently_non_target());
+        assert!(!classified_chunk(None, 0.002).confidently_non_target());
+    }
+
+    #[test]
+    fn invalid_separator_target_cannot_claim_physical_interference() {
+        let invalid_owner = classified_chunk(Some(0.306_831_84), 0.000_652);
+        let mut residual_energy = 0.0;
+        let mut mixture_energy = 0.0;
+        let mut evidence_chunks = 0;
+
+        assert!(!accumulate_physical_interference_evidence(
+            &invalid_owner,
+            &mut residual_energy,
+            &mut mixture_energy,
+            &mut evidence_chunks,
+        ));
+        assert_eq!(evidence_chunks, 0);
+        assert_eq!(residual_energy, 0.0);
+        assert_eq!(mixture_energy, 0.0);
+        assert!(
+            invalid_owner.residual_energy / invalid_owner.mixture_energy
+                >= STRONG_INTERFERENCE_RESIDUAL_RATIO,
+            "session 486 had a large residual, but it came from an invalid near-silent owner estimate"
+        );
+    }
+
+    #[test]
+    fn credible_owner_estimate_can_measure_physical_interference() {
+        let credible_owner = classified_chunk(Some(0.65), 0.35);
+        let mut residual_energy = 0.0;
+        let mut mixture_energy = 0.0;
+        let mut evidence_chunks = 0;
+
+        assert!(accumulate_physical_interference_evidence(
+            &credible_owner,
+            &mut residual_energy,
+            &mut mixture_energy,
+            &mut evidence_chunks,
+        ));
+        assert_eq!(evidence_chunks, 1);
+        assert_eq!(residual_energy, credible_owner.residual_energy);
+        assert_eq!(mixture_energy, credible_owner.mixture_energy);
+    }
+
+    #[test]
+    fn suppression_preserves_timeline_with_silence() {
+        let mut chunk = classified_chunk(Some(0.30), 0.002);
+        assert!(chunk.suppress_confident_non_target("test"));
+        assert_eq!(chunk.pcm, vec![0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn cosine_similarity_handles_unit_and_invalid_vectors() {
+        assert_eq!(cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]), Some(1.0));
+        assert_eq!(cosine_similarity(&[1.0], &[1.0, 0.0]), None);
+        assert_eq!(cosine_similarity(&[0.0, 0.0], &[1.0, 0.0]), None);
     }
 
     #[test]

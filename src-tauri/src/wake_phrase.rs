@@ -1,5 +1,9 @@
 #[derive(Debug, Clone)]
 pub struct Match {
+    /// Absolute start of the keyword-bearing speech segment when the keyword
+    /// model provides one. Local-transcript recovery deliberately leaves this
+    /// unset because it cannot distinguish pre-wake speech from the phrase.
+    pub start_seconds: Option<f32>,
     pub end_seconds: f32,
     pub matched_keyword: Option<String>,
 }
@@ -1040,6 +1044,10 @@ mod platform {
                         }
                         log::info!("[wake-phrase] matched keyword label={matched_keyword}");
                         self.found = Some(Match {
+                            start_seconds: value
+                                .start_time
+                                .is_finite()
+                                .then_some(value.start_time.max(0.0).min(end_seconds)),
                             end_seconds,
                             matched_keyword: Some(matched_keyword),
                         });
@@ -1131,6 +1139,7 @@ mod platform {
                             pcm.len() / 32
                         );
                         return Ok(Some(Match {
+                            start_seconds: found.start_seconds.map(|start| start + offset_s),
                             end_seconds,
                             matched_keyword: found.matched_keyword,
                         }));
@@ -1443,12 +1452,20 @@ mod platform {
                 .unwrap_or_else(|_| "target/wake_diag".to_string());
             let make_detector =
                 || -> Result<StreamingDetector, String> { StreamingDetector::new(&phrase) };
+            #[cfg(feature = "target-speaker-extraction")]
+            let target_speaker_embedding =
+                crate::speaker_verification::target_speaker_embedding_for_phrase(&phrase)
+                    .expect("load enrolled target-speaker embedding");
             let mut wake_total = 0usize;
             let mut wake_streaming_hit = 0usize;
             let mut wake_combined_hit = 0usize;
+            let mut wake_owner_gate_hit = 0usize;
             let mut neg_total = 0usize;
             let mut neg_streaming_hit = 0usize;
             let mut neg_combined_hit = 0usize;
+            let mut neg_owner_gate_hit = 0usize;
+            let mut by_level = std::collections::BTreeMap::<String, (usize, usize)>::new();
+            let mut case_reports = Vec::<serde_json::Value>::new();
             for entry in fs::read_dir(&dir).expect("diag dir") {
                 let path = entry.expect("entry").path();
                 let name = path
@@ -1480,6 +1497,43 @@ mod platform {
                         .is_some()
                 };
                 let combined_hit = streaming_hit || offline_hit;
+                let owner_verification = combined_hit
+                    .then(|| crate::speaker_verification::verify(pcm, &phrase))
+                    .transpose()
+                    .expect("verify enrolled owner");
+                let owner_gate_hit = combined_hit
+                    && owner_verification
+                        .as_ref()
+                        .is_some_and(|verification| verification.matched);
+                #[cfg(feature = "target-speaker-extraction")]
+                let target_recovery = target_speaker_embedding.as_ref().map(|embedding| {
+                    let extracted =
+                        crate::asr::target_speaker_extraction::extract_enrolled_owner_wake_candidate(
+                            pcm,
+                            embedding.clone(),
+                        )
+                        .expect("extract enrolled owner wake candidate");
+                    let phrase_hit = detect_with_recall_cascade(&extracted.pcm, &phrase)
+                        .expect("detect extracted owner wake phrase")
+                        .is_some();
+                    let verification =
+                        crate::speaker_verification::verify(&extracted.pcm, &phrase)
+                            .expect("verify extracted owner wake candidate");
+                    (phrase_hit, verification, extracted)
+                });
+                #[cfg(not(feature = "target-speaker-extraction"))]
+                let target_recovery: Option<(
+                    bool,
+                    crate::speaker_verification::VerificationResult,
+                    (),
+                )> = None;
+                let target_owner_gate_hit =
+                    target_recovery
+                        .as_ref()
+                        .is_some_and(|(phrase_hit, verification, _)| {
+                            *phrase_hit && verification.matched
+                        });
+                let effective_owner_gate_hit = owner_gate_hit || target_owner_gate_hit;
                 if is_wake {
                     wake_total += 1;
                     if streaming_hit {
@@ -1488,6 +1542,17 @@ mod platform {
                     if combined_hit {
                         wake_combined_hit += 1;
                     }
+                    if effective_owner_gate_hit {
+                        wake_owner_gate_hit += 1;
+                    }
+                    let level = name
+                        .strip_prefix("wake_")
+                        .and_then(|rest| rest.split('_').next())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let entry = by_level.entry(level).or_default();
+                    entry.0 += 1;
+                    entry.1 += usize::from(effective_owner_gate_hit);
                 } else {
                     neg_total += 1;
                     if streaming_hit {
@@ -1496,32 +1561,198 @@ mod platform {
                     if combined_hit {
                         neg_combined_hit += 1;
                     }
+                    if effective_owner_gate_hit {
+                        neg_owner_gate_hit += 1;
+                    }
                 }
+                case_reports.push(serde_json::json!({
+                    "name": name,
+                    "kind": if is_wake { "wake" } else { "negative" },
+                    "streamingHit": streaming_hit,
+                    "offlineHit": offline_hit,
+                    "combinedHit": combined_hit,
+                    "ownerMatched": owner_verification.as_ref().map(|value| value.matched),
+                    "ownerScore": owner_verification.as_ref().map(|value| value.score),
+                    "ownerGateHit": owner_gate_hit,
+                    "targetRecoveryPhraseHit": target_recovery.as_ref().map(|value| value.0),
+                    "targetRecoveryOwnerMatched": target_recovery.as_ref().map(|value| value.1.matched),
+                    "targetRecoveryOwnerScore": target_recovery.as_ref().map(|value| value.1.score),
+                    "targetRecoveryResidualRatio": target_recovery.as_ref().map(|value| value.2.residual_ratio),
+                    "targetRecoveryInferenceMs": target_recovery.as_ref().map(|value| value.2.inference_ms),
+                    "effectiveOwnerGateHit": effective_owner_gate_hit,
+                    "pcmMs": pcm.len() / 32,
+                }));
                 println!(
-                    "diag {} kind={} streaming_hit={} offline_hit={} combined_hit={} pcm_ms={} runtime_score={:.1} runtime_threshold={:.2}",
+                    "diag {} kind={} streaming_hit={} offline_hit={} combined_hit={} owner_gate_hit={} owner_score={:?} target_phrase_hit={:?} target_owner_score={:?} effective_owner_gate_hit={} pcm_ms={} runtime_score={:.1} runtime_threshold={:.2}",
                     name,
                     if is_wake { "wake" } else { "neg" },
                     streaming_hit,
                     offline_hit,
                     combined_hit,
+                    owner_gate_hit,
+                    owner_verification.as_ref().map(|value| value.score),
+                    target_recovery.as_ref().map(|value| value.0),
+                    target_recovery.as_ref().map(|value| value.1.score),
+                    effective_owner_gate_hit,
                     pcm.len() / 32,
                     BOOTSTRAP_KEYWORD_SCORE,
                     BOOTSTRAP_KEYWORD_THRESHOLD
                 );
             }
             println!(
-                "summary wake_streaming_hit={}/{} wake_combined_hit={}/{} neg_streaming_false_trigger={}/{} neg_combined_false_trigger={}/{} runtime_score={:.1} runtime_threshold={:.2}",
+                "summary wake_streaming_hit={}/{} wake_combined_hit={}/{} wake_owner_gate_hit={}/{} neg_streaming_false_trigger={}/{} neg_combined_false_trigger={}/{} neg_owner_gate_false_trigger={}/{} by_level={:?} runtime_score={:.1} runtime_threshold={:.2}",
                 wake_streaming_hit,
                 wake_total,
                 wake_combined_hit,
+                wake_total,
+                wake_owner_gate_hit,
                 wake_total,
                 neg_streaming_hit,
                 neg_total,
                 neg_combined_hit,
                 neg_total,
+                neg_owner_gate_hit,
+                neg_total,
+                by_level,
                 BOOTSTRAP_KEYWORD_SCORE,
                 BOOTSTRAP_KEYWORD_THRESHOLD
             );
+            if let Ok(report_path) = std::env::var("LISTENER_WAKE_DIAG_REPORT") {
+                let report = serde_json::json!({
+                    "schema": "listener.cn-interference-wake-matrix.v1",
+                    "status": if wake_owner_gate_hit * 15 >= wake_total * 13
+                        && neg_owner_gate_hit == 0
+                        && by_level.values().all(|(total, hits)| *total == 5 && *hits >= 4)
+                    { "PASS" } else { "FAIL" },
+                    "summary": {
+                        "wakeTotal": wake_total,
+                        "wakeOwnerGateHit": wake_owner_gate_hit,
+                        "negativeTotal": neg_total,
+                        "negativeOwnerGateFalseTrigger": neg_owner_gate_hit,
+                        "byLevel": by_level,
+                    },
+                    "cases": case_reports,
+                });
+                fs::write(
+                    report_path,
+                    serde_json::to_vec_pretty(&report).expect("encode wake diagnostic report"),
+                )
+                .expect("write wake diagnostic report");
+            }
+            assert!(
+                wake_owner_gate_hit * 15 >= wake_total * 13,
+                "owner wake gate must pass at least 13/15"
+            );
+            assert!(
+                by_level
+                    .values()
+                    .all(|(total, hits)| *total == 5 && *hits >= 4),
+                "every interference level must pass at least 4/5: {by_level:?}"
+            );
+            assert_eq!(
+                neg_owner_gate_hit, 0,
+                "interferer-only audio must never pass both wake and owner gates"
+            );
+        }
+
+        #[test]
+        #[ignore = "diagnostic: sweep strong-overlap KWS configs without changing product defaults"]
+        fn diagnostic_sweep_interference_configs() {
+            let phrase =
+                std::env::var("LISTENER_WAKE_PHRASE").unwrap_or_else(|_| "开始录音".to_string());
+            let dir = std::env::var("LISTENER_WAKE_DIAG_DIR").expect("LISTENER_WAKE_DIAG_DIR");
+            let mut cases = fs::read_dir(dir)
+                .expect("diag dir")
+                .map(|entry| entry.expect("entry").path())
+                .filter(|path| {
+                    let name = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("");
+                    path.extension().and_then(|value| value.to_str()) == Some("wav")
+                        && (name.starts_with("wake_") || name.starts_with("neg_"))
+                })
+                .collect::<Vec<_>>();
+            cases.sort();
+            for (score, threshold) in [
+                (4.5, 0.03),
+                (4.5, 0.02),
+                (5.0, 0.03),
+                (5.0, 0.02),
+                (5.0, 0.01),
+                (6.0, 0.01),
+                (7.0, 0.005),
+            ] {
+                let mut wake_hits = 0usize;
+                let mut wake_total = 0usize;
+                let mut neg_hits = 0usize;
+                let mut neg_total = 0usize;
+                let mut by_level = std::collections::BTreeMap::<String, (usize, usize)>::new();
+                for path in &cases {
+                    let name = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("");
+                    let wav = fs::read(path).expect("read diagnostic wav");
+                    let pcm = wav_pcm(&wav);
+                    let hit = detect_with_config(pcm, &phrase, score, threshold)
+                        .expect("sweep KWS")
+                        .is_some();
+                    if name.starts_with("wake_") {
+                        wake_total += 1;
+                        wake_hits += usize::from(hit);
+                        let level = name
+                            .strip_prefix("wake_")
+                            .and_then(|rest| rest.split('_').next())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let entry = by_level.entry(level).or_default();
+                        entry.0 += 1;
+                        entry.1 += usize::from(hit);
+                    } else {
+                        neg_total += 1;
+                        neg_hits += usize::from(hit);
+                    }
+                }
+                println!(
+                    "interference_kws_sweep score={score:.1} threshold={threshold:.3} wake_hits={wake_hits}/{wake_total} negative_hits={neg_hits}/{neg_total} by_level={by_level:?}"
+                );
+            }
+        }
+
+        #[test]
+        #[ignore = "diagnostic: inspect enrolled-owner scores for wake/negative WAVs"]
+        fn diagnostic_scan_interference_owner_scores() {
+            let phrase =
+                std::env::var("LISTENER_WAKE_PHRASE").unwrap_or_else(|_| "开始录音".to_string());
+            let dir = std::env::var("LISTENER_WAKE_DIAG_DIR").expect("LISTENER_WAKE_DIAG_DIR");
+            let mut cases = fs::read_dir(dir)
+                .expect("diag dir")
+                .map(|entry| entry.expect("entry").path())
+                .filter(|path| {
+                    let name = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("");
+                    path.extension().and_then(|value| value.to_str()) == Some("wav")
+                        && (name.starts_with("wake_") || name.starts_with("neg_"))
+                })
+                .collect::<Vec<_>>();
+            cases.sort();
+            for path in cases {
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("");
+                let wav = fs::read(&path).expect("read diagnostic wav");
+                let pcm = wav_pcm(&wav);
+                let verification = crate::speaker_verification::verify(pcm, &phrase)
+                    .expect("verify diagnostic owner");
+                println!(
+                    "interference_owner_score file={name} matched={} score={:.6}",
+                    verification.matched, verification.score
+                );
+            }
         }
 
         #[test]

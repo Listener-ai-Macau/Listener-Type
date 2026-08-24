@@ -8,8 +8,13 @@ const fixtures = resolve(
   process.env.LISTENER_SPEAKER_EVALUATION_FIXTURES
     ?? resolve(root, ".artifacts", "speaker-evaluation", "public-corpus-v1", "fixtures"),
 );
+const publicSpeakers = resolve(
+  process.env.LISTENER_PUBLIC_SPEAKER_MODELS
+    ?? resolve(root, ".artifacts", "speaker-models"),
+);
 const output = resolve(process.argv[2] ?? resolve(root, ".artifacts", "target-speaker-overlap", "report.json"));
 const work = resolve(dirname(output), "work");
+const evidence = resolve(dirname(output), "evidence");
 const probe = resolve(
   process.env.LISTENER_VOLCENGINE_ASR_PROBE
     ?? resolve(
@@ -26,23 +31,24 @@ const filterExe = resolve(
     ?? resolve(root, "src-tauri", "target", "release", "listener-type.exe"),
 );
 
-const owner = resolve(fixtures, "owner-clean-long-01.wav");
-const nonOwner = resolve(fixtures, "non_owner-clean-long-01.wav");
+const ownerEnrollment = ["fangjun-sr-1.wav", "fangjun-sr-2.wav", "fangjun-sr-3.wav"]
+  .map((name) => resolve(publicSpeakers, name));
+const owner = resolve(publicSpeakers, "fangjun-test-sr-1.wav");
+const nonOwner = resolve(publicSpeakers, "leijun-test-sr-1.wav");
 
-for (const [label, path] of [["ASR probe", probe], ["target-speaker filter EXE", filterExe], ["owner fixture", owner], ["non-owner fixture", nonOwner]]) {
+for (const [label, path] of [["ASR probe", probe], ["target-speaker filter EXE", filterExe], ["owner target fixture", owner], ["non-owner fixture", nonOwner], ...ownerEnrollment.map((path, index) => [`owner enrollment ${index + 1}`, path])]) {
   if (!existsSync(path)) {
     throw new Error(`${label} is missing: ${path}`);
   }
 }
-const cases = Array.from({ length: 20 }, (_, index) => ({
+const levels = [-3, 0, 3];
+const cases = Array.from({ length: 15 }, (_, index) => ({
   id: `overlap-${String(index + 1).padStart(2, "0")}`,
-  nonOwnerDelayMs: [120, 220, 350, 500, 700, 900, 1100, 1350, 1550, 1800][index % 10],
-  // Product acceptance must include an ordinary nearby conversation, not
-  // only a background voice that is 6-15 dB quieter than the owner. The final
-  // four cases deliberately make the interferer 3 dB louder so a PASS cannot
-  // be manufactured by source-level imbalance.
-  nonOwnerGainDb: [-12, -6, -3, 0, 3][Math.floor(index / 4) % 5],
-  ownerGainDb: [0, -1, 1, 0][index % 4],
+  nonOwnerDelayMs: [0, 250, 500, 750, 1000][index % 5],
+  // Both source clips are normalized first, making this the measured relative
+  // level rather than an arbitrary gain applied to unequal source recordings.
+  nonOwnerGainDb: levels[Math.floor(index / 5)],
+  ownerGainDb: 0,
 }));
 
 function run(command, args, options = {}) {
@@ -64,6 +70,20 @@ function normalize(value) {
 
 function hash(value) {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function hashFile(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function pcmRms(path) {
+  const pcm = readFileSync(path);
+  let squares = 0;
+  for (let offset = 0; offset + 1 < pcm.length; offset += 2) {
+    const sample = pcm.readInt16LE(offset);
+    squares += sample * sample;
+  }
+  return Math.sqrt(squares / Math.max(1, pcm.length / 2));
 }
 
 function lcsLength(left, right) {
@@ -103,12 +123,28 @@ function transcribe(audioPath, stem) {
 }
 
 mkdirSync(work, { recursive: true });
+mkdirSync(evidence, { recursive: true });
 
 const ownerPcm = resolve(work, "owner.pcm");
-run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", owner, "-f", "s16le", "-ac", "1", "-ar", "16000", ownerPcm]);
+const normalizedOwner = resolve(work, "owner-normalized.wav");
+const normalizedNonOwner = resolve(work, "non-owner-normalized.wav");
+run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", owner, "-af", "loudnorm=I=-24:TP=-2:LRA=7", "-ac", "1", "-ar", "16000", normalizedOwner]);
+run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", nonOwner, "-af", "loudnorm=I=-24:TP=-2:LRA=7", "-ac", "1", "-ar", "16000", normalizedNonOwner]);
+run("ffmpeg", [
+  "-hide_banner", "-loglevel", "error", "-y",
+  ...ownerEnrollment.flatMap((path) => ["-i", path]),
+  "-filter_complex", "[0:a][1:a][2:a]concat=n=3:v=0:a=1,aresample=16000,pan=mono|c0=c0[out]",
+  "-map", "[out]", "-f", "s16le", "-ac", "1", "-ar", "16000", ownerPcm,
+]);
+const ownerLevelPcm = resolve(work, "owner-level.pcm");
+const nonOwnerLevelPcm = resolve(work, "non-owner-level.pcm");
+run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", normalizedOwner, "-f", "s16le", "-ac", "1", "-ar", "16000", ownerLevelPcm]);
+run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", normalizedNonOwner, "-f", "s16le", "-ac", "1", "-ar", "16000", nonOwnerLevelPcm]);
+const normalizedOwnerRms = pcmRms(ownerLevelPcm);
+const normalizedNonOwnerRms = pcmRms(nonOwnerLevelPcm);
 
-const ownerBaseline = transcribe(owner, "owner-baseline");
-const nonOwnerBaseline = transcribe(nonOwner, "non-owner-baseline");
+const ownerBaseline = transcribe(normalizedOwner, "owner-baseline");
+const nonOwnerBaseline = transcribe(normalizedNonOwner, "non-owner-baseline");
 if (ownerBaseline.status !== "PASS" || nonOwnerBaseline.status !== "PASS") {
   throw new Error(
     `Provider baseline transcription failed; overlap results would be invalid. `
@@ -134,7 +170,7 @@ for (const testCase of cases) {
     `[1:a]adelay=${testCase.nonOwnerDelayMs}|${testCase.nonOwnerDelayMs},volume=${testCase.nonOwnerGainDb}dB[room]`,
     "[owner][room]amix=inputs=2:duration=longest:dropout_transition=0,aresample=16000,pan=mono|c0=c0[out]",
   ].join(";");
-  run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", owner, "-i", nonOwner, "-filter_complex", filter, "-map", "[out]", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav]);
+  run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", normalizedOwner, "-i", normalizedNonOwner, "-filter_complex", filter, "-map", "[out]", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav]);
   run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", wav, "-f", "s16le", "-ac", "1", "-ar", "16000", mixPcm]);
   const filterStarted = Date.now();
   run(filterExe, ["--diagnostic-target-speaker-filter", ownerPcm, mixPcm, filteredPcm], { timeout: 30_000 });
@@ -146,17 +182,32 @@ for (const testCase of cases) {
   const contaminationCharacters = [...actual].filter((character) => interfererOnlyCharacters.has(character)).length;
   const contamination = actual.length === 0 ? 0 : contaminationCharacters / actual.length;
   const passed = provider.status === "PASS" && targetRecall >= 0.95 && contamination <= 0.01;
+  const measuredRelativeDb = 20 * Math.log10(
+    (normalizedNonOwnerRms * (10 ** (testCase.nonOwnerGainDb / 20)))
+      / Math.max(1e-9, normalizedOwnerRms),
+  );
+  const overlapMs = Math.max(0, Math.min(5_572, 8_244 + testCase.nonOwnerDelayMs) - testCase.nonOwnerDelayMs);
   results.push({
     ...testCase,
     status: passed ? "PASS" : "FAIL",
     providerStatus: provider.status,
     targetRecall,
     contamination,
+    measuredRelativeDb,
+    overlapMs,
     actualCharacters: actual.length,
     filterElapsedMs,
     transcriptSha256: hash(actual),
     errorCategory: provider.error ? "provider_or_transport_error" : null,
   });
+  const retainEvidence = testCase.nonOwnerDelayMs === 0;
+  if (retainEvidence) {
+    const levelStem = `level-${testCase.nonOwnerGainDb >= 0 ? "+" : ""}${testCase.nonOwnerGainDb}db`;
+    for (const [source, suffix] of [[wav, "mixture.wav"], [filteredWav, "filtered.wav"], [filteredPcm.replace(/\.pcm$/u, ".trace.txt"), "trace.txt"]]) {
+      const target = resolve(evidence, `${levelStem}-${suffix}`);
+      writeFileSync(target, readFileSync(source));
+    }
+  }
   for (const transient of [wav, mixPcm, filteredPcm, filteredWav, filteredPcm.replace(/\.pcm$/u, ".trace.txt")]) {
     rmSync(transient, { force: true });
   }
@@ -164,13 +215,18 @@ for (const testCase of cases) {
 }
 
 const report = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   generatedAt: new Date().toISOString(),
-  corpus: "public-corpus-v1",
+  corpus: "k2-fsa/sherpa-onnx public cross-utterance Chinese fixtures",
   providerMode: "local_enrolled_owner_filter_then_authoritative_bidirectional_paced",
   thresholds: { targetRecallMinimum: 0.95, contaminationMaximum: 0.01 },
-  privacy: "No audio or transcript body is retained in this report; generated mixes and transient probe reports are deleted.",
+  privacy: "No user audio is used. One public diagnostic mixture, filtered WAV and chunk trace per level are retained as reproducible evidence.",
   baseline: {
+    enrollmentClipSha256: ownerEnrollment.map(hashFile),
+    targetClipSha256: hashFile(owner),
+    nonOwnerClipSha256: hashFile(nonOwner),
+    normalizedOwnerRms,
+    normalizedNonOwnerRms,
     ownerNormalizedCharacters: expected.length,
     ownerTranscriptSha256: hash(expected),
     nonOwnerNormalizedCharacters: interferer.length,
@@ -182,6 +238,15 @@ const report = {
     failed: results.filter((item) => item.status !== "PASS").length,
     minimumTargetRecall: Math.min(...results.map((item) => item.targetRecall)),
     maximumContamination: Math.max(...results.map((item) => item.contamination)),
+    byLevel: Object.fromEntries(levels.map((level) => {
+      const subset = results.filter((item) => item.nonOwnerGainDb === level);
+      return [`${level >= 0 ? "+" : ""}${level}dB`, {
+        total: subset.length,
+        passed: subset.filter((item) => item.status === "PASS").length,
+        minimumTargetRecall: Math.min(...subset.map((item) => item.targetRecall)),
+        maximumContamination: Math.max(...subset.map((item) => item.contamination)),
+      }];
+    })),
   },
   results,
 };

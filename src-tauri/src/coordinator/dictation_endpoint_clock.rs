@@ -96,20 +96,32 @@ impl SettledTargetEndpointClock {
             return None;
         }
 
-        let stable_target_end_ms = (update.speaker_info_present && update.speaker_id.is_some())
+        let stable_cloud_target_end_ms =
+            (update.speaker_info_present && update.speaker_id.is_some())
             .then_some(update.target_speech_end_ms)
             .flatten();
-        let stable_target_should_rearm = stable_target_end_ms.is_some()
+        // The local verifier is an equally authoritative owner clock once it
+        // reports Target. Installed multi-interference session c96a7159 had a
+        // fresh local owner edge at 4500 ms while the cloud boundary remained
+        // at 3182 ms. The old clock compared only the cloud value, so the
+        // already-due 900 ms timer stopped at 4600 ms -- just 100 ms after the
+        // owner had spoken. Rearm on the fused confirmed-owner boundary; raw
+        // VAD and NonTarget observations still cannot move this value.
+        let stable_owner_end_ms = stable_cloud_target_end_ms
+            .into_iter()
+            .chain(update.local_target_speech_end_ms)
+            .max();
+        let stable_target_should_rearm = stable_owner_end_ms.is_some()
             && (update.target_activity_advanced
                 || self.pending_was_seen
                 || self.armed_at.is_none()
-                || self.armed_target_end_ms != stable_target_end_ms);
+                || self.armed_target_end_ms != stable_owner_end_ms);
         // Some valid Volcengine previews arrive before diarization publishes a
         // speaker id. Once visible body text exists, arm a wall-clock fallback
         // instead of leaving the session entirely dependent on noisy firmware
         // VAD. A provisional tail still cancels the clock above.
         let unattributed_visible_body_should_arm =
-            stable_target_end_ms.is_none() && self.armed_at.is_none();
+            stable_owner_end_ms.is_none() && self.armed_at.is_none();
         // Two consecutive very-low voiceprint windows identify current room
         // speech as a likely second speaker. Keep the already-running owner
         // timer in that state: provider diarization can temporarily fold both
@@ -136,9 +148,12 @@ impl SettledTargetEndpointClock {
             // Do not require that provisional frame to repeat the cloud id.
             self.armed_from_visible_body_fallback = true;
         } else {
-            self.armed_target_end_ms = stable_target_end_ms;
+            self.armed_target_end_ms = stable_owner_end_ms;
             self.armed_at = Some(now);
-            self.armed_from_visible_body_fallback = stable_target_end_ms.is_none();
+            // Local Target can rearm the clock before cloud diarization catches
+            // up, but local-only visible text still uses the existing guarded
+            // visible-body fallback authority.
+            self.armed_from_visible_body_fallback = stable_cloud_target_end_ms.is_none();
         }
         self.clear_paused_arm();
         Some(self.generation)
@@ -185,9 +200,14 @@ impl SettledTargetEndpointClock {
         if self.armed_at.is_some() && recent_strong_non_target {
             return None;
         }
-        let stable_target_end_ms = (update.speaker_info_present && update.speaker_id.is_some())
+        let stable_cloud_target_end_ms =
+            (update.speaker_info_present && update.speaker_id.is_some())
             .then_some(update.target_speech_end_ms)
             .flatten();
+        let stable_owner_end_ms = stable_cloud_target_end_ms
+            .into_iter()
+            .chain(update.local_target_speech_end_ms)
+            .max();
         let restore_paused_owner_deadline =
             recent_strong_non_target && self.paused_armed_at.is_some();
         self.generation = self.generation.wrapping_add(1);
@@ -196,9 +216,9 @@ impl SettledTargetEndpointClock {
             self.armed_at = self.paused_armed_at;
             self.armed_from_visible_body_fallback = true;
         } else {
-            self.armed_target_end_ms = stable_target_end_ms;
+            self.armed_target_end_ms = stable_owner_end_ms;
             self.armed_at = Some(now);
-            self.armed_from_visible_body_fallback = stable_target_end_ms.is_none();
+            self.armed_from_visible_body_fallback = stable_cloud_target_end_ms.is_none();
         }
         self.clear_paused_arm();
         Some(self.generation)

@@ -8,6 +8,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `package-lock.json` | Build and release config | Build, updater and audit scripts |
 | `package.json` | Build and release config | Build, updater and audit scripts |
 | `scripts/advance-preproduction-total-review.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/analyze-listener-runtime-log.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/build-mac.sh` | Automation and audits | Node/PowerShell script tests |
 | `scripts/capture-live-wake-attempts.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/capture-live-wake-attempts.test.mjs` | Automation and audits | Node/PowerShell script tests |
@@ -69,6 +70,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/run-speaker-verification-evaluation.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-target-speaker-overlap-regressions.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-v1.0.2-regression.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/show-cn-interference-final-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-live-wake-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-live-wake-acceptance.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/speaker-evaluation-manifest.example.json` | Automation and audits | Node/PowerShell script tests |
@@ -165,7 +167,10 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/commands_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_asr_selection.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_device_ai.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_embedded_candidate_begin.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_embedded_detector_init.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_embedded_stream.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_embedded_stream_completion.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_embedded_stream_session.rs` | Core app | Build and targeted tests |
@@ -174,9 +179,13 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator/dictation_endpoint_policy.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_preview.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_session.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_target_speaker_update.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_tests.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_volcengine_callbacks.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_wake_diagnostic_retention.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_diagnostics.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_fusion.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_wake_fusion_core.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_owner_gate.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_polish.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_prefix_retry.rs` | Core app | Build and targeted tests |

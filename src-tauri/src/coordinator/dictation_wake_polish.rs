@@ -887,7 +887,9 @@ fn offset_streaming_wake_match(
     stream_origin_bytes: usize,
 ) -> Option<crate::wake_phrase::Match> {
     found.map(|mut found| {
-        found.end_seconds += stream_origin_bytes as f32 / 32_000.0;
+        let origin_seconds = stream_origin_bytes as f32 / 32_000.0;
+        found.start_seconds = found.start_seconds.map(|start| start + origin_seconds);
+        found.end_seconds += origin_seconds;
         found
     })
 }
@@ -1016,11 +1018,28 @@ fn post_wake_pcm_offset_bytes(wake_end_seconds: f32, pcm_len: usize) -> usize {
 }
 
 const WAKE_SPEAKER_ANCHOR_MS: usize = 800;
+const KEYWORD_SEGMENT_LEAD_PAD_MS: usize = 120;
 
-fn wake_speaker_anchor_pcm_offset_bytes(wake_end_seconds: f32, pcm_len: usize) -> usize {
+fn wake_speaker_anchor_pcm_offset_bytes(
+    wake_start_seconds: Option<f32>,
+    wake_end_seconds: f32,
+    pcm_len: usize,
+) -> usize {
     let wake_end_bytes =
         ((wake_end_seconds.max(0.0) * 32_000.0).round() as usize).min(pcm_len) & !1usize;
-    wake_end_bytes.saturating_sub(WAKE_SPEAKER_ANCHOR_MS * 32) & !1usize
+    let fallback = wake_end_bytes.saturating_sub(WAKE_SPEAKER_ANCHOR_MS * 32) & !1usize;
+    let Some(wake_start_seconds) = wake_start_seconds else {
+        return fallback;
+    };
+    if !wake_start_seconds.is_finite()
+        || wake_start_seconds < 0.0
+        || wake_start_seconds > wake_end_seconds
+    {
+        return fallback;
+    }
+    let keyword_start_bytes =
+        ((wake_start_seconds * 32_000.0).round() as usize).min(wake_end_bytes) & !1usize;
+    keyword_start_bytes.saturating_sub(KEYWORD_SEGMENT_LEAD_PAD_MS * 32) & !1usize
 }
 
 fn wake_phrase_tail_to_capsule_ms(wake_end_seconds: f32, capsule_request_ms: u64) -> u64 {

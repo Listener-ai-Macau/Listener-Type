@@ -55,9 +55,14 @@ export const PREVIEW_DEDUP_POLICY = 'exact-match' as const;
  * only that visual append into a bounded number of rendering frames.
  */
 export const PREVIEW_BURST_REVEAL = {
-  minimumAppendChars: 2,
+  // One/two-character provider updates are already visually incremental. Do
+  // not add a second client-side queue to them; it made normal streaming feel
+  // one beat behind even though the backend event had arrived.
+  minimumAppendChars: 3,
   maxFrames: 8,
-  maxCatchUpMs: 160,
+  // Preserve a readable reveal for genuinely large provider bursts, but catch
+  // the authoritative target within roughly five display frames.
+  maxCatchUpMs: 80,
 } as const;
 
 /** Space reveal frames across the existing catch-up budget instead of

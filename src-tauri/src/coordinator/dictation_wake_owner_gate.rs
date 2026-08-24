@@ -180,6 +180,10 @@ fn maybe_start_target_wake_extraction(
     if candidate.kind != BufferedSpeakerCandidateKind::Verification
         || candidate.target_wake_extraction_attempted
         || candidate.pcm.len() < TARGET_WAKE_EXTRACTION_START_BYTES
+        || !target_wake_extraction_has_weak_phrase_evidence(
+            candidate.local_kws_fusion_evidence,
+            candidate.local_owner_overlap_near_confirmations,
+        )
     {
         return;
     }
@@ -205,6 +209,20 @@ fn maybe_start_target_wake_extraction(
         embedded_session_id,
         candidate.pcm.len() / 32
     );
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+fn target_wake_extraction_has_weak_phrase_evidence(
+    local_kws_fusion_evidence: bool,
+    local_owner_overlap_near_confirmations: u8,
+) -> bool {
+    // Separation is a heavyweight recovery path (1.1-3.0 s in installed live
+    // traces). Starting it for every ambient candidate before either phrase
+    // detector heard anything starved the ordinary single-speaker wake path and
+    // even made the isolated local helper report busy. Require a cheap,
+    // independent partial-phrase hint first. A full KWS/local match already has
+    // the normal low-latency owner gate and does not need this recovery task.
+    local_kws_fusion_evidence || local_owner_overlap_near_confirmations > 0
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -248,6 +266,7 @@ async fn evaluate_target_wake_extraction(
         return Ok(None);
     }
     let wake_match = crate::wake_phrase::Match {
+        start_seconds: None,
         end_seconds: refined_wake_end_seconds(
             0.0,
             &confirmation,

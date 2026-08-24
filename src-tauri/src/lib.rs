@@ -80,15 +80,19 @@ pub fn run_target_speaker_filter_diagnostic(
         .name("target-speaker-diagnostic".to_string())
         .stack_size(8 * 1024 * 1024)
         .spawn(move || {
-            asr::target_speaker_extraction::extract_enrolled_owner_pcm(&enrollment, &mixture)
+            asr::target_speaker_extraction::extract_enrolled_owner_pcm_with_report(
+                &enrollment,
+                &mixture,
+            )
         })
         .map_err(|err| format!("spawn target-speaker diagnostic failed: {err}"))?
         .join()
         .map_err(|_| "target-speaker diagnostic thread panicked".to_string())??;
     trace("writing_output");
-    std::fs::write(output_pcm_path, output)
+    std::fs::write(output_pcm_path, &output.0)
         .map_err(|err| format!("write target-speaker output PCM failed: {err}"))?;
-    trace("complete");
+    std::fs::write(&trace_path, format!("complete\n{}", output.1))
+        .map_err(|err| format!("write target-speaker trace failed: {err}"))?;
     Ok(())
 }
 

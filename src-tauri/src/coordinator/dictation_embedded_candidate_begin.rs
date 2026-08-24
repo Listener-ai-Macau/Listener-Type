@@ -38,6 +38,23 @@ impl EmbeddedStreamingDictation {
             }
             return Ok(());
         }
+        // A terminal wake can finish after the firmware has already closed the
+        // wake segment. The host then opens a real dictation session and asks
+        // the device for a fresh segment. That fresh segment still reports
+        // VoiceActivation, but it is body audio for the already-bound session,
+        // not another hidden wake candidate. Route it before the ordinary
+        // origin/enrollment classifier; otherwise the visible capsule remains
+        // stuck in Starting while every body segment is re-run through KWS.
+        if let Some(coordinator_session_id) =
+            terminal_wake_continuation_waiting_for_audio(inner)
+        {
+            log::info!(
+                "[wake-phrase] attaching fresh embedded segment as terminal wake body embedded_session_id={embedded_session_id} coordinator_session_id={coordinator_session_id}"
+            );
+            self.begin_session_if_needed(inner, embedded_session_id)
+                .await?;
+            return Ok(());
+        }
         self.embedded_session_id = Some(embedded_session_id);
         let configured_phrase = inner.prefs.get().voice_wake_phrase;
         let mut kind = buffered_speaker_candidate_kind(
