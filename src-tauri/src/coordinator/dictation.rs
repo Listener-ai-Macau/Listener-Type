@@ -115,6 +115,11 @@ const EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS: u64 = 200;
 // speaker as unclassified owner speech and disabled provider-stall auto-end.
 // Keep this below two verifier cadences so stale evidence still expires.
 const EMBEDDED_LOCAL_SPEAKER_CLASSIFICATION_SLACK_MS: u64 = 600;
+// Do not let one borderline low-score window release a provisional provider
+// tail.  Require the confirmed local other-speaker edge to remain at least one
+// full endpoint interval beyond the last owner boundary; this preserves the
+// owner-recovery guard while handling a cloud diarizer that merged both voices.
+const EMBEDDED_CONFIRMED_NON_TARGET_OWNER_GAP_MS: u64 = 1_000;
 // F4（2026-08-09 12:47:04）：旁人连续说话时未归属本地语音不断前进，会把
 // 自动结束无限挂起。挂起以最后一次归属语音 +6s 封顶；本人正常说话的分类
 // 滞后远小于 6s，不受影响。
@@ -458,6 +463,47 @@ fn polish_prefetch_adoptable(prefetch: &PolishPrefetch, final_text: &str) -> boo
 
 include!("dictation_target_speaker_update.rs");
 
+/// Select the identity-authoritative owner boundary for endpointing.
+///
+/// Cloud diarization is useful until the enrolled local verifier has observed
+/// the owner. After that point the local Target watermark owns the endpoint:
+/// a provider speaker row can merge a nearby second speaker into the owner's
+/// row and must not move the stop deadline. Local Uncertain/NonTarget windows
+/// do not advance this watermark, while a later positive Target window can
+/// still rearm it normally.
+fn authoritative_owner_endpoint_boundary(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    cloud_owner_boundary_ms: Option<u64>,
+) -> Option<u64> {
+    if update.local_speaker_tracking_enabled {
+        let Some(local_owner_ms) = update.local_target_speech_end_ms else {
+            return cloud_owner_boundary_ms;
+        };
+        // A local verifier window can lag the provider by one overlapping
+        // cadence while the owner is still speaking. Keep that short,
+        // evidence-backed bridge, but never let a cloud row outrun a stale
+        // local owner watermark once the local audio edge is more than the
+        // bounded uncertainty budget away.
+        let local_tail_still_compatible = update.local_speech_end_ms.is_some_and(|speech_ms| {
+            speech_ms <= local_owner_ms.saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
+                && !local_speech_confidently_non_target(update, speech_ms)
+        });
+        if local_tail_still_compatible {
+            cloud_owner_boundary_ms
+                .into_iter()
+                .chain(Some(local_owner_ms))
+                .max()
+        } else {
+            Some(local_owner_ms)
+        }
+    } else {
+        cloud_owner_boundary_ms
+            .into_iter()
+            .chain(update.local_target_speech_end_ms)
+            .max()
+    }
+}
+
 fn target_speaker_update_has_live_owner_activity(
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
 ) -> bool {
@@ -467,10 +513,10 @@ fn target_speaker_update_has_live_owner_activity(
     let audio_edge_ms = update
         .audio_duration_ms
         .max(update.provider_audio_duration_ms);
-    let owner_edge_ms = update
+    let cloud_owner_edge_ms = update
         .target_speech_end_ms
-        .max(update.local_target_speech_end_ms)
         .max(update.stable_attributed_speech_end_ms);
+    let owner_edge_ms = authoritative_owner_endpoint_boundary(update, cloud_owner_edge_ms);
     audio_edge_ms
         .zip(owner_edge_ms)
         .is_some_and(|(audio, owner)| {
@@ -560,35 +606,26 @@ fn target_speaker_endpoint_timeout_with_fusion(
     mode_timeout_ms
 }
 
-/// Recent local speech energy that is not yet attributed as non-target. Used to
-/// hold auto-end while the owner may still be talking even if cloud text froze.
-/// The uncertain energy clock is capped from the last *confirmed owner*
-/// boundary, not from any attributed speaker. This preserves a natural pause
-/// while preventing weak room speech from repeatedly extending the session.
-fn has_unresolved_recent_local_speech(
+/// Recent *owner* activity that the provider has not covered yet.
+///
+/// `local_speech_end_ms` is a generic energy/VAD watermark. It deliberately is
+/// not consulted here: room noise or another speaker must never renew an
+/// owner-tracked recording. The local target watermark is advanced only by a
+/// positive owner classification (or owner-gated preview growth), so this
+/// helper is the sole bounded bridge for provider lag.
+fn has_unresolved_recent_owner_speech(
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
     endpoint_timeout_ms: u64,
 ) -> bool {
-    update
-        .audio_duration_ms
-        .zip(update.local_speech_end_ms)
-        .is_some_and(|(audio_ms, local_speech_ms)| {
-            let confirmed_owner_end_ms = update
-                .target_speech_end_ms
-                .into_iter()
-                .chain(update.local_target_speech_end_ms)
-                .max()
-                .unwrap_or_default();
-            confirmed_owner_end_ms > 0
-                && local_speech_ms
-                    > confirmed_owner_end_ms
-                        .saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
-                && local_speech_ms
-                    <= confirmed_owner_end_ms
-                        .saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
-                && !local_speech_confidently_non_target(update, local_speech_ms)
-                && audio_ms.saturating_sub(local_speech_ms) < endpoint_timeout_ms
-        })
+    let Some(audio_ms) = update.audio_duration_ms else {
+        return false;
+    };
+    let Some(local_owner_ms) = update.local_target_speech_end_ms else {
+        return false;
+    };
+    let provider_owner_ms = update.target_speech_end_ms.unwrap_or_default();
+    local_owner_ms > provider_owner_ms
+        && audio_ms.saturating_sub(local_owner_ms) < endpoint_timeout_ms
 }
 
 fn target_speaker_endpoint_due_with_provider_stall(
@@ -596,18 +633,20 @@ fn target_speaker_endpoint_due_with_provider_stall(
     provider_stall_confirmed: bool,
     endpoint_timeout_ms: u64,
 ) -> bool {
-    let unresolved_recent_local_speech =
-        has_unresolved_recent_local_speech(update, endpoint_timeout_ms);
+    let unresolved_recent_owner_speech =
+        has_unresolved_recent_owner_speech(update, endpoint_timeout_ms);
     let local_target_authority =
         update.local_speaker_tracking_enabled && update.local_target_speech_end_ms.is_some();
     let cloud_target_authority = update.speaker_info_present && update.speaker_id.is_some();
     let recent_local_speech_is_non_target = update
         .local_speech_end_ms
         .is_some_and(|speech_ms| local_speech_confidently_non_target(update, speech_ms));
-    let provider_other_speaker_advanced = update
-        .target_speech_end_ms
-        .zip(update.stable_attributed_speech_end_ms)
-        .is_some_and(|(target_ms, attributed_ms)| attributed_ms > target_ms);
+    let confirmed_non_target_owner_gap = update
+        .local_non_target_speech_end_ms
+        .zip(update.local_target_speech_end_ms)
+        .is_some_and(|(non_target_ms, target_ms)| {
+            non_target_ms.saturating_sub(target_ms) >= EMBEDDED_CONFIRMED_NON_TARGET_OWNER_GAP_MS
+        });
     let uncertain_owner_budget_exhausted = update
         .local_target_speech_end_ms
         .zip(update.local_speech_end_ms)
@@ -621,21 +660,35 @@ fn target_speaker_endpoint_due_with_provider_stall(
     // speech blocks unless repeated strong local evidence and a newer
     // non-target provider attribution both identify another person; room
     // speech must not hold auto-end, while startup calibration stays protected.
+    // A provisional provider row is not, by itself, evidence that the owner
+    // is still speaking. Volcengine may keep `pending_unattributed_speech` set
+    // after the owner clock is quiet; making that flag an unconditional
+    // barrier is the reason automatic stop can hang forever. Pending text is
+    // therefore a hold only while a bounded, recent owner-compatible tail is
+    // present, on both the normal and stalled provider paths.
+    // Strong local NonTarget is sufficient only after it has clearly moved
+    // beyond the last owner boundary. Cloud diarization may collapse both
+    // voices into the same speaker id, so requiring
+    // `provider_other_speaker_advanced` alone can leave the session recording
+    // forever; releasing on a single borderline window would instead swallow
+    // the owner's recovering tail.
     let pending_blocks_endpoint = update.pending_unattributed_speech
-        && !(recent_local_speech_is_non_target && provider_other_speaker_advanced);
+        && unresolved_recent_owner_speech
+        && !(recent_local_speech_is_non_target && confirmed_non_target_owner_gap);
     let stable_attributed_speech_end_ms = (!recent_local_speech_is_non_target
         && !uncertain_owner_budget_exhausted)
         .then_some(update.stable_attributed_speech_end_ms)
         .flatten();
-    let target_speech_end_ms = update
+    let cloud_target_speech_end_ms = update
         .target_speech_end_ms
         .into_iter()
         // Provider diarization can briefly split one continuous owner utterance
         // into a new speaker id. Stable attributed speech must still hold the
         // endpoint clock even though target-only text filtering remains strict.
         .chain(stable_attributed_speech_end_ms)
-        .chain(update.local_target_speech_end_ms)
         .max();
+    let target_speech_end_ms =
+        authoritative_owner_endpoint_boundary(update, cloud_target_speech_end_ms);
     // Once the provider has reported any covered audio boundary, measure the
     // endpoint only inside that authoritative coverage. Local capture normally
     // runs ahead; using its newer clock with an older attributed target end can
@@ -655,7 +708,7 @@ fn target_speaker_endpoint_due_with_provider_stall(
     };
     (cloud_target_authority || local_target_authority)
         && !pending_blocks_endpoint
-        && !unresolved_recent_local_speech
+        && !unresolved_recent_owner_speech
         && endpoint_audio_duration_ms
             .zip(target_speech_end_ms)
             .is_some_and(|(audio_ms, target_ms)| {
@@ -679,7 +732,6 @@ fn provider_stall_local_endpoint_due(
     };
     if !provider_stall_confirmed
         || !update.local_speaker_tracking_enabled
-        || update.pending_unattributed_speech
         || local_audio_ms.saturating_sub(provider_audio_ms)
             < EMBEDDED_PROVIDER_STALL_FALLBACK_LAG_MS
     {
@@ -690,9 +742,18 @@ fn provider_stall_local_endpoint_due(
     // while ASR/provider clocks froze. Confirmed non-target (other people) or
     // energy that has itself been quiet for the full endpoint interval may
     // still use stall fallback so room noise does not hold the session open.
-    if has_unresolved_recent_local_speech(update, endpoint_timeout_ms) {
+    let unresolved_recent_owner_speech =
+        has_unresolved_recent_owner_speech(update, endpoint_timeout_ms);
+    if unresolved_recent_owner_speech {
         return false;
     }
+
+    // A provisional provider row is not an endpoint authority.  During room
+    // interference Volcengine can leave `pending_unattributed_speech` latched
+    // after the local owner clock is quiet; treating that bit as a hard stall
+    // barrier made the local provider-stall fallback wait forever.  The
+    // bounded local-owner-tail check above is the only pending condition that
+    // may hold auto-end.
 
     // An enrolled wake can establish the cloud owner while every later local
     // window is too weak to score Target. Requiring a local Target boundary in
@@ -713,11 +774,9 @@ fn provider_stall_local_endpoint_due(
     // newer boundary has itself been inactive for the full endpoint interval.
     // This preserves quiet tails without waiting forever for a stalled provider
     // to repeat coverage it has already stopped reporting.
-    let newest_target_end_ms = update
-        .local_target_speech_end_ms
-        .map_or(cloud_target_end_ms, |local_target_end_ms| {
-            cloud_target_end_ms.max(local_target_end_ms)
-        });
+    let newest_target_end_ms =
+        authoritative_owner_endpoint_boundary(update, Some(cloud_target_end_ms))
+            .unwrap_or(cloud_target_end_ms);
     local_audio_ms.saturating_sub(newest_target_end_ms) >= endpoint_timeout_ms
 }
 
@@ -754,12 +813,14 @@ fn stage_terminal_wake_continuation(
     wake_pcm: Vec<u8>,
     wake_end_seconds: f32,
     wake_phrase: String,
+    enrolled_owner_matched: bool,
 ) -> bool {
     stage_terminal_wake_continuation_at(
         inner,
         wake_pcm,
         wake_end_seconds,
         wake_phrase,
+        enrolled_owner_matched,
         Instant::now(),
     )
 }
@@ -769,6 +830,7 @@ fn stage_terminal_wake_continuation_at(
     wake_pcm: Vec<u8>,
     wake_end_seconds: f32,
     wake_phrase: String,
+    enrolled_owner_matched: bool,
     now: Instant,
 ) -> bool {
     let mut slot = inner.embedded_audio_terminal_wake_continuation.lock();
@@ -783,6 +845,7 @@ fn stage_terminal_wake_continuation_at(
         wake_pcm,
         wake_end_seconds,
         wake_phrase,
+        enrolled_owner_matched,
         expires_at: now + EMBEDDED_TERMINAL_WAKE_CONTINUATION_TTL,
     });
     true
@@ -2011,29 +2074,27 @@ fn select_target_speaker_final(
         }
         Ok(Some(target)) if filter_required => {
             log::warn!(
-                "[target-speaker] empty owner-only final under confirmed interference; refusing contaminated primary transcript"
+                "[target-speaker] empty owner-only final under confirmed interference; preserving primary rather than returning no text"
             );
-            target
+            if target.text.trim().is_empty() {
+                primary
+            } else {
+                target
+            }
         }
         Ok(Some(_)) => primary,
         Ok(None) if filter_required => {
             log::warn!(
-                "[target-speaker] required owner-only final unavailable; refusing contaminated primary transcript"
+                "[target-speaker] required owner-only final unavailable; preserving primary rather than returning no text"
             );
-            RawTranscript {
-                text: String::new(),
-                duration_ms: primary.duration_ms,
-            }
+            primary
         }
         Ok(None) => primary,
         Err(err) if filter_required => {
             log::warn!(
-                "[target-speaker] required owner-only final failed; refusing contaminated primary transcript: {err}"
+                "[target-speaker] required owner-only final failed; preserving primary rather than returning no text: {err}"
             );
-            RawTranscript {
-                text: String::new(),
-                duration_ms: primary.duration_ms,
-            }
+            primary
         }
         Err(err) => {
             log::warn!(

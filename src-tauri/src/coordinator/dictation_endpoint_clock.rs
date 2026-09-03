@@ -34,12 +34,77 @@ struct SettledTargetEndpointClock {
     /// recording, bridge that suspicious transition for a bounded interval;
     /// ordinary terminal-first short commands keep the normal 900 ms clock.
     manual_terminal_bridge_until: Option<Instant>,
+    manual_terminal_bridge_rearm_pending: bool,
     pending_was_seen: bool,
+    product_endpoint: crate::speech_decision_kernel::EndpointArbiter,
+    last_visible_body_signature: Option<(bool, usize)>,
+    /// Last local speech edge used to renew the firmware endpoint.  Provider
+    /// callbacks can repeat the same snapshot; dedupe it so a stale snapshot
+    /// cannot keep recording alive indefinitely.
+    last_firmware_lease_owner_speech_ms: Option<u64>,
+    /// A bounded diagnostic latch: when the endpoint deadline is reached but
+    /// evidence keeps it in Hold/CatchingUp, report the first reason for this
+    /// generation only.  This avoids per-50ms log spam while making a stuck
+    /// endpoint distinguishable from an actively growing owner utterance.
+    pending_due_hold_diagnostic: Option<(u64, &'static str)>,
+    last_reported_due_hold_diagnostic: Option<(u64, &'static str)>,
 }
 
 const RECENT_STRONG_NON_TARGET_WINDOW_MS: u64 = 900;
 const MANUAL_TERMINAL_BRIDGE_MAX_MS: u64 = 3_000;
 const MANUAL_TERMINAL_BRIDGE_MIN_VISIBLE_CHARS: usize = 20;
+const ENDPOINT_PROVIDER_CATCH_UP_GRACE_MS: u64 = 300;
+
+fn endpoint_hold_reason(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    latest_visible_body_ends_terminal: Option<bool>,
+) -> &'static str {
+    if update.pending_unattributed_speech
+        && !update_has_recent_strong_non_target(update)
+        && has_unresolved_recent_owner_speech(
+            update,
+            EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+        )
+    {
+        return "pending_provider_text";
+    }
+    if update.local_speaker_tracking_enabled
+        && has_unresolved_recent_owner_speech(update, EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS)
+    {
+        return "fresh_owner_tail";
+    }
+    if latest_visible_body_ends_terminal == Some(false) {
+        return "open_clause_tail";
+    }
+    if !(update.speaker_info_present && update.speaker_id.is_some())
+        && update.local_target_speech_end_ms.is_none()
+    {
+        return "owner_identity_not_settled";
+    }
+    "endpoint_guard"
+}
+
+fn product_endpoint_evidence(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    authoritative_owner_watermark_ms: Option<u64>,
+) -> crate::speech_decision_kernel::EndpointEvidence {
+    let latest_speech_confirmed_non_target = update
+        .local_speech_end_ms
+        .is_some_and(|speech_ms| local_speech_confidently_non_target(update, speech_ms));
+    crate::speech_decision_kernel::EndpointEvidence {
+        // The settled clock has already fused provider and local identity.
+        // Reusing the raw provider boundary here would let a provider row that
+        // collapsed a nearby second speaker masquerade as fresh owner growth.
+        owner_watermark_ms: authoritative_owner_watermark_ms,
+        provider_coverage_ms: update.provider_audio_duration_ms,
+        pending_provider_text: update.pending_unattributed_speech,
+        latest_speech_confirmed_non_target,
+        unresolved_owner_tail: has_unresolved_recent_owner_speech(
+            update,
+            EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+        ),
+    }
+}
 
 fn update_has_recent_strong_non_target(
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
@@ -63,6 +128,42 @@ fn update_has_recent_strong_non_target(
 }
 
 impl SettledTargetEndpointClock {
+    fn should_renew_firmware_endpoint_lease(
+        &mut self,
+        update: &crate::asr::volcengine::TargetSpeakerUpdate,
+        body_started: bool,
+    ) -> bool {
+        let owner_speech_ms = update.local_target_speech_end_ms;
+        if owner_speech_ms.is_some()
+            && owner_speech_ms == self.last_firmware_lease_owner_speech_ms
+        {
+            return false;
+        }
+        let latest_speech_confirmed_non_target = update
+            .local_speech_end_ms
+            .is_some_and(|speech_ms| local_speech_confidently_non_target(update, speech_ms));
+        let owner_established = update.target_speech_end_ms.is_some()
+            || update.local_target_speech_end_ms.is_some();
+        let evidence = crate::speech_decision_kernel::FirmwareEndpointLeaseEvidence {
+            visible_body: body_started,
+            owner_established,
+            owner_speech_watermark_ms: owner_speech_ms,
+            provider_coverage_ms: update.provider_audio_duration_ms,
+            unresolved_owner_tail: has_unresolved_recent_owner_speech(
+                update,
+                EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+            ),
+            latest_speech_confirmed_non_target,
+        };
+        if crate::speech_decision_kernel::decide_firmware_endpoint_lease(evidence)
+            != crate::speech_decision_kernel::FirmwareEndpointLeaseDecision::Renew
+        {
+            return false;
+        }
+        self.last_firmware_lease_owner_speech_ms = owner_speech_ms;
+        true
+    }
+
     fn pause_arm_for_provisional_tail(&mut self) {
         if let Some(armed_at) = self.armed_at {
             self.paused_armed_target_end_ms = self.armed_target_end_ms;
@@ -88,7 +189,13 @@ impl SettledTargetEndpointClock {
     ) -> Option<u64> {
         self.latest_update = Some(update.clone());
         let recent_strong_non_target = update_has_recent_strong_non_target(update);
-        if update.pending_unattributed_speech && !recent_strong_non_target {
+        let pending_owner_tail = update.pending_unattributed_speech
+            && !recent_strong_non_target
+            && has_unresolved_recent_owner_speech(
+                &update,
+                EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+            );
+        if pending_owner_tail {
             self.pending_was_seen = true;
             if self.armed_at.is_some() {
                 self.pause_arm_for_provisional_tail();
@@ -107,15 +214,14 @@ impl SettledTargetEndpointClock {
         // already-due 900 ms timer stopped at 4600 ms -- just 100 ms after the
         // owner had spoken. Rearm on the fused confirmed-owner boundary; raw
         // VAD and NonTarget observations still cannot move this value.
-        let stable_owner_end_ms = stable_cloud_target_end_ms
-            .into_iter()
-            .chain(update.local_target_speech_end_ms)
-            .max();
+        let stable_owner_end_ms =
+            authoritative_owner_endpoint_boundary(update, stable_cloud_target_end_ms);
         let stable_target_should_rearm = stable_owner_end_ms.is_some()
-            && (update.target_activity_advanced
+            && (self.armed_at.is_none()
                 || self.pending_was_seen
-                || self.armed_at.is_none()
-                || self.armed_target_end_ms != stable_owner_end_ms);
+                || self
+                    .armed_target_end_ms
+                    .is_none_or(|armed_end_ms| stable_owner_end_ms > Some(armed_end_ms)));
         // Some valid Volcengine previews arrive before diarization publishes a
         // speaker id. Once visible body text exists, arm a wall-clock fallback
         // instead of leaving the session entirely dependent on noisy firmware
@@ -156,11 +262,15 @@ impl SettledTargetEndpointClock {
             self.armed_from_visible_body_fallback = stable_cloud_target_end_ms.is_none();
         }
         self.clear_paused_arm();
+        self.product_endpoint.arm(product_endpoint_evidence(
+            update,
+            self.armed_target_end_ms,
+        ));
         Some(self.generation)
     }
 
     fn due_update(
-        &self,
+        &mut self,
         generation: u64,
         now: Instant,
         timeout_ms: u64,
@@ -172,25 +282,65 @@ impl SettledTargetEndpointClock {
         if now.saturating_duration_since(armed_at) < Duration::from_millis(timeout_ms) {
             return None;
         }
-        self.latest_update
-            .as_ref()
-            .filter(|update| {
-                Self::update_allows_endpoint(
-                    update,
-                    self.armed_from_visible_body_fallback,
-                    self.latest_visible_body_ends_terminal,
-                    self.manual_terminal_bridge_until,
-                    armed_at,
-                    now,
-                )
-            })
-            .cloned()
+        let Some(latest) = self.latest_update.as_ref() else {
+            self.note_due_hold_diagnostic(generation, "no_latest_update");
+            return None;
+        };
+        if !Self::update_allows_endpoint(
+            latest,
+            self.armed_from_visible_body_fallback,
+            self.latest_visible_body_ends_terminal,
+            self.manual_terminal_bridge_until,
+            armed_at,
+            now,
+        ) {
+            self.note_due_hold_diagnostic(
+                generation,
+                endpoint_hold_reason(latest, self.latest_visible_body_ends_terminal),
+            );
+            return None;
+        }
+        let update = latest.clone();
+        let decision = self.product_endpoint.decide_stop(
+            product_endpoint_evidence(&update, self.armed_target_end_ms),
+            now,
+            Duration::from_millis(ENDPOINT_PROVIDER_CATCH_UP_GRACE_MS),
+        );
+        match decision {
+            crate::speech_decision_kernel::EndpointDecision::Stop => Some(update),
+            crate::speech_decision_kernel::EndpointDecision::CatchingUp => {
+                self.note_due_hold_diagnostic(generation, "provider_catch_up");
+                None
+            }
+            crate::speech_decision_kernel::EndpointDecision::Hold => {
+                self.note_due_hold_diagnostic(generation, "arbiter_hold");
+                None
+            }
+        }
+    }
+
+    fn take_due_hold_diagnostic(&mut self) -> Option<(u64, &'static str)> {
+        self.pending_due_hold_diagnostic.take()
+    }
+
+    fn note_due_hold_diagnostic(&mut self, generation: u64, reason: &'static str) {
+        let diagnostic = (generation, reason);
+        if self.last_reported_due_hold_diagnostic != Some(diagnostic) {
+            self.last_reported_due_hold_diagnostic = Some(diagnostic);
+            self.pending_due_hold_diagnostic = Some(diagnostic);
+        }
     }
 
     fn arm_latest_for_visible_body(&mut self, now: Instant) -> Option<u64> {
         let update = self.latest_update.clone()?;
         let recent_strong_non_target = update_has_recent_strong_non_target(&update);
-        if update.pending_unattributed_speech && !recent_strong_non_target {
+        let pending_owner_tail = update.pending_unattributed_speech
+            && !recent_strong_non_target
+            && has_unresolved_recent_owner_speech(
+                &update,
+                EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+            );
+        if pending_owner_tail {
             self.pending_was_seen = true;
             if self.armed_at.is_some() {
                 self.pause_arm_for_provisional_tail();
@@ -204,12 +354,26 @@ impl SettledTargetEndpointClock {
             (update.speaker_info_present && update.speaker_id.is_some())
             .then_some(update.target_speech_end_ms)
             .flatten();
-        let stable_owner_end_ms = stable_cloud_target_end_ms
-            .into_iter()
-            .chain(update.local_target_speech_end_ms)
-            .max();
+        let stable_owner_end_ms =
+            authoritative_owner_endpoint_boundary(&update, stable_cloud_target_end_ms);
         let restore_paused_owner_deadline =
             recent_strong_non_target && self.paused_armed_at.is_some();
+        let owner_boundary_advanced = stable_owner_end_ms.is_some_and(|new_end_ms| {
+            self.armed_target_end_ms
+                .is_none_or(|armed_end_ms| new_end_ms > armed_end_ms)
+        });
+        // This method is called from every visible preview callback.  A
+        // callback is not itself fresh owner speech: restarting the wall clock
+        // here makes a long but already-settled preview wait forever.  Re-arm
+        // only for a strictly newer fused owner boundary or restoration of a
+        // paused deadline after explicit other-speaker evidence.
+        if self.armed_at.is_some()
+            && !owner_boundary_advanced
+            && !restore_paused_owner_deadline
+            && !self.manual_terminal_bridge_rearm_pending
+        {
+            return None;
+        }
         self.generation = self.generation.wrapping_add(1);
         if restore_paused_owner_deadline {
             self.armed_target_end_ms = self.paused_armed_target_end_ms;
@@ -221,28 +385,59 @@ impl SettledTargetEndpointClock {
             self.armed_from_visible_body_fallback = stable_cloud_target_end_ms.is_none();
         }
         self.clear_paused_arm();
+        self.manual_terminal_bridge_rearm_pending = false;
+        self.product_endpoint.arm(product_endpoint_evidence(
+            &update,
+            self.armed_target_end_ms,
+        ));
         Some(self.generation)
     }
 
-    fn is_due(&self, now: Instant, timeout_ms: u64) -> bool {
+    fn is_due(&mut self, now: Instant, timeout_ms: u64) -> bool {
         let Some(armed_at) = self.armed_at else {
             return false;
         };
-        now.saturating_duration_since(armed_at) >= Duration::from_millis(timeout_ms)
-            && self.latest_update.as_ref().is_some_and(|update| {
-            Self::update_allows_endpoint(
-                update,
-                self.armed_from_visible_body_fallback,
-                self.latest_visible_body_ends_terminal,
-                self.manual_terminal_bridge_until,
-                armed_at,
-                now,
-            )
-        })
+        if now.saturating_duration_since(armed_at) < Duration::from_millis(timeout_ms) {
+            return false;
+        }
+        let Some(update) = self.latest_update.clone() else {
+            self.note_due_hold_diagnostic(self.generation, "no_latest_update");
+            return false;
+        };
+        if !Self::update_allows_endpoint(
+            &update,
+            self.armed_from_visible_body_fallback,
+            self.latest_visible_body_ends_terminal,
+            self.manual_terminal_bridge_until,
+            armed_at,
+            now,
+        ) {
+            self.note_due_hold_diagnostic(
+                self.generation,
+                endpoint_hold_reason(&update, self.latest_visible_body_ends_terminal),
+            );
+            return false;
+        }
+        let decision = self.product_endpoint.decide_stop(
+            product_endpoint_evidence(&update, self.armed_target_end_ms),
+            now,
+            Duration::from_millis(ENDPOINT_PROVIDER_CATCH_UP_GRACE_MS),
+        );
+        match decision {
+            crate::speech_decision_kernel::EndpointDecision::Stop => true,
+            crate::speech_decision_kernel::EndpointDecision::CatchingUp => {
+                self.note_due_hold_diagnostic(self.generation, "provider_catch_up");
+                false
+            }
+            crate::speech_decision_kernel::EndpointDecision::Hold => {
+                self.note_due_hold_diagnostic(self.generation, "arbiter_hold");
+                false
+            }
+        }
     }
 
     fn latest_due_update(
-        &self,
+        &mut self,
         now: Instant,
         timeout_ms: u64,
     ) -> Option<crate::asr::volcengine::TargetSpeakerUpdate> {
@@ -253,6 +448,14 @@ impl SettledTargetEndpointClock {
 
     fn generation_is_current(&self, generation: u64) -> bool {
         self.generation == generation && self.armed_at.is_some()
+    }
+
+    fn reopen_after_failed_stop(&mut self) {
+        if let Some(update) = self.latest_update.as_ref() {
+            self.product_endpoint.reopen_after_failed_stop(
+                product_endpoint_evidence(update, self.armed_target_end_ms),
+            );
+        }
     }
 }
 
@@ -295,15 +498,28 @@ fn schedule_settled_target_endpoint_timer(
             wall_clock_timeout_ms.saturating_sub(elapsed_ms),
         ))
         .await;
-        let update = endpoint_clock.lock().due_update(
-            generation,
-            Instant::now(),
-            wall_clock_timeout_ms,
-        );
+        let (update, hold_diagnostic) = {
+            let mut clock = endpoint_clock.lock();
+            let update = clock.due_update(generation, Instant::now(), wall_clock_timeout_ms);
+            let hold_diagnostic = clock.take_due_hold_diagnostic();
+            (update, hold_diagnostic)
+        };
+        if let Some((generation, reason)) = hold_diagnostic {
+            log::info!(
+                "[asr] target endpoint hold session_id={session_id} generation={generation} reason={reason}"
+            );
+        }
         let Some(update) = update else {
             return;
         };
-        handle_target_speaker_update(&inner, session_id, &stop_dispatched, update, true);
+        handle_target_speaker_update(
+            &inner,
+            session_id,
+            &stop_dispatched,
+            &endpoint_clock,
+            update,
+            true,
+        );
     });
 }
 
@@ -347,15 +563,26 @@ fn start_settled_target_endpoint_watchdog(
             let endpoint_timeout_ms = target_speaker_end_timeout_ms_for_preview(
                 current_embedded_audio_partial_preview(&inner).as_deref(),
             );
-            let update = endpoint_clock.lock().latest_due_update(
-                Instant::now(),
-                settled_target_wall_clock_timeout_ms(endpoint_timeout_ms),
-            );
+            let (update, hold_diagnostic) = {
+                let mut clock = endpoint_clock.lock();
+                let update = clock.latest_due_update(
+                    Instant::now(),
+                    settled_target_wall_clock_timeout_ms(endpoint_timeout_ms),
+                );
+                let hold_diagnostic = clock.take_due_hold_diagnostic();
+                (update, hold_diagnostic)
+            };
+            if let Some((generation, reason)) = hold_diagnostic {
+                log::info!(
+                    "[asr] target endpoint hold session_id={session_id} generation={generation} reason={reason}"
+                );
+            }
             if let Some(update) = update {
                 handle_target_speaker_update(
                     &inner,
                     session_id,
                     &stop_dispatched,
+                    &endpoint_clock,
                     update,
                     true,
                 );

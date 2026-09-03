@@ -68,6 +68,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/run-multi-speaker-timeline-regressions.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-recording-consumption-physical-validation.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-speaker-verification-evaluation.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/run-synthetic-speaker-ab.ps1` | Automation and audits | Synthetic owner/non-owner and overlap speaker A/B replay |
 | `scripts/run-target-speaker-overlap-regressions.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-v1.0.2-regression.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-cn-interference-final-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
@@ -189,6 +190,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator/dictation_wake_owner_gate.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_polish.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_prefix_retry.rs` | Core app | Build and targeted tests |
+| `docs/architecture/owner_audio_pipeline.md` | Owner-centric wake, speaker activity and endpoint contract | Architecture review and targeted replay tests |
 | `src-tauri/src/coordinator/embedded_ble_runtime.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/hotkey_device_runtime.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/coordinator/qa.rs` | Core app | Build and targeted tests |
@@ -231,6 +233,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/shortcut_binding.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/shortcut_dispatch.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/speaker_verification.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/speech_decision_kernel.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/startup_evidence.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/timeline.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/types.rs` | Core app | Build and targeted tests |
