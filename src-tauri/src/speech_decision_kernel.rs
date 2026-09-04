@@ -100,6 +100,59 @@ pub(crate) struct TranscriptCommit {
     pub(crate) source: CommitSource,
 }
 
+/// Sole authority for selecting the text representation at a provider's
+/// protocol-final boundary. Provider adapters may calculate candidate-safety
+/// facts, but they must not independently choose between raw, filtered and
+/// optimistic text through overlapping boolean branches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FinalTranscriptAuthority {
+    SpeakerFiltered,
+    ProviderRawRecovery,
+    ProviderOwnerRecovery,
+    OptimisticOwnerRecovery,
+}
+
+impl FinalTranscriptAuthority {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::SpeakerFiltered => "speaker_filtered",
+            Self::ProviderRawRecovery => "provider_raw_recovery",
+            Self::ProviderOwnerRecovery => "provider_owner_recovery",
+            Self::OptimisticOwnerRecovery => "optimistic_owner_recovery",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct FinalTranscriptEvidence {
+    pub(crate) protocol_final: bool,
+    /// Provider diarization and a time-aligned local owner mismatch agree that
+    /// the candidate tail belongs to somebody else. This is a veto, not a
+    /// request to delete already accepted owner text.
+    pub(crate) explicit_non_owner_tail: bool,
+    pub(crate) provider_raw_recovery_safe: bool,
+    pub(crate) provider_owner_recovery_safe: bool,
+    pub(crate) optimistic_owner_recovery_safe: bool,
+}
+
+pub(crate) fn arbitrate_final_transcript(
+    evidence: FinalTranscriptEvidence,
+) -> FinalTranscriptAuthority {
+    if !evidence.protocol_final || evidence.explicit_non_owner_tail {
+        return FinalTranscriptAuthority::SpeakerFiltered;
+    }
+    if evidence.provider_raw_recovery_safe {
+        return FinalTranscriptAuthority::ProviderRawRecovery;
+    }
+    if evidence.provider_owner_recovery_safe {
+        return FinalTranscriptAuthority::ProviderOwnerRecovery;
+    }
+    if evidence.optimistic_owner_recovery_safe {
+        return FinalTranscriptAuthority::OptimisticOwnerRecovery;
+    }
+    FinalTranscriptAuthority::SpeakerFiltered
+}
+
 /// Session-local, append-only provider evidence. Text is never persisted by
 /// this type; it exists only for the lifetime of the ASR session.
 #[derive(Debug, Default)]
@@ -1658,5 +1711,59 @@ mod tests {
                 ..unrelated_phrase
             }
         ));
+    }
+
+    #[test]
+    fn target_speaker_endpoint_final_arbitration_gives_foreign_tail_absolute_veto() {
+        let every_recovery_path_open = FinalTranscriptEvidence {
+            protocol_final: true,
+            explicit_non_owner_tail: true,
+            provider_raw_recovery_safe: true,
+            provider_owner_recovery_safe: true,
+            optimistic_owner_recovery_safe: true,
+        };
+        assert_eq!(
+            arbitrate_final_transcript(every_recovery_path_open),
+            FinalTranscriptAuthority::SpeakerFiltered
+        );
+    }
+
+    #[test]
+    fn target_speaker_endpoint_final_arbitration_has_one_recovery_precedence() {
+        let base = FinalTranscriptEvidence {
+            protocol_final: true,
+            explicit_non_owner_tail: false,
+            provider_raw_recovery_safe: false,
+            provider_owner_recovery_safe: false,
+            optimistic_owner_recovery_safe: false,
+        };
+        assert_eq!(
+            arbitrate_final_transcript(base),
+            FinalTranscriptAuthority::SpeakerFiltered
+        );
+        assert_eq!(
+            arbitrate_final_transcript(FinalTranscriptEvidence {
+                optimistic_owner_recovery_safe: true,
+                ..base
+            }),
+            FinalTranscriptAuthority::OptimisticOwnerRecovery
+        );
+        assert_eq!(
+            arbitrate_final_transcript(FinalTranscriptEvidence {
+                provider_owner_recovery_safe: true,
+                optimistic_owner_recovery_safe: true,
+                ..base
+            }),
+            FinalTranscriptAuthority::ProviderOwnerRecovery
+        );
+        assert_eq!(
+            arbitrate_final_transcript(FinalTranscriptEvidence {
+                provider_raw_recovery_safe: true,
+                provider_owner_recovery_safe: true,
+                optimistic_owner_recovery_safe: true,
+                ..base
+            }),
+            FinalTranscriptAuthority::ProviderRawRecovery
+        );
     }
 }

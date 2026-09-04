@@ -3933,6 +3933,31 @@ fn target_speaker_endpoint_reduces_fresh_activity_before_stop_policy() {
 }
 
 #[test]
+fn target_speaker_endpoint_has_one_atomic_final_transcript_arbiter() {
+    let provider = include_str!("../asr/volcengine.rs");
+    assert_eq!(
+        provider
+            .matches("arbitrate_final_transcript(evidence)")
+            .count(),
+        1,
+        "the provider adapter must ask exactly one final transcript authority"
+    );
+    for legacy_selector in [
+        "prefer_final_unfiltered_provider_text",
+        "prefer_final_provider_text",
+        "prefer_final_optimistic",
+    ] {
+        assert!(
+            !provider.contains(legacy_selector),
+            "legacy independent final selector returned: {legacy_selector}"
+        );
+    }
+    assert!(provider.contains("let state = self.state.lock();"));
+    assert!(provider.contains("FinalTranscriptEvidence"));
+    assert!(provider.contains("explicit_non_owner_tail"));
+}
+
+#[test]
 fn automatic_wake_target_speaker_endpoint_body_wait_has_bounded_wall_clock_escape() {
     let coordinator = Coordinator::new();
     let session_id = new_session_id();

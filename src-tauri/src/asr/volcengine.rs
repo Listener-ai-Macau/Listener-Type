@@ -563,6 +563,12 @@ struct SyncState {
     /// so destructive rollback waits for a stable provider utterance boundary
     /// that agrees with the local owner-absence timeline.
     local_consecutive_transcript_hard_non_target: u8,
+    /// Sticky, non-destructive evidence that two consecutive transcript-grade
+    /// owner mismatches ended at this audio position. It never deletes already
+    /// accepted owner text. It only vetoes fail-open provider-tail recovery
+    /// when the provider's stable foreign-speaker interval overlaps the same
+    /// physical audio (installed interference session 2744).
+    local_confirmed_transcript_non_target_end_ms: Option<u64>,
     /// Session voiceprint negatives are advisory for transcript ownership. Two
     /// very-low-score windows may still mark current speech as another person
     /// for endpointing, but must never freeze/delete provider-recognized text.
@@ -619,6 +625,7 @@ struct OwnerContinuitySnapshot {
     consecutive_target: u8,
     consecutive_non_target: u8,
     consecutive_transcript_hard_non_target: u8,
+    confirmed_transcript_non_target_end_ms: Option<u64>,
     consecutive_strong_non_target: u8,
     owner_absence_run_started_ms: Option<u64>,
     owner_absence_run_confirmed: bool,
@@ -645,6 +652,8 @@ impl OwnerContinuitySnapshot {
             consecutive_non_target: state.local_consecutive_non_target,
             consecutive_transcript_hard_non_target: state
                 .local_consecutive_transcript_hard_non_target,
+            confirmed_transcript_non_target_end_ms: state
+                .local_confirmed_transcript_non_target_end_ms,
             consecutive_strong_non_target: state.local_consecutive_strong_non_target,
             owner_absence_run_started_ms: state.local_owner_absence_run_started_ms,
             owner_absence_run_confirmed: state.local_owner_absence_run_confirmed,
@@ -673,6 +682,8 @@ impl OwnerContinuitySnapshot {
         state.local_consecutive_non_target = self.consecutive_non_target;
         state.local_consecutive_transcript_hard_non_target =
             self.consecutive_transcript_hard_non_target;
+        state.local_confirmed_transcript_non_target_end_ms =
+            self.confirmed_transcript_non_target_end_ms;
         state.local_consecutive_strong_non_target = self.consecutive_strong_non_target;
         state.local_owner_absence_run_started_ms = self.owner_absence_run_started_ms;
         state.local_owner_absence_run_confirmed = self.owner_absence_run_confirmed;
@@ -1301,6 +1312,19 @@ fn local_non_target_vetoes_split_utterance(
         |audio_end_ms: u64| audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
     let inside = |center_ms: u64| center_ms >= utterance_start_ms && center_ms <= utterance_end_ms;
 
+    // Transcript-grade mismatch evidence is intentionally advisory: it must
+    // not erase text by itself. Once two consecutive windows agree, however,
+    // a provider-final fail-open path may not use the overlapping foreign
+    // speaker row to grow the owner result. Session 2744 had exactly this
+    // shape: provider speaker 0 ended at 8192 ms, speaker 1 occupied
+    // 8272..9702 ms, and the confirmed hard mismatch was centred at 8800 ms.
+    if state
+        .local_confirmed_transcript_non_target_end_ms
+        .is_some_and(|audio_end_ms| inside(sample_center(audio_end_ms)))
+    {
+        return true;
+    }
+
     // The raw newest classification is useful only when its physical window
     // overlaps this provider utterance. Session 1195 ended with low-level room
     // noise classified NonTarget several seconds after the owner's final word;
@@ -1337,6 +1361,30 @@ fn local_non_target_vetoes_split_utterance(
             && sample.stable_target
             && sample.classification.score() > LOCAL_OWNER_ABSENCE_MAX_SCORE
     })
+}
+
+fn stable_provider_foreign_row_has_local_veto(state: &SyncState, provider_result: &Value) -> bool {
+    let Some(target_speaker_id) = state.target_speaker_id.as_deref() else {
+        return false;
+    };
+    provider_result
+        .get("utterances")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|utterance| utterance_is_stable(utterance))
+        .filter(|utterance| {
+            utterance_speaker_id(utterance)
+                .as_deref()
+                .is_some_and(|speaker_id| speaker_id != target_speaker_id)
+        })
+        .any(|utterance| {
+            utterance_start_ms(utterance)
+                .zip(utterance_end_ms(utterance))
+                .is_some_and(|(start_ms, end_ms)| {
+                    local_non_target_vetoes_split_utterance(state, start_ms, end_ms)
+                })
+        })
 }
 
 fn result_marks_two_pass_empty(result: &Value) -> bool {
@@ -3450,11 +3498,21 @@ impl VolcengineStreamingASR {
                     .local_consecutive_transcript_hard_non_target
                     .saturating_add(1);
                 if state.local_consecutive_transcript_hard_non_target
-                    == LOCAL_SPEAKER_SWITCH_CONFIRMATIONS
+                    >= LOCAL_SPEAKER_SWITCH_CONFIRMATIONS
                 {
-                    log::info!(
-                        "[asr] confirmed extreme local mismatch kept non-destructive pending provider utterance boundary"
+                    state.local_confirmed_transcript_non_target_end_ms = Some(
+                        state
+                            .local_confirmed_transcript_non_target_end_ms
+                            .unwrap_or_default()
+                            .max(audio_duration_ms),
                     );
+                    if state.local_consecutive_transcript_hard_non_target
+                        == LOCAL_SPEAKER_SWITCH_CONFIRMATIONS
+                    {
+                        log::info!(
+                            "[asr] confirmed extreme local mismatch kept non-destructive pending provider utterance boundary audio_end_ms={audio_duration_ms}"
+                        );
+                    }
                 }
             } else {
                 state.local_consecutive_transcript_hard_non_target = 0;
@@ -3616,6 +3674,7 @@ impl VolcengineStreamingASR {
         state.local_consecutive_target = 0;
         state.local_consecutive_non_target = 0;
         state.local_consecutive_transcript_hard_non_target = 0;
+        state.local_confirmed_transcript_non_target_end_ms = None;
         state.local_consecutive_strong_non_target = 0;
         state.local_owner_absence_run_started_ms = None;
         state.local_owner_absence_run_confirmed = false;
@@ -3798,6 +3857,7 @@ impl VolcengineStreamingASR {
             st.local_consecutive_target = 0;
             st.local_consecutive_non_target = 0;
             st.local_consecutive_transcript_hard_non_target = 0;
+            st.local_confirmed_transcript_non_target_end_ms = None;
             st.local_consecutive_strong_non_target = 0;
             st.local_owner_absence_run_started_ms = None;
             st.local_owner_absence_run_confirmed = false;
@@ -4232,7 +4292,16 @@ impl VolcengineStreamingASR {
             let prior_wake_speaker_end_ms = state.wake_target_speech_end_ms;
             let wake_owner_verified = state.local_wake_owner_verified;
             let local_speaker_profile_adaptive = state.local_speaker_profile_adaptive;
-            let confirmed_non_target_speech_end_ms = state.local_non_target_speech_end_ms;
+            // Both endpoint-grade NonTarget and the independent, confirmed
+            // transcript-grade mismatch describe the same physical exclusion
+            // boundary. The latter remains non-destructive by itself, but a
+            // stable provider foreign-speaker row overlapping that boundary
+            // must not be selected into the owner-filtered result.
+            let confirmed_non_target_speech_end_ms = state
+                .local_non_target_speech_end_ms
+                .into_iter()
+                .chain(state.local_confirmed_transcript_non_target_end_ms)
+                .max();
             let filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
                 result,
                 &mut state.target_speaker_id,
@@ -4551,123 +4620,113 @@ impl VolcengineStreamingASR {
                 self.emit_streaming_event(VolcengineStreamingEvent::Partial(preview));
             }
         }
-        // Streaming partials may only see the first stable utterance
-        // ("开始录音，那你") while result.text / optimistic already holds the
-        // longer owner tail. On protocol final we must prefer the longer
-        // owner-safe optimistic text when available — otherwise intermittent
-        // mid-cut finals insert only two chars (installed 4ff44fc3).
-        let prefer_final_unfiltered_provider_text = has_final
-            && final_unfiltered_provider_recovery_allowed(
-                &self.state.lock(),
-                &speaker_filtered_result,
-                result,
-            );
-        let prefer_final_provider_text =
-            has_final && !speaker_filtered_result.stable_non_target_utterance_present && {
-                let target_text = speaker_filtered_result
-                    .result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let state = self.state.lock();
-                final_wake_only_provider_gap_is_owner_safe(&state, result, target_text)
-                    || sequential_speaker_split_gap_is_owner_safe(&state, result, target_text)
-                    || final_unsegmented_provider_tail_is_owner_safe(&state, result, target_text)
-            };
-        let prefer_final_provider_text =
-            prefer_final_provider_text || prefer_final_unfiltered_provider_text;
-        if has_final {
+        // Protocol-final text selection is one atomic product decision. The
+        // provider receive loop used to evaluate several overlapping boolean
+        // recovery branches under separate state locks. A late local speaker
+        // callback could therefore produce an internally inconsistent choice,
+        // and any one fail-open branch could bypass another branch's foreign-
+        // speaker veto. Build all facts from one owner-continuity snapshot and
+        // ask the pure decision kernel for exactly one authority.
+        let (
+            final_authority,
+            explicit_non_owner_tail,
+            provider_raw_recovery_safe,
+            provider_owner_recovery_safe,
+            optimistic_owner_recovery_safe,
+        ) = {
             let state = self.state.lock();
+            let target_text = speaker_filtered_result
+                .result
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let optimistic_text = speaker_filtered_result
+                .optimistic_result
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let explicit_non_owner_tail = speaker_filtered_result
+                .stable_non_target_utterance_present
+                || state.owner_isolation_frozen
+                || stable_provider_foreign_row_has_local_veto(&state, result);
+            let provider_raw_recovery_safe = has_final
+                && final_unfiltered_provider_recovery_allowed(
+                    &state,
+                    &speaker_filtered_result,
+                    result,
+                );
+            let provider_owner_recovery_safe = has_final
+                && !speaker_filtered_result.stable_non_target_utterance_present
+                && (final_wake_only_provider_gap_is_owner_safe(&state, result, target_text)
+                    || sequential_speaker_split_gap_is_owner_safe(&state, result, target_text)
+                    || final_unsegmented_provider_tail_is_owner_safe(&state, result, target_text));
+            let optimistic_owner_recovery_safe = has_final
+                && spoken_content_len(optimistic_text) > spoken_content_len(target_text)
+                && (local_speaker_allows_optimistic_preview(&state)
+                    || local_speaker_allows_non_destructive_final_recovery(&state)
+                    || spoken_content_len(&state.optimistic_preview_text)
+                        >= spoken_content_len(optimistic_text));
+            let evidence = crate::speech_decision_kernel::FinalTranscriptEvidence {
+                protocol_final: has_final,
+                explicit_non_owner_tail,
+                provider_raw_recovery_safe,
+                provider_owner_recovery_safe,
+                optimistic_owner_recovery_safe,
+            };
+            let authority = crate::speech_decision_kernel::arbitrate_final_transcript(evidence);
+            if has_final {
+                log::info!(
+                    "[asr] final arbitration authority={} provider={} filtered={} best={} optimistic={} last_preview={} tracking={} explicit_non_owner_tail={} raw_recovery={} owner_recovery={} optimistic_recovery={}",
+                    authority.label(),
+                    result
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .map_or(0, spoken_content_len),
+                    spoken_content_len(target_text),
+                    spoken_content_len(&state.best_transcript_text),
+                    spoken_content_len(&state.optimistic_preview_text),
+                    spoken_content_len(&state.last_emitted_preview_text),
+                    state.local_speaker_tracking_enabled,
+                    explicit_non_owner_tail,
+                    provider_raw_recovery_safe,
+                    provider_owner_recovery_safe,
+                    optimistic_owner_recovery_safe,
+                );
+            }
+            (
+                authority,
+                explicit_non_owner_tail,
+                provider_raw_recovery_safe,
+                provider_owner_recovery_safe,
+                optimistic_owner_recovery_safe,
+            )
+        };
+        let result = match final_authority {
+            crate::speech_decision_kernel::FinalTranscriptAuthority::ProviderRawRecovery => result,
+            crate::speech_decision_kernel::FinalTranscriptAuthority::ProviderOwnerRecovery => {
+                result
+            }
+            crate::speech_decision_kernel::FinalTranscriptAuthority::OptimisticOwnerRecovery => {
+                &speaker_filtered_result.optimistic_result
+            }
+            crate::speech_decision_kernel::FinalTranscriptAuthority::SpeakerFiltered => {
+                &speaker_filtered_result.result
+            }
+        };
+        if has_final {
             log::info!(
-                "[asr] final arbitration lengths provider={} filtered={} best={} optimistic={} last_preview={} tracking={} non_target={} frozen={} unfiltered_recovery={}",
+                "[asr] final arbitration committed authority={} explicit_non_owner_tail={} raw_recovery={} owner_recovery={} optimistic_recovery={} result_chars={}",
+                final_authority.label(),
+                explicit_non_owner_tail,
+                provider_raw_recovery_safe,
+                provider_owner_recovery_safe,
+                optimistic_owner_recovery_safe,
                 result
                     .get("text")
                     .and_then(Value::as_str)
-                    .map_or(0, |text| spoken_content_len(text)),
-                speaker_filtered_result
-                    .result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .map_or(0, |text| spoken_content_len(text)),
-                spoken_content_len(&state.best_transcript_text),
-                spoken_content_len(&state.optimistic_preview_text),
-                spoken_content_len(&state.last_emitted_preview_text),
-                state.local_speaker_tracking_enabled,
-                state.local_non_target_speech_end_ms.is_some(),
-                state.owner_isolation_frozen,
-                prefer_final_unfiltered_provider_text,
+                    .map_or(0, |text| text.chars().count()),
             );
         }
-        let prefer_final_optimistic = has_final
-            && !prefer_final_provider_text
-            && !speaker_filtered_result.stable_non_target_utterance_present
-            && {
-                let target_text = speaker_filtered_result
-                    .result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let optimistic_text = speaker_filtered_result
-                    .optimistic_result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let longer = spoken_content_len(optimistic_text) > spoken_content_len(target_text);
-                let owner_ok = {
-                    let state = self.state.lock();
-                    local_speaker_allows_optimistic_preview(&state)
-                        || local_speaker_allows_non_destructive_final_recovery(&state)
-                        || spoken_content_len(&state.optimistic_preview_text)
-                            >= spoken_content_len(optimistic_text)
-                };
-                longer && owner_ok
-            };
-        let result = if prefer_final_unfiltered_provider_text {
-            log::warn!(
-                "[asr] final target extraction was empty without non-owner evidence; preserving provider final chars={}",
-                result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .map(|t| t.chars().count())
-                    .unwrap_or(0)
-            );
-            result
-        } else if prefer_final_provider_text {
-            log::info!(
-                "[asr] protocol final restores owner-safe provider text after diarization regression target_chars={} provider_chars={}",
-                speaker_filtered_result
-                    .result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .map(|t| t.chars().count())
-                    .unwrap_or(0),
-                result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .map(|t| t.chars().count())
-                    .unwrap_or(0)
-            );
-            result
-        } else if prefer_final_optimistic {
-            log::info!(
-                "[asr] protocol final prefers longer owner-safe optimistic text target_chars={} optimistic_chars={}",
-                speaker_filtered_result
-                    .result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .map(|t| t.chars().count())
-                    .unwrap_or(0),
-                speaker_filtered_result
-                    .optimistic_result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .map(|t| t.chars().count())
-                    .unwrap_or(0)
-            );
-            &speaker_filtered_result.optimistic_result
-        } else {
-            &speaker_filtered_result.result
-        };
 
         // 流结束信号只信帧头 flags（lastPacket / negativeSequence）。
         // 之前误把 utterance.definite=true 当成流结束——但那只代表"这一段语音已固化"，
@@ -8565,6 +8624,122 @@ mod tests {
             .expect("session 621 final should resolve")
             .expect("one owner split across three cloud ids should remain complete");
         assert_eq!(transcript.text, full);
+    }
+
+    #[test]
+    fn installed_session_2744_does_not_restore_confirmed_foreign_tail() {
+        // Live airborne interference, 2026-09-04: the provider correctly
+        // separated the 44-char owner row from a 7-char speaker-1 tail. Two
+        // consecutive transcript-grade local mismatches overlapped speaker 1,
+        // but the advisory classification timeline still carried the latched
+        // stable_target bit. The old cloud-cluster-drift recovery therefore
+        // restored all 51 chars and leaked “会持续一段时”. Confirmed hard local
+        // evidence must veto only that fail-open expansion, without deleting
+        // the already selected owner row.
+        let owner = "开始录音。主人第一句，我在旁边说话时自然停顿一下。现在说主人第二句，最后这句话也不能丢。";
+        let result = json!({
+            "text": format!("{owner}会持续一段时。"),
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 1_072,
+                    "end_time": 8_192,
+                    "text": owner
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 8_272,
+                    "end_time": 9_702,
+                    "text": "会持续一段时。"
+                }
+            ]
+        });
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_wake_owner_verified: true,
+            local_speaker_profile_adaptive: false,
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            target_speaker_id: Some("0".into()),
+            wake_speaker_phrase: Some("开始录音".into()),
+            local_speaker_evidence: vec![
+                LocalSpeakerEvidence {
+                    audio_end_ms: 7_000,
+                    classification:
+                        crate::speaker_verification::SessionSpeakerClassification::Target {
+                            score: 0.69,
+                        },
+                    stable_target: true,
+                },
+                LocalSpeakerEvidence {
+                    audio_end_ms: 9_000,
+                    classification:
+                        crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                            score: 0.051,
+                        },
+                    stable_target: true,
+                },
+                LocalSpeakerEvidence {
+                    audio_end_ms: 9_400,
+                    classification:
+                        crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                            score: 0.046,
+                        },
+                    stable_target: true,
+                },
+                LocalSpeakerEvidence {
+                    audio_end_ms: 9_800,
+                    classification:
+                        crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                            score: 0.108,
+                        },
+                    stable_target: true,
+                },
+            ],
+            ..SyncState::default()
+        };
+
+        assert!(sequential_speaker_split_gap_is_owner_safe(
+            &state, &result, owner,
+        ));
+        state.local_confirmed_transcript_non_target_end_ms = Some(9_400);
+        assert!(!sequential_speaker_split_gap_is_owner_safe(
+            &state, &result, owner,
+        ));
+        assert!(stable_provider_foreign_row_has_local_veto(&state, &result));
+
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        *asr.state.lock() = state;
+        let (tx, mut rx) = oneshot::channel();
+        asr.state.lock().final_tx = Some(tx);
+        let payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 9_700 },
+            "result": result,
+        }))
+        .expect("session 2744 final serializes");
+        let frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::LastPacket,
+            Serialization::Json,
+            &payload,
+            None,
+        );
+
+        assert!(!asr.handle_frame(&frame));
+        let transcript = rx
+            .try_recv()
+            .expect("session 2744 final should resolve")
+            .expect("confirmed owner row should remain successful");
+        assert_eq!(transcript.text, owner);
     }
 
     #[test]

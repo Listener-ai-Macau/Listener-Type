@@ -229,3 +229,25 @@ reset 和 retained-audio 恢复重放，原子保存本地音频/语音/主人/�
 `RecordingLifecycleController`，再交给唯一 endpoint reducer。停止 handler 只负责
 幂等提交 STOP，不再兼任主人活动和固件续租处理。这样公开生命周期与真实证据
 保持一致，不会在主人说话期间长期停留于 `QuietPending`。
+
+### 最终文本只有一个原子仲裁器（2026-09-04，session 2744）
+
+现场中文干扰会话 `a86a4b77-c764-404e-8121-6a7f6ba6091e` 中，Provider 已经把
+主人 44 字和 speaker 1 的 7 字尾巴分成两个稳定行。本地声纹在同一尾段连续给出
+transcript-grade 极低分证据，但旧代码把它降级成 advisory `Uncertain` 后，另一个
+“防吞字”分支又按锁存的 `stable_target=true` 把 Provider 51 字原文全部恢复，最终
+漏入“会持续一段时”。这不是 endpoint 阈值错误，而是多个 final 恢复分支互相绕过。
+
+现在 Provider 原文、主人过滤结果和 optimistic 文本不能各自决定提交。
+`speech_decision_kernel::arbitrate_final_transcript` 是唯一的协议终帧文本裁判，并且
+一次只读取一个不可变的 owner-continuity 快照。它按固定优先级选择一个 authority：
+
+1. Provider 稳定外来 speaker 与本地连续极低声纹证据时间重合时，必须选择
+   `speaker_filtered`；这项证据只否决尾巴恢复，不反向删除已确认主人正文。
+2. 没有明确旁人证据时，才允许 `provider_raw_recovery` 或
+   `provider_owner_recovery` 防止云端归属回退造成吞字。
+3. `optimistic_owner_recovery` 只能作为更低优先级的已验证主人恢复；胶囊视觉预览
+   本身永远不是最终文本 authority。
+
+Provider adapter 只负责产生上述证据，不得再添加独立的 `prefer_final_*` 选择器。
+每次终帧必须记录唯一 `authority` 和所有候选安全事实，便于以后直接从日志复现决定。
