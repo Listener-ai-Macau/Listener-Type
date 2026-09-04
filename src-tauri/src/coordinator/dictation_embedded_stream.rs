@@ -187,31 +187,12 @@ impl EmbeddedStreamingDictation {
                         // Mirror stop_dictation: ask the firmware to cut the session
                         // short. The device then emits Stopped, which drives the normal
                         // finish_completed_streaming_session path — no bespoke finish.
-                        let coordinator_session_id = self
-                            .session
-                            .as_ref()
-                            .map(|session| session.session_id)
-                            .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
-                        let stop_sent = if commit_recording_stop(
+                        let stop_sent = request_embedded_ble_recording_stop_from_host(
                             inner,
-                            coordinator_session_id,
                             "provider_delivery_failure_safety",
-                        ) {
-                            match request_embedded_ble_recording_stop_from_host(
-                                inner,
-                                "proactive_trailing_silence",
-                            )
-                            .await
-                            {
-                                Ok(true) => true,
-                                Ok(false) | Err(_) => {
-                                    reopen_recording_stop(inner, coordinator_session_id);
-                                    false
-                                }
-                            }
-                        } else {
-                            false
-                        };
+                        )
+                        .await
+                        .unwrap_or(false);
                         if stop_sent {
                             let _ = request_embedded_audio_stop_feedback(
                                 inner,

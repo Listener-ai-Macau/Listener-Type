@@ -685,11 +685,6 @@ impl RecordingLifecycleController {
         true
     }
 
-    pub(crate) fn stop_committed_for(&self, coordinator_session_id: SessionId) -> bool {
-        self.state == RecordingLifecycleState::Stopping
-            && self.coordinator_session_id == Some(coordinator_session_id)
-    }
-
     pub(crate) fn close_owner(&mut self, coordinator_session_id: SessionId) -> bool {
         if self.coordinator_session_id != Some(coordinator_session_id) {
             return false;

@@ -1055,20 +1055,6 @@ async fn handle_device_dictation_action(
                 ..
             }
         );
-        let committed_stop_session = if send_stop_control {
-            let Some((session_id, _)) = control_session else {
-                return;
-            };
-            if !dictation::commit_recording_stop(&inner, session_id, "device_key") {
-                log::info!(
-                    "[device-key] ignored duplicate/stale stop before BLE dispatch session_id={session_id}"
-                );
-                return;
-            }
-            Some(session_id)
-        } else {
-            None
-        };
         // Promote/ACTIVATE is an internal control choice when a hidden VA verification
         // buffer is already running (voice-auto-start). Owners never see that buffer,
         // so the capsule must use the normal start copy — a "taking over" status looked
@@ -1162,9 +1148,6 @@ async fn handle_device_dictation_action(
                 );
             }
             Err(error) => {
-                if let Some(session_id) = committed_stop_session {
-                    dictation::reopen_recording_stop(&inner, session_id);
-                }
                 record_embedded_ble_listener_last_error(&inner, &error);
                 record_embedded_ble_recovery_failure(&inner, &error);
                 refresh_embedded_ble_listener(&inner);
@@ -1650,15 +1633,11 @@ async fn send_pending_device_key_ble_stop(
 ) {
     let control_decision = device_key_ble_recording_control_decision(&inner);
     let control_session = control_decision.control_session();
-    let Some((session_id, SessionPhase::Listening)) = control_session else {
+    let Some((_session_id, SessionPhase::Listening)) = control_session else {
         drop_pending_device_key_ble_action_for_state(action, control_decision, reason);
         return;
     };
 
-    if !dictation::commit_recording_stop(&inner, session_id, "device_key_retry") {
-        drop_pending_device_key_ble_action_for_state(action, control_decision, reason);
-        return;
-    }
     emit_device_key_recording_control_capsule(
         &inner,
         control_session,
@@ -1700,7 +1679,6 @@ async fn send_pending_device_key_ble_stop(
             );
         }
         Err(error) => {
-            dictation::reopen_recording_stop(&inner, session_id);
             record_embedded_ble_listener_last_error(&inner, &error);
             record_embedded_ble_recovery_failure(&inner, &error);
             refresh_embedded_ble_listener(&inner);

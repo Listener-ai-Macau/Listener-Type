@@ -1102,15 +1102,13 @@ pub(super) async fn request_embedded_ble_recording_stop_from_host(
     if !matches!(phase, SessionPhase::Starting | SessionPhase::Listening) {
         return Ok(false);
     }
-    if phase == SessionPhase::Listening
-        && !inner
-            .recording_lifecycle
-            .lock()
-            .stop_committed_for(session_id)
-    {
-        log::info!(
-            "[coord] rejected BLE STOP without lifecycle commit session_id={session_id} reason={reason}"
-        );
+
+    // This is the sole product-owner STOP transaction. Callers may propose a
+    // stop, but they cannot pre-commit the lifecycle or dispatch transport on
+    // their own. Keeping identity admission and the physical write together
+    // prevents the old split-brain state where the app finalized while the
+    // device continued recording.
+    if !commit_recording_stop(inner, session_id, reason) {
         return Ok(false);
     }
 
@@ -1154,6 +1152,7 @@ pub(super) async fn request_embedded_ble_recording_stop_from_host(
                 Ok(true)
             }
             Err(err) => {
+                reopen_recording_stop(inner, session_id);
                 set_device_ai_processing_async(inner, false, "host_stop_failed");
                 crate::timeline::mark(
                     "backend.embedded_ble_session_actor",

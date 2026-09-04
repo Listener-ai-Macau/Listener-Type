@@ -170,7 +170,7 @@ BLE 延迟和音频质量仍需分别从诊断日志验证；若日志显示模�
 - 连续声纹任务共享原始等待期限；达到有界故障期限后必须放行普通端点判断，
   避免模型或线程池异常造成永久录音。
 - 声纹结果返回后，主人证据走 `OwnerActive`，他人/静音证据继续走
-  `QuietPending -> Stopping`，不允许回调层另设旁路。
+  `QuietPending -> Stop proposal`，再由产品生命周期提交 `Stopping`，不允许回调层另设旁路。
 
 ## Endpoint 会话策略快照（2026-09-04，session 1896）
 
@@ -294,11 +294,14 @@ owner session 身份。停止 handler 只负责按相同 session ID 幂等提交
    `close_owner(coordinator_session_id)`，不存在无身份 reset/close；
 2. endpoint 的 Stop 是可重复 proposal，只有 `RecordingLifecycleController` 能把
    exact owner 从 Active 提交到 Stopping；
-3. BLE STOP 写成功后才发布 Transcribing，再发送 provider final frame；失败时
+3. `request_embedded_ble_recording_stop_from_host` 是唯一 owner STOP 事务入口，在
+   同一调用内完成 exact session 提交、物理 BLE STOP 和失败回滚；endpoint、设备键、
+   provider 故障兜底与胶囊停止都不能预提交或绕过它；
+4. BLE STOP 写成功后才发布 Transcribing，再发送 provider final frame；失败时
    lifecycle 回到 Active，前台和 ASR 始终保持 Listening；
-4. candidate capsule 使用独立 UI token，绝不创建 `SessionState::Starting`，候选
+5. candidate capsule 使用独立 UI token，绝不创建 `SessionState::Starting`，候选
    拒绝也绝不直接写 `SessionPhase::Idle`；
-5. 生产路径不提供 lifecycle `reset()`，只能用带身份的 close 留下 stale callback
+6. 生产路径不提供 lifecycle `reset()`，只能用带身份的 close 留下 stale callback
    tombstone。
 
 ### 最终文本只有一个原子仲裁器（2026-09-04，session 2744）

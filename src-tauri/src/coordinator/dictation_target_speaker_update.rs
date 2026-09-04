@@ -110,19 +110,14 @@ fn handle_target_speaker_endpoint_stop(
     let stop_reason = endpoint_policy.stop_reason;
     let provider_stall_confirmed =
         provider_progress_stalled(inner, session_id, &update, Instant::now());
-    // The endpoint clock is the sole stop authority. Both provider callbacks
-    // and the watchdog pass only a snapshot for which the controller has
-    // already committed OwnerActive -> Stopping. Re-evaluating a second
-    // policy here used to discard that decision and leave the session in
-    // Listening forever.
-    // The endpoint reducer has produced a proposal, but the product lifecycle
-    // is the only component allowed to cross the irreversible stop boundary.
-    // There is deliberately no untracked/Idle bypass: a callback without the
-    // exact active session identity cannot stop physical capture.
-    let lifecycle_stop_committed = commit_recording_stop(inner, session_id, "owner_endpoint");
-    if !lifecycle_stop_committed {
-        return;
-    }
+    // The endpoint clock is the sole evidence authority. Provider callbacks
+    // and the watchdog pass the same reducer snapshot after it has proposed a
+    // stop. Re-evaluating a second policy here used to discard that proposal
+    // and leave the session in Listening forever.
+    // Claim this endpoint proposal before entering the shared STOP transaction.
+    // Provider and watchdog callbacks can arrive concurrently; letting each one
+    // touch the lifecycle produced misleading duplicate-stop rejections even
+    // though only one physical write was sent.
     if stop_dispatched
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -144,7 +139,7 @@ fn handle_target_speaker_endpoint_stop(
 
     let endpoint_lifecycle = endpoint_clock.lock().lifecycle();
     log::info!(
-        "[asr] owner endpoint committed stop session_id={session_id} lifecycle={endpoint_lifecycle:?} reason={stop_reason} body_started={} endpoint_timeout_ms={} wall_clock_timeout_ms={} initial_body_wait_active={}",
+        "[asr] owner endpoint claimed stop proposal session_id={session_id} lifecycle={endpoint_lifecycle:?} reason={stop_reason} body_started={} endpoint_timeout_ms={} wall_clock_timeout_ms={} initial_body_wait_active={}",
         endpoint_policy.body_started,
         endpoint_policy.endpoint_timeout_ms,
         endpoint_policy.wall_clock_timeout_ms,
@@ -226,7 +221,6 @@ fn handle_target_speaker_endpoint_stop(
                 // update may retry while the same session is still active.
                 stop_dispatched.store(false, Ordering::SeqCst);
                 endpoint_clock.lock().reopen_after_failed_stop();
-                reopen_recording_stop(&inner, session_id);
                 log::info!(
                     "[embedded-ble] target-speaker auto-stop not dispatched; retry armed session_id={session_id} reason={stop_reason}"
                 );
@@ -234,7 +228,6 @@ fn handle_target_speaker_endpoint_stop(
             Err(err) => {
                 stop_dispatched.store(false, Ordering::SeqCst);
                 endpoint_clock.lock().reopen_after_failed_stop();
-                reopen_recording_stop(&inner, session_id);
                 log::warn!(
                     "[embedded-ble] target-speaker auto-stop failed; retry armed session_id={session_id} reason={stop_reason}: {err}"
                 );

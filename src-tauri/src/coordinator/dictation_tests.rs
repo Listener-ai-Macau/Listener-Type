@@ -4,7 +4,7 @@ use super::{
     automatic_wake_body_started, automatic_wake_initial_body_wait_active,
     automatic_wake_session_active, begin_embedded_audio_dictation_session_id,
     cancel_embedded_ble_listener_capture, cancel_session, claim_post_dictation_key,
-    clear_automatic_wake_text_guard, clear_embedded_ble_cancel_flag, commit_recording_stop,
+    clear_automatic_wake_text_guard, clear_embedded_ble_cancel_flag,
     current_embedded_audio_partial_preview, default_done_message,
     device_ai_processing_completion_delay, device_ai_processing_io_allowed,
     device_processing_final_succeeded, dictation_asr_engine_backend_id,
@@ -1075,7 +1075,7 @@ fn key_stop_feedback_latches_transcribing_without_processing_phase() {
 }
 
 #[tokio::test]
-async fn target_speaker_endpoint_host_stop_transport_requires_lifecycle_commit() {
+async fn target_speaker_endpoint_host_stop_transaction_commits_lifecycle() {
     let coordinator = Coordinator::new();
     let session_id = new_session_id();
     let cancel_flag = Arc::new(AtomicBool::new(false));
@@ -1091,18 +1091,18 @@ async fn target_speaker_endpoint_host_stop_transport_requires_lifecycle_commit()
         .recording_lifecycle
         .lock()
         .begin_manual_owner(71, session_id));
-    assert!(commit_recording_stop(
-        &coordinator.inner,
-        session_id,
-        "unit_test_host_stop"
-    ));
-
     let handled =
         request_embedded_ble_recording_stop_from_host(&coordinator.inner, "unit_test_host_stop")
             .await
             .expect("test stop request does not touch BLE transport");
 
     assert!(handled);
+    assert!(!request_embedded_ble_recording_stop_from_host(
+        &coordinator.inner,
+        "unit_test_duplicate_host_stop"
+    )
+    .await
+    .expect("duplicate stop is rejected before BLE transport"));
     assert!(!cancel_flag.load(Ordering::SeqCst));
     assert!(!embedded_audio_stop_feedback_latched(&coordinator.inner));
     {
@@ -1110,10 +1110,16 @@ async fn target_speaker_endpoint_host_stop_transport_requires_lifecycle_commit()
         assert_eq!(state.phase, SessionPhase::Listening);
     }
     let history = embedded_ble_session_actor_history(&coordinator.inner);
-    assert!(history.iter().any(|record| {
-        record.command == EmbeddedBleSessionActorCommand::StopCommand
-            && record.detail.contains("unit_test_host_stop")
-    }));
+    assert_eq!(
+        history
+            .iter()
+            .filter(|record| {
+                record.command == EmbeddedBleSessionActorCommand::StopCommand
+                    && record.detail.contains("unit_test_host_stop")
+            })
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -1142,7 +1148,7 @@ fn embedded_audio_session_attaches_to_host_starting_session() {
 }
 
 #[tokio::test]
-async fn target_speaker_endpoint_host_stop_transport_routes_without_capture_flag_after_commit() {
+async fn target_speaker_endpoint_host_stop_transaction_routes_without_capture_flag() {
     let coordinator = Coordinator::new();
     let session_id = new_session_id();
     {
@@ -1156,12 +1162,6 @@ async fn target_speaker_endpoint_host_stop_transport_routes_without_capture_flag
         .recording_lifecycle
         .lock()
         .begin_manual_owner(72, session_id));
-    assert!(commit_recording_stop(
-        &coordinator.inner,
-        session_id,
-        "unit_test_host_stop_pref"
-    ));
-
     let handled = request_embedded_ble_recording_stop_from_host(
         &coordinator.inner,
         "unit_test_host_stop_pref",
@@ -4182,17 +4182,14 @@ fn target_speaker_endpoint_has_one_identity_scoped_stop_commit() {
     assert!(!coordinator_state_writers.contains("state.phase = SessionPhase"));
     assert!(!coordinator_state_writers.contains("cleanup_cancelled_processing_session"));
 
-    let commit = endpoint
-        .find(".commit_stop(session_id)")
-        .expect("identity-scoped lifecycle stop commit");
     let dispatch_latch = endpoint
         .find(".compare_exchange(false, true")
         .expect("physical stop dispatch latch");
-    assert!(commit < dispatch_latch);
 
     let transport_stop = endpoint
         .find("request_embedded_ble_recording_stop_from_host(&inner, stop_reason).await")
         .expect("physical stop write");
+    assert!(dispatch_latch < transport_stop);
     let public_stop_feedback = endpoint
         .find("request_embedded_audio_stop_feedback(&inner, stop_reason)")
         .expect("public transcribing transition");
@@ -4211,7 +4208,17 @@ fn target_speaker_endpoint_has_one_identity_scoped_stop_commit() {
         .next()
         .expect("bounded stop transport function");
     assert!(!stop_transport.contains("request_embedded_audio_stop_feedback"));
-    assert!(stop_transport.contains(".stop_committed_for(session_id)"));
+    let lifecycle_commit = stop_transport
+        .find("commit_recording_stop(inner, session_id, reason)")
+        .expect("identity-scoped lifecycle stop commit");
+    let physical_stop = stop_transport
+        .find("send_recording_control_stop(")
+        .expect("physical stop transport");
+    let failed_stop_reopen = stop_transport
+        .find("reopen_recording_stop(inner, session_id)")
+        .expect("failed physical stop rollback");
+    assert!(lifecycle_commit < physical_stop);
+    assert!(physical_stop < failed_stop_reopen);
     assert!(!include_str!("hotkey_device_runtime.rs").contains("send_recording_control_stop"));
     assert!(!include_str!("dictation_embedded_stream.rs").contains("send_recording_control_stop"));
 }
