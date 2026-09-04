@@ -1,5 +1,5 @@
 use std::fs;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
@@ -523,10 +523,12 @@ fn target_speaker_update_has_live_owner_activity(
             audio.saturating_sub(owner) <= EMBEDDED_LIVE_OWNER_ACTIVITY_ALIGNMENT_MS
         })
 }
+#[cfg(test)]
 fn target_speaker_endpoint_due(update: &crate::asr::volcengine::TargetSpeakerUpdate) -> bool {
     target_speaker_endpoint_due_with_timeout(update, EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS)
 }
 
+#[cfg(test)]
 fn target_speaker_endpoint_due_with_timeout(
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
     endpoint_timeout_ms: u64,
@@ -628,6 +630,7 @@ fn has_unresolved_recent_owner_speech(
         && audio_ms.saturating_sub(local_owner_ms) < endpoint_timeout_ms
 }
 
+#[cfg(test)]
 fn target_speaker_endpoint_due_with_provider_stall(
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
     provider_stall_confirmed: bool,
@@ -1414,15 +1417,6 @@ async fn persist_verified_wake_phrase_calibration(phrase: String) {
     }
 }
 
-/// Newest hidden VA session Type is currently handling. Used so a late
-/// VREC:STOP for reject N does not kill already-started candidate N+1
-/// (owner: called twice, second window cut at ~0.9s by previous reject STOP).
-static LAST_HIDDEN_VA_SESSION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-
-fn note_hidden_va_session(embedded_session_id: u32) {
-    LAST_HIDDEN_VA_SESSION.store(embedded_session_id, Ordering::SeqCst);
-}
-
 fn reject_hidden_automatic_candidate(reason: &'static str, embedded_session_id: u32) {
     log::info!(
         "[speaker-verification] hidden automatic candidate rejected silently reason={reason} embedded_session_id={embedded_session_id}"
@@ -1438,7 +1432,7 @@ fn reject_hidden_automatic_candidate(reason: &'static str, embedded_session_id: 
             // Brief yield: SessionStart for the next candidate often races the
             // terminal reject of the previous one.
             std::thread::sleep(Duration::from_millis(80));
-            let current = LAST_HIDDEN_VA_SESSION.load(Ordering::SeqCst);
+            let current = current_hidden_va_session();
             if embedded_session_id != 0 && current != embedded_session_id {
                 log::info!(
                     "[coord] skip VREC:STOP after reject reason={reason} rejected_session={embedded_session_id} active_session={current}"

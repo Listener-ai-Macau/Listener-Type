@@ -19,6 +19,7 @@ fn preview_ends_with_sentence_terminal(preview: Option<&str>) -> bool {
         .is_some_and(|ch| matches!(ch, '。' | '！' | '？' | '.' | '!' | '?' | '…'))
 }
 
+#[cfg(test)]
 fn target_speaker_endpoint_due_after_visible_body_gate(
     body_started: bool,
     provider_clock_endpoint_due: bool,
@@ -44,29 +45,6 @@ fn update_has_fresh_unclassified_local_speech(
             audio_ms.saturating_sub(speech_ms) < endpoint_timeout_ms
                 && !local_speech_confidently_non_target(update, speech_ms)
         })
-}
-
-fn update_has_fresh_unclassified_local_speech_after_owner(
-    update: &crate::asr::volcengine::TargetSpeakerUpdate,
-    endpoint_timeout_ms: u64,
-) -> bool {
-    let confirmed_owner_end_ms = update
-        .target_speech_end_ms
-        .into_iter()
-        .chain(update.local_target_speech_end_ms)
-        .max()
-        .unwrap_or_default();
-    confirmed_owner_end_ms > 0
-        && update
-            .audio_duration_ms
-            .zip(update.local_speech_end_ms)
-            .is_some_and(|(audio_ms, speech_ms)| {
-                speech_ms
-                    > confirmed_owner_end_ms
-                        .saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
-                    && audio_ms.saturating_sub(speech_ms) < endpoint_timeout_ms
-                    && !local_speech_confidently_non_target(update, speech_ms)
-            })
 }
 
 /// A provider two-pass frame can add real body words while retaining a
@@ -135,32 +113,36 @@ impl SettledTargetEndpointClock {
             update,
             EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
         );
-        // For an enrolled tracker, low-level energy is bounded by the existing
-        // two-second uncertainty ceiling so room noise cannot hold the session.
-        // Apply that ceiling to wall time as well as the provider audio clock:
-        // the provider can stop publishing speaker frames while local audio
-        // remains Uncertain, leaving `latest_update` permanently stale.
+        let pending_owner_tail = update.pending_unattributed_speech
+            && !update_has_recent_strong_non_target(update)
+            && has_unresolved_recent_owner_speech(
+                update,
+                EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+            );
+        // For an enrolled tracker, low-level energy is not endpoint evidence.
+        // A room can remain acoustically active after the owner stops, and an
+        // “Uncertain” voiceprint window is not an owner match. Only a positive
+        // owner watermark may keep the owner endpoint open; generic energy is
+        // retained below solely for manual/no-profile sessions.
         let uncertain_tail_within_wall_ceiling = now.saturating_duration_since(armed_at)
             < Duration::from_millis(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS);
         let bounded_unclassified_local_speech = if update.local_speaker_tracking_enabled
             && update.local_target_speech_end_ms.is_some()
         {
-            // Once the settled wall clock is armed, the wall deadline itself
-            // is the bound. Do not additionally measure from an older target
-            // embedding edge: installed session 531 was still speaking at the
-            // live audio edge, but that redundant bound cut it at 900 ms.
-            uncertain_tail_within_wall_ceiling
-                && update_has_fresh_unclassified_local_speech_after_owner(
-                    update,
-                    EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
-                )
+            // Owner-only endpoint contract: local target activity is the
+            // authority. A generic energy edge after it must not renew this
+            // clock, even briefly.
+            has_unresolved_recent_owner_speech(
+                update,
+                EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+            )
         } else if update.local_speaker_tracking_enabled && update.target_speech_end_ms.is_some() {
             // Cloud attribution without a positive local owner edge is weaker:
             // retain only speech close to that owner boundary. Otherwise fresh
             // room energy could consume the whole uncertainty wall after every
             // settled command. The wall bound also expires a stale snapshot.
             uncertain_tail_within_wall_ceiling
-                && has_unresolved_recent_local_speech(
+                && has_unresolved_recent_owner_speech(
                     update,
                     EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
                 )
@@ -183,7 +165,7 @@ impl SettledTargetEndpointClock {
                 || latest_visible_body_ends_terminal == Some(false)
                 || manual_terminal_bridge_until.is_some_and(|until| now < until));
         !active_body_still_speaking
-            && (!update.pending_unattributed_speech
+            && (!pending_owner_tail
                 || update_has_recent_strong_non_target(update))
             && (armed_from_visible_body_fallback
                 || (update.speaker_info_present
@@ -197,6 +179,11 @@ impl SettledTargetEndpointClock {
         visible_chars: usize,
         now: Instant,
     ) {
+        let signature = (ends_terminal, visible_chars);
+        if self.last_visible_body_signature != Some(signature) {
+            self.last_visible_body_signature = Some(signature);
+            self.product_endpoint.note_text_revision();
+        }
         if ends_terminal {
             let transition_visible_chars = visible_chars.max(self.open_body_peak_visible_chars);
             if transition_visible_chars >= MANUAL_TERMINAL_BRIDGE_MIN_VISIBLE_CHARS
@@ -204,10 +191,12 @@ impl SettledTargetEndpointClock {
             {
                 self.manual_terminal_bridge_until =
                     Some(now + Duration::from_millis(MANUAL_TERMINAL_BRIDGE_MAX_MS));
+                self.manual_terminal_bridge_rearm_pending = true;
             }
             self.open_body_peak_visible_chars = 0;
         } else {
             self.manual_terminal_bridge_until = None;
+            self.manual_terminal_bridge_rearm_pending = false;
             self.open_body_peak_visible_chars =
                 if self.latest_visible_body_ends_terminal == Some(false) {
                     self.open_body_peak_visible_chars.max(visible_chars)

@@ -5105,6 +5105,28 @@ fn device_key_start_takeover_pending_before_hidden_active() {
 }
 
 #[test]
+fn wake_candidate_controller_serializes_phase_and_session_identity() {
+    super::clear_hidden_automatic_candidate();
+    super::note_hidden_va_session(41);
+    super::mark_hidden_automatic_candidate_active();
+    assert!(super::hidden_automatic_candidate_active());
+    assert_eq!(super::current_hidden_va_session(), 41);
+
+    // A new candidate replaces the identity before it becomes ACTIVE. A delayed
+    // reject from the old candidate must therefore observe the new id and cannot
+    // stop it.
+    super::note_hidden_va_session(42);
+    assert_eq!(super::current_hidden_va_session(), 42);
+    assert!(!super::request_hidden_automatic_candidate_promotion());
+    assert!(!super::note_device_key_dictation_start_intent());
+    super::mark_hidden_automatic_candidate_active();
+    assert!(!super::hidden_automatic_candidate_active());
+    assert!(super::take_hidden_automatic_candidate_promotion());
+    assert!(!super::take_hidden_automatic_candidate_promotion());
+    super::clear_hidden_automatic_candidate();
+}
+
+#[test]
 fn hidden_candidate_marked_active_before_detector_init() {
     // Device-key promote depends on ACTIVE during StreamingDetector::new (~2s).
     let stream = concat!(

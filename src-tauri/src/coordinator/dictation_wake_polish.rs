@@ -338,10 +338,48 @@ enum BufferedSpeakerCandidateKind {
 const HIDDEN_AUTOMATIC_CANDIDATE_NONE: u8 = 0;
 const HIDDEN_AUTOMATIC_CANDIDATE_ACTIVE: u8 = 1;
 const HIDDEN_AUTOMATIC_CANDIDATE_PROMOTION_REQUESTED: u8 = 2;
-static HIDDEN_AUTOMATIC_CANDIDATE_STATE: AtomicU8 = AtomicU8::new(HIDDEN_AUTOMATIC_CANDIDATE_NONE);
+/// Single owner for hidden wake-candidate lifecycle.
+///
+/// The previous implementation split this state across two atomics and a second
+/// global session id in `dictation.rs`.  That made a late reject/stop from candidate
+/// N race with candidate N+1 and allowed a device-key intent to be applied to the
+/// wrong candidate.  Keep phase, session identity and takeover intent together so
+/// every wake transition is serialized by one controller.
+struct WakeCandidateController {
+    phase: u8,
+    session_id: u32,
+    takeover_pending: bool,
+}
+
+impl Default for WakeCandidateController {
+    fn default() -> Self {
+        Self {
+            phase: HIDDEN_AUTOMATIC_CANDIDATE_NONE,
+            session_id: 0,
+            takeover_pending: false,
+        }
+    }
+}
+
+static WAKE_CANDIDATE_CONTROLLER: OnceLock<std::sync::Mutex<WakeCandidateController>> =
+    OnceLock::new();
+
+fn wake_candidate_controller() -> &'static std::sync::Mutex<WakeCandidateController> {
+    WAKE_CANDIDATE_CONTROLLER.get_or_init(|| std::sync::Mutex::new(WakeCandidateController::default()))
+}
+
+fn with_wake_candidate_controller<T>(f: impl FnOnce(&mut WakeCandidateController) -> T) -> T {
+    let mut state = wake_candidate_controller()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    f(&mut state)
+}
+
 /// Device-key Start pressed while a hidden VA candidate was not ACTIVE yet (KWS init
 /// race or host lag). When the candidate becomes ACTIVE, auto-request promotion.
-static DEVICE_KEY_DICTATION_TAKEOVER_PENDING: AtomicBool = AtomicBool::new(false);
+/// The legacy name is retained in diagnostics/tests; the implementation is now
+/// the single `WakeCandidateController`, not a second hidden state machine.
+const DEVICE_KEY_DICTATION_TAKEOVER_PENDING: &str = "unified-wake-candidate-controller";
 static WAKE_DIAGNOSTIC_CAPTURE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static WAKE_DIAGNOSTIC_CLEANUP_RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -452,44 +490,60 @@ fn save_bounded_wake_diagnostic(embedded_session_id: u32, outcome: &'static str,
 
 fn mark_hidden_automatic_candidate_active() {
     // Device key may have already asked to take over before ACTIVE was set.
-    if DEVICE_KEY_DICTATION_TAKEOVER_PENDING.swap(false, Ordering::SeqCst) {
-        HIDDEN_AUTOMATIC_CANDIDATE_STATE.store(
-            HIDDEN_AUTOMATIC_CANDIDATE_PROMOTION_REQUESTED,
-            Ordering::SeqCst,
-        );
+    let promoted = with_wake_candidate_controller(|state| {
+        if state.takeover_pending {
+            state.takeover_pending = false;
+            state.phase = HIDDEN_AUTOMATIC_CANDIDATE_PROMOTION_REQUESTED;
+            true
+        } else {
+            state.phase = HIDDEN_AUTOMATIC_CANDIDATE_ACTIVE;
+            false
+        }
+    });
+    if promoted {
         log::info!(
             "[speaker-verification] device-key takeover pending applied as promotion on hidden candidate start"
         );
-        return;
     }
-    HIDDEN_AUTOMATIC_CANDIDATE_STATE.store(HIDDEN_AUTOMATIC_CANDIDATE_ACTIVE, Ordering::SeqCst);
 }
 
 fn clear_hidden_automatic_candidate() {
-    HIDDEN_AUTOMATIC_CANDIDATE_STATE.store(HIDDEN_AUTOMATIC_CANDIDATE_NONE, Ordering::SeqCst);
-    DEVICE_KEY_DICTATION_TAKEOVER_PENDING.store(false, Ordering::SeqCst);
+    with_wake_candidate_controller(|state| {
+        state.phase = HIDDEN_AUTOMATIC_CANDIDATE_NONE;
+        state.takeover_pending = false;
+    });
 }
 
 fn clear_device_key_dictation_takeover_pending() {
-    DEVICE_KEY_DICTATION_TAKEOVER_PENDING.store(false, Ordering::SeqCst);
+    with_wake_candidate_controller(|state| state.takeover_pending = false);
 }
 
 pub(super) fn hidden_automatic_candidate_active() -> bool {
-    HIDDEN_AUTOMATIC_CANDIDATE_STATE.load(Ordering::SeqCst) == HIDDEN_AUTOMATIC_CANDIDATE_ACTIVE
+    with_wake_candidate_controller(|state| state.phase == HIDDEN_AUTOMATIC_CANDIDATE_ACTIVE)
 }
 
 /// Device-key Dictation Start: prefer promote/ACTIVATE over TOGGLE-stop of a live
 /// hidden automatic session. Returns true when the host should send VREC:ACTIVATE.
 pub(super) fn note_device_key_dictation_start_intent() -> bool {
-    DEVICE_KEY_DICTATION_TAKEOVER_PENDING.store(true, Ordering::SeqCst);
-    if request_hidden_automatic_candidate_promotion() {
+    let (promoted, already_requested) = with_wake_candidate_controller(|state| {
+        state.takeover_pending = true;
+        match state.phase {
+            HIDDEN_AUTOMATIC_CANDIDATE_ACTIVE => {
+                state.phase = HIDDEN_AUTOMATIC_CANDIDATE_PROMOTION_REQUESTED;
+                state.takeover_pending = false;
+                (true, false)
+            }
+            HIDDEN_AUTOMATIC_CANDIDATE_PROMOTION_REQUESTED => (false, true),
+            _ => (false, false),
+        }
+    });
+    if promoted {
         log::info!(
             "[speaker-verification] device-key start promotes active hidden automatic candidate"
         );
         return true;
     }
-    let state = HIDDEN_AUTOMATIC_CANDIDATE_STATE.load(Ordering::SeqCst);
-    if state == HIDDEN_AUTOMATIC_CANDIDATE_PROMOTION_REQUESTED {
+    if already_requested {
         log::info!(
             "[speaker-verification] device-key start reuses already-requested hidden promotion"
         );
@@ -504,25 +558,44 @@ pub(super) fn note_device_key_dictation_start_intent() -> bool {
 }
 
 pub(super) fn request_hidden_automatic_candidate_promotion() -> bool {
-    HIDDEN_AUTOMATIC_CANDIDATE_STATE
-        .compare_exchange(
-            HIDDEN_AUTOMATIC_CANDIDATE_ACTIVE,
-            HIDDEN_AUTOMATIC_CANDIDATE_PROMOTION_REQUESTED,
-            Ordering::SeqCst,
-            Ordering::SeqCst,
-        )
-        .is_ok()
+    with_wake_candidate_controller(|state| {
+        if state.phase == HIDDEN_AUTOMATIC_CANDIDATE_ACTIVE {
+            state.phase = HIDDEN_AUTOMATIC_CANDIDATE_PROMOTION_REQUESTED;
+            state.takeover_pending = false;
+            true
+        } else {
+            false
+        }
+    })
 }
 
 fn take_hidden_automatic_candidate_promotion() -> bool {
-    HIDDEN_AUTOMATIC_CANDIDATE_STATE
-        .compare_exchange(
-            HIDDEN_AUTOMATIC_CANDIDATE_PROMOTION_REQUESTED,
-            HIDDEN_AUTOMATIC_CANDIDATE_NONE,
-            Ordering::SeqCst,
-            Ordering::SeqCst,
-        )
-        .is_ok()
+    with_wake_candidate_controller(|state| {
+        if state.phase == HIDDEN_AUTOMATIC_CANDIDATE_PROMOTION_REQUESTED {
+            state.phase = HIDDEN_AUTOMATIC_CANDIDATE_NONE;
+            state.takeover_pending = false;
+            true
+        } else {
+            false
+        }
+    })
+}
+
+fn note_hidden_va_session(embedded_session_id: u32) {
+    with_wake_candidate_controller(|state| {
+        if state.session_id != embedded_session_id {
+            // A fresh device segment starts a fresh candidate lifecycle. Never
+            // inherit ACTIVE/PROMOTION from a prior segment. A pending physical
+            // Start is intentionally preserved: it is the only cross-segment
+            // intent allowed to promote the new candidate.
+            state.phase = HIDDEN_AUTOMATIC_CANDIDATE_NONE;
+        }
+        state.session_id = embedded_session_id;
+    });
+}
+
+fn current_hidden_va_session() -> u32 {
+    with_wake_candidate_controller(|state| state.session_id)
 }
 
 fn discard_pre_press_candidate_pcm(pcm: &mut Vec<u8>) -> usize {

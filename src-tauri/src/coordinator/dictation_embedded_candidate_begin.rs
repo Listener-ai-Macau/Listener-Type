@@ -69,6 +69,9 @@ impl EmbeddedStreamingDictation {
             // the first physical press looks like "recording failed" and only the
             // next press starts a clean User session.
             if candidate_kind == BufferedSpeakerCandidateKind::Verification {
+                // Register the identity before exposing ACTIVE.  This keeps a
+                // delayed reject from candidate N from ever stopping candidate N+1.
+                note_hidden_va_session(embedded_session_id);
                 mark_hidden_automatic_candidate_active();
             }
             // Do NOT await StreamingDetector::new here — it costs ~0.5–1s wall time and
@@ -79,7 +82,7 @@ impl EmbeddedStreamingDictation {
                     let phrase = inner.prefs.get().voice_wake_phrase;
                     Some(tauri::async_runtime::spawn_blocking(move || {
                         // Primary wake uses StreamingDetector::new() (short-prefix variants
-                        // + bootstrap threshold 0.08) for recall in noise / light slur.
+                        // + recall-first bootstrap threshold) for weak speech / light slur.
                         crate::wake_phrase::StreamingDetector::new(&phrase)
                     }))
                 } else {
@@ -92,9 +95,6 @@ impl EmbeddedStreamingDictation {
                 "[speaker-verification] buffering embedded candidate kind={candidate_kind:?} embedded_session_id={embedded_session_id} detector_deferred={}",
                 wake_detector_init.is_some()
             );
-            if candidate_kind == BufferedSpeakerCandidateKind::Verification {
-                note_hidden_va_session(embedded_session_id);
-            }
             self.speaker_candidate = Some(BufferedSpeakerCandidate {
                 kind: candidate_kind,
                 pcm: Vec::new(),
@@ -104,6 +104,7 @@ impl EmbeddedStreamingDictation {
                 owner_ambiguous_confirmations: 0,
                 owner_best_ambiguous_score: 0.0,
                 owner_verification_task: None,
+                owner_verification_attempted: false,
                 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
                 target_wake_extraction_task: None,
                 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -126,7 +127,9 @@ impl EmbeddedStreamingDictation {
                 kws_local_absent_count: 0,
                 local_absent_count: 0,
                 local_kws_fusion_evidence: false,
+                kws_phrase_detected: false,
                 local_owner_overlap_near_confirmations: 0,
+                owner_near_phrase_confirmations: 0,
                 #[cfg(target_os = "windows")]
                 local_absent_coverage: None,
                 kws_first_hit_at: None,
@@ -144,4 +147,3 @@ impl EmbeddedStreamingDictation {
             .await
     }
 }
-
