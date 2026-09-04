@@ -7,6 +7,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `index.html` | Core app | Build and targeted tests |
 | `package-lock.json` | Build and release config | Build, updater and audit scripts |
 | `package.json` | Build and release config | Build, updater and audit scripts |
+| `docs/architecture/owner_audio_pipeline.md` | Owner-centric wake, speaker activity and endpoint contract | Architecture review and targeted replay tests |
+| `docs/architecture/recording-wake-endpoint-reset-rules.md` | Unified recording, wake, endpoint and reset investigation rules | Architecture review and targeted replay tests |
 | `scripts/advance-preproduction-total-review.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/analyze-listener-runtime-log.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/build-mac.sh` | Automation and audits | Node/PowerShell script tests |
@@ -190,7 +192,6 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator/dictation_wake_owner_gate.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_polish.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_prefix_retry.rs` | Core app | Build and targeted tests |
-| `docs/architecture/owner_audio_pipeline.md` | Owner-centric wake, speaker activity and endpoint contract | Architecture review and targeted replay tests |
 | `src-tauri/src/coordinator/embedded_ble_runtime.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/hotkey_device_runtime.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/coordinator/qa.rs` | Core app | Build and targeted tests |
