@@ -81,3 +81,4 @@ fresh test binary, anti-regression contracts, **§1 always-latest Program Files 
   `C:\Program Files\Listener Type\listener-type.exe` 的版本；禁止从 sibling snapshot、旧桌面副本或旧快捷方式启动。
 - 每次改动后，在启动前核对所有 `listener-type` 进程的绝对路径、ProductVersion/FileVersion 和 SHA-256；允许同一哈希的主进程和 `--local-wake-helper` 子进程。发现旧进程、未知副本或哈希不一致，先停止并重新安装/启动，未通过核对不得称为“已修复”。
 - 日志中的 session 只有在上述运行时核对通过后才可作为本次代码验收证据。
+- 闸门命令：`pwsh -NoProfile -File .\scripts\verify_latest_runtime.ps1 -RequireRunning`。
