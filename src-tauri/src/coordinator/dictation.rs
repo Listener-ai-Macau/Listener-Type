@@ -966,9 +966,16 @@ fn discard_terminal_wake_continuation(inner: &Arc<Inner>) {
 include!("dictation_volcengine_callbacks.rs");
 
 fn build_volcengine_asr(inner: &Arc<Inner>, session_id: SessionId) -> Arc<VolcengineStreamingASR> {
-    let asr = Arc::new(VolcengineStreamingASR::new(
+    let proxy_config = super::read_asr_proxy_config("volcengine").unwrap_or_else(|error| {
+        log::warn!(
+            "[network] invalid Volcengine ASR proxy settings; using provider default: {error}"
+        );
+        crate::polish::ProviderProxyConfig::provider_default("volcengine")
+    });
+    let asr = Arc::new(VolcengineStreamingASR::new_with_proxy_config(
         read_volc_credentials(),
         enabled_hotwords(inner),
+        proxy_config,
     ));
     set_volcengine_preview_callbacks(&asr, inner, session_id);
     asr

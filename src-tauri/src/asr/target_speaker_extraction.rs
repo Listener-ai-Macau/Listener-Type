@@ -7,6 +7,7 @@
 //! diarizer can label the mixture but cannot remove the unwanted words.
 
 use crate::asr::AudioConsumer;
+use crate::polish::ProviderProxyConfig;
 use kaldi_native_fbank::{
     istft_compute,
     online::{FeatureComputer, OnlineFeature},
@@ -669,6 +670,7 @@ async fn feed_extracted_chunk(
     staged_pcm: &mut Vec<u8>,
     credentials: &crate::asr::VolcengineCredentials,
     hotwords: &[crate::asr::DictionaryHotword],
+    proxy_config: &ProviderProxyConfig,
     mut extracted: ExtractedChunk,
     residual_energy: &mut f64,
     mixture_energy: &mut f64,
@@ -701,9 +703,10 @@ async fn feed_extracted_chunk(
     log::info!(
         "[target-speaker] strong interference detected during capture residual_ratio={residual_ratio:.6} threshold={STRONG_INTERFERENCE_RESIDUAL_RATIO:.6}; opening streaming extracted ASR"
     );
-    let asr = Arc::new(crate::asr::VolcengineStreamingASR::new(
+    let asr = Arc::new(crate::asr::VolcengineStreamingASR::new_with_proxy_config(
         credentials.clone(),
         hotwords.to_vec(),
+        proxy_config.clone(),
     ));
     asr.open_session_for_deferred_audio()
         .await
@@ -721,6 +724,7 @@ impl TargetSpeakerStream {
         credentials: crate::asr::VolcengineCredentials,
         hotwords: Vec<crate::asr::DictionaryHotword>,
         speaker_embedding: Vec<f32>,
+        proxy_config: ProviderProxyConfig,
     ) -> Arc<Self> {
         let (audio_tx, mut audio_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let interference_detected = Arc::new(AtomicBool::new(false));
@@ -756,6 +760,7 @@ impl TargetSpeakerStream {
                         &mut staged_pcm,
                         &credentials,
                         &hotwords,
+                        &proxy_config,
                         extracted,
                         &mut residual_energy,
                         &mut mixture_energy,
@@ -778,6 +783,7 @@ impl TargetSpeakerStream {
                     &mut staged_pcm,
                     &credentials,
                     &hotwords,
+                    &proxy_config,
                     extracted,
                     &mut residual_energy,
                     &mut mixture_energy,

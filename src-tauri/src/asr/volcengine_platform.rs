@@ -16,6 +16,7 @@ use super::volcengine::{
     VolcengineStreamingEvent,
 };
 use super::{AudioConsumer, DictionaryHotword};
+use crate::polish::ProviderProxyConfig;
 
 pub const PROVIDER_ID: &str = "volcengine";
 
@@ -24,11 +25,17 @@ pub struct VolcengineStreamingProvider {
     credentials: VolcengineCredentials,
     hotwords: Vec<DictionaryHotword>,
     session_options: VolcengineSessionOptions,
+    proxy_config: ProviderProxyConfig,
 }
 
 impl VolcengineStreamingProvider {
     pub fn new(credentials: VolcengineCredentials, hotwords: Vec<DictionaryHotword>) -> Self {
-        Self::new_with_session_options(credentials, hotwords, VolcengineSessionOptions::default())
+        Self::new_with_session_options_and_proxy(
+            credentials,
+            hotwords,
+            VolcengineSessionOptions::default(),
+            ProviderProxyConfig::provider_default(PROVIDER_ID),
+        )
     }
 
     pub fn new_with_session_options(
@@ -36,10 +43,38 @@ impl VolcengineStreamingProvider {
         hotwords: Vec<DictionaryHotword>,
         session_options: VolcengineSessionOptions,
     ) -> Self {
+        Self::new_with_session_options_and_proxy(
+            credentials,
+            hotwords,
+            session_options,
+            ProviderProxyConfig::provider_default(PROVIDER_ID),
+        )
+    }
+
+    pub fn new_with_proxy_config(
+        credentials: VolcengineCredentials,
+        hotwords: Vec<DictionaryHotword>,
+        proxy_config: ProviderProxyConfig,
+    ) -> Self {
+        Self::new_with_session_options_and_proxy(
+            credentials,
+            hotwords,
+            VolcengineSessionOptions::default(),
+            proxy_config,
+        )
+    }
+
+    pub fn new_with_session_options_and_proxy(
+        credentials: VolcengineCredentials,
+        hotwords: Vec<DictionaryHotword>,
+        session_options: VolcengineSessionOptions,
+        proxy_config: ProviderProxyConfig,
+    ) -> Self {
         Self {
             credentials,
             hotwords,
             session_options,
+            proxy_config,
         }
     }
 }
@@ -66,10 +101,11 @@ impl StreamingAsrProvider for VolcengineStreamingProvider {
                 format!("create Volcengine ASR runtime: {error}"),
             )
         })?);
-        let asr = Arc::new(VolcengineStreamingASR::new_with_session_options(
+        let asr = Arc::new(VolcengineStreamingASR::new_with_session_options_and_proxy(
             self.credentials.clone(),
             self.hotwords.clone(),
             self.session_options,
+            self.proxy_config.clone(),
         ));
         let seen_final = Arc::new(AtomicBool::new(false));
         let seen_error = Arc::new(AtomicBool::new(false));

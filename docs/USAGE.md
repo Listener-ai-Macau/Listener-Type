@@ -39,6 +39,8 @@ Style packs define reusable writing behavior. Built-in packs work offline. User 
 
 Each cloud provider has its own Network setting in Settings. The default is provider-aware: domestic providers such as DeepSeek, Ark, SiliconFlow, Bailian and Volcengine use direct connections by default, while overseas, OAuth, aggregation and custom providers follow the system proxy by default.
 
+The streaming ASR WebSocket follows this same setting. System mode uses the computer's system HTTP proxy (or standard proxy environment variables) and custom mode accepts an HTTP proxy URL. The app never ships with a developer machine's loopback proxy address.
+
 Use Direct when a stale local system proxy points at a closed port such as `127.0.0.1:1087`. Use System proxy for providers that require a proxy on your network. Custom HTTP proxy accepts URLs such as `http://127.0.0.1:7890`.
 
 ## History

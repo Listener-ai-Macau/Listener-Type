@@ -11,14 +11,19 @@ use std::time::{Duration, Instant};
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex as ParkingMutex;
 use serde_json::{json, Value};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex, Notify, OnceCell};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::header::HeaderValue;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{
+    client_async_tls_with_config, connect_async, MaybeTlsStream, WebSocketStream,
+};
 use uuid::Uuid;
+
+use crate::polish::{EffectiveProxyMode, ProviderProxyConfig};
 
 use super::frame::{self, Flags, MessageType, Serialization};
 use super::{AudioConsumer, DictionaryHotword, RawTranscript};
@@ -50,6 +55,7 @@ const EMPTY_FINAL_REPLAY_PEAK_CEILING: f64 = i16::MAX as f64 * 0.707_945_784;
 // 建连是全文件唯一曾经无超时边界的网络操作：TCP 黑洞下会挂到 OS 级超时
 // （21s+），期间 stop/cancel 只能排队，proactive 末帧预算耗尽后丢稿。
 const WEBSOCKET_CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
+const PROXY_CONNECT_HEADER_LIMIT: usize = 16 * 1024;
 const FINAL_FRAME_SEND_BUDGET: Duration = Duration::from_millis(1_800);
 const FINAL_AUDIO_DRAIN_MIN_BUDGET: Duration = Duration::from_millis(800);
 const FINAL_AUDIO_DRAIN_MAX_BUDGET: Duration = Duration::from_secs(8);
@@ -127,6 +133,191 @@ fn classify_provider_error(code: u32, body: &str) -> VolcengineASRError {
 }
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+async fn connect_ws_with_network_policy(
+    request: tokio_tungstenite::tungstenite::handshake::client::Request,
+    proxy_config: &ProviderProxyConfig,
+) -> Result<
+    (
+        WsStream,
+        tokio_tungstenite::tungstenite::handshake::client::Response,
+    ),
+    tokio_tungstenite::tungstenite::Error,
+> {
+    let endpoint = request.uri().to_string();
+    let mode = proxy_config.effective_mode(&endpoint);
+    let proxy_url = match mode {
+        EffectiveProxyMode::Direct => None,
+        EffectiveProxyMode::Custom => proxy_config.custom_proxy_url().map(str::to_owned),
+        EffectiveProxyMode::System => system_http_proxy_url(&endpoint),
+    };
+
+    log::info!(
+        "[network] Volcengine WebSocket policy provider={} mode={:?} proxy={}",
+        proxy_config.provider_id(),
+        mode,
+        proxy_url.as_deref().unwrap_or("DIRECT")
+    );
+
+    let Some(proxy_url) = proxy_url else {
+        return connect_async(request).await;
+    };
+
+    let proxy = url::Url::parse(&proxy_url).map_err(|error| {
+        tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid WebSocket proxy URL: {error}"),
+        ))
+    })?;
+    if proxy.scheme() != "http" {
+        return Err(tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "WebSocket proxy must use http:// (SOCKS/HTTPS proxy is not supported by this transport)",
+        )));
+    }
+    let proxy_host = proxy.host_str().ok_or_else(|| {
+        tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "WebSocket proxy host is missing",
+        ))
+    })?;
+    let proxy_port = proxy.port().unwrap_or(80);
+    let target_host = request.uri().host().ok_or_else(|| {
+        tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "WebSocket target host is missing",
+        ))
+    })?;
+    let target_port = request.uri().port_u16().unwrap_or_else(|| {
+        if request.uri().scheme_str() == Some("wss") {
+            443
+        } else {
+            80
+        }
+    });
+    let mut stream = TcpStream::connect((proxy_host, proxy_port))
+        .await
+        .map_err(tokio_tungstenite::tungstenite::Error::Io)?;
+
+    let authority = format!("{target_host}:{target_port}");
+    let mut connect_request = format!(
+        "CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\nProxy-Connection: Keep-Alive\r\n"
+    );
+    if !proxy.username().is_empty() {
+        let userinfo = if let Some(password) = proxy.password() {
+            format!("{}:{}", proxy.username(), password)
+        } else {
+            proxy.username().to_string()
+        };
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(userinfo);
+        connect_request.push_str(&format!("Proxy-Authorization: Basic {encoded}\r\n"));
+    }
+    connect_request.push_str("\r\n");
+    stream
+        .write_all(connect_request.as_bytes())
+        .await
+        .map_err(tokio_tungstenite::tungstenite::Error::Io)?;
+
+    let mut response = Vec::with_capacity(1024);
+    let mut byte = [0_u8; 1];
+    while response.len() < PROXY_CONNECT_HEADER_LIMIT {
+        let read = stream
+            .read(&mut byte)
+            .await
+            .map_err(tokio_tungstenite::tungstenite::Error::Io)?;
+        if read == 0 {
+            break;
+        }
+        response.push(byte[0]);
+        if response.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    let header = String::from_utf8_lossy(&response);
+    let status_ok = header
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|status| status.parse::<u16>().ok())
+        .is_some_and(|status| (200..300).contains(&status));
+    if !status_ok {
+        return Err(tokio_tungstenite::tungstenite::Error::Io(
+            std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                format!(
+                    "HTTP proxy CONNECT rejected: {}",
+                    header.lines().next().unwrap_or("<empty>")
+                ),
+            ),
+        ));
+    }
+
+    client_async_tls_with_config(request, stream, None, None).await
+}
+
+fn system_http_proxy_url(endpoint: &str) -> Option<String> {
+    let target_host = url::Url::parse(endpoint)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned));
+    if let Some(host) = target_host.as_deref() {
+        let no_proxy = std::env::var("NO_PROXY")
+            .ok()
+            .or_else(|| std::env::var("no_proxy").ok());
+        if no_proxy
+            .as_deref()
+            .is_some_and(|entries| no_proxy_matches_host(entries, host))
+        {
+            log::info!("[network] system proxy bypassed by NO_PROXY for host={host}");
+            return None;
+        }
+    }
+    for key in [
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ] {
+        if let Ok(value) = std::env::var(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    if let Ok(proxy) = sysproxy::Sysproxy::get_system_proxy() {
+        if proxy.enable && !proxy.host.trim().is_empty() && proxy.port != 0 {
+            return Some(format!("http://{}:{}", proxy.host.trim(), proxy.port));
+        }
+    }
+    None
+}
+
+fn no_proxy_matches_host(entries: &str, host: &str) -> bool {
+    entries.split(',').any(|entry| {
+        let token = entry.trim().trim_start_matches('.');
+        if token.is_empty() {
+            return false;
+        }
+        if token == "*" {
+            return true;
+        }
+        let token = token
+            .rsplit_once(':')
+            .map(|(host, port)| {
+                if port.chars().all(|c| c.is_ascii_digit()) {
+                    host
+                } else {
+                    token
+                }
+            })
+            .unwrap_or(token);
+        host == token || host.ends_with(&format!(".{token}"))
+    })
+}
 
 fn bounded_empty_final_replay_pcm(pcm: &[u8]) -> (Vec<u8>, f64, u16, u16) {
     let peak_before = pcm
@@ -2319,6 +2510,7 @@ pub struct VolcengineStreamingASR {
     credentials: VolcengineCredentials,
     hotwords: Vec<DictionaryHotword>,
     session_options: VolcengineSessionOptions,
+    proxy_config: ProviderProxyConfig,
     state: ParkingMutex<SyncState>,
     partial_callback: ParkingMutex<Option<PartialTranscriptCallback>>,
     visual_partial_callback: ParkingMutex<Option<VisualPartialTranscriptCallback>>,
@@ -2518,7 +2710,12 @@ struct RecoverySpeakerSnapshot {
 
 impl VolcengineStreamingASR {
     pub fn new(credentials: VolcengineCredentials, hotwords: Vec<DictionaryHotword>) -> Self {
-        Self::new_with_session_options(credentials, hotwords, VolcengineSessionOptions::default())
+        Self::new_with_session_options_and_proxy(
+            credentials,
+            hotwords,
+            VolcengineSessionOptions::default(),
+            ProviderProxyConfig::provider_default("volcengine"),
+        )
     }
 
     pub fn new_with_session_options(
@@ -2526,10 +2723,38 @@ impl VolcengineStreamingASR {
         hotwords: Vec<DictionaryHotword>,
         session_options: VolcengineSessionOptions,
     ) -> Self {
+        Self::new_with_session_options_and_proxy(
+            credentials,
+            hotwords,
+            session_options,
+            ProviderProxyConfig::provider_default("volcengine"),
+        )
+    }
+
+    pub fn new_with_proxy_config(
+        credentials: VolcengineCredentials,
+        hotwords: Vec<DictionaryHotword>,
+        proxy_config: ProviderProxyConfig,
+    ) -> Self {
+        Self::new_with_session_options_and_proxy(
+            credentials,
+            hotwords,
+            VolcengineSessionOptions::default(),
+            proxy_config,
+        )
+    }
+
+    pub fn new_with_session_options_and_proxy(
+        credentials: VolcengineCredentials,
+        hotwords: Vec<DictionaryHotword>,
+        session_options: VolcengineSessionOptions,
+        proxy_config: ProviderProxyConfig,
+    ) -> Self {
         Self {
             credentials,
             hotwords,
             session_options,
+            proxy_config,
             state: ParkingMutex::new(SyncState::default()),
             partial_callback: ParkingMutex::new(None),
             visual_partial_callback: ParkingMutex::new(None),
@@ -2586,6 +2811,7 @@ impl VolcengineStreamingASR {
                 self.credentials.clone(),
                 self.hotwords.clone(),
                 embedding,
+                self.proxy_config.clone(),
             ),
         );
         log::info!(
@@ -2776,10 +3002,11 @@ impl VolcengineStreamingASR {
         reason: &'static str,
         gain: f64,
     ) -> Result<RawTranscript, VolcengineASRError> {
-        let replay = Arc::new(Self::new_with_session_options(
+        let replay = Arc::new(Self::new_with_session_options_and_proxy(
             self.credentials.clone(),
             self.hotwords.clone(),
             self.session_options,
+            self.proxy_config.clone(),
         ));
         log::warn!(
             "[asr] starting one bounded full-audio recovery replay reason={reason} gain={gain:.4} pcm_bytes={} audio_ms={}",
@@ -3461,15 +3688,18 @@ impl VolcengineStreamingASR {
                 .map_err(|e| VolcengineASRError::ConnectionFailed(e.to_string()))?,
         );
 
-        let (ws, _resp) = tokio::time::timeout(WEBSOCKET_CONNECT_TIMEOUT, connect_async(request))
-            .await
-            .map_err(|_| {
-                VolcengineASRError::ConnectionFailed(format!(
-                    "websocket connect timed out after {}s",
-                    WEBSOCKET_CONNECT_TIMEOUT.as_secs()
-                ))
-            })?
-            .map_err(classify_connect_error)?;
+        let (ws, _resp) = tokio::time::timeout(
+            WEBSOCKET_CONNECT_TIMEOUT,
+            connect_ws_with_network_policy(request, &self.proxy_config),
+        )
+        .await
+        .map_err(|_| {
+            VolcengineASRError::ConnectionFailed(format!(
+                "websocket connect timed out after {}s",
+                WEBSOCKET_CONNECT_TIMEOUT.as_secs()
+            ))
+        })?
+        .map_err(classify_connect_error)?;
         let (write, read) = ws.split();
 
         let (tx, rx) = oneshot::channel();
@@ -4956,6 +5186,15 @@ fn hotword_context(entries: &[DictionaryHotword]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_proxy_matching_covers_exact_hosts_suffixes_and_wildcard() {
+        assert!(no_proxy_matches_host("localhost,127.0.0.1", "localhost"));
+        assert!(no_proxy_matches_host(".example.com", "api.example.com"));
+        assert!(no_proxy_matches_host("*", "anywhere.invalid"));
+        assert!(!no_proxy_matches_host("example.com", "example.net"));
+        assert!(no_proxy_matches_host("example.com:443", "example.com"));
+    }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     #[test]

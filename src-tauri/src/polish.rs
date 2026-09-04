@@ -135,11 +135,15 @@ impl ProviderProxyConfig {
         }
     }
 
-    fn custom_proxy_url(&self) -> Option<&str> {
+    pub(crate) fn custom_proxy_url(&self) -> Option<&str> {
         match &self.mode {
             ProviderProxyMode::Custom(url) => Some(url.as_str()),
             _ => None,
         }
+    }
+
+    pub(crate) fn provider_id(&self) -> &str {
+        &self.provider_id
     }
 }
 
