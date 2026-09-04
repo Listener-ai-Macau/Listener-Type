@@ -336,6 +336,24 @@ fn update_embedded_audio_partial_preview(
     session_id: SessionId,
     text: String,
 ) -> bool {
+    reduce_embedded_audio_authoritative_preview(
+        inner,
+        session_id,
+        text,
+        false,
+        crate::observability::PreviewSource::ProviderStream,
+        "stream",
+    )
+}
+
+fn reduce_embedded_audio_authoritative_preview(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    text: String,
+    settle_visible: bool,
+    source: crate::observability::PreviewSource,
+    source_label: &'static str,
+) -> bool {
     let preview = filter_dictation_preview_text(inner, session_id, &text);
     if preview.is_empty() {
         return false;
@@ -344,24 +362,27 @@ fn update_embedded_audio_partial_preview(
         inner,
         EmbeddedBleSessionActorCommand::AsrPartial,
         Some(session_id),
-        format!("chars={}", preview.chars().count()),
+        format!(
+            "source={source_label} chars={} settle_visible={settle_visible}",
+            preview.chars().count()
+        ),
         |_| {
-            let mut slot = inner.embedded_audio_partial_preview.lock();
-            let Some(provider_preview) = provider_preview_change(slot.as_deref(), &preview) else {
-                return false;
-            };
-            *slot = Some(provider_preview.clone());
-            *inner.embedded_audio_visual_preview.lock() = Some(provider_preview.clone());
-            let emitted =
-                emit_embedded_audio_partial_preview_if_active(inner, session_id, provider_preview);
+            let reduction = inner.embedded_audio_preview.lock().observe_authoritative(
+                session_id,
+                &preview,
+                settle_visible,
+            );
+            let emitted = reduction.visible_update.is_some_and(|visible| {
+                emit_embedded_audio_partial_preview_if_active(inner, session_id, visible)
+            });
             if emitted {
                 crate::observability::record_embedded_audio_preview_published(
                     session_id,
-                    crate::observability::PreviewSource::ProviderStream,
+                    source,
                     embedded_audio_stop_feedback_latched(inner),
                 );
             }
-            emitted
+            reduction.authoritative_changed
         },
     )
 }
@@ -386,33 +407,16 @@ fn update_embedded_audio_visual_preview(
         Some(session_id),
         format!("visual_provisional chars={}", preview.chars().count()),
         |_| {
-            // Visual-only text is derived from the same provider stream as the
-            // authoritative preview, but it may have the automatic wake prefix
-            // stripped (and therefore be shorter).  Sending that shorter value
-            // through the shared capsule channel makes the frontend animate a
-            // backtrack on every update (for example 8 -> 3 -> 8 chars).  Keep
-            // the visible preview monotonic until the authoritative stream has
-            // caught up; visual-only text remains a latency hint, never a
-            // reason to erase text the user already saw.
-            let authoritative = inner.embedded_audio_partial_preview.lock();
-            if authoritative.as_deref().is_some_and(|current| {
-                spoken_preview_len(&preview) < spoken_preview_len(current)
-            }) {
-                return false;
-            }
-            drop(authoritative);
-            let mut slot = inner.embedded_audio_visual_preview.lock();
-            let Some(provider_preview) = provider_preview_change(slot.as_deref(), &preview) else {
+            let Some(provider_preview) = inner
+                .embedded_audio_preview
+                .lock()
+                .observe_provisional(session_id, &preview)
+            else {
                 return false;
             };
-            *slot = Some(provider_preview.clone());
             emit_embedded_audio_partial_preview_if_active(inner, session_id, provider_preview)
         },
     )
-}
-
-fn spoken_preview_len(text: &str) -> usize {
-    text.chars().filter(|ch| ch.is_alphanumeric()).count()
 }
 
 fn update_embedded_audio_partial_preview_from_final_supplement(
@@ -421,416 +425,20 @@ fn update_embedded_audio_partial_preview_from_final_supplement(
     update: crate::asr::volcengine::FinalIntermediateTranscript,
 ) -> bool {
     let authoritative_two_pass = update.authoritative_two_pass;
-    let preview = filter_dictation_preview_text(inner, session_id, &update.text);
-    if preview.is_empty() {
-        return false;
-    }
-    dispatch_embedded_ble_session_actor_command(
+    reduce_embedded_audio_authoritative_preview(
         inner,
-        EmbeddedBleSessionActorCommand::AsrPartial,
-        Some(session_id),
-        format!(
-            "final_supplement chars={} authoritative_two_pass={}",
-            preview.chars().count(),
-            authoritative_two_pass
-        ),
-        |_| {
-            let mut slot = inner.embedded_audio_partial_preview.lock();
-            let Some(provider_preview) = provider_preview_change(slot.as_deref(), &preview) else {
-                return false;
-            };
-            *slot = Some(provider_preview.clone());
-            *inner.embedded_audio_visual_preview.lock() = Some(provider_preview.clone());
-            let emitted =
-                emit_embedded_audio_partial_preview_if_active(inner, session_id, provider_preview);
-            if emitted {
-                crate::observability::record_embedded_audio_preview_published(
-                    session_id,
-                    crate::observability::PreviewSource::FinalSupplement,
-                    embedded_audio_stop_feedback_latched(inner),
-                );
-            }
-            emitted
+        session_id,
+        update.text,
+        true,
+        crate::observability::PreviewSource::FinalSupplement,
+        if authoritative_two_pass {
+            "final_supplement_two_pass"
+        } else {
+            "final_supplement"
         },
     )
 }
 
-// `stream` and `two_pass` originate from the same authoritative ASR session.
-// A newer non-identical candidate must replace the capsule text, including an
-// early rewrite; only an exact duplicate is safe to suppress.
-fn provider_preview_change(current: Option<&str>, candidate: &str) -> Option<String> {
-    let candidate = candidate.trim();
-    if candidate.is_empty() || current.is_some_and(|value| value.trim() == candidate) {
-        return None;
-    }
-    Some(candidate.to_string())
-}
-
-fn stabilize_embedded_audio_partial_preview(
-    current: Option<&str>,
-    candidate: &str,
-) -> Option<String> {
-    let candidate = candidate.trim();
-    if candidate.is_empty() {
-        return None;
-    }
-    let Some(current) = current.map(str::trim).filter(|value| !value.is_empty()) else {
-        return Some(candidate.to_string());
-    };
-    let current_key = embedded_audio_partial_preview_stability_key(current);
-    let candidate_key = embedded_audio_partial_preview_stability_key(candidate);
-    if current_key == candidate_key || candidate_key.is_empty() {
-        return None;
-    }
-    if current_key.is_empty() {
-        return Some(candidate.to_string());
-    }
-    if candidate_key.starts_with(&current_key) {
-        let current_key_chars = current_key.chars().count();
-        if embedded_audio_partial_preview_repeats_recent_short_tail(
-            &current_key,
-            &candidate_key,
-            current_key_chars,
-        ) {
-            return None;
-        }
-        return stitch_embedded_audio_partial_preview(current, candidate, current_key_chars);
-    }
-    if current_key.starts_with(&candidate_key) {
-        return None;
-    }
-
-    let current_chars = current_key.chars().count();
-    let candidate_chars = candidate_key.chars().count();
-    if current_chars <= 4 && candidate_chars >= current_chars.saturating_add(3) {
-        return Some(candidate.to_string());
-    }
-
-    None
-}
-
-fn stabilize_embedded_audio_final_supplemental_preview(
-    current: Option<&str>,
-    candidate: &str,
-) -> Option<String> {
-    stabilize_embedded_audio_final_supplemental_preview_with_provider_authority(
-        current, candidate, false,
-    )
-}
-
-fn stabilize_embedded_audio_final_supplemental_preview_with_provider_authority(
-    current: Option<&str>,
-    candidate: &str,
-    authoritative_two_pass: bool,
-) -> Option<String> {
-    const FINAL_SUPPLEMENT_SEED_CHARS: usize = 2;
-    const SHORT_PREFIX_REPAIR_MAX_CURRENT_CHARS: usize = 12;
-    const SHORT_PREFIX_REPAIR_MAX_REWRITE_CHARS: usize = 2;
-    const SHORT_PREFIX_REPAIR_MIN_EXTENSION_CHARS: usize = 3;
-    const SHORT_PREFIX_REPAIR_MIN_SHARED_PREFIX_CHARS: usize = 2;
-    const LONG_PREFIX_REPAIR_MIN_SHARED_PREFIX_CHARS: usize = 12;
-    const LONG_PREFIX_REPAIR_MIN_EXTENSION_CHARS: usize = 6;
-    const LONG_SHIFTED_REPAIR_MIN_TOTAL_GROWTH_CHARS: usize = 2;
-    const AUTHORITATIVE_EARLY_REWRITE_MIN_SHARED_PREFIX_CHARS: usize = 2;
-    const AUTHORITATIVE_EARLY_REWRITE_MIN_EXTENSION_CHARS: usize = 4;
-    const AUTHORITATIVE_EARLY_REWRITE_MAX_EDIT_CHARS: usize = 4;
-    const AUTHORITATIVE_LONG_REVISION_MIN_SHARED_PREFIX_CHARS: usize = 12;
-    const AUTHORITATIVE_LONG_REVISION_MAX_LENGTH_DELTA_CHARS: usize = 4;
-    const AUTHORITATIVE_LONG_REVISION_MAX_EDIT_CHARS: usize = 4;
-    const AUTHORITATIVE_REWRITE_MIN_SHARED_PREFIX_CHARS: usize = 6;
-    const AUTHORITATIVE_REWRITE_MIN_EXTENSION_CHARS: usize = 8;
-
-    let candidate = candidate.trim();
-    if candidate.is_empty() {
-        return None;
-    }
-    let candidate_key = embedded_audio_partial_preview_stability_key(candidate);
-    if candidate_key.is_empty() {
-        return None;
-    }
-    let candidate_key_chars = candidate_key.chars().count();
-    let Some(current) = current.map(str::trim).filter(|value| !value.is_empty()) else {
-        return (candidate_key_chars >= FINAL_SUPPLEMENT_SEED_CHARS).then(|| candidate.to_string());
-    };
-    let current_key = embedded_audio_partial_preview_stability_key(current);
-    if current_key.is_empty() {
-        return None;
-    }
-    if authoritative_two_pass && current_key != candidate_key {
-        log::info!(
-            "[coord] applied provider-authoritative two-pass preview correction current_chars={} candidate_chars={}",
-            current_key.chars().count(),
-            candidate_key_chars
-        );
-        return Some(candidate.to_string());
-    }
-    if current_key == candidate_key {
-        return embedded_audio_final_supplement_adds_decorative_progress(current, candidate)
-            .then(|| candidate.to_string());
-    }
-    if authoritative_two_pass
-        && embedded_audio_final_supplement_is_brief_bounded_revision(&current_key, &candidate_key)
-    {
-        return Some(candidate.to_string());
-    }
-    let current_key_chars = current_key.chars().count();
-    if candidate_key.starts_with(&current_key) {
-        if embedded_audio_partial_preview_repeats_recent_short_tail(
-            &current_key,
-            &candidate_key,
-            current_key_chars,
-        ) {
-            return None;
-        }
-        return stitch_embedded_audio_partial_preview(current, candidate, current_key_chars);
-    }
-    if current_key.starts_with(&candidate_key) {
-        return None;
-    }
-    let shared_prefix =
-        embedded_audio_partial_preview_common_prefix_chars(&current_key, &candidate_key);
-    let bounded_long_revision = current_key_chars > SHORT_PREFIX_REPAIR_MAX_CURRENT_CHARS
-        && embedded_audio_final_supplement_has_bounded_long_rewrite_alignment(
-            &current_key,
-            &candidate_key,
-            shared_prefix,
-            AUTHORITATIVE_LONG_REVISION_MIN_SHARED_PREFIX_CHARS,
-            AUTHORITATIVE_LONG_REVISION_MAX_LENGTH_DELTA_CHARS,
-            AUTHORITATIVE_LONG_REVISION_MAX_EDIT_CHARS,
-        );
-    if candidate_key_chars
-        < current_key_chars.saturating_add(SHORT_PREFIX_REPAIR_MIN_EXTENSION_CHARS)
-        && !bounded_long_revision
-    {
-        return None;
-    }
-    if current_key_chars > SHORT_PREFIX_REPAIR_MAX_CURRENT_CHARS {
-        let stable_long_prefix = shared_prefix >= LONG_PREFIX_REPAIR_MIN_SHARED_PREFIX_CHARS
-            && candidate_key_chars
-                >= current_key_chars.saturating_add(LONG_PREFIX_REPAIR_MIN_EXTENSION_CHARS);
-        let bounded_prefix_insertion =
-            embedded_audio_final_supplement_has_bounded_prefix_insertion_alignment(
-                &current_key,
-                &candidate_key,
-                shared_prefix,
-                LONG_SHIFTED_REPAIR_MIN_TOTAL_GROWTH_CHARS,
-            );
-        let bounded_early_rewrite =
-            embedded_audio_final_supplement_has_bounded_early_rewrite_alignment(
-                &current_key,
-                &candidate_key,
-                shared_prefix,
-                AUTHORITATIVE_EARLY_REWRITE_MIN_SHARED_PREFIX_CHARS,
-                AUTHORITATIVE_EARLY_REWRITE_MIN_EXTENSION_CHARS,
-                AUTHORITATIVE_EARLY_REWRITE_MAX_EDIT_CHARS,
-            );
-        let authoritative_midstream_rewrite = shared_prefix
-            >= AUTHORITATIVE_REWRITE_MIN_SHARED_PREFIX_CHARS
-            && candidate_key_chars
-                >= current_key_chars.saturating_add(AUTHORITATIVE_REWRITE_MIN_EXTENSION_CHARS);
-        if bounded_early_rewrite {
-            log::info!(
-                "[coord] accepted bounded authoritative early preview rewrite current_chars={} candidate_chars={} shared_prefix_chars={}",
-                current_key_chars,
-                candidate_key_chars,
-                shared_prefix
-            );
-            return Some(candidate.to_string());
-        }
-        if bounded_long_revision {
-            log::info!(
-                "[coord] accepted bounded authoritative long preview revision current_chars={} candidate_chars={} shared_prefix_chars={}",
-                current_key_chars,
-                candidate_key_chars,
-                shared_prefix
-            );
-            return Some(candidate.to_string());
-        }
-        return (stable_long_prefix || bounded_prefix_insertion || authoritative_midstream_rewrite)
-            .then(|| candidate.to_string());
-    }
-    if current_key_chars <= 4 || shared_prefix >= SHORT_PREFIX_REPAIR_MIN_SHARED_PREFIX_CHARS {
-        return Some(candidate.to_string());
-    }
-    if current_key_chars.saturating_sub(shared_prefix) > SHORT_PREFIX_REPAIR_MAX_REWRITE_CHARS {
-        return None;
-    }
-    Some(candidate.to_string())
-}
-
-fn embedded_audio_final_supplement_adds_decorative_progress(
-    current: &str,
-    candidate: &str,
-) -> bool {
-    candidate
-        .strip_prefix(current)
-        .filter(|suffix| !suffix.is_empty())
-        .is_some_and(|suffix| {
-            suffix
-                .chars()
-                .all(is_embedded_audio_partial_preview_decorative)
-        })
-}
-
-// Final-session two-pass corrections can replace a short early branch without
-// adding characters. Both ends must still agree before the visible preview is
-// allowed to change, so unrelated short phrases cannot overwrite it.
-fn embedded_audio_final_supplement_is_brief_bounded_revision(
-    current_key: &str,
-    candidate_key: &str,
-) -> bool {
-    const MIN_CHARS: usize = 5;
-    const MAX_CHARS: usize = 12;
-    const MAX_LENGTH_DELTA_CHARS: usize = 2;
-    const MIN_SHARED_PREFIX_CHARS: usize = 2;
-    const MIN_SHARED_SUFFIX_CHARS: usize = 2;
-
-    let current_chars = current_key.chars().count();
-    let candidate_chars = candidate_key.chars().count();
-    current_chars >= MIN_CHARS
-        && candidate_chars >= MIN_CHARS
-        && current_chars <= MAX_CHARS
-        && candidate_chars <= MAX_CHARS
-        && current_chars.abs_diff(candidate_chars) <= MAX_LENGTH_DELTA_CHARS
-        && embedded_audio_partial_preview_common_prefix_chars(current_key, candidate_key)
-            >= MIN_SHARED_PREFIX_CHARS
-        && embedded_audio_partial_preview_common_suffix_chars(current_key, candidate_key)
-            >= MIN_SHARED_SUFFIX_CHARS
-}
-
-fn embedded_audio_final_supplement_has_bounded_prefix_insertion_alignment(
-    current_key: &str,
-    candidate_key: &str,
-    shared_prefix_chars: usize,
-    min_total_growth_chars: usize,
-) -> bool {
-    const MIN_SHARED_PREFIX_CHARS: usize = 2;
-    const MAX_INSERTED_PREFIX_CHARS: usize = 2;
-
-    if shared_prefix_chars < MIN_SHARED_PREFIX_CHARS {
-        return false;
-    }
-
-    let current: Vec<char> = current_key.chars().collect();
-    let candidate: Vec<char> = candidate_key.chars().collect();
-    if candidate.len() < current.len().saturating_add(min_total_growth_chars) {
-        return false;
-    }
-
-    let mut current_index = shared_prefix_chars;
-    let mut candidate_index = shared_prefix_chars;
-    let mut inserted_chars = 0usize;
-    while current_index < current.len() && candidate_index < candidate.len() {
-        if current[current_index] == candidate[candidate_index] {
-            current_index += 1;
-            candidate_index += 1;
-        } else if inserted_chars < MAX_INSERTED_PREFIX_CHARS {
-            inserted_chars += 1;
-            candidate_index += 1;
-        } else {
-            return false;
-        }
-    }
-
-    current_index == current.len() && inserted_chars > 0
-}
-
-fn embedded_audio_final_supplement_has_bounded_early_rewrite_alignment(
-    current_key: &str,
-    candidate_key: &str,
-    shared_prefix_chars: usize,
-    min_shared_prefix_chars: usize,
-    min_extension_chars: usize,
-    max_edit_chars: usize,
-) -> bool {
-    if shared_prefix_chars < min_shared_prefix_chars {
-        return false;
-    }
-
-    let current: Vec<char> = current_key.chars().collect();
-    let candidate: Vec<char> = candidate_key.chars().collect();
-    if candidate.len() < current.len().saturating_add(min_extension_chars) {
-        return false;
-    }
-
-    let min_prefix_len = current.len().saturating_sub(max_edit_chars);
-    let max_prefix_len = current
-        .len()
-        .saturating_add(max_edit_chars)
-        .min(candidate.len());
-    (min_prefix_len..=max_prefix_len).any(|candidate_prefix_len| {
-        embedded_audio_partial_preview_edit_distance_at_most(
-            &current,
-            &candidate[..candidate_prefix_len],
-            max_edit_chars,
-        )
-    })
-}
-
-fn embedded_audio_final_supplement_has_bounded_long_rewrite_alignment(
-    current_key: &str,
-    candidate_key: &str,
-    shared_prefix_chars: usize,
-    min_shared_prefix_chars: usize,
-    max_length_delta_chars: usize,
-    max_edit_chars: usize,
-) -> bool {
-    if shared_prefix_chars < min_shared_prefix_chars {
-        return false;
-    }
-
-    let current: Vec<char> = current_key.chars().collect();
-    let candidate: Vec<char> = candidate_key.chars().collect();
-    current.len().abs_diff(candidate.len()) <= max_length_delta_chars
-        && embedded_audio_partial_preview_edit_distance_at_most(
-            &current,
-            &candidate,
-            max_edit_chars,
-        )
-}
-
-fn embedded_audio_partial_preview_edit_distance_at_most(
-    left: &[char],
-    right: &[char],
-    max_distance: usize,
-) -> bool {
-    if left.len().abs_diff(right.len()) > max_distance {
-        return false;
-    }
-
-    let mut previous: Vec<usize> = (0..=right.len()).collect();
-    for (left_index, left_char) in left.iter().enumerate() {
-        let mut current = Vec::with_capacity(right.len() + 1);
-        current.push(left_index + 1);
-        for (right_index, right_char) in right.iter().enumerate() {
-            let replace_cost = previous[right_index] + usize::from(left_char != right_char);
-            let insert_cost = current[right_index] + 1;
-            let delete_cost = previous[right_index + 1] + 1;
-            current.push(replace_cost.min(insert_cost).min(delete_cost));
-        }
-        if current.iter().copied().min().unwrap_or_default() > max_distance {
-            return false;
-        }
-        previous = current;
-    }
-
-    previous[right.len()] <= max_distance
-}
-
-fn embedded_audio_partial_preview_common_prefix_chars(left: &str, right: &str) -> usize {
-    left.chars()
-        .zip(right.chars())
-        .take_while(|(left, right)| left == right)
-        .count()
-}
-
-fn embedded_audio_partial_preview_common_suffix_chars(left: &str, right: &str) -> usize {
-    left.chars()
-        .rev()
-        .zip(right.chars().rev())
-        .take_while(|(left, right)| left == right)
-        .count()
-}
 
 fn embedded_audio_partial_preview_stability_key(text: &str) -> String {
     let mut key = String::new();
@@ -1416,82 +1024,6 @@ fn filter_dictation_visual_preview_text(
     }
 }
 
-fn embedded_audio_partial_preview_repeats_recent_short_tail(
-    current_key: &str,
-    candidate_key: &str,
-    current_key_chars: usize,
-) -> bool {
-    const MIN_CURRENT_CHARS: usize = 6;
-    const MIN_SUFFIX_CHARS: usize = 2;
-    const MAX_SUFFIX_CHARS: usize = 6;
-
-    if current_key_chars < MIN_CURRENT_CHARS {
-        return false;
-    }
-
-    let suffix_key: String = candidate_key.chars().skip(current_key_chars).collect();
-    let suffix_chars = suffix_key.chars().count();
-    if !(MIN_SUFFIX_CHARS..=MAX_SUFFIX_CHARS).contains(&suffix_chars) {
-        return false;
-    }
-    if !suffix_key
-        .chars()
-        .all(is_embedded_audio_partial_preview_cjk)
-    {
-        return false;
-    }
-
-    current_key.ends_with(&suffix_key)
-}
-
-fn is_embedded_audio_partial_preview_cjk(ch: char) -> bool {
-    matches!(
-        ch as u32,
-        0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
-    )
-}
-
-fn stitch_embedded_audio_partial_preview(
-    current: &str,
-    candidate: &str,
-    current_key_chars: usize,
-) -> Option<String> {
-    let suffix_start = byte_index_after_stability_chars(candidate, current_key_chars);
-    let mut suffix = &candidate[suffix_start..];
-    if suffix.is_empty() {
-        return None;
-    }
-    if current
-        .chars()
-        .last()
-        .is_some_and(is_embedded_audio_partial_preview_decorative)
-    {
-        suffix = suffix.trim_start_matches(is_embedded_audio_partial_preview_decorative);
-    }
-    if suffix.is_empty() {
-        return None;
-    }
-    let mut stitched = current.to_string();
-    stitched.push_str(suffix);
-    Some(stitched)
-}
-
-fn byte_index_after_stability_chars(text: &str, count: usize) -> usize {
-    if count == 0 {
-        return 0;
-    }
-    let mut seen = 0usize;
-    for (idx, ch) in text.char_indices() {
-        if is_embedded_audio_partial_preview_decorative(ch) {
-            continue;
-        }
-        seen = seen.saturating_add(1);
-        if seen == count {
-            return idx + ch.len_utf8();
-        }
-    }
-    text.len()
-}
 
 fn emit_embedded_audio_partial_preview_if_active(
     inner: &Arc<Inner>,

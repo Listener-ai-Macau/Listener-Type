@@ -20,19 +20,17 @@ use super::{
     install_embedded_ble_listener_cancel, mark_automatic_wake_stop_requested,
     mark_embedded_ble_listener_ready, normalize_embedded_pcm_for_asr,
     normalize_embedded_streaming_pcm_for_asr, polish_prefetch_adoptable,
-    preserve_recording_transcript, provider_preview_change, publish_embedded_ble_asr_final,
+    preserve_recording_transcript, publish_embedded_ble_asr_final,
     record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
     remove_standalone_dictation_fillers, request_embedded_audio_stop_feedback,
     request_embedded_ble_recording_stop_from_host, should_restore_clipboard_after_dictation,
-    should_send_post_dictation_key, stabilize_embedded_audio_final_supplemental_preview,
-    stabilize_embedded_audio_partial_preview, store_embedded_audio_stats,
-    streaming_insert_eligible, update_embedded_audio_partial_preview, wayland_done_message,
-    EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand, EmbeddedStreamingAgcState,
-    EmbeddedStreamingDictation, DEVICE_AI_PROCESSING_MAX_VISIBLE_MS,
-    DEVICE_AI_PROCESSING_MIN_VISIBLE_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
-    EMBEDDED_AUDIO_HOST_LIMITER_PEAK, EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV,
-    EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS, LOCAL_CONFIRMATION_START_BYTES,
-    LOCAL_CONFIRMATION_START_MS,
+    should_send_post_dictation_key, store_embedded_audio_stats, streaming_insert_eligible,
+    update_embedded_audio_partial_preview, wayland_done_message, EmbeddedAudioDictationSession,
+    EmbeddedBleSessionActorCommand, EmbeddedStreamingAgcState, EmbeddedStreamingDictation,
+    DEVICE_AI_PROCESSING_MAX_VISIBLE_MS, DEVICE_AI_PROCESSING_MIN_VISIBLE_MS,
+    EMBEDDED_AUDIO_FEED_CHUNK_BYTES, EMBEDDED_AUDIO_HOST_LIMITER_PEAK,
+    EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV, EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS,
+    LOCAL_CONFIRMATION_START_BYTES, LOCAL_CONFIRMATION_START_MS,
 };
 use crate::coordinator::Coordinator;
 use crate::coordinator::{PolishPrefetch, PolishPrefetchBuf};
@@ -194,26 +192,7 @@ impl crate::recorder::AudioConsumer for CapturingConsumer {
 }
 
 #[test]
-fn embedded_audio_partial_preview_ignores_punctuation_only_revision() {
-    assert_eq!(
-        stabilize_embedded_audio_partial_preview(
-            Some("这个预览波动太大了。然后呢？对于用户"),
-            "这个预览波动太大了，然后呢？对于用户"
-        ),
-        None
-    );
-}
-
-#[test]
-fn provider_preview_change_keeps_authoritative_early_rewrite_visible() {
-    assert_eq!(
-        provider_preview_change(Some("明天下午4点"), "明天下午4:15提醒我"),
-        Some("明天下午4:15提醒我".to_string())
-    );
-    assert_eq!(
-        provider_preview_change(Some("明天下午4:15提醒我"), "明天下午4:15提醒我"),
-        None
-    );
+fn standalone_fillers_are_removed_without_damaging_real_words() {
     assert_eq!(
         remove_standalone_dictation_fillers("嗯，呃，今天自动唤醒测试正常。"),
         "今天自动唤醒测试正常。"
@@ -336,18 +315,6 @@ fn remove_standalone_dictation_fillers_also_strips_inlined_chinese_fillers() {
 }
 
 #[test]
-fn embedded_audio_partial_preview_extends_without_rewriting_visible_prefix() {
-    assert_eq!(
-        stabilize_embedded_audio_partial_preview(
-            Some("这个预览波动太大了。然后呢？对于用户"),
-            "这个预览波动太大了，然后呢？对于用户的观感"
-        )
-        .as_deref(),
-        Some("这个预览波动太大了。然后呢？对于用户的观感")
-    );
-}
-
-#[test]
 fn dictation_asr_quality_warning_marks_non_core_engines() {
     assert_eq!(dictation_asr_engine_backend_id("volcengine"), "volcengine");
     assert!(dictation_asr_uses_core_accurate_engine("volcengine"));
@@ -361,148 +328,6 @@ fn dictation_asr_quality_warning_marks_non_core_engines() {
     assert_eq!(
         dictation_asr_quality_warning("whisper").as_deref(),
         Some("当前识别引擎为Whisper-compatible (whisper)，不是核心 Volcengine 准确引擎，识别可能不准。")
-    );
-}
-
-#[test]
-fn embedded_audio_final_supplement_seeds_short_prefix_extends_or_repairs() {
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(None, "帮"),
-        None
-    );
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(None, "帮我"),
-        Some("帮我".to_string())
-    );
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(None, "帮我录音"),
-        Some("帮我录音".to_string())
-    );
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(Some("帮我录音"), "帮我录音。"),
-        Some("帮我录音。".to_string())
-    );
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(Some("帮我录音"), "帮我录音。怎么"),
-        Some("帮我录音。怎么".to_string())
-    );
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(
-            Some("帮我录音。怎么"),
-            "帮我录音，怎么"
-        ),
-        None
-    );
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(
-            Some("帮我录音，怎么退"),
-            "帮我录音，怎么"
-        ),
-        None
-    );
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(
-            Some("帮我录音，怎么退"),
-            "帮我落音，怎么退"
-        ),
-        None
-    );
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(
-            Some("主要是这个露"),
-            "主要是这个录音的指标你需要固化"
-        ),
-        Some("主要是这个录音的指标你需要固化".to_string())
-    );
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(
-            Some("这个浏览被截断"),
-            "这个预览被截断了，需要更准确"
-        ),
-        Some("这个预览被截断了，需要更准确".to_string())
-    );
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(Some("灵敏"), "预览灵敏稳定才算通过"),
-        Some("预览灵敏稳定才算通过".to_string())
-    );
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(
-            Some("然后你看那个浏览器头好像还是有点奇怪"),
-            "然后你看那个浏览系统好像还是有点奇怪"
-        ),
-        None
-    );
-}
-
-#[test]
-fn embedded_audio_final_supplement_repairs_observed_early_cjk_rewrite_without_unrelated_takeover() {
-    let current = "请把3下午2点客户沟通安排近日历资料你先";
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(
-            Some(current),
-            "请把周三下午2点的客户沟通安排进日历资料你先发给陈林确认"
-        ),
-        Some("请把周三下午2点的客户沟通安排进日历资料你先发给陈林确认".to_string())
-    );
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(
-            Some(current),
-            "请把明天的采购清单交给财务，然后准备下周发布会材料"
-        ),
-        None
-    );
-}
-
-#[test]
-fn embedded_audio_final_supplement_repairs_observed_long_same_length_tail_revision() {
-    let current = "晚上回家以后提醒我把洗好的衣服晾起来。再给家里打个电话，问问周日午饭怎么安排，最后别忘了把门禁卡。傍徨外道口袋里";
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(
-            Some(current),
-            "晚上回家以后提醒我把洗好的衣服晾起来。再给家里打个电话，问问周日午饭怎么安排，最后别忘了把门禁卡。放回外套口袋里。"
-        ),
-        Some("晚上回家以后提醒我把洗好的衣服晾起来。再给家里打个电话，问问周日午饭怎么安排，最后别忘了把门禁卡。放回外套口袋里。".to_string())
-    );
-    assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(
-            Some(current),
-            "晚上回家以后提醒我把洗好的衣服晾起来。再给家里打个电话，问问周日午饭怎么安排，最后请把文件寄到另一个地址。"
-        ),
-        None
-    );
-}
-
-#[test]
-fn embedded_audio_partial_preview_does_not_shrink_visible_text() {
-    assert_eq!(
-        stabilize_embedded_audio_partial_preview(
-            Some("这个预览波动太大了。然后呢？对于用户的观感"),
-            "这个预览波动太大了。然后呢？对于用户"
-        ),
-        None
-    );
-}
-
-#[test]
-fn embedded_audio_partial_preview_ignores_repeated_short_tail_extension() {
-    assert_eq!(
-        stabilize_embedded_audio_partial_preview(
-            Some("帮我录音，怎么退"),
-            "帮我录音，怎么退？怎么退"
-        ),
-        None
-    );
-}
-
-#[test]
-fn embedded_audio_partial_preview_keeps_new_short_continuation() {
-    assert_eq!(
-        stabilize_embedded_audio_partial_preview(
-            Some("帮我录音，怎么退"),
-            "帮我录音，怎么退？现在"
-        )
-        .as_deref(),
-        Some("帮我录音，怎么退？现在")
     );
 }
 
@@ -4221,6 +4046,23 @@ fn target_speaker_endpoint_has_one_identity_scoped_stop_commit() {
     assert!(physical_stop < failed_stop_reopen);
     assert!(!include_str!("hotkey_device_runtime.rs").contains("send_recording_control_stop"));
     assert!(!include_str!("dictation_embedded_stream.rs").contains("send_recording_control_stop"));
+}
+
+#[test]
+fn target_speaker_endpoint_preview_has_one_session_scoped_reducer() {
+    let coordinator = include_str!("../coordinator.rs");
+    let preview = include_str!("dictation_preview.rs");
+    let kernel = include_str!("../speech_decision_kernel.rs");
+
+    assert!(coordinator.contains("embedded_audio_preview:"));
+    assert!(!coordinator.contains("embedded_audio_partial_preview: Mutex"));
+    assert!(!coordinator.contains("embedded_audio_visual_preview: Mutex"));
+    assert!(kernel.contains("struct RecordingPreviewController"));
+    assert_eq!(preview.matches(".observe_authoritative(").count(), 1);
+    assert_eq!(preview.matches(".observe_provisional(").count(), 1);
+    assert!(!preview.contains("fn provider_preview_change("));
+    assert!(!preview.contains("fn stabilize_embedded_audio_partial_preview("));
+    assert!(!preview.contains("fn stabilize_embedded_audio_final_supplemental_preview("));
 }
 
 #[test]

@@ -304,6 +304,24 @@ owner session 身份。停止 handler 只负责按相同 session ID 幂等提交
 6. 生产路径不提供 lifecycle `reset()`，只能用带身份的 close 留下 stale callback
    tombstone。
 
+### 预览单一 reducer（2026-09-05）
+
+旧实现把 authoritative partial 与 capsule-only provisional text 放在两个独立 Mutex，
+普通 partial 和 final supplement 又各自复制了一套“锁定、改写、发布”流程。actor
+dispatch 只负责串行记录事件，并不验证 session identity，因此旧 provider callback
+可以先改写共享槽，再由前台状态机拒绝显示；下一会话仍可能读到这次越权写入。
+
+当前只保留一个 session-scoped `RecordingPreviewController`：
+
+- provider partial、two-pass supplement 和 provisional diarization tail 都必须向同一
+  reducer 提交带 coordinator session ID 的 evidence；
+- authoritative 与 visible 仍是不同语义，但在同一把锁中原子变化，provisional
+  text 永远不能进入 endpoint、恢复或最终插入；
+- provisional 已显示、随后 authoritative 得到相同文字时只升级权威，不重复发布；
+- final supplement 可以收回未确认 provisional tail；旧 session callback 不能改写
+  新 session；
+- 已删除不在生产路径中的旧 preview stabilization/stitching 算法和对应“自证测试”。
+
 ### 最终文本只有一个原子仲裁器（2026-09-04，session 2744）
 
 现场中文干扰会话 `a86a4b77-c764-404e-8121-6a7f6ba6091e` 中，Provider 已经把

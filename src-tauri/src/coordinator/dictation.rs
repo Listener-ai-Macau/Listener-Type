@@ -1075,15 +1075,16 @@ async fn open_volcengine_asr(
 include!("dictation_device_ai.rs");
 
 pub(super) fn current_embedded_audio_partial_preview(inner: &Arc<Inner>) -> Option<String> {
-    inner.embedded_audio_partial_preview.lock().clone()
+    let session_id = inner.state.lock().session_id;
+    inner
+        .embedded_audio_preview
+        .lock()
+        .authoritative(session_id)
 }
 
 fn current_embedded_audio_visual_preview(inner: &Arc<Inner>) -> Option<String> {
-    inner
-        .embedded_audio_visual_preview
-        .lock()
-        .clone()
-        .or_else(|| current_embedded_audio_partial_preview(inner))
+    let session_id = inner.state.lock().session_id;
+    inner.embedded_audio_preview.lock().visible(session_id)
 }
 
 include!("dictation_preview.rs");
@@ -1280,7 +1281,7 @@ async fn begin_embedded_audio_dictation_session(
 ) -> Result<EmbeddedAudioDictationSession, String> {
     let current_session_id = begin_embedded_audio_dictation_session_id(inner)?;
     clear_embedded_audio_stats(inner);
-    clear_embedded_audio_partial_preview(inner);
+    begin_embedded_audio_preview_session(inner, current_session_id);
     // Host-start paths (terminal_wake_body_continuation, KEY start) arm the
     // automatic wake guard before BLE PCM attaches so empty-body abandon stays
     // at 3.0s. Unconditionally clearing here dropped that latch and made
@@ -2679,7 +2680,7 @@ async fn finish_end_session_after_stop_transition(
             );
             let _ = publish_embedded_ble_wake_only_expired(inner, current_session_id);
             clear_automatic_wake_text_guard(inner);
-            clear_embedded_audio_partial_preview(inner);
+            clear_embedded_audio_preview_session(inner, current_session_id);
             clear_embedded_audio_stats(inner);
             restore_prepared_windows_ime_session(inner, current_session_id);
             return Ok(());

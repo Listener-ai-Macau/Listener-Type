@@ -226,10 +226,19 @@ fn clear_embedded_audio_stats(inner: &Arc<Inner>) {
     *inner.embedded_audio_stats.lock() = None;
 }
 
-fn clear_embedded_audio_partial_preview(inner: &Arc<Inner>) {
-    *inner.embedded_audio_partial_preview.lock() = None;
-    *inner.embedded_audio_visual_preview.lock() = None;
+fn begin_embedded_audio_preview_session(inner: &Arc<Inner>, session_id: SessionId) {
+    inner.embedded_audio_preview.lock().begin_session(session_id);
     *inner.embedded_audio_last_capsule_level.lock() = 0.0;
+}
+
+fn clear_embedded_audio_preview_session(inner: &Arc<Inner>, session_id: SessionId) {
+    if inner
+        .embedded_audio_preview
+        .lock()
+        .clear_session(session_id)
+    {
+        *inner.embedded_audio_last_capsule_level.lock() = 0.0;
+    }
 }
 
 fn current_embedded_audio_capsule_level(inner: &Arc<Inner>) -> f32 {

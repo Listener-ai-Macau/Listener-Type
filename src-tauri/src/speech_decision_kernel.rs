@@ -469,6 +469,132 @@ pub(crate) struct OwnerEndpointController {
     owner_analysis_deadline: Option<Instant>,
 }
 
+/// Session-scoped preview reducer.
+///
+/// Provider partials, two-pass supplements and provisional diarization text
+/// arrive on independent callbacks. They must never own independent preview
+/// slots: a late callback from session N could otherwise overwrite session
+/// N+1, while an authoritative value equal to the previous ledger could
+/// re-emit text already shown by the provisional path. This controller makes
+/// identity admission and the visible/authoritative relationship atomic.
+#[derive(Debug, Default)]
+pub(crate) struct RecordingPreviewController {
+    session_id: Option<SessionId>,
+    authoritative: Option<String>,
+    visible: Option<String>,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct RecordingPreviewReduction {
+    pub(crate) authoritative_changed: bool,
+    pub(crate) visible_update: Option<String>,
+}
+
+impl RecordingPreviewController {
+    pub(crate) fn begin_session(&mut self, session_id: SessionId) {
+        if self.session_id == Some(session_id) {
+            return;
+        }
+        self.session_id = Some(session_id);
+        self.authoritative = None;
+        self.visible = None;
+    }
+
+    pub(crate) fn clear_session(&mut self, session_id: SessionId) -> bool {
+        if self.session_id != Some(session_id) {
+            return false;
+        }
+        self.session_id = None;
+        self.authoritative = None;
+        self.visible = None;
+        true
+    }
+
+    pub(crate) fn authoritative(&self, session_id: SessionId) -> Option<String> {
+        (self.session_id == Some(session_id))
+            .then(|| self.authoritative.clone())
+            .flatten()
+    }
+
+    pub(crate) fn visible(&self, session_id: SessionId) -> Option<String> {
+        (self.session_id == Some(session_id))
+            .then(|| self.visible.clone().or_else(|| self.authoritative.clone()))
+            .flatten()
+    }
+
+    pub(crate) fn observe_authoritative(
+        &mut self,
+        session_id: SessionId,
+        candidate: &str,
+        settle_visible: bool,
+    ) -> RecordingPreviewReduction {
+        if !self.admit(session_id) {
+            return RecordingPreviewReduction::default();
+        }
+        let candidate = candidate.trim();
+        if candidate.is_empty() {
+            return RecordingPreviewReduction::default();
+        }
+
+        let authoritative_changed = self.authoritative.as_deref() != Some(candidate);
+        if authoritative_changed {
+            self.authoritative = Some(candidate.to_string());
+        }
+
+        let visible_changed = self.visible.as_deref() != Some(candidate);
+        let visible_update = if visible_changed && (authoritative_changed || settle_visible) {
+            let candidate = candidate.to_string();
+            self.visible = Some(candidate.clone());
+            Some(candidate)
+        } else {
+            None
+        };
+
+        RecordingPreviewReduction {
+            authoritative_changed,
+            visible_update,
+        }
+    }
+
+    pub(crate) fn observe_provisional(
+        &mut self,
+        session_id: SessionId,
+        candidate: &str,
+    ) -> Option<String> {
+        if !self.admit(session_id) {
+            return None;
+        }
+        let candidate = candidate.trim();
+        if candidate.is_empty() || self.visible.as_deref() == Some(candidate) {
+            return None;
+        }
+        if self
+            .authoritative
+            .as_deref()
+            .is_some_and(|current| spoken_preview_len(candidate) < spoken_preview_len(current))
+        {
+            return None;
+        }
+        let candidate = candidate.to_string();
+        self.visible = Some(candidate.clone());
+        Some(candidate)
+    }
+
+    fn admit(&mut self, session_id: SessionId) -> bool {
+        match self.session_id {
+            Some(current) => current == session_id,
+            None => {
+                self.begin_session(session_id);
+                true
+            }
+        }
+    }
+}
+
+fn spoken_preview_len(text: &str) -> usize {
+    text.chars().filter(|ch| ch.is_alphanumeric()).count()
+}
+
 /// Product-level recording lifecycle.  Evidence producers (firmware VAD,
 /// wake KWS/voiceprint, provider diarization and the endpoint clock) may run
 /// concurrently, but they are not allowed to create their own lifecycle.
@@ -1061,6 +1187,65 @@ pub(crate) const fn live_owner_near_wake_can_attempt(evidence: LiveOwnerNearWake
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn target_speaker_endpoint_preview_reducer_rejects_stale_sessions_and_cross_source_duplicates()
+    {
+        let first = uuid::Uuid::new_v4();
+        let second = uuid::Uuid::new_v4();
+        let mut preview = RecordingPreviewController::default();
+        preview.begin_session(first);
+
+        assert_eq!(
+            preview.observe_provisional(first, "主人正文"),
+            Some("主人正文".to_string())
+        );
+        let authoritative = preview.observe_authoritative(first, "主人正文", false);
+        assert!(authoritative.authoritative_changed);
+        assert_eq!(authoritative.visible_update, None);
+
+        preview.begin_session(second);
+        assert_eq!(
+            preview.observe_authoritative(first, "旧会话文字", true),
+            RecordingPreviewReduction::default()
+        );
+        assert_eq!(preview.authoritative(second), None);
+        assert_eq!(preview.visible(second), None);
+    }
+
+    #[test]
+    fn target_speaker_endpoint_preview_reducer_final_supplement_settles_provisional_tail() {
+        let session_id = uuid::Uuid::new_v4();
+        let mut preview = RecordingPreviewController::default();
+        preview.begin_session(session_id);
+
+        let initial = preview.observe_authoritative(session_id, "主人第一句", false);
+        assert_eq!(initial.visible_update.as_deref(), Some("主人第一句"));
+        assert_eq!(
+            preview.observe_provisional(session_id, "主人第一句旁人尾巴"),
+            Some("主人第一句旁人尾巴".to_string())
+        );
+
+        let settled = preview.observe_authoritative(session_id, "主人第一句", true);
+        assert!(!settled.authoritative_changed);
+        assert_eq!(settled.visible_update.as_deref(), Some("主人第一句"));
+        assert_eq!(
+            preview.authoritative(session_id).as_deref(),
+            Some("主人第一句")
+        );
+        assert_eq!(preview.visible(session_id).as_deref(), Some("主人第一句"));
+    }
+
+    #[test]
+    fn target_speaker_endpoint_preview_reducer_never_shrinks_to_shorter_provisional_text() {
+        let session_id = uuid::Uuid::new_v4();
+        let mut preview = RecordingPreviewController::default();
+        preview.begin_session(session_id);
+        preview.observe_authoritative(session_id, "主人完整正文", false);
+
+        assert_eq!(preview.observe_provisional(session_id, "主人"), None);
+        assert_eq!(preview.visible(session_id).as_deref(), Some("主人完整正文"));
+    }
 
     #[test]
     fn target_speaker_endpoint_recording_lifecycle_serializes_candidate_owner_stop_and_close() {

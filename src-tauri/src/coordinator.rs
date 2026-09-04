@@ -307,14 +307,10 @@ struct Inner {
     /// 当前嵌入式 BLE 音频会话的 ASR 最终文本，用于 headless A2 验收。
     embedded_audio_final_result:
         Mutex<Option<crate::embedded_audio::EmbeddedAudioTranscriptResult>>,
-    /// 嵌入式 BLE 流式 ASR 的最近一次 partial preview。只用于胶囊视觉反馈；
-    /// 光标仍只在 final text 完成后写入。
-    embedded_audio_partial_preview: Mutex<Option<String>>,
-    /// Latest capsule-only provisional preview. Unlike
-    /// `embedded_audio_partial_preview`, this may contain a still-unsettled
-    /// diarization tail and must never participate in endpointing, transcript
-    /// recovery, hotword repair, or final insertion.
-    embedded_audio_visual_preview: Mutex<Option<String>>,
+    /// The only preview state for embedded dictation. Authoritative and
+    /// provisional evidence remain distinguishable inside the reducer, but
+    /// callbacks cannot mutate independent ledgers or cross session identity.
+    embedded_audio_preview: Mutex<crate::speech_decision_kernel::RecordingPreviewController>,
     /// Session-scoped activation-prefix and initial-body guard. Manual sessions
     /// never arm this guard.
     embedded_audio_automatic_wake_guard: Mutex<Option<AutomaticWakeGuard>>,
@@ -706,8 +702,7 @@ impl Coordinator {
                     audio_archive_active: AtomicBool::new(false),
                     embedded_audio_stats: Mutex::new(None),
                     embedded_audio_final_result: Mutex::new(None),
-                    embedded_audio_partial_preview: Mutex::new(None),
-                    embedded_audio_visual_preview: Mutex::new(None),
+                    embedded_audio_preview: Mutex::new(Default::default()),
                     embedded_audio_automatic_wake_guard: Mutex::new(None),
                     embedded_audio_provider_progress_guard: Mutex::new(None),
                     embedded_audio_terminal_wake_continuation: Mutex::new(None),
@@ -795,8 +790,7 @@ impl Coordinator {
                 audio_archive_active: AtomicBool::new(false),
                 embedded_audio_stats: Mutex::new(None),
                 embedded_audio_final_result: Mutex::new(None),
-                embedded_audio_partial_preview: Mutex::new(None),
-                embedded_audio_visual_preview: Mutex::new(None),
+                embedded_audio_preview: Mutex::new(Default::default()),
                 embedded_audio_automatic_wake_guard: Mutex::new(None),
                 embedded_audio_provider_progress_guard: Mutex::new(None),
                 embedded_audio_terminal_wake_continuation: Mutex::new(None),

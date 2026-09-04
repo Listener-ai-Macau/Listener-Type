@@ -189,7 +189,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
     };
     clear_embedded_audio_stats(inner);
     clear_embedded_audio_final_result(inner);
-    clear_embedded_audio_partial_preview(inner);
+    begin_embedded_audio_preview_session(inner, current_session_id);
     #[cfg(target_os = "windows")]
     {
         let prepared = inner.windows_ime.prepare_session();
