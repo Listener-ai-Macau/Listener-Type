@@ -699,18 +699,11 @@ fn target_speaker_update_from_state(
     }
 }
 
-/// While the newest local sample is still Target, growing owner ASR activity
-/// (Target-filtered / Target-gated provisional preview) may refresh the owner
-/// endpoint clock. Mid-sentence Uncertain/NonTarget dips must NOT refresh from
-/// text growth: other-speaker provisional text used to ride this path during
-/// identity debounce and keep auto-end open while the room spoke (installed
-/// session baeff75a: filtered ~26 chars, optimistic grew to 115, final pasted
-/// the mixed room text).
-///
-/// An Uncertain local window does not refresh the endpoint clock. If the owner
-/// is still speaking, Target-gated preview growth below provides the protected
-/// continuation signal without letting another speaker's weak match hold the
-/// recording open.
+/// Growing owner-safe ASR activity may refresh the owner endpoint clock only
+/// when the shared continuity reducer admits the same revision for preview.
+/// Confirmed Other/sustained owner absence blocks both operations. This keeps
+/// mid-sentence cross-phrase Uncertain windows inside the already-established
+/// owner turn without reviving a turn after the tracker has switched away.
 fn refresh_local_target_from_owner_preview_activity(state: &mut SyncState) -> bool {
     if !state.local_target_confirmed || !local_speaker_allows_owner_endpoint_refresh(state) {
         return false;
@@ -727,30 +720,70 @@ fn refresh_local_target_from_owner_preview_activity(state: &mut SyncState) -> bo
 }
 
 fn refresh_local_target_from_owner_safe_provider_split(state: &mut SyncState) -> bool {
-    // A sequential cloud split is sufficient to recover/display text, but it
-    // is not independent proof that the latest sound still belongs to the
-    // owner. Reuse the strict Target-only refresh gate so an Uncertain room
-    // voice cannot keep auto-end alive through provider preview growth.
+    // Preview and endpointing must use the identical owner-continuity verdict.
+    // A sequential cloud split does not bypass a confirmed Other decision.
     refresh_local_target_from_owner_preview_activity(state)
 }
 
-fn local_speaker_allows_optimistic_preview(state: &SyncState) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LocalOwnerContinuity {
+    /// No local identity tracker is active; provider policy remains authoritative.
+    Untracked,
+    /// The newest local window positively matches the enrolled owner.
+    Confirmed,
+    /// The debounced owner still owns this turn and no sustained owner-absence
+    /// evidence exists, but the newest cross-phrase window is inconclusive.
+    Compatible,
+    /// Current or sustained local evidence identifies a different speaker.
+    Other,
+    /// Tracking is active but the owner has not yet been established.
+    Unknown,
+}
+
+/// One identity verdict shared by preview admission and endpoint refresh.
+///
+/// Session 417 exposed the old split-brain policy: `stable_target + Uncertain`
+/// was allowed onto the visible preview while endpointing called the same frame
+/// Quiet and stopped twelve milliseconds later. A frame cannot be owner-safe
+/// for display yet foreign for capture lifetime. Keep the retained-turn
+/// decision here; explicit NonTarget/sustained owner absence still wins.
+fn local_owner_continuity(state: &SyncState) -> LocalOwnerContinuity {
     if !state.local_speaker_tracking_enabled {
-        return true;
+        return LocalOwnerContinuity::Untracked;
     }
-    if !state.local_speaker_stable_target {
-        return false;
+    if state.local_owner_absence_run_confirmed
+        || state.local_sustained_non_target_speech_end_ms.is_some()
+        || matches!(
+            state.local_speaker_classification.as_ref(),
+            Some(crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. })
+        )
+    {
+        return LocalOwnerContinuity::Other;
     }
-    // `stable_target` is the debounced identity decision. A single enrolled
-    // voiceprint window often falls from Target to Uncertain as the user moves
-    // from the short wake phrase into natural speech; requiring every window to
-    // remain Target hid valid provider text for the rest of that utterance.
-    // Keep explicit NonTarget fail-closed, but let Uncertain render while the
-    // debounced identity is still the owner. Endpoint refresh remains stricter
-    // below, so an uncertain preview cannot keep a room-speech session alive.
-    !matches!(
-        state.local_speaker_classification.as_ref(),
-        Some(crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. })
+    if !state.local_speaker_stable_target
+        || !state.local_wake_owner_verified
+        || !state.local_target_confirmed
+    {
+        return LocalOwnerContinuity::Unknown;
+    }
+    match state.local_speaker_classification.as_ref() {
+        Some(crate::speaker_verification::SessionSpeakerClassification::Target { .. }) => {
+            LocalOwnerContinuity::Confirmed
+        }
+        Some(crate::speaker_verification::SessionSpeakerClassification::Uncertain { .. })
+        | None => LocalOwnerContinuity::Compatible,
+        Some(crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. }) => {
+            LocalOwnerContinuity::Other
+        }
+    }
+}
+
+fn local_speaker_allows_optimistic_preview(state: &SyncState) -> bool {
+    matches!(
+        local_owner_continuity(state),
+        LocalOwnerContinuity::Untracked
+            | LocalOwnerContinuity::Confirmed
+            | LocalOwnerContinuity::Compatible
     )
 }
 
@@ -791,11 +824,10 @@ fn display_only_provisional_preview_candidate(
 }
 
 fn local_speaker_allows_owner_endpoint_refresh(state: &SyncState) -> bool {
-    state.local_speaker_stable_target
-        && matches!(
-            state.local_speaker_classification.as_ref(),
-            Some(crate::speaker_verification::SessionSpeakerClassification::Target { .. })
-        )
+    matches!(
+        local_owner_continuity(state),
+        LocalOwnerContinuity::Confirmed | LocalOwnerContinuity::Compatible
+    )
 }
 
 /// Session voiceprint negatives are not reliable enough across phrases to
@@ -7436,7 +7468,7 @@ mod tests {
     }
 
     #[test]
-    fn uncertain_while_stable_owner_does_not_refresh_endpoint_clock() {
+    fn target_speaker_endpoint_keeps_established_owner_through_uncertain_cross_phrase_window() {
         let asr = VolcengineStreamingASR::new(
             VolcengineCredentials {
                 app_id: "app".into(),
@@ -7445,7 +7477,7 @@ mod tests {
             },
             Vec::new(),
         );
-        asr.note_local_speaker_tracking_started("开始录音");
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
         asr.note_local_speaker_classification(
             1_800,
             crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.80 },
@@ -7456,15 +7488,20 @@ mod tests {
         );
         let state = asr.state.lock();
         assert!(state.local_speaker_stable_target);
-        // LST-REC-031: Uncertain is not owner evidence and cannot refresh the
-        // endpoint clock. Target-gated preview growth covers a continuing owner.
+        // The sample itself is not activity. A later owner-safe preview
+        // revision uses this retained continuity verdict to advance the clock.
         assert_eq!(state.local_target_speech_end_ms, Some(1_800));
+        assert_eq!(
+            local_owner_continuity(&state),
+            LocalOwnerContinuity::Compatible
+        );
     }
 
     #[test]
     fn owner_preview_growth_refreshes_local_target_while_stable() {
         let mut state = SyncState {
             local_speaker_tracking_enabled: true,
+            local_wake_owner_verified: true,
             local_speaker_stable_target: true,
             local_target_confirmed: true,
             // `local_speaker_allows_optimistic_preview` gates refresh on the
@@ -7489,14 +7526,14 @@ mod tests {
     }
 
     #[test]
-    fn uncertain_sequential_provider_split_cannot_refresh_owner_endpoint() {
-        // Installed session 7942d10e exposed a circular hold: cloud speaker
-        // A/B text was admitted using debounced Uncertain windows, then that
-        // preview refreshed the owner clock as if identity were confirmed.
-        // Text recovery may remain available, but only a current Target sample
-        // can extend the owner endpoint.
+    fn target_speaker_endpoint_and_preview_share_uncertain_owner_continuity() {
+        // Installed session 417 exposed the inverse split: the preview admitted
+        // a debounced Uncertain owner revision but endpointing called it Quiet
+        // and stopped before the provider attributed the same words. Both
+        // consumers now read one continuity verdict.
         let mut state = SyncState {
             local_speaker_tracking_enabled: true,
+            local_wake_owner_verified: true,
             local_speaker_stable_target: true,
             local_target_confirmed: true,
             local_speaker_classification: Some(
@@ -7510,14 +7547,18 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!refresh_local_target_from_owner_safe_provider_split(
+        assert!(local_speaker_allows_optimistic_preview(&state));
+        assert!(refresh_local_target_from_owner_safe_provider_split(
             &mut state
         ));
-        assert_eq!(state.local_target_speech_end_ms, Some(4_922));
+        assert_eq!(state.local_target_speech_end_ms, Some(8_940));
 
-        state.local_speaker_classification =
-            Some(crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.62 });
-        assert!(refresh_local_target_from_owner_safe_provider_split(
+        state.local_audio_duration_ms = Some(9_340);
+        state.local_speaker_classification = Some(
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.10 },
+        );
+        assert!(!local_speaker_allows_optimistic_preview(&state));
+        assert!(!refresh_local_target_from_owner_safe_provider_split(
             &mut state
         ));
         assert_eq!(state.local_target_speech_end_ms, Some(8_940));

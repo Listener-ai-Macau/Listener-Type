@@ -90,7 +90,7 @@ impl EmbeddedStreamingDictation {
         if !inner
             .recording_lifecycle
             .lock()
-            .begin_owner(embedded_session_id, session.session_id)
+            .begin_manual_owner(embedded_session_id, session.session_id)
         {
             return Err(format!(
                 "录音生命周期拒绝主人会话 embedded_session_id={embedded_session_id} coordinator_session_id={}",

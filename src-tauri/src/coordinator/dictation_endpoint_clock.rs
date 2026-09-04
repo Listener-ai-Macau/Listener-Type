@@ -674,6 +674,12 @@ fn start_settled_target_endpoint_watchdog(
                 }
                 let now = Instant::now();
                 let owner_analysis_pending = asr.local_speaker_analysis_pending();
+                if owner_analysis_pending {
+                    let _ = inner
+                        .recording_lifecycle
+                        .lock()
+                        .note_owner_evidence_pending(session_id);
+                }
                 let update = clock.latest_due_update_after_owner_analysis(
                     now,
                     settled_target_wall_clock_timeout_ms(endpoint_timeout_ms),

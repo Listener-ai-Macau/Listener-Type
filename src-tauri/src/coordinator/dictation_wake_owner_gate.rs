@@ -310,11 +310,12 @@ fn maybe_start_terminal_owner_compatible_wake_extraction(
     phrase: &str,
     embedded_session_id: u32,
     verification: &Result<crate::speaker_verification::VerificationResult, String>,
+    interference_owner_rise: bool,
 ) {
     let terminal_owner_compatible = terminal_wake_source_owner_compatible(verification);
     let decision = crate::speech_decision_kernel::decide_wake_recovery(
         crate::speech_decision_kernel::WakeRecoveryEvidence {
-            weak_phrase_hint: false,
+            weak_phrase_hint: interference_owner_rise,
             terminal_owner_compatible,
         },
     );
@@ -323,7 +324,11 @@ fn maybe_start_terminal_owner_compatible_wake_extraction(
             candidate,
             phrase,
             embedded_session_id,
-            "terminal_owner_compatible",
+            if interference_owner_rise {
+                "interference_owner_rise"
+            } else {
+                "terminal_owner_compatible"
+            },
         );
     }
 }

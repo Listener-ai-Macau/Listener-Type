@@ -1313,6 +1313,20 @@ impl EmbeddedStreamingDictation {
             let mut owner_verified_by_extraction = false;
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             if wake_match.is_none() {
+                let source_owner_score = verification
+                    .as_ref()
+                    .map(|result| result.score)
+                    .unwrap_or_default();
+                let (interference_owner_rise, interference_baseline_score, baseline_samples) =
+                    note_hidden_wake_interference_owner_score(source_owner_score, false);
+                log::info!(
+                    "[wake-phrase] interference owner baseline embedded_session_id={} source_owner_score={:.6} baseline_score={:.6} baseline_samples={} separated_verification_requested={}",
+                    embedded_session_id,
+                    source_owner_score,
+                    interference_baseline_score,
+                    baseline_samples,
+                    interference_owner_rise
+                );
                 let source_owner_compatible =
                     terminal_wake_source_owner_compatible(&verification);
                 let extraction_was_prefetched =
@@ -1322,6 +1336,7 @@ impl EmbeddedStreamingDictation {
                     &phrase,
                     embedded_session_id,
                     &verification,
+                    interference_owner_rise,
                 );
                 let lazy_terminal_extraction_started = !extraction_was_prefetched
                     && candidate.target_wake_extraction_task.is_some();
@@ -1605,7 +1620,7 @@ impl EmbeddedStreamingDictation {
         if !inner
             .recording_lifecycle
             .lock()
-            .promote_owner(embedded_session_id, session.session_id)
+            .promote_candidate_to_owner(embedded_session_id, session.session_id)
         {
             return Err(format!(
                 "录音生命周期拒绝物理接管 embedded_session_id={embedded_session_id} coordinator_session_id={}",
@@ -2691,7 +2706,7 @@ impl EmbeddedStreamingDictation {
         if !inner
             .recording_lifecycle
             .lock()
-            .promote_owner(embedded_session_id, session.session_id)
+            .promote_candidate_to_owner(embedded_session_id, session.session_id)
         {
             return Err(format!(
                 "录音生命周期拒绝自动唤醒主人会话 embedded_session_id={embedded_session_id} coordinator_session_id={}",

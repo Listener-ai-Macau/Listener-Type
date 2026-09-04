@@ -2123,6 +2123,20 @@ fn target_speaker_endpoint_does_not_commit_before_current_voiceprint_result() {
 }
 
 #[test]
+fn target_speaker_endpoint_wake_interference_baseline_requests_only_separated_verification() {
+    let mut baseline = super::WakeInterferenceBaseline::default();
+    for score in [0.10, 0.11, 0.18, 0.14] {
+        assert!(!baseline.observe(score, false));
+    }
+    assert!(baseline.observe(0.34, false));
+    // A mixed-path phrase hit already has a lightweight route and neither
+    // trains nor invokes the no-phrase recovery trigger.
+    assert!(!baseline.observe(0.60, true));
+    // A likely-owner outlier is deliberately not learned into room baseline.
+    assert!(baseline.observe(0.33, false));
+}
+
+#[test]
 fn dangling_continuation_gets_bounded_pause_without_slowing_complete_text() {
     assert!(
         super::EMBEDDED_DANGLING_FIRMWARE_KEEPALIVE_INTERVAL_MS
@@ -5544,6 +5558,9 @@ fn final_clipboard_retention_cannot_hold_capsule_completion_for_seconds() {
 fn voice_activation_stop_never_counts_as_user_initiated() {
     assert!(!embedded_audio_stop_is_user_initiated(Some(
         crate::embedded_audio::SessionStopOrigin::VoiceActivation
+    )));
+    assert!(!embedded_audio_stop_is_user_initiated(Some(
+        crate::embedded_audio::SessionStopOrigin::VoiceActivationMaxDuration
     )));
     assert!(embedded_audio_stop_is_user_initiated(Some(
         crate::embedded_audio::SessionStopOrigin::User

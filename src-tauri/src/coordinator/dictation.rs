@@ -1535,7 +1535,13 @@ fn complete_voiceprint_enrollment_candidate(reason: &'static str) {
 fn embedded_audio_stop_is_user_initiated(
     origin: Option<crate::embedded_audio::SessionStopOrigin>,
 ) -> bool {
-    origin != Some(crate::embedded_audio::SessionStopOrigin::VoiceActivation)
+    !matches!(
+        origin,
+        Some(
+            crate::embedded_audio::SessionStopOrigin::VoiceActivation
+                | crate::embedded_audio::SessionStopOrigin::VoiceActivationMaxDuration
+        )
+    )
 }
 
 fn speaker_candidate_may_reach_asr(automatic: bool, verified_match: Option<bool>) -> bool {

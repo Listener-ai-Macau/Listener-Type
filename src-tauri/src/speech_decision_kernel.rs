@@ -281,6 +281,7 @@ enum EndpointPhase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OwnerEndpointState {
     OwnerActive,
+    OwnerEvidencePending,
     QuietPending,
     Stopping,
 }
@@ -317,6 +318,7 @@ pub(crate) enum RecordingLifecycleState {
     Idle,
     WakeCandidate,
     OwnerActive,
+    OwnerEvidencePending,
     QuietPending,
     Stopping,
     Closed,
@@ -360,7 +362,10 @@ impl RecordingLifecycleController {
         }
     }
 
-    pub(crate) fn begin_owner(
+    /// Start a user-initiated recording. A hidden wake candidate must use
+    /// `promote_candidate_to_owner`; keeping the transitions separate makes
+    /// it impossible for evidence producers to bypass the wake reducer.
+    pub(crate) fn begin_manual_owner(
         &mut self,
         embedded_session_id: u32,
         coordinator_session_id: SessionId,
@@ -375,13 +380,6 @@ impl RecordingLifecycleController {
                 self.state = RecordingLifecycleState::OwnerActive;
                 true
             }
-            RecordingLifecycleState::WakeCandidate
-                if self.embedded_session_id == Some(embedded_session_id) =>
-            {
-                self.coordinator_session_id = Some(coordinator_session_id);
-                self.state = RecordingLifecycleState::OwnerActive;
-                true
-            }
             RecordingLifecycleState::OwnerActive
                 if self.coordinator_session_id == Some(coordinator_session_id) =>
             {
@@ -391,12 +389,19 @@ impl RecordingLifecycleController {
         }
     }
 
-    pub(crate) fn promote_owner(
+    pub(crate) fn promote_candidate_to_owner(
         &mut self,
         embedded_session_id: u32,
         coordinator_session_id: SessionId,
     ) -> bool {
-        self.begin_owner(embedded_session_id, coordinator_session_id)
+        if self.state != RecordingLifecycleState::WakeCandidate
+            || self.embedded_session_id != Some(embedded_session_id)
+        {
+            return false;
+        }
+        self.coordinator_session_id = Some(coordinator_session_id);
+        self.state = RecordingLifecycleState::OwnerActive;
+        true
     }
 
     pub(crate) fn note_owner_activity(&mut self, coordinator_session_id: SessionId) -> bool {
@@ -404,8 +409,28 @@ impl RecordingLifecycleController {
             return false;
         }
         match self.state {
-            RecordingLifecycleState::OwnerActive | RecordingLifecycleState::QuietPending => {
+            RecordingLifecycleState::OwnerActive
+            | RecordingLifecycleState::OwnerEvidencePending
+            | RecordingLifecycleState::QuietPending => {
                 self.state = RecordingLifecycleState::OwnerActive;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn note_owner_evidence_pending(
+        &mut self,
+        coordinator_session_id: SessionId,
+    ) -> bool {
+        if self.coordinator_session_id != Some(coordinator_session_id) {
+            return false;
+        }
+        match self.state {
+            RecordingLifecycleState::OwnerActive
+            | RecordingLifecycleState::OwnerEvidencePending
+            | RecordingLifecycleState::QuietPending => {
+                self.state = RecordingLifecycleState::OwnerEvidencePending;
                 true
             }
             _ => false,
@@ -417,7 +442,9 @@ impl RecordingLifecycleController {
             return false;
         }
         match self.state {
-            RecordingLifecycleState::OwnerActive | RecordingLifecycleState::QuietPending => {
+            RecordingLifecycleState::OwnerActive
+            | RecordingLifecycleState::OwnerEvidencePending
+            | RecordingLifecycleState::QuietPending => {
                 self.state = RecordingLifecycleState::QuietPending;
                 true
             }
@@ -425,14 +452,16 @@ impl RecordingLifecycleController {
         }
     }
 
-    /// Returns true only for the first OwnerActive/QuietPending -> Stopping
+    /// Returns true only for the first active/pending -> Stopping
     /// transition. Repeated stop requests are harmless and return false.
     pub(crate) fn commit_stop(&mut self, coordinator_session_id: SessionId) -> bool {
         if self.coordinator_session_id != Some(coordinator_session_id) {
             return false;
         }
         match self.state {
-            RecordingLifecycleState::OwnerActive | RecordingLifecycleState::QuietPending => {
+            RecordingLifecycleState::OwnerActive
+            | RecordingLifecycleState::OwnerEvidencePending
+            | RecordingLifecycleState::QuietPending => {
                 self.state = RecordingLifecycleState::Stopping;
                 true
             }
@@ -475,6 +504,11 @@ impl RecordingLifecycleController {
 
 impl EndpointArbiter {
     pub(crate) fn state(&self) -> OwnerEndpointState {
+        if self.owner_analysis_deadline.is_some()
+            && !matches!(self.phase, EndpointPhase::StopCommitted)
+        {
+            return OwnerEndpointState::OwnerEvidencePending;
+        }
         match self.phase {
             EndpointPhase::Listening => OwnerEndpointState::OwnerActive,
             EndpointPhase::CandidateEnd { .. } | EndpointPhase::CatchingUp { .. } => {
@@ -842,10 +876,17 @@ mod tests {
         let coordinator_id = uuid::Uuid::new_v4();
         let mut lifecycle = RecordingLifecycleController::default();
         assert_eq!(lifecycle.state(), RecordingLifecycleState::Idle);
+        assert!(!lifecycle.promote_candidate_to_owner(7, coordinator_id));
         assert!(lifecycle.begin_candidate(7));
         assert_eq!(lifecycle.state(), RecordingLifecycleState::WakeCandidate);
-        assert!(lifecycle.promote_owner(7, coordinator_id));
+        assert!(!lifecycle.begin_manual_owner(7, coordinator_id));
+        assert!(lifecycle.promote_candidate_to_owner(7, coordinator_id));
         assert_eq!(lifecycle.state(), RecordingLifecycleState::OwnerActive);
+        assert!(lifecycle.note_owner_evidence_pending(coordinator_id));
+        assert_eq!(
+            lifecycle.state(),
+            RecordingLifecycleState::OwnerEvidencePending
+        );
         assert!(lifecycle.note_quiet_pending(coordinator_id));
         assert_eq!(lifecycle.state(), RecordingLifecycleState::QuietPending);
         assert!(lifecycle.commit_stop(coordinator_id));
@@ -860,7 +901,7 @@ mod tests {
         let current = uuid::Uuid::new_v4();
         let stale = uuid::Uuid::new_v4();
         let mut lifecycle = RecordingLifecycleController::default();
-        assert!(lifecycle.begin_owner(11, current));
+        assert!(lifecycle.begin_manual_owner(11, current));
         assert!(!lifecycle.note_owner_activity(stale));
         assert!(!lifecycle.commit_stop(stale));
         assert_eq!(lifecycle.state(), RecordingLifecycleState::OwnerActive);
@@ -875,7 +916,7 @@ mod tests {
         let current = uuid::Uuid::new_v4();
         let stale = uuid::Uuid::new_v4();
         let mut lifecycle = RecordingLifecycleController::default();
-        assert!(lifecycle.begin_owner(21, current));
+        assert!(lifecycle.begin_manual_owner(21, current));
         assert!(lifecycle.close(Some(current)));
         assert_eq!(lifecycle.state(), RecordingLifecycleState::Closed);
         assert!(!lifecycle.commit_stop(current));

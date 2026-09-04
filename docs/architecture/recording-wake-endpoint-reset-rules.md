@@ -16,21 +16,36 @@
 ### 唤醒层（主机）
 
 - Wake KWS、短语确认和主人声纹确认只决定 `WakeCandidate` 是否升级为可见录音。
-- 候选失败必须一次性销毁，不得把候选的 PCM、预览、声纹结果或计时器带入下一候选。
+- 固件 `SessionStart/SessionStop` 是物理传输窗口，不等同于产品级
+  `WakeCandidate`。固件必须在 STOP 中报告 `silence` 或 `max_duration`：静音
+  结束销毁逻辑候选；最大时长只轮换有重叠预录音的物理窗口，不得误清空仍在
+  计算的逻辑候选，也不得让旧窗口的异步结果控制新窗口。
+- 候选真正失败时必须一次性销毁，不得把 PCM、预览、声纹结果或计时器带入
+  下一逻辑候选；窗口轮换只允许保留有界 KWS/主人变化摘要，禁止重复拼接重叠
+  PCM。
 - 唤醒延迟问题必须区分：音频未到、候选窗口未满、模型推理慢、声纹不匹配、BLE 激活慢；禁止统一降低所有阈值。
+- 强干扰恢复不得以“原始 KWS 或混音本地 ASR 已经命中”为唯一入口，否则最
+  需要分离时恢复路径反而不可达。轻量路径全部未命中时，控制器必须能依据
+  “已登记主人相对当前干扰底发生变化”的有界证据请求一次分离；分离后的音轨
+  仍须独立通过短语和主人校验。
 
 ### 内容层（主机）
 
 - 云端文字、预览修订和 pending 状态只负责内容合并。
 - pending 只有在仍存在“未归属的主人尾音”时才可以阻止结束；pending 或预览修订本身不能续租录音。
+- 预览准入和 endpoint 续租必须读取同一个 `OwnerContinuity` 结果。禁止出现
+  “同一帧被内容层认作主人可显示、却被结束层认作 Quiet”的分裂判定。
 
 ### 结束层（主机）
 
 可见录音只有一个结束裁判：主人活动时钟。状态必须单向经过：
 
-`WakeCandidate -> OwnerActive -> QuietPending -> Stopping -> Closed`
+`WakeCandidate -> OwnerActive -> OwnerEvidencePending -> QuietPending -> Stopping -> Closed`
 
 - 只有正向主人声纹/主人归属边沿可以推进 `OwnerActive` 的时钟。
+- `OwnerEvidencePending` 表示已经采集的 PCM/预览仍在等待同一套主人连续性裁决；
+  它不是主人活动，不能自行刷新 watermark。确认主人后回到 `OwnerActive`，确认
+  他人或到达有界裁决期限后进入 `QuietPending`。
 - 普通能量、灯光变化、旁人语音、云端 pending、预览增长不能推进主人时钟。
 - `QuietPending` 只允许有限的 provider catch-up 窗口；窗口到期后必须停止，不能无限 Hold。
 - 所有停止请求必须经过同一个幂等出口；失败只能重新进入当前状态，不能创建第二套计时器。
@@ -49,6 +64,27 @@
 - Firmware：必要的静态 verifier；涉及固件代码时重新 build/flash。
 - 运行时：`C:\Program Files\Listener Type\listener-type.exe` 必须与当前 release hash 一致，桌面/托盘不得运行旧副本。
 - 日志：必须能回答“谁推进了主人时钟”“谁触发了停止”“是否有新 WDT”，否则不接受修复。
+- 音频诊断：每个物理窗口必须持久记录 AFE 输入、AGC 输出、最终 BLE PCM 的
+  会话级电平摘要以及动态电平器的 noise floor/allowed gain；LED 电平不得作为
+  模型输入质量的替代证据。
+
+## 架构完成定义（2026-09-04）
+
+只有以下条件同时成立才允许宣称“统一架构完成”：
+
+1. `RecordingLifecycleController` 是唯一产品生命周期，物理 BLE 窗口不能重置或
+   越权结束逻辑生命周期。
+2. 唤醒、预览、声纹过滤和 endpoint 共享同一个 `OwnerContinuity` 裁决；生产
+   路径中不存在第二套“主人仍在说话”的布尔条件。
+3. 原始 KWS、混音本地 ASR、声纹和分离模型只是证据生产者，全部只能通过统一
+   reducer 升级/拒绝候选，不能直接显示、停止或激活。
+   `begin_manual_owner` 与 `promote_candidate_to_owner` 是互斥入口：隐藏候选不能
+   伪装成手动录音绕过 reducer，手动录音也不能继承候选证据。
+4. 所有异步任务携带逻辑 candidate/session identity；过期结果必须被拒绝。
+5. STOP 原因和三点 PCM 质量可以从持久日志还原；没有这份证据不能把间歇性
+   故障归因于模型、增益、BLE 或状态机。
+6. 规定测试、固件静态验证、build/flash、1.0.5 最新运行时 hash 校验和真实
+   干扰验收全部通过。只完成其中一部分必须明确标记为“未完成”。
 
 ## 当前已确认的问题
 
@@ -95,7 +131,7 @@ promotion 标志也可能被新候选继承。
 `RecordingLifecycleController`。它跨 BLE actor、ASR 回调和 endpoint watchdog
 共享同一个状态与 session 身份：
 
-`Idle -> WakeCandidate -> OwnerActive -> QuietPending -> Stopping -> Closed`
+`Idle -> WakeCandidate -> OwnerActive -> OwnerEvidencePending -> QuietPending -> Stopping -> Closed`
 
 候选升级、主人活动、停止提交、停止失败重开和取消/完成清理都必须通过该
 控制器。endpoint clock 只计算“是否到期”的证据，不能绕过控制器直接把录音

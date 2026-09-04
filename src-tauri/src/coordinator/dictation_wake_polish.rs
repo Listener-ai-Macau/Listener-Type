@@ -362,6 +362,43 @@ struct WakeCandidateController {
     phase: u8,
     session_id: u32,
     takeover_pending: bool,
+    interference_baseline: WakeInterferenceBaseline,
+}
+
+#[derive(Debug, Default)]
+struct WakeInterferenceBaseline {
+    score: f32,
+    samples: u8,
+}
+
+const WAKE_INTERFERENCE_BASELINE_MIN_SAMPLES: u8 = 3;
+const WAKE_INTERFERENCE_OWNER_RISE_MIN_SCORE: f32 = 0.28;
+const WAKE_INTERFERENCE_OWNER_RISE_MARGIN: f32 = 0.12;
+
+impl WakeInterferenceBaseline {
+    /// Learn only terminal no-phrase mixtures. A relative owner-score rise is
+    /// not accepted as wake; it merely makes the expensive separated-owner
+    /// phrase check reachable when both mixed-audio phrase models are masked.
+    fn observe(&mut self, score: f32, mixed_phrase_seen: bool) -> bool {
+        if !score.is_finite() || mixed_phrase_seen {
+            return false;
+        }
+        let owner_rise = self.samples >= WAKE_INTERFERENCE_BASELINE_MIN_SAMPLES
+            && score >= WAKE_INTERFERENCE_OWNER_RISE_MIN_SCORE
+            && score >= self.score + WAKE_INTERFERENCE_OWNER_RISE_MARGIN;
+        if owner_rise {
+            return true;
+        }
+        if self.samples == 0 {
+            self.score = score;
+        } else {
+            // Slow EWMA keeps a long interference bed stable without letting
+            // one possible owner attempt become the new baseline.
+            self.score = (self.score * 7.0 + score) / 8.0;
+        }
+        self.samples = self.samples.saturating_add(1);
+        false
+    }
 }
 
 impl Default for WakeCandidateController {
@@ -370,6 +407,7 @@ impl Default for WakeCandidateController {
             phase: HIDDEN_AUTOMATIC_CANDIDATE_NONE,
             session_id: 0,
             takeover_pending: false,
+            interference_baseline: WakeInterferenceBaseline::default(),
         }
     }
 }
@@ -609,6 +647,22 @@ fn note_hidden_va_session(embedded_session_id: u32) {
 
 fn current_hidden_va_session() -> u32 {
     with_wake_candidate_controller(|state| state.session_id)
+}
+
+fn note_hidden_wake_interference_owner_score(
+    score: f32,
+    mixed_phrase_seen: bool,
+) -> (bool, f32, u8) {
+    with_wake_candidate_controller(|state| {
+        let owner_rise = state
+            .interference_baseline
+            .observe(score, mixed_phrase_seen);
+        (
+            owner_rise,
+            state.interference_baseline.score,
+            state.interference_baseline.samples,
+        )
+    })
 }
 
 fn discard_pre_press_candidate_pcm(pcm: &mut Vec<u8>) -> usize {
