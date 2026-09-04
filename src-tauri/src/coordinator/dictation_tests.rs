@@ -1,5 +1,6 @@
 use super::{
-    acknowledge_automatic_wake_capsule_visible, append_typed_prefix, arm_automatic_wake_text_guard,
+    acknowledge_automatic_wake_capsule_visible, append_typed_prefix,
+    arm_accepted_automatic_wake_text_guard, arm_automatic_wake_text_guard,
     automatic_wake_body_started, automatic_wake_initial_body_wait_active,
     automatic_wake_session_active, begin_embedded_audio_dictation_session_id,
     cancel_embedded_ble_listener_capture, cancel_session, claim_post_dictation_key,
@@ -3920,6 +3921,58 @@ fn automatic_wake_target_speaker_endpoint_body_wait_has_bounded_wall_clock_escap
         Some(1_200),
         started_at + Duration::from_millis(2_999),
     ));
+    assert!(!super::automatic_wake_initial_body_wait_active_at(
+        &coordinator.inner,
+        session_id,
+        Some(1_200),
+        started_at + Duration::from_millis(3_000),
+    ));
+}
+
+#[test]
+fn automatic_wake_target_speaker_endpoint_early_capsule_ack_cannot_be_lost() {
+    // Live session 777911d9 showed the early Recording capsule before owner
+    // acceptance. Installing the accepted-session guard afterward waited for
+    // a second visibility ACK that the already-visible frontend never sent,
+    // leaving automatic_body_initial_wait active forever.
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    arm_accepted_automatic_wake_text_guard(
+        &coordinator.inner,
+        session_id,
+        "开始录音".into(),
+        1_800,
+        Some(session_id),
+    );
+    let guard = coordinator
+        .inner
+        .embedded_audio_automatic_wake_guard
+        .lock()
+        .clone()
+        .expect("accepted automatic guard");
+    assert!(guard.initial_body_wait_until_audio_ms.is_some());
+    assert!(guard.initial_body_wait_started_at.is_some());
+
+    filter_automatic_wake_text(&coordinator.inner, session_id, "开始录音这是正文", true);
+    assert!(!automatic_wake_initial_body_wait_active(
+        &coordinator.inner,
+        session_id,
+        Some(1_900),
+    ));
+}
+
+#[test]
+fn automatic_wake_target_speaker_endpoint_missing_capsule_ack_is_bounded() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    arm_automatic_wake_text_guard(&coordinator.inner, session_id, "开始录音".into(), 1_200);
+    let started_at = coordinator
+        .inner
+        .embedded_audio_automatic_wake_guard
+        .lock()
+        .as_ref()
+        .and_then(|guard| guard.initial_body_wait_started_at)
+        .expect("guard arm must start bounded wall escape before frontend ACK");
     assert!(!super::automatic_wake_initial_body_wait_active_at(
         &coordinator.inner,
         session_id,

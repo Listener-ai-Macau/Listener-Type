@@ -1543,7 +1543,13 @@ impl EmbeddedStreamingDictation {
         if automatic {
             let capsule_audio_ms = (candidate.pcm.len() / 32) as u64;
             let phrase = inner.prefs.get().voice_wake_phrase;
-            arm_automatic_wake_text_guard(inner, session.session_id, phrase, capsule_audio_ms);
+            arm_accepted_automatic_wake_text_guard(
+                inner,
+                session.session_id,
+                phrase,
+                capsule_audio_ms,
+                candidate.early_capsule_session_id,
+            );
         }
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         self.session = Some(session);
@@ -2642,7 +2648,13 @@ impl EmbeddedStreamingDictation {
             ));
         }
         let capsule_audio_ms = (candidate.pcm.len() / 32) as u64;
-        arm_automatic_wake_text_guard(inner, session.session_id, phrase.clone(), capsule_audio_ms);
+        arm_accepted_automatic_wake_text_guard(
+            inner,
+            session.session_id,
+            phrase.clone(),
+            capsule_audio_ms,
+            candidate.early_capsule_session_id,
+        );
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         self.session = Some(session);
         // 2026-08-09 12:46:59 激活竞态：ACTIVATE 发出后旧唤醒段可能立即 complete

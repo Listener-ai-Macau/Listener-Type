@@ -904,10 +904,38 @@ fn arm_automatic_wake_text_guard(
         initial_body_wait_until_audio_ms: body_wait_armed_immediately.then_some(
             capsule_audio_boundary_ms.saturating_add(EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS),
         ),
-        initial_body_wait_started_at: body_wait_armed_immediately.then(Instant::now),
+        // Start a wall-clock escape even while waiting for the frontend ACK.
+        // An early capsule can already be visible before the accepted session
+        // installs this guard, so that ACK may legitimately never repeat.
+        initial_body_wait_started_at: Some(Instant::now()),
         body_started: false,
         stop_requested: false,
     });
+}
+
+/// Install the accepted automatic-session guard without losing an early
+/// capsule visibility edge. The phrase detector may show Recording before the
+/// owner gate accepts; product activation must bind that already-visible UI to
+/// the same session instead of waiting for a second frontend transition.
+fn arm_accepted_automatic_wake_text_guard(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    phrase: String,
+    capsule_audio_boundary_ms: u64,
+    early_capsule_session_id: Option<SessionId>,
+) {
+    arm_automatic_wake_text_guard(
+        inner,
+        session_id,
+        phrase,
+        capsule_audio_boundary_ms,
+    );
+    if early_capsule_session_id == Some(session_id) {
+        acknowledge_automatic_wake_capsule_visible(inner, session_id);
+        log::info!(
+            "[wake-phrase] accepted automatic session inherited early capsule visibility session_id={session_id}"
+        );
+    }
 }
 
 /// Close the automatic wake text gate at the same logical boundary as the
@@ -1006,8 +1034,7 @@ fn automatic_wake_initial_body_wait_active_at(
     // wait remains active even if an eager provider preview already found
     // body text. After acknowledgement, either positive body text or expiry
     // of the bounded audio/wall deadline releases the endpoint reducer.
-    guard.initial_body_wait_started_at.is_none()
-        || (!guard.body_started && audio_wait_active && wall_wait_active)
+    !guard.body_started && audio_wait_active && wall_wait_active
 }
 
 fn automatic_wake_session_active(inner: &Arc<Inner>, session_id: SessionId) -> bool {

@@ -202,3 +202,11 @@ session 1930 因此在候选结束后才以 `host_phrase_detectors=none` 被接�
 这四种症状之所以会交替出现，不是四个超时值恰好都不对，而是旧代码
 允许“证据生产者”自己做产品级状态转移。以后改模型、增益或供应商时，
 只能改变证据的质量和到达时间，不允许新增第二个唤醒或停止出口。
+
+session `777911d9-1698-4cc8-bac2-42243c0fb1ce` 还暴露了胶囊可见性的时序
+漏洞：本地短语先显示了早期 Recording 胶囊，主人门稍后接受时才安装
+automatic wake guard。此时前端已可见，不会再发第二次 visible ACK，旧 guard
+因此永久停在 `automatic_body_initial_wait`；日志即使已记录正文开始，endpoint
+仍被这个无界等待拦截。现在 accepted-session guard 必须继承同 session 的早期
+胶囊可见证据；即使 ACK 丢失，guard 也从安装时开始三秒墙钟上限，不再
+存在永久 Hold。
