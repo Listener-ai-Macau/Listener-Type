@@ -225,6 +225,10 @@ fn target_speaker_end_timeout_ms_for_preview(preview: Option<&str>) -> u64 {
 struct TargetSpeakerEndpointPolicy {
     body_started: bool,
     initial_body_wait_active: bool,
+    /// Start of the accepted automatic wake's bounded body window.  This is
+    /// also the no-body endpoint origin: callback and provider activity must
+    /// not create a second timer after the window expires.
+    automatic_no_body_started_at: Option<Instant>,
     endpoint_timeout_ms: u64,
     wall_clock_timeout_ms: u64,
     stop_reason: &'static str,
@@ -245,11 +249,17 @@ fn resolve_target_speaker_endpoint_policy(
     } else {
         mode_timeout_ms
     };
-    let initial_body_wait_active = automatic_wake
-        && automatic_wake_initial_body_wait_active(inner, session_id, audio_duration_ms);
+    let (initial_body_wait_active, automatic_no_body_started_at) = if automatic_wake
+        && !body_started
+    {
+        automatic_wake_initial_body_wait_snapshot(inner, session_id, audio_duration_ms)
+    } else {
+        (false, None)
+    };
     TargetSpeakerEndpointPolicy {
         body_started,
         initial_body_wait_active,
+        automatic_no_body_started_at,
         endpoint_timeout_ms,
         wall_clock_timeout_ms: settled_target_wall_clock_timeout_ms(endpoint_timeout_ms),
         stop_reason: target_speaker_inactive_stop_reason(endpoint_timeout_ms),

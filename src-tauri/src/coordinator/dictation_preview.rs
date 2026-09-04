@@ -1092,12 +1092,46 @@ pub(super) fn acknowledge_automatic_wake_capsule_visible(
     );
 }
 
+#[cfg(test)]
 fn automatic_wake_initial_body_wait_active(
     inner: &Arc<Inner>,
     session_id: SessionId,
     audio_duration_ms: Option<u64>,
 ) -> bool {
-    automatic_wake_initial_body_wait_active_at(
+    automatic_wake_initial_body_wait_snapshot_at(
+        inner,
+        session_id,
+        audio_duration_ms,
+        Instant::now(),
+    )
+    .0
+}
+
+#[cfg(test)]
+fn automatic_wake_initial_body_wait_active_at(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    audio_duration_ms: Option<u64>,
+    now: Instant,
+) -> bool {
+    automatic_wake_initial_body_wait_snapshot_at(
+        inner,
+        session_id,
+        audio_duration_ms,
+        now,
+    )
+    .0
+}
+
+/// Return the body-wait decision and its original monotonic origin from one
+/// guard snapshot.  The endpoint reducer must use the same origin instead of
+/// starting another three-second wait when the provider is silent.
+fn automatic_wake_initial_body_wait_snapshot(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    audio_duration_ms: Option<u64>,
+) -> (bool, Option<Instant>) {
+    automatic_wake_initial_body_wait_snapshot_at(
         inner,
         session_id,
         audio_duration_ms,
@@ -1105,18 +1139,18 @@ fn automatic_wake_initial_body_wait_active(
     )
 }
 
-fn automatic_wake_initial_body_wait_active_at(
+fn automatic_wake_initial_body_wait_snapshot_at(
     inner: &Arc<Inner>,
     session_id: SessionId,
     audio_duration_ms: Option<u64>,
     now: Instant,
-) -> bool {
+) -> (bool, Option<Instant>) {
     let mut slot = inner.embedded_audio_automatic_wake_guard.lock();
     let Some(guard) = slot
         .as_mut()
         .filter(|guard| guard.session_id == session_id)
     else {
-        return false;
+        return (false, None);
     };
     if let Some(audio_ms) = audio_duration_ms {
         guard.latest_audio_ms = guard.latest_audio_ms.max(audio_ms);
@@ -1140,7 +1174,10 @@ fn automatic_wake_initial_body_wait_active_at(
     // wait remains active even if an eager provider preview already found
     // body text. After acknowledgement, either positive body text or expiry
     // of the bounded audio/wall deadline releases the endpoint reducer.
-    !guard.body_started && audio_wait_active && wall_wait_active
+    (
+        !guard.body_started && audio_wait_active && wall_wait_active,
+        guard.initial_body_wait_started_at,
+    )
 }
 
 fn automatic_wake_session_active(inner: &Arc<Inner>, session_id: SessionId) -> bool {

@@ -211,6 +211,25 @@ automatic wake guard。此时前端已可见，不会再发第二次 visible ACK
 胶囊可见证据；即使 ACK 丢失，guard 也从安装时开始三秒墙钟上限，不再
 存在永久 Hold。
 
+真实会话 `0abcb532-2ebe-484f-ae49-0343e0ee45bc`（设备段 2898）进一步证明，
+有界 guard 本身还不等于有界 endpoint：主人唤醒已经通过、早期胶囊已经显示，
+但唤醒前物理 BLE 段随后轮换停止，且没有正文、provider preview 或新的物理段。
+旧 endpoint 只会被正文或 speaker callback 启动，因此日志只记录一次
+`automatic_body_initial_wait`，三秒 guard 到期后仍没有可供唯一裁决器提交的
+endpoint candidate，最终拖到 Volcengine 八秒传输超时。
+
+现在无正文是 `OwnerEndpointController` 的明确会话模式，而不是另一个超时旁路：
+
+- `TargetSpeakerEndpointPolicy` 从 automatic guard 一次性读取 `active + started_at`；
+- watchdog 无条件把当前 ASR 快照送入同一个 reducer，不能再依赖 preview 或
+  diarization callback 才创建 endpoint；
+- no-body candidate 使用 guard 的原始 `started_at`，禁止在三秒到期时重新计时；
+- 唤醒短语尾音、普通能量、provider pending 和旧的声纹计算都不能延长无正文
+  会话；它们不是正文；
+- 一旦第一段正文到达，no-body candidate 原子退出，并由新的主人正文 watermark
+  重新启动普通 endpoint，旧三秒截止不能截断正文；
+- 测试中的 deadline helper 只封装生产 `is_due`，不再保留第二份 endpoint 判定。
+
 ### 主人连续性跨传输重置（2026-09-04，session 2595）
 
 现场会话 `df92eee8-09c5-463e-a48c-34df98e2b2a2` 在 1.9 秒音频处已经由本地

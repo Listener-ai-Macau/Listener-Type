@@ -136,6 +136,7 @@ fn set_volcengine_preview_callbacks(
         let committed_update = clock_for_speaker.lock().reduce_session_policy(
             Instant::now(),
             endpoint_policy,
+            &update,
             owner_analysis_pending,
         );
         if let Some(committed_update) = committed_update {

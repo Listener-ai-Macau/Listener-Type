@@ -13,6 +13,11 @@ struct SettledTargetEndpointClock {
     armed_target_end_ms: Option<u64>,
     armed_at: Option<Instant>,
     armed_from_visible_body_fallback: bool,
+    /// The accepted wake has not produced any body text.  This is not a
+    /// second endpoint: it is an explicit mode of the same controller, armed
+    /// from the automatic-wake guard's original clock.  Wake-phrase audio and
+    /// provider bookkeeping cannot rearm or block this bounded abandonment.
+    automatic_no_body_armed: bool,
     /// A provisional cloud tail normally cancels the owner endpoint. Preserve
     /// its original deadline out of band so a later sustained-local-other
     /// decision can restore that deadline instead of starting another wait.
@@ -164,6 +169,46 @@ impl SettledTargetEndpointClock {
         }
     }
 
+    fn arm_automatic_no_body_if_needed(
+        &mut self,
+        update: &crate::asr::volcengine::TargetSpeakerUpdate,
+        started_at: Instant,
+        observed_at: Instant,
+    ) {
+        if self.automatic_no_body_armed {
+            // Keep diagnostics current without allowing wake audio, room
+            // energy or provider callbacks to restart the original deadline.
+            self.latest_update = Some(update.clone());
+            self.latest_update_at = Some(observed_at);
+            return;
+        }
+        self.generation = self.generation.wrapping_add(1);
+        self.armed_target_end_ms = None;
+        self.armed_at = Some(started_at);
+        self.armed_from_visible_body_fallback = true;
+        self.automatic_no_body_armed = true;
+        self.latest_update = Some(update.clone());
+        self.latest_update_at = Some(started_at);
+        self.clear_paused_arm();
+        self.pending_was_seen = false;
+        self.product_endpoint
+            .arm(crate::speech_decision_kernel::EndpointEvidence::default());
+    }
+
+    fn leave_automatic_no_body_mode(&mut self) {
+        if !self.automatic_no_body_armed {
+            return;
+        }
+        self.generation = self.generation.wrapping_add(1);
+        self.armed_target_end_ms = None;
+        self.armed_at = None;
+        self.armed_from_visible_body_fallback = false;
+        self.automatic_no_body_armed = false;
+        self.clear_paused_arm();
+        self.pending_was_seen = false;
+        self.product_endpoint.reset();
+    }
+
     fn should_renew_firmware_endpoint_lease(
         &mut self,
         update: &crate::asr::volcengine::TargetSpeakerUpdate,
@@ -223,6 +268,16 @@ impl SettledTargetEndpointClock {
         body_started: bool,
         now: Instant,
     ) -> Option<u64> {
+        if self.automatic_no_body_armed {
+            if !body_started {
+                self.latest_update = Some(update.clone());
+                self.latest_update_at = Some(now);
+                return None;
+            }
+            // The first accepted body is a real owner-session transition. It
+            // replaces the wake-only deadline with the ordinary owner clock.
+            self.leave_automatic_no_body_mode();
+        }
         // Keep the previous fused owner boundary before replacing the cached
         // update.  A newer boundary is not automatically new speech: cloud
         // diarization can publish a late/stable row for audio that was already
@@ -343,6 +398,7 @@ impl SettledTargetEndpointClock {
         Some(self.generation)
     }
 
+    #[cfg(test)]
     fn due_update(
         &mut self,
         generation: u64,
@@ -352,48 +408,7 @@ impl SettledTargetEndpointClock {
         if self.generation != generation {
             return None;
         }
-        let armed_at = self.armed_at?;
-        if now.saturating_duration_since(armed_at) < Duration::from_millis(timeout_ms) {
-            return None;
-        }
-        let Some(latest) = self.latest_for_decision(now, timeout_ms) else {
-            self.note_due_hold_diagnostic(generation, "no_latest_update");
-            return None;
-        };
-        if !Self::update_allows_endpoint(
-            &latest,
-            self.armed_from_visible_body_fallback,
-            self.latest_visible_body_ends_terminal,
-            self.manual_terminal_bridge_until,
-            armed_at,
-            now,
-        ) {
-            self.note_due_hold_diagnostic(
-                generation,
-                endpoint_hold_reason(&latest, self.latest_visible_body_ends_terminal),
-            );
-            return None;
-        }
-        let decision = self.product_endpoint.decide_stop(
-            product_endpoint_evidence(&latest, self.armed_target_end_ms),
-            now,
-            Duration::from_millis(ENDPOINT_PROVIDER_CATCH_UP_GRACE_MS),
-        );
-        match decision {
-            crate::speech_decision_kernel::EndpointDecision::Stop => Some(latest),
-            crate::speech_decision_kernel::EndpointDecision::AwaitingOwnerAnalysis => {
-                self.note_due_hold_diagnostic(generation, "owner_analysis_in_flight");
-                None
-            }
-            crate::speech_decision_kernel::EndpointDecision::CatchingUp => {
-                self.note_due_hold_diagnostic(generation, "provider_catch_up");
-                None
-            }
-            crate::speech_decision_kernel::EndpointDecision::Hold => {
-                self.note_due_hold_diagnostic(generation, "arbiter_hold");
-                None
-            }
-        }
+        self.latest_due_update(now, timeout_ms)
     }
 
     fn take_due_hold_diagnostic(&mut self) -> Option<(u64, &'static str)> {
@@ -413,6 +428,7 @@ impl SettledTargetEndpointClock {
     }
 
     fn arm_latest_for_visible_body(&mut self, now: Instant) -> Option<u64> {
+        self.leave_automatic_no_body_mode();
         let update = self.latest_update.clone()?;
         let recent_strong_non_target = update_has_recent_strong_non_target(&update);
         let pending_owner_tail = update.pending_unattributed_speech
@@ -503,6 +519,17 @@ impl SettledTargetEndpointClock {
             self.note_due_hold_diagnostic(self.generation, "no_latest_update");
             return false;
         };
+        if self.automatic_no_body_armed {
+            // Three seconds without accepted body means this is a wake-only
+            // session. The wake phrase's own owner tail and provider pending
+            // state are not body evidence and cannot keep the capsule open.
+            let decision = self.product_endpoint.decide_stop(
+                crate::speech_decision_kernel::EndpointEvidence::default(),
+                now,
+                Duration::from_millis(ENDPOINT_PROVIDER_CATCH_UP_GRACE_MS),
+            );
+            return matches!(decision, crate::speech_decision_kernel::EndpointDecision::Stop);
+        }
         if !Self::update_allows_endpoint(
             &update,
             self.armed_from_visible_body_fallback,
@@ -570,12 +597,21 @@ impl SettledTargetEndpointClock {
         &mut self,
         now: Instant,
         policy: TargetSpeakerEndpointPolicy,
+        decision_snapshot: &crate::asr::volcengine::TargetSpeakerUpdate,
         owner_analysis_pending: bool,
     ) -> Option<crate::asr::volcengine::TargetSpeakerUpdate> {
+        if let Some(started_at) = policy.automatic_no_body_started_at {
+            self.arm_automatic_no_body_if_needed(decision_snapshot, started_at, now);
+        }
         if policy.initial_body_wait_active {
             self.note_session_policy_hold("automatic_body_initial_wait");
             return None;
         }
+        // No body exists for a classifier to protect. An in-flight analysis
+        // belongs to the already accepted wake phrase and must not create a
+        // second post-window wait.
+        let owner_analysis_pending =
+            owner_analysis_pending && policy.automatic_no_body_started_at.is_none();
         self.latest_due_update_after_owner_analysis(
             now,
             policy.wall_clock_timeout_ms,
@@ -617,9 +653,12 @@ impl SettledTargetEndpointClock {
 
     fn reopen_after_failed_stop(&mut self) {
         if let Some(update) = self.latest_update.as_ref() {
-            self.product_endpoint.reopen_after_failed_stop(
-                product_endpoint_evidence(update, self.armed_target_end_ms),
-            );
+            let evidence = if self.automatic_no_body_armed {
+                crate::speech_decision_kernel::EndpointEvidence::default()
+            } else {
+                product_endpoint_evidence(update, self.armed_target_end_ms)
+            };
+            self.product_endpoint.reopen_after_failed_stop(evidence);
         }
     }
 }
@@ -713,7 +752,12 @@ fn start_settled_target_endpoint_watchdog(
                         .note_owner_evidence_pending(session_id);
                 }
                 let update =
-                    clock.reduce_session_policy(now, endpoint_policy, owner_analysis_pending);
+                    clock.reduce_session_policy(
+                        now,
+                        endpoint_policy,
+                        &decision_snapshot,
+                        owner_analysis_pending,
+                    );
                 let hold_diagnostic = clock.take_due_hold_diagnostic();
                 (update, hold_diagnostic)
             };

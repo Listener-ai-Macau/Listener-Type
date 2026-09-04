@@ -3884,6 +3884,7 @@ fn automatic_wake_target_speaker_endpoint_uses_one_policy_snapshot_for_decision_
     );
     assert!(!policy.body_started);
     assert!(policy.initial_body_wait_active);
+    assert!(policy.automatic_no_body_started_at.is_some());
     assert_eq!(policy.endpoint_timeout_ms, 3_000);
     assert_eq!(policy.wall_clock_timeout_ms, 2_900);
     assert_eq!(policy.stop_reason, "target_speaker_inactive_no_body_3000ms");
@@ -3899,6 +3900,138 @@ fn automatic_wake_target_speaker_endpoint_uses_one_policy_snapshot_for_decision_
     assert!(!watchdog_source.contains("target_speaker_end_timeout_ms_for_preview("));
     assert!(!stop_source.contains("target_speaker_end_timeout_ms_for_preview"));
     assert!(!stop_source.contains("endpoint_decision_committed"));
+}
+
+#[test]
+fn automatic_wake_target_speaker_endpoint_no_body_uses_original_guard_clock() {
+    // Live session 2898 accepted the owner wake and showed Recording, then
+    // the pre-activation BLE segment rotated before any body arrived. With no
+    // provider/preview callback, the old endpoint clock was never armed and
+    // the session survived until the provider's eight-second transport error.
+    let started = std::time::Instant::now();
+    let wake_only_snapshot = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: None,
+        target_speech_end_ms: None,
+        provider_audio_duration_ms: None,
+        audio_duration_ms: Some(1_497),
+        local_speech_end_ms: Some(1_497),
+        local_target_speech_end_ms: Some(1_497),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: None,
+        target_activity_advanced: false,
+        pending_unattributed_speech: true,
+        pending_activity_advanced: false,
+        speaker_info_present: false,
+    };
+    let waiting = super::TargetSpeakerEndpointPolicy {
+        body_started: false,
+        initial_body_wait_active: true,
+        automatic_no_body_started_at: Some(started),
+        endpoint_timeout_ms: 3_000,
+        wall_clock_timeout_ms: 2_900,
+        stop_reason: "target_speaker_inactive_no_body_3000ms",
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+
+    assert!(clock
+        .reduce_session_policy(
+            started + std::time::Duration::from_millis(500),
+            waiting,
+            &wake_only_snapshot,
+            true,
+        )
+        .is_none());
+    assert_eq!(
+        clock.lifecycle(),
+        crate::speech_decision_kernel::OwnerEndpointState::QuietPending,
+        "the accepted wake-only session must enter the sole endpoint controller"
+    );
+
+    let expired = super::TargetSpeakerEndpointPolicy {
+        initial_body_wait_active: false,
+        ..waiting
+    };
+    assert!(
+        clock
+            .reduce_session_policy(
+                started + std::time::Duration::from_millis(3_000),
+                expired,
+                &wake_only_snapshot,
+                true,
+            )
+            .is_some(),
+        "wake audio, provider pending and an obsolete classifier must not create a second wait"
+    );
+    assert_eq!(
+        clock.lifecycle(),
+        crate::speech_decision_kernel::OwnerEndpointState::Stopping
+    );
+}
+
+#[test]
+fn automatic_wake_target_speaker_endpoint_body_replaces_no_body_deadline() {
+    let started = std::time::Instant::now();
+    let wake_only_snapshot = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: None,
+        target_speech_end_ms: None,
+        provider_audio_duration_ms: None,
+        audio_duration_ms: Some(1_500),
+        local_speech_end_ms: Some(1_500),
+        local_target_speech_end_ms: Some(1_500),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: None,
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: false,
+    };
+    let waiting = super::TargetSpeakerEndpointPolicy {
+        body_started: false,
+        initial_body_wait_active: true,
+        automatic_no_body_started_at: Some(started),
+        endpoint_timeout_ms: 3_000,
+        wall_clock_timeout_ms: 2_900,
+        stop_reason: "target_speaker_inactive_no_body_3000ms",
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    assert!(clock
+        .reduce_session_policy(started, waiting, &wake_only_snapshot, false)
+        .is_none());
+
+    let body_at = started + std::time::Duration::from_millis(2_500);
+    let body = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(3_900),
+        provider_audio_duration_ms: Some(4_000),
+        audio_duration_ms: Some(4_000),
+        local_speech_end_ms: Some(3_900),
+        local_target_speech_end_ms: Some(3_900),
+        target_activity_advanced: true,
+        speaker_info_present: true,
+        ..wake_only_snapshot
+    };
+    let generation = clock
+        .observe(&body, true, body_at)
+        .expect("first body must replace the wake-only candidate with the owner clock");
+    assert!(
+        clock
+            .due_update(
+                generation,
+                started + std::time::Duration::from_millis(3_000),
+                900,
+            )
+            .is_none(),
+        "the obsolete no-body deadline must not cut off newly accepted body speech"
+    );
+    assert!(clock
+        .due_update(
+            generation,
+            body_at + std::time::Duration::from_millis(900),
+            900,
+        )
+        .is_some());
 }
 
 #[test]
