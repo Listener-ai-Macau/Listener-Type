@@ -88,7 +88,7 @@
 
 ## 当前已确认的问题
 
-- 主机 EndpointArbiter 曾把 pending 预览修订当成主人尾音，导致 `arbiter_hold` 永久化；已由回归测试锁定。
+- 主机旧 endpoint helper 曾把 pending 预览修订当成主人尾音，导致 `arbiter_hold` 永久化；已由回归测试锁定。
 - `diag_log` 环形区仍能读到连续 `boot_watchdog` / `reset_reason=5`，但
   2026-09-04 的最新 20 秒不触发复位串口现场从约 61,136,000 ms 连续到
   61,173,000 ms，未出现新的 WDT、I2S stall、ringbuffer full 或传输丢包。
@@ -98,9 +98,9 @@
 
 ## 本轮落地
 
-- `OwnerEndpointController` 是 `EndpointArbiter` 的唯一语义入口，公开生命周期
-  `OwnerActive -> QuietPending -> Stopping`；旧类型名只保留为兼容别名，避免
-  其他适配器偷偷创建第二套计时器。
+- `OwnerEndpointController` 是唯一 endpoint 类型，公开生命周期
+  `OwnerActive -> QuietPending -> Stopping`；旧类型名和兼容别名已删除，避免
+  其他适配器重新创建第二套计时器。
 - 所有 endpoint hold/stop 日志都会记录 `lifecycle` 和具体 `reason`，可回答谁
   推进主人时钟、谁触发停止，以及是否只是 provider stall。
 - 健康 ASR 路径不再使用原始能量 trailing-silence 作为第二个停止裁判；仅在

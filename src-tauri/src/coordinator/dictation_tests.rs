@@ -3934,6 +3934,11 @@ fn target_speaker_endpoint_reduces_fresh_activity_before_stop_policy() {
 
 #[test]
 fn target_speaker_endpoint_has_one_atomic_final_transcript_arbiter() {
+    let kernel = include_str!("../speech_decision_kernel.rs");
+    assert!(
+        !kernel.contains("EndpointArbiter"),
+        "the removed endpoint compatibility type must not return"
+    );
     let provider = include_str!("../asr/volcengine.rs");
     assert_eq!(
         provider

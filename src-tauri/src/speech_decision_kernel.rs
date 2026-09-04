@@ -465,16 +465,11 @@ impl Default for EndpointPhase {
 /// the callback-order race where local speech/provider text is still ahead of
 /// the owner boundary at the instant that timeout expires.
 #[derive(Debug, Default)]
-pub(crate) struct EndpointArbiter {
+pub(crate) struct OwnerEndpointController {
     phase: EndpointPhase,
     text_revision: u64,
     owner_analysis_deadline: Option<Instant>,
 }
-
-// Keep the old name as a source-compatible alias for tests and adapters while
-// making the ownership boundary explicit to new call sites. There must be
-// exactly one controller instance per visible recording session.
-pub(crate) type OwnerEndpointController = EndpointArbiter;
 
 /// Product-level recording lifecycle.  Evidence producers (firmware VAD,
 /// wake KWS/voiceprint, provider diarization and the endpoint clock) may run
@@ -670,7 +665,7 @@ impl RecordingLifecycleController {
     }
 }
 
-impl EndpointArbiter {
+impl OwnerEndpointController {
     pub(crate) fn state(&self) -> OwnerEndpointState {
         if self.owner_analysis_deadline.is_some()
             && !matches!(self.phase, EndpointPhase::StopCommitted)
@@ -1207,7 +1202,7 @@ mod tests {
             latest_speech_confirmed_non_target: false,
             unresolved_owner_tail: true,
         };
-        let mut endpoint = EndpointArbiter::default();
+        let mut endpoint = OwnerEndpointController::default();
         endpoint.arm(evidence);
         assert_eq!(
             endpoint.decide_stop(evidence, started, Duration::from_millis(300)),
@@ -1247,7 +1242,7 @@ mod tests {
             latest_speech_confirmed_non_target: false,
             unresolved_owner_tail: false,
         };
-        let mut endpoint = EndpointArbiter::default();
+        let mut endpoint = OwnerEndpointController::default();
         endpoint.arm(evidence);
         endpoint.note_owner_analysis_pending(true, started, Duration::from_millis(3_000));
         assert_eq!(
@@ -1294,7 +1289,7 @@ mod tests {
             latest_speech_confirmed_non_target: false,
             unresolved_owner_tail: false,
         };
-        let mut endpoint = EndpointArbiter::default();
+        let mut endpoint = OwnerEndpointController::default();
         endpoint.arm(evidence);
         endpoint.note_owner_analysis_pending(true, started, Duration::from_millis(3_000));
         endpoint.note_owner_analysis_pending(
@@ -1322,7 +1317,7 @@ mod tests {
             latest_speech_confirmed_non_target: false,
             unresolved_owner_tail: false,
         };
-        let mut endpoint = EndpointArbiter::default();
+        let mut endpoint = OwnerEndpointController::default();
         endpoint.arm(evidence);
         endpoint.note_text_revision();
 
@@ -1351,7 +1346,7 @@ mod tests {
             latest_speech_confirmed_non_target: false,
             unresolved_owner_tail: false,
         };
-        let mut endpoint = EndpointArbiter::default();
+        let mut endpoint = OwnerEndpointController::default();
         endpoint.arm(settled);
         endpoint.note_text_revision();
         assert_eq!(
@@ -1378,7 +1373,7 @@ mod tests {
             latest_speech_confirmed_non_target: false,
             unresolved_owner_tail: true,
         };
-        let mut endpoint = EndpointArbiter::default();
+        let mut endpoint = OwnerEndpointController::default();
         endpoint.arm(evidence);
         endpoint.note_text_revision();
 
@@ -1413,7 +1408,7 @@ mod tests {
             latest_speech_confirmed_non_target: false,
             unresolved_owner_tail: false,
         };
-        let mut endpoint = EndpointArbiter::default();
+        let mut endpoint = OwnerEndpointController::default();
         endpoint.arm(evidence);
         assert_eq!(
             endpoint.decide_stop(evidence, Instant::now(), Duration::from_millis(300)),
@@ -1433,7 +1428,7 @@ mod tests {
             latest_speech_confirmed_non_target: false,
             unresolved_owner_tail: false,
         };
-        let mut endpoint = EndpointArbiter::default();
+        let mut endpoint = OwnerEndpointController::default();
         endpoint.arm(evidence);
         assert_eq!(
             endpoint.decide_stop(evidence, Instant::now(), Duration::from_millis(300)),
@@ -1454,7 +1449,7 @@ mod tests {
             latest_speech_confirmed_non_target: false,
             unresolved_owner_tail: false,
         };
-        let mut endpoint = EndpointArbiter::default();
+        let mut endpoint = OwnerEndpointController::default();
         endpoint.arm(evidence);
         endpoint.note_text_revision();
         assert_eq!(
@@ -1477,7 +1472,7 @@ mod tests {
             latest_speech_confirmed_non_target: false,
             unresolved_owner_tail: true,
         };
-        let mut endpoint = EndpointArbiter::default();
+        let mut endpoint = OwnerEndpointController::default();
         assert_eq!(endpoint.state(), OwnerEndpointState::OwnerActive);
         endpoint.arm(evidence);
         assert_eq!(endpoint.state(), OwnerEndpointState::QuietPending);
@@ -1497,7 +1492,7 @@ mod tests {
             latest_speech_confirmed_non_target: false,
             unresolved_owner_tail: true,
         };
-        let mut endpoint = EndpointArbiter::default();
+        let mut endpoint = OwnerEndpointController::default();
         endpoint.arm(evidence);
         assert_eq!(
             endpoint.decide_stop(evidence, started, Duration::from_millis(300)),
@@ -1523,7 +1518,7 @@ mod tests {
             latest_speech_confirmed_non_target: true,
             unresolved_owner_tail: true,
         };
-        let mut endpoint = EndpointArbiter::default();
+        let mut endpoint = OwnerEndpointController::default();
         endpoint.arm(evidence);
         assert_eq!(
             endpoint.decide_stop(evidence, Instant::now(), Duration::from_millis(300)),
@@ -1541,7 +1536,7 @@ mod tests {
             latest_speech_confirmed_non_target: true,
             unresolved_owner_tail: true,
         };
-        let mut endpoint = EndpointArbiter::default();
+        let mut endpoint = OwnerEndpointController::default();
         endpoint.arm(evidence);
         assert_eq!(
             endpoint.decide_stop(evidence, started, Duration::from_millis(300)),
