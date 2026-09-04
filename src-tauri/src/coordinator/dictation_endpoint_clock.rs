@@ -724,7 +724,7 @@ fn start_settled_target_endpoint_watchdog(
                 );
             }
             if let Some(update) = update {
-                handle_target_speaker_update(
+                handle_target_speaker_endpoint_stop(
                     &inner,
                     session_id,
                     &stop_dispatched,
@@ -746,13 +746,15 @@ fn arm_settled_target_endpoint_for_visible_body(
     let preview_ends_terminal = preview_ends_with_sentence_terminal(preview.as_deref());
     let preview_chars = preview.as_deref().map_or(0, |text| text.chars().count());
     let now = Instant::now();
-    {
+    let endpoint_rearmed = {
         let mut clock = endpoint_clock.lock();
         clock.note_visible_body_boundary(preview_ends_terminal, preview_chars, now);
-        clock.arm_latest_for_visible_body(now);
+        clock.arm_latest_for_visible_body(now).is_some()
+    };
+    if endpoint_rearmed {
+        let _ = inner
+            .recording_lifecycle
+            .lock()
+            .note_quiet_pending(session_id);
     }
-    let _ = inner
-        .recording_lifecycle
-        .lock()
-        .note_quiet_pending(session_id);
 }

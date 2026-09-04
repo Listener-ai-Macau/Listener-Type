@@ -596,29 +596,87 @@ struct SyncState {
 }
 
 #[derive(Clone, Debug)]
-struct PendingSessionSpeakerAnchor {
+struct OwnerContinuitySnapshot {
     tracking_enabled: bool,
     wake_owner_verified: bool,
     profile_adaptive: bool,
     wake_phrase: Option<String>,
+    // Opening the provider transport is not a new product recording session.
+    // Local owner analysis can already have consumed the buffered wake/body
+    // PCM while the WebSocket is connecting, so its complete continuity
+    // state must cross the transport reset as one snapshot. Preserving only
+    // the booleans creates an impossible split state (`stable_target=true`
+    // with no confirmed owner watermark) and lets the endpoint stop while the
+    // same owner is still speaking.
+    local_audio_duration_ms: Option<u64>,
+    local_speech_end_ms: Option<u64>,
+    local_target_speech_end_ms: Option<u64>,
+    local_non_target_speech_end_ms: Option<u64>,
+    local_sustained_non_target_speech_end_ms: Option<u64>,
+    local_speaker_classification: Option<crate::speaker_verification::SessionSpeakerClassification>,
+    stable_target: bool,
+    target_confirmed: bool,
+    consecutive_target: u8,
+    consecutive_non_target: u8,
+    consecutive_transcript_hard_non_target: u8,
+    consecutive_strong_non_target: u8,
+    owner_absence_run_started_ms: Option<u64>,
+    owner_absence_run_confirmed: bool,
+    evidence: Vec<LocalSpeakerEvidence>,
 }
 
-impl PendingSessionSpeakerAnchor {
+impl OwnerContinuitySnapshot {
     fn capture(state: &SyncState) -> Self {
         Self {
             tracking_enabled: state.local_speaker_tracking_enabled,
             wake_owner_verified: state.local_wake_owner_verified,
             profile_adaptive: state.local_speaker_profile_adaptive,
             wake_phrase: state.wake_speaker_phrase.clone(),
+            local_audio_duration_ms: state.local_audio_duration_ms,
+            local_speech_end_ms: state.local_speech_end_ms,
+            local_target_speech_end_ms: state.local_target_speech_end_ms,
+            local_non_target_speech_end_ms: state.local_non_target_speech_end_ms,
+            local_sustained_non_target_speech_end_ms: state
+                .local_sustained_non_target_speech_end_ms,
+            local_speaker_classification: state.local_speaker_classification.clone(),
+            stable_target: state.local_speaker_stable_target,
+            target_confirmed: state.local_target_confirmed,
+            consecutive_target: state.local_consecutive_target,
+            consecutive_non_target: state.local_consecutive_non_target,
+            consecutive_transcript_hard_non_target: state
+                .local_consecutive_transcript_hard_non_target,
+            consecutive_strong_non_target: state.local_consecutive_strong_non_target,
+            owner_absence_run_started_ms: state.local_owner_absence_run_started_ms,
+            owner_absence_run_confirmed: state.local_owner_absence_run_confirmed,
+            evidence: state.local_speaker_evidence.clone(),
         }
     }
 
-    fn restore_after_stream_reset(self, state: &mut SyncState) {
+    fn restore(self, state: &mut SyncState) {
         state.local_speaker_tracking_enabled = self.tracking_enabled;
         state.local_wake_owner_verified = self.tracking_enabled && self.wake_owner_verified;
         state.local_speaker_profile_adaptive = self.tracking_enabled && self.profile_adaptive;
-        state.local_speaker_stable_target = self.tracking_enabled;
         state.wake_speaker_phrase = self.wake_phrase;
+        if !self.tracking_enabled {
+            return;
+        }
+        state.local_audio_duration_ms = self.local_audio_duration_ms;
+        state.local_speech_end_ms = self.local_speech_end_ms;
+        state.local_target_speech_end_ms = self.local_target_speech_end_ms;
+        state.local_non_target_speech_end_ms = self.local_non_target_speech_end_ms;
+        state.local_sustained_non_target_speech_end_ms =
+            self.local_sustained_non_target_speech_end_ms;
+        state.local_speaker_classification = self.local_speaker_classification;
+        state.local_speaker_stable_target = self.stable_target;
+        state.local_target_confirmed = self.target_confirmed;
+        state.local_consecutive_target = self.consecutive_target;
+        state.local_consecutive_non_target = self.consecutive_non_target;
+        state.local_consecutive_transcript_hard_non_target =
+            self.consecutive_transcript_hard_non_target;
+        state.local_consecutive_strong_non_target = self.consecutive_strong_non_target;
+        state.local_owner_absence_run_started_ms = self.owner_absence_run_started_ms;
+        state.local_owner_absence_run_confirmed = self.owner_absence_run_confirmed;
+        state.local_speaker_evidence = self.evidence;
     }
 }
 
@@ -2719,25 +2777,7 @@ fn degraded_owner_tail_suggests_interference(evidence: &[LocalSpeakerEvidence]) 
 
 #[derive(Clone)]
 struct RecoverySpeakerSnapshot {
-    local_audio_duration_ms: Option<u64>,
-    local_speech_end_ms: Option<u64>,
-    local_target_speech_end_ms: Option<u64>,
-    local_non_target_speech_end_ms: Option<u64>,
-    local_sustained_non_target_speech_end_ms: Option<u64>,
-    local_speaker_classification: Option<crate::speaker_verification::SessionSpeakerClassification>,
-    local_speaker_tracking_enabled: bool,
-    local_wake_owner_verified: bool,
-    local_speaker_profile_adaptive: bool,
-    local_speaker_stable_target: bool,
-    local_target_confirmed: bool,
-    local_consecutive_target: u8,
-    local_consecutive_non_target: u8,
-    local_consecutive_transcript_hard_non_target: u8,
-    local_consecutive_strong_non_target: u8,
-    local_owner_absence_run_started_ms: Option<u64>,
-    local_owner_absence_run_confirmed: bool,
-    local_speaker_evidence: Vec<LocalSpeakerEvidence>,
-    wake_speaker_phrase: Option<String>,
+    owner_continuity: OwnerContinuitySnapshot,
     wake_target_speech_end_ms: Option<u64>,
     owner_isolation_frozen: bool,
     owner_isolation_ceiling_text: String,
@@ -2956,27 +2996,7 @@ impl VolcengineStreamingASR {
     fn recovery_speaker_snapshot(&self) -> RecoverySpeakerSnapshot {
         let state = self.state.lock();
         RecoverySpeakerSnapshot {
-            local_audio_duration_ms: state.local_audio_duration_ms,
-            local_speech_end_ms: state.local_speech_end_ms,
-            local_target_speech_end_ms: state.local_target_speech_end_ms,
-            local_non_target_speech_end_ms: state.local_non_target_speech_end_ms,
-            local_sustained_non_target_speech_end_ms: state
-                .local_sustained_non_target_speech_end_ms,
-            local_speaker_classification: state.local_speaker_classification.clone(),
-            local_speaker_tracking_enabled: state.local_speaker_tracking_enabled,
-            local_wake_owner_verified: state.local_wake_owner_verified,
-            local_speaker_profile_adaptive: state.local_speaker_profile_adaptive,
-            local_speaker_stable_target: state.local_speaker_stable_target,
-            local_target_confirmed: state.local_target_confirmed,
-            local_consecutive_target: state.local_consecutive_target,
-            local_consecutive_non_target: state.local_consecutive_non_target,
-            local_consecutive_transcript_hard_non_target: state
-                .local_consecutive_transcript_hard_non_target,
-            local_consecutive_strong_non_target: state.local_consecutive_strong_non_target,
-            local_owner_absence_run_started_ms: state.local_owner_absence_run_started_ms,
-            local_owner_absence_run_confirmed: state.local_owner_absence_run_confirmed,
-            local_speaker_evidence: state.local_speaker_evidence.clone(),
-            wake_speaker_phrase: state.wake_speaker_phrase.clone(),
+            owner_continuity: OwnerContinuitySnapshot::capture(&state),
             wake_target_speech_end_ms: state.wake_target_speech_end_ms,
             owner_isolation_frozen: state.owner_isolation_frozen,
             owner_isolation_ceiling_text: state.owner_isolation_ceiling_text.clone(),
@@ -2986,27 +3006,7 @@ impl VolcengineStreamingASR {
 
     fn restore_recovery_speaker_snapshot(&self, snapshot: RecoverySpeakerSnapshot) {
         let mut state = self.state.lock();
-        state.local_audio_duration_ms = snapshot.local_audio_duration_ms;
-        state.local_speech_end_ms = snapshot.local_speech_end_ms;
-        state.local_target_speech_end_ms = snapshot.local_target_speech_end_ms;
-        state.local_non_target_speech_end_ms = snapshot.local_non_target_speech_end_ms;
-        state.local_sustained_non_target_speech_end_ms =
-            snapshot.local_sustained_non_target_speech_end_ms;
-        state.local_speaker_classification = snapshot.local_speaker_classification;
-        state.local_speaker_tracking_enabled = snapshot.local_speaker_tracking_enabled;
-        state.local_wake_owner_verified = snapshot.local_wake_owner_verified;
-        state.local_speaker_profile_adaptive = snapshot.local_speaker_profile_adaptive;
-        state.local_speaker_stable_target = snapshot.local_speaker_stable_target;
-        state.local_target_confirmed = snapshot.local_target_confirmed;
-        state.local_consecutive_target = snapshot.local_consecutive_target;
-        state.local_consecutive_non_target = snapshot.local_consecutive_non_target;
-        state.local_consecutive_transcript_hard_non_target =
-            snapshot.local_consecutive_transcript_hard_non_target;
-        state.local_consecutive_strong_non_target = snapshot.local_consecutive_strong_non_target;
-        state.local_owner_absence_run_started_ms = snapshot.local_owner_absence_run_started_ms;
-        state.local_owner_absence_run_confirmed = snapshot.local_owner_absence_run_confirmed;
-        state.local_speaker_evidence = snapshot.local_speaker_evidence;
-        state.wake_speaker_phrase = snapshot.wake_speaker_phrase;
+        snapshot.owner_continuity.restore(&mut state);
         state.wake_target_speech_end_ms = snapshot.wake_target_speech_end_ms;
         state.owner_isolation_frozen = snapshot.owner_isolation_frozen;
         state.owner_isolation_ceiling_text = snapshot.owner_isolation_ceiling_text;
@@ -3762,7 +3762,7 @@ impl VolcengineStreamingASR {
             // `local_wake_owner_verified` here made the strict owner ledger keep
             // the body provisional while the visual-only ledger also refused to
             // render it, leaving the capsule blank until provider settlement.
-            let pending_speaker_anchor = PendingSessionSpeakerAnchor::capture(&st);
+            let pending_speaker_anchor = OwnerContinuitySnapshot::capture(&st);
             st.pending_audio.clear();
             st.next_sequence = 1;
             st.bytes_sent = 0;
@@ -3794,7 +3794,6 @@ impl VolcengineStreamingASR {
             st.local_non_target_speech_end_ms = None;
             st.local_sustained_non_target_speech_end_ms = None;
             st.local_speaker_classification = None;
-            pending_speaker_anchor.restore_after_stream_reset(&mut st);
             st.local_target_confirmed = false;
             st.local_consecutive_target = 0;
             st.local_consecutive_non_target = 0;
@@ -3803,6 +3802,7 @@ impl VolcengineStreamingASR {
             st.local_owner_absence_run_started_ms = None;
             st.local_owner_absence_run_confirmed = false;
             st.local_speaker_evidence.clear();
+            pending_speaker_anchor.restore(&mut st);
             st.owner_isolation_frozen = false;
             st.owner_isolation_ceiling_text.clear();
             st.owner_isolation_ceiling_segments.clear();
@@ -6321,18 +6321,40 @@ mod tests {
             local_speaker_tracking_enabled: true,
             local_wake_owner_verified: true,
             local_speaker_profile_adaptive: false,
+            local_audio_duration_ms: Some(1_900),
+            local_speech_end_ms: Some(1_900),
+            local_target_speech_end_ms: Some(1_900),
+            local_speaker_classification: Some(
+                crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.72 },
+            ),
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            local_consecutive_target: 2,
+            local_speaker_evidence: vec![LocalSpeakerEvidence {
+                audio_end_ms: 1_900,
+                classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                    score: 0.72,
+                },
+                stable_target: true,
+            }],
             wake_speaker_phrase: Some("开始录音".into()),
             ..SyncState::default()
         };
-        let anchor = PendingSessionSpeakerAnchor::capture(&configured);
+        let anchor = OwnerContinuitySnapshot::capture(&configured);
         let mut reset = SyncState::default();
 
-        anchor.restore_after_stream_reset(&mut reset);
+        anchor.restore(&mut reset);
 
         assert!(reset.local_speaker_tracking_enabled);
         assert!(reset.local_wake_owner_verified);
         assert!(!reset.local_speaker_profile_adaptive);
         assert!(reset.local_speaker_stable_target);
+        assert!(reset.local_target_confirmed);
+        assert_eq!(reset.local_audio_duration_ms, Some(1_900));
+        assert_eq!(reset.local_speech_end_ms, Some(1_900));
+        assert_eq!(reset.local_target_speech_end_ms, Some(1_900));
+        assert_eq!(reset.local_consecutive_target, 2);
+        assert_eq!(reset.local_speaker_evidence.len(), 1);
         assert_eq!(reset.wake_speaker_phrase.as_deref(), Some("开始录音"));
 
         let disabled = SyncState {
@@ -6342,10 +6364,52 @@ mod tests {
             ..SyncState::default()
         };
         let mut reset_disabled = SyncState::default();
-        PendingSessionSpeakerAnchor::capture(&disabled)
-            .restore_after_stream_reset(&mut reset_disabled);
+        OwnerContinuitySnapshot::capture(&disabled).restore(&mut reset_disabled);
         assert!(!reset_disabled.local_wake_owner_verified);
         assert!(!reset_disabled.local_speaker_profile_adaptive);
+    }
+
+    #[test]
+    fn target_speaker_endpoint_transport_reset_keeps_confirmed_owner_continuity() {
+        // Live embedded session 2595 classified the wake owner at 1.9 s, then
+        // WebSocket startup reset only the watermark while retaining
+        // stable_target=true. Every subsequent cross-phrase window was
+        // owner-compatible, but the endpoint saw no local owner authority and
+        // stopped before the final body words. A transport reset must preserve
+        // the entire reducer state, not a subset of its flags.
+        let mut before = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_wake_owner_verified: true,
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            local_audio_duration_ms: Some(1_900),
+            local_speech_end_ms: Some(1_900),
+            local_target_speech_end_ms: Some(1_900),
+            local_speaker_classification: Some(
+                crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.57 },
+            ),
+            wake_speaker_phrase: Some("开始录音".into()),
+            ..SyncState::default()
+        };
+        let anchor = OwnerContinuitySnapshot::capture(&before);
+
+        before.local_audio_duration_ms = None;
+        before.local_speech_end_ms = None;
+        before.local_target_speech_end_ms = None;
+        before.local_speaker_classification = None;
+        before.local_target_confirmed = false;
+        anchor.restore(&mut before);
+
+        assert_eq!(
+            local_owner_continuity(&before),
+            LocalOwnerContinuity::Confirmed
+        );
+        assert_eq!(before.local_target_speech_end_ms, Some(1_900));
+        before.local_audio_duration_ms = Some(2_400);
+        assert!(refresh_local_target_from_owner_preview_activity(
+            &mut before
+        ));
+        assert_eq!(before.local_target_speech_end_ms, Some(2_400));
     }
 
     #[test]

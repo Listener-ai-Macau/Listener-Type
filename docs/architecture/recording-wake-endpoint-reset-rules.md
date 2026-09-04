@@ -210,3 +210,22 @@ automatic wake guard。此时前端已可见，不会再发第二次 visible ACK
 仍被这个无界等待拦截。现在 accepted-session guard 必须继承同 session 的早期
 胶囊可见证据；即使 ACK 丢失，guard 也从安装时开始三秒墙钟上限，不再
 存在永久 Hold。
+
+### 主人连续性跨传输重置（2026-09-04，session 2595）
+
+现场会话 `df92eee8-09c5-463e-a48c-34df98e2b2a2` 在 1.9 秒音频处已经由本地
+声纹明确确认主人；Volcengine WebSocket 随后完成建链并执行内部 stream reset。
+旧 reset 只保留 `local_wake_owner_verified/local_speaker_stable_target` 等布尔标记，
+却清空 `local_target_confirmed/local_target_speech_end_ms` 和声纹证据序列。结果是
+后续窗口仍记录 `stable_target=true`、语音和预览仍在增长，结束器看到的主人
+watermark 却为 `None`，最终在 STOP 后仍到达新语音和新文字，构成确定的中途截断。
+
+现在本地身份状态只有一个 `OwnerContinuitySnapshot`。它同时用于 provider 建链
+reset 和 retained-audio 恢复重放，原子保存本地音频/语音/主人/他人 watermark、
+当前分类、去抖计数、主人缺席状态和证据序列。只有开始新的产品会话才允许建立
+新的连续性；网络建链、重连和恢复重放不得把其中一部分恢复成默认值。
+
+同时，新的声纹/归属 observation 在每次回调到达时先进入
+`RecordingLifecycleController`，再交给唯一 endpoint reducer。停止 handler 只负责
+幂等提交 STOP，不再兼任主人活动和固件续租处理。这样公开生命周期与真实证据
+保持一致，不会在主人说话期间长期停留于 `QuietPending`。

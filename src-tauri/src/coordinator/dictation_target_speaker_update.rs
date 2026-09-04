@@ -1,11 +1,15 @@
-fn handle_target_speaker_update(
+/// Reduce every fresh identity/provider observation into the product
+/// lifecycle. This must run when evidence arrives, not only after the endpoint
+/// clock is already due: doing the latter left the public lifecycle stuck in
+/// QuietPending throughout active owner speech and delayed firmware lease
+/// renewal until the stop path.
+fn reduce_target_speaker_activity_observation(
     inner: &Arc<Inner>,
     session_id: SessionId,
-    stop_dispatched: &Arc<AtomicBool>,
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
-    update: crate::asr::volcengine::TargetSpeakerUpdate,
-    endpoint_policy: TargetSpeakerEndpointPolicy,
-) {
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    body_started: bool,
+) -> bool {
     let session_active = {
         let state = inner.state.lock();
         state.session_id == session_id
@@ -16,17 +20,11 @@ fn handle_target_speaker_update(
             )
     };
     if !session_active {
-        return;
+        return false;
     }
-    let preview = current_embedded_audio_partial_preview(inner);
-    // The callback/watchdog already resolved the product session mode before
-    // committing the endpoint decision. Never recalculate it here: doing so
-    // previously let the controller stop on a 900 ms body clock and then label
-    // that same decision as a 3000 ms no-body stop.
-    let body_started = endpoint_policy.body_started;
     let attributed_owner_activity = (update.target_activity_advanced
         || update.pending_activity_advanced)
-        && target_speaker_update_has_live_owner_activity(&update);
+        && target_speaker_update_has_live_owner_activity(update);
     // Evaluate even when attributed activity already renews the firmware so
     // the same local edge cannot renew a second time on a repeated callback.
     let owner_catch_up_lease_due = endpoint_clock
@@ -59,6 +57,35 @@ fn handle_target_speaker_update(
             update.stable_attributed_speech_end_ms,
         );
     }
+    attributed_owner_activity || renew_owner_catch_up_lease
+}
+
+fn handle_target_speaker_endpoint_stop(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    stop_dispatched: &Arc<AtomicBool>,
+    endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
+    update: crate::asr::volcengine::TargetSpeakerUpdate,
+    endpoint_policy: TargetSpeakerEndpointPolicy,
+) {
+    let session_active = {
+        let state = inner.state.lock();
+        state.session_id == session_id
+            && !state.cancelled
+            && matches!(
+                state.phase,
+                SessionPhase::Starting | SessionPhase::Listening
+            )
+    };
+    if !session_active {
+        return;
+    }
+    let preview = current_embedded_audio_partial_preview(inner);
+    // The callback/watchdog already resolved the product session mode before
+    // committing the endpoint decision. Never recalculate it here: doing so
+    // previously let the controller stop on a 900 ms body clock and then label
+    // that same decision as a 3000 ms no-body stop.
+    let body_started = endpoint_policy.body_started;
     let fusion_state = target_speaker_fusion_state(&update);
     let endpoint_timeout_ms = endpoint_policy.endpoint_timeout_ms;
     let stop_reason = endpoint_policy.stop_reason;

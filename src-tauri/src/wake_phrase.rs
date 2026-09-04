@@ -2043,12 +2043,30 @@ mod platform {
             let pcm = wav_pcm(&wav);
             let default_found = detect(pcm, &phrase).expect("default full-buffer detect");
             let found = detect_with_recall_cascade(pcm, &phrase).expect("recall cascade");
+            let mut streaming = StreamingDetector::new(&phrase).expect("streaming detector");
+            let mut streaming_found = None;
+            let mut streaming_observed_pcm_ms = None;
+            let mut streamed_bytes = 0usize;
+            for chunk in pcm.chunks(1_600) {
+                streamed_bytes = streamed_bytes.saturating_add(chunk.len());
+                streaming_found = streaming.accept_pcm(chunk).expect("streaming PCM");
+                if streaming_found.is_some() {
+                    streaming_observed_pcm_ms = Some(streamed_bytes / 32);
+                    break;
+                }
+            }
+            let streaming_gain = streaming.normalizer.gain;
+            let streaming_finished = streaming.finish().expect("finish streaming detector");
             println!(
-                "full_buffer_recall path={} pcm_ms={} default_end_seconds={:?} cascade_end_seconds={:?}",
+                "full_buffer_recall path={} pcm_ms={} default_end_seconds={:?} cascade_end_seconds={:?} streaming_end_seconds={:?} streaming_observed_pcm_ms={:?} streaming_finished_end_seconds={:?} streaming_gain={:?}",
                 path,
                 pcm.len() / 32,
                 default_found.map(|value| value.end_seconds),
-                found.map(|value| value.end_seconds)
+                found.map(|value| value.end_seconds),
+                streaming_found.map(|value| value.end_seconds),
+                streaming_observed_pcm_ms,
+                streaming_finished.map(|value| value.end_seconds),
+                streaming_gain,
             );
         }
 

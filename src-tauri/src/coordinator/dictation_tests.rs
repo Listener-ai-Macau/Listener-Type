@@ -3902,6 +3902,37 @@ fn automatic_wake_target_speaker_endpoint_uses_one_policy_snapshot_for_decision_
 }
 
 #[test]
+fn target_speaker_endpoint_reduces_fresh_activity_before_stop_policy() {
+    // A fresh provider/local identity callback is an evidence event even when
+    // no stop is due. The old callback invoked the activity reducer only from
+    // the due-stop handler, leaving RecordingLifecycleController in
+    // QuietPending while the owner was actively speaking and renewing the
+    // firmware lease too late.
+    let callback_source = include_str!("dictation_volcengine_callbacks.rs");
+    let activity = callback_source
+        .find("reduce_target_speaker_activity_observation(")
+        .expect("every target-speaker callback must reduce fresh owner evidence");
+    let decision = callback_source[activity..]
+        .find("reduce_session_policy(")
+        .map(|offset| activity + offset)
+        .expect("the same callback must then ask the endpoint reducer for a stop decision");
+    assert!(
+        activity < decision,
+        "owner activity must enter the lifecycle before endpoint stop evaluation"
+    );
+
+    let stop_source = include_str!("dictation_target_speaker_update.rs");
+    let stop_body = stop_source
+        .split("fn handle_target_speaker_endpoint_stop(")
+        .nth(1)
+        .expect("dedicated endpoint stop handler");
+    assert!(
+        !stop_body.contains("note_owner_activity(session_id)"),
+        "the irreversible stop handler must not double as a fresh evidence reducer"
+    );
+}
+
+#[test]
 fn automatic_wake_target_speaker_endpoint_body_wait_has_bounded_wall_clock_escape() {
     let coordinator = Coordinator::new();
     let session_id = new_session_id();
