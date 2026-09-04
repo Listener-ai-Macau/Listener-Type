@@ -507,10 +507,12 @@ fn start_settled_target_endpoint_watchdog(
     session_id: SessionId,
     stop_dispatched: &Arc<AtomicBool>,
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
+    asr: &Arc<crate::asr::volcengine::VolcengineStreamingASR>,
 ) {
     let inner = Arc::clone(inner);
     let stop_dispatched = Arc::clone(stop_dispatched);
     let endpoint_clock = Arc::clone(endpoint_clock);
+    let asr = Arc::clone(asr);
     async_runtime::spawn(async move {
         const POLL_INTERVAL: Duration = Duration::from_millis(50);
         loop {
@@ -535,6 +537,17 @@ fn start_settled_target_endpoint_watchdog(
             );
             let (update, hold_diagnostic) = {
                 let mut clock = endpoint_clock.lock();
+                // If the provider never opened, keep feeding the reducer from
+                // the local owner clock. This preserves the same single
+                // watchdog decision path while removing generic room-energy
+                // from the only remaining fallback.
+                if asr.audio_delivery_failed() {
+                    let body_started = automatic_wake_body_started(&inner, session_id)
+                        || current_embedded_audio_partial_preview(&inner)
+                            .as_deref()
+                            .is_some_and(|text| !text.trim().is_empty());
+                    clock.observe(&asr.endpoint_update_snapshot(), body_started, Instant::now());
+                }
                 let update = clock.latest_due_update(
                     Instant::now(),
                     settled_target_wall_clock_timeout_ms(endpoint_timeout_ms),

@@ -5,7 +5,13 @@ fn set_volcengine_preview_callbacks(
 ) {
     let stop_dispatched = Arc::new(AtomicBool::new(false));
     let endpoint_clock = Arc::new(Mutex::new(SettledTargetEndpointClock::default()));
-    start_settled_target_endpoint_watchdog(inner, session_id, &stop_dispatched, &endpoint_clock);
+    start_settled_target_endpoint_watchdog(
+        inner,
+        session_id,
+        &stop_dispatched,
+        &endpoint_clock,
+        asr,
+    );
 
     let inner_for_stream = Arc::clone(inner);
     let clock_for_stream = Arc::clone(&endpoint_clock);
