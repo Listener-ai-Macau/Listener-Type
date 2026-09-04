@@ -203,6 +203,7 @@ pub(crate) struct EndpointEvidence {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EndpointDecision {
     Hold,
+    AwaitingOwnerAnalysis,
     CatchingUp,
     Stop,
 }
@@ -298,6 +299,7 @@ impl Default for EndpointPhase {
 pub(crate) struct EndpointArbiter {
     phase: EndpointPhase,
     text_revision: u64,
+    owner_analysis_deadline: Option<Instant>,
 }
 
 // Keep the old name as a source-compatible alias for tests and adapters while
@@ -485,6 +487,26 @@ impl EndpointArbiter {
     pub(crate) fn reset(&mut self) {
         self.phase = EndpointPhase::Listening;
         self.text_revision = 0;
+        self.owner_analysis_deadline = None;
+    }
+
+    /// Register the lifecycle of the single-flight owner classifier.  This is
+    /// a stop barrier, never owner activity: it cannot renew the owner
+    /// watermark or the normal inactivity timer.  Repeated pending
+    /// observations retain the original deadline so a wedged/noisy analysis
+    /// chain cannot hold recording forever.
+    pub(crate) fn note_owner_analysis_pending(
+        &mut self,
+        pending: bool,
+        now: Instant,
+        maximum_wait: Duration,
+    ) {
+        if pending {
+            self.owner_analysis_deadline
+                .get_or_insert(now + maximum_wait);
+        } else {
+            self.owner_analysis_deadline = None;
+        }
     }
 
     pub(crate) fn note_text_revision(&mut self) {
@@ -537,6 +559,15 @@ impl EndpointArbiter {
         now: Instant,
         catch_up_grace: Duration,
     ) -> EndpointDecision {
+        if self
+            .owner_analysis_deadline
+            .is_some_and(|deadline| now < deadline)
+        {
+            return EndpointDecision::AwaitingOwnerAnalysis;
+        }
+        if self.owner_analysis_deadline.is_some() {
+            self.owner_analysis_deadline = None;
+        }
         // Provisional provider text is only a stop barrier while the local
         // capture still shows a recent owner-compatible tail.  Under strong
         // interference the provider can leave this bit set forever even after
@@ -989,6 +1020,86 @@ mod tests {
                 Duration::from_millis(300),
             ),
             EndpointDecision::Hold
+        );
+    }
+
+    #[test]
+    fn target_speaker_endpoint_waits_for_in_flight_owner_analysis_without_renewing_owner_clock() {
+        // Installed 2026-09-04 session: the public endpoint expired while a
+        // 5.2 s local voiceprint window was already being classified.  The
+        // result arrived only after stop had been committed.  Analysis is a
+        // bounded barrier, not activity, so its deadline never moves when the
+        // same single-flight chain is observed again.
+        let started = Instant::now();
+        let evidence = EndpointEvidence {
+            owner_watermark_ms: Some(3_122),
+            provider_coverage_ms: Some(5_000),
+            pending_provider_text: false,
+            latest_speech_confirmed_non_target: false,
+            unresolved_owner_tail: false,
+        };
+        let mut endpoint = EndpointArbiter::default();
+        endpoint.arm(evidence);
+        endpoint.note_owner_analysis_pending(true, started, Duration::from_millis(3_000));
+        assert_eq!(
+            endpoint.decide_stop(
+                evidence,
+                started + Duration::from_millis(1_000),
+                Duration::from_millis(300),
+            ),
+            EndpointDecision::AwaitingOwnerAnalysis,
+        );
+
+        endpoint.note_owner_analysis_pending(
+            true,
+            started + Duration::from_millis(2_000),
+            Duration::from_millis(3_000),
+        );
+        assert_eq!(
+            endpoint.decide_stop(
+                evidence,
+                started + Duration::from_millis(2_999),
+                Duration::from_millis(300),
+            ),
+            EndpointDecision::AwaitingOwnerAnalysis,
+            "repeated pending observations must not move the original bound",
+        );
+        assert_eq!(
+            endpoint.decide_stop(
+                evidence,
+                started + Duration::from_millis(3_000),
+                Duration::from_millis(300),
+            ),
+            EndpointDecision::Stop,
+            "a wedged analysis chain must not disable auto-end",
+        );
+    }
+
+    #[test]
+    fn target_speaker_endpoint_completed_owner_analysis_releases_barrier_immediately() {
+        let started = Instant::now();
+        let evidence = EndpointEvidence {
+            owner_watermark_ms: Some(3_122),
+            provider_coverage_ms: Some(5_000),
+            pending_provider_text: false,
+            latest_speech_confirmed_non_target: false,
+            unresolved_owner_tail: false,
+        };
+        let mut endpoint = EndpointArbiter::default();
+        endpoint.arm(evidence);
+        endpoint.note_owner_analysis_pending(true, started, Duration::from_millis(3_000));
+        endpoint.note_owner_analysis_pending(
+            false,
+            started + Duration::from_millis(1_100),
+            Duration::from_millis(3_000),
+        );
+        assert_eq!(
+            endpoint.decide_stop(
+                evidence,
+                started + Duration::from_millis(1_100),
+                Duration::from_millis(300),
+            ),
+            EndpointDecision::Stop,
         );
     }
 

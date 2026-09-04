@@ -2542,6 +2542,10 @@ pub struct VolcengineStreamingASR {
     /// small for dictation sessions and does not affect device memory.
     retained_pcm: ParkingMutex<Vec<u8>>,
     recovery_replay_started: AtomicBool,
+    /// Evidence-only state for the single-flight local owner classifier.  The
+    /// ASR layer never decides how long this may block endpointing; that bound
+    /// belongs to the unified owner endpoint controller.
+    local_speaker_analysis_pending: AtomicBool,
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     target_speaker_stream:
         ParkingMutex<Option<Arc<super::target_speaker_extraction::TargetSpeakerStream>>>,
@@ -2771,6 +2775,7 @@ impl VolcengineStreamingASR {
             final_frame_result: OnceCell::new(),
             retained_pcm: ParkingMutex::new(Vec::new()),
             recovery_replay_started: AtomicBool::new(false),
+            local_speaker_analysis_pending: AtomicBool::new(false),
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             target_speaker_stream: ParkingMutex::new(None),
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -3281,6 +3286,18 @@ impl VolcengineStreamingASR {
     pub fn endpoint_update_snapshot(&self) -> TargetSpeakerUpdate {
         let state = self.state.lock();
         target_speaker_update_from_state(&state, false, false)
+    }
+
+    /// Publish the lifecycle of the single-flight local speaker job without
+    /// pretending that it is owner activity.  The endpoint controller may
+    /// wait for this evidence, but the job itself never renews an owner clock.
+    pub fn note_local_speaker_analysis_pending(&self, pending: bool) {
+        self.local_speaker_analysis_pending
+            .store(pending, Ordering::SeqCst);
+    }
+
+    pub fn local_speaker_analysis_pending(&self) -> bool {
+        self.local_speaker_analysis_pending.load(Ordering::SeqCst)
     }
 
     pub fn note_local_audio_activity(&self, audio_duration_ms: u64, speech_detected: bool) {

@@ -2074,6 +2074,55 @@ fn settled_target_wall_clock_keeps_scheduling_allowance_below_public_endpoint() 
 }
 
 #[test]
+fn target_speaker_endpoint_does_not_commit_before_current_voiceprint_result() {
+    // Replay the ordering from installed session
+    // c5f6bdc7-e8f2-4649-9349-b5809b201608: provider/owner evidence was
+    // settled, but a classification for already captured body audio was still
+    // running when the 900 ms wall clock expired.
+    let started = std::time::Instant::now();
+    let update = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(3_122),
+        provider_audio_duration_ms: Some(5_000),
+        audio_duration_ms: Some(5_000),
+        local_speech_end_ms: Some(3_100),
+        local_target_speech_end_ms: Some(2_400),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(3_122),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.note_visible_body_boundary(true, 11, started);
+    clock
+        .observe(&update, true, started)
+        .expect("settled owner arms endpoint");
+
+    assert!(clock
+        .latest_due_update_after_owner_analysis(
+            started + std::time::Duration::from_millis(900),
+            900,
+            true,
+        )
+        .is_none());
+    assert_eq!(
+        clock.take_due_hold_diagnostic(),
+        Some((clock.generation, "owner_analysis_in_flight")),
+    );
+
+    assert!(clock
+        .latest_due_update_after_owner_analysis(
+            started + std::time::Duration::from_millis(1_100),
+            900,
+            false,
+        )
+        .is_some());
+}
+
+#[test]
 fn dangling_continuation_gets_bounded_pause_without_slowing_complete_text() {
     assert!(
         super::EMBEDDED_DANGLING_FIRMWARE_KEEPALIVE_INTERVAL_MS

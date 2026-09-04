@@ -31,6 +31,10 @@ struct LocalSessionSpeakerTracker {
 }
 
 impl LocalSessionSpeakerTracker {
+    fn classification_pending(&self) -> bool {
+        self.classification_rx.is_some()
+    }
+
     fn from_wake(pcm: Vec<u8>, wake_end_seconds: f32, wake_phrase: String) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         tauri::async_runtime::spawn_blocking(move || {
@@ -299,6 +303,15 @@ impl EmbeddedAudioDictationSession {
                 classification,
                 transcript_hard_non_target,
             );
+        }
+        if let (Some(asr), Some(tracker)) =
+            (self.volcengine_asr.as_ref(), self.local_speaker_tracker.as_ref())
+        {
+            // Update this after publishing a completed observation.  That
+            // keeps the old in-flight guard active while the result callback
+            // is reduced, then exposes whether a successor job was started in
+            // the same audio pass.
+            asr.note_local_speaker_analysis_pending(tracker.classification_pending());
         }
 
         // 改A: track sustained trailing silence AFTER the body has started so the

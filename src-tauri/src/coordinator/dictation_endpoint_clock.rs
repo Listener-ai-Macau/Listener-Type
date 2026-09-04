@@ -63,6 +63,12 @@ const RECENT_STRONG_NON_TARGET_WINDOW_MS: u64 = 900;
 const MANUAL_TERMINAL_BRIDGE_MAX_MS: u64 = 3_000;
 const MANUAL_TERMINAL_BRIDGE_MIN_VISIBLE_CHARS: usize = 20;
 const ENDPOINT_PROVIDER_CATCH_UP_GRACE_MS: u64 = 300;
+// A 1.2 s speaker window can take longer than the public one-second endpoint
+// when the owner-only separator is using the same inference pool.  Wait for
+// the already-started identity job, not for arbitrary sound or provider text.
+// One uninterrupted chain has a hard ceiling so a wedged model cannot disable
+// auto-end.
+const OWNER_ANALYSIS_IN_FLIGHT_MAX_WAIT_MS: u64 = 3_000;
 
 fn endpoint_hold_reason(
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
@@ -375,6 +381,10 @@ impl SettledTargetEndpointClock {
         );
         match decision {
             crate::speech_decision_kernel::EndpointDecision::Stop => Some(latest),
+            crate::speech_decision_kernel::EndpointDecision::AwaitingOwnerAnalysis => {
+                self.note_due_hold_diagnostic(generation, "owner_analysis_in_flight");
+                None
+            }
             crate::speech_decision_kernel::EndpointDecision::CatchingUp => {
                 self.note_due_hold_diagnostic(generation, "provider_catch_up");
                 None
@@ -510,6 +520,10 @@ impl SettledTargetEndpointClock {
         );
         match decision {
             crate::speech_decision_kernel::EndpointDecision::Stop => true,
+            crate::speech_decision_kernel::EndpointDecision::AwaitingOwnerAnalysis => {
+                self.note_due_hold_diagnostic(self.generation, "owner_analysis_in_flight");
+                false
+            }
             crate::speech_decision_kernel::EndpointDecision::CatchingUp => {
                 self.note_due_hold_diagnostic(self.generation, "provider_catch_up");
                 false
@@ -529,6 +543,20 @@ impl SettledTargetEndpointClock {
         self.is_due(now, timeout_ms)
             .then(|| self.latest_update.clone())
             .flatten()
+    }
+
+    fn latest_due_update_after_owner_analysis(
+        &mut self,
+        now: Instant,
+        timeout_ms: u64,
+        owner_analysis_pending: bool,
+    ) -> Option<crate::asr::volcengine::TargetSpeakerUpdate> {
+        self.product_endpoint.note_owner_analysis_pending(
+            owner_analysis_pending,
+            now,
+            Duration::from_millis(OWNER_ANALYSIS_IN_FLIGHT_MAX_WAIT_MS),
+        );
+        self.latest_due_update(now, timeout_ms)
     }
 
     /// Return one immutable decision snapshot for the session reducer.
@@ -644,9 +672,12 @@ fn start_settled_target_endpoint_watchdog(
                         "[asr] endpoint watchdog seeded missing owner clock from provider snapshot session_id={session_id}"
                     );
                 }
-                let update = clock.latest_due_update(
-                    Instant::now(),
+                let now = Instant::now();
+                let owner_analysis_pending = asr.local_speaker_analysis_pending();
+                let update = clock.latest_due_update_after_owner_analysis(
+                    now,
                     settled_target_wall_clock_timeout_ms(endpoint_timeout_ms),
+                    owner_analysis_pending,
                 );
                 let hold_diagnostic = clock.take_due_hold_diagnostic();
                 (update, hold_diagnostic)

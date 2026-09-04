@@ -98,6 +98,7 @@ fn set_volcengine_preview_callbacks(
 
     let inner_for_speaker = Arc::clone(inner);
     let clock_for_speaker = Arc::clone(&endpoint_clock);
+    let asr_for_speaker = Arc::clone(asr);
     asr.set_target_speaker_update_callback(Some(Arc::new(move |update| {
         let body_started = automatic_wake_body_started(&inner_for_speaker, session_id)
             || current_embedded_audio_partial_preview(&inner_for_speaker)
@@ -115,10 +116,14 @@ fn set_volcengine_preview_callbacks(
         let endpoint_timeout_ms = target_speaker_end_timeout_ms_for_preview(
             current_embedded_audio_partial_preview(&inner_for_speaker).as_deref(),
         );
-        let committed_update = clock_for_speaker.lock().latest_due_update(
-            Instant::now(),
-            settled_target_wall_clock_timeout_ms(endpoint_timeout_ms),
-        );
+        let owner_analysis_pending = asr_for_speaker.local_speaker_analysis_pending();
+        let committed_update = clock_for_speaker
+            .lock()
+            .latest_due_update_after_owner_analysis(
+                Instant::now(),
+                settled_target_wall_clock_timeout_ms(endpoint_timeout_ms),
+                owner_analysis_pending,
+            );
         if let Some(committed_update) = committed_update {
             handle_target_speaker_update(
                 &inner_for_speaker,
