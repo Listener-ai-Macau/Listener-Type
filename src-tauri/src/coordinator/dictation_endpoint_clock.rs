@@ -141,6 +141,23 @@ impl SettledTargetEndpointClock {
         self.product_endpoint.state()
     }
 
+    /// Seed the single endpoint controller when a provider emits visible text
+    /// before its first diarization/target row. Without this hand-off a
+    /// healthy ASR session had no clock at all, so the disabled raw-energy
+    /// fallback left the capsule recording indefinitely. The snapshot is
+    /// only an initial observation; subsequent renewals still require positive
+    /// owner evidence from the normal target-update path.
+    pub(crate) fn seed_from_snapshot_if_missing(
+        &mut self,
+        update: crate::asr::volcengine::TargetSpeakerUpdate,
+        body_started: bool,
+        now: Instant,
+    ) {
+        if self.latest_update.is_none() {
+            self.observe(&update, body_started, now);
+        }
+    }
+
     fn should_renew_firmware_endpoint_lease(
         &mut self,
         update: &crate::asr::volcengine::TargetSpeakerUpdate,

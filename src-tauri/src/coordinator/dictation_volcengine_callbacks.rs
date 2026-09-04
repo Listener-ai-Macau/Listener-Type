@@ -15,11 +15,20 @@ fn set_volcengine_preview_callbacks(
 
     let inner_for_stream = Arc::clone(inner);
     let clock_for_stream = Arc::clone(&endpoint_clock);
+    let asr_for_stream = Arc::clone(asr);
     asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
         let previous_preview = current_embedded_audio_partial_preview(&inner_for_stream);
         let preview_changed =
             update_embedded_audio_partial_preview(&inner_for_stream, session_id, text);
         let current_preview = current_embedded_audio_partial_preview(&inner_for_stream);
+        // Volcengine may publish visible body text before its first target
+        // speaker row. Seed the same controller with the ASR state snapshot so
+        // the owner endpoint exists even on a delayed diarization path.
+        clock_for_stream.lock().seed_from_snapshot_if_missing(
+            asr_for_stream.endpoint_update_snapshot(),
+            !current_preview.as_deref().unwrap_or_default().trim().is_empty(),
+            Instant::now(),
+        );
         let refresh_firmware_speech = preview_changed
             && clock_for_stream.lock().latest_update.as_ref().is_some_and(|update| {
                 authoritative_preview_growth_has_recent_owner_speech(
@@ -49,6 +58,7 @@ fn set_volcengine_preview_callbacks(
 
     let inner_for_partial = Arc::clone(inner);
     let clock_for_partial = Arc::clone(&endpoint_clock);
+    let asr_for_partial = Arc::clone(asr);
     asr.set_final_intermediate_transcript_callback(Some(Arc::new(move |update| {
         let previous_preview = current_embedded_audio_partial_preview(&inner_for_partial);
         let preview_changed = update_embedded_audio_partial_preview_from_final_supplement(
@@ -57,6 +67,11 @@ fn set_volcengine_preview_callbacks(
             update,
         );
         let current_preview = current_embedded_audio_partial_preview(&inner_for_partial);
+        clock_for_partial.lock().seed_from_snapshot_if_missing(
+            asr_for_partial.endpoint_update_snapshot(),
+            !current_preview.as_deref().unwrap_or_default().trim().is_empty(),
+            Instant::now(),
+        );
         let refresh_firmware_speech = preview_changed
             && clock_for_partial.lock().latest_update.as_ref().is_some_and(|update| {
                 authoritative_preview_growth_has_recent_owner_speech(
