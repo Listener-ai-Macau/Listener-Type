@@ -580,6 +580,13 @@ struct EmbeddedBleSessionActorState {
     next_seq: u64,
     history: VecDeque<EmbeddedBleSessionActorRecord>,
     pcm_capsule_trace: EmbeddedBlePcmCapsuleTraceState,
+    /// Product session whose pre-activation physical segment has ended while
+    /// the actor is waiting for an optional post-activation segment.  The
+    /// endpoint stop path consumes this hand-off only after firmware STOP and
+    /// provider final-frame dispatch complete; a newly arrived segment clears
+    /// it first.  Physical transport therefore cannot keep a logically ended
+    /// wake-only session alive or capture the next wake.
+    awaiting_post_activation_segment: Option<SessionId>,
 }
 
 #[derive(Debug, Default)]

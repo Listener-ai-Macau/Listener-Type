@@ -184,9 +184,37 @@ fn handle_target_speaker_endpoint_stop(
         };
         let (stop_result, ()) = tokio::join!(stop_future, finalization_future);
         match stop_result {
-            Ok(true) => log::info!(
-                "[embedded-ble] target-speaker auto-stop sent session_id={session_id} reason={stop_reason}"
-            ),
+            Ok(true) => {
+                log::info!(
+                    "[embedded-ble] target-speaker auto-stop sent session_id={session_id} reason={stop_reason}"
+                );
+                // If the pre-activation physical segment already ended and no
+                // replacement arrived, there will never be another device
+                // STOP to drive the product pipeline. Finalize the logical
+                // wake-only session now. A replacement segment clears this
+                // actor hand-off before we inspect it, so active body capture
+                // retains the ordinary physical completion path.
+                if !body_started
+                    && take_embedded_ble_awaiting_post_activation_segment(&inner, session_id)
+                {
+                    log::info!(
+                        "[embedded-ble] logical no-body endpoint owns finalization after pre-activation segment rotation session_id={session_id}"
+                    );
+                    if let Err(err) = end_embedded_ble_session(
+                        &inner,
+                        false,
+                        format!(
+                            "logical_no_body_after_rotated_segment session_id={session_id} reason={stop_reason}"
+                        ),
+                    )
+                    .await
+                    {
+                        log::warn!(
+                            "[embedded-ble] logical no-body finalization failed session_id={session_id}: {err}"
+                        );
+                    }
+                }
+            }
             Ok(false) => {
                 // A transient Starting/Listening ownership race must not burn
                 // the one-shot endpoint latch forever. A later provider/local

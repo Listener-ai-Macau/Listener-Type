@@ -4035,6 +4035,51 @@ fn automatic_wake_target_speaker_endpoint_body_replaces_no_body_deadline() {
 }
 
 #[test]
+fn target_speaker_endpoint_rotated_segment_handoff_is_single_use() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+
+    super::mark_embedded_ble_awaiting_post_activation_segment(&coordinator.inner, session_id);
+    assert!(super::take_embedded_ble_awaiting_post_activation_segment(
+        &coordinator.inner,
+        session_id,
+    ));
+    assert!(
+        !super::take_embedded_ble_awaiting_post_activation_segment(&coordinator.inner, session_id,),
+        "one logical endpoint may own the rotated-segment finalization only once"
+    );
+
+    super::mark_embedded_ble_awaiting_post_activation_segment(&coordinator.inner, session_id);
+    assert!(super::clear_embedded_ble_awaiting_post_activation_segment(
+        &coordinator.inner,
+        session_id,
+    ));
+    assert!(
+        !super::take_embedded_ble_awaiting_post_activation_segment(&coordinator.inner, session_id,),
+        "a real post-activation segment must cancel external no-body finalization"
+    );
+}
+
+#[test]
+fn target_speaker_endpoint_no_body_finalization_cannot_steal_next_physical_wake() {
+    // Session 2899 reached the no-body endpoint, but the old actor waited for
+    // a hypothetical post-activation segment. Forty-two seconds later it
+    // attached segment 2900 to the dead session. Keep the physical/logical
+    // hand-off explicit and prove every owner of it is present in source.
+    let stream = include_str!("dictation_embedded_stream.rs");
+    let begin = include_str!("dictation_embedded_candidate_begin.rs");
+    let endpoint = include_str!("dictation_target_speaker_update.rs");
+    let loop_source = include_str!("dictation_embedded_submit.rs");
+
+    assert!(stream.contains("mark_embedded_ble_awaiting_post_activation_segment"));
+    assert!(stream.contains("clear_embedded_ble_awaiting_post_activation_segment"));
+    assert!(begin.contains("clear_embedded_ble_awaiting_post_activation_segment"));
+    assert!(endpoint.contains("take_embedded_ble_awaiting_post_activation_segment"));
+    assert!(endpoint.contains("logical_no_body_after_rotated_segment"));
+    assert!(loop_source.contains("release_externally_finalized_session_if_needed"));
+}
+
+#[test]
 fn target_speaker_endpoint_reduces_fresh_activity_before_stop_policy() {
     // A fresh provider/local identity callback is an evidence event even when
     // no stop is due. The old callback invoked the activity reducer only from

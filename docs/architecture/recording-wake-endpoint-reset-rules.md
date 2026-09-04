@@ -230,6 +230,26 @@ endpoint candidate，最终拖到 Volcengine 八秒传输超时。
   重新启动普通 endpoint，旧三秒截止不能截断正文；
 - 测试中的 deadline helper 只封装生产 `is_due`，不再保留第二份 endpoint 判定。
 
+同一录音在首轮修复后的自动重放又暴露了物理层反向控制产品生命周期的问题：
+endpoint 已在三秒提交 STOP，固件 STOP 写入也成功，但 BLE actor 仍保留
+`activation_segment_race_guard` 并等待一个不存在的下一物理段。42 秒后的新唤醒段
+2900 被绑定给旧产品 session，旧胶囊直到该段 STOP 才回到 Idle。这解释了“上一轮
+看似结束后，下一次间歇性唤醒不了”。
+
+新的边界使用 actor 内单次 hand-off 表达“正在等待可选的 post-activation 段”：
+
+- 旧段在竞态窗口内 STOP 时，actor 记录对应的产品 session；
+- 真正的新物理段先到时会清除此 hand-off，并继续正常正文捕获；
+- no-body endpoint 完成固件 STOP 与 provider final-frame 后，只有仍持有 hand-off
+  才能直接完成产品 session；
+- 产品 session 到达 Idle 后，后台 actor 只释放本地传输壳，不再次取消 ASR、发布
+  错误或等待物理 STOP；
+- hand-off 只能被消费一次，未来设备段必须进入新的 `WakeCandidate`，不得附着到
+  已结束的 session。
+
+因此物理 BLE 段现在只决定 PCM 的接入与排空，不能再阻塞已经由唯一 endpoint
+裁决为结束的逻辑会话。
+
 ### 主人连续性跨传输重置（2026-09-04，session 2595）
 
 现场会话 `df92eee8-09c5-463e-a48c-34df98e2b2a2` 在 1.9 秒音频处已经由本地

@@ -7,6 +7,30 @@ impl EmbeddedStreamingDictation {
         lifecycle.close(None);
     }
 
+    /// Drop actor-local transport state after the product session was fully
+    /// finalized by the no-body endpoint path.  There is deliberately no ASR
+    /// cancel or error publication here: the provider result and Idle event
+    /// have already been committed by `end_embedded_ble_session`.
+    fn release_externally_finalized_session_if_needed(&mut self, inner: &Arc<Inner>) -> bool {
+        let Some(session_id) = self.session.as_ref().map(|session| session.session_id) else {
+            return false;
+        };
+        let product_closed = {
+            let state = inner.state.lock();
+            state.session_id == session_id && state.phase == SessionPhase::Idle
+        };
+        if !product_closed {
+            return false;
+        }
+        clear_embedded_ble_awaiting_post_activation_segment(inner, session_id);
+        self.reset_product_lifecycle(inner);
+        self.reset_for_next_session();
+        log::info!(
+            "[embedded-ble] released actor transport state after logical no-body finalization session_id={session_id}"
+        );
+        true
+    }
+
     async fn finish_completed_streaming_session(
         &mut self,
         inner: &Arc<Inner>,

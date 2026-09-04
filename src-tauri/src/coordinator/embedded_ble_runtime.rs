@@ -135,6 +135,40 @@ fn embedded_ble_session_actor_diagnostics(
         .collect()
 }
 
+fn mark_embedded_ble_awaiting_post_activation_segment(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) {
+    inner
+        .embedded_ble_session_actor
+        .lock()
+        .awaiting_post_activation_segment = Some(session_id);
+    crate::timeline::mark(
+        "backend.embedded_ble_session_actor",
+        "awaiting_post_activation_segment",
+        format!("session_id={session_id}"),
+    );
+}
+
+fn clear_embedded_ble_awaiting_post_activation_segment(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) -> bool {
+    let mut actor = inner.embedded_ble_session_actor.lock();
+    if actor.awaiting_post_activation_segment != Some(session_id) {
+        return false;
+    }
+    actor.awaiting_post_activation_segment = None;
+    true
+}
+
+fn take_embedded_ble_awaiting_post_activation_segment(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) -> bool {
+    clear_embedded_ble_awaiting_post_activation_segment(inner, session_id)
+}
+
 fn hold_embedded_ble_listener_for_pairing_confirmation(
     inner: &Arc<Inner>,
     reason: &'static str,

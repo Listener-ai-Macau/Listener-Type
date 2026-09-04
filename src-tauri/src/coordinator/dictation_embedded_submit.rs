@@ -418,6 +418,18 @@ async fn submit_embedded_audio_ble_stream_impl(
     let mut ready_capsule_shown = false;
     let mut control_signal_worker_started = false;
     loop {
+        // A wake-only product session may close after its pre-activation BLE
+        // segment has already ended.  Release the actor-local transport shell
+        // without waiting for (and stealing) the next physical wake segment.
+        if streaming.release_externally_finalized_session_if_needed(inner) {
+            record_embedded_ble_session_actor_command(
+                inner,
+                EmbeddedBleSessionActorCommand::ActorRestart,
+                None,
+                "background listener ready after logical no-body finalization",
+            );
+            continue;
+        }
         // Soft session abort (continuous only): wake without waiting for more PCM.
         if let Some(session_abort) = session_abort.as_ref() {
             if session_abort.swap(false, Ordering::SeqCst) {

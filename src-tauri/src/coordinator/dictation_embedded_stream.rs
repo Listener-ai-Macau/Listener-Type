@@ -143,6 +143,9 @@ impl EmbeddedStreamingDictation {
                 // 同段延续里，只有「旧段在竞态窗口内 STOP 且正文未开始」才重绑定。
                 if let Some((pre_segment_id, _)) = self.activation_segment_race_guard {
                     if chunk_session_id != pre_segment_id {
+                        if let Some(session_id) = self.session.as_ref().map(|session| session.session_id) {
+                            clear_embedded_ble_awaiting_post_activation_segment(inner, session_id);
+                        }
                         self.embedded_session_id = Some(chunk_session_id);
                         self.activation_segment_race_guard = None;
                         log::info!(
@@ -267,6 +270,14 @@ impl EmbeddedStreamingDictation {
                                 "[coord] pre-activation embedded segment {session_id} stopped {}ms after wake activation with no body; dictation session stays open for the post-activation segment",
                                 activated_at.elapsed().as_millis()
                             );
+                            if let Some(coordinator_session_id) =
+                                self.session.as_ref().map(|session| session.session_id)
+                            {
+                                mark_embedded_ble_awaiting_post_activation_segment(
+                                    inner,
+                                    coordinator_session_id,
+                                );
+                            }
                             self.collector.reset();
                             self.embedded_session_id = None;
                             self.pending_stop_expected_packet_count = None;

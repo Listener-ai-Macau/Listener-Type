@@ -22,6 +22,10 @@ impl EmbeddedStreamingDictation {
                     && embedded_session_id != pre_segment_id
                     && start_origin == crate::embedded_audio::SessionStartOrigin::VoiceActivation
                 {
+                    if let Some(session_id) = self.session.as_ref().map(|session| session.session_id)
+                    {
+                        clear_embedded_ble_awaiting_post_activation_segment(inner, session_id);
+                    }
                     self.embedded_session_id = Some(embedded_session_id);
                     self.activation_segment_race_guard = None;
                     log::info!(
