@@ -3972,6 +3972,52 @@ fn target_speaker_endpoint_has_one_atomic_final_transcript_arbiter() {
         provider.contains("commit_once(&full_text, false)"),
         "terminal delivery must not run a second raw-provider fallback after sealing"
     );
+    assert!(!provider.contains("post_stop_preview_ceiling"));
+    let final_candidate_block = provider
+        .split("let mut candidate = if matches!(")
+        .nth(1)
+        .expect("provider must assemble one terminal candidate");
+    let safety_ceiling = final_candidate_block
+        .find("owner_preview_safety_ceiling(&state, &candidate.text)")
+        .expect("stop-boundary safety ceiling must normalize the candidate");
+    let content_seal = final_candidate_block
+        .find("let arbitrated_final_content_len")
+        .expect("normalized candidate must then be sealed");
+    assert!(
+        safety_ceiling < content_seal,
+        "the shrink-only preview ceiling must run before the provider seal"
+    );
+
+    let coordinator = include_str!("dictation.rs");
+    assert_eq!(
+        coordinator
+            .matches("arbitrate_product_final_transcript(")
+            .count(),
+        1,
+        "the coordinator must select the product transcript exactly once"
+    );
+    assert_eq!(
+        coordinator
+            .matches("product final sealed authority=")
+            .count(),
+        1,
+        "the selected owner content must be sealed exactly once"
+    );
+    for legacy_writer in [
+        "select_target_speaker_final(",
+        "raw.text = recovered",
+        "raw = replayed",
+        "empty ASR final recovered from partial preview",
+    ] {
+        assert!(
+            !coordinator.contains(legacy_writer),
+            "legacy downstream transcript writer returned: {legacy_writer}"
+        );
+    }
+    let product_arbiter = include_str!("dictation_preview.rs");
+    assert!(product_arbiter.contains("ProductFinalCandidates"));
+    assert!(product_arbiter.contains("target_filter_required"));
+    assert!(product_arbiter.contains("local_shadow_eligible"));
 }
 
 #[test]
@@ -7564,47 +7610,102 @@ fn local_shadow_rejects_rewrites_and_large_other_speaker_gaps() {
     );
 }
 
-#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-#[test]
-fn confirmed_interference_never_returns_an_empty_final_when_filter_is_unavailable() {
-    fn primary() -> crate::asr::RawTranscript {
-        crate::asr::RawTranscript {
-            text: "开始录音旁边的人连续说了很长一段无关内容".into(),
+fn product_final_candidates(primary: &str) -> super::ProductFinalCandidates {
+    super::ProductFinalCandidates {
+        provider_primary: crate::asr::RawTranscript {
+            text: primary.into(),
             duration_ms: 7_462,
-        }
+        },
+        separated_owner: None,
+        retained_audio_replay: None,
+        debug_override: None,
+        partial_preview: None,
+        local_shadow: None,
+        local_shadow_owner_end_aligned: false,
+        target_filter_required: false,
     }
+}
 
-    let empty_target = crate::asr::RawTranscript {
-        text: String::new(),
+#[test]
+fn target_speaker_endpoint_product_final_chooses_separated_owner_once_under_interference() {
+    let mut candidates = product_final_candidates("主人第一句旁边的人无关内容主人第二句");
+    candidates.target_filter_required = true;
+    candidates.separated_owner = Some(crate::asr::RawTranscript {
+        text: "主人第一句主人第二句".into(),
         duration_ms: 7_462,
-    };
+    });
+    candidates.partial_preview = Some(crate::asr::RawTranscript {
+        text: "主人第一句旁边的人无关内容主人第二句".into(),
+        duration_ms: 7_462,
+    });
+    candidates.local_shadow = Some("主人第一句旁边的人无关内容主人第二句".into());
+    candidates.local_shadow_owner_end_aligned = true;
+
+    let decision = super::arbitrate_product_final_transcript(candidates, &[], false);
+    assert_eq!(decision.transcript.text, "主人第一句主人第二句");
     assert_eq!(
-        super::select_target_speaker_final(primary(), Ok(Some(empty_target)), true).text,
-        "开始录音旁边的人连续说了很长一段无关内容"
+        decision.authority,
+        crate::speech_decision_kernel::ProductFinalAuthority::SeparatedOwner
     );
+    assert!(!decision.local_shadow_recovered);
+}
+
+#[test]
+fn target_speaker_endpoint_product_final_never_restores_unverified_text_when_filter_is_required() {
+    let mut candidates = product_final_candidates("");
+    candidates.target_filter_required = true;
+    candidates.retained_audio_replay = Some(crate::asr::RawTranscript {
+        text: "重放混入旁人内容".into(),
+        duration_ms: 7_462,
+    });
+    candidates.partial_preview = Some(crate::asr::RawTranscript {
+        text: "预览混入旁人内容".into(),
+        duration_ms: 7_462,
+    });
+    candidates.local_shadow = Some("本地模型混入旁人内容".into());
+    candidates.local_shadow_owner_end_aligned = true;
+
+    let decision = super::arbitrate_product_final_transcript(candidates, &[], false);
+    assert!(decision.transcript.text.is_empty());
     assert_eq!(
-        super::select_target_speaker_final(primary(), Ok(None), true).text,
-        "开始录音旁边的人连续说了很长一段无关内容"
+        decision.authority,
+        crate::speech_decision_kernel::ProductFinalAuthority::Empty
     );
+}
+
+#[test]
+fn target_speaker_endpoint_product_final_recovers_cloud_omission_only_without_interference() {
+    let mut candidates =
+        product_final_candidates("我现在准备测试这个录音系统的完整效果，看看最后结尾是否正常。");
+    candidates.local_shadow =
+        Some("我现在认真准备测试这个录音系统的完整效果看看最后完整结尾是否正常".into());
+    candidates.local_shadow_owner_end_aligned = true;
+
+    let decision = super::arbitrate_product_final_transcript(candidates, &[], false);
     assert_eq!(
-        super::select_target_speaker_final(primary(), Err("separator failed".into()), true).text,
-        "开始录音旁边的人连续说了很长一段无关内容"
+        decision.transcript.text,
+        "我现在认真准备测试这个录音系统的完整效果，看看最后完整结尾是否正常。"
     );
+    assert!(decision.local_shadow_recovered);
+}
+
+#[test]
+fn target_speaker_endpoint_product_final_uses_replay_before_preview_for_clean_empty_primary() {
+    let mut candidates = product_final_candidates("");
+    candidates.retained_audio_replay = Some(crate::asr::RawTranscript {
+        text: "重放恢复的主人正文".into(),
+        duration_ms: 7_462,
+    });
+    candidates.partial_preview = Some(crate::asr::RawTranscript {
+        text: "较旧的预览正文".into(),
+        duration_ms: 7_462,
+    });
+
+    let decision = super::arbitrate_product_final_transcript(candidates, &[], false);
+    assert_eq!(decision.transcript.text, "重放恢复的主人正文");
     assert_eq!(
-        super::select_target_speaker_final(primary(), Ok(None), false).text,
-        "开始录音旁边的人连续说了很长一段无关内容"
-    );
-    assert_eq!(
-        super::select_target_speaker_final(
-            primary(),
-            Ok(Some(crate::asr::RawTranscript {
-                text: "这是主人完整说的话".into(),
-                duration_ms: 7_462,
-            })),
-            true,
-        )
-        .text,
-        "这是主人完整说的话"
+        decision.authority,
+        crate::speech_decision_kernel::ProductFinalAuthority::RetainedAudioReplay
     );
 }
 

@@ -1,6 +1,112 @@
 // Embedded audio partial preview / wake-phrase filtering helpers.
 // Included into `coordinator::dictation` via `include!`.
 
+#[derive(Debug)]
+struct ProductFinalCandidates {
+    provider_primary: RawTranscript,
+    separated_owner: Option<RawTranscript>,
+    retained_audio_replay: Option<RawTranscript>,
+    debug_override: Option<RawTranscript>,
+    partial_preview: Option<RawTranscript>,
+    local_shadow: Option<String>,
+    local_shadow_owner_end_aligned: bool,
+    target_filter_required: bool,
+}
+
+#[derive(Debug)]
+struct ProductFinalDecision {
+    transcript: RawTranscript,
+    authority: crate::speech_decision_kernel::ProductFinalAuthority,
+    local_shadow_recovered: bool,
+}
+
+fn nonempty_transcript(candidate: &Option<RawTranscript>) -> bool {
+    candidate
+        .as_ref()
+        .is_some_and(|candidate| !candidate.text.trim().is_empty())
+}
+
+/// The only product-boundary text selector. Every upstream result is supplied
+/// as an immutable candidate, one authority is selected once, and optional
+/// omission/hotword/filler normalization happens before the returned content
+/// is sealed by the caller. No downstream recovery path may grow this result.
+fn arbitrate_product_final_transcript(
+    candidates: ProductFinalCandidates,
+    hotwords: &[DictionaryHotword],
+    remove_filler_words: bool,
+) -> ProductFinalDecision {
+    use crate::speech_decision_kernel::{
+        arbitrate_product_final, ProductFinalAuthority, ProductFinalEvidence,
+    };
+
+    let authority = arbitrate_product_final(ProductFinalEvidence {
+        target_filter_required: candidates.target_filter_required,
+        separated_owner_available: nonempty_transcript(&candidates.separated_owner),
+        provider_primary_available: !candidates.provider_primary.text.trim().is_empty(),
+        retained_audio_replay_available: nonempty_transcript(&candidates.retained_audio_replay),
+        debug_override_available: nonempty_transcript(&candidates.debug_override),
+        partial_preview_available: nonempty_transcript(&candidates.partial_preview),
+    });
+    let preview_for_hotwords = candidates
+        .partial_preview
+        .as_ref()
+        .map(|preview| preview.text.clone());
+
+    let mut transcript = match authority {
+        ProductFinalAuthority::SeparatedOwner => candidates
+            .separated_owner
+            .expect("available separated-owner candidate"),
+        ProductFinalAuthority::ProviderPrimary => candidates.provider_primary,
+        ProductFinalAuthority::RetainedAudioReplay => candidates
+            .retained_audio_replay
+            .expect("available retained-audio candidate"),
+        ProductFinalAuthority::DebugOverride => candidates
+            .debug_override
+            .expect("available debug transcript candidate"),
+        ProductFinalAuthority::PartialPreviewRecovery => candidates
+            .partial_preview
+            .expect("available partial-preview candidate"),
+        ProductFinalAuthority::Empty => RawTranscript {
+            text: String::new(),
+            duration_ms: candidates.provider_primary.duration_ms,
+        },
+    };
+
+    let local_shadow_eligible = !candidates.target_filter_required
+        && candidates.local_shadow_owner_end_aligned
+        && matches!(
+            authority,
+            ProductFinalAuthority::ProviderPrimary
+                | ProductFinalAuthority::RetainedAudioReplay
+        );
+    let mut local_shadow_recovered = false;
+    if local_shadow_eligible {
+        if let Some(local) = candidates.local_shadow.as_deref() {
+            if let Some(recovered) = recover_local_shadow_omissions(&transcript.text, local) {
+                transcript.text = recovered;
+                local_shadow_recovered = true;
+            }
+        }
+    }
+
+    if let Some(preview) = preview_for_hotwords.as_deref() {
+        transcript.text = reconcile_final_transcript_with_preview_hotwords(
+            &transcript.text,
+            preview,
+            hotwords,
+        );
+    }
+    if remove_filler_words {
+        transcript.text = remove_standalone_dictation_fillers(&transcript.text);
+    }
+
+    ProductFinalDecision {
+        transcript,
+        authority,
+        local_shadow_recovered,
+    }
+}
+
 fn reconcile_final_transcript_with_preview_hotwords(
     final_text: &str,
     preview: &str,

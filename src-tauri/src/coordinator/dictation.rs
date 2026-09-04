@@ -2064,54 +2064,6 @@ fn begin_stop_session_transition(inner: &Arc<Inner>, user_initiated: bool) -> Di
     )
 }
 
-#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-fn select_target_speaker_final(
-    primary: RawTranscript,
-    target_result: Result<Option<RawTranscript>, String>,
-    filter_required: bool,
-) -> RawTranscript {
-    match target_result {
-        Ok(Some(target)) if !target.text.trim().is_empty() => {
-            log::info!(
-                "[target-speaker] owner-only final selected primary_chars={} target_chars={}",
-                primary.text.chars().count(),
-                target.text.chars().count()
-            );
-            target
-        }
-        Ok(Some(target)) if filter_required => {
-            log::warn!(
-                "[target-speaker] empty owner-only final under confirmed interference; preserving primary rather than returning no text"
-            );
-            if target.text.trim().is_empty() {
-                primary
-            } else {
-                target
-            }
-        }
-        Ok(Some(_)) => primary,
-        Ok(None) if filter_required => {
-            log::warn!(
-                "[target-speaker] required owner-only final unavailable; preserving primary rather than returning no text"
-            );
-            primary
-        }
-        Ok(None) => primary,
-        Err(err) if filter_required => {
-            log::warn!(
-                "[target-speaker] required owner-only final failed; preserving primary rather than returning no text: {err}"
-            );
-            primary
-        }
-        Err(err) => {
-            log::warn!(
-                "[target-speaker] owner-only final unavailable; preserving primary transcript: {err}"
-            );
-            primary
-        }
-    }
-}
-
 async fn finish_end_session_after_stop_transition(
     inner: &Arc<Inner>,
     transition: DictationTransition,
@@ -2184,8 +2136,12 @@ async fn finish_end_session_after_stop_transition(
         });
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     let mut target_speaker_filter_required = false;
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    let mut separated_owner_candidate: Option<RawTranscript> = None;
     #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
     let target_speaker_filter_required = false;
+    #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
+    let separated_owner_candidate: Option<RawTranscript> = None;
     let raw = match asr {
         ActiveAsr::Volcengine(asr) => {
             debug_assert!(uses_global_timeout);
@@ -2283,11 +2239,36 @@ async fn finish_end_session_after_stop_transition(
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             {
                 target_speaker_filter_required = asr.target_speaker_filter_was_required();
-                select_target_speaker_final(
-                    primary_result,
-                    target_result,
-                    target_speaker_filter_required,
-                )
+                separated_owner_candidate = match target_result {
+                    Ok(Some(target)) if !target.text.trim().is_empty() => {
+                        log::info!(
+                            "[target-speaker] owner-only final offered to product arbiter primary_chars={} target_chars={}",
+                            primary_result.text.chars().count(),
+                            target.text.chars().count()
+                        );
+                        Some(target)
+                    }
+                    Ok(Some(_)) | Ok(None) if target_speaker_filter_required => {
+                        log::warn!(
+                            "[target-speaker] required owner-only final unavailable; sealed provider primary is the only owner-policy candidate"
+                        );
+                        None
+                    }
+                    Ok(Some(_)) | Ok(None) => None,
+                    Err(err) if target_speaker_filter_required => {
+                        log::warn!(
+                            "[target-speaker] required owner-only final failed; sealed provider primary is the only owner-policy candidate: {err}"
+                        );
+                        None
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "[target-speaker] owner-only final unavailable; provider primary remains a candidate: {err}"
+                        );
+                        None
+                    }
+                };
+                primary_result
             }
             #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
             {
@@ -2439,36 +2420,49 @@ async fn finish_end_session_after_stop_transition(
         return Ok(());
     }
 
-    // ASR 返回空转写护栏（来自 PR #66）：写一条 emptyTranscript 失败历史 + 错误胶囊，
-    // 与 main 上其它 error 路径保持一致（带 schedule_capsule_idle 让胶囊自动消失）。
-    let mut raw = raw;
-
-    #[cfg(any(debug_assertions, test))]
-    if raw.text.trim().is_empty() && !target_speaker_filter_required {
-        if let Some(debug_text) = debug_transcript_override_text() {
-            log::info!(
-                "[coord] using debug transcript override (chars={})",
-                debug_text.chars().count()
-            );
-            raw.text = debug_text;
-        }
-    }
-
-    let unfiltered_text = raw.text.clone();
-    raw.text = filter_automatic_wake_text(inner, current_session_id, &raw.text, false);
-    if raw.text != unfiltered_text.trim() {
+    // Build immutable evidence candidates first. Wake-prefix stripping is a
+    // deterministic normalization; candidate selection happens exactly once
+    // below in `arbitrate_product_final_transcript`.
+    let mut provider_primary = raw;
+    let unfiltered_text = provider_primary.text.clone();
+    provider_primary.text =
+        filter_automatic_wake_text(inner, current_session_id, &provider_primary.text, false);
+    if provider_primary.text != unfiltered_text.trim() {
         log::info!(
             "[wake-phrase] removed automatic activation prefix from final transcript session_id={} before_chars={} after_chars={}",
             current_session_id,
             unfiltered_text.chars().count(),
-            raw.text.chars().count()
+            provider_primary.text.chars().count()
         );
     }
+    let separated_owner_candidate = separated_owner_candidate.map(|mut candidate| {
+        candidate.text =
+            filter_automatic_wake_text(inner, current_session_id, &candidate.text, false);
+        candidate
+    });
+
+    #[cfg(any(debug_assertions, test))]
+    let debug_override_candidate =
+        if provider_primary.text.trim().is_empty() && !target_speaker_filter_required {
+            debug_transcript_override_text().map(|text| RawTranscript {
+                text,
+                duration_ms: provider_primary.duration_ms,
+            })
+        } else {
+            None
+        };
+    #[cfg(not(any(debug_assertions, test)))]
+    let debug_override_candidate: Option<RawTranscript> = None;
+
     // F2 云端空转兜底重试（2026-08-09 12:47:04：包全收、音频足量、云端
     // audio_duration 正常增长，但终稿只有唤醒词残段）。终稿空且本地证据显示
     // 整段持续人声时，用 retained_pcm 向新 ASR 会话有界重试一次；仍空才走
     // 下面的 emptyTranscript 护栏。replay_retained_audio_once 自带一次性闸。
-    if raw.text.trim().is_empty() && !target_speaker_filter_required {
+    let mut retained_audio_replay_candidate = None;
+    if provider_primary.text.trim().is_empty()
+        && !nonempty_transcript(&separated_owner_candidate)
+        && !target_speaker_filter_required
+    {
         if let Some(asr) = volcengine_for_empty_retry.as_ref() {
             let automatic_wake = automatic_wake_session_active(inner, current_session_id);
             let retry_allowed = asr.has_sustained_local_speech_evidence()
@@ -2486,14 +2480,19 @@ async fn finish_end_session_after_stop_transition(
                 .await
                 {
                     Ok(Ok(replayed)) if !replayed.text.trim().is_empty() => {
+                        let mut replayed = replayed;
+                        replayed.text = filter_automatic_wake_text(
+                            inner,
+                            current_session_id,
+                            &replayed.text,
+                            false,
+                        );
                         log::info!(
-                            "[coord] empty-spin retained-audio retry recovered session_id={} chars={}",
+                            "[coord] empty-spin retained-audio retry offered to product arbiter session_id={} chars={}",
                             current_session_id,
                             replayed.text.chars().count()
                         );
-                        raw = replayed;
-                        raw.text =
-                            filter_automatic_wake_text(inner, current_session_id, &raw.text, false);
+                        retained_audio_replay_candidate = Some(replayed);
                     }
                     Ok(Ok(_)) => {
                         log::info!(
@@ -2510,25 +2509,22 @@ async fn finish_end_session_after_stop_transition(
             }
         }
     }
-    // Live multi-speaker finals can collapse to empty after speaker filtering
-    // even when the capsule already streamed a long owner preview. Prefer that
-    // preview over the false "没有识别到语音" failure path.
-    if raw.text.trim().is_empty() && !target_speaker_filter_required {
-        if let Some(preview) = current_embedded_audio_partial_preview(inner) {
-            let recovered = filter_automatic_wake_text(inner, current_session_id, &preview, false);
-            if !recovered.trim().is_empty() {
-                log::warn!(
-                    "[coord] empty ASR final recovered from partial preview session_id={} preview_chars={} recovered_chars={}",
-                    current_session_id,
-                    preview.chars().count(),
-                    recovered.chars().count()
-                );
-                raw.text = recovered;
-            }
+
+    let partial_preview_candidate = current_embedded_audio_partial_preview(inner).map(|preview| {
+        let text = filter_automatic_wake_text(inner, current_session_id, &preview, false);
+        RawTranscript {
+            text,
+            duration_ms: provider_primary.duration_ms,
         }
-    }
+    });
+
+    let any_verified_base_text = !provider_primary.text.trim().is_empty()
+        || nonempty_transcript(&separated_owner_candidate)
+        || nonempty_transcript(&retained_audio_replay_candidate);
+    let mut local_shadow_candidate = None;
+    let mut local_shadow_owner_end_aligned = false;
     #[cfg(target_os = "windows")]
-    if !raw.text.trim().is_empty() {
+    if any_verified_base_text && !target_speaker_filter_required {
         if let Some((started, audio_ms, task)) = local_shadow_task.take() {
             let total_budget = Duration::from_millis(LOCAL_SHADOW_ASR_TOTAL_BUDGET_MS);
             let remaining = total_budget.saturating_sub(started.elapsed());
@@ -2545,36 +2541,20 @@ async fn finish_end_session_after_stop_transition(
                             .as_ref()
                             .is_some_and(|asr| asr.permits_local_shadow_omission_recovery());
                         if owner_end_aligned {
-                            if let Some(recovered) =
-                                recover_local_shadow_omissions(&raw.text, &local)
-                            {
-                                log::info!(
-                                    "[coord] local shadow recovered bounded cloud omissions session_id={} cloud_chars={} local_chars={} recovered_chars={} audio_ms={} inference_ms={} total_ms={}",
-                                    current_session_id,
-                                    raw.text.chars().count(),
-                                    local.chars().count(),
-                                    recovered.chars().count(),
-                                    audio_ms,
-                                    shadow.inference_ms,
-                                    started.elapsed().as_millis()
-                                );
-                                raw.text = recovered;
-                            } else {
-                                log::info!(
-                                    "[coord] local shadow kept cloud authoritative session_id={} cloud_chars={} local_chars={} audio_ms={} inference_ms={} total_ms={}",
-                                    current_session_id,
-                                    raw.text.chars().count(),
-                                    local.chars().count(),
-                                    audio_ms,
-                                    shadow.inference_ms,
-                                    started.elapsed().as_millis()
-                                );
-                            }
+                            log::info!(
+                                "[coord] local shadow offered to product arbiter session_id={} local_chars={} audio_ms={} inference_ms={} total_ms={}",
+                                current_session_id,
+                                local.chars().count(),
+                                audio_ms,
+                                shadow.inference_ms,
+                                started.elapsed().as_millis()
+                            );
+                            local_shadow_candidate = Some(local);
+                            local_shadow_owner_end_aligned = true;
                         } else {
                             log::info!(
-                                "[coord] local shadow discarded because owner end clocks did not align session_id={} cloud_chars={} local_chars={} audio_ms={} inference_ms={} total_ms={}",
+                                "[coord] local shadow discarded because owner end clocks did not align session_id={} local_chars={} audio_ms={} inference_ms={} total_ms={}",
                                 current_session_id,
-                                raw.text.chars().count(),
                                 local.chars().count(),
                                 audio_ms,
                                 shadow.inference_ms,
@@ -2602,18 +2582,29 @@ async fn finish_end_session_after_stop_transition(
             }
         }
     }
-    if inner.prefs.get().remove_filler_words {
-        let before = raw.text.clone();
-        raw.text = remove_standalone_dictation_fillers(&raw.text);
-        if raw.text != before {
-            log::info!(
-                "[coord] removed standalone filler words session_id={} before_chars={} after_chars={}",
-                current_session_id,
-                before.chars().count(),
-                raw.text.chars().count()
-            );
-        }
-    }
+
+    let product_final = arbitrate_product_final_transcript(
+        ProductFinalCandidates {
+            provider_primary,
+            separated_owner: separated_owner_candidate,
+            retained_audio_replay: retained_audio_replay_candidate,
+            debug_override: debug_override_candidate,
+            partial_preview: partial_preview_candidate,
+            local_shadow: local_shadow_candidate,
+            local_shadow_owner_end_aligned,
+            target_filter_required: target_speaker_filter_required,
+        },
+        &enabled_hotwords(inner),
+        inner.prefs.get().remove_filler_words,
+    );
+    log::info!(
+        "[coord] product final sealed authority={} chars={} filter_required={} local_shadow_recovered={}",
+        product_final.authority.label(),
+        product_final.transcript.text.chars().count(),
+        target_speaker_filter_required,
+        product_final.local_shadow_recovered
+    );
+    let mut raw = product_final.transcript;
 
     if raw.text.trim().is_empty() {
         let wake_only_expired = automatic_wake_session_active(inner, current_session_id)
@@ -2717,13 +2708,6 @@ async fn finish_end_session_after_stop_transition(
         return Err("ASR returned empty transcript".to_string());
     }
 
-    if let Some(preview) = current_embedded_audio_partial_preview(inner) {
-        raw.text = reconcile_final_transcript_with_preview_hotwords(
-            &raw.text,
-            &preview,
-            &enabled_hotwords(inner),
-        );
-    }
     publish_embedded_ble_asr_final(inner, current_session_id, false, Some(raw.text.clone()));
 
     let correction_rules = match inner.correction_rules.list() {

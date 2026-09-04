@@ -948,7 +948,7 @@ fn should_preserve_longer_owner_preview(
 /// exactly how room speech/recognition hallucinations leak into the user's
 /// text.  Keep punctuation-only corrections, but never admit new spoken
 /// content after the boundary unless a separately extracted owner track exists.
-fn post_stop_preview_ceiling(state: &SyncState, merged: &str) -> Option<String> {
+fn owner_preview_safety_ceiling(state: &SyncState, merged: &str) -> Option<String> {
     if !state.finishing
         || !state.local_speaker_tracking_enabled
         || state.last_emitted_preview_text.trim().is_empty()
@@ -4809,7 +4809,7 @@ impl VolcengineStreamingASR {
                 Some(&speaker_filtered_result.result)
             }
         };
-        let candidate = if matches!(
+        let mut candidate = if matches!(
             final_authority,
             crate::speech_decision_kernel::FinalTranscriptAuthority::SessionLedgerRecovery
         ) {
@@ -4824,6 +4824,18 @@ impl VolcengineStreamingASR {
         } else {
             transcript_candidate_from_result(selected_result.expect("non-ledger final authority"))
         };
+        // Apply the stop-boundary ceiling while this is still an unsealed
+        // candidate. It is a shrink-only ownership normalization, never a
+        // second final writer after the authority has been logged and sealed.
+        if has_final {
+            let state = self.state.lock();
+            if let Some(ceiling) = owner_preview_safety_ceiling(&state, &candidate.text) {
+                candidate.text = ceiling;
+                // The preview is display text rather than a timed provider
+                // segment. Discard stale timing before the candidate is sealed.
+                candidate.timed_segments.clear();
+            }
+        }
         let arbitrated_final_content_len = has_final.then(|| spoken_content_len(&candidate.text));
 
         // 流结束信号只信帧头 flags（lastPacket / negativeSequence）。
@@ -4928,19 +4940,6 @@ impl VolcengineStreamingASR {
                         trimmed.chars().count()
                     );
                     merged = trimmed;
-                }
-            }
-            // The provider's late two-pass revision must not make the final
-            // insertion contain words that were never present in the last
-            // owner-safe capsule preview.  Punctuation-only revisions remain
-            // eligible through the helper's normalized-content check.
-            if has_final {
-                if let Some(ceiling) = post_stop_preview_ceiling(&state, &merged) {
-                    merged = ceiling;
-                    // The preview is display text rather than a timed provider
-                    // segment; discard stale final timing so a later merge
-                    // cannot re-introduce the capped tail.
-                    segments.clear();
                 }
             }
             let changed = !merged.is_empty() && state.last_partial_text != merged;
@@ -6622,7 +6621,7 @@ mod tests {
             ..SyncState::default()
         };
         assert_eq!(
-            post_stop_preview_ceiling(&state, "开始录音。主人正文到这里。旁人插入的字。"),
+            owner_preview_safety_ceiling(&state, "开始录音。主人正文到这里。旁人插入的字。"),
             Some("开始录音。主人正文到这里。".into())
         );
     }
@@ -6635,7 +6634,7 @@ mod tests {
             last_emitted_preview_text: "开始录音主人正文".into(),
             ..SyncState::default()
         };
-        assert!(post_stop_preview_ceiling(&state, "开始录音，主人正文。").is_none());
+        assert!(owner_preview_safety_ceiling(&state, "开始录音，主人正文。").is_none());
     }
 
     #[test]

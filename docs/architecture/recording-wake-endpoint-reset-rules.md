@@ -262,3 +262,31 @@ Provider adapter 只负责产生上述证据，不得再添加独立的 `prefer_
 稳定的不同 speaker 行交叉确认，不能单独删除同 speaker 主人文字，也不能改变 endpoint。
 协议终帧经唯一仲裁后成为 sealed transcript；其后只允许标点、空格和重复尾巴规范化，
 不允许流式 merge、ledger fallback 或 provider fallback 再增加内容。
+
+### 产品终稿边界也只有一个裁决者（2026-09-04）
+
+Provider 内部封口并不等于产品终稿已经统一。继续审计发现 coordinator 在收到
+sealed provider final 后，仍会依次执行四条可写路径：owner-only 分离结果直接替换、
+空结果 retained-audio replay 直接替换、胶囊 partial preview 直接恢复、local shadow
+直接补字；最后 preview hotword 又单独改写一次。每条路径单独看都有用途，但串联后
+后执行的“防吞字”恢复可以绕过前面的干扰过滤，这正是四种体验反复回归的外层根因。
+
+现在停止流程必须先收集不可变的 `ProductFinalCandidates`，再且仅再调用一次
+`arbitrate_product_final_transcript`。产品级优先级由
+`speech_decision_kernel::arbitrate_product_final` 固定：
+
+1. 有可用的 owner-only 分离结果时选择 `separated_owner`；
+2. 否则选择已经通过 Provider 协议终帧仲裁并封口的 `provider_primary`；
+3. 明确要求干扰过滤且上述两项均为空时返回空，不得用 replay、preview 或 shadow
+   恢复未经身份验证的文字；
+4. 无干扰的空终稿才依次允许 `retained_audio_replay`、debug override 和
+   `partial_preview_recovery`；
+5. local shadow 不是独立 authority，只能在无干扰、主人结束时钟对齐且基础候选来自
+   Provider/replay 时，执行严格有界的 omission repair；
+6. preview hotword 与 filler 删除在一次裁决函数内部完成，随后记录唯一
+   `product final sealed authority=...`。之后 correction rule/LLM 只属于用户显式文本
+   后处理，不能重新读取 ASR、预览或声纹证据恢复录音内容。
+
+结构回归会拒绝旧 `select_target_speaker_final`、`raw = replayed`、
+`raw.text = recovered` 和 partial-preview 直接恢复语句重新出现。以后增加任何模型或
+fallback，都只能增加 `ProductFinalCandidates` 的证据字段，禁止新增终稿写出口。

@@ -159,6 +159,69 @@ pub(crate) fn arbitrate_final_transcript(
     FinalTranscriptAuthority::SpeakerFiltered
 }
 
+/// Sole product-boundary authority for choosing which already-produced text
+/// candidate may become the dictation result. Provider diarization, owner-only
+/// separation, retained-audio replay, the capsule preview and local shadow ASR
+/// are evidence producers; none of them may write the final text directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProductFinalAuthority {
+    SeparatedOwner,
+    ProviderPrimary,
+    RetainedAudioReplay,
+    DebugOverride,
+    PartialPreviewRecovery,
+    Empty,
+}
+
+impl ProductFinalAuthority {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::SeparatedOwner => "separated_owner",
+            Self::ProviderPrimary => "provider_primary",
+            Self::RetainedAudioReplay => "retained_audio_replay",
+            Self::DebugOverride => "debug_override",
+            Self::PartialPreviewRecovery => "partial_preview_recovery",
+            Self::Empty => "empty",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ProductFinalEvidence {
+    pub(crate) target_filter_required: bool,
+    pub(crate) separated_owner_available: bool,
+    pub(crate) provider_primary_available: bool,
+    pub(crate) retained_audio_replay_available: bool,
+    pub(crate) debug_override_available: bool,
+    pub(crate) partial_preview_available: bool,
+}
+
+pub(crate) fn arbitrate_product_final(evidence: ProductFinalEvidence) -> ProductFinalAuthority {
+    if evidence.separated_owner_available {
+        return ProductFinalAuthority::SeparatedOwner;
+    }
+    if evidence.provider_primary_available {
+        return ProductFinalAuthority::ProviderPrimary;
+    }
+    // Once explicit interference requires owner filtering, unverified replay,
+    // preview and local-shadow text must fail closed. The provider primary is
+    // still permitted above because it has already passed the provider's
+    // protocol-final speaker arbiter and is sealed against later expansion.
+    if evidence.target_filter_required {
+        return ProductFinalAuthority::Empty;
+    }
+    if evidence.retained_audio_replay_available {
+        return ProductFinalAuthority::RetainedAudioReplay;
+    }
+    if evidence.debug_override_available {
+        return ProductFinalAuthority::DebugOverride;
+    }
+    if evidence.partial_preview_available {
+        return ProductFinalAuthority::PartialPreviewRecovery;
+    }
+    ProductFinalAuthority::Empty
+}
+
 /// Transcript ownership evidence is deliberately separate from the wake and
 /// endpoint classification. Short, high-energy windows are too small to erase
 /// text on their own, but two of them may corroborate a provider-final speaker
@@ -1827,6 +1890,69 @@ mod tests {
                 ..base
             }),
             FinalTranscriptAuthority::ProviderRawRecovery
+        );
+    }
+
+    #[test]
+    fn target_speaker_endpoint_product_final_blocks_unverified_recovery_under_interference() {
+        let evidence = ProductFinalEvidence {
+            target_filter_required: true,
+            separated_owner_available: false,
+            provider_primary_available: false,
+            retained_audio_replay_available: true,
+            debug_override_available: true,
+            partial_preview_available: true,
+        };
+        assert_eq!(
+            arbitrate_product_final(evidence),
+            ProductFinalAuthority::Empty
+        );
+        assert_eq!(
+            arbitrate_product_final(ProductFinalEvidence {
+                provider_primary_available: true,
+                ..evidence
+            }),
+            ProductFinalAuthority::ProviderPrimary,
+            "the sealed provider result may survive a separator outage"
+        );
+        assert_eq!(
+            arbitrate_product_final(ProductFinalEvidence {
+                separated_owner_available: true,
+                provider_primary_available: true,
+                ..evidence
+            }),
+            ProductFinalAuthority::SeparatedOwner
+        );
+    }
+
+    #[test]
+    fn target_speaker_endpoint_product_final_has_one_clean_recovery_precedence() {
+        let all_recovery_candidates = ProductFinalEvidence {
+            target_filter_required: false,
+            separated_owner_available: false,
+            provider_primary_available: false,
+            retained_audio_replay_available: true,
+            debug_override_available: true,
+            partial_preview_available: true,
+        };
+        assert_eq!(
+            arbitrate_product_final(all_recovery_candidates),
+            ProductFinalAuthority::RetainedAudioReplay
+        );
+        assert_eq!(
+            arbitrate_product_final(ProductFinalEvidence {
+                retained_audio_replay_available: false,
+                ..all_recovery_candidates
+            }),
+            ProductFinalAuthority::DebugOverride
+        );
+        assert_eq!(
+            arbitrate_product_final(ProductFinalEvidence {
+                retained_audio_replay_available: false,
+                debug_override_available: false,
+                ..all_recovery_candidates
+            }),
+            ProductFinalAuthority::PartialPreviewRecovery
         );
     }
 }
