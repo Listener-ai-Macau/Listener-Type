@@ -1010,10 +1010,10 @@ async fn handle_device_dictation_action(
                 control_decision,
                 DeviceKeyBleRecordingControlDecision::Start
             ) {
-                note_device_key_dictation_start_intent()
+                note_device_key_dictation_start_intent(&inner)
                     || should_promote_hidden_automatic_candidate(
                         control_decision,
-                        hidden_automatic_candidate_active(),
+                        hidden_automatic_candidate_active(&inner),
                     )
             } else {
                 false
@@ -1048,6 +1048,27 @@ async fn handle_device_dictation_action(
         }
 
         let control_session = control_decision.control_session();
+        let send_stop_control = matches!(
+            control_decision,
+            DeviceKeyBleRecordingControlDecision::Stop {
+                phase: SessionPhase::Listening,
+                ..
+            }
+        );
+        let committed_stop_session = if send_stop_control {
+            let Some((session_id, _)) = control_session else {
+                return;
+            };
+            if !dictation::commit_recording_stop(&inner, session_id, "device_key") {
+                log::info!(
+                    "[device-key] ignored duplicate/stale stop before BLE dispatch session_id={session_id}"
+                );
+                return;
+            }
+            Some(session_id)
+        } else {
+            None
+        };
         // Promote/ACTIVATE is an internal control choice when a hidden VA verification
         // buffer is already running (voice-auto-start). Owners never see that buffer,
         // so the capsule must use the normal start copy — a "taking over" status looked
@@ -1058,63 +1079,44 @@ async fn handle_device_dictation_action(
             "正在启动 Listener 录音..."
         };
 
-        let stop_feedback_requested =
-            if matches!(control_session, Some((_, SessionPhase::Listening))) {
-                request_embedded_audio_stop_feedback(&inner, "device_key_stop_control_pending")
-            } else {
-                false
-            };
-        let pending_ui_state = if stop_feedback_requested {
-            DictationUiState::Transcribing
-        } else {
-            DictationUiState::Recording
-        };
-        let waiting_message = if stop_feedback_requested {
-            current_embedded_audio_partial_preview(&inner)
-                .unwrap_or_else(|| waiting_message.to_string())
-        } else {
-            waiting_message.to_string()
-        };
         emit_device_key_recording_control_capsule(
             &inner,
             control_session,
-            pending_ui_state,
+            DictationUiState::Recording,
             if control_session.is_some() {
                 CapsuleState::Reconnecting
             } else {
                 CapsuleState::Recording
             },
-            waiting_message,
+            waiting_message.to_string(),
         );
-        let send_stop_control = matches!(
-            control_decision,
-            DeviceKeyBleRecordingControlDecision::Stop {
-                phase: SessionPhase::Listening,
-                ..
-            }
-        );
-        let result = async_runtime::spawn_blocking(move || {
-            if promote_hidden_candidate {
-                crate::embedded_ble::send_recording_control_activate(
-                    EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
-                )
-            } else if send_stop_control {
-                crate::embedded_ble::send_recording_control_stop(
-                    EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
-                )
-            } else {
-                crate::embedded_ble::send_recording_control_toggle(
-                    EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
-                )
-            }
-        })
-        .await
-        .map_err(|err| err.to_string())
-        .and_then(|value| value);
+        let result = if send_stop_control {
+            request_embedded_ble_recording_stop_from_host(&inner, "device_key_stop")
+                .await
+                .and_then(|sent| {
+                    sent.then_some(())
+                        .ok_or_else(|| "录音停止已被生命周期拒绝".to_string())
+                })
+        } else {
+            async_runtime::spawn_blocking(move || {
+                if promote_hidden_candidate {
+                    crate::embedded_ble::send_recording_control_activate(
+                        EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+                    )
+                } else {
+                    crate::embedded_ble::send_recording_control_toggle(
+                        EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+                    )
+                }
+            })
+            .await
+            .map_err(|err| err.to_string())
+            .and_then(|value| value)
+        };
         match result {
             Ok(()) => {
                 let promotion_requested = if promote_hidden_candidate {
-                    request_hidden_automatic_candidate_promotion()
+                    request_hidden_automatic_candidate_promotion(&inner)
                 } else {
                     false
                 };
@@ -1145,6 +1147,10 @@ async fn handle_device_dictation_action(
                     }
                 }
                 if matches!(control_session, Some((_, SessionPhase::Listening))) {
+                    let _ = request_embedded_audio_stop_feedback(
+                        &inner,
+                        "device_key_stop_control_sent",
+                    );
                     return;
                 }
                 emit_device_key_recording_control_capsule(
@@ -1156,6 +1162,9 @@ async fn handle_device_dictation_action(
                 );
             }
             Err(error) => {
+                if let Some(session_id) = committed_stop_session {
+                    dictation::reopen_recording_stop(&inner, session_id);
+                }
                 record_embedded_ble_listener_last_error(&inner, &error);
                 record_embedded_ble_recovery_failure(&inner, &error);
                 refresh_embedded_ble_listener(&inner);
@@ -1641,31 +1650,39 @@ async fn send_pending_device_key_ble_stop(
 ) {
     let control_decision = device_key_ble_recording_control_decision(&inner);
     let control_session = control_decision.control_session();
-    let Some((_, SessionPhase::Listening)) = control_session else {
+    let Some((session_id, SessionPhase::Listening)) = control_session else {
         drop_pending_device_key_ble_action_for_state(action, control_decision, reason);
         return;
     };
 
-    let _ = request_embedded_audio_stop_feedback(&inner, "device_key_stop_control_retry");
+    if !dictation::commit_recording_stop(&inner, session_id, "device_key_retry") {
+        drop_pending_device_key_ble_action_for_state(action, control_decision, reason);
+        return;
+    }
     emit_device_key_recording_control_capsule(
         &inner,
         control_session,
-        DictationUiState::Transcribing,
+        DictationUiState::Recording,
         CapsuleState::Reconnecting,
         "正在补发设备录音停止控制...".to_string(),
     );
 
-    let result = async_runtime::spawn_blocking(move || {
-        crate::embedded_ble::send_recording_control_stop(
-            EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
-        )
-    })
+    let result = request_embedded_ble_recording_stop_from_host(
+        &inner,
+        "device_key_stop_retry",
+    )
     .await
-    .map_err(|err| err.to_string())
-    .and_then(|value| value);
+    .and_then(|sent| {
+        sent.then_some(())
+            .ok_or_else(|| "录音停止重试已被生命周期拒绝".to_string())
+    });
 
     match result {
         Ok(()) => {
+            let _ = request_embedded_audio_stop_feedback(
+                &inner,
+                "device_key_stop_control_retry_sent",
+            );
             clear_embedded_ble_listener_last_error(&inner);
             crate::timeline::mark(
                 "backend.device_key",
@@ -1683,6 +1700,7 @@ async fn send_pending_device_key_ble_stop(
             );
         }
         Err(error) => {
+            dictation::reopen_recording_stop(&inner, session_id);
             record_embedded_ble_listener_last_error(&inner, &error);
             record_embedded_ble_recovery_failure(&inner, &error);
             refresh_embedded_ble_listener(&inner);
@@ -1849,7 +1867,7 @@ async fn request_embedded_ble_recording_start_from_host(
                 if terminal_wake_continuation {
                     dictation::clear_terminal_wake_continuation(inner, session_id);
                 }
-                set_phase_idle_if_session_matches(inner, session_id);
+                transition_pipeline_error_if_session_matches(inner, session_id);
                 record_embedded_ble_listener_last_error(inner, &err);
                 record_embedded_ble_recovery_failure(inner, &err);
                 refresh_embedded_ble_listener(inner);

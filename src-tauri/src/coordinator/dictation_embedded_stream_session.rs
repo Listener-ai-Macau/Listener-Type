@@ -55,7 +55,7 @@ impl EmbeddedStreamingDictation {
         }
 
         // User-origin full session: do not auto-promote a later unrelated VA candidate.
-        clear_device_key_dictation_takeover_pending();
+        clear_device_key_dictation_takeover_pending(inner);
         self.embedded_session_id = Some(embedded_session_id);
         let mut session = begin_embedded_audio_dictation_session(inner).await?;
         let terminal_wake_continuation =
@@ -81,21 +81,46 @@ impl EmbeddedStreamingDictation {
                 acknowledge_automatic_wake_capsule_visible(inner, session.session_id);
             }
         }
-        if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
-            if terminal_wake_continuation.is_some() {
-                clear_automatic_wake_text_guard(inner);
+        let lifecycle_admitted = if terminal_wake_continuation.is_some() {
+            let mut lifecycle = inner.recording_lifecycle.lock();
+            lifecycle
+                .current_candidate_session_id()
+                .is_some_and(|candidate_id| {
+                    lifecycle.promote_candidate_to_owner(candidate_id, session.session_id)
+                })
+        } else {
+            inner
+                .recording_lifecycle
+                .lock()
+                .begin_manual_owner(embedded_session_id, session.session_id)
+        };
+        if !lifecycle_admitted {
+            if let Some(candidate_id) = inner
+                .recording_lifecycle
+                .lock()
+                .current_candidate_session_id()
+            {
+                let _ = inner
+                    .recording_lifecycle
+                    .lock()
+                    .close_candidate(candidate_id);
             }
-            return Err("嵌入式音频听写会话已被取消".to_string());
-        }
-        if !inner
-            .recording_lifecycle
-            .lock()
-            .begin_manual_owner(embedded_session_id, session.session_id)
-        {
+            transition_pipeline_error_if_session_matches(inner, session.session_id);
+            cancel_asr_for_session(inner, session.session_id);
             return Err(format!(
                 "录音生命周期拒绝主人会话 embedded_session_id={embedded_session_id} coordinator_session_id={}",
                 session.session_id
             ));
+        }
+        if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
+            let _ = inner
+                .recording_lifecycle
+                .lock()
+                .close_owner(session.session_id);
+            if terminal_wake_continuation.is_some() {
+                clear_automatic_wake_text_guard(inner);
+            }
+            return Err("嵌入式音频听写会话已被取消".to_string());
         }
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         log::info!(

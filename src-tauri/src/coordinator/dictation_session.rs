@@ -324,7 +324,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                     asr.cancel();
                     discard_startup_resources_for_session(inner, current_session_id);
                     restore_prepared_windows_ime_session(inner, current_session_id);
-                    set_phase_idle_if_session_matches(inner, current_session_id);
+                    transition_pipeline_error_if_session_matches(inner, current_session_id);
                     return Ok(());
                 }
                 StartupRaceStatus::ActiveStarting => {
@@ -348,7 +348,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                 asr.cancel();
                 discard_startup_resources_for_session(inner, current_session_id);
                 restore_prepared_windows_ime_session(inner, current_session_id);
-                set_phase_idle_if_session_matches(inner, current_session_id);
+                transition_pipeline_error_if_session_matches(inner, current_session_id);
                 return Ok(());
             }
             StartupRaceStatus::StaleContinuation => {
@@ -421,7 +421,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                     asr.cancel();
                     discard_startup_resources_for_session(inner, current_session_id);
                     restore_prepared_windows_ime_session(inner, current_session_id);
-                    set_phase_idle_if_session_matches(inner, current_session_id);
+                    transition_pipeline_error_if_session_matches(inner, current_session_id);
                     return Ok(());
                 }
                 StartupRaceStatus::ActiveStarting => {}
@@ -455,7 +455,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                 asr.cancel();
                 discard_startup_resources_for_session(inner, current_session_id);
                 restore_prepared_windows_ime_session(inner, current_session_id);
-                set_phase_idle_if_session_matches(inner, current_session_id);
+                transition_pipeline_error_if_session_matches(inner, current_session_id);
                 return Ok(());
             }
             StartupRaceStatus::StaleContinuation => {
@@ -677,7 +677,7 @@ pub(super) async fn finish_starting_session(inner: &Arc<Inner>, session_id: Sess
             log::info!("[coord] cancel raced during recorder/ASR startup — aborting begin");
             discard_startup_resources_for_session(inner, session_id);
             restore_prepared_windows_ime_session(inner, session_id);
-            set_phase_idle_if_session_matches(inner, session_id);
+            transition_pipeline_error_if_session_matches(inner, session_id);
         }
         BeginOutcome::Started | BeginOutcome::PendingStop => {
             log::info!("[coord] session started");

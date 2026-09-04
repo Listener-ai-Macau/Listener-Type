@@ -2,9 +2,18 @@
 // Included into `coordinator::dictation` via `include!`.
 
 impl EmbeddedStreamingDictation {
-    fn reset_product_lifecycle(&self, inner: &Arc<Inner>) {
+    /// Close only lifecycle identity owned by this actor instance. A transport
+    /// event without actor-local work must never mutate a newer product
+    /// candidate/session.
+    fn close_owned_product_lifecycle(&self, inner: &Arc<Inner>) {
         let mut lifecycle = inner.recording_lifecycle.lock();
-        lifecycle.close(None);
+        if let Some(session_id) = self.session.as_ref().map(|session| session.session_id) {
+            let _ = lifecycle.close_owner(session_id);
+        } else if self.speaker_candidate.is_some() {
+            if let Some(embedded_session_id) = self.embedded_session_id {
+                let _ = lifecycle.close_candidate(embedded_session_id);
+            }
+        }
     }
 
     /// Drop actor-local transport state after the product session was fully
@@ -23,7 +32,7 @@ impl EmbeddedStreamingDictation {
             return false;
         }
         clear_embedded_ble_awaiting_post_activation_segment(inner, session_id);
-        self.reset_product_lifecycle(inner);
+        self.close_owned_product_lifecycle(inner);
         self.reset_for_next_session();
         log::info!(
             "[embedded-ble] released actor transport state after logical no-body finalization session_id={session_id}"
@@ -107,10 +116,7 @@ impl EmbeddedStreamingDictation {
     }
 
     fn abort_active_session(&mut self, inner: &Arc<Inner>, message: &str) {
-        {
-            self.reset_product_lifecycle(inner);
-        }
-        clear_hidden_automatic_candidate();
+        self.close_owned_product_lifecycle(inner);
         self.activation_segment_race_guard = None;
         set_device_ai_processing_async(inner, false, "embedded_stream_abort");
         if matches!(
@@ -152,7 +158,7 @@ impl EmbeddedStreamingDictation {
         if !had_work {
             return false;
         }
-        clear_hidden_automatic_candidate();
+        self.close_owned_product_lifecycle(inner);
         set_device_ai_processing_async(inner, false, "embedded_stream_user_cancel");
         if matches!(
             self.speaker_candidate
@@ -166,7 +172,6 @@ impl EmbeddedStreamingDictation {
             cancel_asr_for_session(inner, session.session_id);
             restore_prepared_windows_ime_session(inner, session.session_id);
         }
-        self.reset_product_lifecycle(inner);
         self.reset_for_next_session();
         log::info!(
             "[embedded-ble] discarded in-flight background stream session after user cancel; notify kept open"
@@ -177,7 +182,7 @@ impl EmbeddedStreamingDictation {
     /// Logical stream error on continuous background: drop local session state but
     /// keep the GATT notify subscription alive for the next attempt.
     fn discard_active_session_after_stream_error(&mut self, inner: &Arc<Inner>, message: &str) {
-        clear_hidden_automatic_candidate();
+        self.close_owned_product_lifecycle(inner);
         set_device_ai_processing_async(inner, false, "embedded_stream_soft_error");
         if matches!(
             self.speaker_candidate
@@ -195,7 +200,6 @@ impl EmbeddedStreamingDictation {
             // wake rejections should not bounce the BLE link.
             publish_dictation_pipeline_error(inner, session.session_id, message.to_string());
         }
-        self.reset_product_lifecycle(inner);
         self.reset_for_next_session();
         log::warn!(
             "[embedded-ble] discarded background stream session after error while keeping notify open: {message}"
@@ -227,7 +231,6 @@ impl EmbeddedStreamingDictation {
     }
 
     fn reset_for_next_session(&mut self) {
-        clear_hidden_automatic_candidate();
         self.collector.reset();
         self.session = None;
         self.speaker_candidate = None;

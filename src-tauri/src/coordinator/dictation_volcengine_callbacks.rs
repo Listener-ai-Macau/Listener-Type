@@ -109,25 +109,17 @@ fn set_volcengine_preview_callbacks(
             decision_audio_ms,
         );
         let now = Instant::now();
-        let endpoint_rearmed = {
+        {
             let mut clock = clock_for_speaker.lock();
-            clock
-                .observe(&update, endpoint_policy.body_started, now)
-                .is_some()
-        };
-        let owner_activity = reduce_target_speaker_activity_observation(
+            clock.observe(&update, endpoint_policy.body_started, now);
+        }
+        renew_firmware_lease_from_owner_observation(
             &inner_for_speaker,
             session_id,
             &clock_for_speaker,
             &update,
             endpoint_policy.body_started,
         );
-        if endpoint_rearmed && !owner_activity {
-            let _ = inner_for_speaker
-                .recording_lifecycle
-                .lock()
-                .note_quiet_pending(session_id);
-        }
         // Provider callbacks only publish observations. Reuse the same clock
         // decision as the watchdog instead of running a second endpoint policy
         // here; the previous split could commit Stopping in the clock and then

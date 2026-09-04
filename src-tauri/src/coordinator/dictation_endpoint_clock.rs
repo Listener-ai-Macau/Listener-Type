@@ -745,12 +745,6 @@ fn start_settled_target_endpoint_watchdog(
                 }
                 let now = Instant::now();
                 let owner_analysis_pending = asr.local_speaker_analysis_pending();
-                if owner_analysis_pending {
-                    let _ = inner
-                        .recording_lifecycle
-                        .lock()
-                        .note_owner_evidence_pending(session_id);
-                }
                 let update =
                     clock.reduce_session_policy(
                         now,
@@ -783,22 +777,16 @@ fn start_settled_target_endpoint_watchdog(
 
 fn arm_settled_target_endpoint_for_visible_body(
     inner: &Arc<Inner>,
-    session_id: SessionId,
+    _session_id: SessionId,
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
 ) {
     let preview = current_embedded_audio_partial_preview(inner);
     let preview_ends_terminal = preview_ends_with_sentence_terminal(preview.as_deref());
     let preview_chars = preview.as_deref().map_or(0, |text| text.chars().count());
     let now = Instant::now();
-    let endpoint_rearmed = {
+    {
         let mut clock = endpoint_clock.lock();
         clock.note_visible_body_boundary(preview_ends_terminal, preview_chars, now);
-        clock.arm_latest_for_visible_body(now).is_some()
-    };
-    if endpoint_rearmed {
-        let _ = inner
-            .recording_lifecycle
-            .lock()
-            .note_quiet_pending(session_id);
+        clock.arm_latest_for_visible_body(now);
     }
 }

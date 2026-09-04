@@ -104,7 +104,7 @@ guessing.
 6. Wake and endpoint decisions are replayable from captured PCM and structured
    evidence, without changing global thresholds blindly.
 
-## Runtime ownership rule (1.0.6)
+## Runtime ownership rule (1.0.5)
 
 Endpointing is a session reducer, not a collection of callback timers. Provider,
 preview, and local-speaker callbacks only publish an observation into the

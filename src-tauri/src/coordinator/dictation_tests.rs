@@ -4,7 +4,7 @@ use super::{
     automatic_wake_body_started, automatic_wake_initial_body_wait_active,
     automatic_wake_session_active, begin_embedded_audio_dictation_session_id,
     cancel_embedded_ble_listener_capture, cancel_session, claim_post_dictation_key,
-    clear_automatic_wake_text_guard, clear_embedded_ble_cancel_flag,
+    clear_automatic_wake_text_guard, clear_embedded_ble_cancel_flag, commit_recording_stop,
     current_embedded_audio_partial_preview, default_done_message,
     device_ai_processing_completion_delay, device_ai_processing_io_allowed,
     device_processing_final_succeeded, dictation_asr_engine_backend_id,
@@ -1075,7 +1075,7 @@ fn key_stop_feedback_latches_transcribing_without_processing_phase() {
 }
 
 #[tokio::test]
-async fn host_stop_request_to_firmware_latches_feedback_without_local_finish() {
+async fn target_speaker_endpoint_host_stop_transport_requires_lifecycle_commit() {
     let coordinator = Coordinator::new();
     let session_id = new_session_id();
     let cancel_flag = Arc::new(AtomicBool::new(false));
@@ -1086,6 +1086,16 @@ async fn host_stop_request_to_firmware_latches_feedback_without_local_finish() {
         state.phase = SessionPhase::Listening;
         state.cancelled = false;
     }
+    assert!(coordinator
+        .inner
+        .recording_lifecycle
+        .lock()
+        .begin_manual_owner(71, session_id));
+    assert!(commit_recording_stop(
+        &coordinator.inner,
+        session_id,
+        "unit_test_host_stop"
+    ));
 
     let handled =
         request_embedded_ble_recording_stop_from_host(&coordinator.inner, "unit_test_host_stop")
@@ -1094,7 +1104,7 @@ async fn host_stop_request_to_firmware_latches_feedback_without_local_finish() {
 
     assert!(handled);
     assert!(!cancel_flag.load(Ordering::SeqCst));
-    assert!(embedded_audio_stop_feedback_latched(&coordinator.inner));
+    assert!(!embedded_audio_stop_feedback_latched(&coordinator.inner));
     {
         let state = coordinator.inner.state.lock();
         assert_eq!(state.phase, SessionPhase::Listening);
@@ -1132,7 +1142,48 @@ fn embedded_audio_session_attaches_to_host_starting_session() {
 }
 
 #[tokio::test]
-async fn host_stop_request_routes_by_embedded_ble_preference_without_capture_flag() {
+async fn target_speaker_endpoint_host_stop_transport_routes_without_capture_flag_after_commit() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = session_id;
+        state.phase = SessionPhase::Listening;
+        state.cancelled = false;
+    }
+    assert!(coordinator
+        .inner
+        .recording_lifecycle
+        .lock()
+        .begin_manual_owner(72, session_id));
+    assert!(commit_recording_stop(
+        &coordinator.inner,
+        session_id,
+        "unit_test_host_stop_pref"
+    ));
+
+    let handled = request_embedded_ble_recording_stop_from_host(
+        &coordinator.inner,
+        "unit_test_host_stop_pref",
+    )
+    .await
+    .expect("test stop request does not touch BLE transport");
+
+    assert!(handled);
+    assert!(!embedded_audio_stop_feedback_latched(&coordinator.inner));
+    {
+        let state = coordinator.inner.state.lock();
+        assert_eq!(state.phase, SessionPhase::Listening);
+    }
+    let history = embedded_ble_session_actor_history(&coordinator.inner);
+    assert!(history.iter().any(|record| {
+        record.command == EmbeddedBleSessionActorCommand::StopCommand
+            && record.detail.contains("unit_test_host_stop_pref")
+    }));
+}
+
+#[tokio::test]
+async fn target_speaker_endpoint_host_stop_transport_rejects_uncommitted_session() {
     let coordinator = Coordinator::new();
     let session_id = new_session_id();
     {
@@ -1144,22 +1195,15 @@ async fn host_stop_request_routes_by_embedded_ble_preference_without_capture_fla
 
     let handled = request_embedded_ble_recording_stop_from_host(
         &coordinator.inner,
-        "unit_test_host_stop_pref",
+        "unit_test_uncommitted_stop",
     )
     .await
-    .expect("test stop request does not touch BLE transport");
+    .expect("uncommitted stop is rejected before BLE transport");
 
-    assert!(handled);
-    assert!(embedded_audio_stop_feedback_latched(&coordinator.inner));
-    {
-        let state = coordinator.inner.state.lock();
-        assert_eq!(state.phase, SessionPhase::Listening);
-    }
-    let history = embedded_ble_session_actor_history(&coordinator.inner);
-    assert!(history.iter().any(|record| {
-        record.command == EmbeddedBleSessionActorCommand::StopCommand
-            && record.detail.contains("unit_test_host_stop_pref")
-    }));
+    assert!(!handled);
+    assert!(!embedded_ble_session_actor_history(&coordinator.inner)
+        .iter()
+        .any(|record| record.command == EmbeddedBleSessionActorCommand::StopCommand));
 }
 
 #[tokio::test]
@@ -3407,7 +3451,7 @@ fn provider_stall_requires_real_time_without_provider_coverage_progress() {
 }
 
 #[test]
-fn terminal_wake_continuation_is_bounded_session_matched_and_one_shot() {
+fn target_speaker_endpoint_terminal_wake_continuation_is_bounded_session_matched_and_one_shot() {
     let coordinator = Coordinator::new();
     let started = Instant::now();
     let session_id = new_session_id();
@@ -3459,7 +3503,7 @@ fn terminal_wake_continuation_is_bounded_session_matched_and_one_shot() {
 }
 
 #[test]
-fn terminal_wake_continuation_expiry_or_session_mismatch_cannot_leak() {
+fn target_speaker_endpoint_terminal_wake_continuation_expiry_or_session_mismatch_cannot_leak() {
     let coordinator = Coordinator::new();
     let started = Instant::now();
     let session_id = new_session_id();
@@ -3515,7 +3559,7 @@ fn terminal_wake_continuation_expiry_or_session_mismatch_cannot_leak() {
 }
 
 #[test]
-fn bound_terminal_wake_continuation_routes_next_device_segment_to_body() {
+fn target_speaker_endpoint_bound_terminal_wake_continuation_routes_next_device_segment_to_body() {
     // Installed session ca5c63d3 reproduced the regression: terminal wake
     // opened a visible Starting session, but the next VoiceActivation segment
     // was buffered as a second wake candidate and the capsule hung for 25s.
@@ -3588,7 +3632,7 @@ fn terminal_wake_body_guard_is_bound_before_recording_capsule_emit() {
 }
 
 #[test]
-fn terminal_wake_continuation_captures_original_windows_insertion_target() {
+fn target_speaker_endpoint_terminal_wake_continuation_captures_original_windows_insertion_target() {
     // Installed session 237 completed ASR successfully but showed the
     // clipboard/error capsule because the host-start path explicitly created
     // the real session with `focus_target=None`.
@@ -3965,7 +4009,7 @@ fn automatic_wake_target_speaker_endpoint_no_body_uses_original_guard_clock() {
     );
     assert_eq!(
         clock.lifecycle(),
-        crate::speech_decision_kernel::OwnerEndpointState::Stopping
+        crate::speech_decision_kernel::OwnerEndpointState::QuietPending
     );
 }
 
@@ -4082,13 +4126,11 @@ fn target_speaker_endpoint_no_body_finalization_cannot_steal_next_physical_wake(
 #[test]
 fn target_speaker_endpoint_reduces_fresh_activity_before_stop_policy() {
     // A fresh provider/local identity callback is an evidence event even when
-    // no stop is due. The old callback invoked the activity reducer only from
-    // the due-stop handler, leaving RecordingLifecycleController in
-    // QuietPending while the owner was actively speaking and renewing the
-    // firmware lease too late.
+    // no stop is due. It may renew the physical firmware lease, but it must not
+    // mirror endpoint sub-states into RecordingLifecycleController.
     let callback_source = include_str!("dictation_volcengine_callbacks.rs");
     let activity = callback_source
-        .find("reduce_target_speaker_activity_observation(")
+        .find("renew_firmware_lease_from_owner_observation(")
         .expect("every target-speaker callback must reduce fresh owner evidence");
     let decision = callback_source[activity..]
         .find("reduce_session_policy(")
@@ -4096,7 +4138,11 @@ fn target_speaker_endpoint_reduces_fresh_activity_before_stop_policy() {
         .expect("the same callback must then ask the endpoint reducer for a stop decision");
     assert!(
         activity < decision,
-        "owner activity must enter the lifecycle before endpoint stop evaluation"
+        "owner activity must renew the physical lease before endpoint stop evaluation"
+    );
+    assert!(
+        !callback_source.contains(".recording_lifecycle"),
+        "evidence callbacks must not maintain a second copy of endpoint lifecycle state"
     );
 
     let stop_source = include_str!("dictation_target_speaker_update.rs");
@@ -4108,6 +4154,106 @@ fn target_speaker_endpoint_reduces_fresh_activity_before_stop_policy() {
         !stop_body.contains("note_owner_activity(session_id)"),
         "the irreversible stop handler must not double as a fresh evidence reducer"
     );
+}
+
+#[test]
+fn target_speaker_endpoint_has_one_identity_scoped_stop_commit() {
+    let kernel = include_str!("../speech_decision_kernel.rs");
+    let endpoint = include_str!("dictation_target_speaker_update.rs");
+    let stream = include_str!("dictation_embedded_stream.rs");
+    let completion = include_str!("dictation_embedded_stream_completion.rs");
+    let submit = include_str!("dictation_embedded_submit.rs");
+    let wake = include_str!("dictation_wake_polish.rs");
+    let combined = [stream, completion, submit].join("\n");
+    let coordinator_state_writers = [
+        include_str!("dictation.rs"),
+        include_str!("dictation_device_ai.rs"),
+        include_str!("support.rs"),
+    ]
+    .join("\n");
+
+    assert!(!kernel.contains("StopCommitted"));
+    assert!(!kernel.contains("fn close(&mut self, coordinator_session_id: Option"));
+    assert!(!combined.contains("close(None)"));
+    assert!(!combined.contains("reset_product_lifecycle"));
+    assert!(!wake.contains("WakeCandidateController"));
+    assert!(!wake.contains("HIDDEN_AUTOMATIC_CANDIDATE_"));
+    assert!(!endpoint.contains("RecordingLifecycleState::Idle"));
+    assert!(!coordinator_state_writers.contains("state.phase = SessionPhase"));
+    assert!(!coordinator_state_writers.contains("cleanup_cancelled_processing_session"));
+
+    let commit = endpoint
+        .find(".commit_stop(session_id)")
+        .expect("identity-scoped lifecycle stop commit");
+    let dispatch_latch = endpoint
+        .find(".compare_exchange(false, true")
+        .expect("physical stop dispatch latch");
+    assert!(commit < dispatch_latch);
+
+    let transport_stop = endpoint
+        .find("request_embedded_ble_recording_stop_from_host(&inner, stop_reason).await")
+        .expect("physical stop write");
+    let public_stop_feedback = endpoint
+        .find("request_embedded_audio_stop_feedback(&inner, stop_reason)")
+        .expect("public transcribing transition");
+    let provider_final = endpoint
+        .find("asr.send_last_frame().await")
+        .expect("provider final frame");
+    assert!(transport_stop < public_stop_feedback);
+    assert!(public_stop_feedback < provider_final);
+
+    let transport = include_str!("dictation.rs");
+    let stop_transport = transport
+        .split("pub(super) async fn request_embedded_ble_recording_stop_from_host")
+        .nth(1)
+        .expect("stop transport function")
+        .split("fn activate_embedded_audio_dictation_session")
+        .next()
+        .expect("bounded stop transport function");
+    assert!(!stop_transport.contains("request_embedded_audio_stop_feedback"));
+    assert!(stop_transport.contains(".stop_committed_for(session_id)"));
+    assert!(!include_str!("hotkey_device_runtime.rs").contains("send_recording_control_stop"));
+    assert!(!include_str!("dictation_embedded_stream.rs").contains("send_recording_control_stop"));
+}
+
+#[test]
+fn target_speaker_endpoint_binds_lifecycle_before_every_visible_activation() {
+    let stream = include_str!("dictation_embedded_stream.rs");
+    let session = include_str!("dictation_embedded_stream_session.rs");
+    let promotions = stream
+        .match_indices(".promote_candidate_to_owner(")
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let activations = stream
+        .match_indices("if !activate_embedded_audio_dictation_session(")
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    assert_eq!(promotions.len(), 3);
+    assert_eq!(activations.len(), 3);
+    for (promote, activate) in promotions.into_iter().zip(activations) {
+        assert!(promote < activate);
+    }
+
+    let manual_bind = session
+        .find(".begin_manual_owner(")
+        .expect("manual lifecycle bind");
+    let continuation_branch = session
+        .find("if terminal_wake_continuation.is_some()")
+        .expect("terminal continuation lifecycle branch");
+    let continuation_promote = session
+        .find("lifecycle.promote_candidate_to_owner(candidate_id, session.session_id)")
+        .expect("terminal continuation candidate promotion");
+    let manual_activate = session
+        .find("if !activate_embedded_audio_dictation_session(")
+        .expect("manual visible activation");
+    assert!(continuation_branch < continuation_promote);
+    assert!(continuation_promote < manual_activate);
+    assert!(manual_bind < manual_activate);
+    assert_eq!(session.matches(".begin_manual_owner(").count(), 1);
+
+    let coordinator = include_str!("dictation.rs");
+    assert!(coordinator.contains("schedule_terminal_wake_continuation_expiry"));
+    assert!(coordinator.contains("close_candidate(candidate_id)"));
 }
 
 #[test]
@@ -4244,7 +4390,7 @@ fn automatic_wake_target_speaker_endpoint_early_capsule_ack_cannot_be_lost() {
         session_id,
         "开始录音".into(),
         1_800,
-        Some(session_id),
+        true,
     );
     let guard = coordinator
         .inner
@@ -4261,6 +4407,22 @@ fn automatic_wake_target_speaker_endpoint_early_capsule_ack_cannot_be_lost() {
         session_id,
         Some(1_900),
     ));
+}
+
+#[test]
+fn target_speaker_endpoint_candidate_capsule_cannot_create_or_close_product_session() {
+    let source = include_str!("dictation.rs");
+    let start = source
+        .find("fn show_early_wake_recording_capsule")
+        .expect("candidate capsule helper");
+    let end = source[start..]
+        .find("fn take_early_capsule_session_id")
+        .map(|offset| start + offset)
+        .expect("candidate capsule helper boundary");
+    let body = &source[start..end];
+    assert!(!body.contains("begin_session_state("));
+    assert!(!body.contains("state.phase ="));
+    assert!(body.contains("uuid::Uuid::new_v4()"));
 }
 
 #[test]
@@ -5587,15 +5749,16 @@ fn bounded_rolling_owner_near_match_reaches_voiceprint_gate_without_swallowing_b
 #[test]
 fn device_key_start_takeover_pending_before_hidden_active() {
     let polish = include_str!("dictation_wake_polish.rs");
+    let kernel = include_str!("../speech_decision_kernel.rs");
     assert!(
-        polish.contains("DEVICE_KEY_DICTATION_TAKEOVER_PENDING")
-            && polish.contains("note_device_key_dictation_start_intent")
-            && polish.contains("device-key takeover pending applied as promotion"),
+        polish.contains("note_device_key_dictation_start_intent")
+            && kernel.contains("device_key_takeover_pending")
+            && kernel.contains("candidate_promotion_requested"),
         "device-key Start must sticky-promote when the hidden VA candidate is not ACTIVE yet"
     );
     let hotkey = include_str!("hotkey_device_runtime.rs");
     assert!(
-        hotkey.contains("note_device_key_dictation_start_intent()"),
+        hotkey.contains("note_device_key_dictation_start_intent(&inner)"),
         "device-key dictation Start must call note_device_key_dictation_start_intent"
     );
     // Promote stays internal (ACTIVATE vs TOGGLE). Capsule copy must not say "接管"
@@ -5611,34 +5774,14 @@ fn device_key_start_takeover_pending_before_hidden_active() {
 }
 
 #[test]
-fn wake_candidate_controller_serializes_phase_and_session_identity() {
-    super::clear_hidden_automatic_candidate();
-    super::note_hidden_va_session(41);
-    super::mark_hidden_automatic_candidate_active();
-    assert!(super::hidden_automatic_candidate_active());
-    assert_eq!(super::current_hidden_va_session(), 41);
-
-    // A new candidate replaces the identity before it becomes ACTIVE. A delayed
-    // reject from the old candidate must therefore observe the new id and cannot
-    // stop it.
-    super::note_hidden_va_session(42);
-    assert_eq!(super::current_hidden_va_session(), 42);
-    assert!(!super::request_hidden_automatic_candidate_promotion());
-    assert!(!super::note_device_key_dictation_start_intent());
-    super::mark_hidden_automatic_candidate_active();
-    assert!(!super::hidden_automatic_candidate_active());
-    assert!(super::take_hidden_automatic_candidate_promotion());
-    assert!(!super::take_hidden_automatic_candidate_promotion());
-    super::clear_hidden_automatic_candidate();
-}
-
-#[test]
 fn wake_candidate_controller_has_no_legacy_split_state() {
     let polish = include_str!("dictation_wake_polish.rs");
     let dictation = include_str!("dictation.rs");
-    assert!(polish.contains("WakeCandidateController"));
-    assert!(!polish.contains("static HIDDEN_AUTOMATIC_CANDIDATE_STATE"));
-    assert!(!polish.contains("static DEVICE_KEY_DICTATION_TAKEOVER_PENDING"));
+    let kernel = include_str!("../speech_decision_kernel.rs");
+    assert!(!polish.contains("WakeCandidateController"));
+    assert!(!polish.contains("HIDDEN_AUTOMATIC_CANDIDATE_"));
+    assert!(kernel.contains("struct RecordingLifecycleController"));
+    assert!(kernel.contains("fn take_candidate_promotion"));
     assert!(!dictation.contains("LAST_HIDDEN_VA_SESSION"));
 }
 
@@ -5657,14 +5800,14 @@ fn hidden_candidate_marked_active_before_detector_init() {
         .expect("begin_candidate_or_session");
     let body = &stream[begin..];
     let mark = body
-        .find("mark_hidden_automatic_candidate_active()")
-        .expect("must mark hidden ACTIVE for Verification");
+        .find(".begin_candidate(embedded_session_id)")
+        .expect("must bind the hidden candidate identity for Verification");
     let detector = body
         .find("StreamingDetector::new(&phrase)")
         .expect("detector init");
     assert!(
         mark < detector,
-        "mark_hidden_automatic_candidate_active must run before StreamingDetector::new so EC11 Start can promote instead of toggle-stop"
+        "RecordingLifecycleController::begin_candidate must run before StreamingDetector::new so EC11 Start can promote instead of toggle-stop"
     );
     assert!(
         body.contains("detector_deferred") && body.contains("wake_detector_init"),
@@ -5775,8 +5918,8 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
     // Hidden ACTIVE must be marked before StreamingDetector::new (~1–2s init)
     // so device-key Start promotes instead of toggle-stop during that window.
     let mark_hidden = source
-        .find("mark_hidden_automatic_candidate_active()")
-        .expect("hidden automatic candidate must be marked active");
+        .find(".begin_candidate(embedded_session_id)")
+        .expect("hidden automatic candidate identity must be bound");
     let wake_init = source[mark_hidden..]
         .find("let wake_detector_init =")
         .map(|offset| mark_hidden + offset)
@@ -5895,7 +6038,7 @@ fn physical_hidden_candidate_promotion_discards_pre_press_pcm() {
         .find("self.speaker_candidate.take()")
         .expect("promotion must take speaker candidate first");
     let promotion_take = body
-        .find("take_hidden_automatic_candidate_promotion()")
+        .find("take_hidden_automatic_candidate_promotion(inner, embedded_session_id)")
         .expect("promotion must consume the promotion flag");
     assert!(
         candidate_take < promotion_take,

@@ -124,9 +124,8 @@ const EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE: &str =
 #[cfg(test)]
 use dictation::dictation_error_code;
 use dictation::{
-    acknowledge_automatic_wake_capsule_visible, begin_session, cancel_session,
-    current_embedded_audio_partial_preview, end_session, handle_pressed, handle_pressed_edge,
-    handle_released_edge, hidden_automatic_candidate_active,
+    acknowledge_automatic_wake_capsule_visible, begin_session, cancel_session, end_session,
+    handle_pressed, handle_pressed_edge, handle_released_edge, hidden_automatic_candidate_active,
     note_device_key_dictation_start_intent, request_embedded_audio_stop_feedback,
     request_embedded_ble_recording_stop_from_host, request_hidden_automatic_candidate_promotion,
     request_stop_during_starting, submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream,
@@ -146,8 +145,8 @@ use support::{
     capture_focus_target, capture_frontmost_app, emit_capsule, emit_capsule_for_session,
     emit_capsule_with_session, enabled_phrases, listening_session_has_no_current_asr,
     local_qwen_transcribe_timeout, publish_dictation_capsule, publish_dictation_transition,
-    restore_focus_target_if_possible, schedule_capsule_idle, set_phase_idle_if_session_matches,
-    startup_race_status_for_starting, CAPSULE_ACTIONABLE_ERROR_HIDE_DELAY_MS,
+    restore_focus_target_if_possible, schedule_capsule_idle, startup_race_status_for_starting,
+    transition_pipeline_error_if_session_matches, CAPSULE_ACTIONABLE_ERROR_HIDE_DELAY_MS,
     CAPSULE_AUTO_HIDE_DELAY_MS, CAPSULE_EMPTY_TRANSCRIPT_HIDE_DELAY_MS,
     CAPSULE_STREAM_ERROR_HIDE_DELAY_MS, CAPSULE_SUCCESS_HIDE_DELAY_MS,
     COORDINATOR_GLOBAL_TIMEOUT_SECS,

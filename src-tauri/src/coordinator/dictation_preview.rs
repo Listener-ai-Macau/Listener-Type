@@ -1020,15 +1020,15 @@ fn arm_automatic_wake_text_guard(
 }
 
 /// Install the accepted automatic-session guard without losing an early
-/// capsule visibility edge. The phrase detector may show Recording before the
-/// owner gate accepts; product activation must bind that already-visible UI to
-/// the same session instead of waiting for a second frontend transition.
+/// candidate-capsule visibility edge. Candidate UI has an independent token
+/// and never creates a product session; this boolean only transfers the known
+/// visibility fact after the real owner session has been created.
 fn arm_accepted_automatic_wake_text_guard(
     inner: &Arc<Inner>,
     session_id: SessionId,
     phrase: String,
     capsule_audio_boundary_ms: u64,
-    early_capsule_session_id: Option<SessionId>,
+    early_capsule_was_visible: bool,
 ) {
     arm_automatic_wake_text_guard(
         inner,
@@ -1036,7 +1036,7 @@ fn arm_accepted_automatic_wake_text_guard(
         phrase,
         capsule_audio_boundary_ms,
     );
-    if early_capsule_session_id == Some(session_id) {
+    if early_capsule_was_visible {
         acknowledge_automatic_wake_capsule_visible(inner, session_id);
         log::info!(
             "[wake-phrase] accepted automatic session inherited early capsule visibility session_id={session_id}"

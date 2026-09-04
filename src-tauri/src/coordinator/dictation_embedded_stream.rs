@@ -34,11 +34,11 @@ impl EmbeddedStreamingDictation {
                             "[recording-gate] dropping in-flight embedded session on deny embedded_session_id={}",
                             chunk.session_id
                         );
+                        self.close_owned_product_lifecycle(inner);
                         self.session = None;
                         self.speaker_candidate = None;
                         self.embedded_session_id = None;
                         self.pending_stop_expected_packet_count = None;
-                        clear_hidden_automatic_candidate();
                     }
                     return Ok(false);
                 }
@@ -187,13 +187,36 @@ impl EmbeddedStreamingDictation {
                         // Mirror stop_dictation: ask the firmware to cut the session
                         // short. The device then emits Stopped, which drives the normal
                         // finish_completed_streaming_session path — no bespoke finish.
-                        let stop_sent = request_embedded_ble_recording_stop_from_host(
+                        let coordinator_session_id = self
+                            .session
+                            .as_ref()
+                            .map(|session| session.session_id)
+                            .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
+                        let stop_sent = if commit_recording_stop(
                             inner,
-                            "proactive_trailing_silence",
-                        )
-                        .await
-                        .unwrap_or(false);
+                            coordinator_session_id,
+                            "provider_delivery_failure_safety",
+                        ) {
+                            match request_embedded_ble_recording_stop_from_host(
+                                inner,
+                                "proactive_trailing_silence",
+                            )
+                            .await
+                            {
+                                Ok(true) => true,
+                                Ok(false) | Err(_) => {
+                                    reopen_recording_stop(inner, coordinator_session_id);
+                                    false
+                                }
+                            }
+                        } else {
+                            false
+                        };
                         if stop_sent {
+                            let _ = request_embedded_audio_stop_feedback(
+                                inner,
+                                "provider_delivery_failure_safety",
+                            );
                             if let Some(session) = self.session.as_mut() {
                                 session.proactive_stop_dispatched = true;
                             }
@@ -244,7 +267,6 @@ impl EmbeddedStreamingDictation {
                     log::info!(
                         "[coord] embedded audio stop without active host session or wake candidate embedded_session_id={session_id}; resetting stream state and keeping notify open"
                     );
-                    self.reset_product_lifecycle(inner);
                     self.reset_for_next_session();
                     return Ok(true);
                 }
@@ -329,7 +351,6 @@ impl EmbeddedStreamingDictation {
             crate::embedded_audio::StreamingSessionEvent::Cancelled { session_id, .. } => {
                 if self.session.is_none() {
                     if let Some(candidate) = self.speaker_candidate.take() {
-                        clear_hidden_automatic_candidate();
                         if candidate.kind == BufferedSpeakerCandidateKind::Enrollment {
                             crate::speaker_verification::fail_enrollment("嵌入式音频会话已取消");
                             complete_voiceprint_enrollment_candidate(
@@ -337,11 +358,11 @@ impl EmbeddedStreamingDictation {
                             );
                         } else {
                             reject_hidden_automatic_candidate(
+                                inner,
                                 "hidden_candidate_cancelled",
                                 session_id,
                             );
                         }
-                        self.reset_product_lifecycle(inner);
                         self.reset_for_next_session();
                         // A terminal device CANCEL ends only this logical candidate.
                         // The continuous actor must keep waiting on the same notify
@@ -354,7 +375,6 @@ impl EmbeddedStreamingDictation {
                     log::info!(
                         "[coord] embedded audio cancel without active stream work embedded_session_id={session_id}; keeping notify open"
                     );
-                    self.reset_product_lifecycle(inner);
                     self.reset_for_next_session();
                     return Ok(!self.keep_listening_after_pipeline_errors);
                 }
@@ -439,8 +459,16 @@ impl EmbeddedStreamingDictation {
                 .finish_buffered_speaker_candidate(inner, embedded_session_id)
                 .await?
         {
-            let mut lifecycle = inner.recording_lifecycle.lock();
-            lifecycle.close(None);
+            // A terminal wake accepted after its physical segment ended keeps
+            // the exact candidate identity until the requested continuation
+            // segment attaches and promotes it. Other terminal outcomes close
+            // the candidate here.
+            if terminal_wake_continuation_waiting_for_audio(inner).is_none() {
+                let _ = inner
+                    .recording_lifecycle
+                    .lock()
+                    .close_candidate(embedded_session_id);
+            }
             return Ok(());
         }
         self.show_transcribing_after_stop(inner);
@@ -511,8 +539,10 @@ impl EmbeddedStreamingDictation {
             self.transcript = take_embedded_audio_final_result(inner, coordinator_session_id);
         }
         if end_result.is_ok() {
-            let mut lifecycle = inner.recording_lifecycle.lock();
-            lifecycle.close(Some(coordinator_session_id));
+            let _ = inner
+                .recording_lifecycle
+                .lock()
+                .close_owner(coordinator_session_id);
         }
         end_result
     }
@@ -531,12 +561,12 @@ impl EmbeddedStreamingDictation {
         let Some(mut candidate) = self.speaker_candidate.take() else {
             return Ok(false);
         };
-        clear_hidden_automatic_candidate();
         if candidate.kind == BufferedSpeakerCandidateKind::Rejected {
             if let Some(sid) = take_early_capsule_session_id(&mut candidate) {
                 dismiss_early_wake_recording_capsule(inner, sid);
             }
             reject_hidden_automatic_candidate(
+                inner,
                 "automatic_candidate_rejected",
                 embedded_session_id,
             );
@@ -703,6 +733,7 @@ impl EmbeddedStreamingDictation {
                     &candidate.pcm,
                 );
                 reject_hidden_automatic_candidate(
+                    inner,
                     "wake_phrase_detection_failed",
                     embedded_session_id,
                 );
@@ -729,6 +760,7 @@ impl EmbeddedStreamingDictation {
                         "[wake-phrase] terminal streaming detector task failed embedded_session_id={embedded_session_id}: {err}"
                     );
                     reject_hidden_automatic_candidate(
+                        inner,
                         "wake_phrase_detection_failed",
                         embedded_session_id,
                     );
@@ -1217,6 +1249,7 @@ impl EmbeddedStreamingDictation {
                         &candidate.pcm,
                     );
                     reject_hidden_automatic_candidate(
+                        inner,
                         "wake_phrase_detection_failed",
                         embedded_session_id,
                     );
@@ -1408,6 +1441,7 @@ impl EmbeddedStreamingDictation {
                     &candidate.pcm,
                 );
                 reject_hidden_automatic_candidate(
+                    inner,
                     "wake_phrase_non_match",
                     embedded_session_id,
                 );
@@ -1434,7 +1468,7 @@ impl EmbeddedStreamingDictation {
                     dismiss_early_wake_recording_capsule(inner, sid);
                 }
                 save_bounded_wake_diagnostic(embedded_session_id, reason, &candidate.pcm);
-                reject_hidden_automatic_candidate(reason, embedded_session_id);
+                reject_hidden_automatic_candidate(inner, reason, embedded_session_id);
                 return Ok(true);
             }
             let result = match verification {
@@ -1502,6 +1536,7 @@ impl EmbeddedStreamingDictation {
                         "[wake-phrase] terminal continuation already active; rejecting duplicate embedded_session_id={embedded_session_id}"
                     );
                     reject_hidden_automatic_candidate(
+                        inner,
                         "wake_phrase_continuation_already_active",
                         embedded_session_id,
                     );
@@ -1512,18 +1547,28 @@ impl EmbeddedStreamingDictation {
                     "accepted-terminal-continuation",
                     &candidate.pcm,
                 );
-                clear_hidden_automatic_candidate();
                 match request_embedded_ble_recording_start_from_host(
                     inner,
                     "terminal_wake_body_continuation",
                 )
                 .await
                 {
-                    Ok(session_id) => log::info!(
-                        "[wake-phrase] terminal continuation recording requested embedded_session_id={embedded_session_id} coordinator_session_id={session_id}"
-                    ),
+                    Ok(session_id) => {
+                        schedule_terminal_wake_continuation_expiry(
+                            inner,
+                            embedded_session_id,
+                            session_id,
+                        );
+                        log::info!(
+                            "[wake-phrase] terminal continuation recording requested embedded_session_id={embedded_session_id} coordinator_session_id={session_id}"
+                        );
+                    }
                     Err(err) => {
                         discard_terminal_wake_continuation(inner);
+                        let _ = inner
+                            .recording_lifecycle
+                            .lock()
+                            .close_candidate(embedded_session_id);
                         log::warn!(
                             "[wake-phrase] terminal continuation recording failed embedded_session_id={embedded_session_id}: {err}"
                         );
@@ -1548,7 +1593,28 @@ impl EmbeddedStreamingDictation {
                 enrolled_owner_matched,
             );
         }
+        if automatic
+            && !inner
+                .recording_lifecycle
+                .lock()
+                .promote_candidate_to_owner(embedded_session_id, session.session_id)
+        {
+            let _ = inner
+                .recording_lifecycle
+                .lock()
+                .close_candidate(embedded_session_id);
+            transition_pipeline_error_if_session_matches(inner, session.session_id);
+            cancel_asr_for_session(inner, session.session_id);
+            return Err(format!(
+                "录音生命周期拒绝终端自动唤醒主人会话 embedded_session_id={embedded_session_id} coordinator_session_id={}",
+                session.session_id
+            ));
+        }
         if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
+            let _ = inner
+                .recording_lifecycle
+                .lock()
+                .close_owner(session.session_id);
             return Err("嵌入式音频听写会话已被取消".to_string());
         }
         if automatic {
@@ -1559,7 +1625,7 @@ impl EmbeddedStreamingDictation {
                 session.session_id,
                 phrase,
                 capsule_audio_ms,
-                candidate.early_capsule_session_id,
+                candidate.early_capsule_session_id.is_some(),
             );
         }
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
@@ -1595,7 +1661,7 @@ impl EmbeddedStreamingDictation {
             self.speaker_candidate = Some(candidate);
             return Ok(false);
         }
-        if !take_hidden_automatic_candidate_promotion() {
+        if !take_hidden_automatic_candidate_promotion(inner, embedded_session_id) {
             self.speaker_candidate = Some(candidate);
             return Ok(false);
         }
@@ -1608,18 +1674,28 @@ impl EmbeddedStreamingDictation {
 
         let discarded_pcm_bytes = discard_pre_press_candidate_pcm(&mut candidate.pcm);
         let session = begin_embedded_audio_dictation_session(inner).await?;
-        if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
-            return Err("物理录音接管会话已被取消".to_string());
-        }
         if !inner
             .recording_lifecycle
             .lock()
             .promote_candidate_to_owner(embedded_session_id, session.session_id)
         {
+            let _ = inner
+                .recording_lifecycle
+                .lock()
+                .close_candidate(embedded_session_id);
+            transition_pipeline_error_if_session_matches(inner, session.session_id);
+            cancel_asr_for_session(inner, session.session_id);
             return Err(format!(
                 "录音生命周期拒绝物理接管 embedded_session_id={embedded_session_id} coordinator_session_id={}",
                 session.session_id
             ));
+        }
+        if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
+            let _ = inner
+                .recording_lifecycle
+                .lock()
+                .close_owner(session.session_id);
+            return Err("物理录音接管会话已被取消".to_string());
         }
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         self.session = Some(session);
@@ -1781,7 +1857,11 @@ impl EmbeddedStreamingDictation {
                 let Some(detector) = candidate.wake_detector.take() else {
                     candidate.kind = BufferedSpeakerCandidateKind::Rejected;
                     candidate.pcm.clear();
-                    clear_hidden_automatic_candidate();
+                    reject_hidden_automatic_candidate(
+                        inner,
+                        "wake_phrase_detector_unavailable",
+                        embedded_session_id,
+                    );
                     log::warn!(
                             "[wake-phrase] hidden candidate rejected because streaming detector is unavailable embedded_session_id={embedded_session_id}"
                         );
@@ -1838,7 +1918,11 @@ impl EmbeddedStreamingDictation {
                         candidate.kind = BufferedSpeakerCandidateKind::Rejected;
                         candidate.pcm.clear();
                     }
-                    clear_hidden_automatic_candidate();
+                    reject_hidden_automatic_candidate(
+                        inner,
+                        "wake_phrase_detector_task_failed",
+                        embedded_session_id,
+                    );
                     log::warn!(
                             "[wake-phrase] streaming detector task failed embedded_session_id={embedded_session_id}: {err}"
                         );
@@ -1886,7 +1970,11 @@ impl EmbeddedStreamingDictation {
                     Err(err) => {
                         candidate.kind = BufferedSpeakerCandidateKind::Rejected;
                         candidate.pcm.clear();
-                        clear_hidden_automatic_candidate();
+                        reject_hidden_automatic_candidate(
+                            inner,
+                            "wake_phrase_detector_failed",
+                            embedded_session_id,
+                        );
                         log::warn!(
                                 "[wake-phrase] streaming detector failed embedded_session_id={embedded_session_id}: {err}"
                             );
@@ -2575,7 +2663,11 @@ impl EmbeddedStreamingDictation {
                 candidate.kind = BufferedSpeakerCandidateKind::Rejected;
                 candidate.pcm.clear();
             }
-            clear_hidden_automatic_candidate();
+            reject_hidden_automatic_candidate(
+                inner,
+                "voiceprint_non_match",
+                embedded_session_id,
+            );
             log::info!(
                 "[wake-phrase] phrase matched but owner verification rejected embedded_session_id={} phrase={} result={:?}",
                 embedded_session_id,
@@ -2605,7 +2697,6 @@ impl EmbeddedStreamingDictation {
             enrolled_owner_matched,
         );
         save_bounded_wake_diagnostic(embedded_session_id, "accepted", &candidate.pcm);
-        clear_hidden_automatic_candidate();
         // Keep only the bounded tail containing the accepted wake phrase. This
         // gives cloud diarization a target-speaker anchor without sending the
         // earlier ambient candidate; the wake-text guard keeps it out of UI/output.
@@ -2645,18 +2736,28 @@ impl EmbeddedStreamingDictation {
             local_speaker_seed.2,
             local_speaker_seed.3,
         );
-        if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
-            return Err("嵌入式音频听写会话已被取消".to_string());
-        }
         if !inner
             .recording_lifecycle
             .lock()
             .promote_candidate_to_owner(embedded_session_id, session.session_id)
         {
+            let _ = inner
+                .recording_lifecycle
+                .lock()
+                .close_candidate(embedded_session_id);
+            transition_pipeline_error_if_session_matches(inner, session.session_id);
+            cancel_asr_for_session(inner, session.session_id);
             return Err(format!(
                 "录音生命周期拒绝自动唤醒主人会话 embedded_session_id={embedded_session_id} coordinator_session_id={}",
                 session.session_id
             ));
+        }
+        if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
+            let _ = inner
+                .recording_lifecycle
+                .lock()
+                .close_owner(session.session_id);
+            return Err("嵌入式音频听写会话已被取消".to_string());
         }
         let capsule_audio_ms = (candidate.pcm.len() / 32) as u64;
         arm_accepted_automatic_wake_text_guard(
@@ -2664,7 +2765,7 @@ impl EmbeddedStreamingDictation {
             session.session_id,
             phrase.clone(),
             capsule_audio_ms,
-            candidate.early_capsule_session_id,
+            candidate.early_capsule_session_id.is_some(),
         );
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         self.session = Some(session);

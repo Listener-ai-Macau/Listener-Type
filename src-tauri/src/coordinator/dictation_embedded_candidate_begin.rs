@@ -73,19 +73,17 @@ impl EmbeddedStreamingDictation {
             // the first physical press looks like "recording failed" and only the
             // next press starts a clean User session.
             if candidate_kind == BufferedSpeakerCandidateKind::Verification {
-                if !inner
-                    .recording_lifecycle
-                    .lock()
-                    .begin_candidate(embedded_session_id)
-                {
+                let mut lifecycle = inner.recording_lifecycle.lock();
+                if !lifecycle.begin_candidate(embedded_session_id) {
                     return Err(format!(
                         "录音生命周期拒绝新的唤醒候选 embedded_session_id={embedded_session_id}"
                     ));
                 }
-                // Register the identity before exposing ACTIVE.  This keeps a
-                // delayed reject from candidate N from ever stopping candidate N+1.
-                note_hidden_va_session(embedded_session_id);
-                mark_hidden_automatic_candidate_active();
+                if !lifecycle.hidden_candidate_active() {
+                    log::info!(
+                        "[speaker-verification] device-key takeover pending bound to hidden candidate embedded_session_id={embedded_session_id}"
+                    );
+                }
             }
             // Do NOT await StreamingDetector::new here — it costs ~0.5–1s wall time and
             // delayed the first PCM into the buffer until after the user finished 开始录音.
@@ -101,9 +99,6 @@ impl EmbeddedStreamingDictation {
                 } else {
                     None
                 };
-            if candidate_kind != BufferedSpeakerCandidateKind::Verification {
-                clear_hidden_automatic_candidate();
-            }
             log::info!(
                 "[speaker-verification] buffering embedded candidate kind={candidate_kind:?} embedded_session_id={embedded_session_id} detector_deferred={}",
                 wake_detector_init.is_some()

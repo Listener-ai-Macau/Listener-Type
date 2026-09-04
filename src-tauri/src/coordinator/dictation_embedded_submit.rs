@@ -447,7 +447,6 @@ async fn submit_embedded_audio_ble_stream_impl(
         if !emit_idle_capture_errors {
             match streaming.force_finish_pending_stop_if_due(inner).await {
                 Ok(true) => {
-                    streaming.reset_product_lifecycle(inner);
                     streaming.reset_for_next_session();
                     record_embedded_ble_session_actor_command(
                         inner,
@@ -531,12 +530,9 @@ async fn submit_embedded_audio_ble_stream_impl(
                             "[embedded-ble] background session submission incomplete while keeping notify open: {err}"
                         );
                         streaming.discard_active_session_after_stream_error(inner, &err);
-                        streaming.reset_product_lifecycle(inner);
-                        streaming.reset_for_next_session();
                         continue;
                     }
                 }
-                streaming.reset_product_lifecycle(inner);
                 streaming.reset_for_next_session();
                 record_embedded_ble_session_actor_command(
                     inner,

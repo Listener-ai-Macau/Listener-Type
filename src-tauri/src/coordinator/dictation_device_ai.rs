@@ -188,9 +188,7 @@ fn finish_dictation_pipeline_error(
         "dictation_pipeline_error",
         Duration::from_millis(0),
     );
-    if !publish_dictation_pipeline_error(inner, session_id, message)
-        && cleanup_cancelled_processing_session(inner, session_id)
-    {
+    if !publish_dictation_pipeline_error(inner, session_id, message) {
         return false;
     }
     restore_prepared_windows_ime_session(inner, session_id);
@@ -215,37 +213,12 @@ fn finish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message: 
     } else {
         publish_dictation_timeout(inner, session_id, message)
     };
-    if !published && cleanup_cancelled_processing_session(inner, session_id) {
+    if !published {
         return false;
     }
     restore_prepared_windows_ime_session(inner, session_id);
     schedule_actionable_error_capsule_idle(inner, session_id);
     crate::observability::record_embedded_audio_timeout(session_id);
-    true
-}
-
-fn cleanup_cancelled_processing_session(inner: &Arc<Inner>, session_id: SessionId) -> bool {
-    let should_cleanup = {
-        let state = inner.state.lock();
-        state.session_id == session_id && state.cancelled && state.phase == SessionPhase::Processing
-    };
-    if !should_cleanup {
-        return false;
-    }
-
-    restore_prepared_windows_ime_session(inner, session_id);
-    clear_embedded_audio_stats(inner);
-    {
-        let mut state = inner.state.lock();
-        if state.session_id != session_id
-            || !state.cancelled
-            || state.phase != SessionPhase::Processing
-        {
-            return false;
-        }
-        state.phase = SessionPhase::Idle;
-        state.focus_target = None;
-    }
     true
 }
 

@@ -952,6 +952,10 @@ pub(super) fn clear_terminal_wake_continuation(inner: &Arc<Inner>, session_id: S
     };
     if cleared {
         clear_automatic_wake_text_guard(inner);
+        let mut lifecycle = inner.recording_lifecycle.lock();
+        if let Some(candidate_id) = lifecycle.current_candidate_session_id() {
+            let _ = lifecycle.close_candidate(candidate_id);
+        }
     }
 }
 
@@ -963,7 +967,79 @@ fn discard_terminal_wake_continuation(inner: &Arc<Inner>) {
         .is_some();
     if had_continuation {
         clear_automatic_wake_text_guard(inner);
+        let mut lifecycle = inner.recording_lifecycle.lock();
+        if let Some(candidate_id) = lifecycle.current_candidate_session_id() {
+            let _ = lifecycle.close_candidate(candidate_id);
+        }
     }
+}
+
+/// A successful VREC start write is not proof that the continuation segment
+/// reached the host. Bound the transport-attachment phase so an accepted
+/// terminal wake cannot leave the product in Starting forever. The cleanup is
+/// identity-scoped through both the continuation slot and candidate lifecycle.
+fn schedule_terminal_wake_continuation_expiry(
+    inner: &Arc<Inner>,
+    candidate_id: u32,
+    session_id: SessionId,
+) {
+    let inner = Arc::clone(inner);
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(EMBEDDED_TERMINAL_WAKE_CONTINUATION_TTL).await;
+        let expired = {
+            let mut slot = inner.embedded_audio_terminal_wake_continuation.lock();
+            if slot.as_ref().is_some_and(|continuation| {
+                continuation.session_id == Some(session_id)
+                    && continuation.expires_at <= Instant::now()
+            }) {
+                *slot = None;
+                true
+            } else {
+                false
+            }
+        };
+        if !expired {
+            return;
+        }
+        clear_automatic_wake_text_guard(&inner);
+        if !inner
+            .recording_lifecycle
+            .lock()
+            .close_candidate(candidate_id)
+        {
+            return;
+        }
+        log::warn!(
+            "[wake-phrase] terminal continuation expired before body transport attached embedded_session_id={candidate_id} coordinator_session_id={session_id}"
+        );
+        let _ = publish_dictation_pipeline_error(
+            &inner,
+            session_id,
+            "Listener 未收到唤醒后的录音数据".to_string(),
+        );
+        schedule_actionable_error_capsule_idle(&inner, session_id);
+        let stop_inner = Arc::clone(&inner);
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            if !stop_inner
+                .recording_lifecycle
+                .lock()
+                .rejected_candidate_still_owns_transport_stop(candidate_id)
+            {
+                return;
+            }
+            match crate::embedded_ble::send_recording_control_stop(
+                EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+            ) {
+                Ok(()) => log::info!(
+                    "[wake-phrase] terminal continuation expiry sent VREC:STOP embedded_session_id={candidate_id} coordinator_session_id={session_id}"
+                ),
+                Err(err) => log::warn!(
+                    "[wake-phrase] terminal continuation expiry VREC:STOP failed embedded_session_id={candidate_id} coordinator_session_id={session_id}: {err}"
+                ),
+            }
+        })
+        .await;
+    });
 }
 
 include!("dictation_volcengine_callbacks.rs");
@@ -1026,6 +1102,17 @@ pub(super) async fn request_embedded_ble_recording_stop_from_host(
     if !matches!(phase, SessionPhase::Starting | SessionPhase::Listening) {
         return Ok(false);
     }
+    if phase == SessionPhase::Listening
+        && !inner
+            .recording_lifecycle
+            .lock()
+            .stop_committed_for(session_id)
+    {
+        log::info!(
+            "[coord] rejected BLE STOP without lifecycle commit session_id={session_id} reason={reason}"
+        );
+        return Ok(false);
+    }
 
     record_embedded_ble_session_actor_command(
         inner,
@@ -1033,14 +1120,6 @@ pub(super) async fn request_embedded_ble_recording_stop_from_host(
         Some(session_id),
         format!("host stop requested reason={reason} phase={phase:?}"),
     );
-    match phase {
-        SessionPhase::Starting => request_stop_during_starting(inner, reason),
-        SessionPhase::Listening => {
-            let _ = request_embedded_audio_stop_feedback(inner, reason);
-        }
-        _ => {}
-    }
-
     #[cfg(test)]
     {
         crate::timeline::mark(
@@ -1283,18 +1362,6 @@ fn begin_embedded_audio_dictation_session_id(inner: &Arc<Inner>) -> Result<Sessi
     if attach_host_start && state.phase == SessionPhase::Starting {
         return Ok(state.session_id);
     }
-    // Recover stuck Processing (post-cancel/empty-ASR race, common after OTA churn)
-    // so the next EC11 / BLE start is not permanently blocked.
-    if state.phase == SessionPhase::Processing {
-        log::warn!(
-            "[coord] clearing stuck Processing phase before embedded dictation start session_id={} cancelled={}",
-            state.session_id,
-            state.cancelled
-        );
-        state.phase = SessionPhase::Idle;
-        state.focus_target = None;
-        state.cancelled = false;
-    }
     begin_session_state(&mut state, capture_focus_target(), capture_frontmost_app())
         .ok_or_else(|| "当前已有听写会话在运行，暂不能提交嵌入式音频".to_string())
 }
@@ -1417,7 +1484,21 @@ async fn persist_verified_wake_phrase_calibration(phrase: String) {
     }
 }
 
-fn reject_hidden_automatic_candidate(reason: &'static str, embedded_session_id: u32) {
+fn reject_hidden_automatic_candidate(
+    inner: &Arc<Inner>,
+    reason: &'static str,
+    embedded_session_id: u32,
+) {
+    if !inner
+        .recording_lifecycle
+        .lock()
+        .close_candidate(embedded_session_id)
+    {
+        log::info!(
+            "[speaker-verification] ignored stale hidden candidate rejection reason={reason} embedded_session_id={embedded_session_id}"
+        );
+        return;
+    }
     log::info!(
         "[speaker-verification] hidden automatic candidate rejected silently reason={reason} embedded_session_id={embedded_session_id}"
     );
@@ -1428,14 +1509,18 @@ fn reject_hidden_automatic_candidate(reason: &'static str, embedded_session_id: 
     // when this reject is still the latest candidate (avoid killing N+1).
     #[cfg(not(test))]
     {
+        let inner = Arc::clone(inner);
         tauri::async_runtime::spawn_blocking(move || {
             // Brief yield: SessionStart for the next candidate often races the
             // terminal reject of the previous one.
             std::thread::sleep(Duration::from_millis(80));
-            let current = current_hidden_va_session();
-            if embedded_session_id != 0 && current != embedded_session_id {
+            let stop_still_owned = inner
+                .recording_lifecycle
+                .lock()
+                .rejected_candidate_still_owns_transport_stop(embedded_session_id);
+            if !stop_still_owned {
                 log::info!(
-                    "[coord] skip VREC:STOP after reject reason={reason} rejected_session={embedded_session_id} active_session={current}"
+                    "[coord] skip stale VREC:STOP after reject reason={reason} rejected_session={embedded_session_id}; lifecycle ownership advanced"
                 );
                 return;
             }
@@ -1461,27 +1546,15 @@ fn show_early_wake_recording_capsule(inner: &Arc<Inner>, candidate: &mut Buffere
     if candidate.early_capsule_session_id.is_some() {
         return;
     }
-    let session_id = {
-        let mut state = inner.state.lock();
-        if matches!(
-            state.phase,
-            SessionPhase::Starting | SessionPhase::Listening
-        ) {
-            candidate.early_capsule_session_id = Some(state.session_id);
-            return;
-        }
-        if state.phase != SessionPhase::Idle {
-            return;
-        }
-        match crate::coordinator_state::begin_session_state(
-            &mut state,
-            capture_focus_target(),
-            capture_frontmost_app(),
-        ) {
-            Some(id) => id,
-            None => return,
-        }
-    };
+    // This is candidate UI, not product activation. The previous path called
+    // begin_session_state here and made an unverified phrase look like a real
+    // Starting session. A later reject then wrote SessionPhase::Idle directly,
+    // racing the next accepted wake. Keep the capsule token independent; the
+    // accepted owner path alone creates the coordinator session.
+    if inner.state.lock().phase != SessionPhase::Idle {
+        return;
+    }
+    let session_id = uuid::Uuid::new_v4();
     candidate.early_capsule_request_ms = Some(candidate.started_at.elapsed().as_millis() as u64);
     publish_dictation_capsule(
         inner,
@@ -1498,17 +1571,6 @@ fn show_early_wake_recording_capsule(inner: &Arc<Inner>, candidate: &mut Buffere
 }
 
 fn dismiss_early_wake_recording_capsule(inner: &Arc<Inner>, session_id: SessionId) {
-    {
-        let mut state = inner.state.lock();
-        if state.session_id == session_id
-            && matches!(
-                state.phase,
-                SessionPhase::Starting | SessionPhase::Listening
-            )
-        {
-            state.phase = SessionPhase::Idle;
-        }
-    }
     schedule_capsule_idle(inner, 0, Some(session_id));
     log::info!(
         "[wake-phrase] early recording capsule dismissed session_id={session_id} (wake not confirmed)"
@@ -2100,7 +2162,7 @@ async fn finish_end_session_after_stop_transition(
             restore_prepared_windows_ime_session(inner, current_session_id);
             clear_embedded_audio_stats(inner);
             set_device_ai_processing_async(inner, false, "dictation_processing_no_asr");
-            set_phase_idle_if_session_matches(inner, current_session_id);
+            transition_pipeline_error_if_session_matches(inner, current_session_id);
             return Ok(());
         }
     };
@@ -2346,7 +2408,7 @@ async fn finish_end_session_after_stop_transition(
                         );
                         schedule_foundry_local_asr_release(inner, current_session_id);
                         restore_prepared_windows_ime_session(inner, current_session_id);
-                        set_phase_idle_if_session_matches(inner, current_session_id);
+                        transition_pipeline_error_if_session_matches(inner, current_session_id);
                         return Ok(());
                     }
                     log::error!("[coord] Foundry Local Whisper transcribe failed: {e:#}");
@@ -2408,15 +2470,6 @@ async fn finish_end_session_after_stop_transition(
         log::info!("[coord] cancel detected after ASR — discarding transcript");
         restore_prepared_windows_ime_session(inner, current_session_id);
         clear_embedded_audio_stats(inner);
-        // PR #387 的「cancel 后清 focus_target」契约要在 Processing 路径上也成立。
-        // cancel_session 在 Processing 阶段故意跳过 finish_cancel_session_state（让
-        // 这里收尾），但此前的 end_session 没把 focus_target 清掉。logic-review
-        // 2026-05-10 P3 (🚩) 把这条补完。
-        {
-            let mut state = inner.state.lock();
-            state.phase = SessionPhase::Idle;
-            state.focus_target = None;
-        }
         return Ok(());
     }
 
@@ -2625,14 +2678,7 @@ async fn finish_end_session_after_stop_transition(
                     error_code: None,
                 },
             );
-            let published = publish_embedded_ble_wake_only_expired(inner, current_session_id);
-            if !published {
-                let mut state = inner.state.lock();
-                if state.session_id == current_session_id {
-                    state.phase = SessionPhase::Idle;
-                    state.focus_target = None;
-                }
-            }
+            let _ = publish_embedded_ble_wake_only_expired(inner, current_session_id);
             clear_automatic_wake_text_guard(inner);
             clear_embedded_audio_partial_preview(inner);
             clear_embedded_audio_stats(inner);
@@ -2681,28 +2727,12 @@ async fn finish_end_session_after_stop_transition(
         device_ai_processing
             .complete_warning("dictation_empty_transcript")
             .await;
-        let published = publish_embedded_ble_asr_final(
+        let _ = publish_embedded_ble_asr_final(
             inner,
             current_session_id,
             true,
             Some("没有识别到语音".to_string()),
         );
-        // Cancel-during-Processing used to leave phase=Processing; AsrFinal then
-        // Ignored(CancelledSession) never cleared it. Force Idle either way.
-        if !published {
-            let _ = cleanup_cancelled_processing_session(inner, current_session_id);
-        }
-        {
-            let mut state = inner.state.lock();
-            if state.session_id == current_session_id && state.phase == SessionPhase::Processing {
-                log::warn!(
-                    "[coord] empty transcript force-idle stuck Processing session_id={current_session_id} cancelled={}",
-                    state.cancelled
-                );
-                state.phase = SessionPhase::Idle;
-                state.focus_target = None;
-            }
-        }
         restore_prepared_windows_ime_session(inner, current_session_id);
         schedule_empty_transcript_capsule_idle(inner, current_session_id);
         return Err("ASR returned empty transcript".to_string());
@@ -3327,7 +3357,6 @@ pub(super) fn cancel_session(inner: &Arc<Inner>) {
 /// OTA owns BLE exclusively — cancel any dictation/wake path and force capsule idle.
 pub(super) fn suppress_dictation_pipeline_for_firmware_ota(inner: &Arc<Inner>) {
     log::info!("[firmware-ota] suppressing dictation/capsule pipeline for exclusive OTA transfer");
-    clear_hidden_automatic_candidate();
     cancel_session(inner);
     // Force hide even when cancel is a no-op (Idle with no capture flag).
     emit_capsule(inner, CapsuleState::Idle, 0.0, 0, None, None);

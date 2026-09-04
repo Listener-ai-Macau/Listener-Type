@@ -9,8 +9,9 @@ use parking_lot::Mutex;
 use tauri::{async_runtime, AppHandle, Emitter, Manager};
 
 use crate::coordinator_state::{
-    publishable_dictation_snapshot, startup_race_status, DictationSnapshot, DictationTransition,
-    DictationUiState, SessionId, SessionPhase, StartupRaceStatus,
+    apply_dictation_event, publishable_dictation_snapshot, startup_race_status, DictationEvent,
+    DictationSnapshot, DictationTransition, DictationUiState, SessionId, SessionPhase,
+    StartupRaceStatus,
 };
 use crate::types::{CapsulePayload, CapsuleState};
 #[cfg(target_os = "windows")]
@@ -79,11 +80,12 @@ pub(super) fn startup_race_status_for_starting(
     startup_race_status(&state, captured_session_id)
 }
 
-pub(super) fn set_phase_idle_if_session_matches(inner: &Arc<Inner>, session_id: SessionId) {
+pub(super) fn transition_pipeline_error_if_session_matches(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) {
     let mut state = inner.state.lock();
-    if state.session_id == session_id {
-        state.phase = SessionPhase::Idle;
-    }
+    let _ = apply_dictation_event(&mut state, DictationEvent::PipelineError { session_id });
 }
 
 pub(super) fn listening_session_has_no_current_asr(inner: &Arc<Inner>) -> bool {

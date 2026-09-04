@@ -1,15 +1,39 @@
+pub(super) fn commit_recording_stop(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    source: &'static str,
+) -> bool {
+    let committed = inner
+        .recording_lifecycle
+        .lock()
+        .commit_stop(session_id);
+    if !committed {
+        log::info!(
+            "[asr] recording lifecycle rejected stale/duplicate automatic stop session_id={session_id} source={source}"
+        );
+    }
+    committed
+}
+
+pub(super) fn reopen_recording_stop(inner: &Arc<Inner>, session_id: SessionId) {
+    let _ = inner
+        .recording_lifecycle
+        .lock()
+        .reopen_after_failed_stop(session_id);
+}
+
 /// Reduce every fresh identity/provider observation into the product
 /// lifecycle. This must run when evidence arrives, not only after the endpoint
 /// clock is already due: doing the latter left the public lifecycle stuck in
 /// QuietPending throughout active owner speech and delayed firmware lease
 /// renewal until the stop path.
-fn reduce_target_speaker_activity_observation(
+fn renew_firmware_lease_from_owner_observation(
     inner: &Arc<Inner>,
     session_id: SessionId,
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
     body_started: bool,
-) -> bool {
+) {
     let session_active = {
         let state = inner.state.lock();
         state.session_id == session_id
@@ -20,7 +44,7 @@ fn reduce_target_speaker_activity_observation(
             )
     };
     if !session_active {
-        return false;
+        return;
     }
     let attributed_owner_activity = (update.target_activity_advanced
         || update.pending_activity_advanced)
@@ -43,10 +67,6 @@ fn reduce_target_speaker_activity_observation(
             );
         }
         note_embedded_asr_speech_activity(inner, session_id);
-        let _ = inner
-            .recording_lifecycle
-            .lock()
-            .note_owner_activity(session_id);
     } else if update.target_activity_advanced || update.pending_activity_advanced {
         log::info!(
             "[asr] stale attributed activity did not refresh firmware endpoint provider_audio_ms={:?} local_audio_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?} stable_attributed_end_ms={:?}",
@@ -57,7 +77,6 @@ fn reduce_target_speaker_activity_observation(
             update.stable_attributed_speech_end_ms,
         );
     }
-    attributed_owner_activity || renew_owner_catch_up_lease
 }
 
 fn handle_target_speaker_endpoint_stop(
@@ -96,30 +115,18 @@ fn handle_target_speaker_endpoint_stop(
     // already committed OwnerActive -> Stopping. Re-evaluating a second
     // policy here used to discard that decision and leave the session in
     // Listening forever.
+    // The endpoint reducer has produced a proposal, but the product lifecycle
+    // is the only component allowed to cross the irreversible stop boundary.
+    // There is deliberately no untracked/Idle bypass: a callback without the
+    // exact active session identity cannot stop physical capture.
+    let lifecycle_stop_committed = commit_recording_stop(inner, session_id, "owner_endpoint");
+    if !lifecycle_stop_committed {
+        return;
+    }
     if stop_dispatched
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
-        return;
-    }
-
-    // The endpoint clock has produced evidence, but the product lifecycle is
-    // the only component allowed to cross the irreversible stop boundary.
-    // Untracked non-embedded sessions retain the legacy host endpoint path;
-    // embedded sessions must commit here exactly once.
-    let lifecycle_stop_committed = {
-        let mut lifecycle = inner.recording_lifecycle.lock();
-        match lifecycle.state() {
-            crate::speech_decision_kernel::RecordingLifecycleState::Idle
-                => true,
-            _ => lifecycle.commit_stop(session_id),
-        }
-    };
-    if !lifecycle_stop_committed {
-        log::info!(
-            "[asr] recording lifecycle rejected stale/duplicate endpoint stop session_id={session_id}"
-        );
-        stop_dispatched.store(false, Ordering::SeqCst);
         return;
     }
 
@@ -144,47 +151,45 @@ fn handle_target_speaker_endpoint_stop(
         endpoint_policy.initial_body_wait_active,
     );
 
-    // 1.0.4 A3: latch Transcribing + keep last preview immediately at the
-    // silence threshold so the UI does not hang on Listening while BLE stop
-    // and final-frame work are still in flight.
-    let stop_feedback_started = Instant::now();
-    let feedback_emitted = request_embedded_audio_stop_feedback(inner, stop_reason);
-    // 预热润色：与 stop/终稿并行发起，终稿一致则采用，首字提前 ~0.4-0.6s。
-    maybe_start_polish_prefetch(inner, session_id);
-    if feedback_emitted {
-        log::info!(
-            "[asr] stop_to_transcribing_ms={} session_id={session_id} reason={stop_reason} timeout_ms={endpoint_timeout_ms} body_started={body_started} sentence_pause={} semantic_continuation={} fusion_state={fusion_state:?}",
-            stop_feedback_started.elapsed().as_millis(),
-            preview_ends_with_sentence_terminal(preview.as_deref()),
-            preview_has_dangling_continuation(preview.as_deref()),
-        );
-    }
-
     let inner = Arc::clone(inner);
     let stop_dispatched = Arc::clone(stop_dispatched);
     let endpoint_clock = Arc::clone(endpoint_clock);
     let early_final_asr = clone_volcengine_asr_for_session(&inner, session_id);
     async_runtime::spawn(async move {
-        let stop_future = request_embedded_ble_recording_stop_from_host(&inner, stop_reason);
-        let finalization_future = async move {
-            let Some(asr) = early_final_asr else {
-                return;
-            };
-            let started = Instant::now();
-            match asr.send_last_frame().await {
-                Ok(()) => log::info!(
-                    "[asr] proactive endpoint final frame sent session_id={session_id} provider_stall_fallback={provider_stall_fallback} controller_committed=true elapsed_ms={}",
-                    started.elapsed().as_millis()
-                ),
-                Err(err) => log::warn!(
-                    "[asr] proactive endpoint final frame failed session_id={session_id} provider_stall_fallback={provider_stall_fallback} controller_committed=true elapsed_ms={} error={err}",
-                    started.elapsed().as_millis()
-                ),
-            }
-        };
-        let (stop_result, ()) = tokio::join!(stop_future, finalization_future);
+        let stop_result =
+            request_embedded_ble_recording_stop_from_host(&inner, stop_reason).await;
         match stop_result {
             Ok(true) => {
+                // Only cross the public Listening -> Processing boundary after
+                // the physical STOP write succeeds. The previous eager UI
+                // transition plus concurrent final-frame send made a transient
+                // BLE error unrecoverable: lifecycle reopened, but coordinator
+                // state and ASR were already terminal.
+                let stop_feedback_started = Instant::now();
+                let feedback_emitted =
+                    request_embedded_audio_stop_feedback(&inner, stop_reason);
+                maybe_start_polish_prefetch(&inner, session_id);
+                if feedback_emitted {
+                    log::info!(
+                        "[asr] stop_to_transcribing_ms={} session_id={session_id} reason={stop_reason} timeout_ms={endpoint_timeout_ms} body_started={body_started} sentence_pause={} semantic_continuation={} fusion_state={fusion_state:?}",
+                        stop_feedback_started.elapsed().as_millis(),
+                        preview_ends_with_sentence_terminal(preview.as_deref()),
+                        preview_has_dangling_continuation(preview.as_deref()),
+                    );
+                }
+                if let Some(asr) = early_final_asr {
+                    let started = Instant::now();
+                    match asr.send_last_frame().await {
+                        Ok(()) => log::info!(
+                            "[asr] proactive endpoint final frame sent session_id={session_id} provider_stall_fallback={provider_stall_fallback} controller_committed=true elapsed_ms={}",
+                            started.elapsed().as_millis()
+                        ),
+                        Err(err) => log::warn!(
+                            "[asr] proactive endpoint final frame failed session_id={session_id} provider_stall_fallback={provider_stall_fallback} controller_committed=true elapsed_ms={} error={err}",
+                            started.elapsed().as_millis()
+                        ),
+                    }
+                }
                 log::info!(
                     "[embedded-ble] target-speaker auto-stop sent session_id={session_id} reason={stop_reason}"
                 );
@@ -221,10 +226,7 @@ fn handle_target_speaker_endpoint_stop(
                 // update may retry while the same session is still active.
                 stop_dispatched.store(false, Ordering::SeqCst);
                 endpoint_clock.lock().reopen_after_failed_stop();
-                let _ = inner
-                    .recording_lifecycle
-                    .lock()
-                    .reopen_after_failed_stop(session_id);
+                reopen_recording_stop(&inner, session_id);
                 log::info!(
                     "[embedded-ble] target-speaker auto-stop not dispatched; retry armed session_id={session_id} reason={stop_reason}"
                 );
@@ -232,10 +234,7 @@ fn handle_target_speaker_endpoint_stop(
             Err(err) => {
                 stop_dispatched.store(false, Ordering::SeqCst);
                 endpoint_clock.lock().reopen_after_failed_stop();
-                let _ = inner
-                    .recording_lifecycle
-                    .lock()
-                    .reopen_after_failed_stop(session_id);
+                reopen_recording_stop(&inner, session_id);
                 log::warn!(
                     "[embedded-ble] target-speaker auto-stop failed; retry armed session_id={session_id} reason={stop_reason}: {err}"
                 );

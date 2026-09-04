@@ -38,9 +38,11 @@
 
 ### 结束层（主机）
 
-可见录音只有一个结束裁判：主人活动时钟。状态必须单向经过：
+可见录音只有一个结束裁判：主人活动时钟。身份边界与证据边界是两套正交 reducer，
+但只有前者有权提交不可逆 STOP：
 
-`WakeCandidate -> OwnerActive -> OwnerEvidencePending -> QuietPending -> Stopping -> Closed`
+- 产品身份：`Idle -> WakeCandidate -> Active -> Stopping -> Closed`；
+- endpoint 证据：`OwnerActive -> OwnerEvidencePending -> QuietPending -> Stop proposal`。
 
 - 只有正向主人声纹/主人归属边沿可以推进 `OwnerActive` 的时钟。
 - `OwnerEvidencePending` 表示已经采集的 PCM/预览仍在等待同一套主人连续性裁决；
@@ -48,7 +50,9 @@
   他人或到达有界裁决期限后进入 `QuietPending`。
 - 普通能量、灯光变化、旁人语音、云端 pending、预览增长不能推进主人时钟。
 - `QuietPending` 只允许有限的 provider catch-up 窗口；窗口到期后必须停止，不能无限 Hold。
-- 所有停止请求必须经过同一个幂等出口；失败只能重新进入当前状态，不能创建第二套计时器。
+- 所有可见录音停止必须由产品身份 reducer 按 coordinator session ID 提交；endpoint
+  只能提出 stop proposal。BLE STOP 成功后才能把前台切到 Processing 并关闭 ASR；
+  写入失败必须保持 Listening、恢复 Active 并允许同一 endpoint 重试。
 
 ## 重启调查规则
 
@@ -98,9 +102,9 @@
 
 ## 本轮落地
 
-- `OwnerEndpointController` 是唯一 endpoint 类型，公开生命周期
-  `OwnerActive -> QuietPending -> Stopping`；旧类型名和兼容别名已删除，避免
-  其他适配器重新创建第二套计时器。
+- `OwnerEndpointController` 是唯一 endpoint 证据类型，只公开
+  `OwnerActive / OwnerEvidencePending / QuietPending`；它没有 `Stopping`，避免
+  endpoint 与产品身份各自保存一个不可逆停止态。
 - 所有 endpoint hold/stop 日志都会记录 `lifecycle` 和具体 `reason`，可回答谁
   推进主人时钟、谁触发停止，以及是否只是 provider stall。
 - 健康 ASR 路径不再使用原始能量 trailing-silence 作为第二个停止裁判；仅在
@@ -114,11 +118,17 @@
 设备按键接管时产生跨段竞态：旧候选的延迟 STOP 可能截断新候选，旧的
 promotion 标志也可能被新候选继承。
 
-当前统一为 `WakeCandidateController`：阶段、设备段 ID 和接管意图在同一
-个串行控制器内变更；新设备段注册时先清空上一候选阶段，再允许进入
-`ACTIVE`。KWS、短语确认和声纹推理仍是候选的证据提供者，不得各自改变
-可见录音或设备 STOP。旧的 endpoint policy 辅助函数仅在测试编译，正式
-程序不存在第二个 endpoint 裁判。
+当前不再保留独立 `WakeCandidateController` 或候选原子变量。候选阶段、设备段
+ID、按键接管意图和产品 owner session 全部由 `Inner.recording_lifecycle` 中的
+`RecordingLifecycleController` 原子变更。actor 内 `speaker_candidate` 只保存 PCM
+和模型证据，不能改变产品生命周期。KWS、短语确认和声纹推理仍是候选的证据
+提供者，不得各自改变可见录音或设备 STOP。
+
+拒绝候选后的延迟物理 STOP 必须验证“原候选 Closed tombstone 仍拥有 transport
+stop”，不能只检查“当前没有新候选”：这段延迟内若已经进入主人录音，旧 STOP
+必须失效。终端唤醒跨物理段时保留同一个候选身份，下一段只能执行
+`promote_candidate_to_owner`，不得伪装成 `begin_manual_owner`；六秒内没有收到
+正文 transport 时按 candidate + coordinator 双身份清理 Starting 会话。
 
 保留的本地确认、声纹预取和终端离线确认是同一候选控制器内的有界证据
 级联，不是独立生命周期；每一条路径都必须最终调用同一个候选升级或拒绝
@@ -129,12 +139,13 @@ promotion 标志也可能被新候选继承。
 
 嵌入式录音现在由 `Inner.recording_lifecycle` 持有唯一的
 `RecordingLifecycleController`。它跨 BLE actor、ASR 回调和 endpoint watchdog
-共享同一个状态与 session 身份：
+共享同一个产品身份：
 
-`Idle -> WakeCandidate -> OwnerActive -> OwnerEvidencePending -> QuietPending -> Stopping -> Closed`
+`Idle -> WakeCandidate -> Active -> Stopping -> Closed`
 
-候选升级、主人活动、停止提交、停止失败重开和取消/完成清理都必须通过该
-控制器。endpoint clock 只计算“是否到期”的证据，不能绕过控制器直接把录音
+候选升级、停止提交、停止失败重开和取消/完成清理都必须通过该控制器。
+主人活动、待裁决声纹和静音只进入 `OwnerEndpointController`，不能复制进产品
+身份状态。endpoint clock 只计算“是否到期”的证据，不能绕过控制器直接把录音
 标成停止；重复 callback/watchdog STOP 会被 session ID + 幂等转换拒绝。
 固件 VAD、灯光、云端 pending 和预览仍然只是证据，不会创建第二个生命周期。
 
@@ -264,10 +275,31 @@ reset 和 retained-audio 恢复重放，原子保存本地音频/语音/主人/�
 当前分类、去抖计数、主人缺席状态和证据序列。只有开始新的产品会话才允许建立
 新的连续性；网络建链、重连和恢复重放不得把其中一部分恢复成默认值。
 
-同时，新的声纹/归属 observation 在每次回调到达时先进入
-`RecordingLifecycleController`，再交给唯一 endpoint reducer。停止 handler 只负责
-幂等提交 STOP，不再兼任主人活动和固件续租处理。这样公开生命周期与真实证据
-保持一致，不会在主人说话期间长期停留于 `QuietPending`。
+同时，新的声纹/归属 observation 只进入唯一 endpoint reducer；
+`RecordingLifecycleController` 不再复制 `OwnerActive/QuietPending`，只验证候选和
+owner session 身份。停止 handler 只负责按相同 session ID 幂等提交 STOP，不再
+兼任主人活动和固件续租处理。
+
+### STOP 两阶段提交与过期回调隔离（2026-09-05）
+
+最后一轮结构审计确认了三个会制造间歇性故障的残留：旧 BLE actor 能用
+`close(None)` 关闭当前任意会话；endpoint 自己先进入 `StopCommitted`，但产品
+生命周期可能拒绝同一次停止；BLE STOP 尚未成功时前台已进入 Processing，ASR
+也已并发收到 final frame。它们分别会误杀下一次唤醒、造成永不结束，以及在
+瞬时 BLE 写失败后留下“有声音但无预览”的半关闭会话。
+
+当前硬约束是：
+
+1. actor 只能 `close_candidate(embedded_session_id)` 或
+   `close_owner(coordinator_session_id)`，不存在无身份 reset/close；
+2. endpoint 的 Stop 是可重复 proposal，只有 `RecordingLifecycleController` 能把
+   exact owner 从 Active 提交到 Stopping；
+3. BLE STOP 写成功后才发布 Transcribing，再发送 provider final frame；失败时
+   lifecycle 回到 Active，前台和 ASR 始终保持 Listening；
+4. candidate capsule 使用独立 UI token，绝不创建 `SessionState::Starting`，候选
+   拒绝也绝不直接写 `SessionPhase::Idle`；
+5. 生产路径不提供 lifecycle `reset()`，只能用带身份的 close 留下 stale callback
+   tombstone。
 
 ### 最终文本只有一个原子仲裁器（2026-09-04，session 2744）
 
