@@ -354,6 +354,17 @@ impl EndpointArbiter {
         {
             return EndpointDecision::Hold;
         }
+        // The coordinator only calls this arbiter after its independent
+        // endpoint clock has expired and the authority/identity gate passed.
+        // Once both owner-tail barriers are clear, a stale arbiter phase must
+        // not strand the session in Listening/CandidateEnd. This is the
+        // failure shape seen in installed session 1724: provider settled at
+        // 7.2s, local owner tail was quiet, yet the arbiter stayed Hold while
+        // low-score room energy continued arriving.
+        if !evidence.pending_provider_text && !evidence.unresolved_owner_tail {
+            self.phase = EndpointPhase::StopCommitted;
+            return EndpointDecision::Stop;
+        }
         let needs_catch_up = Self::needs_provider_catch_up(evidence);
         match self.phase {
             EndpointPhase::Listening => EndpointDecision::Hold,
@@ -791,6 +802,30 @@ mod tests {
         let mut endpoint = EndpointArbiter::default();
         endpoint.arm(settled);
         endpoint.note_text_revision();
+        assert_eq!(
+            endpoint.decide_stop(
+                settled,
+                started + Duration::from_millis(900),
+                Duration::from_millis(300),
+            ),
+            EndpointDecision::Stop
+        );
+    }
+
+    #[test]
+    fn quiet_owner_commits_stop_even_if_arbiter_phase_was_not_armed() {
+        // The outer settled clock has already established a valid endpoint;
+        // a stale Listening phase must not turn that due decision into an
+        // unbounded hold.
+        let started = Instant::now();
+        let settled = EndpointEvidence {
+            owner_watermark_ms: Some(6_502),
+            provider_coverage_ms: Some(7_100),
+            pending_provider_text: false,
+            latest_speech_confirmed_non_target: false,
+            unresolved_owner_tail: false,
+        };
+        let mut endpoint = EndpointArbiter::default();
         assert_eq!(
             endpoint.decide_stop(
                 settled,
