@@ -74,11 +74,13 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/run-target-speaker-overlap-regressions.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-v1.0.2-regression.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-cn-interference-final-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/show-cn-interference-development-acceptance.ps1` | Automation and audits | Current-tree interference acceptance helper |
 | `scripts/show-live-wake-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-live-wake-acceptance.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/speaker-evaluation-manifest.example.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/validation/run_ble_recording_cancel_matrix.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-frontend.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/verify_latest_runtime.ps1` | Automation and audits | Latest installed runtime hash/path gate |
 | `scripts/verify-listener-1.0.4-clean-env.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-listener-1.0.4-identity.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-listener-1.0.4-protected-contracts.mjs` | Automation and audits | Node/PowerShell script tests |
