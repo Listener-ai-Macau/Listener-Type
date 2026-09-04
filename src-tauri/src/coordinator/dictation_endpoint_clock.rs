@@ -193,6 +193,15 @@ impl SettledTargetEndpointClock {
         body_started: bool,
         now: Instant,
     ) -> Option<u64> {
+        // Keep the previous fused owner boundary before replacing the cached
+        // update.  A newer boundary is not automatically new speech: cloud
+        // diarization can publish a late/stable row for audio that was already
+        // consumed.  Only a boundary accompanied by a fresh activity edge may
+        // restart the wall-clock endpoint.
+        let previous_local_owner_end_ms = self
+            .latest_update
+            .as_ref()
+            .and_then(|previous| previous.local_target_speech_end_ms);
         self.latest_update = Some(update.clone());
         self.latest_update_at = Some(now);
         let recent_strong_non_target = update_has_recent_strong_non_target(update);
@@ -241,13 +250,22 @@ impl SettledTargetEndpointClock {
                         > local_owner_ms.saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
                     && stable_owner_end_ms == Some(local_owner_ms)
             });
+        let local_owner_activity_advanced = update
+            .local_target_speech_end_ms
+            .zip(previous_local_owner_end_ms)
+            .is_some_and(|(new_end_ms, previous_end_ms)| new_end_ms > previous_end_ms);
+        let fresh_owner_activity = update.target_activity_advanced
+            || update.pending_activity_advanced
+            || local_owner_activity_advanced;
         let stable_target_should_rearm = stable_owner_end_ms.is_some()
             && (self.armed_at.is_none()
                 || self.pending_was_seen
-                || local_authority_recovered_from_cloud
+                || (local_authority_recovered_from_cloud && fresh_owner_activity)
                 || self
                     .armed_target_end_ms
-                    .is_none_or(|armed_end_ms| stable_owner_end_ms > Some(armed_end_ms)));
+                    .is_none_or(|armed_end_ms| {
+                        stable_owner_end_ms > Some(armed_end_ms) && fresh_owner_activity
+                    }));
         // Some valid Volcengine previews arrive before diarization publishes a
         // speaker id. Once visible body text exists, arm a wall-clock fallback
         // instead of leaving the session entirely dependent on noisy firmware
@@ -397,6 +415,7 @@ impl SettledTargetEndpointClock {
             self.armed_target_end_ms
                 .is_none_or(|armed_end_ms| new_end_ms > armed_end_ms)
         });
+        let fresh_owner_activity = update.target_activity_advanced || update.pending_activity_advanced;
         // This method is called from every visible preview callback.  A
         // callback is not itself fresh owner speech: restarting the wall clock
         // here makes a long but already-settled preview wait forever.  Re-arm
@@ -404,7 +423,7 @@ impl SettledTargetEndpointClock {
         // paused deadline after explicit other-speaker evidence.
         if self.armed_at.is_some()
             && !owner_boundary_advanced
-            && !local_authority_recovered_from_cloud
+            && !(local_authority_recovered_from_cloud && fresh_owner_activity)
             && !restore_paused_owner_deadline
             && !self.manual_terminal_bridge_rearm_pending
         {
@@ -415,6 +434,12 @@ impl SettledTargetEndpointClock {
             self.armed_target_end_ms = self.paused_armed_target_end_ms;
             self.armed_at = self.paused_armed_at;
             self.armed_from_visible_body_fallback = true;
+        } else if self.armed_at.is_some() && owner_boundary_advanced && !fresh_owner_activity {
+            // A late provider boundary is informational only.  Keep the
+            // already-running deadline instead of restarting it from callback
+            // arrival time; otherwise delayed diarization can make endpointing
+            // wait forever while the microphone is quiet.
+            return None;
         } else {
             self.armed_target_end_ms = stable_owner_end_ms;
             self.armed_at = Some(now);
