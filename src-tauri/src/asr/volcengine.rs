@@ -481,7 +481,8 @@ impl Default for AudioDeliveryReadiness {
 use super::volcengine_transcript::{
     authoritative_final_supersedes_repeated_streaming_ledger, is_unstable_initial_partial,
     normalize_cjk_final_spacing_and_echoes, normalized_result, transcript_candidate_from_result,
-    trim_repeated_short_final_tail, trim_repeated_short_streaming_tail, TranscriptSegment,
+    trim_repeated_short_final_tail, trim_repeated_short_streaming_tail, TranscriptCandidate,
+    TranscriptSegment,
 };
 use super::volcengine_untimed_merge::merge_streaming_candidate_with_untimed_window;
 
@@ -569,6 +570,11 @@ struct SyncState {
     /// when the provider's stable foreign-speaker interval overlaps the same
     /// physical audio (installed interference session 2744).
     local_confirmed_transcript_non_target_end_ms: Option<u64>,
+    /// Two consecutive short but high-energy extreme mismatches. This weaker
+    /// checkpoint is never passed to same-cluster filtering and cannot erase
+    /// text alone; it only corroborates a stable provider foreign-speaker row.
+    local_consecutive_transcript_foreign_hint: u8,
+    local_confirmed_transcript_foreign_hint_end_ms: Option<u64>,
     /// Session voiceprint negatives are advisory for transcript ownership. Two
     /// very-low-score windows may still mark current speech as another person
     /// for endpointing, but must never freeze/delete provider-recognized text.
@@ -626,6 +632,8 @@ struct OwnerContinuitySnapshot {
     consecutive_non_target: u8,
     consecutive_transcript_hard_non_target: u8,
     confirmed_transcript_non_target_end_ms: Option<u64>,
+    consecutive_transcript_foreign_hint: u8,
+    confirmed_transcript_foreign_hint_end_ms: Option<u64>,
     consecutive_strong_non_target: u8,
     owner_absence_run_started_ms: Option<u64>,
     owner_absence_run_confirmed: bool,
@@ -654,6 +662,9 @@ impl OwnerContinuitySnapshot {
                 .local_consecutive_transcript_hard_non_target,
             confirmed_transcript_non_target_end_ms: state
                 .local_confirmed_transcript_non_target_end_ms,
+            consecutive_transcript_foreign_hint: state.local_consecutive_transcript_foreign_hint,
+            confirmed_transcript_foreign_hint_end_ms: state
+                .local_confirmed_transcript_foreign_hint_end_ms,
             consecutive_strong_non_target: state.local_consecutive_strong_non_target,
             owner_absence_run_started_ms: state.local_owner_absence_run_started_ms,
             owner_absence_run_confirmed: state.local_owner_absence_run_confirmed,
@@ -684,6 +695,9 @@ impl OwnerContinuitySnapshot {
             self.consecutive_transcript_hard_non_target;
         state.local_confirmed_transcript_non_target_end_ms =
             self.confirmed_transcript_non_target_end_ms;
+        state.local_consecutive_transcript_foreign_hint = self.consecutive_transcript_foreign_hint;
+        state.local_confirmed_transcript_foreign_hint_end_ms =
+            self.confirmed_transcript_foreign_hint_end_ms;
         state.local_consecutive_strong_non_target = self.consecutive_strong_non_target;
         state.local_owner_absence_run_started_ms = self.owner_absence_run_started_ms;
         state.local_owner_absence_run_confirmed = self.owner_absence_run_confirmed;
@@ -702,10 +716,6 @@ const LOCAL_SPEAKER_SWITCH_CONFIRMATIONS: u8 = 2;
 const LOCAL_SPEAKER_EVIDENCE_LIMIT: usize = 64;
 const LOCAL_SPEAKER_WINDOW_MS: u64 = 1_200;
 const LOCAL_ENDPOINT_STRONG_NON_TARGET_MAX_SCORE: f32 = 0.20;
-// Transcript isolation is deliberately stricter than endpointing. Only an
-// extreme mismatch may freeze future transcript growth; ordinary same-owner
-// cross-phrase dips (observed around 0.17) remain advisory.
-const LOCAL_TRANSCRIPT_HARD_NON_TARGET_MAX_SCORE: f32 = 0.10;
 const LOCAL_ENDPOINT_OWNER_ABSENCE_CONTINUATION_MAX_SCORE: f32 = 0.30;
 // Three 400 ms overlapping low-score observations are enough to distinguish
 // sustained other speech from the two-window startup dip seen in session 2024.
@@ -1367,6 +1377,8 @@ fn stable_provider_foreign_row_has_local_veto(state: &SyncState, provider_result
     let Some(target_speaker_id) = state.target_speaker_id.as_deref() else {
         return false;
     };
+    let sample_center =
+        |audio_end_ms: u64| audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
     provider_result
         .get("utterances")
         .and_then(Value::as_array)
@@ -1382,7 +1394,14 @@ fn stable_provider_foreign_row_has_local_veto(state: &SyncState, provider_result
             utterance_start_ms(utterance)
                 .zip(utterance_end_ms(utterance))
                 .is_some_and(|(start_ms, end_ms)| {
-                    local_non_target_vetoes_split_utterance(state, start_ms, end_ms)
+                    let confirmed_short_foreign_hint_overlaps = state
+                        .local_confirmed_transcript_foreign_hint_end_ms
+                        .is_some_and(|audio_end_ms| {
+                            let center_ms = sample_center(audio_end_ms);
+                            center_ms >= start_ms && center_ms <= end_ms
+                        });
+                    confirmed_short_foreign_hint_overlaps
+                        || local_non_target_vetoes_split_utterance(state, start_ms, end_ms)
                 })
         })
 }
@@ -1502,19 +1521,6 @@ fn commit_session_transcript_if_stronger(
     state.best_transcript_text = text.clone();
     state.best_transcript_segments = segments;
     state.last_partial_text = text;
-}
-
-fn confirmed_owner_final_preview_fallback(
-    state: &SyncState,
-    retained_text: &str,
-) -> Option<(String, Vec<TranscriptSegment>)> {
-    // Protocol contract: an empty / weaker final never regresses below the
-    // session speech ledger. Content only enters that ledger from Target-gated
-    // optimistic stream or already-filtered best text, so later NonTarget tails
-    // and Volcengine `two_pass_empty` seals cannot invent foreign speech here.
-    let (committed_text, committed_segments) = session_committed_transcript(state)?;
-    (spoken_content_len(&committed_text) > spoken_content_len(retained_text))
-        .then_some((committed_text, committed_segments))
 }
 
 fn provider_raw_fallback_allowed(state: &SyncState) -> bool {
@@ -2206,8 +2212,28 @@ fn utterance_belongs_to_verified_target_or_body_alias(
     wake_owner_verified: bool,
     local_speaker_profile_adaptive: bool,
     confirmed_non_target_speech_end_ms: Option<u64>,
+    confirmed_foreign_hint_end_ms: Option<u64>,
 ) -> bool {
     let utterance_speaker = utterance_speaker_id(utterance);
+    // A short local mismatch cannot reject same-cluster text. When the cloud
+    // independently marks a stable, time-aligned different speaker, however,
+    // the two weak signals form one explicit foreign-row veto. Keep this check
+    // before applying the response-local body alias.
+    let corroborated_foreign_row = utterance_is_stable(utterance)
+        && utterance_speaker
+            .as_deref()
+            .is_some_and(|speaker| speaker != target_speaker_id)
+        && confirmed_foreign_hint_end_ms.is_some_and(|audio_end_ms| {
+            utterance_start_ms(utterance)
+                .zip(utterance_end_ms(utterance))
+                .is_some_and(|(start_ms, end_ms)| {
+                    let center_ms = audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+                    center_ms >= start_ms && center_ms <= end_ms
+                })
+        });
+    if corroborated_foreign_row {
+        return false;
+    }
     let body_alias_matches =
         immediate_body_speaker_id.is_some_and(|alias| utterance_speaker.as_deref() == Some(alias));
     let effective_target = if body_alias_matches {
@@ -2246,6 +2272,7 @@ fn filter_result_to_target_speaker_with_local_evidence(
         false,
         false,
         None,
+        None,
     )
 }
 
@@ -2259,6 +2286,7 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
     wake_owner_verified: bool,
     local_speaker_profile_adaptive: bool,
     confirmed_non_target_speech_end_ms: Option<u64>,
+    confirmed_foreign_hint_end_ms: Option<u64>,
 ) -> SpeakerFilteredResult {
     let mut filtered_result = result.clone();
     let utterances = result
@@ -2384,6 +2412,7 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
                         wake_owner_verified,
                         local_speaker_profile_adaptive,
                         confirmed_non_target_speech_end_ms,
+                        confirmed_foreign_hint_end_ms,
                     )
                 })
                 .cloned()
@@ -2433,6 +2462,7 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
                     wake_owner_verified,
                     local_speaker_profile_adaptive,
                     confirmed_non_target_speech_end_ms,
+                    confirmed_foreign_hint_end_ms,
                 )
         })
     });
@@ -2476,6 +2506,7 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
                     wake_owner_verified,
                     local_speaker_profile_adaptive,
                     confirmed_non_target_speech_end_ms,
+                    confirmed_foreign_hint_end_ms,
                 )
             }) {
                 return true;
@@ -3409,15 +3440,18 @@ impl VolcengineStreamingASR {
         audio_duration_ms: u64,
         classification: crate::speaker_verification::SessionSpeakerClassification,
     ) {
-        let transcript_hard_non_target = matches!(
-            classification,
-            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score }
-                if score <= LOCAL_TRANSCRIPT_HARD_NON_TARGET_MAX_SCORE
-        );
+        let transcript_speaker_evidence = match classification {
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score } => {
+                crate::speech_decision_kernel::classify_transcript_speaker_evidence(
+                    score, 1_200, 512.0,
+                )
+            }
+            _ => crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive,
+        };
         self.note_local_speaker_observation(
             audio_duration_ms,
             classification,
-            transcript_hard_non_target,
+            transcript_speaker_evidence,
         );
     }
 
@@ -3425,7 +3459,7 @@ impl VolcengineStreamingASR {
         &self,
         audio_duration_ms: u64,
         classification: crate::speaker_verification::SessionSpeakerClassification,
-        transcript_hard_non_target: bool,
+        transcript_speaker_evidence: crate::speech_decision_kernel::TranscriptSpeakerEvidence,
     ) {
         let (update, stable_target, effective_classification, endpoint_strong_non_target) = {
             let mut state = self.state.lock();
@@ -3490,10 +3524,42 @@ impl VolcengineStreamingASR {
             // to freeze the ledger and produce an empty final. Keep the new
             // extreme-mismatch channel independent from identity/endpoint
             // hysteresis and enable it only for a persisted enrolled owner.
-            let transcript_hard_non_target_applies = transcript_hard_non_target
+            let transcript_speaker_evidence =
+                if state.local_wake_owner_verified && !state.local_speaker_profile_adaptive {
+                    transcript_speaker_evidence
+                } else {
+                    crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive
+                };
+            let transcript_hard_non_target_applies = matches!(
+                transcript_speaker_evidence,
+                crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget
+            );
+            let transcript_foreign_hint_applies = matches!(
+                transcript_speaker_evidence,
+                crate::speech_decision_kernel::TranscriptSpeakerEvidence::ForeignTailHint
+                    | crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget
+            );
+            if transcript_foreign_hint_applies {
+                state.local_consecutive_transcript_foreign_hint = state
+                    .local_consecutive_transcript_foreign_hint
+                    .saturating_add(1);
+                if state.local_consecutive_transcript_foreign_hint
+                    >= LOCAL_SPEAKER_SWITCH_CONFIRMATIONS
+                {
+                    state.local_confirmed_transcript_foreign_hint_end_ms = Some(
+                        state
+                            .local_confirmed_transcript_foreign_hint_end_ms
+                            .unwrap_or_default()
+                            .max(audio_duration_ms),
+                    );
+                }
+            } else {
+                state.local_consecutive_transcript_foreign_hint = 0;
+            }
+            if transcript_hard_non_target_applies
                 && state.local_wake_owner_verified
-                && !state.local_speaker_profile_adaptive;
-            if transcript_hard_non_target_applies {
+                && !state.local_speaker_profile_adaptive
+            {
                 state.local_consecutive_transcript_hard_non_target = state
                     .local_consecutive_transcript_hard_non_target
                     .saturating_add(1);
@@ -3634,7 +3700,8 @@ impl VolcengineStreamingASR {
             )
         };
         log::info!(
-            "[asr] local session-speaker evidence classification={classification:?} effective={effective_classification:?} stable_target={stable_target} endpoint_strong_non_target={endpoint_strong_non_target} transcript_hard_non_target={transcript_hard_non_target} audio_end_ms={audio_duration_ms}"
+            "[asr] local session-speaker evidence classification={classification:?} effective={effective_classification:?} stable_target={stable_target} endpoint_strong_non_target={endpoint_strong_non_target} transcript_speaker_evidence={} audio_end_ms={audio_duration_ms}",
+            transcript_speaker_evidence.label()
         );
         if update.speaker_id.is_some() || update.local_speaker_tracking_enabled {
             self.emit_target_speaker_update(update);
@@ -3675,6 +3742,8 @@ impl VolcengineStreamingASR {
         state.local_consecutive_non_target = 0;
         state.local_consecutive_transcript_hard_non_target = 0;
         state.local_confirmed_transcript_non_target_end_ms = None;
+        state.local_consecutive_transcript_foreign_hint = 0;
+        state.local_confirmed_transcript_foreign_hint_end_ms = None;
         state.local_consecutive_strong_non_target = 0;
         state.local_owner_absence_run_started_ms = None;
         state.local_owner_absence_run_confirmed = false;
@@ -3858,6 +3927,8 @@ impl VolcengineStreamingASR {
             st.local_consecutive_non_target = 0;
             st.local_consecutive_transcript_hard_non_target = 0;
             st.local_confirmed_transcript_non_target_end_ms = None;
+            st.local_consecutive_transcript_foreign_hint = 0;
+            st.local_confirmed_transcript_foreign_hint_end_ms = None;
             st.local_consecutive_strong_non_target = 0;
             st.local_owner_absence_run_started_ms = None;
             st.local_owner_absence_run_confirmed = false;
@@ -4292,6 +4363,8 @@ impl VolcengineStreamingASR {
             let prior_wake_speaker_end_ms = state.wake_target_speech_end_ms;
             let wake_owner_verified = state.local_wake_owner_verified;
             let local_speaker_profile_adaptive = state.local_speaker_profile_adaptive;
+            let confirmed_foreign_hint_end_ms =
+                state.local_confirmed_transcript_foreign_hint_end_ms;
             // Both endpoint-grade NonTarget and the independent, confirmed
             // transcript-grade mismatch describe the same physical exclusion
             // boundary. The latter remains non-destructive by itself, but a
@@ -4312,6 +4385,7 @@ impl VolcengineStreamingASR {
                 wake_owner_verified,
                 local_speaker_profile_adaptive,
                 confirmed_non_target_speech_end_ms,
+                confirmed_foreign_hint_end_ms,
             );
             if let Some(wake_end_ms) = filtered.wake_target_speech_end_ms {
                 state.wake_target_speech_end_ms = Some(wake_end_ms);
@@ -4627,12 +4701,15 @@ impl VolcengineStreamingASR {
         // and any one fail-open branch could bypass another branch's foreign-
         // speaker veto. Build all facts from one owner-continuity snapshot and
         // ask the pure decision kernel for exactly one authority.
+        let two_pass_empty_final = has_final && result_marks_two_pass_empty(result);
         let (
             final_authority,
             explicit_non_owner_tail,
             provider_raw_recovery_safe,
             provider_owner_recovery_safe,
+            session_ledger_recovery_safe,
             optimistic_owner_recovery_safe,
+            session_ledger_candidate,
         ) = {
             let state = self.state.lock();
             let target_text = speaker_filtered_result
@@ -4666,17 +4743,32 @@ impl VolcengineStreamingASR {
                     || local_speaker_allows_non_destructive_final_recovery(&state)
                     || spoken_content_len(&state.optimistic_preview_text)
                         >= spoken_content_len(optimistic_text));
+            let session_ledger_candidate = session_committed_transcript(&state);
+            let session_ledger_recovery_safe = has_final
+                && !explicit_non_owner_tail
+                && session_ledger_candidate
+                    .as_ref()
+                    .is_some_and(|(ledger_text, _)| {
+                        spoken_content_len(ledger_text) > spoken_content_len(target_text)
+                            && (two_pass_empty_final
+                                || target_text.trim().is_empty()
+                                || !authoritative_final_supersedes_repeated_streaming_ledger(
+                                    target_text,
+                                    ledger_text,
+                                ))
+                    });
             let evidence = crate::speech_decision_kernel::FinalTranscriptEvidence {
                 protocol_final: has_final,
                 explicit_non_owner_tail,
                 provider_raw_recovery_safe,
                 provider_owner_recovery_safe,
+                session_ledger_recovery_safe,
                 optimistic_owner_recovery_safe,
             };
             let authority = crate::speech_decision_kernel::arbitrate_final_transcript(evidence);
             if has_final {
                 log::info!(
-                    "[asr] final arbitration authority={} provider={} filtered={} best={} optimistic={} last_preview={} tracking={} explicit_non_owner_tail={} raw_recovery={} owner_recovery={} optimistic_recovery={}",
+                    "[asr] final arbitration authority={} provider={} filtered={} best={} optimistic={} last_preview={} tracking={} explicit_non_owner_tail={} raw_recovery={} owner_recovery={} ledger_recovery={} optimistic_recovery={}",
                     authority.label(),
                     result
                         .get("text")
@@ -4690,6 +4782,7 @@ impl VolcengineStreamingASR {
                     explicit_non_owner_tail,
                     provider_raw_recovery_safe,
                     provider_owner_recovery_safe,
+                    session_ledger_recovery_safe,
                     optimistic_owner_recovery_safe,
                 );
             }
@@ -4698,46 +4791,46 @@ impl VolcengineStreamingASR {
                 explicit_non_owner_tail,
                 provider_raw_recovery_safe,
                 provider_owner_recovery_safe,
+                session_ledger_recovery_safe,
                 optimistic_owner_recovery_safe,
+                session_ledger_candidate,
             )
         };
-        let result = match final_authority {
-            crate::speech_decision_kernel::FinalTranscriptAuthority::ProviderRawRecovery => result,
-            crate::speech_decision_kernel::FinalTranscriptAuthority::ProviderOwnerRecovery => {
-                result
+        let selected_result = match final_authority {
+            crate::speech_decision_kernel::FinalTranscriptAuthority::ProviderRawRecovery
+            | crate::speech_decision_kernel::FinalTranscriptAuthority::ProviderOwnerRecovery => {
+                Some(result)
             }
+            crate::speech_decision_kernel::FinalTranscriptAuthority::SessionLedgerRecovery => None,
             crate::speech_decision_kernel::FinalTranscriptAuthority::OptimisticOwnerRecovery => {
-                &speaker_filtered_result.optimistic_result
+                Some(&speaker_filtered_result.optimistic_result)
             }
             crate::speech_decision_kernel::FinalTranscriptAuthority::SpeakerFiltered => {
-                &speaker_filtered_result.result
+                Some(&speaker_filtered_result.result)
             }
         };
-        if has_final {
-            log::info!(
-                "[asr] final arbitration committed authority={} explicit_non_owner_tail={} raw_recovery={} owner_recovery={} optimistic_recovery={} result_chars={}",
-                final_authority.label(),
-                explicit_non_owner_tail,
-                provider_raw_recovery_safe,
-                provider_owner_recovery_safe,
-                optimistic_owner_recovery_safe,
-                result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .map_or(0, |text| text.chars().count()),
-            );
-        }
+        let candidate = if matches!(
+            final_authority,
+            crate::speech_decision_kernel::FinalTranscriptAuthority::SessionLedgerRecovery
+        ) {
+            let (text, timed_segments) = session_ledger_candidate
+                .clone()
+                .unwrap_or_else(|| (String::new(), Vec::new()));
+            TranscriptCandidate {
+                text,
+                timed_segments,
+                authoritative_cumulative: false,
+            }
+        } else {
+            transcript_candidate_from_result(selected_result.expect("non-ledger final authority"))
+        };
+        let arbitrated_final_content_len = has_final.then(|| spoken_content_len(&candidate.text));
 
         // 流结束信号只信帧头 flags（lastPacket / negativeSequence）。
         // 之前误把 utterance.definite=true 当成流结束——但那只代表"这一段语音已固化"，
         // 用户可能还在继续说。结果一收到第一个 definite=true 就关掉接收，
         // 后面用户讲的内容全部丢失（实测丢了 9 秒）。
-        let candidate = transcript_candidate_from_result(result);
-        let two_pass_empty_final = has_final && result_marks_two_pass_empty(result);
-        let final_speaker_candidate_empty = has_final && candidate.text.trim().is_empty();
         let authoritative_two_pass = candidate.authoritative_cumulative && !two_pass_empty_final;
-        let authoritative_final_candidate = (has_final && authoritative_two_pass)
-            .then(|| (candidate.text.clone(), candidate.timed_segments.clone()));
         log::info!(
             "[asr] {} server metadata: {}",
             self.session_options.endpoint.label(),
@@ -4780,83 +4873,33 @@ impl VolcengineStreamingASR {
         }
         let (full_text, partial_changed, preview_holds_endpoint) = {
             let mut state = self.state.lock();
-            let (mut merged, mut segments, untimed_window) =
+            // A protocol-final candidate is already sealed by the sole final
+            // transcript arbiter above. The generic streaming merge may only
+            // process non-final revisions; allowing it to prepend/append the
+            // older ledger after sealing was the hidden second writer behind
+            // the interference-vs-truncation regression loop.
+            let (mut merged, mut segments, untimed_window) = if has_final {
+                (
+                    candidate.text.clone(),
+                    candidate.timed_segments.clone(),
+                    String::new(),
+                )
+            } else {
                 merge_streaming_candidate_with_untimed_window(
                     &state.best_transcript_text,
                     &state.best_transcript_segments,
                     &state.best_untimed_window,
                     candidate,
-                );
+                )
+            };
             state.best_untimed_window = untimed_window;
-            // A no-segment optimistic ledger can keep winning inside the
-            // generic streaming merge before final fallback is considered.
-            // Restore the incoming two-pass authority at this boundary when
-            // the only extra ledger content is a repeated terminal revision.
-            if let Some((authoritative_text, authoritative_segments)) =
-                authoritative_final_candidate.as_ref()
-            {
-                if authoritative_final_supersedes_repeated_streaming_ledger(
-                    authoritative_text,
-                    &merged,
-                ) {
-                    log::warn!(
-                        "[asr] authoritative final replaced inflated streaming merge final_chars={} merged_chars={}",
-                        authoritative_text.chars().count(),
-                        merged.chars().count()
-                    );
-                    merged = authoritative_text.clone();
-                    segments = authoritative_segments.clone();
-                }
-            }
             // Hard multi-speaker isolation: never grow past the owner ceiling
             // while local identity is off the wake speaker.
-            let (clamped_text, clamped_segments) =
-                clamp_to_owner_isolation_ceiling(&state, merged, segments);
-            merged = clamped_text;
-            segments = clamped_segments;
-            // Root contract: protocol final is a stream seal. Empty / weaker
-            // finals (including Volcengine two_pass_empty and diarization
-            // re-attribution stubs) never erase longer session-committed speech.
-            // When isolation froze, the fallback deliberately excludes longer
-            // optimistic room text.
-            if has_final
-                && (two_pass_empty_final
-                    || final_speaker_candidate_empty
-                    || spoken_content_len(&state.optimistic_preview_text)
-                        > spoken_content_len(&merged)
-                    || spoken_content_len(&state.best_transcript_text)
-                        > spoken_content_len(&merged)
-                    || (state.owner_isolation_frozen
-                        && spoken_content_len(&state.owner_isolation_ceiling_text)
-                            > spoken_content_len(&merged)))
-            {
-                if let Some((fallback_text, fallback_segments)) =
-                    confirmed_owner_final_preview_fallback(&state, &merged)
-                {
-                    if authoritative_two_pass
-                        && authoritative_final_supersedes_repeated_streaming_ledger(
-                            &merged,
-                            &fallback_text,
-                        )
-                    {
-                        log::warn!(
-                            "[asr] authoritative final rejected repeated streaming-ledger tail final_chars={} ledger_chars={}",
-                            merged.chars().count(),
-                            fallback_text.chars().count()
-                        );
-                    } else {
-                        log::warn!(
-                            "[asr] protocol final weaker than session ledger; committing {} accepted chars over {} retained chars (two_pass_empty={} final_empty={} isolation_frozen={})",
-                            fallback_text.chars().count(),
-                            merged.chars().count(),
-                            two_pass_empty_final,
-                            final_speaker_candidate_empty,
-                            state.owner_isolation_frozen
-                        );
-                        merged = fallback_text;
-                        segments = fallback_segments;
-                    }
-                }
+            if !has_final {
+                let (clamped_text, clamped_segments) =
+                    clamp_to_owner_isolation_ceiling(&state, merged, segments);
+                merged = clamped_text;
+                segments = clamped_segments;
             }
             let cleaned_streaming_tail = trim_repeated_short_streaming_tail(&merged);
             if cleaned_streaming_tail != merged {
@@ -4925,6 +4968,25 @@ impl VolcengineStreamingASR {
                 && refresh_local_target_from_owner_preview_activity(&mut state);
             (merged, changed, preview_holds_endpoint)
         };
+
+        if let Some(arbitrated_content_len) = arbitrated_final_content_len {
+            let sealed_content_len = spoken_content_len(&full_text);
+            debug_assert!(
+                sealed_content_len <= arbitrated_content_len,
+                "terminal finalization must never expand the arbitrated transcript"
+            );
+            log::info!(
+                "[asr] final arbitration sealed authority={} explicit_non_owner_tail={} raw_recovery={} owner_recovery={} ledger_recovery={} optimistic_recovery={} arbitrated_chars={} sealed_chars={}",
+                final_authority.label(),
+                explicit_non_owner_tail,
+                provider_raw_recovery_safe,
+                provider_owner_recovery_safe,
+                session_ledger_recovery_safe,
+                optimistic_owner_recovery_safe,
+                arbitrated_content_len,
+                sealed_content_len,
+            );
+        }
 
         // Owner ASR text is still growing while debounced identity remains
         // target: keep the 1s endpoint clock aligned with live speech so
@@ -5021,28 +5083,30 @@ impl VolcengineStreamingASR {
         if has_final {
             let commit = {
                 let mut state = self.state.lock();
-                let allow_raw_fallback = provider_raw_fallback_allowed(&state);
                 let revision_count = state.transcript_evidence.revision_count();
-                let commit = state
-                    .transcript_evidence
-                    .commit_once(&full_text, allow_raw_fallback);
-                (commit, revision_count, allow_raw_fallback)
+                // Raw provider recovery is an explicit authority of the sole
+                // final arbiter. Terminal delivery may claim exactly-once, but
+                // it may not run another fallback after the transcript seal.
+                let commit = state.transcript_evidence.commit_once(&full_text, false);
+                (commit, revision_count)
             };
-            let (Some(commit), revision_count, allow_raw_fallback) = commit else {
+            let (Some(commit), revision_count) = commit else {
                 log::warn!("[asr] duplicate terminal transcript suppressed");
                 self.state.lock().is_connected = false;
                 *self.audio_tx.lock() = None;
                 return false;
             };
-            if commit.source == crate::speech_decision_kernel::CommitSource::ProviderRawFallback {
-                log::warn!(
-                    "[asr] ownership filter produced empty final; committed retained provider evidence source={} chars={} provider_revisions={} raw_fallback_allowed={}",
-                    commit.source.label(),
-                    commit.text.chars().count(),
-                    revision_count,
-                    allow_raw_fallback
-                );
-            }
+            debug_assert_ne!(
+                commit.source,
+                crate::speech_decision_kernel::CommitSource::ProviderRawFallback,
+                "terminal delivery cannot override the sealed final authority"
+            );
+            log::info!(
+                "[asr] sealed terminal transcript delivered source={} chars={} provider_revisions={}",
+                commit.source.label(),
+                commit.text.chars().count(),
+                revision_count
+            );
             let duration_ms = self
                 .state
                 .lock()
@@ -5839,10 +5903,10 @@ mod tests {
     }
 
     #[test]
-    fn final_preview_fallback_keeps_confirmed_owner_body_after_non_target_tail() {
+    fn session_ledger_keeps_confirmed_owner_body_after_non_target_tail() {
         let mut manual = SyncState::default();
         // Empty ledger → nothing to commit.
-        assert!(confirmed_owner_final_preview_fallback(&manual, "").is_none());
+        assert!(session_committed_transcript(&manual).is_none());
 
         manual.optimistic_preview_text = "这是应该保留的本人正文".into();
         // Production commits a Target-confirmed owner preview into the ledger
@@ -5860,19 +5924,9 @@ mod tests {
             crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.22 },
         );
         assert_eq!(
-            confirmed_owner_final_preview_fallback(&manual, "").map(|(text, _)| text),
+            session_committed_transcript(&manual).map(|(text, _)| text),
             Some("这是应该保留的本人正文".into())
         );
-        assert_eq!(
-            confirmed_owner_final_preview_fallback(&manual, "开始录音").map(|(text, _)| text),
-            Some("这是应该保留的本人正文".into())
-        );
-        // Longer retained finals still win over the cached preview.
-        assert!(confirmed_owner_final_preview_fallback(
-            &manual,
-            "这是一个明显更加完整而且已经稳定的正文"
-        )
-        .is_none());
     }
 
     #[test]
@@ -6660,7 +6714,7 @@ mod tests {
             Vec::new(),
         );
         assert_eq!(clamped, "本人说完了");
-        let fallback = confirmed_owner_final_preview_fallback(&state, "本人说完了");
+        let fallback = session_committed_transcript(&state);
         // Isolation path must not pick the longer optimistic room text.
         assert!(
             fallback.is_none()
@@ -7103,6 +7157,7 @@ mod tests {
             true,
             false,
             Some(7_600),
+            None,
         );
         assert_eq!(target.as_deref(), Some("0"));
         assert_eq!(filtered.result["text"], "开始录音。主人第一句。");
@@ -7119,6 +7174,7 @@ mod tests {
             true,
             true,
             Some(7_600),
+            None,
         );
         assert_eq!(
             adaptive.result["text"], result["text"],
@@ -7956,6 +8012,7 @@ mod tests {
             false,
             false,
             None,
+            None,
         );
         assert_eq!(filtered.result["text"], body_text);
         assert_eq!(filtered.target_speech_end_ms, Some(9_862));
@@ -8005,6 +8062,7 @@ mod tests {
             Some(1_032),
             false,
             false,
+            None,
             None,
         );
         assert_eq!(rejected.result["text"], "");
@@ -8108,6 +8166,7 @@ mod tests {
             true,
             false,
             None,
+            None,
         );
 
         assert_eq!(target.as_deref(), Some("0"), "wake anchor stays persistent");
@@ -8183,6 +8242,7 @@ mod tests {
             true,
             false,
             None,
+            None,
         );
         assert_eq!(late.result["text"], "开始录音。");
 
@@ -8203,6 +8263,7 @@ mod tests {
             true,
             false,
             Some(2_000),
+            None,
         );
         assert_eq!(contiguous.result["text"], "开始录音。");
     }
@@ -8513,7 +8574,8 @@ mod tests {
     }
 
     #[test]
-    fn installed_session_621_keeps_one_owner_split_across_three_cloud_ids() {
+    fn target_speaker_endpoint_installed_session_621_keeps_one_owner_split_across_three_cloud_ids()
+    {
         // Installed session 621 was one continuous verified-owner utterance,
         // but the provider relabelled it 0 -> 1 -> 2 -> 2. CAM++ recognized
         // only the first windows as Target and left the natural-speech body in
@@ -8627,7 +8689,7 @@ mod tests {
     }
 
     #[test]
-    fn installed_session_2744_does_not_restore_confirmed_foreign_tail() {
+    fn target_speaker_endpoint_installed_session_2744_does_not_restore_confirmed_foreign_tail() {
         // Live airborne interference, 2026-09-04: the provider correctly
         // separated the 44-char owner row from a 7-char speaker-1 tail. Two
         // consecutive transcript-grade local mismatches overlapped speaker 1,
@@ -8739,6 +8801,95 @@ mod tests {
             .try_recv()
             .expect("session 2744 final should resolve")
             .expect("confirmed owner row should remain successful");
+        assert_eq!(transcript.text, owner);
+    }
+
+    #[test]
+    fn target_speaker_endpoint_short_foreign_tail_corroboration_seals_filtered_final() {
+        // Live session a12c722f: provider diarization split the synthetic room
+        // speaker into a stable speaker-1 tail, while CAM++ produced two clean
+        // 500/400 ms windows at 0.045/0.068. Each window is too short for hard
+        // transcript exclusion, but together they corroborate that provider
+        // boundary. The old final merge restored the polluted 53-char ledger
+        // after the arbiter had selected the 43-char owner result.
+        let owner =
+            "开始录音。主人第一句，我会自然停顿一下。现在继续说主人第二句，最后这句话也不能丢。";
+        let foreign = "这是一段来自另外一个。";
+        let result = json!({
+            "text": format!("{owner}{foreign}"),
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 172,
+                    "end_time": 7_572,
+                    "text": owner
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 7_772,
+                    "end_time": 9_902,
+                    "text": foreign
+                }
+            ]
+        });
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        {
+            let mut state = asr.state.lock();
+            state.local_speaker_stable_target = true;
+            state.local_target_confirmed = true;
+            state.target_speaker_id = Some("0".into());
+            state.best_transcript_text = format!("{owner}{foreign}");
+            state.optimistic_preview_text = format!("{owner}{foreign}");
+            state.last_partial_text = format!("{owner}{foreign}");
+            state.last_emitted_preview_text = format!("{owner}{foreign}");
+        }
+        asr.note_local_speaker_observation(
+            9_300,
+            crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: 0.045 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::ForeignTailHint,
+        );
+        asr.note_local_speaker_observation(
+            9_700,
+            crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: 0.068 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::ForeignTailHint,
+        );
+        assert_eq!(
+            asr.state
+                .lock()
+                .local_confirmed_transcript_foreign_hint_end_ms,
+            Some(9_700)
+        );
+
+        let (tx, mut rx) = oneshot::channel();
+        asr.state.lock().final_tx = Some(tx);
+        let payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 9_900 },
+            "result": result,
+        }))
+        .expect("short foreign-tail replay serializes");
+        let frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::LastPacket,
+            Serialization::Json,
+            &payload,
+            None,
+        );
+
+        assert!(!asr.handle_frame(&frame));
+        let transcript = rx
+            .try_recv()
+            .expect("short foreign-tail final should resolve")
+            .expect("filtered owner final should remain successful");
         assert_eq!(transcript.text, owner);
     }
 
@@ -9887,10 +10038,14 @@ mod tests {
         asr.note_local_speaker_observation(
             5_950,
             Classification::Uncertain { score: -0.029 },
-            true,
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget,
         );
         assert!(!asr.state.lock().owner_isolation_frozen);
-        asr.note_local_speaker_observation(6_350, Classification::Uncertain { score: 0.077 }, true);
+        asr.note_local_speaker_observation(
+            6_350,
+            Classification::Uncertain { score: 0.077 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget,
+        );
 
         let state = asr.state.lock();
         assert!(state.local_speaker_stable_target);
@@ -10824,12 +10979,12 @@ mod tests {
                         "audioEndMs": audio_end_ms,
                         "score": observation.classification.score(),
                         "classification": format!("{:?}", observation.classification),
-                        "transcriptHardNonTarget": observation.transcript_hard_non_target,
+                        "transcriptSpeakerEvidence": observation.transcript_speaker_evidence.label(),
                     }));
                     asr.note_local_speaker_observation(
                         audio_end_ms,
                         observation.classification,
-                        observation.transcript_hard_non_target,
+                        observation.transcript_speaker_evidence,
                     );
                 }
                 next_observation_ms = audio_end_ms.saturating_add(400);

@@ -95,12 +95,11 @@ pub enum SessionSpeakerClassification {
 pub struct SessionSpeakerObservation {
     pub classification: SessionSpeakerClassification,
     pub real_speech_ms: usize,
-    /// Transcript-only evidence for a very strong owner mismatch. Keeping this
-    /// separate from `classification` lets a 600-999 ms clean fragment stop
-    /// room speech from entering the final ledger without changing the
-    /// established wake or endpoint policy, which still requires a full
-    /// identity window.
-    pub transcript_hard_non_target: bool,
+    /// Transcript-only ownership evidence. It is intentionally typed rather
+    /// than folded into wake/endpoint classification: short foreign fragments
+    /// can corroborate provider diarization without independently deleting
+    /// owner text or changing recording lifetime.
+    pub transcript_speaker_evidence: crate::speech_decision_kernel::TranscriptSpeakerEvidence,
     embedding: Vec<f32>,
 }
 
@@ -123,8 +122,6 @@ const SESSION_SPEAKER_MIN_NON_TARGET_MS: usize = 1_000;
 // Identity decisions need an absolute signal floor as well: below this level
 // the sample remains advisory/Uncertain and cannot end or erase a session.
 const SESSION_SPEAKER_MIN_IDENTITY_PEAK_RMS: f32 = 512.0;
-const SESSION_SPEAKER_TRANSCRIPT_HARD_NON_TARGET_MIN_MS: usize = 600;
-const SESSION_SPEAKER_TRANSCRIPT_HARD_NON_TARGET_MAX_SCORE: f32 = 0.10;
 const SESSION_SPEAKER_ADAPT_MIN_SCORE: f32 = 0.50;
 const SESSION_SPEAKER_ADAPT_CONFIRMATIONS: usize = 2;
 const SESSION_SPEAKER_BOOTSTRAP_CONFIRMATIONS: usize = 3;
@@ -356,24 +353,14 @@ fn session_speaker_classification_for_signal(
     }
 }
 
-fn session_speaker_transcript_hard_non_target(
-    score: f32,
-    real_speech_ms: usize,
-    peak_rms: f32,
-) -> bool {
-    score <= SESSION_SPEAKER_TRANSCRIPT_HARD_NON_TARGET_MAX_SCORE
-        && real_speech_ms >= SESSION_SPEAKER_TRANSCRIPT_HARD_NON_TARGET_MIN_MS
-        && peak_rms >= SESSION_SPEAKER_MIN_IDENTITY_PEAK_RMS
-}
-
 #[cfg(target_os = "windows")]
 mod platform {
     #[cfg(test)]
     use super::session_speaker_classification_for_evidence;
     use super::{
-        session_speaker_classification_for_signal, session_speaker_transcript_hard_non_target,
-        SessionSpeakerClassification, SessionSpeakerObservation, SessionSpeakerProfile,
-        VerificationPolicy, VerificationResult, VoiceProfileState, VoiceprintStatus,
+        session_speaker_classification_for_signal, SessionSpeakerClassification,
+        SessionSpeakerObservation, SessionSpeakerProfile, VerificationPolicy, VerificationResult,
+        VoiceProfileState, VoiceprintStatus,
     };
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     #[cfg(test)]
@@ -2002,16 +1989,21 @@ mod platform {
         // stabilized speaker.
         let classification =
             session_speaker_classification_for_signal(score, real_speech_ms, peak_rms);
-        let transcript_hard_non_target =
-            session_speaker_transcript_hard_non_target(score, real_speech_ms, peak_rms);
+        let transcript_speaker_evidence =
+            crate::speech_decision_kernel::classify_transcript_speaker_evidence(
+                score,
+                real_speech_ms,
+                peak_rms,
+            );
         log::info!(
-            "[speaker-verification] local session sample real_speech_ms={real_speech_ms} speech_span_ms={speech_span_ms} model_input_ms={} peak_rms={peak_rms:.1} reference_rms={reference_rms:.1} inference_ms={inference_ms} score={score:.6} classification={classification:?} transcript_hard_non_target={transcript_hard_non_target}",
-            model_pcm.len() / 32
+            "[speaker-verification] local session sample real_speech_ms={real_speech_ms} speech_span_ms={speech_span_ms} model_input_ms={} peak_rms={peak_rms:.1} reference_rms={reference_rms:.1} inference_ms={inference_ms} score={score:.6} classification={classification:?} transcript_speaker_evidence={}",
+            model_pcm.len() / 32,
+            transcript_speaker_evidence.label()
         );
         Ok(SessionSpeakerObservation {
             classification,
             real_speech_ms,
-            transcript_hard_non_target,
+            transcript_speaker_evidence,
             embedding: candidate,
         })
     }
@@ -3278,7 +3270,8 @@ mod tests {
         SessionSpeakerObservation {
             classification,
             real_speech_ms,
-            transcript_hard_non_target: false,
+            transcript_speaker_evidence:
+                crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive,
             embedding: embedding.to_vec(),
         }
     }
@@ -3383,19 +3376,31 @@ mod tests {
     }
 
     #[test]
-    fn short_high_energy_extreme_mismatch_is_transcript_only_evidence() {
-        assert!(session_speaker_transcript_hard_non_target(
-            0.077, 600, 771.7
-        ));
-        assert!(!session_speaker_transcript_hard_non_target(
-            0.077, 599, 771.7
-        ));
-        assert!(!session_speaker_transcript_hard_non_target(
-            0.077, 800, 70.7
-        ));
-        assert!(!session_speaker_transcript_hard_non_target(
-            0.172, 800, 771.7
-        ));
+    fn target_speaker_endpoint_short_high_energy_mismatch_is_typed_transcript_evidence() {
+        use crate::speech_decision_kernel::{
+            classify_transcript_speaker_evidence, TranscriptSpeakerEvidence,
+        };
+
+        assert_eq!(
+            classify_transcript_speaker_evidence(0.077, 600, 771.7),
+            TranscriptSpeakerEvidence::HardNonTarget
+        );
+        assert_eq!(
+            classify_transcript_speaker_evidence(0.077, 599, 771.7),
+            TranscriptSpeakerEvidence::ForeignTailHint
+        );
+        assert_eq!(
+            classify_transcript_speaker_evidence(0.077, 300, 771.7),
+            TranscriptSpeakerEvidence::ForeignTailHint
+        );
+        assert_eq!(
+            classify_transcript_speaker_evidence(0.077, 800, 70.7),
+            TranscriptSpeakerEvidence::Inconclusive
+        );
+        assert_eq!(
+            classify_transcript_speaker_evidence(0.172, 800, 771.7),
+            TranscriptSpeakerEvidence::Inconclusive
+        );
     }
 
     #[test]

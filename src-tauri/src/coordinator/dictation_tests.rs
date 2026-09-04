@@ -3946,6 +3946,8 @@ fn target_speaker_endpoint_has_one_atomic_final_transcript_arbiter() {
         "prefer_final_unfiltered_provider_text",
         "prefer_final_provider_text",
         "prefer_final_optimistic",
+        "confirmed_owner_final_preview_fallback",
+        "protocol final weaker than session ledger",
     ] {
         assert!(
             !provider.contains(legacy_selector),
@@ -3955,6 +3957,21 @@ fn target_speaker_endpoint_has_one_atomic_final_transcript_arbiter() {
     assert!(provider.contains("let state = self.state.lock();"));
     assert!(provider.contains("FinalTranscriptEvidence"));
     assert!(provider.contains("explicit_non_owner_tail"));
+    assert_eq!(
+        provider
+            .matches("final arbitration sealed authority=")
+            .count(),
+        1,
+        "a protocol final must be sealed exactly once before terminal delivery"
+    );
+    assert!(
+        provider.contains("FinalTranscriptAuthority::SessionLedgerRecovery"),
+        "the anti-truncation ledger must be a candidate of the sole arbiter, not a later writer"
+    );
+    assert!(
+        provider.contains("commit_once(&full_text, false)"),
+        "terminal delivery must not run a second raw-provider fallback after sealing"
+    );
 }
 
 #[test]

@@ -246,8 +246,19 @@ transcript-grade 极低分证据，但旧代码把它降级成 advisory `Uncerta
    `speaker_filtered`；这项证据只否决尾巴恢复，不反向删除已确认主人正文。
 2. 没有明确旁人证据时，才允许 `provider_raw_recovery` 或
    `provider_owner_recovery` 防止云端归属回退造成吞字。
-3. `optimistic_owner_recovery` 只能作为更低优先级的已验证主人恢复；胶囊视觉预览
+3. 防吞字的 session ledger 只是 `session_ledger_recovery` 候选，必须在相同证据
+   快照内通过仲裁，不能在仲裁之后按“最长文本”覆盖结果。
+4. `optimistic_owner_recovery` 只能作为更低优先级的已验证主人恢复；胶囊视觉预览
    本身永远不是最终文本 authority。
 
 Provider adapter 只负责产生上述证据，不得再添加独立的 `prefer_final_*` 选择器。
 每次终帧必须记录唯一 `authority` 和所有候选安全事实，便于以后直接从日志复现决定。
+
+后续现场会话 `a12c722f-858f-4198-a4e6-39fd08c2254e` 暴露了两个更隐蔽的遗留点：
+本地旁人尾段被切成 500 ms 与 400 ms 两个高能量低分窗口，旧的单窗 600 ms 布尔门
+把二者都丢成无证据；即使仲裁器选中 speaker-filtered，通用流式合并器仍在之后用
+最长 session ledger 把旁人文本重新补回。新契约将声纹证据改为
+`Inconclusive / ForeignTailHint / HardNonTarget`，两个连续 `ForeignTailHint` 只能与云端
+稳定的不同 speaker 行交叉确认，不能单独删除同 speaker 主人文字，也不能改变 endpoint。
+协议终帧经唯一仲裁后成为 sealed transcript；其后只允许标点、空格和重复尾巴规范化，
+不允许流式 merge、ledger fallback 或 provider fallback 再增加内容。

@@ -68,7 +68,7 @@ impl LocalSessionSpeakerTracker {
     ) -> Option<(
         u64,
         crate::speaker_verification::SessionSpeakerClassification,
-        bool,
+        crate::speech_decision_kernel::TranscriptSpeakerEvidence,
     )> {
         self.rolling_pcm.extend_from_slice(pcm);
         if self.rolling_pcm.len() > LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES {
@@ -108,7 +108,7 @@ impl LocalSessionSpeakerTracker {
                     completed = Some((
                         result.0,
                         result.1.classification,
-                        result.1.transcript_hard_non_target,
+                        result.1.transcript_speaker_evidence,
                     ));
                     self.classification_rx = None;
                 }
@@ -295,13 +295,13 @@ impl EmbeddedAudioDictationSession {
         ) {
             asr.note_local_speaker_profile_adaptive(adaptive);
         }
-        if let (Some(asr), Some((audio_end_ms, classification, transcript_hard_non_target))) =
+        if let (Some(asr), Some((audio_end_ms, classification, transcript_speaker_evidence))) =
             (self.volcengine_asr.as_ref(), local_speaker_evidence)
         {
             asr.note_local_speaker_observation(
                 audio_end_ms,
                 classification,
-                transcript_hard_non_target,
+                transcript_speaker_evidence,
             );
         }
         if let (Some(asr), Some(tracker)) =

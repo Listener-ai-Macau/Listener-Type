@@ -109,6 +109,7 @@ pub(crate) enum FinalTranscriptAuthority {
     SpeakerFiltered,
     ProviderRawRecovery,
     ProviderOwnerRecovery,
+    SessionLedgerRecovery,
     OptimisticOwnerRecovery,
 }
 
@@ -118,6 +119,7 @@ impl FinalTranscriptAuthority {
             Self::SpeakerFiltered => "speaker_filtered",
             Self::ProviderRawRecovery => "provider_raw_recovery",
             Self::ProviderOwnerRecovery => "provider_owner_recovery",
+            Self::SessionLedgerRecovery => "session_ledger_recovery",
             Self::OptimisticOwnerRecovery => "optimistic_owner_recovery",
         }
     }
@@ -132,6 +134,7 @@ pub(crate) struct FinalTranscriptEvidence {
     pub(crate) explicit_non_owner_tail: bool,
     pub(crate) provider_raw_recovery_safe: bool,
     pub(crate) provider_owner_recovery_safe: bool,
+    pub(crate) session_ledger_recovery_safe: bool,
     pub(crate) optimistic_owner_recovery_safe: bool,
 }
 
@@ -147,10 +150,59 @@ pub(crate) fn arbitrate_final_transcript(
     if evidence.provider_owner_recovery_safe {
         return FinalTranscriptAuthority::ProviderOwnerRecovery;
     }
+    if evidence.session_ledger_recovery_safe {
+        return FinalTranscriptAuthority::SessionLedgerRecovery;
+    }
     if evidence.optimistic_owner_recovery_safe {
         return FinalTranscriptAuthority::OptimisticOwnerRecovery;
     }
     FinalTranscriptAuthority::SpeakerFiltered
+}
+
+/// Transcript ownership evidence is deliberately separate from the wake and
+/// endpoint classification. Short, high-energy windows are too small to erase
+/// text on their own, but two of them may corroborate a provider-final speaker
+/// change. This prevents changing the global endpoint sensitivity to solve a
+/// transcript-only failure.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum TranscriptSpeakerEvidence {
+    #[default]
+    Inconclusive,
+    ForeignTailHint,
+    HardNonTarget,
+}
+
+impl TranscriptSpeakerEvidence {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Inconclusive => "inconclusive",
+            Self::ForeignTailHint => "foreign_tail_hint",
+            Self::HardNonTarget => "hard_non_target",
+        }
+    }
+}
+
+const TRANSCRIPT_SPEAKER_MIN_SIGNAL_PEAK_RMS: f32 = 512.0;
+const TRANSCRIPT_SPEAKER_FOREIGN_HINT_MIN_MS: usize = 300;
+const TRANSCRIPT_SPEAKER_HARD_NON_TARGET_MIN_MS: usize = 600;
+const TRANSCRIPT_SPEAKER_FOREIGN_MAX_SCORE: f32 = 0.10;
+
+pub(crate) fn classify_transcript_speaker_evidence(
+    score: f32,
+    real_speech_ms: usize,
+    peak_rms: f32,
+) -> TranscriptSpeakerEvidence {
+    if score > TRANSCRIPT_SPEAKER_FOREIGN_MAX_SCORE
+        || real_speech_ms < TRANSCRIPT_SPEAKER_FOREIGN_HINT_MIN_MS
+        || peak_rms < TRANSCRIPT_SPEAKER_MIN_SIGNAL_PEAK_RMS
+    {
+        return TranscriptSpeakerEvidence::Inconclusive;
+    }
+    if real_speech_ms >= TRANSCRIPT_SPEAKER_HARD_NON_TARGET_MIN_MS {
+        TranscriptSpeakerEvidence::HardNonTarget
+    } else {
+        TranscriptSpeakerEvidence::ForeignTailHint
+    }
 }
 
 /// Session-local, append-only provider evidence. Text is never persisted by
@@ -1720,6 +1772,7 @@ mod tests {
             explicit_non_owner_tail: true,
             provider_raw_recovery_safe: true,
             provider_owner_recovery_safe: true,
+            session_ledger_recovery_safe: true,
             optimistic_owner_recovery_safe: true,
         };
         assert_eq!(
@@ -1735,6 +1788,7 @@ mod tests {
             explicit_non_owner_tail: false,
             provider_raw_recovery_safe: false,
             provider_owner_recovery_safe: false,
+            session_ledger_recovery_safe: false,
             optimistic_owner_recovery_safe: false,
         };
         assert_eq!(
@@ -1750,7 +1804,16 @@ mod tests {
         );
         assert_eq!(
             arbitrate_final_transcript(FinalTranscriptEvidence {
+                session_ledger_recovery_safe: true,
+                optimistic_owner_recovery_safe: true,
+                ..base
+            }),
+            FinalTranscriptAuthority::SessionLedgerRecovery
+        );
+        assert_eq!(
+            arbitrate_final_transcript(FinalTranscriptEvidence {
                 provider_owner_recovery_safe: true,
+                session_ledger_recovery_safe: true,
                 optimistic_owner_recovery_safe: true,
                 ..base
             }),
