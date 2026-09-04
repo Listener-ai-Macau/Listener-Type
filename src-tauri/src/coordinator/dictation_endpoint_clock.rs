@@ -223,9 +223,28 @@ impl SettledTargetEndpointClock {
         // VAD and NonTarget observations still cannot move this value.
         let stable_owner_end_ms =
             authoritative_owner_endpoint_boundary(update, stable_cloud_target_end_ms);
+        // A cloud row may briefly outrun the enrolled local owner clock while
+        // room speech is being merged into the same provider speaker id. Once
+        // the local speech edge exceeds the bounded uncertainty budget,
+        // authoritative_owner_endpoint_boundary deliberately falls back to the
+        // local owner watermark. Treat that downward transition as a real
+        // authority change and re-arm the reducer; otherwise the product
+        // arbiter keeps comparing the new local watermark with the old cloud
+        // watermark and emits arbiter_hold forever.
+        let local_authority_recovered_from_cloud = update
+            .local_target_speech_end_ms
+            .zip(update.local_speech_end_ms)
+            .zip(stable_cloud_target_end_ms)
+            .is_some_and(|((local_owner_ms, local_speech_ms), cloud_ms)| {
+                cloud_ms > local_owner_ms
+                    && local_speech_ms
+                        > local_owner_ms.saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
+                    && stable_owner_end_ms == Some(local_owner_ms)
+            });
         let stable_target_should_rearm = stable_owner_end_ms.is_some()
             && (self.armed_at.is_none()
                 || self.pending_was_seen
+                || local_authority_recovered_from_cloud
                 || self
                     .armed_target_end_ms
                     .is_none_or(|armed_end_ms| stable_owner_end_ms > Some(armed_end_ms)));
@@ -362,6 +381,16 @@ impl SettledTargetEndpointClock {
             .flatten();
         let stable_owner_end_ms =
             authoritative_owner_endpoint_boundary(&update, stable_cloud_target_end_ms);
+        let local_authority_recovered_from_cloud = update
+            .local_target_speech_end_ms
+            .zip(update.local_speech_end_ms)
+            .zip(stable_cloud_target_end_ms)
+            .is_some_and(|((local_owner_ms, local_speech_ms), cloud_ms)| {
+                cloud_ms > local_owner_ms
+                    && local_speech_ms
+                        > local_owner_ms.saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
+                    && stable_owner_end_ms == Some(local_owner_ms)
+            });
         let restore_paused_owner_deadline =
             recent_strong_non_target && self.paused_armed_at.is_some();
         let owner_boundary_advanced = stable_owner_end_ms.is_some_and(|new_end_ms| {
@@ -375,6 +404,7 @@ impl SettledTargetEndpointClock {
         // paused deadline after explicit other-speaker evidence.
         if self.armed_at.is_some()
             && !owner_boundary_advanced
+            && !local_authority_recovered_from_cloud
             && !restore_paused_owner_deadline
             && !self.manual_terminal_bridge_rearm_pending
         {

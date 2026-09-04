@@ -6811,6 +6811,56 @@ fn installed_session_1284_cloud_row_cannot_renew_enrolled_owner_endpoint() {
 }
 
 #[test]
+fn cloud_boundary_regression_rearms_local_owner_authority_instead_of_holding_forever() {
+    let started = std::time::Instant::now();
+    let initial = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(1_382),
+        provider_audio_duration_ms: Some(1_900),
+        audio_duration_ms: Some(2_000),
+        local_speech_end_ms: Some(2_000),
+        local_target_speech_end_ms: Some(1_200),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(1_382),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    let first_generation = clock
+        .observe(&initial, true, started)
+        .expect("initial cloud/local owner boundary arms endpoint");
+
+    let merged_room_speech = crate::asr::volcengine::TargetSpeakerUpdate {
+        target_speech_end_ms: Some(5_152),
+        provider_audio_duration_ms: Some(5_900),
+        audio_duration_ms: Some(5_900),
+        local_speech_end_ms: Some(5_600),
+        stable_attributed_speech_end_ms: Some(5_152),
+        target_activity_advanced: true,
+        ..initial
+    };
+    let recovered_generation = clock
+        .observe(
+            &merged_room_speech,
+            true,
+            started + std::time::Duration::from_millis(900),
+        )
+        .expect("local authority recovery must replace the stale cloud boundary");
+    assert_ne!(first_generation, recovered_generation);
+    assert_eq!(clock.armed_target_end_ms, Some(1_200));
+    assert!(clock
+        .due_update(
+            recovered_generation,
+            started + std::time::Duration::from_millis(1_900),
+            1_000,
+        )
+        .is_some());
+}
+
+#[test]
 fn fresh_local_owner_recovery_still_rearms_after_cloud_only_growth_is_ignored() {
     let started = std::time::Instant::now();
     let first_owner = crate::asr::volcengine::TargetSpeakerUpdate {
