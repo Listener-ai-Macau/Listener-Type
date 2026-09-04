@@ -1212,33 +1212,10 @@ impl EmbeddedStreamingDictation {
                     return Ok(true);
                 }
             };
-            // The device has already classified this segment as VoiceActivation.
-            // Requiring the host KWS/ASR to hear the same phrase again makes
-            // mixed speech a circular failure: the firmware opened the
-            // candidate, but the host rejects it before the owner stream can
-            // separate the voices. For an automatic candidate, a successful
-            // owner/open policy is independent phrase evidence; host phrase
-            // detectors remain the fast path and this is terminal-only.
-            if wake_match.is_none()
-                && candidate.kind == BufferedSpeakerCandidateKind::Verification
-                && verification.as_ref().is_ok_and(|result| result.matched)
-            {
-                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
-                wake_match = Some(crate::wake_phrase::Match {
-                    start_seconds: None,
-                    end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
-                    matched_keyword: None,
-                });
-                log::info!(
-                    "[wake-phrase] terminal firmware VoiceActivation fallback accepted embedded_session_id={} owner_policy={} owner_score={:.6} host_phrase_detectors=none",
-                    embedded_session_id,
-                    verification
-                        .as_ref()
-                        .map(|result| result.policy_label())
-                        .unwrap_or("unavailable"),
-                    verification.as_ref().map(|result| result.score).unwrap_or_default()
-                );
-            }
+            // Firmware VoiceActivation is a VAD transport window, not phrase
+            // evidence. It must never be relabelled as KeywordModel merely
+            // because the enrolled owner is speaking. Interference recovery
+            // continues below through separated phrase + owner verification.
             if wake_match.is_none()
                 && verification.as_ref().is_ok_and(|result| {
                     crate::speech_decision_kernel::repeated_owner_near_phrase_wake_can_activate(
@@ -1647,20 +1624,15 @@ impl EmbeddedStreamingDictation {
         inner: &Arc<Inner>,
         embedded_session_id: u32,
     ) -> Result<bool, String> {
-        // VoiceActivation is already a firmware-side speech decision. Start
-        // the independent owner check as soon as its real audio window is
-        // available, instead of waiting for the host KWS/local-ASR phrase
-        // models to succeed first. Field sessions showed the phrase models can
-        // alternate between a 1.8 s hit, a 5.3 s terminal fallback, and a full
-        // miss over packet-identical candidates. Running identity in parallel
-        // gives an enrolled owner a bounded, model-independent recovery path.
+        // Firmware VoiceActivation means only that a VAD transport window is
+        // open. Prefetch identity in parallel for latency, but never let that
+        // identity result manufacture phrase evidence or activate by itself.
         let phrase = inner.prefs.get().voice_wake_phrase;
         if let Some(candidate) = self.speaker_candidate.as_mut() {
             if candidate.kind == BufferedSpeakerCandidateKind::Verification {
                 maybe_prefetch_owner_verification(candidate, &phrase, embedded_session_id);
             }
         }
-        let mut firmware_owner_verification = None;
         #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
         {
             let completed_task = self.speaker_candidate.as_mut().and_then(|candidate| {
@@ -1932,7 +1904,7 @@ impl EmbeddedStreamingDictation {
                     maybe_prefetch_owner_verification(candidate, &phrase, embedded_session_id);
                 }
             }
-            let mut wake_match = {
+            let wake_match = {
                 #[cfg(target_os = "windows")]
                 {
                     let completed_task = {
@@ -2459,47 +2431,6 @@ impl EmbeddedStreamingDictation {
                     kws_hit
                 }
             };
-            if wake_match.is_none() {
-                let completed_owner_task = self.speaker_candidate.as_mut().and_then(|candidate| {
-                    candidate
-                        .owner_verification_task
-                        .as_ref()
-                        .is_some_and(|task| task.inner().is_finished())
-                        .then(|| candidate.owner_verification_task.take())
-                        .flatten()
-                });
-                if let Some(task) = completed_owner_task {
-                    let completed = match task.await {
-                        Ok(result) => result,
-                        Err(err) => (Err(format!("声纹验证任务失败: {err}")), 0),
-                    };
-                    let owner_matched = completed
-                        .0
-                        .as_ref()
-                        .is_ok_and(|result| result.enrolled_owner_matched());
-                    if owner_matched {
-                        let pcm_ms = self
-                            .speaker_candidate
-                            .as_ref()
-                            .map(|candidate| candidate.pcm.len() / 32)
-                            .unwrap_or_default();
-                        phrase_signal =
-                            denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
-                        wake_match = Some(crate::wake_phrase::Match {
-                            start_seconds: None,
-                            end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
-                            matched_keyword: None,
-                        });
-                        log::info!(
-                            "[wake-phrase] live firmware VoiceActivation plus enrolled owner accepted embedded_session_id={} pcm_ms={} owner_score={:.6} host_phrase_detectors=none",
-                            embedded_session_id,
-                            pcm_ms,
-                            completed.0.as_ref().map(|result| result.score).unwrap_or_default()
-                        );
-                    }
-                    firmware_owner_verification = Some(completed);
-                }
-            }
             let Some(wake_match) = wake_match else {
                 return Ok(false);
             };
@@ -2549,19 +2480,16 @@ impl EmbeddedStreamingDictation {
         let pcm_ms = pcm.len() / 32;
         let kws_ms = candidate.kws_total_ms;
         let voiceprint_phrase = phrase.clone();
-        let verification_task = match firmware_owner_verification.take() {
-            Some(result) => Ok(result),
-            None => match candidate.owner_verification_task.take() {
-                Some(task) => task.await,
-                None => {
-                    tauri::async_runtime::spawn_blocking(move || {
-                        let started = Instant::now();
-                        let result = crate::speaker_verification::verify(&pcm, &voiceprint_phrase);
-                        (result, started.elapsed().as_millis() as u64)
-                    })
-                    .await
-                }
-            },
+        let verification_task = match candidate.owner_verification_task.take() {
+            Some(task) => task.await,
+            None => {
+                tauri::async_runtime::spawn_blocking(move || {
+                    let started = Instant::now();
+                    let result = crate::speaker_verification::verify(&pcm, &voiceprint_phrase);
+                    (result, started.elapsed().as_millis() as u64)
+                })
+                .await
+            }
         };
         let (verification, voiceprint_ms) = match verification_task {
             Ok(result) => result,

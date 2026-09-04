@@ -400,6 +400,10 @@ impl SettledTargetEndpointClock {
         self.pending_due_hold_diagnostic.take()
     }
 
+    fn note_session_policy_hold(&mut self, reason: &'static str) {
+        self.note_due_hold_diagnostic(self.generation, reason);
+    }
+
     fn note_due_hold_diagnostic(&mut self, generation: u64, reason: &'static str) {
         let diagnostic = (generation, reason);
         if self.last_reported_due_hold_diagnostic != Some(diagnostic) {
@@ -559,6 +563,26 @@ impl SettledTargetEndpointClock {
         self.latest_due_update(now, timeout_ms)
     }
 
+    /// The only product-level endpoint decision entry used by both provider
+    /// callbacks and the watchdog. Evidence producers may update this clock,
+    /// but they cannot duplicate session-grace or timeout policy around it.
+    fn reduce_session_policy(
+        &mut self,
+        now: Instant,
+        policy: TargetSpeakerEndpointPolicy,
+        owner_analysis_pending: bool,
+    ) -> Option<crate::asr::volcengine::TargetSpeakerUpdate> {
+        if policy.initial_body_wait_active {
+            self.note_session_policy_hold("automatic_body_initial_wait");
+            return None;
+        }
+        self.latest_due_update_after_owner_analysis(
+            now,
+            policy.wall_clock_timeout_ms,
+            owner_analysis_pending,
+        )
+    }
+
     /// Return one immutable decision snapshot for the session reducer.
     ///
     /// Provider/local callbacks are not a clock: under a provider stall the
@@ -639,8 +663,16 @@ fn start_settled_target_endpoint_watchdog(
             if !session_active {
                 return;
             }
-            let endpoint_timeout_ms = target_speaker_end_timeout_ms_for_preview(
-                current_embedded_audio_partial_preview(&inner).as_deref(),
+            let preview = current_embedded_audio_partial_preview(&inner);
+            let decision_snapshot = asr.endpoint_update_snapshot();
+            let decision_audio_ms = decision_snapshot
+                .audio_duration_ms
+                .or(decision_snapshot.provider_audio_duration_ms);
+            let endpoint_policy = resolve_target_speaker_endpoint_policy(
+                &inner,
+                session_id,
+                preview.as_deref(),
+                decision_audio_ms,
             );
             let (update, hold_diagnostic) = {
                 let mut clock = endpoint_clock.lock();
@@ -649,11 +681,11 @@ fn start_settled_target_endpoint_watchdog(
                 // watchdog decision path while removing generic room-energy
                 // from the only remaining fallback.
                 if asr.audio_delivery_failed() {
-                    let body_started = automatic_wake_body_started(&inner, session_id)
-                        || current_embedded_audio_partial_preview(&inner)
-                            .as_deref()
-                            .is_some_and(|text| !text.trim().is_empty());
-                    clock.observe(&asr.endpoint_update_snapshot(), body_started, Instant::now());
+                    clock.observe(
+                        &decision_snapshot,
+                        endpoint_policy.body_started,
+                        Instant::now(),
+                    );
                 } else if clock.latest_update.is_none()
                     && current_embedded_audio_partial_preview(&inner)
                         .as_deref()
@@ -680,11 +712,8 @@ fn start_settled_target_endpoint_watchdog(
                         .lock()
                         .note_owner_evidence_pending(session_id);
                 }
-                let update = clock.latest_due_update_after_owner_analysis(
-                    now,
-                    settled_target_wall_clock_timeout_ms(endpoint_timeout_ms),
-                    owner_analysis_pending,
-                );
+                let update =
+                    clock.reduce_session_policy(now, endpoint_policy, owner_analysis_pending);
                 let hold_diagnostic = clock.take_due_hold_diagnostic();
                 (update, hold_diagnostic)
             };
@@ -701,7 +730,7 @@ fn start_settled_target_endpoint_watchdog(
                     &stop_dispatched,
                     &endpoint_clock,
                     update,
-                    true,
+                    endpoint_policy,
                 );
             }
         }

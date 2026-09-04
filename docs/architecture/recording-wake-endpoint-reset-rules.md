@@ -160,3 +160,45 @@ BLE 延迟和音频质量仍需分别从诊断日志验证；若日志显示模�
   避免模型或线程池异常造成永久录音。
 - 声纹结果返回后，主人证据走 `OwnerActive`，他人/静音证据继续走
   `QuietPending -> Stopping`，不允许回调层另设旁路。
+
+## Endpoint 会话策略快照（2026-09-04，session 1896）
+
+真实会话 `01d999ab-bbd3-4e47-895b-5f0159d09c06` 暴露了此前“统一状态机”仍未
+统一策略输入的问题：自动唤醒正文尚未开始时，callback/watchdog 用普通正文的
+900 ms 墙钟提交停止；停止处理层随后重新读取 wake guard，并把同一决定记录成
+`target_speaker_inactive_no_body_3000ms`。因此日志看似执行了 3 秒规则，实际胶囊
+显示 1,945 ms 后已经进入 Transcribing；停止后到达的 2/4 字预览又被当成迟到
+结果，最终 13 字被整段唤醒前缀规则清空。
+
+修复后的硬约束：
+
+- `TargetSpeakerEndpointPolicy` 是一次解析的不可变会话策略快照，包含
+  `body_started`、正文初始等待、产品 endpoint timeout、调度墙钟 timeout 和
+  stop reason。
+- provider callback、endpoint watchdog 和 stop dispatch 必须消费同一份快照；
+  stop dispatch 禁止再次读取 preview/wake guard 推导另一套 timeout 或 reason。
+- 胶囊可见后的初始正文等待现在进入生产决策路径，不再只是测试辅助函数；它
+  同时受音频进度和 3 秒墙钟约束，provider 覆盖停止时也不能永久 Hold。
+- 回归测试必须静态确认 callback/watchdog 不再直接调用 preview timeout helper，
+  并复现“无正文会话不能按 900 ms 提交、日志理由必须与真实决定一致”。
+
+同一批日志还确认了第二个旧旁路：固件 `VoiceActivation` 实际只表示 VAD 打开了
+隐藏 PCM 传输窗口，不表示唤醒短语已经命中。旧代码在 host KWS/本地短语均未
+命中时，只要主人声纹通过，就把这项 VAD 证据伪装成 `KeywordModel` 后放行。
+session 1930 因此在候选结束后才以 `host_phrase_detectors=none` 被接受：它同时
+制造误唤醒和约 5 秒的慢唤醒。该旁路已删除。声纹预取仍可并行降低延迟，但
+只能与真实 KWS、本地短语近似或分离后短语证据一起交给 wake reducer，不能
+单独构造 phrase evidence。
+
+### 四种循环症状的架构归因
+
+| 用户症状 | 真实架构冲突 | 统一后的权威 |
+| --- | --- | --- |
+| 唤醒不了 | KWS/本地短语没有产生真实 phrase evidence | wake reducer 只接收可标注的短语证据；模型召回率单独 A/B |
+| 误唤醒或终端慢唤醒 | 固件 VAD 和主人声纹被伪装成 `KeywordModel` | VAD 只开 PCM 窗口，不再制造短语命中 |
+| 说话中途提前结束、吞字 | callback/watchdog 按短时钟提交，stop handler 又按长时钟重算并记录 | 一次解析的 `TargetSpeakerEndpointPolicy` 贯穿判定和停止 |
+| 不自动结束 | pending/provider stall/异步声纹任务曾各自续租 | `OwnerEndpointController` 是唯一结束裁判，所有 Hold 有有界退出 |
+
+这四种症状之所以会交替出现，不是四个超时值恰好都不对，而是旧代码
+允许“证据生产者”自己做产品级状态转移。以后改模型、增益或供应商时，
+只能改变证据的质量和到达时间，不允许新增第二个唤醒或停止出口。

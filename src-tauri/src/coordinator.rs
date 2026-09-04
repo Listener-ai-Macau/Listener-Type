@@ -250,6 +250,10 @@ struct AutomaticWakeGuard {
     phrase: String,
     latest_audio_ms: u64,
     initial_body_wait_until_audio_ms: Option<u64>,
+    /// Wall-clock twin of the audio deadline. Provider coverage can stall,
+    /// so the initial body grace must never depend on an audio timestamp
+    /// that may stop advancing.
+    initial_body_wait_started_at: Option<Instant>,
     body_started: bool,
     /// Stop boundary is latched before ASR finalization. Late provider text
     /// must not retroactively start a wake-only body.

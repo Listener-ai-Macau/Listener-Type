@@ -896,13 +896,15 @@ fn arm_automatic_wake_text_guard(
             .ok()
             .as_deref()
             != Some("1");
+    let body_wait_armed_immediately = !wait_for_visible_ack;
     *inner.embedded_audio_automatic_wake_guard.lock() = Some(AutomaticWakeGuard {
         session_id,
         phrase,
         latest_audio_ms: capsule_audio_boundary_ms,
-        initial_body_wait_until_audio_ms: (!wait_for_visible_ack).then_some(
+        initial_body_wait_until_audio_ms: body_wait_armed_immediately.then_some(
             capsule_audio_boundary_ms.saturating_add(EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS),
         ),
+        initial_body_wait_started_at: body_wait_armed_immediately.then(Instant::now),
         body_started: false,
         stop_requested: false,
     });
@@ -949,6 +951,7 @@ pub(super) fn acknowledge_automatic_wake_capsule_visible(
             .latest_audio_ms
             .saturating_add(EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS),
     );
+    guard.initial_body_wait_started_at = Some(Instant::now());
     log::info!(
         "[wake-phrase] automatic body wait started from visible capsule session_id={session_id} audio_ms={}",
         guard.latest_audio_ms
@@ -960,6 +963,20 @@ fn automatic_wake_initial_body_wait_active(
     session_id: SessionId,
     audio_duration_ms: Option<u64>,
 ) -> bool {
+    automatic_wake_initial_body_wait_active_at(
+        inner,
+        session_id,
+        audio_duration_ms,
+        Instant::now(),
+    )
+}
+
+fn automatic_wake_initial_body_wait_active_at(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    audio_duration_ms: Option<u64>,
+    now: Instant,
+) -> bool {
     let mut slot = inner.embedded_audio_automatic_wake_guard.lock();
     let Some(guard) = slot
         .as_mut()
@@ -970,16 +987,27 @@ fn automatic_wake_initial_body_wait_active(
     if let Some(audio_ms) = audio_duration_ms {
         guard.latest_audio_ms = guard.latest_audio_ms.max(audio_ms);
     }
-    guard
+    let audio_wait_active = guard
         .initial_body_wait_until_audio_ms
         .map(|deadline_ms| {
-            !guard.body_started
-                &&
             audio_duration_ms
                 .map(|audio_ms| audio_ms < deadline_ms)
                 .unwrap_or(true)
         })
-        .unwrap_or(true)
+        .unwrap_or(true);
+    let wall_wait_active = guard
+        .initial_body_wait_started_at
+        .map(|started_at| {
+            now.saturating_duration_since(started_at)
+                < Duration::from_millis(EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS)
+        })
+        .unwrap_or(true);
+    // Before the capsule-visible acknowledgement no deadline is armed, so the
+    // wait remains active even if an eager provider preview already found
+    // body text. After acknowledgement, either positive body text or expiry
+    // of the bounded audio/wall deadline releases the endpoint reducer.
+    guard.initial_body_wait_started_at.is_none()
+        || (!guard.body_started && audio_wait_active && wall_wait_active)
 }
 
 fn automatic_wake_session_active(inner: &Arc<Inner>, session_id: SessionId) -> bool {

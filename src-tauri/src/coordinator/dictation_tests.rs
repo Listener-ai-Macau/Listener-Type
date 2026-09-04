@@ -3865,6 +3865,94 @@ fn automatic_wake_no_body_uses_longer_endpoint_timeout() {
 }
 
 #[test]
+fn automatic_wake_target_speaker_endpoint_uses_one_policy_snapshot_for_decision_and_reason() {
+    // Live session 1896 exposed a split policy: callback/watchdog committed on
+    // the 900 ms body wall clock, while stop dispatch recomputed and logged the
+    // 3000 ms no-body reason. The resolved snapshot is now the only value both
+    // layers may consume.
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    arm_automatic_wake_text_guard(&coordinator.inner, session_id, "开始录音".into(), 1_200);
+    acknowledge_automatic_wake_capsule_visible(&coordinator.inner, session_id);
+
+    let policy = super::resolve_target_speaker_endpoint_policy(
+        &coordinator.inner,
+        session_id,
+        None,
+        Some(2_500),
+    );
+    assert!(!policy.body_started);
+    assert!(policy.initial_body_wait_active);
+    assert_eq!(policy.endpoint_timeout_ms, 3_000);
+    assert_eq!(policy.wall_clock_timeout_ms, 2_900);
+    assert_eq!(policy.stop_reason, "target_speaker_inactive_no_body_3000ms");
+
+    let callback_source = include_str!("dictation_volcengine_callbacks.rs");
+    let watchdog_source = include_str!("dictation_endpoint_clock.rs");
+    let stop_source = include_str!("dictation_target_speaker_update.rs");
+    assert!(callback_source.contains("resolve_target_speaker_endpoint_policy"));
+    assert!(watchdog_source.contains("resolve_target_speaker_endpoint_policy"));
+    assert!(callback_source.contains("reduce_session_policy"));
+    assert!(watchdog_source.contains("reduce_session_policy"));
+    assert!(!callback_source.contains("target_speaker_end_timeout_ms_for_preview"));
+    assert!(!watchdog_source.contains("target_speaker_end_timeout_ms_for_preview("));
+    assert!(!stop_source.contains("target_speaker_end_timeout_ms_for_preview"));
+    assert!(!stop_source.contains("endpoint_decision_committed"));
+}
+
+#[test]
+fn automatic_wake_target_speaker_endpoint_body_wait_has_bounded_wall_clock_escape() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    arm_automatic_wake_text_guard(&coordinator.inner, session_id, "开始录音".into(), 1_200);
+    acknowledge_automatic_wake_capsule_visible(&coordinator.inner, session_id);
+    let started_at = coordinator
+        .inner
+        .embedded_audio_automatic_wake_guard
+        .lock()
+        .as_ref()
+        .and_then(|guard| guard.initial_body_wait_started_at)
+        .expect("visible capsule must arm wall-clock body wait");
+
+    assert!(super::automatic_wake_initial_body_wait_active_at(
+        &coordinator.inner,
+        session_id,
+        Some(1_200),
+        started_at + Duration::from_millis(2_999),
+    ));
+    assert!(!super::automatic_wake_initial_body_wait_active_at(
+        &coordinator.inner,
+        session_id,
+        Some(1_200),
+        started_at + Duration::from_millis(3_000),
+    ));
+}
+
+#[test]
+fn target_speaker_endpoint_wake_never_relabels_firmware_vad_as_phrase_evidence() {
+    // Firmware `VoiceActivation` is the name of a VAD-opened PCM transport
+    // window. Sessions such as 1930 reached terminal fallback with
+    // host_phrase_detectors=none and were nevertheless relabelled as
+    // KeywordModel solely because the owner voiceprint matched. That bypass
+    // alternated false wake, slow terminal wake and wake rejection.
+    let source = include_str!("dictation_embedded_stream.rs");
+    assert!(!source.contains("terminal firmware VoiceActivation fallback accepted"));
+    assert!(!source.contains("live firmware VoiceActivation plus enrolled owner accepted"));
+    assert!(!source.contains("host_phrase_detectors=none"));
+
+    let arbitration = crate::speech_decision_kernel::arbitrate_wake(
+        denzic_voice_activation_v1_core::PhraseSignal::None,
+        crate::speech_decision_kernel::OwnerAccessEvidence::EnrolledMatch,
+        true,
+    );
+    assert_eq!(
+        arbitration.decision,
+        denzic_voice_activation_v1_core::GateDecision::Reject,
+        "an enrolled owner without phrase evidence is not a wake command"
+    );
+}
+
+#[test]
 fn late_text_after_stop_cannot_start_wake_only_body() {
     let coordinator = Coordinator::new();
     let session_id = new_session_id();

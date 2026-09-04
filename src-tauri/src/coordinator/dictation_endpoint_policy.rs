@@ -216,6 +216,46 @@ fn target_speaker_end_timeout_ms_for_preview(preview: Option<&str>) -> u64 {
     }
 }
 
+/// One immutable interpretation of the current product session for an
+/// endpoint decision. Callback, watchdog and stop dispatch must consume the
+/// same value; recomputing the no-body mode after the controller has already
+/// committed a shorter deadline produces a truthful-looking but false stop
+/// reason (live session 1896 logged `no_body_3000ms` after a ~900 ms commit).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TargetSpeakerEndpointPolicy {
+    body_started: bool,
+    initial_body_wait_active: bool,
+    endpoint_timeout_ms: u64,
+    wall_clock_timeout_ms: u64,
+    stop_reason: &'static str,
+}
+
+fn resolve_target_speaker_endpoint_policy(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    preview: Option<&str>,
+    audio_duration_ms: Option<u64>,
+) -> TargetSpeakerEndpointPolicy {
+    let body_started = automatic_wake_body_started(inner, session_id)
+        || preview.is_some_and(|text| !text.trim().is_empty());
+    let automatic_wake = automatic_wake_session_active(inner, session_id);
+    let mode_timeout_ms = target_speaker_end_timeout_ms_for_preview(preview);
+    let endpoint_timeout_ms = if automatic_wake && !body_started {
+        EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS.max(mode_timeout_ms)
+    } else {
+        mode_timeout_ms
+    };
+    let initial_body_wait_active = automatic_wake
+        && automatic_wake_initial_body_wait_active(inner, session_id, audio_duration_ms);
+    TargetSpeakerEndpointPolicy {
+        body_started,
+        initial_body_wait_active,
+        endpoint_timeout_ms,
+        wall_clock_timeout_ms: settled_target_wall_clock_timeout_ms(endpoint_timeout_ms),
+        stop_reason: target_speaker_inactive_stop_reason(endpoint_timeout_ms),
+    }
+}
+
 fn settled_target_wall_clock_timeout_ms(endpoint_timeout_ms: u64) -> u64 {
     endpoint_timeout_ms
         .saturating_sub(EMBEDDED_SETTLED_TARGET_SCHEDULING_ALLOWANCE_MS)

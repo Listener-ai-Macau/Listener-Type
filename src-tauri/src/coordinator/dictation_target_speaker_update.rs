@@ -4,7 +4,7 @@ fn handle_target_speaker_update(
     stop_dispatched: &Arc<AtomicBool>,
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
     update: crate::asr::volcengine::TargetSpeakerUpdate,
-    endpoint_decision_committed: bool,
+    endpoint_policy: TargetSpeakerEndpointPolicy,
 ) {
     let session_active = {
         let state = inner.state.lock();
@@ -19,12 +19,11 @@ fn handle_target_speaker_update(
         return;
     }
     let preview = current_embedded_audio_partial_preview(inner);
-    // Prefer the live filtered preview if present; wake guard body_started is
-    // the durable latch once any non-empty body was seen this session.
-    let body_started = automatic_wake_body_started(inner, session_id)
-        || preview
-            .as_deref()
-            .is_some_and(|text| !text.trim().is_empty());
+    // The callback/watchdog already resolved the product session mode before
+    // committing the endpoint decision. Never recalculate it here: doing so
+    // previously let the controller stop on a 900 ms body clock and then label
+    // that same decision as a 3000 ms no-body stop.
+    let body_started = endpoint_policy.body_started;
     let attributed_owner_activity = (update.target_activity_advanced
         || update.pending_activity_advanced)
         && target_speaker_update_has_live_owner_activity(&update);
@@ -60,18 +59,9 @@ fn handle_target_speaker_update(
             update.stable_attributed_speech_end_ms,
         );
     }
-    let mode_timeout_ms = target_speaker_end_timeout_ms_for_preview(preview.as_deref());
-    let mode_endpoint_timeout_ms = if body_started {
-        mode_timeout_ms
-    } else if automatic_wake_session_active(inner, session_id) {
-        EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS.max(mode_timeout_ms)
-    } else {
-        mode_timeout_ms
-    };
     let fusion_state = target_speaker_fusion_state(&update);
-    let endpoint_timeout_ms =
-        target_speaker_endpoint_timeout_with_fusion(fusion_state, mode_endpoint_timeout_ms);
-    let stop_reason = target_speaker_inactive_stop_reason(endpoint_timeout_ms);
+    let endpoint_timeout_ms = endpoint_policy.endpoint_timeout_ms;
+    let stop_reason = endpoint_policy.stop_reason;
     let provider_stall_confirmed =
         provider_progress_stalled(inner, session_id, &update, Instant::now());
     // The endpoint clock is the sole stop authority. Both provider callbacks
@@ -79,11 +69,9 @@ fn handle_target_speaker_update(
     // already committed OwnerActive -> Stopping. Re-evaluating a second
     // policy here used to discard that decision and leave the session in
     // Listening forever.
-    let endpoint_due = endpoint_decision_committed;
-    if !endpoint_due
-        || stop_dispatched
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
+    if stop_dispatched
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
     {
         return;
     }
@@ -122,7 +110,11 @@ fn handle_target_speaker_update(
 
     let endpoint_lifecycle = endpoint_clock.lock().lifecycle();
     log::info!(
-        "[asr] owner endpoint committed stop session_id={session_id} lifecycle={endpoint_lifecycle:?} reason={stop_reason}"
+        "[asr] owner endpoint committed stop session_id={session_id} lifecycle={endpoint_lifecycle:?} reason={stop_reason} body_started={} endpoint_timeout_ms={} wall_clock_timeout_ms={} initial_body_wait_active={}",
+        endpoint_policy.body_started,
+        endpoint_policy.endpoint_timeout_ms,
+        endpoint_policy.wall_clock_timeout_ms,
+        endpoint_policy.initial_body_wait_active,
     );
 
     // 1.0.4 A3: latch Transcribing + keep last preview immediately at the

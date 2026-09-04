@@ -100,30 +100,29 @@ fn set_volcengine_preview_callbacks(
     let clock_for_speaker = Arc::clone(&endpoint_clock);
     let asr_for_speaker = Arc::clone(asr);
     asr.set_target_speaker_update_callback(Some(Arc::new(move |update| {
-        let body_started = automatic_wake_body_started(&inner_for_speaker, session_id)
-            || current_embedded_audio_partial_preview(&inner_for_speaker)
-                .as_deref()
-                .is_some_and(|text| !text.trim().is_empty());
+        let preview = current_embedded_audio_partial_preview(&inner_for_speaker);
+        let decision_audio_ms = update.audio_duration_ms.or(update.provider_audio_duration_ms);
+        let endpoint_policy = resolve_target_speaker_endpoint_policy(
+            &inner_for_speaker,
+            session_id,
+            preview.as_deref(),
+            decision_audio_ms,
+        );
         let now = Instant::now();
         {
             let mut clock = clock_for_speaker.lock();
-            clock.observe(&update, body_started, now);
+            clock.observe(&update, endpoint_policy.body_started, now);
         }
         // Provider callbacks only publish observations. Reuse the same clock
         // decision as the watchdog instead of running a second endpoint policy
         // here; the previous split could commit Stopping in the clock and then
         // discard it during a second callback-side evaluation.
-        let endpoint_timeout_ms = target_speaker_end_timeout_ms_for_preview(
-            current_embedded_audio_partial_preview(&inner_for_speaker).as_deref(),
-        );
         let owner_analysis_pending = asr_for_speaker.local_speaker_analysis_pending();
-        let committed_update = clock_for_speaker
-            .lock()
-            .latest_due_update_after_owner_analysis(
-                Instant::now(),
-                settled_target_wall_clock_timeout_ms(endpoint_timeout_ms),
-                owner_analysis_pending,
-            );
+        let committed_update = clock_for_speaker.lock().reduce_session_policy(
+            Instant::now(),
+            endpoint_policy,
+            owner_analysis_pending,
+        );
         if let Some(committed_update) = committed_update {
             handle_target_speaker_update(
                 &inner_for_speaker,
@@ -131,7 +130,7 @@ fn set_volcengine_preview_callbacks(
                 &stop_dispatched,
                 &clock_for_speaker,
                 committed_update,
-                true,
+                endpoint_policy,
             );
         }
     })));
