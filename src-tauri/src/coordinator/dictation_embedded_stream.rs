@@ -430,7 +430,6 @@ impl EmbeddedStreamingDictation {
         {
             let mut lifecycle = inner.recording_lifecycle.lock();
             lifecycle.close(None);
-            lifecycle.reset();
             return Ok(());
         }
         self.show_transcribing_after_stop(inner);
@@ -503,7 +502,6 @@ impl EmbeddedStreamingDictation {
         if end_result.is_ok() {
             let mut lifecycle = inner.recording_lifecycle.lock();
             lifecycle.close(Some(coordinator_session_id));
-            lifecycle.reset();
         }
         end_result
     }

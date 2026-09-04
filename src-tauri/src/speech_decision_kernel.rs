@@ -840,6 +840,20 @@ mod tests {
     }
 
     #[test]
+    fn recording_lifecycle_keeps_closed_identity_as_stale_callback_tombstone() {
+        let current = uuid::Uuid::new_v4();
+        let stale = uuid::Uuid::new_v4();
+        let mut lifecycle = RecordingLifecycleController::default();
+        assert!(lifecycle.begin_owner(21, current));
+        assert!(lifecycle.close(Some(current)));
+        assert_eq!(lifecycle.state(), RecordingLifecycleState::Closed);
+        assert!(!lifecycle.commit_stop(current));
+        assert!(!lifecycle.commit_stop(stale));
+        assert!(lifecycle.begin_candidate(22));
+        assert_eq!(lifecycle.state(), RecordingLifecycleState::WakeCandidate);
+    }
+
+    #[test]
     fn unenrolled_phrase_can_wake_without_claiming_owner_verification() {
         let result = arbitrate_wake(
             PhraseSignal::LocalTranscript,

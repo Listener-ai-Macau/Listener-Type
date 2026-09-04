@@ -5,7 +5,6 @@ impl EmbeddedStreamingDictation {
     fn reset_product_lifecycle(&self, inner: &Arc<Inner>) {
         let mut lifecycle = inner.recording_lifecycle.lock();
         lifecycle.close(None);
-        lifecycle.reset();
     }
 
     async fn finish_completed_streaming_session(

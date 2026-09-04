@@ -96,7 +96,7 @@ fn handle_target_speaker_update(
         let mut lifecycle = inner.recording_lifecycle.lock();
         match lifecycle.state() {
             crate::speech_decision_kernel::RecordingLifecycleState::Idle
-            | crate::speech_decision_kernel::RecordingLifecycleState::Closed => true,
+                => true,
             _ => lifecycle.commit_stop(session_id),
         }
     };
