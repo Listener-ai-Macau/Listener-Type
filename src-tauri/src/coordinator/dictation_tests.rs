@@ -5127,6 +5127,16 @@ fn wake_candidate_controller_serializes_phase_and_session_identity() {
 }
 
 #[test]
+fn wake_candidate_controller_has_no_legacy_split_state() {
+    let polish = include_str!("dictation_wake_polish.rs");
+    let dictation = include_str!("dictation.rs");
+    assert!(polish.contains("WakeCandidateController"));
+    assert!(!polish.contains("static HIDDEN_AUTOMATIC_CANDIDATE_STATE"));
+    assert!(!polish.contains("static DEVICE_KEY_DICTATION_TAKEOVER_PENDING"));
+    assert!(!dictation.contains("LAST_HIDDEN_VA_SESSION"));
+}
+
+#[test]
 fn hidden_candidate_marked_active_before_detector_init() {
     // Device-key promote depends on ACTIVE during StreamingDetector::new (~2s).
     let stream = concat!(
