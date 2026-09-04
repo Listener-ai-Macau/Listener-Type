@@ -4,7 +4,7 @@ fn handle_target_speaker_update(
     stop_dispatched: &Arc<AtomicBool>,
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
     update: crate::asr::volcengine::TargetSpeakerUpdate,
-    settled_wall_clock_due: bool,
+    endpoint_decision_committed: bool,
 ) {
     let session_active = {
         let state = inner.state.lock();
@@ -68,43 +68,14 @@ fn handle_target_speaker_update(
     let endpoint_timeout_ms =
         target_speaker_endpoint_timeout_with_fusion(fusion_state, mode_endpoint_timeout_ms);
     let stop_reason = target_speaker_inactive_stop_reason(endpoint_timeout_ms);
-    let initial_body_wait_active =
-        automatic_wake_initial_body_wait_active(inner, session_id, update.audio_duration_ms);
     let provider_stall_confirmed =
         provider_progress_stalled(inner, session_id, &update, Instant::now());
-    let provider_clock_endpoint_due = target_speaker_endpoint_due_with_provider_stall(
-        &update,
-        provider_stall_confirmed,
-        endpoint_timeout_ms,
-    );
-    // A settled-text timer is only a fallback for a quiet, covered provider
-    // stream.  If the provider is still carrying an unattributed provisional
-    // tail, its owner boundary is known to be behind the live text and the
-    // wall-clock fallback must not cut the sentence in the middle.  Confirmed
-    // provider stall is the one bounded exception: the normal endpoint policy
-    // will then require the local owner tail to be quiet before stopping.
-    let settled_wall_clock_endpoint_due = body_started
-        && settled_wall_clock_due
-        && (!update.pending_unattributed_speech || provider_stall_confirmed);
-    if body_started
-        && settled_wall_clock_due
-        && update.pending_unattributed_speech
-        && !provider_stall_confirmed
-    {
-        log::info!(
-            "[asr] settled-text wall clock held pending_provider_text provider_audio_ms={:?} local_audio_ms={:?} local_speech_end_ms={:?} cloud_target_end_ms={:?}",
-            update.provider_audio_duration_ms,
-            update.audio_duration_ms,
-            update.local_speech_end_ms,
-            update.target_speech_end_ms,
-        );
-    }
-    let endpoint_due = !initial_body_wait_active
-        && target_speaker_endpoint_due_after_visible_body_gate(
-            body_started,
-            provider_clock_endpoint_due,
-            settled_wall_clock_endpoint_due,
-        );
+    // The endpoint clock is the sole stop authority. Both provider callbacks
+    // and the watchdog pass only a snapshot for which the controller has
+    // already committed OwnerActive -> Stopping. Re-evaluating a second
+    // policy here used to discard that decision and leave the session in
+    // Listening forever.
+    let endpoint_due = endpoint_decision_committed;
     if !endpoint_due
         || stop_dispatched
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -115,15 +86,6 @@ fn handle_target_speaker_update(
 
     let provider_stall_fallback =
         provider_stall_local_endpoint_due(&update, provider_stall_confirmed, endpoint_timeout_ms);
-    if settled_wall_clock_endpoint_due && !provider_clock_endpoint_due {
-        log::info!(
-            "[asr] target endpoint using settled-text wall clock provider_audio_ms={:?} local_audio_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?} timeout_ms={endpoint_timeout_ms}",
-            update.provider_audio_duration_ms,
-            update.audio_duration_ms,
-            update.target_speech_end_ms,
-            update.local_target_speech_end_ms
-        );
-    }
     if provider_stall_fallback {
         log::info!(
             "[asr] target endpoint using bounded provider-stall fallback provider_audio_ms={:?} local_audio_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?} timeout_ms={endpoint_timeout_ms}",
@@ -168,11 +130,11 @@ fn handle_target_speaker_update(
             let started = Instant::now();
             match asr.send_last_frame().await {
                 Ok(()) => log::info!(
-                    "[asr] proactive endpoint final frame sent session_id={session_id} provider_stall_fallback={provider_stall_fallback} settled_wall_clock_fallback={settled_wall_clock_endpoint_due} elapsed_ms={}",
+                    "[asr] proactive endpoint final frame sent session_id={session_id} provider_stall_fallback={provider_stall_fallback} controller_committed=true elapsed_ms={}",
                     started.elapsed().as_millis()
                 ),
                 Err(err) => log::warn!(
-                    "[asr] proactive endpoint final frame failed session_id={session_id} provider_stall_fallback={provider_stall_fallback} settled_wall_clock_fallback={settled_wall_clock_endpoint_due} elapsed_ms={} error={err}",
+                    "[asr] proactive endpoint final frame failed session_id={session_id} provider_stall_fallback={provider_stall_fallback} controller_committed=true elapsed_ms={} error={err}",
                     started.elapsed().as_millis()
                 ),
             }

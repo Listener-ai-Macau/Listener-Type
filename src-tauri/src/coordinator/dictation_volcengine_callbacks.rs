@@ -106,15 +106,26 @@ fn set_volcengine_preview_callbacks(
             let mut clock = clock_for_speaker.lock();
             clock.observe(&update, body_started, now);
         }
-        // The session watchdog is the sole endpoint evaluator. Provider
-        // callbacks only publish observations and never race a second timer.
-        handle_target_speaker_update(
-            &inner_for_speaker,
-            session_id,
-            &stop_dispatched,
-            &clock_for_speaker,
-            update,
-            false,
+        // Provider callbacks only publish observations. Reuse the same clock
+        // decision as the watchdog instead of running a second endpoint policy
+        // here; the previous split could commit Stopping in the clock and then
+        // discard it during a second callback-side evaluation.
+        let endpoint_timeout_ms = target_speaker_end_timeout_ms_for_preview(
+            current_embedded_audio_partial_preview(&inner_for_speaker).as_deref(),
         );
+        let committed_update = clock_for_speaker.lock().latest_due_update(
+            Instant::now(),
+            settled_target_wall_clock_timeout_ms(endpoint_timeout_ms),
+        );
+        if let Some(committed_update) = committed_update {
+            handle_target_speaker_update(
+                &inner_for_speaker,
+                session_id,
+                &stop_dispatched,
+                &clock_for_speaker,
+                committed_update,
+                true,
+            );
+        }
     })));
 }
