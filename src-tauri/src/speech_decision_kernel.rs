@@ -193,7 +193,6 @@ impl TranscriptEvidenceLedger {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct EndpointEvidence {
     pub(crate) owner_watermark_ms: Option<u64>,
-    pub(crate) local_speech_watermark_ms: Option<u64>,
     pub(crate) provider_coverage_ms: Option<u64>,
     pub(crate) pending_provider_text: bool,
     pub(crate) latest_speech_confirmed_non_target: bool,
@@ -214,7 +213,9 @@ pub(crate) enum EndpointDecision {
 pub(crate) struct FirmwareEndpointLeaseEvidence {
     pub(crate) visible_body: bool,
     pub(crate) owner_established: bool,
-    pub(crate) local_speech_watermark_ms: Option<u64>,
+    /// Positive enrolled-owner activity watermark. Generic room-energy/VAD
+    /// must never be passed to the firmware lease decision.
+    pub(crate) owner_speech_watermark_ms: Option<u64>,
     pub(crate) provider_coverage_ms: Option<u64>,
     pub(crate) unresolved_owner_tail: bool,
     pub(crate) latest_speech_confirmed_non_target: bool,
@@ -240,12 +241,12 @@ pub(crate) fn decide_firmware_endpoint_lease(
     {
         return FirmwareEndpointLeaseDecision::Idle;
     }
-    let Some(local_speech_ms) = evidence.local_speech_watermark_ms else {
+    let Some(owner_speech_ms) = evidence.owner_speech_watermark_ms else {
         return FirmwareEndpointLeaseDecision::Idle;
     };
     if evidence
         .provider_coverage_ms
-        .is_some_and(|provider_ms| provider_ms >= local_speech_ms)
+        .is_some_and(|provider_ms| provider_ms >= owner_speech_ms)
     {
         FirmwareEndpointLeaseDecision::Idle
     } else {
@@ -327,11 +328,11 @@ impl EndpointArbiter {
         if evidence.pending_provider_text && evidence.unresolved_owner_tail {
             return true;
         }
-        let provider_behind_speech = evidence
-            .local_speech_watermark_ms
+        let provider_behind_owner = evidence
+            .owner_watermark_ms
             .zip(evidence.provider_coverage_ms)
-            .is_some_and(|(speech, provider)| provider < speech);
-        evidence.unresolved_owner_tail && provider_behind_speech
+            .is_some_and(|(owner, provider)| provider < owner);
+        evidence.unresolved_owner_tail && provider_behind_owner
     }
 
     pub(crate) fn decide_stop(
@@ -362,9 +363,15 @@ impl EndpointArbiter {
                 text_revision,
             } => {
                 let text_revision_changed = text_revision != self.text_revision;
-                if owner_watermark_ms != evidence.owner_watermark_ms
-                    || (text_revision_changed && !evidence.latest_speech_confirmed_non_target)
-                {
+                // A preview revision is only an endpoint barrier while the
+                // provider/local clocks still show an owner tail. Once the
+                // provider has settled (`pending_provider_text=false`) and
+                // the owner watermark is quiet, punctuation/final-row
+                // revisions must not re-arm the endpoint indefinitely.
+                let revision_needs_owner_tail = text_revision_changed
+                    && !evidence.latest_speech_confirmed_non_target
+                    && (evidence.pending_provider_text || evidence.unresolved_owner_tail);
+                if owner_watermark_ms != evidence.owner_watermark_ms || revision_needs_owner_tail {
                     self.arm(evidence);
                     return EndpointDecision::Hold;
                 }
@@ -391,9 +398,10 @@ impl EndpointArbiter {
                 deadline,
             } => {
                 let text_revision_changed = text_revision != self.text_revision;
-                if owner_watermark_ms != evidence.owner_watermark_ms
-                    || (text_revision_changed && !evidence.latest_speech_confirmed_non_target)
-                {
+                let revision_needs_owner_tail = text_revision_changed
+                    && !evidence.latest_speech_confirmed_non_target
+                    && (evidence.pending_provider_text || evidence.unresolved_owner_tail);
+                if owner_watermark_ms != evidence.owner_watermark_ms || revision_needs_owner_tail {
                     self.arm(evidence);
                     return EndpointDecision::Hold;
                 }
@@ -711,7 +719,6 @@ mod tests {
         let started = Instant::now();
         let evidence = EndpointEvidence {
             owner_watermark_ms: Some(8_650),
-            local_speech_watermark_ms: Some(9_500),
             provider_coverage_ms: Some(9_000),
             pending_provider_text: false,
             latest_speech_confirmed_non_target: false,
@@ -747,7 +754,6 @@ mod tests {
         let started = Instant::now();
         let evidence = EndpointEvidence {
             owner_watermark_ms: Some(4_000),
-            local_speech_watermark_ms: Some(4_000),
             provider_coverage_ms: Some(4_000),
             pending_provider_text: false,
             latest_speech_confirmed_non_target: false,
@@ -757,16 +763,38 @@ mod tests {
         endpoint.arm(evidence);
         endpoint.note_text_revision();
 
-        // The first expiry observes the newer revision and re-arms the
-        // candidate; the following decision must be able to commit Stop.
-        assert_eq!(
-            endpoint.decide_stop(evidence, started, Duration::from_millis(300)),
-            EndpointDecision::Hold
-        );
+        // A settled preview revision is not an owner-tail barrier. It must
+        // commit immediately once the normal endpoint deadline is reached.
         assert_eq!(
             endpoint.decide_stop(
                 evidence,
                 started + Duration::from_millis(1),
+                Duration::from_millis(300),
+            ),
+            EndpointDecision::Stop,
+        );
+    }
+
+    #[test]
+    fn settled_provider_revision_cannot_hold_quiet_enrolled_owner() {
+        // Replay of the current installed failure: provider settled the final
+        // row at 10.8s, local owner watermark was quiet at 7.6s, but preview
+        // revisions kept the arbiter in Hold until the user clicked Stop.
+        let started = Instant::now();
+        let settled = EndpointEvidence {
+            owner_watermark_ms: Some(10_052),
+            provider_coverage_ms: Some(10_700),
+            pending_provider_text: false,
+            latest_speech_confirmed_non_target: false,
+            unresolved_owner_tail: false,
+        };
+        let mut endpoint = EndpointArbiter::default();
+        endpoint.arm(settled);
+        endpoint.note_text_revision();
+        assert_eq!(
+            endpoint.decide_stop(
+                settled,
+                started + Duration::from_millis(900),
                 Duration::from_millis(300),
             ),
             EndpointDecision::Stop
@@ -782,7 +810,6 @@ mod tests {
         let started = Instant::now();
         let evidence = EndpointEvidence {
             owner_watermark_ms: Some(9_692),
-            local_speech_watermark_ms: Some(10_900),
             provider_coverage_ms: Some(10_800),
             pending_provider_text: false,
             latest_speech_confirmed_non_target: false,
@@ -818,7 +845,6 @@ mod tests {
     fn quiet_owner_endpoint_keeps_normal_latency() {
         let evidence = EndpointEvidence {
             owner_watermark_ms: Some(4_000),
-            local_speech_watermark_ms: Some(4_000),
             provider_coverage_ms: Some(5_000),
             pending_provider_text: false,
             latest_speech_confirmed_non_target: false,
@@ -836,7 +862,6 @@ mod tests {
     fn pending_interference_does_not_hold_quiet_owner_forever() {
         let evidence = EndpointEvidence {
             owner_watermark_ms: Some(4_000),
-            local_speech_watermark_ms: Some(4_000),
             provider_coverage_ms: Some(4_000),
             pending_provider_text: true,
             latest_speech_confirmed_non_target: false,
@@ -855,7 +880,6 @@ mod tests {
         let started = Instant::now();
         let evidence = EndpointEvidence {
             owner_watermark_ms: Some(4_000),
-            local_speech_watermark_ms: Some(4_800),
             provider_coverage_ms: Some(4_200),
             pending_provider_text: true,
             latest_speech_confirmed_non_target: false,
@@ -874,7 +898,6 @@ mod tests {
         let started = Instant::now();
         let evidence = EndpointEvidence {
             owner_watermark_ms: Some(4_000),
-            local_speech_watermark_ms: Some(4_800),
             provider_coverage_ms: Some(4_200),
             pending_provider_text: false,
             latest_speech_confirmed_non_target: false,
@@ -900,7 +923,6 @@ mod tests {
     fn confirmed_other_speaker_never_extends_owner_catch_up() {
         let evidence = EndpointEvidence {
             owner_watermark_ms: Some(4_000),
-            local_speech_watermark_ms: Some(5_000),
             provider_coverage_ms: Some(4_100),
             pending_provider_text: true,
             latest_speech_confirmed_non_target: true,
@@ -919,7 +941,6 @@ mod tests {
         let started = Instant::now();
         let evidence = EndpointEvidence {
             owner_watermark_ms: Some(4_000),
-            local_speech_watermark_ms: Some(5_000),
             provider_coverage_ms: Some(4_100),
             pending_provider_text: true,
             latest_speech_confirmed_non_target: true,
@@ -952,7 +973,7 @@ mod tests {
         let evidence = FirmwareEndpointLeaseEvidence {
             visible_body: true,
             owner_established: true,
-            local_speech_watermark_ms: Some(5_300),
+            owner_speech_watermark_ms: Some(5_300),
             provider_coverage_ms: Some(4_350),
             unresolved_owner_tail: true,
             latest_speech_confirmed_non_target: false,
@@ -975,7 +996,7 @@ mod tests {
         let owner_tail = FirmwareEndpointLeaseEvidence {
             visible_body: true,
             owner_established: true,
-            local_speech_watermark_ms: Some(5_300),
+            owner_speech_watermark_ms: Some(5_300),
             provider_coverage_ms: Some(4_350),
             unresolved_owner_tail: true,
             latest_speech_confirmed_non_target: false,
@@ -995,6 +1016,13 @@ mod tests {
             },
             FirmwareEndpointLeaseEvidence {
                 visible_body: false,
+                ..owner_tail
+            },
+            // Generic VAD/energy has no field in this contract. An update
+            // carrying only room activity must therefore remain idle.
+            FirmwareEndpointLeaseEvidence {
+                owner_speech_watermark_ms: None,
+                unresolved_owner_tail: false,
                 ..owner_tail
             },
         ] {
