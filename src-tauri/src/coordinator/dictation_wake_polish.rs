@@ -6,6 +6,12 @@ const LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES: usize = LOCAL_SPEAKER_CLASSIFY_WINDOW
 const LOCAL_SPEAKER_CLASSIFY_MIN_MS: usize = 1_000;
 const LOCAL_SPEAKER_CLASSIFY_MIN_BYTES: usize = LOCAL_SPEAKER_CLASSIFY_MIN_MS * 32;
 const LOCAL_SPEAKER_CLASSIFY_STEP_MS: u64 = 400;
+// The isolated Paraformer helper is intentionally single-flight. A second
+// candidate should get a bounded chance to use it after the active request
+// finishes, but must never form an unbounded queue that delays terminal wake
+// decisions or lets stale ambient candidates consume the helper forever.
+const LOCAL_WAKE_HELPER_BUSY_RETRY_BUDGET_MS: u64 = 360;
+const LOCAL_WAKE_HELPER_BUSY_RETRY_INTERVAL_MS: u64 = 40;
 
 struct LocalSessionSpeakerTracker {
     profile_rx: Option<
@@ -156,13 +162,17 @@ impl EmbeddedAudioDictationSession {
         wake_pcm: Vec<u8>,
         wake_end_seconds: f32,
         wake_phrase: String,
+        enrolled_owner_matched: bool,
     ) {
         if let Some(asr) = self.volcengine_asr.as_ref() {
-            // Every call site is reached only after the automatic wake path has
-            // accepted the persisted owner voiceprint. Preserve that verified
-            // identity into body isolation; a positive body window is still
-            // required separately for endpoint refresh.
-            asr.note_verified_local_speaker_tracking_started(&wake_phrase);
+            if enrolled_owner_matched {
+                asr.note_verified_local_speaker_tracking_started(&wake_phrase);
+            } else {
+                // Open policy may accept a phrase without proving identity. It
+                // can seed an adaptive session profile, but must not enable the
+                // strict enrolled-owner transcript/endpoint path.
+                asr.note_local_speaker_tracking_started(&wake_phrase);
+            }
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             asr.start_target_speaker_extraction(&wake_phrase);
         }
@@ -569,6 +579,10 @@ struct BufferedSpeakerCandidate {
             u64,
         )>,
     >,
+    /// A candidate gets at most one speculative owner snapshot. Once that
+    /// bounded task completes, do not immediately spawn another copy on every
+    /// incoming PCM chunk; repeated inference starves preview/ASR processing.
+    owner_verification_attempted: bool,
     /// Strong continuous Mandarin can hide the owner's phrase from both raw
     /// KWS and local ASR. Run one bounded, enrolled-owner extraction beside the
     /// established raw path; it may release only after the extracted output
@@ -612,11 +626,19 @@ struct BufferedSpeakerCandidate {
     /// near-match. It never wakes by itself, but keeps the bounded terminal KWS
     /// cascade available after older-window Absents.
     local_kws_fusion_evidence: bool,
+    /// Host KWS has produced a phrase candidate. This is still only a
+    /// candidate: the separated track must pass the enrolled owner verifier.
+    kws_phrase_detected: bool,
     /// Overlap-degraded local ASR can preserve only the start-aligned first
     /// half of 「开始录音」 while the enrolled owner still verifies. Count only
-    /// repeated origin-zero confirmations; terminal policy may combine three
-    /// of them with the independent enrolled voiceprint.
+    /// repeated start-aligned confirmations; terminal policy may combine three
+    /// of them with the independent enrolled voiceprint. A rolling window also
+    /// has one bounded owner-gated near-match path with body text.
     local_owner_overlap_near_confirmations: u8,
+    /// Independent near-phrase observations retained for terminal recovery.
+    /// Interference can shift the phrase inside a rolling window, so this
+    /// ledger is intentionally not limited to start-aligned matches.
+    owner_near_phrase_confirmations: u8,
     /// Absolute PCM interval inspected by the newest non-stale local Absent.
     /// A KWS fallback may not override it when it already covered that hit.
     #[cfg(target_os = "windows")]
@@ -654,6 +676,7 @@ struct ExtractedOwnerWakeEvidence {
     local_confirmation_ms: u64,
     extraction_ms: u64,
     owner_score: f32,
+    owner_verified_by_extraction: bool,
     residual_ratio: f64,
 }
 
@@ -684,16 +707,24 @@ const STREAMING_KWS_ROTATE_AFTER_MS: usize = 2_400;
 const STREAMING_KWS_ROTATE_AFTER_BYTES: usize = STREAMING_KWS_ROTATE_AFTER_MS * 32;
 const STREAMING_KWS_ROTATE_OVERLAP_MS: usize = 1_400;
 const STREAMING_KWS_ROTATE_OVERLAP_BYTES: usize = STREAMING_KWS_ROTATE_OVERLAP_MS * 32;
-/// Proactive trailing-silence stop (改A) — DISABLED. A fixed energy-silence
-/// threshold cannot distinguish a mid-sentence pause from a real
-/// end-of-utterance, so any value that beats the firmware `auto_stop_silence`
-/// timeout (observed 3-14s) truncates speech. User acceptance 2026-07-26:
-/// "话还没说完就结束了". Set well above the firmware's max auto_stop so the
-/// device's own endpointer always wins and this path stays dormant. The proper
-/// fix is a content-aware endpoint (ASR sentence boundary) and/or device-side
-/// wake word detection — see the 治本 plan. Do not lower this again until one of
-/// those gates the dispatch.
-const EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS: u64 = 30_000;
+/// Healthy sessions have exactly one endpoint authority: the owner activity
+/// controller driven by speaker evidence. A raw-energy proactive stop cannot
+/// distinguish a thinking pause from an utterance boundary, so keep this path
+/// permanently dormant. The field remains for telemetry/backward-compatible
+/// session state; only the provider-failure safety path below may dispatch it.
+const EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS: u64 = u64::MAX;
+// A failed provider cannot emit the normal content-aware endpoint. Keep a
+// separate local safety bound for that failure mode only; healthy sessions
+// continue to use the disabled-by-design 30s guard.
+const EMBEDDED_ASR_FAILURE_PROACTIVE_STOP_SILENCE_MS: u64 = 1_200;
+
+fn proactive_stop_silence_threshold_ms(asr_delivery_failed: bool) -> u64 {
+    if asr_delivery_failed {
+        EMBEDDED_ASR_FAILURE_PROACTIVE_STOP_SILENCE_MS
+    } else {
+        EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS
+    }
+}
 // 2026-08-09 12:46:59 激活竞态：ACTIVATE 与旧唤醒段 complete 相隔 0.1s。旧段
 // STOP 落在该窗口内且正文未开始时，视为段 rotation 而非用户说完，不 finalize。
 const EMBEDDED_ACTIVATION_SEGMENT_RACE_WINDOW: Duration = Duration::from_millis(2_000);
@@ -710,7 +741,13 @@ const TARGET_WAKE_EXTRACTION_START_MS: usize = 2_400;
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 const TARGET_WAKE_EXTRACTION_START_BYTES: usize = TARGET_WAKE_EXTRACTION_START_MS * 32;
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-const TARGET_WAKE_EXTRACTION_TERMINAL_WAIT_MS: u64 = 2_200;
+const TARGET_WAKE_EXTRACTION_PREFETCHED_WAIT_MS: u64 = 2_200;
+// A separator started from terminal owner evidence has no pre-terminal head
+// start. Installed traces put extraction alone at 2.1-2.5 s, so applying the
+// prefetched budget killed the recovery before its phrase/owner gates ran.
+// This larger budget is used only after the ordinary wake path has failed.
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+const TARGET_WAKE_EXTRACTION_LAZY_TERMINAL_WAIT_MS: u64 = 3_200;
 /* A negotiated firmware pre-roll burst can deliver several seconds of already
  * captured audio in under one second. Starting the heavyweight exploratory
  * local ASR at the ordinary 0.8 s PCM rung contends with BLE/KWS four times
@@ -823,6 +860,7 @@ fn should_advance_local_confirmation_window(
     current_origin_bytes: usize,
     next_origin_bytes: usize,
     local_confirmation_attempts: usize,
+    local_confirmation_in_flight: bool,
 ) -> bool {
     // A fast BLE pre-roll can reach the first KWS rotation before the deferred
     // 2.4 s exploratory confirmation has run. Preserve origin zero for that
@@ -834,6 +872,11 @@ fn should_advance_local_confirmation_window(
         && !keyword_model_hit
         && next_origin_bytes > current_origin_bytes
         && !initial_full_context_confirmation_pending
+        // Never invalidate a confirmation that is still running. A fast
+        // pre-roll can rotate the KWS stream while Paraformer is decoding the
+        // origin-zero window; advancing here discards a valid wake at the
+        // head of the candidate and forces a slow terminal fallback.
+        && !local_confirmation_in_flight
 }
 
 #[cfg(target_os = "windows")]
@@ -1175,8 +1218,22 @@ fn run_local_wake_confirmation_once(
     // Boost toward KWS/ASR training levels (min 8x): candidate PCM arrives far
     // below them, and an unboosted phrase reads as garbled Absent (session 548).
     let boosted = crate::wake_phrase::gain_normalized_pcm16(pcm);
-    let result = crate::asr::local::wake_helper::confirm(&boosted, phrase, Duration::from_secs(4))
-        .map_err(|err| format!("local wake confirmation failed: {err}"))?;
+    let busy_deadline = Instant::now()
+        + Duration::from_millis(LOCAL_WAKE_HELPER_BUSY_RETRY_BUDGET_MS);
+    let result = loop {
+        match crate::asr::local::wake_helper::confirm(&boosted, phrase, Duration::from_secs(4)) {
+            Err(err)
+                if crate::asr::local::wake_helper::is_busy_error(&err)
+                    && Instant::now() < busy_deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(
+                    LOCAL_WAKE_HELPER_BUSY_RETRY_INTERVAL_MS,
+                ));
+            }
+            result => break result,
+        }
+    }
+    .map_err(|err| format!("local wake confirmation failed: {err}"))?;
     Ok(LocalWakeConfirmation {
         matched: result.matched,
         phrase_relation: result.phrase_relation,
