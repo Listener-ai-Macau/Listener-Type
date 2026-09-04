@@ -94,6 +94,38 @@ impl EmbeddedStreamingDictation {
                 // and open a full Recording capsule with no wake/key intent (owner
                 // saw phantom dictation; stop origin was still VoiceActivation).
                 if self.session.is_none() {
+                    // A notify/GATT reopen can deliver the middle of a
+                    // VoiceActivation segment before its SessionStart frame
+                    // (the firmware may already be draining a pre-roll burst).
+                    // Dropping every orphan PCM packet makes that entire wake
+                    // attempt invisible and produces the intermittent
+                    // "sometimes wakes, sometimes does nothing" failure.  A
+                    // recovered segment is still a hidden Verification
+                    // candidate, never a visible dictation session; the normal
+                    // phrase + owner gates therefore remain authoritative.
+                    if chunk.packet_sequence >= 3
+                        && self.embedded_session_id.is_none()
+                        && self.speaker_candidate.is_none()
+                    {
+                        log::warn!(
+                            "[coord] recovering orphan embedded PCM as hidden VoiceActivation candidate embedded_session_id={} packet_sequence={} pcm_bytes={} (SessionStart was lost during notify reopen)",
+                            chunk.session_id,
+                            chunk.packet_sequence,
+                            chunk.pcm.len()
+                        );
+                        self.begin_candidate_or_session(
+                            inner,
+                            chunk.session_id,
+                            crate::embedded_audio::SessionStartOrigin::VoiceActivation,
+                        )
+                        .await?;
+                        // The current packet is intentionally not replayed into
+                        // the detector: the detector is initialized
+                        // asynchronously and the next packet preserves the
+                        // actor's single-flight ordering.  It is at most one
+                        // 10–15 ms frame, not an entire lost pre-roll.
+                        return Ok(false);
+                    }
                     // High-rate orphan tails after notify reopen can flood the log
                     // and stall the stream actor; keep first packets only.
                     if chunk.packet_sequence < 3 || chunk.packet_sequence % 500 == 0 {
