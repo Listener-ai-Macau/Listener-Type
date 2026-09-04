@@ -626,6 +626,23 @@ fn start_settled_target_endpoint_watchdog(
                             .as_deref()
                             .is_some_and(|text| !text.trim().is_empty());
                     clock.observe(&asr.endpoint_update_snapshot(), body_started, Instant::now());
+                } else if clock.latest_update.is_none()
+                    && current_embedded_audio_partial_preview(&inner)
+                        .as_deref()
+                        .is_some_and(|text| !text.trim().is_empty())
+                {
+                    // A provider can deliver preview text while omitting all
+                    // target-speaker rows. Seed the same controller from the
+                    // live ASR snapshot instead of leaving healthy sessions
+                    // without any endpoint clock.
+                    clock.seed_from_snapshot_if_missing(
+                        asr.endpoint_update_snapshot(),
+                        true,
+                        Instant::now(),
+                    );
+                    log::info!(
+                        "[asr] endpoint watchdog seeded missing owner clock from provider snapshot session_id={session_id}"
+                    );
                 }
                 let update = clock.latest_due_update(
                     Instant::now(),
