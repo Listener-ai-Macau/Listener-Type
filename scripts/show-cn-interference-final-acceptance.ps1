@@ -76,6 +76,14 @@ function Save-Result {
     $script:player.Stop()
     $parent = [System.IO.Path]::GetDirectoryName($output)
     [System.IO.Directory]::CreateDirectory($parent) | Out-Null
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $promptBytes = [Text.Encoding]::UTF8.GetBytes($spokenText)
+        $promptHash = [System.BitConverter]::ToString($sha.ComputeHash($promptBytes)).Replace('-', '')
+    }
+    finally {
+        $sha.Dispose()
+    }
     $payload = [ordered]@{
         schema = 'listener.cn-interference-human-acceptance.v1'
         selection = $Selection
@@ -84,9 +92,7 @@ function Save-Result {
         sawRecording = $script:sawRecording
         sawDone = $script:sawDone
         interferenceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $interference).Hash
-        spokenPromptSha256 = [Convert]::ToHexString(
-            [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($spokenText))
-        )
+        spokenPromptSha256 = $promptHash
         installedExeSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $installed).Hash
         msiSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $msi).Hash
         note = $note.Text.Trim()

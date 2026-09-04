@@ -673,6 +673,7 @@ fn start_settled_target_endpoint_watchdog(
 
 fn arm_settled_target_endpoint_for_visible_body(
     inner: &Arc<Inner>,
+    session_id: SessionId,
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
 ) {
     let preview = current_embedded_audio_partial_preview(inner);
@@ -684,4 +685,8 @@ fn arm_settled_target_endpoint_for_visible_body(
         clock.note_visible_body_boundary(preview_ends_terminal, preview_chars, now);
         clock.arm_latest_for_visible_body(now);
     }
+    let _ = inner
+        .recording_lifecycle
+        .lock()
+        .note_quiet_pending(session_id);
 }

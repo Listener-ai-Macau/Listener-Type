@@ -43,6 +43,7 @@ mod selection;
 mod shortcut_binding;
 mod shortcut_dispatch;
 mod speaker_verification;
+mod speech_decision_kernel;
 mod startup_evidence;
 mod timeline;
 mod types;
@@ -94,6 +95,140 @@ pub fn run_target_speaker_filter_diagnostic(
     std::fs::write(&trace_path, format!("complete\n{}", output.1))
         .map_err(|err| format!("write target-speaker trace failed: {err}"))?;
     Ok(())
+}
+
+/// Replay the production terminal wake-recovery gates against one consented
+/// local capture. The report contains decisions and timings, never transcript
+/// text, so failed live wakes can be diagnosed without persisting what people
+/// in the room said.
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+pub fn run_enrolled_wake_recovery_diagnostic(
+    input_wav_path: &std::path::Path,
+    wake_phrase: &str,
+    extracted_wav_path: &std::path::Path,
+    report_path: &std::path::Path,
+) -> Result<bool, String> {
+    let wav = std::fs::read(input_wav_path)
+        .map_err(|err| format!("read wake-recovery WAV failed: {err}"))?;
+    let pcm = embedded_audio::read_wav_pcm16le(&wav)
+        .map_err(|err| format!("decode wake-recovery WAV failed: {err}"))?;
+    let raw_verification = speaker_verification::verify(&pcm, wake_phrase)?;
+    let raw_confirmation =
+        asr::local::wake_helper::confirm(&pcm, wake_phrase, Duration::from_secs(30))?;
+    let raw_phrase_matched = raw_confirmation.matched
+        && denzic_voice_activation_v1_core::local_confirmation_can_activate(
+            false,
+            raw_confirmation.phrase_relation,
+        );
+    let weak_phrase_hint = !raw_phrase_matched && raw_confirmation.phonetic_prefix_units > 0;
+    let terminal_owner_compatible = raw_verification.policy
+        == speaker_verification::VerificationPolicy::Enrolled
+        && raw_verification.score >= 0.38;
+    let terminal_overlap_degraded_evidence =
+        speech_decision_kernel::owner_overlap_degraded_phrase_evidence(
+            speech_decision_kernel::OwnerOverlapPhraseEvidence {
+                phrase_matched: raw_confirmation.matched,
+                phrase_absent: raw_confirmation.phrase_relation
+                    == crate::wake_phrase::LocalPhraseRelation::Absent,
+                task_origin_bytes: 0,
+                best_window_start: raw_confirmation.phonetic_best_window_start,
+                best_distance: raw_confirmation.phonetic_best_distance,
+                transcript_chars: raw_confirmation.transcript_chars,
+                phrase_chars: wake_phrase.chars().count(),
+            },
+        );
+    let recovery_selected = speech_decision_kernel::decide_wake_recovery(
+        speech_decision_kernel::WakeRecoveryEvidence {
+            weak_phrase_hint,
+            terminal_owner_compatible,
+        },
+    ) == speech_decision_kernel::WakeRecoveryDecision::AwaitSeparatedOwner;
+
+    let mut phrase_matched = false;
+    let mut extracted_owner_matched = false;
+    let mut phrase_relation = "not_run".to_string();
+    let mut local_ms = 0;
+    let mut extraction_ms = 0;
+    let mut residual_ratio = 0.0;
+    let mut extracted_owner_score = 0.0;
+    if recovery_selected {
+        let embedding = speaker_verification::target_speaker_embedding_for_phrase(wake_phrase)?
+            .ok_or_else(|| "enrolled wake template has no target-speaker embedding".to_string())?;
+        asr::target_speaker_extraction::warm_up()?;
+        let input_pcm = pcm.clone();
+        let extracted = std::thread::Builder::new()
+            .name("wake-recovery-diagnostic".to_string())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(move || {
+                asr::target_speaker_extraction::extract_enrolled_owner_wake_candidate(
+                    &input_pcm, embedding,
+                )
+            })
+            .map_err(|err| format!("spawn wake-recovery diagnostic failed: {err}"))?
+            .join()
+            .map_err(|_| "wake-recovery diagnostic thread panicked".to_string())??;
+        extraction_ms = extracted.inference_ms;
+        residual_ratio = extracted.residual_ratio;
+        let samples = extracted
+            .pcm
+            .chunks_exact(2)
+            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+            .collect::<Vec<_>>();
+        std::fs::write(extracted_wav_path, asr::wav::encode_wav_16k_mono(&samples))
+            .map_err(|err| format!("write extracted wake-recovery WAV failed: {err}"))?;
+        let confirmation =
+            asr::local::wake_helper::confirm(&extracted.pcm, wake_phrase, Duration::from_secs(30))?;
+        phrase_relation = format!("{:?}", confirmation.phrase_relation);
+        local_ms = confirmation.inference_ms;
+        phrase_matched = confirmation.matched
+            && denzic_voice_activation_v1_core::local_confirmation_can_activate(
+                false,
+                confirmation.phrase_relation,
+            );
+        let extracted_verification = speaker_verification::verify(&extracted.pcm, wake_phrase)?;
+        extracted_owner_matched = extracted_verification.enrolled_owner_matched();
+        extracted_owner_score = extracted_verification.score;
+    }
+    let accepted = speech_decision_kernel::separated_wake_can_activate(
+        speech_decision_kernel::SeparatedWakeEvidence {
+            exact_phrase: phrase_matched,
+            source_owner_compatible: terminal_owner_compatible,
+            separated_owner_match: extracted_owner_matched,
+        },
+    );
+    let report = serde_json::json!({
+        "schemaVersion": 2,
+        "inputPcmMs": pcm.len() / 32,
+        "rawOwnerPolicy": raw_verification.policy_label(),
+        "rawOwnerScore": raw_verification.score,
+        "rawPhraseRelation": format!("{:?}", raw_confirmation.phrase_relation),
+        "rawPhraseMatched": raw_phrase_matched,
+        "rawPhoneticPrefixUnits": raw_confirmation.phonetic_prefix_units,
+        "rawPhoneticBestDistance": raw_confirmation.phonetic_best_distance,
+        "rawPhoneticBestWindowStart": raw_confirmation.phonetic_best_window_start,
+        "rawTranscriptChars": raw_confirmation.transcript_chars,
+        "weakPhraseHint": weak_phrase_hint,
+        "terminalOwnerCompatible": terminal_owner_compatible,
+        "terminalOverlapDegradedEvidence": terminal_overlap_degraded_evidence,
+        "repeatedOwnerOverlapConfirmationsRequired":
+            speech_decision_kernel::OWNER_OVERLAP_NEAR_CONFIRMATIONS_REQUIRED,
+        "recoverySelected": recovery_selected,
+        "extractionMs": extraction_ms,
+        "residualRatio": residual_ratio,
+        "phraseRelation": phrase_relation,
+        "phraseMatched": phrase_matched,
+        "localConfirmationMs": local_ms,
+        "extractedOwnerScore": extracted_owner_score,
+        "extractedOwnerMatched": extracted_owner_matched,
+        "accepted": accepted,
+    });
+    std::fs::write(
+        report_path,
+        serde_json::to_vec_pretty(&report)
+            .map_err(|err| format!("encode wake-recovery report failed: {err}"))?,
+    )
+    .map_err(|err| format!("write wake-recovery report failed: {err}"))?;
+    Ok(accepted)
 }
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -277,6 +412,22 @@ pub fn run() {
         .setup(move |app| {
             init_file_logger();
             log::info!("=== Listener Type 启动 ===");
+            let executable = std::env::current_exe()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|error| format!("<unavailable:{error}>"));
+            let candidate_id = std::env::var("LISTENER_TYPE_CANDIDATE_ID")
+                .unwrap_or_else(|_| "official".to_string());
+            log::info!(
+                "[build-identity] desktop_version={} profile={} candidate_id={} executable={}",
+                env!("CARGO_PKG_VERSION"),
+                if cfg!(debug_assertions) {
+                    "debug"
+                } else {
+                    "release"
+                },
+                candidate_id,
+                executable
+            );
             #[cfg(target_os = "windows")]
             if std::env::var_os(LISTENER_TYPE_WEBVIEW2_ADDITIONAL_BROWSER_ARGS_ENV).is_some() {
                 log::info!(

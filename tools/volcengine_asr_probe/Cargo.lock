@@ -172,6 +172,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "denzic-voice-activation-v1-core"
+version = "0.1.0"
+dependencies = [
+ "pinyin",
+ "serde",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -442,6 +450,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "denzic-audio-v1-core",
+ "denzic-voice-activation-v1-core",
  "env_logger",
  "futures-util",
  "keyring",
@@ -535,6 +544,12 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "pinyin"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16f2611cd06a1ac239a0cea4521de9eb068a6ca110324ee00631aa68daa74fc0"
 
 [[package]]
 name = "portable-atomic"

@@ -2688,6 +2688,22 @@ fn processing_hints_do_not_retry_with_late_fresh_gatt() {
 }
 
 #[test]
+fn recovered_physical_link_is_reopened_only_after_continuous_session_boundary() {
+    assert!(should_refresh_notify_after_link_recovery_for_test(
+        true,
+        CaptureTerminalBehavior::ContinueListening,
+    ));
+    assert!(!should_refresh_notify_after_link_recovery_for_test(
+        false,
+        CaptureTerminalBehavior::ContinueListening,
+    ));
+    assert!(!should_refresh_notify_after_link_recovery_for_test(
+        true,
+        CaptureTerminalBehavior::StopCapture,
+    ));
+}
+
+#[test]
 fn foreground_probe_success_disables_notify_cccd() {
     assert_eq!(
         NotifyCccdTeardown::for_probe_success(),

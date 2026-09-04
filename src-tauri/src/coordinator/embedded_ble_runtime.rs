@@ -1945,6 +1945,24 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                     } else {
                         next_embedded_ble_background_retry_delay(&err, retry_delay)
                     };
+                    /* A USB-powered Listener is expected to become connectable
+                     * immediately after an EC11 wake/reboot.  The generic
+                     * offline GATT backoff (180 s) was designed for battery
+                     * devices and made a successful physical wake look dead to
+                     * the owner.  Keep the long backoff for battery/unknown
+                     * power, but cap it to the proven 2 s reconnect window when
+                     * the latest firmware identity says USB power is present. */
+                    let usb_powered = embedded_ble_wake_recovery_snapshot(&inner).usb_powered;
+                    let adjusted_retry_delay =
+                        embedded_ble_retry_delay_for_power(retry_delay, usb_powered, &err);
+                    if adjusted_retry_delay != retry_delay {
+                        log::info!(
+                            "[embedded-ble] USB-powered recovery backoff capped for wake responsiveness usb_powered={usb_powered:?} from_ms={} to_ms={} reason=plugged_wake",
+                            retry_delay.as_millis(),
+                            adjusted_retry_delay.as_millis(),
+                        );
+                    }
+                    retry_delay = adjusted_retry_delay;
                 }
                 log::warn!(
                     "[embedded-ble] background listen retrying in {} ms after: {err}",
@@ -3054,6 +3072,20 @@ async fn maybe_hold_embedded_ble_startup_without_current_native_pairing(
     if native_hid_addresses.is_empty()
         && is_explicit_manual_windows_delete_pairing_state(&pairing)
     {
+        /* During plugged soft-off the firmware intentionally drops both BLE
+         * and native HID while retaining the bond.  Windows reports the same
+         * NeedsUserAction/matched=1 shape as a real manual delete, so a fresh
+         * Type process would otherwise enter the 180 s pairing hold and make
+         * the next physical wake appear dead.  A persisted successful notify
+         * target is sufficient ownership evidence here: skip the destructive
+         * pairing hold and let the bounded, radio-passive GATT retry loop wait
+         * for the device to wake. */
+        if let Some(address) = crate::embedded_ble::persisted_listener_notify_target_address() {
+            log::info!(
+                "[embedded-ble] startup manual-delete shape has persisted Listener notify target address={address:012X}; treating absent HID as plugged soft-off and keeping bounded GATT recovery"
+            );
+            return false;
+        }
         log::warn!(
             "[embedded-ble] startup confirmed Windows manual-delete shape with no present HID; blocking persisted GATT and advertisement fallback target={expected_ble_name:?} matched={} failed={} open_settings={}",
             pairing.matched_devices,
@@ -3267,6 +3299,28 @@ fn next_embedded_ble_background_retry_delay(err: &str, current: Duration) -> Dur
     current
         .saturating_mul(2)
         .clamp(EMBEDDED_BLE_RETRY_BASE_DELAY, EMBEDDED_BLE_RETRY_MAX_DELAY)
+}
+
+fn embedded_ble_retry_delay_for_power(
+    proposed: Duration,
+    usb_powered: Option<bool>,
+    err: &str,
+) -> Duration {
+    let offline_backoff = is_embedded_ble_background_offline_backoff_error(err);
+    /* A plugged soft-off deliberately drops BLE before restarting.  The first
+     * recovery error can therefore lose the firmware power snapshot (USB CDC
+     * is already disconnected) and arrive here as usb_powered=None.  Any
+     * offline GATT retry is safe in that state: it cannot wake a radio-silent
+     * soft-off device or send a recording command; it only makes the listener
+     * ready as soon as the physical wake edge brings BLE back.  Keep the long
+     * backoff only when firmware explicitly reports battery power. */
+    if offline_backoff
+        && usb_powered != Some(false)
+    {
+        proposed.min(EMBEDDED_BLE_RETRY_LONG_DELAY)
+    } else {
+        proposed
+    }
 }
 
 fn is_embedded_ble_automatic_recovery_error(err: &str) -> bool {

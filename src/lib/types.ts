@@ -539,6 +539,7 @@ export interface VoiceprintStatus {
   enrolled: boolean;
   enrolledPhrase: string | null;
   requiresReenrollment: boolean;
+  profileState: 'unchecked' | 'unenrolled' | 'ready' | 'incompatible' | 'corrupt' | 'credential_error' | 'unavailable';
   state: 'idle' | 'preparing' | 'armed' | 'capturing' | 'processing' | 'complete' | 'error' | 'unavailable';
   progress: number;
   captureSecondsRemaining: number | null;

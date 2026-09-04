@@ -251,6 +251,9 @@ struct AutomaticWakeGuard {
     latest_audio_ms: u64,
     initial_body_wait_until_audio_ms: Option<u64>,
     body_started: bool,
+    /// Stop boundary is latched before ASR finalization. Late provider text
+    /// must not retroactively start a wake-only body.
+    stop_requested: bool,
 }
 
 struct ProviderProgressGuard {
@@ -264,6 +267,7 @@ struct TerminalWakeContinuation {
     wake_pcm: Vec<u8>,
     wake_end_seconds: f32,
     wake_phrase: String,
+    enrolled_owner_matched: bool,
     expires_at: Instant,
 }
 
@@ -280,6 +284,9 @@ struct Inner {
     #[cfg(target_os = "windows")]
     prepared_windows_ime_session: Arc<Mutex<Vec<PreparedWindowsImeSessionSlot>>>,
     state: Mutex<SessionState>,
+    /// Single product recording lifecycle shared by BLE actor and ASR endpoint
+    /// callbacks. Evidence paths may be concurrent; transitions are not.
+    recording_lifecycle: Mutex<crate::speech_decision_kernel::RecordingLifecycleController>,
     asr: Mutex<Option<SessionResource<ActiveAsr>>>,
     /// 本地 Qwen3-ASR 引擎缓存。跨会话复用，避免每次重加载 1.2GB+ 模型。
     /// 释放时机由 prefs.local_asr_keep_loaded_secs 决定。
@@ -683,6 +690,7 @@ impl Coordinator {
                     correction_rules,
                     inserter: TextInserter::new(),
                     state: Mutex::new(SessionState::default()),
+                    recording_lifecycle: Mutex::new(Default::default()),
                     asr: Mutex::new(None),
                     recorder: Mutex::new(None),
                     audio_archive_active: AtomicBool::new(false),
@@ -771,6 +779,7 @@ impl Coordinator {
                 windows_ime: WindowsImeSessionController::new(),
                 prepared_windows_ime_session: Arc::new(Mutex::new(Vec::new())),
                 state: Mutex::new(SessionState::default()),
+                recording_lifecycle: Mutex::new(Default::default()),
                 asr: Mutex::new(None),
                 recorder: Mutex::new(None),
                 audio_archive_active: AtomicBool::new(false),

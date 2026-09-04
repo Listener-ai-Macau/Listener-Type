@@ -4,6 +4,7 @@
 //! the terminal product decision. In particular, an open (unenrolled) owner
 //! policy is allowed to wake without being mislabeled as a verified owner.
 
+use crate::coordinator_state::SessionId;
 use denzic_voice_activation_v1_core::{decide_gate, GateDecision, GateInput, PhraseSignal};
 use std::time::{Duration, Instant};
 
@@ -303,6 +304,172 @@ pub(crate) struct EndpointArbiter {
 // making the ownership boundary explicit to new call sites. There must be
 // exactly one controller instance per visible recording session.
 pub(crate) type OwnerEndpointController = EndpointArbiter;
+
+/// Product-level recording lifecycle.  Evidence producers (firmware VAD,
+/// wake KWS/voiceprint, provider diarization and the endpoint clock) may run
+/// concurrently, but they are not allowed to create their own lifecycle.
+/// This reducer is the single owner of the capture boundary and makes stop
+/// idempotent across callback, watchdog and cancellation races.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecordingLifecycleState {
+    Idle,
+    WakeCandidate,
+    OwnerActive,
+    QuietPending,
+    Stopping,
+    Closed,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct RecordingLifecycleController {
+    state: RecordingLifecycleState,
+    embedded_session_id: Option<u32>,
+    coordinator_session_id: Option<SessionId>,
+}
+
+impl Default for RecordingLifecycleState {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
+impl RecordingLifecycleController {
+    pub(crate) fn state(&self) -> RecordingLifecycleState {
+        self.state
+    }
+
+    pub(crate) fn begin_candidate(&mut self, embedded_session_id: u32) -> bool {
+        if embedded_session_id == 0 {
+            return false;
+        }
+        match self.state {
+            RecordingLifecycleState::Idle | RecordingLifecycleState::Closed => {
+                self.state = RecordingLifecycleState::WakeCandidate;
+                self.embedded_session_id = Some(embedded_session_id);
+                self.coordinator_session_id = None;
+                true
+            }
+            RecordingLifecycleState::WakeCandidate
+                if self.embedded_session_id == Some(embedded_session_id) =>
+            {
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn begin_owner(
+        &mut self,
+        embedded_session_id: u32,
+        coordinator_session_id: SessionId,
+    ) -> bool {
+        if embedded_session_id == 0 {
+            return false;
+        }
+        match self.state {
+            RecordingLifecycleState::Idle | RecordingLifecycleState::Closed => {
+                self.embedded_session_id = Some(embedded_session_id);
+                self.coordinator_session_id = Some(coordinator_session_id);
+                self.state = RecordingLifecycleState::OwnerActive;
+                true
+            }
+            RecordingLifecycleState::WakeCandidate
+                if self.embedded_session_id == Some(embedded_session_id) =>
+            {
+                self.coordinator_session_id = Some(coordinator_session_id);
+                self.state = RecordingLifecycleState::OwnerActive;
+                true
+            }
+            RecordingLifecycleState::OwnerActive
+                if self.coordinator_session_id == Some(coordinator_session_id) =>
+            {
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn promote_owner(
+        &mut self,
+        embedded_session_id: u32,
+        coordinator_session_id: SessionId,
+    ) -> bool {
+        self.begin_owner(embedded_session_id, coordinator_session_id)
+    }
+
+    pub(crate) fn note_owner_activity(&mut self, coordinator_session_id: SessionId) -> bool {
+        if self.coordinator_session_id != Some(coordinator_session_id) {
+            return false;
+        }
+        match self.state {
+            RecordingLifecycleState::OwnerActive | RecordingLifecycleState::QuietPending => {
+                self.state = RecordingLifecycleState::OwnerActive;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn note_quiet_pending(&mut self, coordinator_session_id: SessionId) -> bool {
+        if self.coordinator_session_id != Some(coordinator_session_id) {
+            return false;
+        }
+        match self.state {
+            RecordingLifecycleState::OwnerActive | RecordingLifecycleState::QuietPending => {
+                self.state = RecordingLifecycleState::QuietPending;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Returns true only for the first OwnerActive/QuietPending -> Stopping
+    /// transition. Repeated stop requests are harmless and return false.
+    pub(crate) fn commit_stop(&mut self, coordinator_session_id: SessionId) -> bool {
+        if self.coordinator_session_id != Some(coordinator_session_id) {
+            return false;
+        }
+        match self.state {
+            RecordingLifecycleState::OwnerActive | RecordingLifecycleState::QuietPending => {
+                self.state = RecordingLifecycleState::Stopping;
+                true
+            }
+            RecordingLifecycleState::Stopping | RecordingLifecycleState::Closed => false,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn reopen_after_failed_stop(&mut self, coordinator_session_id: SessionId) -> bool {
+        if self.coordinator_session_id != Some(coordinator_session_id)
+            || self.state != RecordingLifecycleState::Stopping
+        {
+            return false;
+        }
+        self.state = RecordingLifecycleState::OwnerActive;
+        true
+    }
+
+    pub(crate) fn close(&mut self, coordinator_session_id: Option<SessionId>) -> bool {
+        if coordinator_session_id.is_some() && self.coordinator_session_id != coordinator_session_id
+        {
+            return false;
+        }
+        if matches!(
+            self.state,
+            RecordingLifecycleState::Idle | RecordingLifecycleState::Closed
+        ) {
+            return false;
+        }
+        self.state = RecordingLifecycleState::Closed;
+        true
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.state = RecordingLifecycleState::Idle;
+        self.embedded_session_id = None;
+        self.coordinator_session_id = None;
+    }
+}
 
 impl EndpointArbiter {
     pub(crate) fn state(&self) -> OwnerEndpointState {
@@ -638,6 +805,39 @@ pub(crate) const fn live_owner_near_wake_can_attempt(evidence: LiveOwnerNearWake
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recording_lifecycle_serializes_candidate_owner_stop_and_close() {
+        let coordinator_id = uuid::Uuid::new_v4();
+        let mut lifecycle = RecordingLifecycleController::default();
+        assert_eq!(lifecycle.state(), RecordingLifecycleState::Idle);
+        assert!(lifecycle.begin_candidate(7));
+        assert_eq!(lifecycle.state(), RecordingLifecycleState::WakeCandidate);
+        assert!(lifecycle.promote_owner(7, coordinator_id));
+        assert_eq!(lifecycle.state(), RecordingLifecycleState::OwnerActive);
+        assert!(lifecycle.note_quiet_pending(coordinator_id));
+        assert_eq!(lifecycle.state(), RecordingLifecycleState::QuietPending);
+        assert!(lifecycle.commit_stop(coordinator_id));
+        assert_eq!(lifecycle.state(), RecordingLifecycleState::Stopping);
+        assert!(!lifecycle.commit_stop(coordinator_id));
+        assert!(lifecycle.close(Some(coordinator_id)));
+        assert_eq!(lifecycle.state(), RecordingLifecycleState::Closed);
+    }
+
+    #[test]
+    fn recording_lifecycle_rejects_stale_sessions_and_reopens_only_failed_stop() {
+        let current = uuid::Uuid::new_v4();
+        let stale = uuid::Uuid::new_v4();
+        let mut lifecycle = RecordingLifecycleController::default();
+        assert!(lifecycle.begin_owner(11, current));
+        assert!(!lifecycle.note_owner_activity(stale));
+        assert!(!lifecycle.commit_stop(stale));
+        assert_eq!(lifecycle.state(), RecordingLifecycleState::OwnerActive);
+        assert!(lifecycle.commit_stop(current));
+        assert!(lifecycle.reopen_after_failed_stop(current));
+        assert_eq!(lifecycle.state(), RecordingLifecycleState::OwnerActive);
+        assert!(!lifecycle.reopen_after_failed_stop(current));
+    }
 
     #[test]
     fn unenrolled_phrase_can_wake_without_claiming_owner_verification() {

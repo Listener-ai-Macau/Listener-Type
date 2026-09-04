@@ -97,6 +97,25 @@ fn wait_post_ota_notify_target_connected_with_timeout(
     }
 }
 
+/// Windows can deliver a queued `ConnectionStatusChanged(Disconnected)` callback
+/// after the same link has already reconnected and the notify CCCD has been
+/// enabled again.  Treat that callback as stale only when both the device and
+/// its GATT session are currently healthy; a genuinely disconnected target is
+/// still handled by the normal recovery path below.
+fn stale_disconnect_signal_after_reconnect(cleanup: &NotifyCleanup) -> bool {
+    let device_connected = cleanup.target.device.as_ref().is_some_and(|device| {
+        device
+            .ConnectionStatus()
+            .is_ok_and(|status| status == BluetoothConnectionStatus::Connected)
+    });
+    let session_active = cleanup.target.session.as_ref().is_some_and(|session| {
+        session
+            .SessionStatus()
+            .is_ok_and(|status| status == GattSessionStatus::Active)
+    });
+    device_connected && session_active
+}
+
 pub fn capture_notification_events(
     timeout: Duration,
     on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
@@ -183,6 +202,13 @@ fn capture_notification_events_until_cancelled_impl(
     }
     let target = open_notify_target_with_retry(capture_id)?;
     wait_post_ota_notify_target_connected(capture_id, &target)?;
+    let max_pdu_size = target
+        .session
+        .as_ref()
+        .and_then(|session| session.MaxPduSize().ok());
+    log::info!(
+        "[embedded-ble] capture #{capture_id}: notify target ready max_pdu_size={max_pdu_size:?}"
+    );
     let characteristic = target.characteristic.clone();
     let (tx, rx) = mpsc::channel::<BleCaptureSignal>();
     let (control_tx, control_rx) = mpsc::channel::<AudioControlRequest>();
@@ -373,6 +399,7 @@ fn capture_notification_events_until_cancelled_impl(
     let mut stop_drain_deadline: Option<Instant> = None;
     let mut link_recovery_deadline: Option<Instant> = None;
     let mut link_recovery_reason: Option<String> = None;
+    let mut notify_refresh_required_after_link_recovery = false;
     let mut ec11_recovery_prepare_disconnect_deadline: Option<Instant> = None;
     let mut ec11_recovery_disconnect_deadline: Option<Instant> = None;
     let mut consecutive_type_heartbeat_failures = 0u32;
@@ -493,6 +520,17 @@ fn capture_notification_events_until_cancelled_impl(
                     stats.received_packet_count,
                     stats.missing_packet_count
                 );
+                if should_refresh_notify_after_link_recovery(
+                    notify_refresh_required_after_link_recovery,
+                    terminal_behavior,
+                ) {
+                    log::warn!(
+                        "[embedded-ble] capture #{capture_id}: recovered link reached a stop-drain terminal boundary; reopening a fresh notify/GATT target before the next recording"
+                    );
+                    cleanup.defer_type_heartbeat_bye_until_processing_done();
+                    cleanup.disable_notify();
+                    return Ok(());
+                }
                 collector.reset();
                 stop_drain_deadline = None;
                 continue;
@@ -579,6 +617,17 @@ fn capture_notification_events_until_cancelled_impl(
                             stats.received_packet_count,
                             stats.missing_packet_count
                         );
+                        if should_refresh_notify_after_link_recovery(
+                            notify_refresh_required_after_link_recovery,
+                            terminal_behavior,
+                        ) {
+                            log::warn!(
+                                "[embedded-ble] capture #{capture_id}: recovered link reached a stop-drain terminal boundary; reopening a fresh notify/GATT target before the next recording"
+                            );
+                            cleanup.defer_type_heartbeat_bye_until_processing_done();
+                            cleanup.disable_notify();
+                            return Ok(());
+                        }
                         collector.reset();
                         stop_drain_deadline = None;
                         continue;
@@ -617,8 +666,9 @@ fn capture_notification_events_until_cancelled_impl(
         let notification = match signal {
             BleCaptureSignal::Notification(notification) => {
                 if link_recovery_deadline.take().is_some() {
+                    notify_refresh_required_after_link_recovery = true;
                     log::info!(
-                        "[embedded-ble] capture #{capture_id}: link recovered after active-session disconnect: {}",
+                        "[embedded-ble] capture #{capture_id}: link recovered after active-session disconnect; current recording may finish, but this notify/GATT target is quarantined: {}",
                         link_recovery_reason
                             .take()
                             .unwrap_or_else(|| "unknown".to_string())
@@ -639,6 +689,14 @@ fn capture_notification_events_until_cancelled_impl(
                 continue;
             }
             BleCaptureSignal::Disconnected(reason) => {
+                if reason.contains("device connection status changed to Disconnected")
+                    && stale_disconnect_signal_after_reconnect(&cleanup)
+                {
+                    log::info!(
+                        "[embedded-ble] capture #{capture_id}: ignoring stale Disconnected event because the device and GATT session are connected/active again"
+                    );
+                    continue;
+                }
                 if ec11_recovery_disconnect_deadline.take().is_some() {
                     log::info!(
                         "[embedded-ble] capture #{capture_id}: firmware disconnect observed after EC11 recovery notice; releasing the retained GATT session for recovery arbitration"
@@ -750,6 +808,17 @@ fn capture_notification_events_until_cancelled_impl(
                 | Some(crate::embedded_audio::SessionEvent::Error { .. })
         ) {
             if terminal_behavior == CaptureTerminalBehavior::ContinueListening {
+                if should_refresh_notify_after_link_recovery(
+                    notify_refresh_required_after_link_recovery,
+                    terminal_behavior,
+                ) {
+                    log::warn!(
+                        "[embedded-ble] capture #{capture_id}: recovered link reached a cancel/error terminal boundary; reopening a fresh notify/GATT target before the next recording"
+                    );
+                    cleanup.defer_type_heartbeat_bye_until_processing_done();
+                    cleanup.disable_notify();
+                    return Ok(());
+                }
                 log::info!(
                     "[embedded-ble] capture #{capture_id}: terminal cancel/error while continuous listening; keeping notify open for the next session"
                 );
@@ -769,6 +838,20 @@ fn capture_notification_events_until_cancelled_impl(
         if collector.has_successful_complete_session() {
             if terminal_behavior == CaptureTerminalBehavior::ContinueListening {
                 let stats = collector.stats();
+                if should_refresh_notify_after_link_recovery(
+                    notify_refresh_required_after_link_recovery,
+                    terminal_behavior,
+                ) {
+                    log::warn!(
+                        "[embedded-ble] capture #{capture_id}: recovered link completed its preserved recording; reopening a fresh notify/GATT target before the next recording (session_id={:?}, pcm_bytes={}, packets={})",
+                        stats.session_id,
+                        stats.received_pcm_bytes,
+                        stats.received_packet_count
+                    );
+                    cleanup.defer_type_heartbeat_bye_until_processing_done();
+                    cleanup.disable_notify();
+                    return Ok(());
+                }
                 log::info!(
                     "[embedded-ble] capture #{capture_id}: complete session received; keeping notify open for background listener (session_id={:?}, pcm_bytes={}, packets={})",
                     stats.session_id,

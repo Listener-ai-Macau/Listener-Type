@@ -56,6 +56,8 @@ mod persistence {
 }
 
 mod asr;
+#[path = "../../../src-tauri/src/speech_decision_kernel.rs"]
+mod speech_decision_kernel;
 use denzic_audio_v1_core as embedded_audio;
 
 use std::collections::BTreeMap;

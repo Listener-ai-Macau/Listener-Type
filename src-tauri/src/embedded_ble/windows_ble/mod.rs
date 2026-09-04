@@ -2152,6 +2152,16 @@ fn should_restore_lossless_after_heartbeat(
     consecutive_failures > 0 && !active_session
 }
 
+fn should_refresh_notify_after_link_recovery(
+    link_recovered: bool,
+    terminal_behavior: CaptureTerminalBehavior,
+) -> bool {
+    // A Windows GATT target can resume delivering notifications after a physical
+    // reconnect while retaining the reconnect's smaller ATT PDU. Preserve the
+    // in-flight recording, but never reuse that target for the next recording.
+    link_recovered && terminal_behavior == CaptureTerminalBehavior::ContinueListening
+}
+
 #[cfg(test)]
 pub(super) fn active_capture_recovery_timing_for_test() -> (Duration, Duration) {
     (
@@ -2174,6 +2184,14 @@ pub(super) fn should_restore_lossless_after_heartbeat_for_test(
     active_session: bool,
 ) -> bool {
     should_restore_lossless_after_heartbeat(consecutive_failures, active_session)
+}
+
+#[cfg(test)]
+fn should_refresh_notify_after_link_recovery_for_test(
+    link_recovered: bool,
+    terminal_behavior: CaptureTerminalBehavior,
+) -> bool {
+    should_refresh_notify_after_link_recovery(link_recovered, terminal_behavior)
 }
 
 #[cfg(debug_assertions)]
@@ -4083,6 +4101,15 @@ fn persisted_successful_notify_target_address_for_current() -> Option<u64> {
         crate::embedded_ble::format_bluetooth_address(address)
     );
     Some(address)
+}
+
+/// Return the last notify target learned from a successful session, including
+/// across a Type process restart.  The coordinator uses this only to avoid
+/// treating a temporarily radio-silent plugged soft-off device as a manual
+/// Windows unpair; no pairing prompt or adapter scan is triggered by reading
+/// this persisted hint.
+pub(super) fn persisted_listener_notify_target_address() -> Option<u64> {
+    persisted_successful_notify_target_address_for_current()
 }
 
 fn ghost_pairing_prune_state_is_recent_for_keep(

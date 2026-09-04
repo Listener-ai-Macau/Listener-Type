@@ -4,6 +4,7 @@ struct LocalConfirmationPrefixRetryState {
     task_is_retry: bool,
     pending: bool,
     used: bool,
+    retry_after_attempts: usize,
 }
 
 #[cfg(target_os = "windows")]
@@ -16,7 +17,7 @@ impl LocalConfirmationPrefixRetryState {
         !ladder_ready
             && !self.used
             && self.pending
-            && attempts == LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS
+            && attempts == self.retry_after_attempts
             && new_audio_bytes >= LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_BYTES
     }
 
@@ -27,18 +28,27 @@ impl LocalConfirmationPrefixRetryState {
             self.used = true;
         }
     }
+
+    fn blocks_heavy_recovery(&self, local_confirmation_in_flight: bool) -> bool {
+        self.pending || (self.task_is_retry && local_confirmation_in_flight)
+    }
 }
 
-/// A slower physical "开始录音" can still be only "开始" at the 1.6 s rung.
-/// Retry after 140 ms of new audio only for that start-aligned strong prefix.
-/// The opportunistic retry is non-authoritative when absent, preserving the
-/// fixed rejection budget and the established 2.0 s fallback.
+/// A slower/noisy physical "开始录音" can still be only "开始" at the first
+/// 0.8 s rung. Retry after 140 ms of new audio only for that start-aligned
+/// strong prefix, instead of waiting for the 1.8 s ladder rung. The
+/// opportunistic retry is non-authoritative when absent, preserving the fixed
+/// rejection budget and the established later fallback.
 #[cfg(target_os = "windows")]
 const LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_MS: usize = 140;
 #[cfg(target_os = "windows")]
 const LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_BYTES: usize =
     LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_MS * 32;
 #[cfg(target_os = "windows")]
+// `local_confirmation_attempts` is incremented when a ladder task starts, so
+// the second rung is observed as 2 when its result is recorded. Using 1 here
+// silently disabled the bounded fast follow-up for a strong 3/4-syllable
+// prefix.
 const LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS: usize = 2;
 
 #[cfg(target_os = "windows")]
@@ -76,17 +86,26 @@ fn note_local_confirmation_prefix(
     candidate: &mut BufferedSpeakerCandidate,
     confirmation: &LocalWakeConfirmation,
     phrase_chars: usize,
+    task_origin_bytes: usize,
     embedded_session_id: u32,
 ) {
+    // Both the initial and rolling windows get one ordinary exploratory pass;
+    // the bounded follow-up unlocks after that first pass. It never consumes
+    // the normal Absent budget and cannot accept without a complete relation.
+    let retry_after_attempts = if task_origin_bytes == 0 {
+        LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS
+    } else {
+        1
+    };
     if candidate.local_confirmation_prefix_retry.task_is_retry
-        || candidate.local_confirmation_attempts
-            != LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS
+        || candidate.local_confirmation_attempts != retry_after_attempts
         || candidate.local_confirmation_prefix_retry.used
         || !local_confirmation_prefix_retry_eligible(confirmation, phrase_chars)
     {
         return;
     }
     candidate.local_confirmation_prefix_retry.pending = true;
+    candidate.local_confirmation_prefix_retry.retry_after_attempts = retry_after_attempts;
     log::info!(
         "[wake-phrase] strong start prefix scheduled bounded follow-up embedded_session_id={} prefix_units={} distance={} after_new_audio_ms={}",
         embedded_session_id,

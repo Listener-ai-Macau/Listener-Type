@@ -69,6 +69,15 @@ impl EmbeddedStreamingDictation {
             // the first physical press looks like "recording failed" and only the
             // next press starts a clean User session.
             if candidate_kind == BufferedSpeakerCandidateKind::Verification {
+                if !inner
+                    .recording_lifecycle
+                    .lock()
+                    .begin_candidate(embedded_session_id)
+                {
+                    return Err(format!(
+                        "录音生命周期拒绝新的唤醒候选 embedded_session_id={embedded_session_id}"
+                    ));
+                }
                 // Register the identity before exposing ACTIVE.  This keeps a
                 // delayed reject from candidate N from ever stopping candidate N+1.
                 note_hidden_va_session(embedded_session_id);

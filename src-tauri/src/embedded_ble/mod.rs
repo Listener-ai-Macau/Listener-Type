@@ -1048,6 +1048,16 @@ pub fn recent_listener_pairing_fast_gatt_address() -> Option<u64> {
 }
 
 #[cfg(target_os = "windows")]
+pub fn persisted_listener_notify_target_address() -> Option<u64> {
+    windows_ble::persisted_listener_notify_target_address()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn persisted_listener_notify_target_address() -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "windows")]
 pub fn query_listener_pairing(expected_name: Option<&str>) -> BleDevicePairingPromptResult {
     windows_ble::query_listener_pairing(expected_name)
 }

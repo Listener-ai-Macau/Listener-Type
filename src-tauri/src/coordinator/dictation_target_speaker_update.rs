@@ -46,6 +46,10 @@ fn handle_target_speaker_update(
             );
         }
         note_embedded_asr_speech_activity(inner, session_id);
+        let _ = inner
+            .recording_lifecycle
+            .lock()
+            .note_owner_activity(session_id);
     } else if update.target_activity_advanced || update.pending_activity_advanced {
         log::info!(
             "[asr] stale attributed activity did not refresh firmware endpoint provider_audio_ms={:?} local_audio_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?} stable_attributed_end_ms={:?}",
@@ -81,6 +85,26 @@ fn handle_target_speaker_update(
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
     {
+        return;
+    }
+
+    // The endpoint clock has produced evidence, but the product lifecycle is
+    // the only component allowed to cross the irreversible stop boundary.
+    // Untracked non-embedded sessions retain the legacy host endpoint path;
+    // embedded sessions must commit here exactly once.
+    let lifecycle_stop_committed = {
+        let mut lifecycle = inner.recording_lifecycle.lock();
+        match lifecycle.state() {
+            crate::speech_decision_kernel::RecordingLifecycleState::Idle
+            | crate::speech_decision_kernel::RecordingLifecycleState::Closed => true,
+            _ => lifecycle.commit_stop(session_id),
+        }
+    };
+    if !lifecycle_stop_committed {
+        log::info!(
+            "[asr] recording lifecycle rejected stale/duplicate endpoint stop session_id={session_id}"
+        );
+        stop_dispatched.store(false, Ordering::SeqCst);
         return;
     }
 
@@ -150,6 +174,10 @@ fn handle_target_speaker_update(
                 // update may retry while the same session is still active.
                 stop_dispatched.store(false, Ordering::SeqCst);
                 endpoint_clock.lock().reopen_after_failed_stop();
+                let _ = inner
+                    .recording_lifecycle
+                    .lock()
+                    .reopen_after_failed_stop(session_id);
                 log::info!(
                     "[embedded-ble] target-speaker auto-stop not dispatched; retry armed session_id={session_id} reason={stop_reason}"
                 );
@@ -157,6 +185,10 @@ fn handle_target_speaker_update(
             Err(err) => {
                 stop_dispatched.store(false, Ordering::SeqCst);
                 endpoint_clock.lock().reopen_after_failed_stop();
+                let _ = inner
+                    .recording_lifecycle
+                    .lock()
+                    .reopen_after_failed_stop(session_id);
                 log::warn!(
                     "[embedded-ble] target-speaker auto-stop failed; retry armed session_id={session_id} reason={stop_reason}: {err}"
                 );

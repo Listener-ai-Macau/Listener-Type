@@ -88,3 +88,20 @@ promotion 标志也可能被新候选继承。
 级联，不是独立生命周期；每一条路径都必须最终调用同一个候选升级或拒绝
 出口。任何新的唤醒延迟日志都要按“PCM 到达、候选窗口、推理耗时、声纹
 结果、BLE 控制”五段定位，不能再通过全局阈值微调掩盖结构问题。
+
+## 产品生命周期控制器（2026-09-04）
+
+嵌入式录音现在由 `Inner.recording_lifecycle` 持有唯一的
+`RecordingLifecycleController`。它跨 BLE actor、ASR 回调和 endpoint watchdog
+共享同一个状态与 session 身份：
+
+`Idle -> WakeCandidate -> OwnerActive -> QuietPending -> Stopping -> Closed`
+
+候选升级、主人活动、停止提交、停止失败重开和取消/完成清理都必须通过该
+控制器。endpoint clock 只计算“是否到期”的证据，不能绕过控制器直接把录音
+标成停止；重复 callback/watchdog STOP 会被 session ID + 幂等转换拒绝。
+固件 VAD、灯光、云端 pending 和预览仍然只是证据，不会创建第二个生命周期。
+
+这次改动解决的是状态所有权和竞态根因，不是把超时继续调小。模型命中率、
+BLE 延迟和音频质量仍需分别从诊断日志验证；若日志显示模型未命中，不能把它
+误报成状态机已经修复。

@@ -65,6 +65,7 @@ impl EmbeddedStreamingDictation {
                 continuation.wake_pcm.clone(),
                 continuation.wake_end_seconds,
                 continuation.wake_phrase.clone(),
+                continuation.enrolled_owner_matched,
             );
             // Safety net: host-start arms the wake guard before PCM attaches, but
             // if begin_session raced and cleared it, re-arm so empty-body abandon
@@ -85,6 +86,16 @@ impl EmbeddedStreamingDictation {
                 clear_automatic_wake_text_guard(inner);
             }
             return Err("嵌入式音频听写会话已被取消".to_string());
+        }
+        if !inner
+            .recording_lifecycle
+            .lock()
+            .begin_owner(embedded_session_id, session.session_id)
+        {
+            return Err(format!(
+                "录音生命周期拒绝主人会话 embedded_session_id={embedded_session_id} coordinator_session_id={}",
+                session.session_id
+            ));
         }
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         log::info!(

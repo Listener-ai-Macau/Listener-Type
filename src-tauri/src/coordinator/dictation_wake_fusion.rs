@@ -58,7 +58,8 @@ fn enrolled_terminal_kws_phonetic_fusion_signal(
 }
 
 #[cfg(target_os = "windows")]
-const OWNER_OVERLAP_NEAR_CONFIRMATIONS_REQUIRED: u8 = 3;
+const OWNER_OVERLAP_NEAR_CONFIRMATIONS_REQUIRED: u8 =
+    crate::speech_decision_kernel::OWNER_OVERLAP_NEAR_CONFIRMATIONS_REQUIRED;
 
 #[cfg(target_os = "windows")]
 fn overlap_degraded_owner_phrase_evidence(
@@ -66,15 +67,18 @@ fn overlap_degraded_owner_phrase_evidence(
     phrase_chars: usize,
     task_origin_bytes: usize,
 ) -> bool {
-    let minimum_prefix_units = (phrase_chars / 2).max(2);
-    !confirmation.matched
-        && confirmation.phrase_relation == crate::wake_phrase::LocalPhraseRelation::Absent
-        && task_origin_bytes == 0
-        && confirmation.phonetic_best_window_start == 0
-        && confirmation.phonetic_prefix_units >= minimum_prefix_units
-        && confirmation.phonetic_best_distance
-            <= phrase_chars.saturating_sub(minimum_prefix_units)
-        && confirmation.transcript_chars >= phrase_chars.saturating_add(1)
+    crate::speech_decision_kernel::owner_overlap_degraded_phrase_evidence(
+        crate::speech_decision_kernel::OwnerOverlapPhraseEvidence {
+            phrase_matched: confirmation.matched,
+            phrase_absent: confirmation.phrase_relation
+                == crate::wake_phrase::LocalPhraseRelation::Absent,
+            task_origin_bytes,
+            best_window_start: confirmation.phonetic_best_window_start,
+            best_distance: confirmation.phonetic_best_distance,
+            transcript_chars: confirmation.transcript_chars,
+            phrase_chars,
+        },
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -82,5 +86,53 @@ fn enrolled_owner_repeated_overlap_near_can_accept(
     enrolled_owner_matched: bool,
     confirmations: u8,
 ) -> bool {
-    enrolled_owner_matched && confirmations >= OWNER_OVERLAP_NEAR_CONFIRMATIONS_REQUIRED
+    crate::speech_decision_kernel::repeated_owner_overlap_wake_can_activate(
+        enrolled_owner_matched,
+        confirmations,
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn live_owner_near_wake_can_attempt(
+    phrase_enrolled: bool,
+    bounded_followup: bool,
+    confirmation: &LocalWakeConfirmation,
+    phrase_chars: usize,
+    task_origin_bytes: usize,
+    current_window_origin_bytes: usize,
+) -> bool {
+    crate::speech_decision_kernel::live_owner_near_wake_can_attempt(
+        crate::speech_decision_kernel::LiveOwnerNearWakeEvidence {
+            phrase_enrolled,
+            bounded_followup,
+            task_origin_bytes,
+            current_window_origin_bytes,
+            best_window_start: confirmation.phonetic_best_window_start,
+            prefix_units: confirmation.phonetic_prefix_units,
+            best_distance: confirmation.phonetic_best_distance,
+            transcript_chars: confirmation.transcript_chars,
+            phrase_chars,
+        },
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn live_owner_near_wake_end_seconds(
+    confirmation: &LocalWakeConfirmation,
+    phrase_chars: usize,
+    task_origin_bytes: usize,
+) -> f32 {
+    let relative_end = denzic_voice_activation_v1_core::refined_local_wake_end_seconds(
+        denzic_voice_activation_v1_core::LocalConfirmationBoundaryInput {
+            keyword_end_seconds: 0.0,
+            recovered_keyword_end_seconds: confirmation.recovered_keyword_end_seconds,
+            phrase_relation: crate::wake_phrase::LocalPhraseRelation::PhoneticStart,
+            transcript_chars: confirmation.transcript_chars,
+            phrase_chars,
+            snapshot_pcm_ms: confirmation.snapshot_pcm_ms,
+            end_pad_seconds: WAKE_END_PAD_SECONDS,
+            local_endpoint_max_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
+        },
+    );
+    task_origin_bytes as f32 / 32_000.0 + relative_end
 }

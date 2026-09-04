@@ -178,14 +178,26 @@ mod platform {
     const MODEL_DIR: &str = "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20";
     const MODEL_SHA256: &str = "68447F4FBC67E70EEE3A93961F36E81E98F47AEF73CE7E7CA00885C6CD3616A6";
     const MODEL_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2";
-    const ENCODER: &str = "encoder-epoch-13-avg-2-chunk-8-left-64.int8.onnx";
+    // Keep the low-latency chunk-8 graph, but use the fp32 acoustic graph.
+    // The int8 encoder/joiner was fast yet repeatedly produced an empty KWS
+    // result on real device PCM even when the local Paraformer recognized the
+    // same phrase.  The official model examples use the fp32 graph; switching
+    // precision is a model-execution fix, not another threshold tweak.
+    const ENCODER: &str = "encoder-epoch-13-avg-2-chunk-8-left-64.onnx";
     const DECODER: &str = "decoder-epoch-13-avg-2-chunk-8-left-64.onnx";
-    const JOINER: &str = "joiner-epoch-13-avg-2-chunk-8-left-64.int8.onnx";
+    const JOINER: &str = "joiner-epoch-13-avg-2-chunk-8-left-64.onnx";
     const TOKENS: &str = "tokens.txt";
     const SAMPLE_RATE: i32 = 16_000;
     // 0.4s warmup (was 0.8s): short "开始录音" often finishes near 0.8s; long
     // warmup delayed first KWS feed and locked gain on quiet pre-roll only.
     const STREAM_GAIN_WARMUP_BYTES: usize = SAMPLE_RATE as usize * 2 * 2 / 5;
+    // A VoiceActivation candidate contains firmware pre-roll.  Its first
+    // 400 ms can therefore be room noise, not the owner's phrase.  Keep a
+    // deterministic post-lock analysis window so a noisy pre-roll cannot lock
+    // a low gain for the rest of the candidate.
+    const STREAM_GAIN_REBASE_WINDOW_BYTES: usize = SAMPLE_RATE as usize * 2 / 5;
+    const STREAM_GAIN_REBASE_MIN_REFERENCE: f32 = 0.002;
+    const STREAM_GAIN_REBASE_RATIO: f32 = 1.25;
     /// p95 target for host-side boost. Board wake-candidate PCM arrives spiky
     /// and far below KWS training levels (firmware leveling clamps peaks near
     /// 0.5 while speech p95 sits ~0.015). The old 0.65/48x normalizer boosted
@@ -199,12 +211,14 @@ mod platform {
     const CONTINUOUS_SPEECH_TRAILING_BLANKS: i32 = 0;
     const KEYWORD_SCORE: f32 = 1.5;
     const KEYWORD_THRESHOLD: f32 = 0.25;
-    /// Product baseline restored toward 1.0.3-era stability (3.5/0.05). The
-    /// 4.5/0.03 thrash raised false windows and still missed mid-distance speech
-    /// (owner: 比 1.0.3 还差). Recall under noise relies on multi-window offline
-    /// cascade, not an ultra-sensitive live threshold.
-    const BOOTSTRAP_KEYWORD_SCORE: f32 = 3.5;
-    const BOOTSTRAP_KEYWORD_THRESHOLD: f32 = 0.05;
+    /// Live KWS is deliberately recall-first.  It only opens a bounded
+    /// candidate; local phrase confirmation and (when enrolled) owner
+    /// verification still decide whether recording actually starts.  The old
+    /// 3.5/0.05 setting produced repeated complete misses in real speech, so
+    /// the detector must be allowed to surface weak evidence instead of
+    /// making the user repeat the wake word.
+    const BOOTSTRAP_KEYWORD_SCORE: f32 = 5.0;
+    const BOOTSTRAP_KEYWORD_THRESHOLD: f32 = 0.01;
     const CALIBRATION_FILE: &str = "calibration.json";
     const CALIBRATION_CANDIDATES: &[(f32, f32)] = &[
         (KEYWORD_SCORE, KEYWORD_THRESHOLD),
@@ -214,12 +228,13 @@ mod platform {
         (2.5, 0.12),
         (3.0, 0.10),
         (3.0, 0.08),
-        (3.5, 0.05),
+        (5.0, 0.01),
         (4.0, 0.04),
         (4.0, 0.03),
     ];
     /// Offline second-pass + multi-window (full / first / mid / last 2.5s).
-    /// Keep ladder near product bootstrap — do not live at 4.5/0.03.
+    /// Offline recall remains bounded; the live detector itself uses the more
+    /// sensitive bootstrap above and precision is enforced by the local gate.
     const RECALL_CASCADE: &[(f32, f32)] = &[
         (BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD),
         (4.0, 0.04),
@@ -590,26 +605,34 @@ mod platform {
             keyword_entry(&phrase, &phrase, score, threshold, false)?,
         ];
         if emit_variants && phrase.chars().count() >= 4 {
-            let leading_trimmed = phrase.chars().skip(1).collect::<String>();
-            let trailing_trimmed = phrase
-                .chars()
-                .take(phrase.chars().count() - 1)
-                .collect::<String>();
+            // A streaming spotter can lose one syllable at a BLE/frame or
+            // endpoint boundary.  Edge-only variants fixed "开始录音" →
+            // "始录音"/"开始录" but still missed middle-character loss such
+            // as "开录音".  Emit every one-character deletion variant; the
+            // label remains the configured full phrase and the local
+            // confirmation gate still decides whether recording activates.
             let short_threshold = (threshold * 1.5).min(0.35);
-            keywords.push(keyword_entry(
-                &leading_trimmed,
-                &phrase,
-                score,
-                short_threshold,
-                true,
-            )?);
-            keywords.push(keyword_entry(
-                &trailing_trimmed,
-                &phrase,
-                score,
-                short_threshold,
-                true,
-            )?);
+            let chars = phrase.chars().collect::<Vec<_>>();
+            let mut variants = Vec::<String>::new();
+            for index in 0..chars.len() {
+                let variant = chars
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(candidate, ch)| (candidate != index).then_some(*ch))
+                    .collect::<String>();
+                if !variants.iter().any(|existing| existing == &variant) {
+                    variants.push(variant);
+                }
+            }
+            for variant in variants {
+                keywords.push(keyword_entry(
+                    &variant,
+                    &phrase,
+                    score,
+                    short_threshold,
+                    true,
+                )?);
+            }
         }
         Ok(keywords.join("\n"))
     }
@@ -815,6 +838,7 @@ mod platform {
     struct StreamingNormalizer {
         warmup: Vec<u8>,
         gain: Option<f32>,
+        rebase_window: Vec<u8>,
         accepted_bytes: usize,
         emitted_bytes: usize,
     }
@@ -826,10 +850,39 @@ mod platform {
             }
             self.accepted_bytes = self.accepted_bytes.saturating_add(pcm.len());
             if let Some(gain) = self.gain {
-                // Keep one gain for the whole candidate. Recomputing it from each
-                // transport chunk makes wake detection depend on BLE packet timing.
-                self.emitted_bytes = self.emitted_bytes.saturating_add(pcm.len());
-                return Ok(samples_with_gain(pcm, gain));
+                // Keep the current gain for each deterministic analysis window;
+                // never recompute directly from a BLE packet (packet boundaries
+                // are transport-dependent).  A later window may only increase
+                // gain when its robust p95 is materially higher than the gain
+                // locked on the pre-roll.  This recovers quiet owner speech after
+                // loud room noise without allowing a transient spike to lower or
+                // repeatedly oscillate the stream level.
+                let mut output = Vec::with_capacity(pcm.len() / 2);
+                let mut offset = 0usize;
+                while offset < pcm.len() {
+                    let remaining = pcm.len().saturating_sub(offset);
+                    let needed =
+                        STREAM_GAIN_REBASE_WINDOW_BYTES.saturating_sub(self.rebase_window.len());
+                    let take = remaining.min(needed.max(2));
+                    let end = offset.saturating_add(take).min(pcm.len());
+                    let segment = &pcm[offset..end];
+                    output.extend(samples_with_gain(segment, gain));
+                    self.rebase_window.extend_from_slice(segment);
+                    self.emitted_bytes = self.emitted_bytes.saturating_add(segment.len());
+                    offset = end;
+
+                    if self.rebase_window.len() >= STREAM_GAIN_REBASE_WINDOW_BYTES {
+                        let candidate_gain = normalization_gain(&self.rebase_window);
+                        let reference = NORMALIZATION_TARGET_P95 / candidate_gain.max(f32::EPSILON);
+                        if reference >= STREAM_GAIN_REBASE_MIN_REFERENCE
+                            && candidate_gain > gain * STREAM_GAIN_REBASE_RATIO
+                        {
+                            self.gain = Some(candidate_gain.min(NORMALIZATION_MAX_GAIN));
+                        }
+                        self.rebase_window.clear();
+                    }
+                }
+                return Ok(output);
             }
 
             let needed = STREAM_GAIN_WARMUP_BYTES.saturating_sub(self.warmup.len());
@@ -855,6 +908,7 @@ mod platform {
 
         fn finish(&mut self) -> Vec<f32> {
             if self.warmup.is_empty() {
+                self.rebase_window.clear();
                 return Vec::new();
             }
             let gain = normalization_gain(&self.warmup);
@@ -1227,6 +1281,8 @@ mod platform {
                     "k āi sh ǐ l ù y īn :1.5 #0.25 @开始录音\n",
                     "k ai sh i l u y in :1.5 #0.25 @开始录音\n",
                     "sh ǐ l ù y īn :1.5 #0.35 @开始录音\n",
+                    "k āi l ù y īn :1.5 #0.35 @开始录音\n",
+                    "k āi sh ǐ y īn :1.5 #0.35 @开始录音\n",
                     "k āi sh ǐ l ù :1.5 #0.35 @开始录音"
                 )
             );
@@ -1269,8 +1325,8 @@ mod platform {
             let (score, threshold) = configured_keyword_values("开始录音");
             assert_eq!(score, BOOTSTRAP_KEYWORD_SCORE);
             assert_eq!(threshold, BOOTSTRAP_KEYWORD_THRESHOLD);
-            assert_eq!(BOOTSTRAP_KEYWORD_SCORE, 3.5);
-            assert!((BOOTSTRAP_KEYWORD_THRESHOLD - 0.05).abs() < f32::EPSILON);
+            assert_eq!(BOOTSTRAP_KEYWORD_SCORE, 5.0);
+            assert!((BOOTSTRAP_KEYWORD_THRESHOLD - 0.01).abs() < f32::EPSILON);
             assert!(is_less_sensitive_than_bootstrap(1.5, 0.25));
             assert!(is_less_sensitive_than_bootstrap(3.0, 0.10));
             assert!(is_less_sensitive_than_bootstrap(3.0, 0.08));
@@ -1335,6 +1391,28 @@ mod platform {
             assert_eq!(whole.emitted_bytes, pcm.len());
             assert_eq!(chunked.accepted_bytes, pcm.len());
             assert_eq!(chunked.emitted_bytes, pcm.len());
+        }
+
+        #[test]
+        fn streaming_normalization_rebases_after_noisy_preroll() {
+            // Loud pre-roll noise would historically lock a low gain for the
+            // whole candidate.  A later quiet owner phrase must be able to
+            // raise the candidate-local gain on a fixed analysis window.
+            let noisy_preroll = (0..STREAM_GAIN_WARMUP_BYTES)
+                .flat_map(|_| 2_000i16.to_le_bytes())
+                .collect::<Vec<_>>();
+            let quiet_owner = (0..STREAM_GAIN_REBASE_WINDOW_BYTES)
+                .flat_map(|_| 500i16.to_le_bytes())
+                .collect::<Vec<_>>();
+            let mut normalizer = StreamingNormalizer::default();
+            let _ = normalizer.accept(&noisy_preroll).expect("pre-roll");
+            let locked_gain = normalizer.gain.expect("initial gain");
+            let _ = normalizer.accept(&quiet_owner).expect("owner window");
+            let rebased_gain = normalizer.gain.expect("rebased gain");
+            assert!(
+                rebased_gain > locked_gain * STREAM_GAIN_REBASE_RATIO,
+                "quiet owner speech must raise gain after noisy pre-roll: locked={locked_gain} rebased={rebased_gain}"
+            );
         }
 
         #[test]
@@ -1504,7 +1582,7 @@ mod platform {
                 let owner_gate_hit = combined_hit
                     && owner_verification
                         .as_ref()
-                        .is_some_and(|verification| verification.matched);
+                        .is_some_and(|verification| verification.enrolled_owner_matched());
                 #[cfg(feature = "target-speaker-extraction")]
                 let target_recovery = target_speaker_embedding.as_ref().map(|embedding| {
                     let extracted =
@@ -1531,7 +1609,7 @@ mod platform {
                     target_recovery
                         .as_ref()
                         .is_some_and(|(phrase_hit, verification, _)| {
-                            *phrase_hit && verification.matched
+                            *phrase_hit && verification.enrolled_owner_matched()
                         });
                 let effective_owner_gate_hit = owner_gate_hit || target_owner_gate_hit;
                 if is_wake {
@@ -1571,11 +1649,12 @@ mod platform {
                     "streamingHit": streaming_hit,
                     "offlineHit": offline_hit,
                     "combinedHit": combined_hit,
-                    "ownerMatched": owner_verification.as_ref().map(|value| value.matched),
+                    "ownerMatched": owner_verification.as_ref().map(|value| value.enrolled_owner_matched()),
+                    "ownerPolicy": owner_verification.as_ref().map(|value| value.policy_label()),
                     "ownerScore": owner_verification.as_ref().map(|value| value.score),
                     "ownerGateHit": owner_gate_hit,
                     "targetRecoveryPhraseHit": target_recovery.as_ref().map(|value| value.0),
-                    "targetRecoveryOwnerMatched": target_recovery.as_ref().map(|value| value.1.matched),
+                    "targetRecoveryOwnerMatched": target_recovery.as_ref().map(|value| value.1.enrolled_owner_matched()),
                     "targetRecoveryOwnerScore": target_recovery.as_ref().map(|value| value.1.score),
                     "targetRecoveryResidualRatio": target_recovery.as_ref().map(|value| value.2.residual_ratio),
                     "targetRecoveryInferenceMs": target_recovery.as_ref().map(|value| value.2.inference_ms),
@@ -1750,7 +1829,8 @@ mod platform {
                     .expect("verify diagnostic owner");
                 println!(
                     "interference_owner_score file={name} matched={} score={:.6}",
-                    verification.matched, verification.score
+                    verification.enrolled_owner_matched(),
+                    verification.score
                 );
             }
         }

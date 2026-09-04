@@ -2,6 +2,12 @@
 // Included into `coordinator::dictation` via `include!`.
 
 impl EmbeddedStreamingDictation {
+    fn reset_product_lifecycle(&self, inner: &Arc<Inner>) {
+        let mut lifecycle = inner.recording_lifecycle.lock();
+        lifecycle.close(None);
+        lifecycle.reset();
+    }
+
     async fn finish_completed_streaming_session(
         &mut self,
         inner: &Arc<Inner>,
@@ -78,6 +84,9 @@ impl EmbeddedStreamingDictation {
     }
 
     fn abort_active_session(&mut self, inner: &Arc<Inner>, message: &str) {
+        {
+            self.reset_product_lifecycle(inner);
+        }
         clear_hidden_automatic_candidate();
         self.activation_segment_race_guard = None;
         set_device_ai_processing_async(inner, false, "embedded_stream_abort");
@@ -134,6 +143,7 @@ impl EmbeddedStreamingDictation {
             cancel_asr_for_session(inner, session.session_id);
             restore_prepared_windows_ime_session(inner, session.session_id);
         }
+        self.reset_product_lifecycle(inner);
         self.reset_for_next_session();
         log::info!(
             "[embedded-ble] discarded in-flight background stream session after user cancel; notify kept open"
@@ -162,6 +172,7 @@ impl EmbeddedStreamingDictation {
             // wake rejections should not bounce the BLE link.
             publish_dictation_pipeline_error(inner, session.session_id, message.to_string());
         }
+        self.reset_product_lifecycle(inner);
         self.reset_for_next_session();
         log::warn!(
             "[embedded-ble] discarded background stream session after error while keeping notify open: {message}"

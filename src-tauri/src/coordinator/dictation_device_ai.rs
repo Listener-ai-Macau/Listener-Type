@@ -281,6 +281,10 @@ fn latch_embedded_audio_stop_feedback(inner: &Arc<Inner>, session_id: SessionId)
         .embedded_audio_stop_feedback_latched
         .store(true, Ordering::SeqCst);
     *inner.dictation_stop_feedback_at.lock() = Some((session_id, Instant::now()));
+    // Keep the wake-prefix/body gate in lockstep with the visible stop
+    // boundary. Otherwise a late provider final can promote a wake-only
+    // capsule and inject text after the user has already stopped.
+    mark_automatic_wake_stop_requested(inner, session_id);
 }
 
 fn embedded_audio_stop_feedback_latched(inner: &Arc<Inner>) -> bool {

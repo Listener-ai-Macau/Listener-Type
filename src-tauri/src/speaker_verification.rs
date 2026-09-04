@@ -1,6 +1,19 @@
 use serde::Serialize;
 use std::sync::Arc;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VoiceProfileState {
+    #[default]
+    Unchecked,
+    Unenrolled,
+    Ready,
+    Incompatible,
+    Corrupt,
+    CredentialError,
+    Unavailable,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceprintStatus {
@@ -10,6 +23,7 @@ pub struct VoiceprintStatus {
     pub enrolled: bool,
     pub enrolled_phrase: Option<String>,
     pub requires_reenrollment: bool,
+    pub profile_state: VoiceProfileState,
     pub state: String,
     pub progress: u8,
     pub capture_seconds_remaining: Option<u8>,
@@ -27,10 +41,35 @@ pub struct VoiceprintStatus {
     pub local_only: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerificationPolicy {
+    OpenUnenrolled,
+    OpenInactiveProfile,
+    Enrolled,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct VerificationResult {
+    /// Product gate result. Open policies may allow wake without proving owner
+    /// identity; callers that need identity must use `owner_matched`.
     pub matched: bool,
+    pub owner_matched: bool,
     pub score: f32,
+    pub policy: VerificationPolicy,
+}
+
+impl VerificationResult {
+    pub const fn enrolled_owner_matched(self) -> bool {
+        self.owner_matched && matches!(self.policy, VerificationPolicy::Enrolled)
+    }
+
+    pub const fn policy_label(self) -> &'static str {
+        match self.policy {
+            VerificationPolicy::OpenUnenrolled => "open_unenrolled",
+            VerificationPolicy::OpenInactiveProfile => "open_inactive_profile",
+            VerificationPolicy::Enrolled => "enrolled",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -334,7 +373,7 @@ mod platform {
     use super::{
         session_speaker_classification_for_signal, session_speaker_transcript_hard_non_target,
         SessionSpeakerClassification, SessionSpeakerObservation, SessionSpeakerProfile,
-        VerificationResult, VoiceprintStatus,
+        VerificationPolicy, VerificationResult, VoiceProfileState, VoiceprintStatus,
     };
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     #[cfg(test)]
@@ -434,6 +473,7 @@ mod platform {
         last_score: Option<f32>,
         template: Option<SpeakerTemplate>,
         template_checked: bool,
+        profile_state: VoiceProfileState,
         enrollment_phrase: Option<String>,
         enrollment_capture_started: Option<std::time::Instant>,
         enrollment_live: EnrollmentLiveState,
@@ -1385,11 +1425,22 @@ mod platform {
                         }
                     }
                     state.template = Some(template);
+                    state.profile_state = VoiceProfileState::Ready;
                 }
-                Err(err) => state.error = Some(err),
+                Err(err) => {
+                    state.profile_state = if err.contains("incompatible") {
+                        VoiceProfileState::Incompatible
+                    } else {
+                        VoiceProfileState::Corrupt
+                    };
+                    state.error = Some(err);
+                }
             },
-            Ok(None) => {}
-            Err(err) => state.error = Some(err),
+            Ok(None) => state.profile_state = VoiceProfileState::Unenrolled,
+            Err(err) => {
+                state.profile_state = VoiceProfileState::CredentialError;
+                state.error = Some(err);
+            }
         }
     }
 
@@ -1403,6 +1454,7 @@ mod platform {
         template.phrase = Some(phrase.to_string());
         if let Err(err) = persist_template(template) {
             template.phrase = None;
+            state.profile_state = VoiceProfileState::CredentialError;
             state.error = Some(format!("绑定旧声纹到当前唤醒词失败: {err}"));
             return;
         }
@@ -1487,6 +1539,7 @@ mod platform {
             enrolled,
             enrolled_phrase,
             requires_reenrollment,
+            profile_state: state.profile_state,
             state: state
                 .capture
                 .unwrap_or(CaptureState::Idle)
@@ -1710,6 +1763,7 @@ mod platform {
                 let mut state = STATE.lock();
                 state.template = Some(template);
                 state.template_checked = true;
+                state.profile_state = VoiceProfileState::Ready;
                 state.capture = Some(CaptureState::Complete);
                 state.progress = 100;
                 state.last_score = None;
@@ -1732,14 +1786,18 @@ mod platform {
         // 兼带修复旧逻辑的坑：以前未注册时这里返回 Err，导致 gate 把"开始录音"判定为
         // voiceprint_verification_failed 而拒唤醒——没录声纹反而完全唤醒不了。
         // 未注册时直接短路返回，避免无谓加载 ONNX runtime/模型（省几百 ms 延迟 + 网络下载）。
-        let template = {
+        let (template, profile_state, profile_error) = {
             let mut state = STATE.lock();
             load_template_for_phrase_locked(&mut state, &phrase);
-            state.template.clone()
+            (
+                state.template.clone(),
+                state.profile_state,
+                state.error.clone(),
+            )
         };
         let template = match template {
             Some(template) if template_matches_phrase(&template, &phrase) => template,
-            None => {
+            None if profile_state == VoiceProfileState::Unenrolled => {
                 log::info!(
                     "[speaker-verification] owner not enrolled for phrase={} — open gate (any speaker may wake), pcm_ms={}",
                     phrase,
@@ -1747,8 +1805,20 @@ mod platform {
                 );
                 return Ok(VerificationResult {
                     matched: true,
+                    owner_matched: false,
                     score: 0.0,
+                    policy: VerificationPolicy::OpenUnenrolled,
                 });
+            }
+            None => {
+                let detail = profile_error.unwrap_or_else(|| {
+                    format!("voiceprint profile unavailable: {profile_state:?}")
+                });
+                log::warn!(
+                    "[speaker-verification] owner profile unavailable phrase={} profile_state={profile_state:?} — fail closed: {detail}",
+                    phrase
+                );
+                return Err(detail);
             }
             Some(template) => {
                 log::info!(
@@ -1759,7 +1829,9 @@ mod platform {
                 );
                 return Ok(VerificationResult {
                     matched: true,
+                    owner_matched: false,
                     score: 0.0,
+                    policy: VerificationPolicy::OpenInactiveProfile,
                 });
             }
         };
@@ -1801,9 +1873,12 @@ mod platform {
             candidate_windows[0].len() / 32
         );
         STATE.lock().last_score = Some(score);
+        let matched = matches!(decision.action, Action::Release);
         Ok(VerificationResult {
-            matched: matches!(decision.action, Action::Release),
+            matched,
+            owner_matched: matched,
             score,
+            policy: VerificationPolicy::Enrolled,
         })
     }
 
@@ -2023,6 +2098,7 @@ mod platform {
         let mut state = STATE.lock();
         state.template = None;
         state.template_checked = true;
+        state.profile_state = VoiceProfileState::Unenrolled;
         state.capture = Some(CaptureState::Idle);
         state.progress = 0;
         state.last_score = None;
@@ -2577,6 +2653,7 @@ mod platform {
             peak_rms: f32,
             reference_rms: f32,
             score: f32,
+            consensus_score: f32,
             inference_ms: u128,
         }
 
@@ -2700,11 +2777,17 @@ mod platform {
                 .embedding(&model_pcm)
                 .unwrap_or_else(|err| panic!("embed evaluation fixture {}: {err}", path.display()));
             let inference_ms = started.elapsed().as_millis();
-            let score = references
+            let mut reference_scores = references
                 .iter()
                 .map(|reference| cosine(reference, &embedding).expect("matching dimensions"))
-                .max_by(f32::total_cmp)
-                .expect("enrollment references");
+                .collect::<Vec<_>>();
+            reference_scores.sort_by(|left, right| right.total_cmp(left));
+            let score = *reference_scores.first().expect("enrollment references");
+            let consensus_score = if reference_scores.len() >= 2 {
+                (reference_scores[0] + reference_scores[1]) / 2.0
+            } else {
+                score
+            };
             EvaluationScore {
                 id: sample.id.clone(),
                 label: sample.label,
@@ -2715,6 +2798,7 @@ mod platform {
                 peak_rms,
                 reference_rms,
                 score,
+                consensus_score,
                 inference_ms,
             }
         }
@@ -2826,6 +2910,7 @@ mod platform {
                 peak_rms: 900.0,
                 reference_rms: 600.0,
                 score,
+                consensus_score: score,
                 inference_ms,
             }
         }
@@ -3065,6 +3150,7 @@ pub fn status() -> VoiceprintStatus {
         enrolled: false,
         enrolled_phrase: None,
         requires_reenrollment: false,
+        profile_state: VoiceProfileState::Unavailable,
         state: "unavailable".into(),
         progress: 0,
         capture_seconds_remaining: None,

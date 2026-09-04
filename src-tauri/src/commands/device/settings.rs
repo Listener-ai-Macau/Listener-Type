@@ -362,6 +362,11 @@ pub const DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS: u32 =
 pub const DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES: u32 = 0;
 pub const DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES: u32 = 1440;
 pub const DEVICE_SETTINGS_DEFAULT_BLE_NAME: &str = "listener";
+// Keep the host-side offline snapshot aligned with firmware defaults. A
+// transient readback failure must not turn an unrelated settings save into a
+// persisted voice_auto_start=0 regression.
+pub const DEVICE_SETTINGS_DEFAULT_VOICE_AUTO_START_ENABLED: bool = true;
+pub const DEVICE_SETTINGS_DEFAULT_VOICE_AUTO_STOP_ENABLED: bool = true;
 pub const DEVICE_SETTINGS_BLE_WRITE_TIMEOUT: Duration = Duration::from_secs(4);
 pub const DEVICE_SETTINGS_BLE_NAME_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DEVICE_SETTINGS_BLE_TASK_TIMEOUT: Duration = Duration::from_secs(20);
@@ -1562,8 +1567,8 @@ pub fn device_settings_snapshot_from_device(
         plugged_low_power_idle_minutes: DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
         battery_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
         plugged_low_power_enabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
-        voice_auto_start_enabled: false,
-        voice_auto_stop_enabled: false,
+        voice_auto_start_enabled: DEVICE_SETTINGS_DEFAULT_VOICE_AUTO_START_ENABLED,
+        voice_auto_stop_enabled: DEVICE_SETTINGS_DEFAULT_VOICE_AUTO_STOP_ENABLED,
         plugged_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS,
         battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
         knob_rotation_action: ui_knob_rotation_action_from_firmware(
@@ -1598,8 +1603,8 @@ pub fn device_settings_snapshot_from_request(
         plugged_low_power_idle_minutes: DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
         battery_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
         plugged_low_power_enabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
-        voice_auto_start_enabled: false,
-        voice_auto_stop_enabled: false,
+        voice_auto_start_enabled: DEVICE_SETTINGS_DEFAULT_VOICE_AUTO_START_ENABLED,
+        voice_auto_stop_enabled: DEVICE_SETTINGS_DEFAULT_VOICE_AUTO_STOP_ENABLED,
         plugged_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS,
         battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
         knob_rotation_action: ui_knob_rotation_action_from_firmware(

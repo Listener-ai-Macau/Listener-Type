@@ -280,6 +280,21 @@ fn update_embedded_audio_visual_preview(
         Some(session_id),
         format!("visual_provisional chars={}", preview.chars().count()),
         |_| {
+            // Visual-only text is derived from the same provider stream as the
+            // authoritative preview, but it may have the automatic wake prefix
+            // stripped (and therefore be shorter).  Sending that shorter value
+            // through the shared capsule channel makes the frontend animate a
+            // backtrack on every update (for example 8 -> 3 -> 8 chars).  Keep
+            // the visible preview monotonic until the authoritative stream has
+            // caught up; visual-only text remains a latency hint, never a
+            // reason to erase text the user already saw.
+            let authoritative = inner.embedded_audio_partial_preview.lock();
+            if authoritative.as_deref().is_some_and(|current| {
+                spoken_preview_len(&preview) < spoken_preview_len(current)
+            }) {
+                return false;
+            }
+            drop(authoritative);
             let mut slot = inner.embedded_audio_visual_preview.lock();
             let Some(provider_preview) = provider_preview_change(slot.as_deref(), &preview) else {
                 return false;
@@ -288,6 +303,10 @@ fn update_embedded_audio_visual_preview(
             emit_embedded_audio_partial_preview_if_active(inner, session_id, provider_preview)
         },
     )
+}
+
+fn spoken_preview_len(text: &str) -> usize {
+    text.chars().filter(|ch| ch.is_alphanumeric()).count()
 }
 
 fn update_embedded_audio_partial_preview_from_final_supplement(
@@ -885,7 +904,30 @@ fn arm_automatic_wake_text_guard(
             capsule_audio_boundary_ms.saturating_add(EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS),
         ),
         body_started: false,
+        stop_requested: false,
     });
+}
+
+/// Close the automatic wake text gate at the same logical boundary as the
+/// transcribing feedback. Provider frames can still arrive after this point,
+/// but they must not turn an empty wake-only capsule into a late body.
+pub(super) fn mark_automatic_wake_stop_requested(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) {
+    let mut slot = inner.embedded_audio_automatic_wake_guard.lock();
+    if let Some(guard) = slot
+        .as_mut()
+        .filter(|guard| guard.session_id == session_id)
+    {
+        if !guard.stop_requested {
+            guard.stop_requested = true;
+            log::info!(
+                "[wake-phrase] automatic wake text gate closed at stop boundary session_id={session_id} body_started={}",
+                guard.body_started
+            );
+        }
+    }
 }
 
 pub(super) fn acknowledge_automatic_wake_capsule_visible(
@@ -962,12 +1004,25 @@ fn filter_automatic_wake_text(
     text: &str,
     partial: bool,
 ) -> String {
-    let phrase = inner
+    let (phrase, late_body_blocked) = inner
         .embedded_audio_automatic_wake_guard
         .lock()
         .as_ref()
         .filter(|guard| guard.session_id == session_id)
-        .map(|guard| guard.phrase.clone());
+        .map(|guard| {
+            (
+                Some(guard.phrase.clone()),
+                guard.stop_requested && !guard.body_started,
+            )
+        })
+        .unwrap_or((None, false));
+    if late_body_blocked {
+        log::debug!(
+            "[wake-phrase] ignored late text after stop before body start session_id={session_id} partial={partial} chars={}",
+            text.chars().count()
+        );
+        return String::new();
+    }
     let filtered = phrase.map_or_else(
         || preserve_recording_transcript(text),
         |phrase| strip_automatic_activation_prefix(text, &phrase, partial),

@@ -39,6 +39,7 @@ fn set_volcengine_preview_callbacks(
             });
         arm_settled_target_endpoint_for_visible_body(
             &inner_for_stream,
+            session_id,
             &clock_for_stream,
         );
         if refresh_firmware_speech {
@@ -82,6 +83,7 @@ fn set_volcengine_preview_callbacks(
             });
         arm_settled_target_endpoint_for_visible_body(
             &inner_for_partial,
+            session_id,
             &clock_for_partial,
         );
         if refresh_firmware_speech {

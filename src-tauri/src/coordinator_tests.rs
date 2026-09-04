@@ -1425,6 +1425,26 @@ fn embedded_ble_background_retry_backs_off_for_offline_gatt_failures() {
 }
 
 #[test]
+fn embedded_ble_usb_powered_wake_does_not_sleep_through_offline_backoff() {
+    let message = "BLE GATT session did not become active after 8000 ms; stale GATT/cache or paired device disconnected";
+    assert_eq!(
+        embedded_ble_retry_delay_for_power(EMBEDDED_BLE_RETRY_OFFLINE_DELAY, Some(true), message,),
+        EMBEDDED_BLE_RETRY_LONG_DELAY,
+        "USB-powered wake must retry in the bounded 2 s window"
+    );
+    assert_eq!(
+        embedded_ble_retry_delay_for_power(EMBEDDED_BLE_RETRY_OFFLINE_DELAY, Some(false), message,),
+        EMBEDDED_BLE_RETRY_OFFLINE_DELAY,
+        "known battery power keeps the protective offline backoff"
+    );
+    assert_eq!(
+        embedded_ble_retry_delay_for_power(EMBEDDED_BLE_RETRY_OFFLINE_DELAY, None, message,),
+        EMBEDDED_BLE_RETRY_LONG_DELAY,
+        "unknown power with an explicit link-loss error must not sleep through a physical wake"
+    );
+}
+
+#[test]
 fn embedded_ble_background_retry_caps_generic_errors() {
     assert_eq!(
         next_embedded_ble_background_retry_delay(
