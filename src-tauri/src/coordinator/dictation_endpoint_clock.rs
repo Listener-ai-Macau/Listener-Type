@@ -19,6 +19,12 @@ struct SettledTargetEndpointClock {
     paused_armed_target_end_ms: Option<u64>,
     paused_armed_at: Option<Instant>,
     latest_update: Option<crate::asr::volcengine::TargetSpeakerUpdate>,
+    /// Monotonic arrival time of the evidence above. Endpoint decisions must
+    /// not keep treating a frozen provider snapshot as live owner speech.
+    /// Once this expires, the session reducer converts the snapshot into a
+    /// bounded provider-stall observation and evaluates it exactly once from
+    /// the watchdog.
+    latest_update_at: Option<Instant>,
     /// Whether the latest visible preview ends at a sentence boundary. A
     /// provider row can stop advancing for several seconds in the middle of a
     /// long clause; the settled-text wall clock must not cut that open body
@@ -188,6 +194,7 @@ impl SettledTargetEndpointClock {
         now: Instant,
     ) -> Option<u64> {
         self.latest_update = Some(update.clone());
+        self.latest_update_at = Some(now);
         let recent_strong_non_target = update_has_recent_strong_non_target(update);
         let pending_owner_tail = update.pending_unattributed_speech
             && !recent_strong_non_target
@@ -282,12 +289,12 @@ impl SettledTargetEndpointClock {
         if now.saturating_duration_since(armed_at) < Duration::from_millis(timeout_ms) {
             return None;
         }
-        let Some(latest) = self.latest_update.as_ref() else {
+        let Some(latest) = self.latest_for_decision(now, timeout_ms) else {
             self.note_due_hold_diagnostic(generation, "no_latest_update");
             return None;
         };
         if !Self::update_allows_endpoint(
-            latest,
+            &latest,
             self.armed_from_visible_body_fallback,
             self.latest_visible_body_ends_terminal,
             self.manual_terminal_bridge_until,
@@ -296,18 +303,17 @@ impl SettledTargetEndpointClock {
         ) {
             self.note_due_hold_diagnostic(
                 generation,
-                endpoint_hold_reason(latest, self.latest_visible_body_ends_terminal),
+                endpoint_hold_reason(&latest, self.latest_visible_body_ends_terminal),
             );
             return None;
         }
-        let update = latest.clone();
         let decision = self.product_endpoint.decide_stop(
-            product_endpoint_evidence(&update, self.armed_target_end_ms),
+            product_endpoint_evidence(&latest, self.armed_target_end_ms),
             now,
             Duration::from_millis(ENDPOINT_PROVIDER_CATCH_UP_GRACE_MS),
         );
         match decision {
-            crate::speech_decision_kernel::EndpointDecision::Stop => Some(update),
+            crate::speech_decision_kernel::EndpointDecision::Stop => Some(latest),
             crate::speech_decision_kernel::EndpointDecision::CatchingUp => {
                 self.note_due_hold_diagnostic(generation, "provider_catch_up");
                 None
@@ -400,7 +406,7 @@ impl SettledTargetEndpointClock {
         if now.saturating_duration_since(armed_at) < Duration::from_millis(timeout_ms) {
             return false;
         }
-        let Some(update) = self.latest_update.clone() else {
+        let Some(update) = self.latest_for_decision(now, timeout_ms) else {
             self.note_due_hold_diagnostic(self.generation, "no_latest_update");
             return false;
         };
@@ -446,8 +452,36 @@ impl SettledTargetEndpointClock {
             .flatten()
     }
 
-    fn generation_is_current(&self, generation: u64) -> bool {
-        self.generation == generation && self.armed_at.is_some()
+    /// Return one immutable decision snapshot for the session reducer.
+    ///
+    /// Provider/local callbacks are not a clock: under a provider stall the
+    /// last callback can remain unchanged while the microphone session keeps
+    /// running. Keeping its `pending` and local-tail bits forever made every
+    /// later fix depend on another escape hatch. After one endpoint interval
+    /// without a fresh observation, the snapshot is explicitly classified as
+    /// stale provider evidence. The watchdog remains the only caller that can
+    /// turn that classification into a stop.
+    fn latest_for_decision(
+        &self,
+        now: Instant,
+        timeout_ms: u64,
+    ) -> Option<crate::asr::volcengine::TargetSpeakerUpdate> {
+        let mut update = self.latest_update.clone()?;
+        let stale = self.latest_update_at.is_some_and(|observed_at| {
+            now.saturating_duration_since(observed_at) >= Duration::from_millis(timeout_ms)
+        });
+        if stale {
+            update.pending_unattributed_speech = false;
+            update.pending_activity_advanced = false;
+            // No callback means there is no newer owner edge to protect. Use
+            // the last covered audio edge as the bounded stall watermark so a
+            // frozen local tail cannot block the reducer forever.
+            if let Some(audio_ms) = update.audio_duration_ms.or(update.provider_audio_duration_ms)
+            {
+                update.local_speech_end_ms = Some(audio_ms);
+            }
+        }
+        Some(update)
     }
 
     fn reopen_after_failed_stop(&mut self) {
@@ -457,70 +491,6 @@ impl SettledTargetEndpointClock {
             );
         }
     }
-}
-
-fn schedule_settled_target_endpoint_timer(
-    inner: &Arc<Inner>,
-    session_id: SessionId,
-    stop_dispatched: &Arc<AtomicBool>,
-    endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
-    generation: u64,
-    endpoint_timeout_ms: u64,
-) {
-    let inner = Arc::clone(inner);
-    let stop_dispatched = Arc::clone(stop_dispatched);
-    let endpoint_clock = Arc::clone(endpoint_clock);
-    async_runtime::spawn(async move {
-        let wall_clock_timeout_ms =
-            settled_target_wall_clock_timeout_ms(endpoint_timeout_ms);
-        let mut elapsed_ms = 0u64;
-        // Firmware deliberately retains a one-second safety endpoint. While a
-        // visible owner-safe preview ends in an explicit continuation word,
-        // refresh that safety clock at most twice; generation checks cancel
-        // the old schedule as soon as text grows or the session changes.
-        while endpoint_timeout_ms > EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
-            && elapsed_ms
-                .saturating_add(EMBEDDED_DANGLING_FIRMWARE_KEEPALIVE_INTERVAL_MS)
-                < wall_clock_timeout_ms
-        {
-            tokio::time::sleep(Duration::from_millis(
-                EMBEDDED_DANGLING_FIRMWARE_KEEPALIVE_INTERVAL_MS,
-            ))
-            .await;
-            elapsed_ms = elapsed_ms
-                .saturating_add(EMBEDDED_DANGLING_FIRMWARE_KEEPALIVE_INTERVAL_MS);
-            if !endpoint_clock.lock().generation_is_current(generation) {
-                return;
-            }
-            note_embedded_asr_speech_activity(&inner, session_id);
-        }
-        tokio::time::sleep(Duration::from_millis(
-            wall_clock_timeout_ms.saturating_sub(elapsed_ms),
-        ))
-        .await;
-        let (update, hold_diagnostic) = {
-            let mut clock = endpoint_clock.lock();
-            let update = clock.due_update(generation, Instant::now(), wall_clock_timeout_ms);
-            let hold_diagnostic = clock.take_due_hold_diagnostic();
-            (update, hold_diagnostic)
-        };
-        if let Some((generation, reason)) = hold_diagnostic {
-            log::info!(
-                "[asr] target endpoint hold session_id={session_id} generation={generation} reason={reason}"
-            );
-        }
-        let Some(update) = update else {
-            return;
-        };
-        handle_target_speaker_update(
-            &inner,
-            session_id,
-            &stop_dispatched,
-            &endpoint_clock,
-            update,
-            true,
-        );
-    });
 }
 
 /// Session-scoped fallback for callback-order races.
@@ -593,28 +563,15 @@ fn start_settled_target_endpoint_watchdog(
 
 fn arm_settled_target_endpoint_for_visible_body(
     inner: &Arc<Inner>,
-    session_id: SessionId,
-    stop_dispatched: &Arc<AtomicBool>,
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
 ) {
     let preview = current_embedded_audio_partial_preview(inner);
     let preview_ends_terminal = preview_ends_with_sentence_terminal(preview.as_deref());
     let preview_chars = preview.as_deref().map_or(0, |text| text.chars().count());
-    let endpoint_timeout_ms = target_speaker_end_timeout_ms_for_preview(preview.as_deref());
     let now = Instant::now();
-    let generation = {
+    {
         let mut clock = endpoint_clock.lock();
         clock.note_visible_body_boundary(preview_ends_terminal, preview_chars, now);
-        clock.arm_latest_for_visible_body(now)
-    };
-    if let Some(generation) = generation {
-        schedule_settled_target_endpoint_timer(
-            inner,
-            session_id,
-            stop_dispatched,
-            endpoint_clock,
-            generation,
-            endpoint_timeout_ms,
-        );
+        clock.arm_latest_for_visible_body(now);
     }
 }

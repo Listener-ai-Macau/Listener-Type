@@ -1527,6 +1527,38 @@ fn body_preview_endpoint_extends_only_explicit_dangling_continuations() {
 }
 
 #[test]
+fn stale_provider_snapshot_is_expired_by_single_session_reducer() {
+    let started = std::time::Instant::now();
+    let update = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(6_502),
+        provider_audio_duration_ms: Some(7_100),
+        audio_duration_ms: Some(7_200),
+        local_speech_end_ms: Some(6_900),
+        local_target_speech_end_ms: Some(2_400),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(6_502),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    let generation = clock.observe(&update, true, started).expect("armed");
+
+    // No provider/local callback arrives after the stable row. The reducer
+    // must expire that frozen tail at the one-second deadline instead of
+    // leaving the session in arbiter_hold forever.
+    let stopped = clock.due_update(
+        generation,
+        started + std::time::Duration::from_millis(900),
+        900,
+    );
+    assert!(stopped.is_some(), "stale endpoint evidence must stop");
+}
+
+#[test]
 fn settled_target_wall_clock_ends_one_second_after_visible_stable_text() {
     let started = std::time::Instant::now();
     let stable = crate::asr::volcengine::TargetSpeakerUpdate {

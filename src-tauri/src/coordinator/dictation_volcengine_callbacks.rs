@@ -8,7 +8,6 @@ fn set_volcengine_preview_callbacks(
     start_settled_target_endpoint_watchdog(inner, session_id, &stop_dispatched, &endpoint_clock);
 
     let inner_for_stream = Arc::clone(inner);
-    let stop_for_stream = Arc::clone(&stop_dispatched);
     let clock_for_stream = Arc::clone(&endpoint_clock);
     asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
         let previous_preview = current_embedded_audio_partial_preview(&inner_for_stream);
@@ -25,8 +24,6 @@ fn set_volcengine_preview_callbacks(
             });
         arm_settled_target_endpoint_for_visible_body(
             &inner_for_stream,
-            session_id,
-            &stop_for_stream,
             &clock_for_stream,
         );
         if refresh_firmware_speech {
@@ -45,7 +42,6 @@ fn set_volcengine_preview_callbacks(
     })));
 
     let inner_for_partial = Arc::clone(inner);
-    let stop_for_partial = Arc::clone(&stop_dispatched);
     let clock_for_partial = Arc::clone(&endpoint_clock);
     asr.set_final_intermediate_transcript_callback(Some(Arc::new(move |update| {
         let previous_preview = current_embedded_audio_partial_preview(&inner_for_partial);
@@ -65,8 +61,6 @@ fn set_volcengine_preview_callbacks(
             });
         arm_settled_target_endpoint_for_visible_body(
             &inner_for_partial,
-            session_id,
-            &stop_for_partial,
             &clock_for_partial,
         );
         if refresh_firmware_speech {
@@ -87,32 +81,19 @@ fn set_volcengine_preview_callbacks(
                 .as_deref()
                 .is_some_and(|text| !text.trim().is_empty());
         let now = Instant::now();
-        let (settled_wall_clock_due, generation) = {
+        {
             let mut clock = clock_for_speaker.lock();
-            let generation = clock.observe(&update, body_started, now);
-            let due = clock.is_due(now, EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS);
-            (due, generation)
-        };
+            clock.observe(&update, body_started, now);
+        }
+        // The session watchdog is the sole endpoint evaluator. Provider
+        // callbacks only publish observations and never race a second timer.
         handle_target_speaker_update(
             &inner_for_speaker,
             session_id,
             &stop_dispatched,
+            &clock_for_speaker,
             update,
-            settled_wall_clock_due,
+            false,
         );
-        if let Some(generation) = generation {
-            let endpoint_timeout_ms = target_speaker_end_timeout_ms_for_preview(
-                current_embedded_audio_partial_preview(&inner_for_speaker).as_deref(),
-            );
-            schedule_settled_target_endpoint_timer(
-                &inner_for_speaker,
-                session_id,
-                &stop_dispatched,
-                &clock_for_speaker,
-                generation,
-                endpoint_timeout_ms,
-            );
-        }
     })));
 }
-
