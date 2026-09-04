@@ -42,7 +42,10 @@ struct SettledTargetEndpointClock {
     manual_terminal_bridge_until: Option<Instant>,
     manual_terminal_bridge_rearm_pending: bool,
     pending_was_seen: bool,
-    product_endpoint: crate::speech_decision_kernel::EndpointArbiter,
+    /// The sole visible-recording stop authority. All callback evidence is
+    /// reduced into this controller; no provider or firmware callback owns a
+    /// second endpoint timer.
+    product_endpoint: crate::speech_decision_kernel::OwnerEndpointController,
     last_visible_body_signature: Option<(bool, usize)>,
     /// Last local speech edge used to renew the firmware endpoint.  Provider
     /// callbacks can repeat the same snapshot; dedupe it so a stale snapshot
@@ -134,6 +137,10 @@ fn update_has_recent_strong_non_target(
 }
 
 impl SettledTargetEndpointClock {
+    pub(crate) fn lifecycle(&self) -> crate::speech_decision_kernel::OwnerEndpointState {
+        self.product_endpoint.state()
+    }
+
     fn should_renew_firmware_endpoint_lease(
         &mut self,
         update: &crate::asr::volcengine::TargetSpeakerUpdate,
@@ -611,8 +618,9 @@ fn start_settled_target_endpoint_watchdog(
                 (update, hold_diagnostic)
             };
             if let Some((generation, reason)) = hold_diagnostic {
+                let lifecycle = endpoint_clock.lock().lifecycle();
                 log::info!(
-                    "[asr] target endpoint hold session_id={session_id} generation={generation} reason={reason}"
+                    "[asr] target endpoint hold session_id={session_id} generation={generation} reason={reason} lifecycle={lifecycle:?}"
                 );
             }
             if let Some(update) = update {

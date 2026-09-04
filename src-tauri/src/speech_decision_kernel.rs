@@ -269,6 +269,20 @@ enum EndpointPhase {
     StopCommitted,
 }
 
+/// The only lifecycle owned by the visible recording endpoint.
+///
+/// Wake-candidate creation and the outer coordinator's `SessionPhase` remain
+/// separate concerns. Once a visible body exists, however, every endpoint
+/// decision must be observable as one of these states; provider callbacks,
+/// preview revisions, and firmware leases are inputs, never additional
+/// lifecycles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OwnerEndpointState {
+    OwnerActive,
+    QuietPending,
+    Stopping,
+}
+
 impl Default for EndpointPhase {
     fn default() -> Self {
         Self::Listening
@@ -285,7 +299,22 @@ pub(crate) struct EndpointArbiter {
     text_revision: u64,
 }
 
+// Keep the old name as a source-compatible alias for tests and adapters while
+// making the ownership boundary explicit to new call sites. There must be
+// exactly one controller instance per visible recording session.
+pub(crate) type OwnerEndpointController = EndpointArbiter;
+
 impl EndpointArbiter {
+    pub(crate) fn state(&self) -> OwnerEndpointState {
+        match self.phase {
+            EndpointPhase::Listening => OwnerEndpointState::OwnerActive,
+            EndpointPhase::CandidateEnd { .. } | EndpointPhase::CatchingUp { .. } => {
+                OwnerEndpointState::QuietPending
+            }
+            EndpointPhase::StopCommitted => OwnerEndpointState::Stopping,
+        }
+    }
+
     pub(crate) fn reset(&mut self) {
         self.phase = EndpointPhase::Listening;
         self.text_revision = 0;
@@ -856,6 +885,9 @@ mod tests {
             endpoint.decide_stop(evidence, Instant::now(), Duration::from_millis(300)),
             EndpointDecision::Stop
         );
+        assert_eq!(endpoint.state(), OwnerEndpointState::Stopping);
+        endpoint.reopen_after_failed_stop(evidence);
+        assert_eq!(endpoint.state(), OwnerEndpointState::QuietPending);
     }
 
     #[test]
@@ -912,7 +944,9 @@ mod tests {
             unresolved_owner_tail: true,
         };
         let mut endpoint = EndpointArbiter::default();
+        assert_eq!(endpoint.state(), OwnerEndpointState::OwnerActive);
         endpoint.arm(evidence);
+        assert_eq!(endpoint.state(), OwnerEndpointState::QuietPending);
         assert_eq!(
             endpoint.decide_stop(evidence, started, Duration::from_millis(300)),
             EndpointDecision::Hold
@@ -943,6 +977,7 @@ mod tests {
             ),
             EndpointDecision::Stop
         );
+        assert_eq!(endpoint.state(), OwnerEndpointState::Stopping);
     }
 
     #[test]

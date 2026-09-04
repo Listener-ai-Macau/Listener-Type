@@ -2,6 +2,7 @@ fn handle_target_speaker_update(
     inner: &Arc<Inner>,
     session_id: SessionId,
     stop_dispatched: &Arc<AtomicBool>,
+    endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
     update: crate::asr::volcengine::TargetSpeakerUpdate,
     settled_wall_clock_due: bool,
 ) {
@@ -17,20 +18,6 @@ fn handle_target_speaker_update(
     if !session_active {
         return;
     }
-    if update.target_activity_advanced || update.pending_activity_advanced {
-        if target_speaker_update_has_live_owner_activity(&update) {
-            note_embedded_asr_speech_activity(inner, session_id);
-        } else {
-            log::info!(
-                "[asr] stale attributed activity did not refresh firmware endpoint provider_audio_ms={:?} local_audio_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?} stable_attributed_end_ms={:?}",
-                update.provider_audio_duration_ms,
-                update.audio_duration_ms,
-                update.target_speech_end_ms,
-                update.local_target_speech_end_ms,
-                update.stable_attributed_speech_end_ms,
-            );
-        }
-    }
     let preview = current_embedded_audio_partial_preview(inner);
     // Prefer the live filtered preview if present; wake guard body_started is
     // the durable latch once any non-empty body was seen this session.
@@ -38,6 +25,37 @@ fn handle_target_speaker_update(
         || preview
             .as_deref()
             .is_some_and(|text| !text.trim().is_empty());
+    let attributed_owner_activity = (update.target_activity_advanced
+        || update.pending_activity_advanced)
+        && target_speaker_update_has_live_owner_activity(&update);
+    // Evaluate even when attributed activity already renews the firmware so
+    // the same local edge cannot renew a second time on a repeated callback.
+    let owner_catch_up_lease_due = endpoint_clock
+        .lock()
+        .should_renew_firmware_endpoint_lease(&update, body_started);
+    let renew_owner_catch_up_lease = !attributed_owner_activity && owner_catch_up_lease_due;
+    if attributed_owner_activity || renew_owner_catch_up_lease {
+        if renew_owner_catch_up_lease {
+            log::info!(
+                "[asr] bounded owner catch-up renewed firmware endpoint session_id={session_id} provider_audio_ms={:?} local_audio_ms={:?} local_speech_end_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?}",
+                update.provider_audio_duration_ms,
+                update.audio_duration_ms,
+                update.local_speech_end_ms,
+                update.target_speech_end_ms,
+                update.local_target_speech_end_ms,
+            );
+        }
+        note_embedded_asr_speech_activity(inner, session_id);
+    } else if update.target_activity_advanced || update.pending_activity_advanced {
+        log::info!(
+            "[asr] stale attributed activity did not refresh firmware endpoint provider_audio_ms={:?} local_audio_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?} stable_attributed_end_ms={:?}",
+            update.provider_audio_duration_ms,
+            update.audio_duration_ms,
+            update.target_speech_end_ms,
+            update.local_target_speech_end_ms,
+            update.stable_attributed_speech_end_ms,
+        );
+    }
     let mode_timeout_ms = target_speaker_end_timeout_ms_for_preview(preview.as_deref());
     let mode_endpoint_timeout_ms = if body_started {
         mode_timeout_ms
@@ -59,7 +77,28 @@ fn handle_target_speaker_update(
         provider_stall_confirmed,
         endpoint_timeout_ms,
     );
-    let settled_wall_clock_endpoint_due = body_started && settled_wall_clock_due;
+    // A settled-text timer is only a fallback for a quiet, covered provider
+    // stream.  If the provider is still carrying an unattributed provisional
+    // tail, its owner boundary is known to be behind the live text and the
+    // wall-clock fallback must not cut the sentence in the middle.  Confirmed
+    // provider stall is the one bounded exception: the normal endpoint policy
+    // will then require the local owner tail to be quiet before stopping.
+    let settled_wall_clock_endpoint_due = body_started
+        && settled_wall_clock_due
+        && (!update.pending_unattributed_speech || provider_stall_confirmed);
+    if body_started
+        && settled_wall_clock_due
+        && update.pending_unattributed_speech
+        && !provider_stall_confirmed
+    {
+        log::info!(
+            "[asr] settled-text wall clock held pending_provider_text provider_audio_ms={:?} local_audio_ms={:?} local_speech_end_ms={:?} cloud_target_end_ms={:?}",
+            update.provider_audio_duration_ms,
+            update.audio_duration_ms,
+            update.local_speech_end_ms,
+            update.target_speech_end_ms,
+        );
+    }
     let endpoint_due = !initial_body_wait_active
         && target_speaker_endpoint_due_after_visible_body_gate(
             body_started,
@@ -95,6 +134,11 @@ fn handle_target_speaker_update(
         );
     }
 
+    let endpoint_lifecycle = endpoint_clock.lock().lifecycle();
+    log::info!(
+        "[asr] owner endpoint committed stop session_id={session_id} lifecycle={endpoint_lifecycle:?} reason={stop_reason}"
+    );
+
     // 1.0.4 A3: latch Transcribing + keep last preview immediately at the
     // silence threshold so the UI does not hang on Listening while BLE stop
     // and final-frame work are still in flight.
@@ -113,6 +157,7 @@ fn handle_target_speaker_update(
 
     let inner = Arc::clone(inner);
     let stop_dispatched = Arc::clone(stop_dispatched);
+    let endpoint_clock = Arc::clone(endpoint_clock);
     let early_final_asr = clone_volcengine_asr_for_session(&inner, session_id);
     async_runtime::spawn(async move {
         let stop_future = request_embedded_ble_recording_stop_from_host(&inner, stop_reason);
@@ -142,12 +187,14 @@ fn handle_target_speaker_update(
                 // the one-shot endpoint latch forever. A later provider/local
                 // update may retry while the same session is still active.
                 stop_dispatched.store(false, Ordering::SeqCst);
+                endpoint_clock.lock().reopen_after_failed_stop();
                 log::info!(
                     "[embedded-ble] target-speaker auto-stop not dispatched; retry armed session_id={session_id} reason={stop_reason}"
                 );
             }
             Err(err) => {
                 stop_dispatched.store(false, Ordering::SeqCst);
+                endpoint_clock.lock().reopen_after_failed_stop();
                 log::warn!(
                     "[embedded-ble] target-speaker auto-stop failed; retry armed session_id={session_id} reason={stop_reason}: {err}"
                 );
@@ -155,4 +202,3 @@ fn handle_target_speaker_update(
         }
     });
 }
-

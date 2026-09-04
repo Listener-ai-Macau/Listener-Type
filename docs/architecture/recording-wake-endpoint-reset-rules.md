@@ -53,5 +53,20 @@
 ## 当前已确认的问题
 
 - 主机 EndpointArbiter 曾把 pending 预览修订当成主人尾音，导致 `arbiter_hold` 永久化；已由回归测试锁定。
-- 固件最新现场出现连续 `boot_watchdog` / `reset_reason=5`，说明 interrupt WDT 仍需独立抓现场定位，不能用历史日志或短 soak 代替。
+- `diag_log` 环形区仍能读到连续 `boot_watchdog` / `reset_reason=5`，但
+  2026-09-04 的最新 20 秒不触发复位串口现场从约 61,136,000 ms 连续到
+  61,173,000 ms，未出现新的 WDT、I2S stall、ringbuffer full 或传输丢包。
+  因此这些 boot segment 目前只能标为历史证据；再次出现问题时必须立即抓
+  现场并按同一时间基线确认，不能把环形区旧记录当成新复位。
 - 固件动态电平器确实在运行；它的衰减统计必须作为唤醒 A/B 输入证据，不能直接拿灯光或 raw level 推断声纹结果。
+
+## 本轮落地
+
+- `OwnerEndpointController` 是 `EndpointArbiter` 的唯一语义入口，公开生命周期
+  `OwnerActive -> QuietPending -> Stopping`；旧类型名只保留为兼容别名，避免
+  其他适配器偷偷创建第二套计时器。
+- 所有 endpoint hold/stop 日志都会记录 `lifecycle` 和具体 `reason`，可回答谁
+  推进主人时钟、谁触发停止，以及是否只是 provider stall。
+- 健康 ASR 路径不再使用原始能量 trailing-silence 作为第二个停止裁判；仅在
+  ASR 投递失败时保留有界安全回退。固件的 `VREC:SPEECH` 仍是独立安全租约，
+  不改变可见录音的主人活动权威。
