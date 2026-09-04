@@ -364,13 +364,13 @@ impl EndpointArbiter {
             } => {
                 let text_revision_changed = text_revision != self.text_revision;
                 // A preview revision is only an endpoint barrier while the
-                // provider/local clocks still show an owner tail. Once the
-                // provider has settled (`pending_provider_text=false`) and
-                // the owner watermark is quiet, punctuation/final-row
-                // revisions must not re-arm the endpoint indefinitely.
+                // provider/local clocks still show an owner tail. A provider
+                // can keep `pending_provider_text` set while room noise or a
+                // second speaker produces late revisions; that flag alone is
+                // not owner activity and must not re-arm the endpoint.
                 let revision_needs_owner_tail = text_revision_changed
                     && !evidence.latest_speech_confirmed_non_target
-                    && (evidence.pending_provider_text || evidence.unresolved_owner_tail);
+                    && evidence.unresolved_owner_tail;
                 if owner_watermark_ms != evidence.owner_watermark_ms || revision_needs_owner_tail {
                     self.arm(evidence);
                     return EndpointDecision::Hold;
@@ -400,7 +400,7 @@ impl EndpointArbiter {
                 let text_revision_changed = text_revision != self.text_revision;
                 let revision_needs_owner_tail = text_revision_changed
                     && !evidence.latest_speech_confirmed_non_target
-                    && (evidence.pending_provider_text || evidence.unresolved_owner_tail);
+                    && evidence.unresolved_owner_tail;
                 if owner_watermark_ms != evidence.owner_watermark_ms || revision_needs_owner_tail {
                     self.arm(evidence);
                     return EndpointDecision::Hold;
@@ -871,6 +871,32 @@ mod tests {
         endpoint.arm(evidence);
         assert_eq!(
             endpoint.decide_stop(evidence, Instant::now(), Duration::from_millis(300)),
+            EndpointDecision::Stop
+        );
+    }
+
+    #[test]
+    fn pending_preview_revision_does_not_rearm_quiet_owner() {
+        // Provider pending text may remain latched while late room-speech
+        // revisions arrive. Once the owner tail is resolved, those revisions
+        // must not turn an already armed endpoint back into Hold.
+        let started = Instant::now();
+        let evidence = EndpointEvidence {
+            owner_watermark_ms: Some(4_000),
+            provider_coverage_ms: Some(4_000),
+            pending_provider_text: true,
+            latest_speech_confirmed_non_target: false,
+            unresolved_owner_tail: false,
+        };
+        let mut endpoint = EndpointArbiter::default();
+        endpoint.arm(evidence);
+        endpoint.note_text_revision();
+        assert_eq!(
+            endpoint.decide_stop(
+                evidence,
+                started + Duration::from_millis(900),
+                Duration::from_millis(300),
+            ),
             EndpointDecision::Stop
         );
     }
