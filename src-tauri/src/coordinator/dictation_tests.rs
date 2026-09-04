@@ -1427,7 +1427,7 @@ fn failed_asr_uses_only_the_bounded_local_silence_fallback() {
     assert_eq!(
         super::proactive_stop_silence_threshold_ms(false),
         EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS,
-        "healthy ASR keeps the existing content-aware endpoint path"
+        "healthy ASR must not have a second raw-energy endpoint path"
     );
 }
 
@@ -1556,6 +1556,36 @@ fn stale_provider_snapshot_is_expired_by_single_session_reducer() {
         900,
     );
     assert!(stopped.is_some(), "stale endpoint evidence must stop");
+}
+
+#[test]
+fn visible_preview_seeds_endpoint_before_first_diarization_row() {
+    let started = std::time::Instant::now();
+    let snapshot = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: None,
+        target_speech_end_ms: None,
+        provider_audio_duration_ms: Some(1_000),
+        audio_duration_ms: Some(1_000),
+        local_speech_end_ms: Some(1_000),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: None,
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: false,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.seed_from_snapshot_if_missing(snapshot, true, started);
+    assert_eq!(
+        clock.lifecycle(),
+        crate::speech_decision_kernel::OwnerEndpointState::QuietPending,
+        "visible provider text must create a bounded endpoint even before diarization"
+    );
+    assert!(clock
+        .latest_due_update(started + std::time::Duration::from_millis(900), 900)
+        .is_some());
 }
 
 #[test]
