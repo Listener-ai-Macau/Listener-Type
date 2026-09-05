@@ -435,3 +435,15 @@ fallback，都只能增加 `ProductFinalCandidates` 的证据字段，禁止新�
 该 candidate 持有的 transport ownership，发送动作和 stale 检查在同一个调度器内
 完成。正常主人录音仍由 `request_embedded_ble_recording_stop_from_host` 的生命周期
 事务负责；隐藏候选不能伪造产品 session，也不能直接改写终稿。
+
+### 已确认主人后的 Uncertain 不能伪装成静音（2026-09-05，session 1226）
+
+声纹连续窗口不是每次都能给出 Target：低音量音节、重叠边界或短暂的模型抖动会
+落在 `Uncertain`，但这并不等价于“主人停止”。旧 endpoint 策略只检查“本地主人
+水位是否领先云端”，当两者相等时会把同一段 Uncertain 尾音当作静音，触发
+`inactive_1000ms`，造成说话中途截断。
+
+统一状态机现在把“已建立主人 + 未出现明确 NonTarget + 最近仍有本地语音边缘”归为
+有界 `UncertainOwnerTail` hold。它只延迟当前端点，不推进主人水位、不提交文本；
+明确 NonTarget 立即解除 hold，尾音超过两秒上限也自动回到正常一秒静音端点。因此
+这条路径不会把房间噪声永久续命，也不会再把一次低分窗口当成停止证据。
