@@ -1599,6 +1599,29 @@ fn final_partial_coverage_gap_from_state(state: &SyncState) -> Option<(u64, u64)
         .then_some((sent_audio_ms, transcript_end_ms))
 }
 
+/// A stable provider row that is not the verified target (or its tightly
+/// contiguous body alias) is already explicit foreign-speaker evidence.  It
+/// must reach the single final arbiter even when the local verifier has not
+/// yet debounced a NonTarget window; otherwise an owner-recovery branch can
+/// re-introduce the foreign row into the committed transcript.
+fn final_explicit_non_owner_tail(
+    state: &SyncState,
+    filtered: &SpeakerFilteredResult,
+    provider_result: &Value,
+) -> bool {
+    let target_text = filtered
+        .result
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let cloud_row_is_verified_owner_continuation = filtered.stable_other_speaker_present
+        && sequential_speaker_split_gap_is_owner_safe(state, provider_result, target_text);
+    filtered.stable_non_target_utterance_present
+        || (filtered.stable_other_speaker_present && !cloud_row_is_verified_owner_continuation)
+        || state.owner_isolation_frozen
+        || stable_provider_foreign_row_has_local_veto(state, provider_result)
+}
+
 fn server_audio_duration_ms(json: &Value) -> Option<u64> {
     json.get("audio_info")
         .and_then(|audio_info| audio_info.get("duration"))
@@ -4722,10 +4745,8 @@ impl VolcengineStreamingASR {
                 .get("text")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            let explicit_non_owner_tail = speaker_filtered_result
-                .stable_non_target_utterance_present
-                || state.owner_isolation_frozen
-                || stable_provider_foreign_row_has_local_veto(&state, result);
+            let explicit_non_owner_tail =
+                final_explicit_non_owner_tail(&state, &speaker_filtered_result, result);
             let provider_raw_recovery_safe = has_final
                 && final_unfiltered_provider_recovery_allowed(
                     &state,
@@ -6692,6 +6713,44 @@ mod tests {
             &partial_filtered,
             &json!({"text": "你傻呀！今天的工作顺序是先完成设备配对"}),
         ));
+    }
+
+    #[test]
+    fn stable_other_speaker_is_a_final_foreign_veto_even_without_local_non_target() {
+        let state = SyncState {
+            local_speaker_tracking_enabled: true,
+            target_speaker_id: Some("owner".to_string()),
+            ..SyncState::default()
+        };
+        let filtered = SpeakerFilteredResult {
+            result: json!({"text": "主人正文"}),
+            optimistic_result: json!({"text": "主人正文旁人干扰"}),
+            speaker_info_present: true,
+            response_local_body_alias_present: false,
+            stable_non_target_utterance_present: false,
+            stable_other_speaker_present: true,
+            target_speech_end_ms: Some(2_000),
+            wake_target_speech_end_ms: Some(500),
+            stable_attributed_speech_end_ms: Some(3_000),
+            pending_unattributed_text: String::new(),
+        };
+        let provider = json!({"text": "主人正文旁人干扰"});
+        assert!(final_explicit_non_owner_tail(&state, &filtered, &provider));
+        assert_eq!(
+            crate::speech_decision_kernel::arbitrate_final_transcript(
+                crate::speech_decision_kernel::FinalTranscriptEvidence {
+                    protocol_final: true,
+                    explicit_non_owner_tail: final_explicit_non_owner_tail(
+                        &state, &filtered, &provider,
+                    ),
+                    provider_raw_recovery_safe: true,
+                    provider_owner_recovery_safe: true,
+                    session_ledger_recovery_safe: true,
+                    optimistic_owner_recovery_safe: true,
+                },
+            ),
+            crate::speech_decision_kernel::FinalTranscriptAuthority::SpeakerFiltered
+        );
     }
 
     #[test]
