@@ -478,13 +478,15 @@ function Convert-ListenerLog(
     # A VoiceActivation candidate is only a VAD proposal. Rejecting ordinary
     # owner/room speech without the wake phrase is expected false-wake
     # suppression, not a runtime failure. Escalate only the contradictory case
-    # where both phrase and enrolled owner evidence were present yet the gate
-    # still rejected it.
+    # where the unified reducer recorded confirmed phrase evidence and enrolled
+    # owner evidence yet the gate still rejected it. A raw KWS hit is only a
+    # candidate: stage-2 may explicitly classify that same audio as Absent, so
+    # kws_hit_seen alone must never be treated as confirmed phrase evidence.
     if (
       $candidate.origin -eq 'VoiceActivation' -and
       $candidate.decision -eq 'reject' -and
       $candidate.owner_matched -eq $true -and
-      ($candidate.local_match_seen -or $candidate.kws_hit_seen)
+      $candidate.phrase_signal -ne 'None'
     ) {
       $issues.Add([ordered]@{
         severity = 'error'
