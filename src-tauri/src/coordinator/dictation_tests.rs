@@ -5501,7 +5501,7 @@ fn local_confirmation_ladder_does_not_block_the_complete_phrase_window() {
 
 #[cfg(target_os = "windows")]
 #[test]
-fn strong_start_prefix_gets_one_non_authoritative_latency_followup() {
+fn target_speaker_endpoint_strong_start_prefix_gets_one_non_authoritative_latency_followup() {
     let partial = super::LocalWakeConfirmation {
         matched: false,
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
@@ -5534,11 +5534,11 @@ fn strong_start_prefix_gets_one_non_authoritative_latency_followup() {
     ));
 
     assert_eq!(super::LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_MS, 140);
-    assert_eq!(super::LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS, 2);
+    assert_eq!(super::LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS, 1);
 
     let mut rolling = super::LocalConfirmationPrefixRetryState {
         pending: true,
-        retry_after_attempts: 2,
+        retry_after_attempts: 1,
         ..Default::default()
     };
     assert!(rolling.should_start(

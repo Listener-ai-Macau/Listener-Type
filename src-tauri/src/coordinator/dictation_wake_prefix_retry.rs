@@ -45,11 +45,11 @@ const LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_MS: usize = 140;
 const LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_BYTES: usize =
     LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_MS * 32;
 #[cfg(target_os = "windows")]
-// `local_confirmation_attempts` is incremented when a ladder task starts, so
-// the second rung is observed as 2 when its result is recorded. Using 1 here
-// silently disabled the bounded fast follow-up for a strong 3/4-syllable
-// prefix.
-const LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS: usize = 2;
+// `local_confirmation_attempts` is incremented before the first ladder task
+// starts, so its result is recorded as attempt 1. The bounded follow-up must
+// therefore unlock after that first result; waiting for attempt 2 defeats the
+// latency path and makes a near-match wait for the ordinary 1.8 s rung.
+const LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS: usize = 1;
 
 #[cfg(target_os = "windows")]
 fn should_defer_exploratory_local_confirmation_for_fast_preroll(
