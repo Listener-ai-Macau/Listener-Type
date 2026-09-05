@@ -978,6 +978,40 @@ fn discard_terminal_wake_continuation(inner: &Arc<Inner>) {
 /// reached the host. Bound the transport-attachment phase so an accepted
 /// terminal wake cannot leave the product in Starting forever. The cleanup is
 /// identity-scoped through both the continuation slot and candidate lifecycle.
+fn dispatch_owned_candidate_transport_stop(
+    inner: &Arc<Inner>,
+    candidate_id: u32,
+    reason: &'static str,
+    delay_ms: u64,
+) {
+    let inner = Arc::clone(inner);
+    tauri::async_runtime::spawn_blocking(move || {
+        if delay_ms > 0 {
+            std::thread::sleep(Duration::from_millis(delay_ms));
+        }
+        if !inner
+            .recording_lifecycle
+            .lock()
+            .rejected_candidate_still_owns_transport_stop(candidate_id)
+        {
+            log::info!(
+                "[coord] skip stale VREC:STOP reason={reason} rejected_session={candidate_id}; lifecycle ownership advanced"
+            );
+            return;
+        }
+        match crate::embedded_ble::send_recording_control_stop(
+            EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+        ) {
+            Ok(()) => log::info!(
+                "[coord] VREC:STOP sent reason={reason} embedded_session_id={candidate_id}"
+            ),
+            Err(err) => log::warn!(
+                "[coord] VREC:STOP failed reason={reason} embedded_session_id={candidate_id}: {err}"
+            ),
+        }
+    });
+}
+
 fn schedule_terminal_wake_continuation_expiry(
     inner: &Arc<Inner>,
     candidate_id: u32,
@@ -1018,27 +1052,12 @@ fn schedule_terminal_wake_continuation_expiry(
             "Listener 未收到唤醒后的录音数据".to_string(),
         );
         schedule_actionable_error_capsule_idle(&inner, session_id);
-        let stop_inner = Arc::clone(&inner);
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            if !stop_inner
-                .recording_lifecycle
-                .lock()
-                .rejected_candidate_still_owns_transport_stop(candidate_id)
-            {
-                return;
-            }
-            match crate::embedded_ble::send_recording_control_stop(
-                EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
-            ) {
-                Ok(()) => log::info!(
-                    "[wake-phrase] terminal continuation expiry sent VREC:STOP embedded_session_id={candidate_id} coordinator_session_id={session_id}"
-                ),
-                Err(err) => log::warn!(
-                    "[wake-phrase] terminal continuation expiry VREC:STOP failed embedded_session_id={candidate_id} coordinator_session_id={session_id}: {err}"
-                ),
-            }
-        })
-        .await;
+        dispatch_owned_candidate_transport_stop(
+            &inner,
+            candidate_id,
+            "terminal_continuation_expiry",
+            0,
+        );
     });
 }
 
@@ -1509,32 +1528,10 @@ fn reject_hidden_automatic_candidate(
     // when this reject is still the latest candidate (avoid killing N+1).
     #[cfg(not(test))]
     {
-        let inner = Arc::clone(inner);
-        tauri::async_runtime::spawn_blocking(move || {
-            // Brief yield: SessionStart for the next candidate often races the
-            // terminal reject of the previous one.
-            std::thread::sleep(Duration::from_millis(80));
-            let stop_still_owned = inner
-                .recording_lifecycle
-                .lock()
-                .rejected_candidate_still_owns_transport_stop(embedded_session_id);
-            if !stop_still_owned {
-                log::info!(
-                    "[coord] skip stale VREC:STOP after reject reason={reason} rejected_session={embedded_session_id}; lifecycle ownership advanced"
-                );
-                return;
-            }
-            match crate::embedded_ble::send_recording_control_stop(
-                EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
-            ) {
-                Ok(()) => log::info!(
-                    "[coord] VREC:STOP sent after hidden automatic reject reason={reason} embedded_session_id={embedded_session_id}"
-                ),
-                Err(err) => log::warn!(
-                    "[coord] VREC:STOP after hidden reject failed reason={reason} embedded_session_id={embedded_session_id}: {err}"
-                ),
-            }
-        });
+        // Brief yield: SessionStart for the next candidate often races the
+        // terminal reject of the previous one. Ownership is checked by the
+        // shared candidate-stop dispatcher immediately before the write.
+        dispatch_owned_candidate_transport_stop(inner, embedded_session_id, reason, 80);
     }
 }
 
