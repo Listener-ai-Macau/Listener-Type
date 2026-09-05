@@ -366,9 +366,16 @@ impl WakeInterferenceBaseline {
         if !score.is_finite() || mixed_phrase_seen {
             return false;
         }
-        let owner_rise = self.samples >= WAKE_INTERFERENCE_BASELINE_MIN_SAMPLES
-            && score >= WAKE_INTERFERENCE_OWNER_RISE_MIN_SCORE
-            && score >= self.score + WAKE_INTERFERENCE_OWNER_RISE_MARGIN;
+        // A candidate may reach terminal arbitration before a second owner
+        // snapshot exists. In that case a single sufficiently strong owner
+        // score is enough to request the bounded separated-track check; the
+        // separated result still has to pass phrase + owner verification and
+        // can never activate the product session by itself. Once a candidate
+        // has a few ambient samples, retain the stricter relative-rise rule.
+        let owner_rise = (self.samples == 0 && score >= WAKE_INTERFERENCE_OWNER_RISE_MIN_SCORE)
+            || (self.samples >= WAKE_INTERFERENCE_BASELINE_MIN_SAMPLES
+                && score >= WAKE_INTERFERENCE_OWNER_RISE_MIN_SCORE
+                && score >= self.score + WAKE_INTERFERENCE_OWNER_RISE_MARGIN);
         if owner_rise {
             return true;
         }
