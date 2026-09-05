@@ -2769,6 +2769,14 @@ fn target_speaker_filter_required_after_finish(
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+fn target_speaker_filter_required_after_final(
+    filter_required: bool,
+    explicit_non_owner_tail: bool,
+) -> bool {
+    filter_required || explicit_non_owner_tail
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 fn recover_incomplete_separator_final_from_distinct_provider_track(
     separator: Result<Option<RawTranscript>, String>,
     provider_target: Option<RawTranscript>,
@@ -4787,6 +4795,20 @@ impl VolcengineStreamingASR {
                 optimistic_owner_recovery_safe,
             };
             let authority = crate::speech_decision_kernel::arbitrate_final_transcript(evidence);
+            // The final arbiter is the authoritative owner-boundary decision.
+            // Propagate its foreign-tail veto to the coordinator before the
+            // final oneshot resolves; otherwise product arbitration can see
+            // `filter_required=false` and select the raw provider text again.
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            if explicit_non_owner_tail {
+                self.target_speaker_filter_required.store(
+                    target_speaker_filter_required_after_final(
+                        self.target_speaker_filter_required.load(Ordering::SeqCst),
+                        true,
+                    ),
+                    Ordering::SeqCst,
+                );
+            }
             if has_final {
                 log::info!(
                     "[asr] final arbitration authority={} provider={} filtered={} best={} optimistic={} last_preview={} tracking={} explicit_non_owner_tail={} raw_recovery={} owner_recovery={} ledger_recovery={} optimistic_recovery={}",
@@ -5396,6 +5418,15 @@ mod tests {
         assert!(target_speaker_final_required(false, true, false));
         assert!(target_speaker_final_required(false, false, true));
         assert!(target_speaker_final_required(true, true, false));
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn explicit_final_foreign_tail_forces_product_filter_requirement() {
+        assert!(!target_speaker_filter_required_after_final(false, false));
+        assert!(target_speaker_filter_required_after_final(false, true));
+        assert!(target_speaker_filter_required_after_final(true, false));
+        assert!(target_speaker_filter_required_after_final(true, true));
     }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
