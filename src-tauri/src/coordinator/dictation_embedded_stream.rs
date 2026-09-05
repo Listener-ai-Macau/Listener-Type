@@ -9,6 +9,29 @@ impl EmbeddedStreamingDictation {
     ) -> Result<bool, String> {
         match event {
             crate::embedded_audio::StreamingSessionEvent::Started { session_id, origin } => {
+                // A failed orphan-tail recovery is quarantined by session id.
+                // Do not let a replayed SessionStart immediately reopen the
+                // same poisoned segment; only a new firmware session id may
+                // clear the tombstone.
+                if self
+                    .orphan_recovery_quarantine_session_id
+                    .is_some_and(|quarantined| quarantined == session_id)
+                {
+                    log::warn!(
+                        "[coord] coalescing quarantined embedded SessionStart embedded_session_id={session_id} origin={origin:?}"
+                    );
+                    return Ok(false);
+                }
+                if self
+                    .orphan_recovery_quarantine_session_id
+                    .is_some_and(|quarantined| quarantined != session_id)
+                {
+                    log::info!(
+                        "[coord] advancing orphan recovery quarantine old_session_id={:?} new_session_id={session_id}",
+                        self.orphan_recovery_quarantine_session_id
+                    );
+                    self.orphan_recovery_quarantine_session_id = None;
+                }
                 if !recording_gate::try_admit_arc(
                     inner,
                     RecordIntent::BleSessionStart,
@@ -103,6 +126,16 @@ impl EmbeddedStreamingDictation {
                     // recovered segment is still a hidden Verification
                     // candidate, never a visible dictation session; the normal
                     // phrase + owner gates therefore remain authoritative.
+                    if self.orphan_recovery_quarantine_session_id == Some(chunk.session_id) {
+                        if chunk.packet_sequence < 4 || chunk.packet_sequence % 500 == 0 {
+                            log::warn!(
+                                "[coord] dropping quarantined orphan embedded PCM embedded_session_id={} packet_sequence={} (waiting for a new firmware session id)",
+                                chunk.session_id,
+                                chunk.packet_sequence
+                            );
+                        }
+                        return Ok(false);
+                    }
                     if chunk.packet_sequence >= 3
                         && self.embedded_session_id.is_none()
                         && self.speaker_candidate.is_none()
@@ -113,12 +146,32 @@ impl EmbeddedStreamingDictation {
                             chunk.packet_sequence,
                             chunk.pcm.len()
                         );
-                        self.begin_candidate_or_session(
+                        self.orphan_recovery_quarantine_session_id = Some(chunk.session_id);
+                        match self.begin_candidate_or_session(
                             inner,
                             chunk.session_id,
                             crate::embedded_audio::SessionStartOrigin::VoiceActivation,
                         )
-                        .await?;
+                        .await
+                        {
+                            Ok(()) => {
+                                // Recovery was admitted. The quarantine is no
+                                // longer needed; the candidate now owns the
+                                // session and normal lifecycle errors apply.
+                                self.orphan_recovery_quarantine_session_id = None;
+                            }
+                            Err(err) => {
+                                // This is a transport-boundary failure, not a
+                                // speech decision. Keep notify alive and drop
+                                // the poisoned segment instead of returning an
+                                // error for every replayed packet.
+                                log::warn!(
+                                    "[coord] orphan embedded PCM recovery rejected once; quarantining session embedded_session_id={} error={err}",
+                                    chunk.session_id
+                                );
+                                self.reset_for_next_session();
+                            }
+                        }
                         // The current packet is intentionally not replayed into
                         // the detector: the detector is initialized
                         // asynchronously and the next packet preserves the

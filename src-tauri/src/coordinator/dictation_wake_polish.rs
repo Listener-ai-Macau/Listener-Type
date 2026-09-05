@@ -1332,6 +1332,13 @@ struct EmbeddedStreamingDictation {
     session: Option<EmbeddedAudioDictationSession>,
     speaker_candidate: Option<BufferedSpeakerCandidate>,
     embedded_session_id: Option<u32>,
+    /// A notify reopen may replay a middle-of-stream PCM tail after the
+    /// corresponding SessionStart was lost. If recovery cannot be admitted
+    /// (for example because an older owner is still stopping), quarantine that
+    /// exact embedded session id until the firmware advances to a new session.
+    /// Without this tombstone every subsequent PCM packet retried recovery and
+    /// drove an actor-restart storm, starving fresh wake candidates.
+    orphan_recovery_quarantine_session_id: Option<u32>,
     transcript: Option<crate::embedded_audio::EmbeddedAudioTranscriptResult>,
     pending_stop_expected_packet_count: Option<u16>,
     /// When set, continuous background will force-finish a STOP that never
@@ -1353,6 +1360,7 @@ impl Default for EmbeddedStreamingDictation {
             session: None,
             speaker_candidate: None,
             embedded_session_id: None,
+            orphan_recovery_quarantine_session_id: None,
             transcript: None,
             pending_stop_expected_packet_count: None,
             pending_stop_force_after: None,

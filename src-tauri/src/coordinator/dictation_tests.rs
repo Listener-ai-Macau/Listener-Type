@@ -5783,6 +5783,22 @@ fn orphan_pcm_without_explicit_start_must_not_open_dictation() {
 }
 
 #[test]
+fn orphan_recovery_failure_is_quarantined_per_embedded_session() {
+    let stream = include_str!("dictation_embedded_stream.rs");
+    let polish = include_str!("dictation_wake_polish.rs");
+    assert!(
+        polish.contains("orphan_recovery_quarantine_session_id"),
+        "stream actor must retain a per-session orphan recovery tombstone"
+    );
+    assert!(
+        stream.contains("dropping quarantined orphan embedded PCM")
+            && stream.contains("orphan embedded PCM recovery rejected once; quarantining session")
+            && stream.contains("coalescing quarantined embedded SessionStart"),
+        "failed orphan recovery must be coalesced instead of restarting the actor per packet"
+    );
+}
+
+#[test]
 fn automatic_start_never_bypasses_hidden_candidate_gate() {
     use crate::embedded_audio::SessionStartOrigin;
 
