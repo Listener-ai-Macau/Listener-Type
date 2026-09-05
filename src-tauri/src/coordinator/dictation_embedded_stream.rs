@@ -1313,7 +1313,10 @@ impl EmbeddedStreamingDictation {
             }
             let mut owner_verified_by_extraction = false;
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-            if wake_match.is_none() {
+            if wake_match.is_none()
+                || (!enrolled_owner_matched
+                    && phrase_signal != denzic_voice_activation_v1_core::PhraseSignal::None)
+            {
                 let source_owner_score = verification
                     .as_ref()
                     .map(|result| result.score)
@@ -1342,6 +1345,7 @@ impl EmbeddedStreamingDictation {
                     embedded_session_id,
                     &verification,
                     interference_owner_rise,
+                    wake_match.is_some(),
                 );
                 let lazy_terminal_extraction_started = !extraction_was_prefetched
                     && candidate.target_wake_extraction_task.is_some();
@@ -2610,6 +2614,32 @@ impl EmbeddedStreamingDictation {
         );
 
         if gate_decision != denzic_voice_activation_v1_core::GateDecision::Accept {
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            {
+                maybe_start_phrase_owner_recovery(
+                    candidate,
+                    &phrase,
+                    embedded_session_id,
+                    phrase_signal,
+                    enrolled_owner_matched,
+                );
+                if candidate.target_wake_extraction_task.is_some() {
+                    candidate.pending_phrase_match = Some(PendingAutomaticPhraseMatch {
+                        wake_match,
+                        phrase_signal,
+                        local_confirmation_ms,
+                        owner_verification_start_ms: pcm_ms.saturating_add(1),
+                        owner_verified_by_extraction: false,
+                    });
+                    log::info!(
+                        "[target-speaker] phrase hit held for separated owner recovery embedded_session_id={} pcm_ms={} owner_score={:.6}",
+                        embedded_session_id,
+                        pcm_ms,
+                        verification.as_ref().map(|result| result.score).unwrap_or_default()
+                    );
+                    return Ok(false);
+                }
+            }
             if let Some(retry_ms) =
                 next_owner_verification_retry_after(pcm_ms, &verification)
             {

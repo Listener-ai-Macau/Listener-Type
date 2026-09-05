@@ -1736,6 +1736,22 @@ fn heavy_wake_separation_requires_independent_partial_phrase_evidence() {
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 #[test]
+fn phrase_owner_mismatch_is_routed_to_separated_recovery_before_reject() {
+    let owner_gate = include_str!("dictation_wake_owner_gate.rs");
+    let stream = include_str!("dictation_embedded_stream.rs");
+    assert!(owner_gate.contains("maybe_start_phrase_owner_recovery"));
+    assert!(owner_gate.contains("\"phrase_owner_mismatch\""));
+    // Terminal recovery must also run when phrase evidence exists but the
+    // mixed full-buffer owner check failed; otherwise overlap is rejected
+    // before the separated waveform can be evaluated.
+    assert!(stream.contains(
+        "|| (!enrolled_owner_matched\n                    && phrase_signal != denzic_voice_activation_v1_core::PhraseSignal::None)"
+    ));
+    assert!(stream.contains("phrase_evidence: bool"));
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+#[test]
 fn terminal_lazy_wake_recovery_gets_its_own_bounded_budget() {
     assert_eq!(
         super::target_wake_extraction_terminal_wait_ms(false),

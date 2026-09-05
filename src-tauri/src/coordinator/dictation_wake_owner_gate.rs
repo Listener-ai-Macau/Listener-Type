@@ -314,6 +314,30 @@ fn maybe_start_target_wake_extraction(
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+fn maybe_start_phrase_owner_recovery(
+    candidate: &mut BufferedSpeakerCandidate,
+    phrase: &str,
+    embedded_session_id: u32,
+    phrase_signal: denzic_voice_activation_v1_core::PhraseSignal,
+    owner_matched: bool,
+) {
+    // A confirmed phrase with a contaminated full-buffer embedding is the
+    // overlap case the separated-owner path exists for. Previously a phrase
+    // hit followed by an owner mismatch was rejected before extraction ran.
+    if owner_matched || phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::None {
+        return;
+    }
+    if candidate.target_wake_extraction_task.is_none() {
+        start_target_wake_extraction(
+            candidate,
+            phrase,
+            embedded_session_id,
+            "phrase_owner_mismatch",
+        );
+    }
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 fn start_target_wake_extraction(
     candidate: &mut BufferedSpeakerCandidate,
     phrase: &str,
@@ -357,11 +381,12 @@ fn maybe_start_terminal_owner_compatible_wake_extraction(
     embedded_session_id: u32,
     verification: &Result<crate::speaker_verification::VerificationResult, String>,
     interference_owner_rise: bool,
+    phrase_evidence: bool,
 ) {
     let terminal_owner_compatible = terminal_wake_source_owner_compatible(verification);
     let decision = crate::speech_decision_kernel::decide_wake_recovery(
         crate::speech_decision_kernel::WakeRecoveryEvidence {
-            weak_phrase_hint: interference_owner_rise,
+            weak_phrase_hint: interference_owner_rise || phrase_evidence,
             terminal_owner_compatible,
         },
     );
