@@ -138,6 +138,7 @@ impl EmbeddedStreamingDictation {
                 kws_phrase_detected: false,
                 local_owner_overlap_near_confirmations: 0,
                 owner_near_phrase_confirmations: 0,
+                wake_interference_baseline: WakeInterferenceBaseline::default(),
                 #[cfg(target_os = "windows")]
                 local_absent_coverage: None,
                 kws_first_hit_at: None,

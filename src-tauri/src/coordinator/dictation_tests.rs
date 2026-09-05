@@ -2007,6 +2007,20 @@ fn target_speaker_endpoint_wake_interference_baseline_requests_only_separated_ve
 }
 
 #[test]
+fn target_speaker_endpoint_wake_interference_baseline_is_candidate_scoped() {
+    let source = include_str!("dictation_wake_polish.rs");
+    assert!(
+        source.contains("wake_interference_baseline: WakeInterferenceBaseline"),
+        "interference calibration must live on each buffered candidate"
+    );
+    assert!(
+        !source.contains("static WAKE_INTERFERENCE_BASELINE")
+            && !source.contains("with_wake_interference_baseline"),
+        "process-global interference calibration is a cross-session wake bypass"
+    );
+}
+
+#[test]
 fn dangling_continuation_gets_bounded_pause_without_slowing_complete_text() {
     assert!(
         super::EMBEDDED_DANGLING_FIRMWARE_KEEPALIVE_INTERVAL_MS

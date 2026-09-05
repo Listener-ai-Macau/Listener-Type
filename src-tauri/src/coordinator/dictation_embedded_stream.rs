@@ -1320,7 +1320,11 @@ impl EmbeddedStreamingDictation {
                     .map(|result| result.score)
                     .unwrap_or_default();
                 let (interference_owner_rise, interference_baseline_score, baseline_samples) =
-                    note_hidden_wake_interference_owner_score(source_owner_score, false);
+                    note_hidden_wake_interference_owner_score(
+                        &mut candidate.wake_interference_baseline,
+                        source_owner_score,
+                        false,
+                    );
                 log::info!(
                     "[wake-phrase] interference owner baseline embedded_session_id={} source_owner_score={:.6} baseline_score={:.6} baseline_samples={} separated_verification_requested={}",
                     embedded_session_id,

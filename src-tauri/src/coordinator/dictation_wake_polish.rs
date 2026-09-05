@@ -384,20 +384,6 @@ impl WakeInterferenceBaseline {
     }
 }
 
-/// Model-adapter statistics only. Candidate/session ownership lives exclusively
-/// in `Inner.recording_lifecycle`; this process-global baseline is deliberately
-/// unable to activate, reject, promote or stop a recording.
-static WAKE_INTERFERENCE_BASELINE: OnceLock<std::sync::Mutex<WakeInterferenceBaseline>> =
-    OnceLock::new();
-
-fn with_wake_interference_baseline<T>(f: impl FnOnce(&mut WakeInterferenceBaseline) -> T) -> T {
-    let mut state = WAKE_INTERFERENCE_BASELINE
-        .get_or_init(|| std::sync::Mutex::new(WakeInterferenceBaseline::default()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    f(&mut state)
-}
-
 static WAKE_DIAGNOSTIC_CAPTURE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static WAKE_DIAGNOSTIC_CLEANUP_RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -556,17 +542,12 @@ fn take_hidden_automatic_candidate_promotion(
 }
 
 fn note_hidden_wake_interference_owner_score(
+    baseline: &mut WakeInterferenceBaseline,
     score: f32,
     mixed_phrase_seen: bool,
 ) -> (bool, f32, u8) {
-    with_wake_interference_baseline(|state| {
-        let owner_rise = state.observe(score, mixed_phrase_seen);
-        (
-            owner_rise,
-            state.score,
-            state.samples,
-        )
-    })
+    let owner_rise = baseline.observe(score, mixed_phrase_seen);
+    (owner_rise, baseline.score, baseline.samples)
 }
 
 fn discard_pre_press_candidate_pcm(pcm: &mut Vec<u8>) -> usize {
@@ -683,6 +664,10 @@ struct BufferedSpeakerCandidate {
     /// Interference can shift the phrase inside a rolling window, so this
     /// ledger is intentionally not limited to start-aligned matches.
     owner_near_phrase_confirmations: u8,
+    /// Interference calibration is scoped to this candidate. A process-global
+    /// baseline let a previous room/foreign-speaker candidate bias later wake
+    /// decisions, making sensitivity intermittent across recordings.
+    wake_interference_baseline: WakeInterferenceBaseline,
     /// Absolute PCM interval inspected by the newest non-stale local Absent.
     /// A KWS fallback may not override it when it already covered that hit.
     #[cfg(target_os = "windows")]
