@@ -5482,6 +5482,23 @@ fn installed_terminal_session_210_uses_fused_owner_recovery() {
 }
 
 #[test]
+fn target_speaker_endpoint_wake_terminal_and_live_paths_share_one_arbitration_seam() {
+    let stream = include_str!("dictation_embedded_stream.rs");
+    let uses = stream.matches("arbitrate_candidate_wake(").count();
+    assert_eq!(
+        uses, 2,
+        "terminal and live call sites must remain on the single arbitration seam"
+    );
+    assert_eq!(
+        stream
+            .matches("speech_decision_kernel::arbitrate_wake(")
+            .count(),
+        0,
+        "streaming coordinator must not bypass the shared arbitration seam"
+    );
+}
+
+#[test]
 fn local_confirmation_adds_context_with_a_strict_attempt_cap() {
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(0),

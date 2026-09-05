@@ -218,6 +218,37 @@ fn evaluate_candidate_owner_gate(
     )
 }
 
+/// Single owner/phrase arbitration seam for every wake-candidate lifecycle.
+///
+/// Terminal and live streaming paths may finish their evidence at different
+/// times, but they must not each reimplement the policy that turns that
+/// evidence into access. Keeping the extraction override here prevents a
+/// future path from accidentally letting a voiceprint result manufacture
+/// phrase evidence or from applying a different owner policy at terminal
+/// versus live boundaries.
+fn arbitrate_candidate_wake(
+    candidate: &mut BufferedSpeakerCandidate,
+    phrase_signal: denzic_voice_activation_v1_core::PhraseSignal,
+    verification: &Result<crate::speaker_verification::VerificationResult, String>,
+    owner_verified_by_extraction: bool,
+    terminal: bool,
+) -> (
+    OwnerGateEvaluation,
+    crate::speech_decision_kernel::WakeArbitration,
+) {
+    let mut owner_gate = evaluate_candidate_owner_gate(candidate, phrase_signal, verification);
+    if owner_verified_by_extraction {
+        owner_gate.access = crate::speech_decision_kernel::OwnerAccessEvidence::EnrolledMatch;
+        owner_gate.recovered_by_local_phrase = true;
+    }
+    let arbitration = crate::speech_decision_kernel::arbitrate_wake(
+        phrase_signal,
+        owner_gate.access,
+        terminal,
+    );
+    (owner_gate, arbitration)
+}
+
 // Run terminal verification before phrase recall. Otherwise repeated local-ASR
 // Absents can skip the independent KWS cascade even when the completed buffer
 // strongly matches the enrolled owner. Owner evidence only permits KWS to run;

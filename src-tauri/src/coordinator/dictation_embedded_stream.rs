@@ -1311,7 +1311,6 @@ impl EmbeddedStreamingDictation {
                     LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS
                 );
             }
-            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             let mut owner_verified_by_extraction = false;
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             if wake_match.is_none() {
@@ -1381,17 +1380,11 @@ impl EmbeddedStreamingDictation {
                 .as_ref()
                 .map(|_| phrase_signal)
                 .unwrap_or(denzic_voice_activation_v1_core::PhraseSignal::None);
-            let mut owner_gate =
-                evaluate_candidate_owner_gate(&mut candidate, effective_phrase_signal, &verification);
-            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-            if owner_verified_by_extraction {
-                owner_gate.access =
-                    crate::speech_decision_kernel::OwnerAccessEvidence::EnrolledMatch;
-                owner_gate.recovered_by_local_phrase = true;
-            }
-            let arbitration = crate::speech_decision_kernel::arbitrate_wake(
+            let (owner_gate, arbitration) = arbitrate_candidate_wake(
+                &mut candidate,
                 effective_phrase_signal,
-                owner_gate.access,
+                &verification,
+                owner_verified_by_extraction,
                 true,
             );
             let gate_decision = arbitration.decision;
@@ -2585,17 +2578,14 @@ impl EmbeddedStreamingDictation {
             Ok(result) => result,
             Err(err) => (Err(format!("声纹验证任务失败: {err}")), 0),
         };
-        let mut owner_gate = evaluate_candidate_owner_gate(candidate, phrase_signal, &verification);
-        if owner_verified_by_extraction {
-            owner_gate.access = crate::speech_decision_kernel::OwnerAccessEvidence::EnrolledMatch;
-            owner_gate.recovered_by_local_phrase = true;
-        }
         let total_ms = kws_ms
             .saturating_add(local_confirmation_ms)
             .saturating_add(voiceprint_ms);
-        let arbitration = crate::speech_decision_kernel::arbitrate_wake(
+        let (owner_gate, arbitration) = arbitrate_candidate_wake(
+            candidate,
             phrase_signal,
-            owner_gate.access,
+            &verification,
+            owner_verified_by_extraction,
             false,
         );
         let gate_decision = arbitration.decision;
