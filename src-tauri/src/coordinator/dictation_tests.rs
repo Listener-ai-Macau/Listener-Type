@@ -4045,6 +4045,25 @@ fn target_speaker_endpoint_has_one_identity_scoped_stop_commit() {
     assert!(public_stop_feedback < provider_final);
 
     let transport = include_str!("dictation.rs");
+    let candidate_stop_dispatcher = transport
+        .split("fn dispatch_owned_candidate_transport_stop")
+        .nth(1)
+        .expect("candidate transport stop dispatcher");
+    let ownership_check = candidate_stop_dispatcher
+        .find("rejected_candidate_still_owns_transport_stop(candidate_id)")
+        .expect("candidate stop ownership check");
+    let dispatcher_write = candidate_stop_dispatcher
+        .find("send_recording_control_stop(")
+        .expect("candidate stop transport write");
+    assert!(ownership_check < dispatcher_write);
+    assert!(
+        !transport
+            .split("fn reject_hidden_automatic_candidate")
+            .nth(1)
+            .unwrap_or_default()
+            .contains("send_recording_control_stop("),
+        "hidden candidate rejection must not bypass the shared stop dispatcher"
+    );
     let stop_transport = transport
         .split("pub(super) async fn request_embedded_ble_recording_stop_from_host")
         .nth(1)
