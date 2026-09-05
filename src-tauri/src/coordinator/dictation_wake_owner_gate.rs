@@ -73,7 +73,22 @@ fn next_owner_verification_retry_after(
         // A short voiced span is a normal early-window condition, not a terminal
         // identity decision. Other runtime errors stay fail-closed, but receive
         // the same bounded 1.8s/2.4s retry ladder before final rejection.
-        Ok(_) | Err(_) => next_owner_verification_retry_ms(pcm_ms),
+        Ok(_) | Err(_) => {
+            // If local ASR has just supplied a complete phrase, the 1.1 s
+            // prefetch is only a warm-up sample. Between the 1.8 s and 2.4 s
+            // rungs the candidate already contains enough new audio for a
+            // materially better owner embedding, so retry against the current
+            // buffer immediately instead of inserting an empty 600 ms wait.
+            // Keep the normal ladder at the exact 1.8 s rung and after 2.4 s;
+            // this is a bounded phrase-backed fast path, not a lower threshold.
+            if pcm_ms > OWNER_VERIFICATION_SNAPSHOT_MS[1]
+                && pcm_ms < OWNER_VERIFICATION_SNAPSHOT_MS[2]
+            {
+                Some(pcm_ms)
+            } else {
+                next_owner_verification_retry_ms(pcm_ms)
+            }
+        }
     }
 }
 

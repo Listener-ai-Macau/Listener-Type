@@ -5182,6 +5182,10 @@ fn short_or_failed_early_owner_window_retries_before_fail_closed_reject() {
         Some(2_400)
     );
     assert_eq!(
+        super::next_owner_verification_retry_after(1_869, &short),
+        Some(1_869)
+    );
+    assert_eq!(
         super::next_owner_verification_retry_after(2_400, &short),
         None,
         "verification errors remain fail-closed after the bounded retry ladder"
