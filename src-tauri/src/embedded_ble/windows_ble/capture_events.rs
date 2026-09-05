@@ -97,12 +97,23 @@ fn wait_post_ota_notify_target_connected_with_timeout(
     }
 }
 
+fn should_ignore_stale_disconnect_status(
+    device_connected: bool,
+    gatt_session_active: bool,
+    active_capture: bool,
+) -> bool {
+    gatt_session_active && (device_connected || active_capture)
+}
+
 /// Windows can deliver a queued `ConnectionStatusChanged(Disconnected)` callback
-/// after the same link has already reconnected and the notify CCCD has been
-/// enabled again.  Treat that callback as stale only when both the device and
-/// its GATT session are currently healthy; a genuinely disconnected target is
-/// still handled by the normal recovery path below.
-fn stale_disconnect_signal_after_reconnect(cleanup: &NotifyCleanup) -> bool {
+/// while the GATT session is still active and an audio capture is receiving
+/// packets. Treat that callback as advisory for the active capture: a real
+/// loss will be detected by the heartbeat/notification watchdog, while a
+/// transient WinRT status flap must not abort a live recording after 5 seconds.
+fn stale_disconnect_signal_after_reconnect(
+    cleanup: &NotifyCleanup,
+    collector: &crate::embedded_audio::SessionCollector,
+) -> bool {
     let device_connected = cleanup.target.device.as_ref().is_some_and(|device| {
         device
             .ConnectionStatus()
@@ -113,7 +124,11 @@ fn stale_disconnect_signal_after_reconnect(cleanup: &NotifyCleanup) -> bool {
             .SessionStatus()
             .is_ok_and(|status| status == GattSessionStatus::Active)
     });
-    device_connected && session_active
+    should_ignore_stale_disconnect_status(
+        device_connected,
+        session_active,
+        collector_has_active_recoverable_session(collector),
+    )
 }
 
 pub fn capture_notification_events(
@@ -690,7 +705,7 @@ fn capture_notification_events_until_cancelled_impl(
             }
             BleCaptureSignal::Disconnected(reason) => {
                 if reason.contains("device connection status changed to Disconnected")
-                    && stale_disconnect_signal_after_reconnect(&cleanup)
+                    && stale_disconnect_signal_after_reconnect(&cleanup, &collector)
                 {
                     log::info!(
                         "[embedded-ble] capture #{capture_id}: ignoring stale Disconnected event because the device and GATT session are connected/active again"

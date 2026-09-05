@@ -2833,3 +2833,17 @@ fn transient_gatt_inactive_does_not_tear_down_a_connected_notify_target() {
         "transient GATT Inactive must preserve the existing notify channel"
     );
 }
+
+#[test]
+fn transient_device_disconnect_does_not_abort_active_gatt_capture() {
+    assert!(should_ignore_stale_disconnect_status(true, true, true));
+    assert!(
+        should_ignore_stale_disconnect_status(false, true, true),
+        "an active GATT session with an in-flight audio capture must survive a WinRT device-status flap"
+    );
+    assert!(
+        !should_ignore_stale_disconnect_status(false, true, false),
+        "an idle target with no device connection must still enter normal recovery"
+    );
+    assert!(!should_ignore_stale_disconnect_status(true, false, true));
+}
