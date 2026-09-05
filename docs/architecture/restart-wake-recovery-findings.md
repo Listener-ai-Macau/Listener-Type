@@ -29,3 +29,18 @@
 ## 当前状态
 
 该缺陷已定位到 BLE 会话恢复/控制写入边界，尚未宣称修复完成。后续代码修改必须先覆盖上述代际隔离、幂等 STOP 和恢复收敛，再运行规定的 Rust 测试、固件静态检查、build/flash 与重启后运行日志验收。
+
+## Type 重启后的新增证据（2026-09-05）
+
+主机端 Type 使用最新 1.0.5 release 重启后，`%LOCALAPPDATA%\Listener Type\Logs\listener-type.log` 仍观察到固件 session 计数回退：最近 504 个 `VoiceActivation` `SessionStart` 中有 15 次从 `7/8/9/10...` 回到 `1`，例如：
+
+```text
+13:29:04  session 9 -> 1
+13:30:07  session 8 -> 1
+13:31:12  session 7 -> 1
+13:32:15  session 7 -> 1
+13:33:20  session 7 -> 1
+13:34:25  session 8 -> 1
+```
+
+这些回退大约每 63–75 秒发生，并伴随 GATT Inactive → Active。由于固件 `s_session_id_counter` 只在设备启动时归零，这强烈指向固件重启或 BLE 链路重建后的固件状态重置，而不是声纹判定问题。当前 Type 日志尾部没有新的 `protocol_error=14`，但没有 COM5 就无法读取对应的 `reset_reason`；必须在设备重新枚举后抓取新鲜固件诊断日志完成分型。
