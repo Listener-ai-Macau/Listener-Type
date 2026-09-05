@@ -322,6 +322,22 @@ dispatch 只负责串行记录事件，并不验证 session identity，因此旧
   新 session；
 - 已删除不在生产路径中的旧 preview stabilization/stitching 算法和对应“自证测试”。
 
+### BLE 连接状态与录音会话边界（2026-09-05）
+
+Windows `BluetoothLEDevice.ConnectionStatusChanged(Disconnected)` 是异步状态通知，
+可能在同一物理链路已经恢复、GATT 仍为 Active、且音频通知仍在到达之后才投递。它
+不能单独作为录音会话的断链裁决，否则一次状态抖动会启动 5 秒恢复超时并拆掉正常
+notify，表现为一段时间完全无法唤醒。
+
+- 活动录音中，只有“GATT 非 Active 且没有继续收包”或 heartbeat/通知 watchdog
+  超时，才可以进入 link recovery；单个延迟的设备 Disconnected 回调只能记录为
+  advisory；
+- 空闲 notify 目标没有可恢复录音时，设备断开仍立即进入普通恢复路径；
+- 连接恢复不得改变当前逻辑 candidate/session identity，也不得清理已提交的主人
+  连续性或预览；恢复失败后只重建物理 notify 壳；
+- BLE recovery 与录音 endpoint 完全正交：它不能推进主人时钟、提交 STOP 或改写
+  final transcript。
+
 ### 最终文本只有一个原子仲裁器（2026-09-04，session 2744）
 
 现场中文干扰会话 `a86a4b77-c764-404e-8121-6a7f6ba6091e` 中，Provider 已经把
