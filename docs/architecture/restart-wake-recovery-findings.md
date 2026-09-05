@@ -44,3 +44,14 @@
 ```
 
 这些回退大约每 63–75 秒发生，并伴随 GATT Inactive → Active。由于固件 `s_session_id_counter` 只在设备启动时归零，这强烈指向固件重启或 BLE 链路重建后的固件状态重置，而不是声纹判定问题。当前 Type 日志尾部没有新的 `protocol_error=14`，但没有 COM5 就无法读取对应的 `reset_reason`；必须在设备重新枚举后抓取新鲜固件诊断日志完成分型。
+
+## 新鲜固件抓取结果（2026-09-05 21:40）
+
+COM5 重新出现后执行一次受限抓取，得到 `tests/artifacts/diag_log_20260905-214037.jsonl`：
+
+```text
+sys_boot_safety: reset_reason=usb(11), crash_count=0, safe_mode=0
+sys_boot: boot_reason=boot_reset(2)
+```
+
+这次记录没有 WDT 或 panic 证据。但抓取脚本本身会打开 Windows 串口，ESP32-S3 原生 USB Serial/JTAG 在打开端口时可能接收到 DTR/RTS 复位序列；因此这份 `usb(11)` 只能确认“该次启动是 USB 复位”，不能单独证明是自发重启。后续验收必须在不打开 COM5 的观察窗口中先记录 session 计数回退，再做一次诊断读取，并把读取动作造成的 USB 复位单独标记，避免污染因果判断。
