@@ -398,3 +398,14 @@ sealed provider final 后，仍会依次执行四条可写路径：owner-only �
 结构回归会拒绝旧 `select_target_speaker_final`、`raw = replayed`、
 `raw.text = recovered` 和 partial-preview 直接恢复语句重新出现。以后增加任何模型或
 fallback，都只能增加 `ProductFinalCandidates` 的证据字段，禁止新增终稿写出口。
+
+### 干扰基线必须绑定唤醒候选（2026-09-05）
+
+旧实现把唤醒干扰基线放在进程级 `OnceLock<Mutex<...>>` 中。每个物理窗口结束时
+仍会把主人分数写入同一份状态，因此上一段录音的房间/旁人分数会改变下一段候选
+是否请求分离验证；这会表现为同一句话有时灵敏、有时完全不唤醒。
+
+现在 `WakeInterferenceBaseline` 是 `BufferedSpeakerCandidate` 的字段，只能由当前
+候选携带和销毁；源码结构测试禁止重新引入进程级基线或旁路 helper。它仍然只是
+分离验证的证据触发器，不能直接激活、拒绝、停止录音，也不能修改终稿。后续若要
+扩展基线采样，必须继续写入候选 reducer，不能恢复跨 session 的隐式状态。
