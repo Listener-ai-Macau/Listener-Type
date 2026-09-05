@@ -424,3 +424,14 @@ fallback，都只能增加 `ProductFinalCandidates` 的证据字段，禁止新�
 和 `speech_decision_kernel::arbitrate_wake`。声纹分离只作为 owner evidence，不能
 制造 phrase evidence；`terminal` 只描述生命周期边界，不改变证据优先级。结构测试
 会拒绝 coordinator 直接调用底层 `arbitrate_wake`，避免未来再长出第三条旁路。
+
+### 隐藏候选停止也走同一所有权调度器（2026-09-05）
+
+隐藏候选被拒绝、或唤醒后续接管在 TTL 内未建立时，都需要让固件结束当前物理
+窗口。这两个安全分支以前各自延迟、检查 session、发送 `VREC:STOP`，容易在新
+候选已经开始时把旧 STOP 发出去。
+
+现在二者统一调用 `dispatch_owned_candidate_transport_stop`：发送前只接受仍由
+该 candidate 持有的 transport ownership，发送动作和 stale 检查在同一个调度器内
+完成。正常主人录音仍由 `request_embedded_ble_recording_stop_from_host` 的生命周期
+事务负责；隐藏候选不能伪造产品 session，也不能直接改写终稿。
