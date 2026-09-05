@@ -7415,6 +7415,39 @@ fn unresolved_local_speech_hold_is_capped_two_seconds_after_confirmed_owner() {
 }
 
 #[test]
+fn uncertain_owner_tail_cannot_trigger_inactive_endpoint_mid_sentence() {
+    // Live session 1226/77cf... had a confirmed owner watermark at 15.6s,
+    // then a low-energy same-speaker window reached 17.3s with score 0.1089.
+    // Cloud and local owner watermarks were equal, so the previous policy
+    // incorrectly treated that Uncertain tail as silence and stopped at 17.7s.
+    let update = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(15_632),
+        provider_audio_duration_ms: Some(17_700),
+        audio_duration_ms: Some(17_700),
+        local_speech_end_ms: Some(17_300),
+        local_target_speech_end_ms: Some(15_600),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(15_632),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    assert!(super::has_uncertain_owner_identity_tail(&update));
+    let now = std::time::Instant::now();
+    assert!(!super::SettledTargetEndpointClock::update_allows_endpoint(
+        &update,
+        false,
+        Some(false),
+        None,
+        now - std::time::Duration::from_secs(2),
+        now,
+    ));
+}
+
+#[test]
 fn installed_session_1284_cloud_row_cannot_renew_enrolled_owner_endpoint() {
     // Session 1284: the local verifier last confirmed the owner at 11.9s.
     // Later Uncertain/low-score room speech was folded into the same cloud

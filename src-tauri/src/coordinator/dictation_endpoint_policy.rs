@@ -129,13 +129,21 @@ impl SettledTargetEndpointClock {
         let bounded_unclassified_local_speech = if update.local_speaker_tracking_enabled
             && update.local_target_speech_end_ms.is_some()
         {
-            // Owner-only endpoint contract: local target activity is the
-            // authority. A generic energy edge after it must not renew this
-            // clock, even briefly.
-            has_unresolved_recent_owner_speech(
-                update,
-                EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
-            )
+            // Once the wake owner is established, a later local window can be
+            // genuinely the same speaker while its embedding is temporarily
+            // Uncertain (quiet syllable, overlap, or a short boundary split).
+            // The old branch only accepted provider-uncovered owner speech;
+            // when cloud and local watermarks were equal it treated that
+            // Uncertain tail as silence and fired `inactive_1000ms` mid-word.
+            // Keep the bounded identity-uncertainty hold here. Explicit
+            // NonTarget evidence still wins through
+            // `local_speech_confidently_non_target`, and the existing
+            // two-second cap guarantees that room noise cannot hold forever.
+            has_uncertain_owner_identity_tail(update)
+                || has_unresolved_recent_owner_speech(
+                    update,
+                    EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+                )
         } else if update.local_speaker_tracking_enabled && update.target_speech_end_ms.is_some() {
             // Cloud attribution without a positive local owner edge is weaker:
             // retain only speech close to that owner boundary. Otherwise fresh
