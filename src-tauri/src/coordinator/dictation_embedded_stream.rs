@@ -1759,6 +1759,7 @@ impl EmbeddedStreamingDictation {
         if let Some(candidate) = self.speaker_candidate.as_mut() {
             if candidate.kind == BufferedSpeakerCandidateKind::Verification {
                 maybe_prefetch_owner_verification(candidate, &phrase, embedded_session_id);
+                poll_prefetched_owner_verification(candidate, embedded_session_id).await;
             }
         }
         #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]

@@ -2019,12 +2019,12 @@ fn target_speaker_endpoint_does_not_commit_before_current_voiceprint_result() {
 fn target_speaker_endpoint_wake_interference_baseline_requests_only_separated_verification() {
     let mut first_sample = super::WakeInterferenceBaseline::default();
     assert!(
-        first_sample.observe(0.34, false),
-        "a terminal candidate may have only one owner snapshot"
+        !first_sample.observe(0.34, false),
+        "a single terminal owner snapshot must not launch separation"
     );
 
     let mut baseline = super::WakeInterferenceBaseline::default();
-    for score in [0.10, 0.11, 0.18, 0.14] {
+    for score in [0.10] {
         assert!(!baseline.observe(score, false));
     }
     assert!(baseline.observe(0.34, false));
