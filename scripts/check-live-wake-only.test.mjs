@@ -16,6 +16,7 @@ function acceptedAttempt(index, overrides = {}) {
   const coordinatorId = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
   const base = Date.parse("2026-08-12T12:00:00.000Z") + index * 10_000;
   const visibleMs = overrides.visibleMs ?? 900;
+  const acceptOffsetMs = overrides.acceptOffsetMs ?? 20;
   const wakeEndMs = overrides.wakeEndMs ?? 650;
   const bodyWaitMs = overrides.bodyWaitMs ?? 3_100;
   const missing = overrides.missing ?? 0;
@@ -24,7 +25,7 @@ function acceptedAttempt(index, overrides = {}) {
     `${stamp(base, 2)} [INFO] source=backend.embedded_ble_session_actor event=ble_packet event=start embedded_session_id=${embeddedId} origin=VoiceActivation`,
     `${stamp(base, 4)} [INFO] source=backend.embedded_ble_session_actor event=ble_packet event=start embedded_session_id=${embeddedId} origin=VoiceActivation`,
     `${stamp(base, visibleMs - 40)} [INFO] source=backend.capsule event=emit_request session_id=${coordinatorId} state=Recording visible=true`,
-    `${stamp(base, visibleMs - 20)} [INFO] [wake-phrase] live automatic session activated and released embedded_session_id=${embeddedId} wake_end_s=${(wakeEndMs / 1_000).toFixed(3)}`,
+    `${stamp(base, visibleMs - acceptOffsetMs)} [INFO] [wake-phrase] live automatic session activated and released embedded_session_id=${embeddedId} wake_end_s=${(wakeEndMs / 1_000).toFixed(3)}`,
     `${stamp(base, visibleMs)} [INFO] source=frontend.capsule event=event_received state=recording detail={"sessionId":"${coordinatorId}","insertedChars":null}`,
     `${stamp(base, visibleMs + bodyWaitMs - 50)} [INFO] complete session received; keeping notify open (session_id=Some(${embeddedId}), pcm_bytes=150000, packets=360)`,
     `${stamp(base, visibleMs + bodyWaitMs - 40)} [INFO] embedded_session_id=${embeddedId} coordinator_session_id=${coordinatorId}`,
@@ -76,7 +77,8 @@ test("passes twenty correlated wake-only attempts and deduplicates BLE starts", 
   assert.equal(report.observedAttemptCount, 20);
   assert.equal(report.successfulAttemptCount, 20);
   assert.equal(report.attempts[0].duplicateStartCount, 2);
-  assert.equal(report.aggregate.wakeToVisibleP95Ms, 900);
+  assert.equal(report.aggregate.acceptedWakeToVisibleP95Ms, 20);
+  assert.equal(report.aggregate.candidateWakeToVisibleP95Ms, 900);
   assert.equal(report.aggregate.phraseTailToVisibleP95Ms, 250);
 });
 
@@ -144,9 +146,9 @@ test("rejects packet loss, QueueFull, notify failures and latency breaches", () 
   assert.equal(faultReport.status, "NO_GO");
   assert.equal(faultReport.transportFaultCount, 1);
 
-  const latencyReport = analyzeLiveWakeOnlyLog(fixture(20, 0, 7, { visibleMs: 1_201, wakeEndMs: 650 }), { attemptIds: attemptIds(20) });
+  const latencyReport = analyzeLiveWakeOnlyLog(fixture(20, 0, 7, { visibleMs: 1_201, acceptOffsetMs: 1_201, wakeEndMs: 650 }), { attemptIds: attemptIds(20) });
   assert.equal(latencyReport.status, "NO_GO");
-  assert.match(latencyReport.failures.join("\n"), /wake-to-visible latency exceeds 1200 ms/);
+  assert.match(latencyReport.failures.join("\n"), /wake-to-visible latency exceeds 500 ms/);
   assert.match(latencyReport.failures.join("\n"), /phrase-tail-to-visible latency exceeds 500 ms/);
 });
 

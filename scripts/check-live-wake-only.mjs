@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_THRESHOLDS = Object.freeze({
   requiredAttempts: 20,
   requiredSuccesses: 19,
-  wakeP95Ms: 1_000,
-  wakeMaxMs: 1_200,
+  wakeP95Ms: 500,
+  wakeMaxMs: 500,
   phraseTailP95Ms: 350,
   phraseTailMaxMs: 500,
   bodyWaitMinMs: 3_000,
@@ -123,6 +123,9 @@ function newAttempt(embeddedSessionId, startedAtMs, line) {
   return {
     embeddedSessionId,
     coordinatorSessionId: null,
+    acceptedAtMs: null,
+    acceptedToVisibleMs: null,
+    candidateToVisibleMs: null,
     startedAt: startedAtMs === null ? null : new Date(startedAtMs).toISOString(),
     startLine: line,
     duplicateStartCount: 0,
@@ -188,6 +191,7 @@ export function analyzeLiveWakeOnlyLog(text, options = {}) {
   const beforeMs = options.before ? Date.parse(options.before) : Number.POSITIVE_INFINITY;
   const attempts = new Map();
   const coordinatorToEmbedded = new Map();
+  const acceptedWakeAt = new Map();
   const sessionEvidence = new Map();
   const pendingTransport = [];
   const transportFaults = [];
@@ -232,6 +236,7 @@ export function analyzeLiveWakeOnlyLog(text, options = {}) {
         attempts.set(embeddedId, attempt);
         attempt.decision = "accepted";
         attempt.decisionReason = "wake_phrase_match";
+        if (!acceptedWakeAt.has(embeddedId) && atMs !== null) acceptedWakeAt.set(embeddedId, atMs);
         const wakeEndSeconds = numberField(line, "wake_end_s");
         attempt.wakeEndMs = wakeEndSeconds === null ? null : Math.round(wakeEndSeconds * 1_000);
       }
@@ -333,8 +338,16 @@ export function analyzeLiveWakeOnlyLog(text, options = {}) {
   for (const attempt of ordered) {
     if (attempt.classification === "missing_candidate") continue;
     const startedAtMs = attempt.startedAt ? Date.parse(attempt.startedAt) : null;
+    const acceptedAtMs = acceptedWakeAt.get(attempt.embeddedSessionId)
+      ?? startedAtMs;
+    attempt.acceptedAtMs = acceptedAtMs;
+    if (acceptedAtMs !== null) attempt.acceptedAt = new Date(acceptedAtMs).toISOString();
     if (startedAtMs !== null && attempt.frontendRecordingAtMs !== null) {
-      attempt.wakeToVisibleMs = attempt.frontendRecordingAtMs - startedAtMs;
+      attempt.candidateToVisibleMs = attempt.frontendRecordingAtMs - startedAtMs;
+    }
+    if (acceptedAtMs !== null && attempt.frontendRecordingAtMs !== null) {
+      attempt.acceptedToVisibleMs = Math.max(0, attempt.frontendRecordingAtMs - acceptedAtMs);
+      attempt.wakeToVisibleMs = attempt.acceptedToVisibleMs;
     }
     if (startedAtMs !== null && attempt.frontendRecordingAtMs !== null && attempt.wakeEndMs !== null) {
       attempt.phraseTailToVisibleMs = attempt.frontendRecordingAtMs - startedAtMs - attempt.wakeEndMs;
@@ -372,7 +385,7 @@ export function analyzeLiveWakeOnlyLog(text, options = {}) {
     if (attempt.classification === "wake_only" && attempt.bodyWaitMs !== null && attempt.bodyWaitMs < thresholds.bodyWaitMinMs) {
       attempt.errors.push(`wake-only body wait shorter than ${thresholds.bodyWaitMinMs} ms`);
     }
-    if (attempt.wakeToVisibleMs !== null && attempt.wakeToVisibleMs > thresholds.wakeMaxMs) {
+    if (attempt.acceptedToVisibleMs !== null && attempt.acceptedToVisibleMs > thresholds.wakeMaxMs) {
       attempt.errors.push(`wake-to-visible latency exceeds ${thresholds.wakeMaxMs} ms`);
     }
     if (attempt.phraseTailToVisibleMs !== null && attempt.phraseTailToVisibleMs > thresholds.phraseTailMaxMs) {
@@ -389,9 +402,14 @@ export function analyzeLiveWakeOnlyLog(text, options = {}) {
   const successful = ordered.filter(attempt => attempt.success);
   const eligible = ordered.filter(attempt => attempt.classification !== "body_present");
   const acceptedVisible = ordered.filter(attempt => attempt.decision === "accepted" && attempt.frontendRecordingAtMs !== null);
-  const wakeValues = acceptedVisible.map(attempt => attempt.wakeToVisibleMs).filter(Number.isFinite);
+  const wakeValues = acceptedVisible.map(attempt => attempt.acceptedToVisibleMs).filter(Number.isFinite);
+  const candidateWakeValues = acceptedVisible.map(attempt => attempt.candidateToVisibleMs).filter(Number.isFinite);
   const phraseTailValues = acceptedVisible.map(attempt => attempt.phraseTailToVisibleMs).filter(Number.isFinite);
   const aggregate = {
+    acceptedWakeToVisibleP95Ms: percentile(wakeValues, 0.95),
+    acceptedWakeToVisibleMaxMs: wakeValues.length > 0 ? Math.max(...wakeValues) : null,
+    candidateWakeToVisibleP95Ms: percentile(candidateWakeValues, 0.95),
+    candidateWakeToVisibleMaxMs: candidateWakeValues.length > 0 ? Math.max(...candidateWakeValues) : null,
     wakeToVisibleP95Ms: percentile(wakeValues, 0.95),
     wakeToVisibleMaxMs: wakeValues.length > 0 ? Math.max(...wakeValues) : null,
     phraseTailToVisibleP95Ms: percentile(phraseTailValues, 0.95),
@@ -412,10 +430,10 @@ export function analyzeLiveWakeOnlyLog(text, options = {}) {
   if (eligible.length >= thresholds.requiredAttempts && successful.length < thresholds.requiredSuccesses) {
     failures.push(`only ${successful.length}/${eligible.length} eligible attempts succeeded; ${thresholds.requiredSuccesses} required`);
   }
-  if (eligible.length >= thresholds.requiredAttempts && aggregate.wakeToVisibleP95Ms > thresholds.wakeP95Ms) {
+  if (eligible.length >= thresholds.requiredAttempts && aggregate.acceptedWakeToVisibleP95Ms > thresholds.wakeP95Ms) {
     failures.push(`wake-to-visible p95 exceeds ${thresholds.wakeP95Ms} ms`);
   }
-  if (aggregate.wakeToVisibleMaxMs > thresholds.wakeMaxMs) {
+  if (aggregate.acceptedWakeToVisibleMaxMs > thresholds.wakeMaxMs) {
     failures.push(`wake-to-visible max exceeds ${thresholds.wakeMaxMs} ms`);
   }
   if (eligible.length >= thresholds.requiredAttempts && aggregate.phraseTailToVisibleP95Ms > thresholds.phraseTailP95Ms) {
