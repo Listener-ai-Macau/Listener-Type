@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULT_THRESHOLDS = Object.freeze({
   requiredSamples: 20,
-  wakeP95Ms: 1_200,
-  wakeMaxMs: 1_500,
+  wakeP95Ms: 500,
+  wakeMaxMs: 500,
   phraseTailP95Ms: 350,
   phraseTailMaxMs: 500,
   previewP95Ms: 1_500,
@@ -97,6 +97,10 @@ export function analyzeLiveWakeLog(text, options = {}) {
   const afterMs = options.after ? Date.parse(options.after) : Number.NEGATIVE_INFINITY;
   const samples = new Map();
   const coordinatorToEmbedded = new Map();
+  const acceptedWakeAt = new Map();
+  const recordingAt = new Map();
+  const bodyStartedAt = new Map();
+  const firstNonemptyPreviewAt = new Map();
   const endpoints = new Map();
   const settledTargets = new Map();
   const previewLatencies = new Map();
@@ -123,6 +127,32 @@ export function analyzeLiveWakeLog(text, options = {}) {
       pendingOwnerMode = { enrolled: true, timestampMs };
     }
 
+    // The product's accepted-wake boundary is the single owner-gated Accept
+    // decision.  The old checker used the candidate-start elapsed counter,
+    // which includes the KWS/owner-confirmation window and is not the
+    // accepted-wake -> Recording latency required by the acceptance contract.
+    if (line.includes("[wake-phrase] automatic streaming gate") && line.includes("gate_decision=Accept")) {
+      const embeddedId = integerField(line, "embedded_session_id");
+      if (embeddedId !== null && timestampMs !== null && !acceptedWakeAt.has(embeddedId)) {
+        acceptedWakeAt.set(embeddedId, timestampMs);
+      }
+    }
+
+    const capsuleRecording = /source=backend\.capsule event=emit_request .*session_id=([0-9a-f-]{36}) .*state=Recording .*visible=true/.exec(line);
+    if (capsuleRecording && timestampMs !== null) {
+      const sessionId = capsuleRecording[1];
+      if (!recordingAt.has(sessionId)) recordingAt.set(sessionId, timestampMs);
+      const messageChars = integerField(line, "message_chars");
+      if (messageChars !== null && messageChars > 0 && !firstNonemptyPreviewAt.has(sessionId)) {
+        firstNonemptyPreviewAt.set(sessionId, timestampMs);
+      }
+    }
+
+    const bodyStarted = /automatic body started after capsule session_id=([0-9a-f-]{36})/.exec(line);
+    if (bodyStarted && timestampMs !== null && !bodyStartedAt.has(bodyStarted[1])) {
+      bodyStartedAt.set(bodyStarted[1], timestampMs);
+    }
+
     if (line.includes("live automatic session activated and released")) {
       const embeddedId = integerField(line, "embedded_session_id");
       if (embeddedId !== null) {
@@ -135,7 +165,10 @@ export function analyzeLiveWakeLog(text, options = {}) {
           embeddedSessionId: embeddedId,
           coordinatorSessionId: null,
           timestamp: timestampMs === null ? null : new Date(timestampMs).toISOString(),
-          wakeToCapsuleMs: integerField(line, "wake_to_capsule_request_ms"),
+          // Kept for diagnosis only.  This is candidate-start -> capsule,
+          // not the acceptance-contract wake latency.
+          candidateToCapsuleMs: integerField(line, "wake_to_capsule_request_ms"),
+          acceptedToRecordingMs: null,
           phraseTailToCapsuleMs: integerField(line, "phrase_tail_to_capsule_ms"),
           ownerEnrolled: ownerModeFresh ? pendingOwnerMode.enrolled : null,
           endpointTimeoutMs: null,
@@ -145,7 +178,8 @@ export function analyzeLiveWakeLog(text, options = {}) {
           sentencePause: null,
           semanticContinuation: null,
           settledTargetToEndpointMs: null,
-          previewLatencyMs: null,
+          firstNonemptyPreviewMs: null,
+          providerPreviewLatencyMs: null,
           previewInflationBursts: 0,
           providerFinalChars: null,
           resultFinalChars: null,
@@ -306,6 +340,18 @@ export function analyzeLiveWakeLog(text, options = {}) {
     const sample = samples.get(embeddedId);
     if (!sample) continue;
     sample.coordinatorSessionId = coordinatorId;
+    const acceptedAtMs = acceptedWakeAt.get(embeddedId)
+      ?? (sample.timestamp === null ? null : Date.parse(sample.timestamp));
+    const recordingTimestampMs = recordingAt.get(coordinatorId) ?? null;
+    sample.acceptedAt = acceptedAtMs === null || acceptedAtMs === undefined
+      ? null
+      : new Date(acceptedAtMs).toISOString();
+    sample.recordingAt = recordingTimestampMs === null
+      ? null
+      : new Date(recordingTimestampMs).toISOString();
+    sample.acceptedToRecordingMs = acceptedAtMs === null || acceptedAtMs === undefined || recordingTimestampMs === null
+      ? null
+      : Math.max(0, recordingTimestampMs - acceptedAtMs);
     const endpoint = endpoints.get(coordinatorId);
     if (endpoint) {
       sample.endpointReason = endpoint.reason;
@@ -317,7 +363,16 @@ export function analyzeLiveWakeLog(text, options = {}) {
         sample.settledTargetToEndpointMs = Math.max(0, endpoint.timestampMs - endpoint.settledAtMs);
       }
     }
-    sample.previewLatencyMs = previewLatencies.get(coordinatorId) ?? null;
+    sample.providerPreviewLatencyMs = previewLatencies.get(coordinatorId) ?? null;
+    const bodyAtMs = bodyStartedAt.get(coordinatorId) ?? null;
+    const firstPreviewAtMs = firstNonemptyPreviewAt.get(coordinatorId) ?? null;
+    sample.bodyStartedAt = bodyAtMs === null ? null : new Date(bodyAtMs).toISOString();
+    sample.firstNonemptyPreviewAt = firstPreviewAtMs === null
+      ? null
+      : new Date(firstPreviewAtMs).toISOString();
+    sample.firstNonemptyPreviewMs = bodyAtMs === null || firstPreviewAtMs === null
+      ? null
+      : Math.max(0, firstPreviewAtMs - bodyAtMs);
     sample.previewInflationBursts =
       previewGrowth.get(coordinatorId)?.maxConsecutiveInflation ?? 0;
     const integrity = finalIntegrity.get(coordinatorId);
@@ -364,9 +419,9 @@ export function analyzeLiveWakeLog(text, options = {}) {
     });
     const required = [
       [sample.coordinatorSessionId, "missing coordinator session link"],
-      [sample.wakeToCapsuleMs, "missing wake_to_capsule_request_ms"],
+      [sample.acceptedToRecordingMs, "missing accepted-wake to Recording timing"],
       [sample.phraseTailToCapsuleMs, "missing phrase_tail_to_capsule_ms"],
-      [sample.previewLatencyMs, "missing first provider preview latency"],
+      [sample.firstNonemptyPreviewMs, "missing first nonempty capsule preview timing"],
       [sample.stopToDoneMs, "missing stop_to_done_ms"],
       [sample.insertionStatus, "missing insertion status"],
       [sample.pcmBytes, "missing BLE completion"],
@@ -376,9 +431,9 @@ export function analyzeLiveWakeLog(text, options = {}) {
       [sample.settledTargetToEndpointMs, "missing settled-target endpoint latency"],
     ];
     for (const [value, error] of required) if (value === null) sample.errors.push(error);
-    if (sample.wakeToCapsuleMs > thresholds.wakeMaxMs) sample.errors.push(`wake latency exceeds ${thresholds.wakeMaxMs} ms`);
+    if (sample.acceptedToRecordingMs > thresholds.wakeMaxMs) sample.errors.push(`wake latency exceeds ${thresholds.wakeMaxMs} ms`);
     if (sample.phraseTailToCapsuleMs > thresholds.phraseTailMaxMs) sample.errors.push(`phrase-tail latency exceeds ${thresholds.phraseTailMaxMs} ms`);
-    if (sample.previewLatencyMs > thresholds.previewMaxMs) sample.errors.push(`first preview latency exceeds ${thresholds.previewMaxMs} ms`);
+    if (sample.firstNonemptyPreviewMs > thresholds.previewMaxMs) sample.errors.push(`first preview latency exceeds ${thresholds.previewMaxMs} ms`);
     if (sample.previewInflationBursts >= 2) {
       sample.errors.push("streaming preview repeatedly outgrew the provider revision window");
     }
@@ -406,11 +461,23 @@ export function analyzeLiveWakeLog(text, options = {}) {
     if (sample.faults.length > 0) sample.errors.push("transport failure counter became nonzero");
   }
 
-  const wakeValues = ordered.map(sample => sample.wakeToCapsuleMs).filter(Number.isFinite);
+  const wakeValues = ordered.map(sample => sample.acceptedToRecordingMs).filter(Number.isFinite);
   const phraseTailValues = ordered.map(sample => sample.phraseTailToCapsuleMs).filter(Number.isFinite);
-  const previewValues = ordered.map(sample => sample.previewLatencyMs).filter(Number.isFinite);
+  const previewValues = ordered.map(sample => sample.firstNonemptyPreviewMs).filter(Number.isFinite);
+  const providerPreviewValues = ordered.map(sample => sample.providerPreviewLatencyMs).filter(Number.isFinite);
+  const candidateWakeValues = ordered.map(sample => sample.candidateToCapsuleMs).filter(Number.isFinite);
   const doneValues = ordered.map(sample => sample.stopToDoneMs).filter(Number.isFinite);
   const aggregate = {
+    acceptedToRecordingP95Ms: percentile(wakeValues, 0.95),
+    acceptedToRecordingMaxMs: wakeValues.length ? Math.max(...wakeValues) : null,
+    firstNonemptyPreviewP95Ms: percentile(previewValues, 0.95),
+    firstNonemptyPreviewMaxMs: previewValues.length ? Math.max(...previewValues) : null,
+    providerPreviewP95Ms: percentile(providerPreviewValues, 0.95),
+    providerPreviewMaxMs: providerPreviewValues.length ? Math.max(...providerPreviewValues) : null,
+    candidateToCapsuleP95Ms: percentile(candidateWakeValues, 0.95),
+    candidateToCapsuleMaxMs: candidateWakeValues.length ? Math.max(...candidateWakeValues) : null,
+    // Deprecated aliases retained for consumers of schema v1.  Their values
+    // now follow the contract boundary rather than candidate-start elapsed.
     wakeToCapsuleP95Ms: percentile(wakeValues, 0.95),
     wakeToCapsuleMaxMs: wakeValues.length ? Math.max(...wakeValues) : null,
     phraseTailToCapsuleP95Ms: percentile(phraseTailValues, 0.95),
@@ -427,8 +494,8 @@ export function analyzeLiveWakeLog(text, options = {}) {
   // Percentiles are population gates. A short operator spot-check may be
   // within the hard per-session ceiling without representing p95; keep it
   // INCOMPLETE instead of falsely turning one accepted outlier into NO_GO.
-  if (hasRequiredPopulation && aggregate.wakeToCapsuleP95Ms > thresholds.wakeP95Ms) failures.push(`wake p95 exceeds ${thresholds.wakeP95Ms} ms`);
-  if (aggregate.wakeToCapsuleMaxMs > thresholds.wakeMaxMs) failures.push(`wake max exceeds ${thresholds.wakeMaxMs} ms`);
+  if (hasRequiredPopulation && aggregate.acceptedToRecordingP95Ms > thresholds.wakeP95Ms) failures.push(`wake p95 exceeds ${thresholds.wakeP95Ms} ms`);
+  if (aggregate.acceptedToRecordingMaxMs > thresholds.wakeMaxMs) failures.push(`wake max exceeds ${thresholds.wakeMaxMs} ms`);
   if (hasRequiredPopulation && aggregate.phraseTailToCapsuleP95Ms > thresholds.phraseTailP95Ms) failures.push(`phrase-tail p95 exceeds ${thresholds.phraseTailP95Ms} ms`);
   if (aggregate.phraseTailToCapsuleMaxMs > thresholds.phraseTailMaxMs) failures.push(`phrase-tail max exceeds ${thresholds.phraseTailMaxMs} ms`);
   if (hasRequiredPopulation && aggregate.previewP95Ms > thresholds.previewP95Ms) failures.push(`preview p95 exceeds ${thresholds.previewP95Ms} ms`);
@@ -441,7 +508,7 @@ export function analyzeLiveWakeLog(text, options = {}) {
       ? "INCOMPLETE"
       : "PASS";
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     status,
     after: options.after ?? null,
     thresholds,

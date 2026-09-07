@@ -15,6 +15,8 @@ function sampleLines(index, overrides = {}) {
   const tailMs = overrides.tailMs ?? 90 + index;
   const doneMs = overrides.doneMs ?? 40 + index;
   const previewMs = overrides.previewMs ?? 1_000 + index;
+  const recordingDelayMs = overrides.recordingDelayMs ?? 100 + index;
+  const firstPreviewDelayMs = overrides.firstPreviewDelayMs ?? previewMs;
   const missing = overrides.missing ?? 0;
   const insertion = overrides.insertion ?? "Inserted";
   const providerFinalChars = overrides.providerFinalChars ?? 36;
@@ -26,6 +28,9 @@ function sampleLines(index, overrides = {}) {
     ownerLine,
     `${timestamp} [INFO] [wake-phrase] live automatic session activated and released embedded_session_id=${embeddedId} phrase=开始录音 wake_to_capsule_request_ms=${wakeMs} phrase_tail_to_capsule_ms=${tailMs}`,
     `${timestamp} [INFO] [timeline] session_id=Some(${coordinatorId}) ble_start embedded_session_id=${embeddedId}`,
+    `${new Date(Date.parse(timestamp) + recordingDelayMs).toISOString()} [INFO] [timeline] source=backend.capsule event=emit_request seq=1 session_id=${coordinatorId} state=Recording elapsed_ms=${recordingDelayMs} level=0.000 visible=true has_message=false message_chars=0`,
+    `${new Date(Date.parse(timestamp) + recordingDelayMs + 1).toISOString()} [INFO] [wake-phrase] automatic body started after capsule session_id=${coordinatorId}`,
+    `${new Date(Date.parse(timestamp) + recordingDelayMs + 1 + firstPreviewDelayMs).toISOString()} [INFO] [timeline] source=backend.capsule event=emit_request seq=2 session_id=${coordinatorId} state=Recording elapsed_ms=${recordingDelayMs + 1 + firstPreviewDelayMs} level=0.000 visible=true has_message=true message_chars=3`,
     `${timestamp} [INFO] [obs-v1] {"event":"embedded_audio_preview_first_provider_stream","timing_metric":"preview_latency_ms","timing_value_ms":${previewMs}}`,
     `${settledTimestamp} [INFO] [asr] target-speaker state speaker_id=Some("1") stable_end_ms=Some(4082) audio_duration_ms=Some(4700) provider_audio_duration_ms=Some(4600) pending_provisional=false target_advanced=true pending_advanced=false`,
   ];
@@ -69,7 +74,8 @@ test("passes twenty correlated enrolled-owner wake sessions", () => {
   assert.equal(report.sampleCount, 20);
   assert.equal(report.enrolledOwnerSamples, 20);
   assert.equal(report.openGateSamples, 0);
-  assert.equal(report.aggregate.wakeToCapsuleP95Ms, 918);
+  assert.equal(report.aggregate.acceptedToRecordingP95Ms, 118);
+  assert.equal(report.aggregate.firstNonemptyPreviewP95Ms, 1_018);
 });
 
 test("reports a clean short run as incomplete instead of pass", () => {
@@ -106,15 +112,30 @@ test("rejects packet loss and a failed insertion", () => {
 });
 
 test("rejects an accepted wake over the latency ceiling", () => {
-  const report = analyzeLiveWakeLog(fixture(20, new Map([[5, { wakeMs: 1_501 }]])));
+  const report = analyzeLiveWakeLog(fixture(20, new Map([[5, { recordingDelayMs: 1_501 }]])));
   assert.equal(report.status, "NO_GO");
-  assert.match(report.failures.join("\n"), /wake latency exceeds 1500 ms/);
+  assert.match(report.failures.join("\n"), /wake latency exceeds 500 ms/);
 });
 
-test("keeps the accepted 1456 ms real-capsule baseline below the hard ceiling", () => {
-  const report = analyzeLiveWakeLog(fixture(1, new Map([[0, { wakeMs: 1_456 }]])));
+test("rejects a Recording transition over the 500 ms contract", () => {
+  const report = analyzeLiveWakeLog(fixture(1, new Map([[0, { recordingDelayMs: 501 }]])));
+  assert.equal(report.status, "NO_GO");
+  assert.match(report.failures.join("\n"), /wake latency exceeds 500 ms/);
+});
+
+test("measures from the accepted owner gate instead of candidate-start elapsed", () => {
+  const acceptedGate = "2026-08-12T12:00:00.050Z [INFO] [wake-phrase] automatic streaming gate embedded_session_id=700 gate_decision=Accept";
+  const report = analyzeLiveWakeLog(`${acceptedGate}\n${fixture(1, new Map([[0, {
+    wakeMs: 1_499,
+    recordingDelayMs: 100,
+    firstPreviewDelayMs: 10,
+    previewMs: 5_000,
+  }]]))}`);
   assert.equal(report.status, "INCOMPLETE", report.failures.join("\n"));
-  assert.equal(report.failures.length, 0);
+  assert.equal(report.samples[0].acceptedToRecordingMs, 50);
+  assert.equal(report.samples[0].candidateToCapsuleMs, 1_499);
+  assert.equal(report.samples[0].firstNonemptyPreviewMs, 10);
+  assert.equal(report.samples[0].providerPreviewLatencyMs, 5_000);
 });
 
 test("accepts firmware VoiceActivation stop as an automatic endpoint", () => {
@@ -143,7 +164,7 @@ test("does not require sentence punctuation, but rejects a semantic continuation
 });
 
 test("rejects a slow first preview independently of capsule timing", () => {
-  const report = analyzeLiveWakeLog(fixture(20, new Map([[5, { previewMs: 1_801 }]])));
+  const report = analyzeLiveWakeLog(fixture(20, new Map([[5, { firstPreviewDelayMs: 1_801, previewMs: 100 }]])));
   assert.equal(report.status, "NO_GO");
   assert.match(report.failures.join("\n"), /first preview latency exceeds 1800 ms/);
 });
