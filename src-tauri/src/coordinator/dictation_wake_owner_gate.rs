@@ -64,60 +64,6 @@ fn maybe_prefetch_owner_verification(
     );
 }
 
-/// Retain the completed early owner window as interference calibration. This
-/// is deliberately non-blocking: if the 1.1 s prefetch is still running, the
-/// terminal path will use its normal full-buffer verification and will not
-/// launch separation from a single score. Keeping the snapshot on the
-/// candidate makes the rise decision local to one transport window.
-async fn poll_prefetched_owner_verification(
-    candidate: &mut BufferedSpeakerCandidate,
-    embedded_session_id: u32,
-) {
-    let completed = candidate
-        .owner_verification_task
-        .as_ref()
-        .is_some_and(|task| task.inner().is_finished())
-        .then(|| candidate.owner_verification_task.take())
-        .flatten();
-    let Some(task) = completed else {
-        return;
-    };
-    match task.await {
-        Ok((Ok(result), elapsed_ms)) => {
-            let (owner_rise, baseline_score, baseline_samples) =
-                note_hidden_wake_interference_owner_score(
-                    &mut candidate.wake_interference_baseline,
-                    result.score,
-                    false,
-                );
-            log::info!(
-                "[wake-phrase] prefetched owner snapshot retained embedded_session_id={} score={:.6} inference_ms={} baseline_score={:.6} baseline_samples={} owner_rise={}",
-                embedded_session_id,
-                result.score,
-                elapsed_ms,
-                baseline_score,
-                baseline_samples,
-                owner_rise
-            );
-        }
-        Ok((Err(err), elapsed_ms)) => {
-            log::info!(
-                "[wake-phrase] prefetched owner snapshot unavailable embedded_session_id={} inference_ms={} error={}",
-                embedded_session_id,
-                elapsed_ms,
-                err
-            );
-        }
-        Err(err) => {
-            log::info!(
-                "[wake-phrase] prefetched owner snapshot task failed embedded_session_id={} error={}",
-                embedded_session_id,
-                err
-            );
-        }
-    }
-}
-
 fn next_owner_verification_retry_after(
     pcm_ms: usize,
     verification: &Result<crate::speaker_verification::VerificationResult, String>,
@@ -347,15 +293,10 @@ fn maybe_start_target_wake_extraction(
     ) {
         return;
     }
-    let repeated_partial_phrase =
-        crate::speech_decision_kernel::partial_phrase_recovery_ready(
-            candidate.local_partial_phrase_confirmations,
-        );
     let weak_phrase_hint = target_wake_extraction_has_weak_phrase_evidence(
         candidate.kws_phrase_detected,
         candidate.local_kws_fusion_evidence,
         candidate.local_owner_overlap_near_confirmations,
-        repeated_partial_phrase,
     );
     if candidate.kind != BufferedSpeakerCandidateKind::Verification
         || candidate.target_wake_extraction_attempted
@@ -369,16 +310,7 @@ fn maybe_start_target_wake_extraction(
     {
         return;
     }
-    start_target_wake_extraction(
-        candidate,
-        phrase,
-        embedded_session_id,
-        if repeated_partial_phrase {
-            "repeated_partial_phrase"
-        } else {
-            "weak_phrase_hint"
-        },
-    );
+    start_target_wake_extraction(candidate, phrase, embedded_session_id, "weak_phrase_hint");
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -487,7 +419,6 @@ fn target_wake_extraction_has_weak_phrase_evidence(
     kws_phrase_detected: bool,
     local_kws_fusion_evidence: bool,
     local_owner_overlap_near_confirmations: u8,
-    repeated_partial_phrase: bool,
 ) -> bool {
     // Separation is a heavyweight recovery path (1.1-3.0 s in installed live
     // traces). Starting it for every ambient candidate before either phrase
@@ -498,7 +429,6 @@ fn target_wake_extraction_has_weak_phrase_evidence(
     kws_phrase_detected
         || local_kws_fusion_evidence
         || local_owner_overlap_near_confirmations > 0
-        || repeated_partial_phrase
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]

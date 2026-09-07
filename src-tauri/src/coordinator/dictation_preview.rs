@@ -623,7 +623,6 @@ fn arm_automatic_wake_text_guard(
         // installs this guard, so that ACK may legitimately never repeat.
         initial_body_wait_started_at: Some(Instant::now()),
         body_started: false,
-        allow_late_buffered_body: false,
         stop_requested: false,
     });
 }
@@ -638,7 +637,6 @@ fn arm_accepted_automatic_wake_text_guard(
     phrase: String,
     capsule_audio_boundary_ms: u64,
     early_capsule_was_visible: bool,
-    allow_late_buffered_body: bool,
 ) {
     arm_automatic_wake_text_guard(
         inner,
@@ -646,21 +644,6 @@ fn arm_accepted_automatic_wake_text_guard(
         phrase,
         capsule_audio_boundary_ms,
     );
-    if allow_late_buffered_body {
-        if let Some(guard) = inner
-            .embedded_audio_automatic_wake_guard
-            .lock()
-            .as_mut()
-            .filter(|guard| guard.session_id == session_id)
-        {
-            guard.allow_late_buffered_body = true;
-            log::info!(
-                "[wake-phrase] accepted terminal wake keeps buffered body eligible session_id={} audio_ms={}",
-                session_id,
-                capsule_audio_boundary_ms
-            );
-        }
-    }
     if early_capsule_was_visible {
         acknowledge_automatic_wake_capsule_visible(inner, session_id);
         log::info!(
@@ -835,7 +818,7 @@ fn filter_automatic_wake_text(
         .map(|guard| {
             (
                 Some(guard.phrase.clone()),
-                guard.stop_requested && !guard.body_started && !guard.allow_late_buffered_body,
+                guard.stop_requested && !guard.body_started,
             )
         })
         .unwrap_or((None, false));
