@@ -4302,6 +4302,7 @@ fn automatic_wake_target_speaker_endpoint_early_capsule_ack_cannot_be_lost() {
         "开始录音".into(),
         1_800,
         true,
+        false,
     );
     let guard = coordinator
         .inner
@@ -4402,6 +4403,31 @@ fn late_text_after_stop_cannot_start_wake_only_body() {
         !automatic_wake_body_started(&coordinator.inner, session_id),
         "late provider text must not retroactively start a wake-only body"
     );
+}
+
+#[test]
+fn terminal_wake_keeps_cached_body_eligible_after_physical_stop() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    arm_accepted_automatic_wake_text_guard(
+        &coordinator.inner,
+        session_id,
+        "开始录音".into(),
+        4_000,
+        false,
+        true,
+    );
+    mark_automatic_wake_stop_requested(&coordinator.inner, session_id);
+    assert_eq!(
+        filter_automatic_wake_text(
+            &coordinator.inner,
+            session_id,
+            "开始录音。缓存的主人正文。",
+            false,
+        ),
+        "缓存的主人正文。"
+    );
+    assert!(automatic_wake_body_started(&coordinator.inner, session_id));
 }
 
 #[test]

@@ -254,6 +254,10 @@ struct AutomaticWakeGuard {
     /// that may stop advancing.
     initial_body_wait_started_at: Option<Instant>,
     body_started: bool,
+    /// Terminal wake acceptance may happen after the physical VAD window has
+    /// stopped. PCM after the wake phrase was already captured before that
+    /// boundary and must remain eligible as body text.
+    allow_late_buffered_body: bool,
     /// Stop boundary is latched before ASR finalization. Late provider text
     /// must not retroactively start a wake-only body.
     stop_requested: bool,

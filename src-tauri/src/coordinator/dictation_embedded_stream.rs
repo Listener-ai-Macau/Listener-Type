@@ -657,6 +657,10 @@ impl EmbeddedStreamingDictation {
 
         let automatic = candidate.kind == BufferedSpeakerCandidateKind::Verification;
         let mut local_speaker_seed = None;
+        // A terminal wake can be accepted after the physical VAD window has
+        // stopped.  Keep this bit so the already-buffered post-wake owner
+        // speech is not discarded by the late-provider guard below.
+        let mut allow_late_buffered_body = false;
         if automatic {
             let phrase = inner.prefs.get().voice_wake_phrase;
             // Finish deferred detector init before terminal KWS/offline pass.
@@ -1611,6 +1615,7 @@ impl EmbeddedStreamingDictation {
                 }
                 return Ok(true);
             }
+            allow_late_buffered_body = true;
         } else {
             log::info!(
                 "[speaker-verification] physical recording bypass embedded_session_id={embedded_session_id}"
@@ -1661,6 +1666,7 @@ impl EmbeddedStreamingDictation {
                 phrase,
                 capsule_audio_ms,
                 candidate.early_capsule_session_id.is_some(),
+                allow_late_buffered_body,
             );
         }
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
@@ -2851,6 +2857,7 @@ impl EmbeddedStreamingDictation {
             phrase.clone(),
             capsule_audio_ms,
             candidate.early_capsule_session_id.is_some(),
+            false,
         );
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         self.session = Some(session);
