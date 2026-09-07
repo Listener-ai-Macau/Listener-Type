@@ -2277,6 +2277,32 @@ impl EmbeddedStreamingDictation {
                                     })
                                 } else if !result.matched {
                                     let phrase_chars = phrase.chars().count();
+                                    if crate::speech_decision_kernel::partial_phrase_recovery_observation(
+                                        crate::speech_decision_kernel::PartialPhraseRecoveryEvidence {
+                                            phrase_matched: result.matched,
+                                            phrase_absent: result.phrase_relation
+                                                == crate::wake_phrase::LocalPhraseRelation::Absent,
+                                            task_origin_bytes,
+                                            best_window_start: result.phonetic_best_window_start,
+                                            prefix_units: result.phonetic_prefix_units,
+                                            best_distance: result.phonetic_best_distance,
+                                            phrase_chars,
+                                        },
+                                    ) {
+                                        if let Some(candidate) = self.speaker_candidate.as_mut() {
+                                            candidate.local_partial_phrase_confirmations = candidate
+                                                .local_partial_phrase_confirmations
+                                                .saturating_add(1);
+                                            log::info!(
+                                                "[wake-phrase] repeated partial phrase evidence embedded_session_id={} confirmations={}/{} prefix_units={} distance={}",
+                                                embedded_session_id,
+                                                candidate.local_partial_phrase_confirmations,
+                                                crate::speech_decision_kernel::PARTIAL_PHRASE_RECOVERY_CONFIRMATIONS_REQUIRED,
+                                                result.phonetic_prefix_units,
+                                                result.phonetic_best_distance
+                                            );
+                                        }
+                                    }
                                     if result.phrase_relation
                                             == crate::wake_phrase::LocalPhraseRelation::Absent
                                         && result.phonetic_best_distance <= 2

@@ -293,10 +293,15 @@ fn maybe_start_target_wake_extraction(
     ) {
         return;
     }
+    let repeated_partial_phrase =
+        crate::speech_decision_kernel::partial_phrase_recovery_ready(
+            candidate.local_partial_phrase_confirmations,
+        );
     let weak_phrase_hint = target_wake_extraction_has_weak_phrase_evidence(
         candidate.kws_phrase_detected,
         candidate.local_kws_fusion_evidence,
         candidate.local_owner_overlap_near_confirmations,
+        repeated_partial_phrase,
     );
     if candidate.kind != BufferedSpeakerCandidateKind::Verification
         || candidate.target_wake_extraction_attempted
@@ -310,7 +315,16 @@ fn maybe_start_target_wake_extraction(
     {
         return;
     }
-    start_target_wake_extraction(candidate, phrase, embedded_session_id, "weak_phrase_hint");
+    start_target_wake_extraction(
+        candidate,
+        phrase,
+        embedded_session_id,
+        if repeated_partial_phrase {
+            "repeated_partial_phrase"
+        } else {
+            "weak_phrase_hint"
+        },
+    );
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -419,6 +433,7 @@ fn target_wake_extraction_has_weak_phrase_evidence(
     kws_phrase_detected: bool,
     local_kws_fusion_evidence: bool,
     local_owner_overlap_near_confirmations: u8,
+    repeated_partial_phrase: bool,
 ) -> bool {
     // Separation is a heavyweight recovery path (1.1-3.0 s in installed live
     // traces). Starting it for every ambient candidate before either phrase
@@ -429,6 +444,7 @@ fn target_wake_extraction_has_weak_phrase_evidence(
     kws_phrase_detected
         || local_kws_fusion_evidence
         || local_owner_overlap_near_confirmations > 0
+        || repeated_partial_phrase
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]

@@ -1721,17 +1721,24 @@ fn settled_target_wall_clock_rearms_on_fresh_local_owner_boundary() {
 #[test]
 fn heavy_wake_separation_requires_independent_partial_phrase_evidence() {
     assert!(!super::target_wake_extraction_has_weak_phrase_evidence(
-        false, false, 0,
+        false, false, 0, false,
     ));
     assert!(super::target_wake_extraction_has_weak_phrase_evidence(
-        false, true, 0,
+        false, true, 0, false,
     ));
     assert!(super::target_wake_extraction_has_weak_phrase_evidence(
-        false, false, 1,
+        false, false, 1, false,
     ));
     assert!(super::target_wake_extraction_has_weak_phrase_evidence(
-        true, false, 0,
+        true, false, 0, false,
     ));
+    assert!(super::target_wake_extraction_has_weak_phrase_evidence(
+        false, false, 0, true,
+    ));
+    assert_eq!(
+        crate::speech_decision_kernel::PARTIAL_PHRASE_RECOVERY_CONFIRMATIONS_REQUIRED,
+        2,
+    );
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]

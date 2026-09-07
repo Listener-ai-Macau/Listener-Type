@@ -667,6 +667,10 @@ struct BufferedSpeakerCandidate {
     /// of them with the independent enrolled voiceprint. A rolling window also
     /// has one bounded owner-gated near-match path with body text.
     local_owner_overlap_near_confirmations: u8,
+    /// Severe interference can expose only the first half of the wake phrase
+    /// before body text exists. Two start-aligned observations may authorize
+    /// one separated-owner attempt, but never activate the candidate alone.
+    local_partial_phrase_confirmations: u8,
     /// Independent near-phrase observations retained for terminal recovery.
     /// Interference can shift the phrase inside a rolling window, so this
     /// ledger is intentionally not limited to start-aligned matches.
