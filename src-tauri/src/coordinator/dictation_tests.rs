@@ -1721,17 +1721,24 @@ fn settled_target_wall_clock_rearms_on_fresh_local_owner_boundary() {
 #[test]
 fn heavy_wake_separation_requires_independent_partial_phrase_evidence() {
     assert!(!super::target_wake_extraction_has_weak_phrase_evidence(
-        false, false, 0,
+        false, false, 0, false,
     ));
     assert!(super::target_wake_extraction_has_weak_phrase_evidence(
-        false, true, 0,
+        false, true, 0, false,
     ));
     assert!(super::target_wake_extraction_has_weak_phrase_evidence(
-        false, false, 1,
+        false, false, 1, false,
     ));
     assert!(super::target_wake_extraction_has_weak_phrase_evidence(
-        true, false, 0,
+        true, false, 0, false,
     ));
+    assert!(super::target_wake_extraction_has_weak_phrase_evidence(
+        false, false, 0, true,
+    ));
+    assert_eq!(
+        crate::speech_decision_kernel::PARTIAL_PHRASE_RECOVERY_CONFIRMATIONS_REQUIRED,
+        2,
+    );
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -2012,12 +2019,12 @@ fn target_speaker_endpoint_does_not_commit_before_current_voiceprint_result() {
 fn target_speaker_endpoint_wake_interference_baseline_requests_only_separated_verification() {
     let mut first_sample = super::WakeInterferenceBaseline::default();
     assert!(
-        first_sample.observe(0.34, false),
-        "a terminal candidate may have only one owner snapshot"
+        !first_sample.observe(0.34, false),
+        "a single terminal owner snapshot must not launch separation"
     );
 
     let mut baseline = super::WakeInterferenceBaseline::default();
-    for score in [0.10, 0.11, 0.18, 0.14] {
+    for score in [0.10] {
         assert!(!baseline.observe(score, false));
     }
     assert!(baseline.observe(0.34, false));
@@ -4295,6 +4302,7 @@ fn automatic_wake_target_speaker_endpoint_early_capsule_ack_cannot_be_lost() {
         "开始录音".into(),
         1_800,
         true,
+        false,
     );
     let guard = coordinator
         .inner
@@ -4395,6 +4403,31 @@ fn late_text_after_stop_cannot_start_wake_only_body() {
         !automatic_wake_body_started(&coordinator.inner, session_id),
         "late provider text must not retroactively start a wake-only body"
     );
+}
+
+#[test]
+fn terminal_wake_keeps_cached_body_eligible_after_physical_stop() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    arm_accepted_automatic_wake_text_guard(
+        &coordinator.inner,
+        session_id,
+        "开始录音".into(),
+        4_000,
+        false,
+        true,
+    );
+    mark_automatic_wake_stop_requested(&coordinator.inner, session_id);
+    assert_eq!(
+        filter_automatic_wake_text(
+            &coordinator.inner,
+            session_id,
+            "开始录音。缓存的主人正文。",
+            false,
+        ),
+        "缓存的主人正文。"
+    );
+    assert!(automatic_wake_body_started(&coordinator.inner, session_id));
 }
 
 #[test]

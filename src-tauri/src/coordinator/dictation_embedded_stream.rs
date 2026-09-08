@@ -657,6 +657,10 @@ impl EmbeddedStreamingDictation {
 
         let automatic = candidate.kind == BufferedSpeakerCandidateKind::Verification;
         let mut local_speaker_seed = None;
+        // A terminal wake can be accepted after the physical VAD window has
+        // stopped. Keep this bit so already-buffered post-wake owner speech is
+        // not discarded by the late-provider guard below.
+        let mut allow_late_buffered_body = false;
         if automatic {
             let phrase = inner.prefs.get().voice_wake_phrase;
             // Finish deferred detector init before terminal KWS/offline pass.
@@ -1528,6 +1532,7 @@ impl EmbeddedStreamingDictation {
                 phrase.clone(),
                 enrolled_owner_matched,
             ));
+            allow_late_buffered_body = true;
             save_bounded_wake_diagnostic(embedded_session_id, "accepted", &candidate.pcm);
             if phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::KeywordModel {
                 persist_verified_wake_phrase_calibration(phrase.clone()).await;
@@ -1661,6 +1666,7 @@ impl EmbeddedStreamingDictation {
                 phrase,
                 capsule_audio_ms,
                 candidate.early_capsule_session_id.is_some(),
+                allow_late_buffered_body,
             );
         }
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
@@ -1759,6 +1765,7 @@ impl EmbeddedStreamingDictation {
         if let Some(candidate) = self.speaker_candidate.as_mut() {
             if candidate.kind == BufferedSpeakerCandidateKind::Verification {
                 maybe_prefetch_owner_verification(candidate, &phrase, embedded_session_id);
+                poll_prefetched_owner_verification(candidate, embedded_session_id).await;
             }
         }
         #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -2277,6 +2284,32 @@ impl EmbeddedStreamingDictation {
                                     })
                                 } else if !result.matched {
                                     let phrase_chars = phrase.chars().count();
+                                    if crate::speech_decision_kernel::partial_phrase_recovery_observation(
+                                        crate::speech_decision_kernel::PartialPhraseRecoveryEvidence {
+                                            phrase_matched: result.matched,
+                                            phrase_absent: result.phrase_relation
+                                                == crate::wake_phrase::LocalPhraseRelation::Absent,
+                                            task_origin_bytes,
+                                            best_window_start: result.phonetic_best_window_start,
+                                            prefix_units: result.phonetic_prefix_units,
+                                            best_distance: result.phonetic_best_distance,
+                                            phrase_chars,
+                                        },
+                                    ) {
+                                        if let Some(candidate) = self.speaker_candidate.as_mut() {
+                                            candidate.local_partial_phrase_confirmations = candidate
+                                                .local_partial_phrase_confirmations
+                                                .saturating_add(1);
+                                            log::info!(
+                                                "[wake-phrase] repeated partial phrase evidence embedded_session_id={} confirmations={}/{} prefix_units={} distance={}",
+                                                embedded_session_id,
+                                                candidate.local_partial_phrase_confirmations,
+                                                crate::speech_decision_kernel::PARTIAL_PHRASE_RECOVERY_CONFIRMATIONS_REQUIRED,
+                                                result.phonetic_prefix_units,
+                                                result.phonetic_best_distance
+                                            );
+                                        }
+                                    }
                                     if result.phrase_relation
                                             == crate::wake_phrase::LocalPhraseRelation::Absent
                                         && result.phonetic_best_distance <= 2
@@ -2824,6 +2857,7 @@ impl EmbeddedStreamingDictation {
             phrase.clone(),
             capsule_audio_ms,
             candidate.early_capsule_session_id.is_some(),
+            false,
         );
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         self.session = Some(session);

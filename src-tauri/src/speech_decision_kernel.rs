@@ -1088,6 +1088,7 @@ pub(crate) const fn separated_wake_can_activate(evidence: SeparatedWakeEvidence)
 }
 
 pub(crate) const OWNER_OVERLAP_NEAR_CONFIRMATIONS_REQUIRED: u8 = 3;
+pub(crate) const PARTIAL_PHRASE_RECOVERY_CONFIRMATIONS_REQUIRED: u8 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct OwnerOverlapPhraseEvidence {
@@ -1117,6 +1118,41 @@ pub(crate) const fn owner_overlap_degraded_phrase_evidence(
         && evidence.best_window_start == 0
         && evidence.best_distance <= maximum_distance
         && evidence.transcript_chars >= evidence.phrase_chars.saturating_add(1)
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct PartialPhraseRecoveryEvidence {
+    pub(crate) phrase_matched: bool,
+    pub(crate) phrase_absent: bool,
+    pub(crate) task_origin_bytes: usize,
+    pub(crate) best_window_start: usize,
+    pub(crate) prefix_units: usize,
+    pub(crate) best_distance: usize,
+    pub(crate) phrase_chars: usize,
+}
+
+/// Severe mono overlap may leave only the first half of the wake phrase in
+/// two consecutive expanding windows, before any body text is available.
+/// This is recovery-selection evidence only: the caller still has to run the
+/// enrolled-owner separator and the normal fused wake arbiter. Requiring two
+/// independent observations keeps a single noisy partial transcript from
+/// starting the heavyweight path for every ambient VAD candidate.
+pub(crate) const fn partial_phrase_recovery_observation(
+    evidence: PartialPhraseRecoveryEvidence,
+) -> bool {
+    let half_phrase = evidence.phrase_chars / 2;
+    let retained_units = if half_phrase > 2 { half_phrase } else { 2 };
+    let maximum_distance = evidence.phrase_chars.saturating_sub(retained_units);
+    !evidence.phrase_matched
+        && evidence.phrase_absent
+        && evidence.task_origin_bytes == 0
+        && evidence.best_window_start == 0
+        && evidence.prefix_units >= retained_units
+        && evidence.best_distance <= maximum_distance
+}
+
+pub(crate) const fn partial_phrase_recovery_ready(confirmations: u8) -> bool {
+    confirmations >= PARTIAL_PHRASE_RECOVERY_CONFIRMATIONS_REQUIRED
 }
 
 pub(crate) const fn repeated_owner_overlap_wake_can_activate(
