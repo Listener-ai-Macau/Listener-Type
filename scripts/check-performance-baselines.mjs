@@ -403,9 +403,9 @@ const asrLatencyGate = readFileSync(
 for (const token of [
   "const FINAL_RESULT_TIMEOUT: Duration = Duration::from_secs(12);",
   "final transcript coverage incomplete after full provider timeout",
-  "provider_preview_change(slot.as_deref(), &preview)",
-  "current.is_some_and(|value| value.trim() == candidate)",
-  "Provider preview replacement must not reintroduce heuristic text suppression",
+  "reduce_embedded_audio_authoritative_preview(",
+  ".observe_authoritative(",
+  "Authoritative provider preview reducer must not reintroduce heuristic text suppression",
   "EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS",
   "LOW_LATENCY_PREVIEW_ENDPOINT",
   "VolcenginePreviewSidecar",
