@@ -231,10 +231,10 @@ requireIncludes(
   "Recording capsule partial preview must reuse the latest audio level",
 );
 for (const token of [
-  "fn provider_preview_change",
-  "current.is_some_and(|value| value.trim() == candidate)",
-  "provider_preview_change(slot.as_deref(), &preview)",
-  "provider_preview_change_keeps_authoritative_early_rewrite_visible",
+  "fn reduce_embedded_audio_authoritative_preview",
+  ".observe_authoritative(",
+  "reduction.authoritative_changed",
+  "target_speaker_endpoint_preview_has_one_session_scoped_reducer",
 ]) {
   requireIncludes(
     dictation,

@@ -151,7 +151,7 @@ for (const token of [
 const provisionalPreview = section(
   volcengine,
   "if !has_final\n            && pending_unattributed_speech",
-  "let prefer_final_optimistic = has_final",
+  "let optimistic_candidate =",
   "Display-only provisional preview path",
 );
 requireExcludes(
@@ -241,31 +241,33 @@ for (const token of [
 const finalSupplement = section(
   dictation,
   "fn update_embedded_audio_partial_preview_from_final_supplement",
-  "fn provider_preview_change",
+  "fn embedded_audio_partial_preview_stability_key",
   "Final supplement handoff",
 );
 for (const token of [
   "crate::asr::volcengine::FinalIntermediateTranscript",
   "let authoritative_two_pass = update.authoritative_two_pass;",
-  "provider_preview_change(slot.as_deref(), &preview)",
+  "reduce_embedded_audio_authoritative_preview(",
+  "update.text",
 ]) {
   requireIncludes(finalSupplement, token, "Final supplement handoff");
 }
 
 const providerPreviewPolicy = section(
   dictation,
-  "fn provider_preview_change",
-  "fn stabilize_embedded_audio_partial_preview",
-  "Provider preview replacement policy",
+  "fn reduce_embedded_audio_authoritative_preview",
+  "fn update_embedded_audio_visual_preview",
+  "Authoritative provider preview reducer",
 );
 for (const token of [
-  "current.is_some_and(|value| value.trim() == candidate)",
-  "Some(candidate.to_string())",
+  ".observe_authoritative(",
+  "reduction.visible_update",
+  "reduction.authoritative_changed",
 ]) {
-  requireIncludes(providerPreviewPolicy, token, "Provider preview replacement policy");
+  requireIncludes(providerPreviewPolicy, token, "Authoritative provider preview reducer");
 }
 if (providerPreviewPolicy.includes("embedded_audio_partial_preview_stability_key")) {
-  fail("Provider preview replacement must not reintroduce heuristic text suppression");
+  fail("Authoritative provider preview reducer must not reintroduce heuristic text suppression");
 }
 
 console.log(
