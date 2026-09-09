@@ -253,6 +253,11 @@ struct AutomaticWakeGuard {
     /// so the initial body grace must never depend on an audio timestamp
     /// that may stop advancing.
     initial_body_wait_started_at: Option<Instant>,
+    /// Provisional owner-anchored text has appeared in the current session.
+    /// This may come from a visual preview and is allowed to release the
+    /// wake-only grace after capsule acknowledgement, but it is not final
+    /// text authority.
+    body_presence: bool,
     body_started: bool,
     /// Terminal wake acceptance may happen after the physical VAD window has
     /// stopped. PCM after the wake phrase was already captured before that

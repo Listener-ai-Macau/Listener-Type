@@ -5,8 +5,24 @@ on:
   push:
     branches: [master]
 
+permissions:
+  contents: read
+
 jobs:
+  public-hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: npm run check:open-source
+      - run: git diff --check
+
   frontend-and-audits:
+    # Full builds currently require the separately hosted Denzic Platform
+    # submodule. Fork pull requests still receive the public-hygiene gate.
+    if: github.repository == 'Listener-ai-Macau/Listener-Type'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -35,6 +51,7 @@ jobs:
       - run: npm run check:traceability
 
   rust-check:
+    if: github.repository == 'Listener-ai-Macau/Listener-Type'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

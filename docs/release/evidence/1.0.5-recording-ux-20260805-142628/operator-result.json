@@ -2,7 +2,7 @@
   "schema": "listener.1.0.5.recording_ux.owner_acceptance",
   "result": "PASS_WITH_NOTES",
   "note": "All five steps selected 通过 (parsed from step-*-raw.txt). Notes include product feedback and deferred other-speaker; not a clean silent PASS.",
-  "evidence_dir": "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\docs\\release\\evidence\\1.0.5-recording-ux-20260805-142628",
+  "evidence_dir": "<repository>/docs/release/evidence/1.0.5-recording-ux-20260805-142628",
   "installed_exe_sha256": "51B1A80EAEDB8C5DD5C61A575F3AA464F60F7BA998EF37AFB5ED35D8D618B594",
   "installed_version": "1.0.5",
   "steps": [

@@ -47,7 +47,7 @@
       "max_start_to_notify_ready_ms": 3000,
       "persisted_path_required": true,
       "no_pair_async": true,
-      "validation_command": "pwsh -NoProfile -File C:\\Users\\Billy\\Desktop\\Denzic\\ai-collaboration-workflow\\scripts\\aiw.ps1 with-lock -Resource listener-ble -Wait -WaitTimeoutSeconds 60 -Purpose \"Type restart reconnect speed validation\" -Run pwsh -NoProfile -File .\\scripts\\check-type-startup-reconnect-speed.ps1 -RequirePersistedPath -MaxNotifyReadyMs 3000 -OutputJson <artifact>.json; artifact must prove no PairAsync, persisted_path_used=true, and background listener notify ready <=3000 ms from === Listener Type 启动 ===."
+      "validation_command": "pwsh -NoProfile -File <workflow-repo>/scripts/aiw.ps1 with-lock -Resource listener-ble -Wait -WaitTimeoutSeconds 60 -Purpose \"Type restart reconnect speed validation\" -Run pwsh -NoProfile -File .\\scripts\\check-type-startup-reconnect-speed.ps1 -RequirePersistedPath -MaxNotifyReadyMs 3000 -OutputJson <artifact>.json; artifact must prove no PairAsync, persisted_path_used=true, and background listener notify ready <=3000 ms from === Listener Type 启动 ===."
     },
     "ec11_type_repair_recovery": {
       "accepted": true,

@@ -29,7 +29,7 @@ B 组没有单独构建并安装前，不要把 A/B 结果混写。每组使用�
 ```powershell
 New-Item -ItemType Directory -Force .artifacts\acceptance-1.0.5 | Out-Null
 pwsh -NoProfile -File .\scripts\show-live-wake-acceptance.ps1 `
-  -LogPath 'C:\Users\Billy\AppData\Local\Listener Type\Logs\listener-type.log' `
+  -LogPath (Join-Path $env:LOCALAPPDATA 'Listener Type\Logs\listener-type.log') `
   -OutputPath '.artifacts\acceptance-1.0.5\wake-A-markers.json' `
   -Attempts 20
 ```
@@ -99,7 +99,7 @@ hold reason：
 
 ## 日志中重点看什么
 
-在 `C:\Users\Billy\AppData\Local\Listener Type\Logs\listener-type.log` 中检查：
+在 `%LOCALAPPDATA%\Listener Type\Logs\listener-type.log` 中检查：
 
 - 唤醒延迟：`wake_to_capsule_request_ms`、`phrase_tail_to_capsule_ms`
 - 自动结束：`target-speaker auto-stop sent`、`stop_to_transcribing_ms`

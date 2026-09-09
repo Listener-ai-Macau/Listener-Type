@@ -47,7 +47,7 @@ rejected because retained quiet true-positive candidates overlap the incident sa
 
 - Type source commit: `e3cff98873cdb065e830615b8f94f9330b5d9134`.
 - Formal MSI:
-  `C:\Users\Billy\Desktop\Denzic\Listener\ListenerType_1.0.3_x64_en-US.msi`.
+  `<release-root>/ListenerType_1.0.3_x64_en-US.msi`.
 - MSI SHA-256:
   `9CD5080A8E6CDD0F3F8352A398ED14DB348B5EB783B272303D0429F7B7215532`.
 - Installed executable:
@@ -62,7 +62,7 @@ rejected because retained quiet true-positive candidates overlap the incident sa
 
 Listen to:
 
-`C:\Users\Billy\AppData\Local\Listener Type\Logs\wake-diag-live\wake-candidate-133-session-151-accepted.wav`
+`%LOCALAPPDATA%\Listener Type\Logs\wake-diag-live\wake-candidate-133-session-151-accepted.wav`
 
 Record whether the activation phrase is audibly present. Energy statistics alone are not
 accepted evidence for changing wake sensitivity.

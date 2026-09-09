@@ -2,6 +2,6 @@
   "selected": "失败",
   "text": "先恢复一下。然后我现在说两个人在说话，看一下能不能……这个自动我暂时不支持。",
   "spoken_text": null,
-  "output_path": "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\scripts\\..\\docs\\release\\evidence\\1.0.4-recording-ux-20260809-215347\\step-03-other-speaker-note.txt"
+  "output_path": "<repository>/docs/release/evidence/1.0.4-recording-ux-20260809-215347/step-03-other-speaker-note.txt"
 }
 

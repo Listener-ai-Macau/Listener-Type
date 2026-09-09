@@ -309,17 +309,17 @@ impl EmbeddedStreamingDictation {
                 // 时，旧段 STOP 视为段 rotation：不 finalize，绑定激活后的新设备段。
                 if let Some((pre_segment_id, activated_at)) = self.activation_segment_race_guard {
                     if self.session.is_some() && session_id == pre_segment_id {
-                        let body_started = self
+                        let body_present = self
                             .session
                             .as_ref()
                             .map(|session| session.session_id)
                             .is_some_and(|coordinator_session_id| {
-                                automatic_wake_body_started(inner, coordinator_session_id)
+                                automatic_wake_body_presence(inner, coordinator_session_id)
                                     || current_embedded_audio_partial_preview(inner)
                                         .as_deref()
                                         .is_some_and(|text| !text.trim().is_empty())
                             });
-                        if !body_started
+                        if !body_present
                             && activated_at.elapsed() <= EMBEDDED_ACTIVATION_SEGMENT_RACE_WINDOW
                         {
                             log::info!(

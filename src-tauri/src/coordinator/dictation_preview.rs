@@ -622,6 +622,7 @@ fn arm_automatic_wake_text_guard(
         // An early capsule can already be visible before the accepted session
         // installs this guard, so that ACK may legitimately never repeat.
         initial_body_wait_started_at: Some(Instant::now()),
+        body_presence: false,
         body_started: false,
         allow_late_buffered_body: false,
         stop_requested: false,
@@ -684,7 +685,8 @@ pub(super) fn mark_automatic_wake_stop_requested(
         if !guard.stop_requested {
             guard.stop_requested = true;
             log::info!(
-                "[wake-phrase] automatic wake text gate closed at stop boundary session_id={session_id} body_started={}",
+                "[wake-phrase] automatic wake text gate closed at stop boundary session_id={session_id} body_presence={} body_started={}",
+                guard.body_presence,
                 guard.body_started
             );
         }
@@ -797,10 +799,12 @@ fn automatic_wake_initial_body_wait_snapshot_at(
         .unwrap_or(true);
     // Before the capsule-visible acknowledgement no deadline is armed, so the
     // wait remains active even if an eager provider preview already found
-    // body text. After acknowledgement, either positive body text or expiry
-    // of the bounded audio/wall deadline releases the endpoint reducer.
+    // body text. After acknowledgement, provisional owner presence releases
+    // the grace; only authoritative text can qualify final wake-body output.
+    let body_wait_released = guard.initial_body_wait_until_audio_ms.is_some()
+        && guard.body_presence;
     (
-        !guard.body_started && audio_wait_active && wall_wait_active,
+        !body_wait_released && audio_wait_active && wall_wait_active,
         guard.initial_body_wait_started_at,
     )
 }
@@ -821,6 +825,17 @@ fn automatic_wake_body_started(inner: &Arc<Inner>, session_id: SessionId) -> boo
         .is_some_and(|guard| guard.session_id == session_id && guard.body_started)
 }
 
+pub(super) fn automatic_wake_body_presence(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) -> bool {
+    inner
+        .embedded_audio_automatic_wake_guard
+        .lock()
+        .as_ref()
+        .is_some_and(|guard| guard.session_id == session_id && guard.body_presence)
+}
+
 fn filter_automatic_wake_text(
     inner: &Arc<Inner>,
     session_id: SessionId,
@@ -835,7 +850,7 @@ fn filter_automatic_wake_text(
         .map(|guard| {
             (
                 Some(guard.phrase.clone()),
-                guard.stop_requested && !guard.body_started && !guard.allow_late_buffered_body,
+                guard.stop_requested && !guard.body_presence && !guard.allow_late_buffered_body,
             )
         })
         .unwrap_or((None, false));
@@ -854,8 +869,9 @@ fn filter_automatic_wake_text(
         let mut slot = inner.embedded_audio_automatic_wake_guard.lock();
         if let Some(guard) = slot
             .as_mut()
-            .filter(|guard| guard.session_id == session_id && !guard.body_started)
+            .filter(|guard| guard.session_id == session_id)
         {
+            guard.body_presence = true;
             guard.body_started = true;
             log::info!(
                 "[wake-phrase] automatic body started after capsule session_id={session_id}"
@@ -1010,11 +1026,21 @@ fn strip_inlined_chinese_filler_runs(text: &str) -> String {
 
 fn filter_dictation_preview_text(inner: &Arc<Inner>, session_id: SessionId, text: &str) -> String {
     let text = filter_automatic_wake_text(inner, session_id, text, true);
-    if inner.prefs.get().remove_filler_words {
+    let text = if inner.prefs.get().remove_filler_words {
         remove_standalone_dictation_fillers(&text)
     } else {
         text
+    };
+    if !text.trim().is_empty() {
+        let mut slot = inner.embedded_audio_automatic_wake_guard.lock();
+        if let Some(guard) = slot
+            .as_mut()
+            .filter(|guard| guard.session_id == session_id)
+        {
+            guard.body_presence = true;
+        }
     }
+    text
 }
 
 fn filter_dictation_visual_preview_text(
@@ -1034,11 +1060,21 @@ fn filter_dictation_visual_preview_text(
         || preserve_recording_transcript(text),
         |phrase| strip_automatic_activation_prefix(text, &phrase, true),
     );
-    if inner.prefs.get().remove_filler_words {
+    let text = if inner.prefs.get().remove_filler_words {
         remove_standalone_dictation_fillers(&text)
     } else {
         text
+    };
+    if !text.trim().is_empty() {
+        let mut slot = inner.embedded_audio_automatic_wake_guard.lock();
+        if let Some(guard) = slot
+            .as_mut()
+            .filter(|guard| guard.session_id == session_id)
+        {
+            guard.body_presence = true;
+        }
     }
+    text
 }
 
 

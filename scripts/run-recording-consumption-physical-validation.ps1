@@ -23,7 +23,7 @@ $installedType = "C:\Program Files\Listener Type\listener-type.exe"
 $workflowRoot = if ($env:AI_WORKFLOW_REPO -and (Test-Path (Join-Path $env:AI_WORKFLOW_REPO "docs\agent_quickstart.md"))) {
     $env:AI_WORKFLOW_REPO
 } else {
-    "C:\Users\Billy\Desktop\Denzic\ai-collaboration-workflow"
+    throw "Set AI_WORKFLOW_REPO to a workflow checkout containing docs\agent_quickstart.md before running this private validation helper."
 }
 $aiw = Join-Path $workflowRoot "scripts\aiw.ps1"
 $typeLog = Join-Path $env:LOCALAPPDATA "Listener Type\Logs\listener-type.log"

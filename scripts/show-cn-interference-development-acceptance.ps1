@@ -108,7 +108,7 @@ function Save-Result {
         'event=start embedded_session_id=(\d+) origin=VoiceActivation')
     $candidateIds = @(
         foreach ($match in $candidateMatches) {
-            [int]$match.Groups[1].Value
+            [long]$match.Groups[1].Value
         }
     )
     $acceptedMatches = [regex]::Matches(
@@ -116,7 +116,7 @@ function Save-Result {
         'automatic streaming gate embedded_session_id=(\d+).*gate_decision=Accept')
     $acceptedIds = @(
         foreach ($match in $acceptedMatches) {
-            [int]$match.Groups[1].Value
+            [long]$match.Groups[1].Value
         }
     )
     $parent = [System.IO.Path]::GetDirectoryName($output)

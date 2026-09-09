@@ -248,7 +248,11 @@ fn resolve_target_speaker_endpoint_policy(
     preview: Option<&str>,
     audio_duration_ms: Option<u64>,
 ) -> TargetSpeakerEndpointPolicy {
-    let body_started = automatic_wake_body_started(inner, session_id)
+    // Endpoint mode follows the session's owner presence anchor. A visual
+    // preview is enough to leave the wake-only grace, but only the
+    // authoritative filter promotes `automatic_wake_body_started` for final
+    // text qualification.
+    let body_started = automatic_wake_body_presence(inner, session_id)
         || preview.is_some_and(|text| !text.trim().is_empty());
     let automatic_wake = automatic_wake_session_active(inner, session_id);
     let mode_timeout_ms = target_speaker_end_timeout_ms_for_preview(preview);

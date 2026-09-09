@@ -785,7 +785,7 @@ function Show-CanonicalReviewStep {
     $workflowRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_WORKFLOW_REPO) -and (Test-Path -LiteralPath (Join-Path $env:AI_WORKFLOW_REPO "scripts\\aiw.ps1"))) {
         $env:AI_WORKFLOW_REPO
     } else {
-        "C:\\Users\\Billy\\Desktop\\Denzic\\ai-collaboration-workflow"
+        throw "Set AI_WORKFLOW_REPO to a workflow checkout containing scripts\\aiw.ps1 before running this private review helper."
     }
     $workflowAiw = Join-Path $workflowRoot "scripts\\aiw.ps1"
     if (-not (Test-Path -LiteralPath $workflowAiw)) {

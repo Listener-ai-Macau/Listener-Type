@@ -13,7 +13,7 @@ $ErrorActionPreference = "Stop"
 $workflow = if ($env:AI_WORKFLOW_REPO -and (Test-Path (Join-Path $env:AI_WORKFLOW_REPO "scripts\operator_prompt.ps1"))) {
   $env:AI_WORKFLOW_REPO
 } else {
-  "C:\Users\Billy\Desktop\Denzic\ai-collaboration-workflow"
+  throw "Set AI_WORKFLOW_REPO to a workflow checkout containing scripts\operator_prompt.ps1 before running this private acceptance helper."
 }
 $operatorPrompt = Join-Path $workflow "scripts\operator_prompt.ps1"
 if (-not (Test-Path $operatorPrompt)) { throw "missing operator_prompt.ps1: $operatorPrompt" }

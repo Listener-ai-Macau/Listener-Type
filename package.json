@@ -13,6 +13,7 @@
     "check:cloud": "node scripts/check-cloud-services.mjs",
     "check:docs": "node scripts/check-doc-inheritance.mjs",
     "check:traceability": "node scripts/check-traceability.mjs",
+    "check:open-source": "node scripts/check-open-source-hygiene.mjs",
     "check:module-budgets": "node scripts/check-module-budgets.mjs",
     "check:tauri-info": "node scripts/check-tauri-info.mjs",
     "check:version": "node scripts/check-release-version.mjs",

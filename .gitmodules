@@ -1,4 +1,4 @@
 [submodule "third_party/denzic-platform"]
 	path = third_party/denzic-platform
-	url = git@github.com:Listener-ai-Macau/Denzic-Platform.git
+	url = https://github.com/Listener-ai-Macau/Denzic-Platform.git
 	branch = master

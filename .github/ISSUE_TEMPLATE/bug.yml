@@ -31,4 +31,11 @@ body:
     id: logs
     attributes:
       label: Logs
-      description: Attach relevant `listener-type.log` excerpts.
+      description: Attach only redacted excerpts. Never include API keys, tokens, recordings, transcripts, personal data, or full local paths.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I have removed credentials, recordings, transcripts, personal data, and private paths.
+          required: true

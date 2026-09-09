@@ -54,8 +54,8 @@ For Windows IME edits, also run the static scripts under `scripts/windows-*.test
 
 ## Shared agent rules (Grok / Claude / Codex)
 
-Also follow `C:\Users\Billy\Desktop\Denzic\ai-collaboration-workflow\docs\shared_product_engineering_rules.md`
-(or `$env:AI_WORKFLOW_REPO\docs\shared_product_engineering_rules.md`): fix-before-acceptance,
+Also follow `$env:AI_WORKFLOW_REPO\docs\shared_product_engineering_rules.md`
+(or the canonical local workflow checkout): fix-before-acceptance,
 fresh test binary, anti-regression contracts, **§1 always-latest Program Files Type + matching firmware**
 (install MSI / flash or OTA before owner opens the app for acceptance).
 

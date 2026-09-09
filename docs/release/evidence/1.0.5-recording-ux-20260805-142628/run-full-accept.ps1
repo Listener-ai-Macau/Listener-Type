@@ -1,7 +1,7 @@
 #requires -Version 7.0
 $ErrorActionPreference = "Stop"
 $EvidenceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$op = "C:\Users\Billy\Desktop\Denzic\ai-collaboration-workflow\scripts\operator_prompt.ps1"
+$op = Join-Path $env:AI_WORKFLOW_REPO "scripts\operator_prompt.ps1"
 $results = [System.Collections.Generic.List[object]]::new()
 $overall = "PASS"
 

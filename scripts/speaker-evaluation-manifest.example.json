@@ -2,7 +2,7 @@
   "models": [
     {
       "name": "campplus-current",
-      "path": "C:/Users/OWNER/AppData/Roaming/Listener Type/models/speaker-verification/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
+      "path": "%APPDATA%/Listener Type/models/speaker-verification/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
     },
     {
       "name": "eres2net-candidate",

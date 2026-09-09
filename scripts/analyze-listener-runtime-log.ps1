@@ -172,7 +172,10 @@ function Convert-ListenerLog(
       $origin = $Matches.origin
       $activeEmbeddedId = $id
       foreach ($prior in $candidates.Values) {
-        if ($prior.embedded_session_id -ne [int]$id -and $prior.decision -eq 'pending') {
+        # Firmware session ids are uint32 values and routinely exceed the
+        # signed Int32 range. Keep them as Int64 in diagnostics so a valid
+        # device session cannot crash the observer before it emits a report.
+        if ($prior.embedded_session_id -ne [long]$id -and $prior.decision -eq 'pending') {
           # Firmware/actor recovery can replace a VAD proposal without an
           # explicit STOP for the old proposal. A later start proves the actor
           # is not stuck; retain it as a diagnostic supersession, not an error.
@@ -182,7 +185,7 @@ function Convert-ListenerLog(
       }
       $candidate = Get-OrAdd $candidates $id {
         [ordered]@{
-          embedded_session_id = [int]$id
+          embedded_session_id = [long]$id
           origin = $origin
           started_at = $timestamp.ToString('o')
           stopped_at = $null

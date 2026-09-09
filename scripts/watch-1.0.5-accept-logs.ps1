@@ -6,8 +6,8 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
-$log = "C:\Users\Billy\AppData\Local\Listener Type\Logs\listener-type.log"
-$capsule = "C:\Users\Billy\AppData\Local\Listener Type\Logs\capsule-timeline.log"
+$log = Join-Path $env:LOCALAPPDATA "Listener Type\Logs\listener-type.log"
+$capsule = Join-Path $env:LOCALAPPDATA "Listener Type\Logs\capsule-timeline.log"
 $out = Join-Path $EvidenceDir "live-log-hits.jsonl"
 $doneMarker = Join-Path $EvidenceDir "operator-result.json"
 $start = Get-Date

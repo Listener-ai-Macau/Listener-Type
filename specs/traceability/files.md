@@ -29,6 +29,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/check-live-wake-only.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-live-wake-only.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-module-budgets.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-open-source-hygiene.mjs` | Public repository hygiene | `npm run check:open-source` |
 | `scripts/check-ota-transfer-speed-log.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-ota-transfer-speed-log.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-performance-baselines.mjs` | Automation and audits | Node/PowerShell script tests |

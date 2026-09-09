@@ -2,6 +2,15 @@
 
 This documentation set is organized so product behavior, implementation files and release safety can be checked together.
 
+For the public project boundary, contribution rules, support, and vulnerability
+reports, start with [CONTRIBUTING](../CONTRIBUTING.md), [SUPPORT](../SUPPORT.md),
+[SECURITY](../SECURITY.md), and [Open-source status](OPEN_SOURCE.md).
+
+For release expectations, read the [change log](../CHANGELOG.md) and the
+[1.0.5 commercial readiness note](release/1.0.5-commercial-readiness.md).
+They intentionally separate the usable 1.0.5 product baseline from the
+broader owner-enrollment and interference work planned for 1.0.6.
+
 ## User Guides
 
 - [Usage](USAGE.md)

@@ -1,0 +1,23 @@
+name: Private security contact fallback
+description: Request a private route for a suspected vulnerability without publishing details
+title: "[Security contact]: "
+labels: ["security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not describe the vulnerability here. If GitHub Security Advisories are enabled, use that private channel instead.
+  - type: textarea
+    id: request
+    attributes:
+      label: Safe contact request
+      description: State only that you need a private security contact and include a safe reply method if appropriate.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I have not included exploit details, credentials, recordings, transcripts, personal data, or private paths.
+          required: true

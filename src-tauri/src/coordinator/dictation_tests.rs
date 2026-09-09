@@ -1,11 +1,11 @@
 use super::{
     acknowledge_automatic_wake_capsule_visible, append_typed_prefix,
     arm_accepted_automatic_wake_text_guard, arm_automatic_wake_text_guard,
-    automatic_wake_body_started, automatic_wake_initial_body_wait_active,
-    automatic_wake_session_active, begin_embedded_audio_dictation_session_id,
-    cancel_embedded_ble_listener_capture, cancel_session, claim_post_dictation_key,
-    clear_automatic_wake_text_guard, clear_embedded_ble_cancel_flag,
-    current_embedded_audio_partial_preview, default_done_message,
+    automatic_wake_body_presence, automatic_wake_body_started,
+    automatic_wake_initial_body_wait_active, automatic_wake_session_active,
+    begin_embedded_audio_dictation_session_id, cancel_embedded_ble_listener_capture,
+    cancel_session, claim_post_dictation_key, clear_automatic_wake_text_guard,
+    clear_embedded_ble_cancel_flag, current_embedded_audio_partial_preview, default_done_message,
     device_ai_processing_completion_delay, device_ai_processing_io_allowed,
     device_processing_final_succeeded, dictation_asr_engine_backend_id,
     dictation_asr_quality_warning, dictation_asr_uses_core_accurate_engine, dictation_error_code,
@@ -4453,7 +4453,30 @@ fn visual_only_preview_strips_wake_without_starting_endpoint_body_clock() {
         !automatic_wake_body_started(&coordinator.inner, session_id),
         "display-only text must not shorten the three-second no-body guard"
     );
+    assert!(automatic_wake_body_presence(&coordinator.inner, session_id));
     assert!(current_embedded_audio_partial_preview(&coordinator.inner).is_none());
+}
+
+#[test]
+fn owner_presence_releases_post_ack_wait_without_promoting_final_text() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    arm_automatic_wake_text_guard(&coordinator.inner, session_id, "开始录音".into(), 1_200);
+    assert_eq!(
+        filter_dictation_visual_preview_text(
+            &coordinator.inner,
+            session_id,
+            "开始录音。主人临时预览。",
+        ),
+        "主人临时预览。"
+    );
+    acknowledge_automatic_wake_capsule_visible(&coordinator.inner, session_id);
+    assert!(!automatic_wake_initial_body_wait_active(
+        &coordinator.inner,
+        session_id,
+        Some(1_300)
+    ));
+    assert!(!automatic_wake_body_started(&coordinator.inner, session_id));
 }
 
 #[test]

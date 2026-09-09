@@ -1,7 +1,7 @@
 {
   "schema": "listener.1.0.4.recording_ux.owner_acceptance",
   "result": "FAIL",
-  "evidence_dir": "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\docs\\release\\evidence\\1.0.4-recording-ux-20260809-215347",
+  "evidence_dir": "<repository>/docs/release/evidence/1.0.4-recording-ux-20260809-215347",
   "steps": [
     {
       "id": "00-ready",

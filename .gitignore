@@ -10,6 +10,9 @@ dist/
 cache/
 __pycache__/
 *.pyc
+*.log
+coverage/
+*.tmp
 artifacts/
 .artifacts/
 docs/validation/
@@ -26,6 +29,8 @@ ref/
 *.rpm
 *.zip
 *.sig
+*.pem
+*.key
 
 # Tauri
 **/target/
