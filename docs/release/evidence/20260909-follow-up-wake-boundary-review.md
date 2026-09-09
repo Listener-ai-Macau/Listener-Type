@@ -39,3 +39,23 @@ also passes all `10` catalog scenarios. The complete `cargo test --lib` suite
 is still not green on this branch: `1284` passed, `19` historical coordinator
 and endpoint-replay tests failed, and `31` were ignored. Those failures remain
 a separate release blocker, not something to hide behind the focused tests.
+
+## Current-branch MSI identity check
+
+This development branch was packaged and installed for an identity check only;
+it is not a new 1.0.5 acceptance record:
+
+- `npm run tauri -- build --bundles msi`: PASS
+- `msiexec /i ... /qn /norestart`: exit `0`
+- MSI SHA-256: `09A180C96D8F656C7CC6855C3CAED6A1AD6733959D1987EA55CEB3A6835120E5`
+- packaged MSI payload and installed executable SHA-256:
+  `9026C012C35C624255780B1228C2BA12B58465333B7A664340B1E0B451FF4B55`
+- `scripts/verify_latest_runtime.ps1 -RequireRunning`: PASS, two processes from
+  the installed Program Files path
+
+Tauri patches executable bundle metadata while producing the MSI, so the raw
+`target/release/listener-type.exe` hash is not the installed payload identity.
+The runtime verifier now extracts the current MSI payload into a temporary
+directory and compares that packaged executable instead. This fixes a false
+stale-binary failure; it does not replace the missing fresh human interference
+run.
