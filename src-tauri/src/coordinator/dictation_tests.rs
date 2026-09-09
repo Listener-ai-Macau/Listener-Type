@@ -6921,6 +6921,35 @@ fn exact_phrase_only_local_confirmation_refines_late_keyword_boundary() {
 
 #[cfg(target_os = "windows")]
 #[test]
+fn terminal_exact_start_does_not_consume_the_following_body_as_wake_audio() {
+    // Live session 2469201662: interference delayed local confirmation until
+    // the 4.48 s terminal snapshot. The transcript still contained exactly
+    // the four-character wake phrase, so the old boundary became 4.36 s and
+    // post_wake_pcm_ms=0, dropping the owner's first sentence.
+    let confirmation = super::LocalWakeConfirmation {
+        matched: true,
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::ExactStart,
+        transcript_chars: 4,
+        phonetic_prefix_units: 4,
+        phonetic_best_distance: 0,
+        phonetic_best_window_start: 0,
+        inference_ms: 114,
+        snapshot_pcm_ms: 4_480,
+        recovered_keyword_end_seconds: None,
+    };
+    let refined = super::refined_wake_end_seconds(0.0, &confirmation, 4);
+    assert!((refined - 1.32).abs() < 0.001);
+
+    let pcm_bytes = 4_480 * 32;
+    let post_wake_bytes = pcm_bytes - super::post_wake_pcm_offset_bytes(refined, pcm_bytes);
+    assert!(
+        post_wake_bytes >= 32_000,
+        "owner body must stay in the promoted session"
+    );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
 fn local_only_second_chance_requires_a_start_aligned_phrase() {
     use crate::wake_phrase::LocalPhraseRelation;
 

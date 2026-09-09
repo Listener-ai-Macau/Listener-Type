@@ -1141,7 +1141,7 @@ fn refined_wake_end_seconds(
     confirmation: &LocalWakeConfirmation,
     phrase_chars: usize,
 ) -> f32 {
-    denzic_voice_activation_v1_core::refined_local_wake_end_seconds(
+    let refined = denzic_voice_activation_v1_core::refined_local_wake_end_seconds(
         denzic_voice_activation_v1_core::LocalConfirmationBoundaryInput {
             keyword_end_seconds,
             recovered_keyword_end_seconds: confirmation.recovered_keyword_end_seconds,
@@ -1152,7 +1152,29 @@ fn refined_wake_end_seconds(
             end_pad_seconds: WAKE_END_PAD_SECONDS,
             local_endpoint_max_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
         },
+    );
+    // Under interference the terminal local transcript can confirm only the
+    // exact wake phrase after the capture already contains the first body
+    // sentence. With no KWS/model boundary, the shared core's phrase-only
+    // fallback would use the entire snapshot (for example 4.36 s), making
+    // post_wake_pcm_ms zero and dropping the owner's first sentence. Keep the
+    // normal short-window behavior, but bound this delayed exact-start case
+    // to the product wake endpoint plus its pad.
+    let delayed_exact_start_without_boundary = matches!(
+        confirmation.phrase_relation,
+        crate::wake_phrase::LocalPhraseRelation::ExactStart
+            | crate::wake_phrase::LocalPhraseRelation::PhoneticStart
     )
+        && confirmation.transcript_chars <= phrase_chars
+        && keyword_end_seconds <= 0.0
+        && confirmation.recovered_keyword_end_seconds.is_none()
+        && confirmation.snapshot_pcm_ms as f32
+            > (LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS + 1.0) * 1_000.0;
+    if delayed_exact_start_without_boundary {
+        refined.min(LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS + WAKE_END_PAD_SECONDS)
+    } else {
+        refined
+    }
 }
 
 #[cfg(target_os = "windows")]
