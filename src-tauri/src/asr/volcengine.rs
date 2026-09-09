@@ -948,13 +948,22 @@ fn should_preserve_longer_owner_preview(
 /// exactly how room speech/recognition hallucinations leak into the user's
 /// text.  Keep punctuation-only corrections, but never admit new spoken
 /// content after the boundary unless a separately extracted owner track exists.
-fn owner_preview_safety_ceiling(state: &SyncState, merged: &str) -> Option<String> {
+fn owner_preview_safety_ceiling(
+    state: &SyncState,
+    merged: &str,
+    owner_recovery_proven: bool,
+) -> Option<String> {
     if !state.finishing
         || !state.local_speaker_tracking_enabled
         || state.last_emitted_preview_text.trim().is_empty()
         || spoken_content_len(merged) <= spoken_content_len(&state.last_emitted_preview_text)
         || state.wake_bound_single_speaker_final_text.is_some()
         || state.distinct_speaker_target_final_text.is_some()
+        // The final arbiter has already established that this late growth is
+        // an owner-continuous provider candidate (for example a sequential
+        // speaker split or an unsegmented owner tail). In that case the last
+        // visible preview is stale evidence, not an ownership ceiling.
+        || owner_recovery_proven
     {
         return None;
     }
@@ -4872,7 +4881,14 @@ impl VolcengineStreamingASR {
         // second final writer after the authority has been logged and sealed.
         if has_final {
             let state = self.state.lock();
-            if let Some(ceiling) = owner_preview_safety_ceiling(&state, &candidate.text) {
+            if let Some(ceiling) = owner_preview_safety_ceiling(
+                &state,
+                &candidate.text,
+                matches!(
+                    final_authority,
+                    crate::speech_decision_kernel::FinalTranscriptAuthority::ProviderOwnerRecovery
+                ),
+            ) {
                 candidate.text = ceiling;
                 // The preview is display text rather than a timed provider
                 // segment. Discard stale timing before the candidate is sealed.
@@ -6673,7 +6689,7 @@ mod tests {
             ..SyncState::default()
         };
         assert_eq!(
-            owner_preview_safety_ceiling(&state, "开始录音。主人正文到这里。旁人插入的字。"),
+            owner_preview_safety_ceiling(&state, "开始录音。主人正文到这里。旁人插入的字。", false,),
             Some("开始录音。主人正文到这里。".into())
         );
     }
@@ -6686,7 +6702,31 @@ mod tests {
             last_emitted_preview_text: "开始录音主人正文".into(),
             ..SyncState::default()
         };
-        assert!(owner_preview_safety_ceiling(&state, "开始录音，主人正文。").is_none());
+        assert!(owner_preview_safety_ceiling(&state, "开始录音，主人正文。", false).is_none());
+    }
+
+    #[test]
+    fn post_stop_owner_recovery_can_admit_late_owner_tail() {
+        let state = SyncState {
+            finishing: true,
+            local_speaker_tracking_enabled: true,
+            last_emitted_preview_text: "开始录音。主人前半句".into(),
+            ..SyncState::default()
+        };
+        assert!(owner_preview_safety_ceiling(
+            &state,
+            "开始录音。主人前半句，停止后才到的主人尾巴。",
+            true,
+        )
+        .is_none());
+        assert_eq!(
+            owner_preview_safety_ceiling(
+                &state,
+                "开始录音。主人前半句，停止后才到的主人尾巴。",
+                false,
+            ),
+            Some("开始录音。主人前半句".into())
+        );
     }
 
     #[test]

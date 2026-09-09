@@ -19,6 +19,8 @@ Listener Type 1.0.5 is the current desktop and Listener keyboard baseline.
   configurable cloud ASR/LLM providers.
 - Owner-presence and interference protections across the wake candidate,
   recording session, endpoint and final-text paths.
+- A final-frame owner-recovery guard that keeps a verified late owner tail
+  instead of truncating it to the last preview shown before auto-stop.
 - A recorded owner-plus-computer-playback interference baseline. See
   [the evidence record](docs/release/evidence/20260909-current-interference-baseline.md).
 - Public repository hygiene, contribution, support, security and code-of-

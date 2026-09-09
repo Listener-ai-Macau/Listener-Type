@@ -4218,7 +4218,7 @@ fn target_speaker_endpoint_has_one_atomic_final_transcript_arbiter() {
         .nth(1)
         .expect("provider must assemble one terminal candidate");
     let safety_ceiling = final_candidate_block
-        .find("owner_preview_safety_ceiling(&state, &candidate.text)")
+        .find("owner_preview_safety_ceiling(")
         .expect("stop-boundary safety ceiling must normalize the candidate");
     let content_seal = final_candidate_block
         .find("let arbitrated_final_content_len")
