@@ -50,6 +50,7 @@ function Get-ObservationAction([string]$Kind, [int]$Count) {
     'recording_stuck',
     'final_commit_truncated',
     'owner_text_destructive_reduction',
+    'delayed_wake_body_lost',
     'runtime_fatal_or_watchdog'
   )
   if ($Kind -in $singleEvidenceCritical) { return 'investigate_now' }
@@ -204,6 +205,11 @@ function Convert-ListenerLog(
           max_transcript_chars = 0
           max_owner_score = $null
           local_helper_busy_count = 0
+          terminal_start_aligned = $false
+          terminal_snapshot_pcm_ms = $null
+          terminal_transcript_chars = $null
+          terminal_wake_end_ms = $null
+          terminal_post_wake_pcm_ms = $null
         }
       }
       continue
@@ -230,6 +236,11 @@ function Convert-ListenerLog(
             $candidate.best_phonetic_distance = $distance
           }
         }
+        if ($line -match 'terminal local confirmation finished .* matched=true phrase_relation=(?<relation>ExactStart|PhoneticStart)\s+snapshot_pcm_ms=(?<snapshot>\d+) transcript_chars=(?<chars>\d+)') {
+          $candidate.terminal_start_aligned = $true
+          $candidate.terminal_snapshot_pcm_ms = [int]$Matches.snapshot
+          $candidate.terminal_transcript_chars = [int]$Matches.chars
+        }
         if ($line -match 'local confirmation.*(?:busy|local_wake_helper_busy)') {
           $candidate.local_helper_busy_count = [int]$candidate.local_helper_busy_count + 1
         }
@@ -239,6 +250,12 @@ function Convert-ListenerLog(
           $candidate.phrase_signal = $Matches.signal
           $candidate.decision = $Matches.decision.ToLowerInvariant()
           $candidate.owner_matched = $Matches.owner -eq 'true'
+        }
+        if ($line -match 'automatic candidate decision .* gate_allowed=(?<allowed>true|false).* wake_end_s=(?<wake>\d+(?:\.\d+)?)') {
+          $candidate.terminal_wake_end_ms = [int][math]::Round(([double]$Matches.wake) * 1000)
+        }
+        if ($line -match 'terminal accept requires body continuation .* post_wake_pcm_ms=(?<post>\d+)') {
+          $candidate.terminal_post_wake_pcm_ms = [int]$Matches.post
         }
         if ($line -match 'live automatic session activated .* wake_to_capsule_request_ms=(?<latency>\d+).* phrase_tail_to_capsule_ms=(?<tail>\d+)') {
           $candidate.decision = 'accept'
@@ -478,6 +495,27 @@ function Convert-ListenerLog(
     })
   }
   foreach ($candidate in $candidates.Values) {
+    if (
+      $candidate.origin -eq 'VoiceActivation' -and
+      $candidate.decision -eq 'accept' -and
+      $candidate.terminal_start_aligned -eq $true -and
+      $null -ne $candidate.terminal_snapshot_pcm_ms -and
+      $candidate.terminal_snapshot_pcm_ms -gt 3000 -and
+      $candidate.terminal_post_wake_pcm_ms -eq 0 -and
+      $null -ne $candidate.terminal_wake_end_ms -and
+      $candidate.terminal_wake_end_ms -gt 3000
+    ) {
+      $issues.Add([ordered]@{
+        severity = 'error'
+        kind = 'delayed_wake_body_lost'
+        embedded_session_id = $candidate.embedded_session_id
+        phrase_relation = 'start_aligned'
+        terminal_snapshot_pcm_ms = $candidate.terminal_snapshot_pcm_ms
+        terminal_wake_end_ms = $candidate.terminal_wake_end_ms
+        post_wake_pcm_ms = $candidate.terminal_post_wake_pcm_ms
+        action = 'verify first owner sentence was not consumed as wake audio'
+      })
+    }
     # A VoiceActivation candidate is only a VAD proposal. Rejecting ordinary
     # owner/room speech without the wake phrase is expected false-wake
     # suppression, not a runtime failure. Escalate only the contradictory case
@@ -689,7 +727,7 @@ function Convert-ListenerLog(
   $watchlist = @($observationGroups | Where-Object action -eq 'observe_more')
 
   [ordered]@{
-    schema = 'listener-runtime-health/v6'
+    schema = 'listener-runtime-health/v7'
     generated_at = [datetime]::UtcNow.ToString('o')
     log_path = $LogPath
     cutoff_utc = $CutoffUtc.ToString('o')
