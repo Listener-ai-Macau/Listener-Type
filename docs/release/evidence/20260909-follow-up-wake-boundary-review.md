@@ -33,10 +33,9 @@ still lacks human acceptance for this runtime path. Do not move this record
 into the 1.0.5 baseline or update the release tag until the operator records a
 successful retest.
 
-The targeted wake-boundary and post-stop-owner-tail tests pass. The complete
-`cargo test --lib` suite is not green on this branch: eight historical ASR
-replay tests currently fail around provider-final recovery and empty/tail
-arbitration (`installed_session_768`, `installed_b6c7bd31`,
-`installed_session_239`, `optimistic_preview_gate`, `owner_acceptance_final`,
-two `protocol_final_preserves_*` cases, and `two_pass_empty_final`). That is a
-separate release blocker, not something to hide behind the targeted tests.
+The focused ASR replay suite now passes: `114` executable tests passed and `2`
+credential/audio-backed tests were ignored. The published multi-speaker matrix
+also passes all `10` catalog scenarios. The complete `cargo test --lib` suite
+is still not green on this branch: `1284` passed, `19` historical coordinator
+and endpoint-replay tests failed, and `31` were ignored. Those failures remain
+a separate release blocker, not something to hide behind the focused tests.

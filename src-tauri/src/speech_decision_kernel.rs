@@ -141,8 +141,19 @@ pub(crate) struct FinalTranscriptEvidence {
 pub(crate) fn arbitrate_final_transcript(
     evidence: FinalTranscriptEvidence,
 ) -> FinalTranscriptAuthority {
-    if !evidence.protocol_final || evidence.explicit_non_owner_tail {
+    if !evidence.protocol_final {
         return FinalTranscriptAuthority::SpeakerFiltered;
+    }
+    // A foreign-tail veto must prevent provider/raw/optimistic recovery from
+    // reintroducing the other speaker, but it must not erase owner text that
+    // was already committed before the tail arrived. The session ledger is the
+    // only recovery source that has already crossed the owner boundary.
+    if evidence.explicit_non_owner_tail {
+        return if evidence.session_ledger_recovery_safe {
+            FinalTranscriptAuthority::SessionLedgerRecovery
+        } else {
+            FinalTranscriptAuthority::SpeakerFiltered
+        };
     }
     if evidence.provider_raw_recovery_safe {
         return FinalTranscriptAuthority::ProviderRawRecovery;
@@ -2130,6 +2141,13 @@ mod tests {
         };
         assert_eq!(
             arbitrate_final_transcript(every_recovery_path_open),
+            FinalTranscriptAuthority::SessionLedgerRecovery
+        );
+        assert_eq!(
+            arbitrate_final_transcript(FinalTranscriptEvidence {
+                session_ledger_recovery_safe: false,
+                ..every_recovery_path_open
+            }),
             FinalTranscriptAuthority::SpeakerFiltered
         );
     }

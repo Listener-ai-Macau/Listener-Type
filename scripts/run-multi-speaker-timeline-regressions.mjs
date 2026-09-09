@@ -61,7 +61,7 @@ if (!hasRustTest(dictationTestsSource, catalog.lifecycle_test)) {
   fail(`lifecycle regression test is missing: ${catalog.lifecycle_test}`);
 }
 
-function runCargo(filter) {
+function runCargoTest(filter) {
   const result = spawnSync(
     'cargo',
     [
@@ -71,6 +71,7 @@ function runCargo(filter) {
       '--lib',
       filter,
       '--',
+      '--exact',
       '--test-threads=1',
     ],
     {
@@ -88,8 +89,26 @@ function runCargo(filter) {
   return output;
 }
 
-const volcengineOutput = runCargo('asr::volcengine::tests');
-const dictationOutput = runCargo('coordinator::dictation::tests');
+// Run only the tests declared by this catalog. Running every ASR/coordinator
+// unit test here made the release gate fail on unrelated historical replay
+// fixtures, even when all declared multi-speaker scenarios passed. The full
+// Rust suite remains a separate diagnostic command; this gate should measure
+// exactly the published scenario matrix.
+const transcriptOutputs = new Map();
+const endpointOutputs = new Map();
+for (const scenario of catalog.scenarios) {
+  transcriptOutputs.set(
+    scenario.transcript_test,
+    runCargoTest(`asr::volcengine::tests::${scenario.transcript_test}`),
+  );
+  endpointOutputs.set(
+    scenario.endpoint_test,
+    runCargoTest(`coordinator::dictation::tests::${scenario.endpoint_test}`),
+  );
+}
+const lifecycleOutput = runCargoTest(
+  `coordinator::dictation::tests::${catalog.lifecycle_test}`,
+);
 
 function outputHasPassedTest(output, moduleName, testName) {
   return output
@@ -98,7 +117,7 @@ function outputHasPassedTest(output, moduleName, testName) {
 }
 
 const lifecyclePassed = outputHasPassedTest(
-    dictationOutput,
+    lifecycleOutput,
   'coordinator::dictation::tests',
   catalog.lifecycle_test,
 );
@@ -108,12 +127,12 @@ const scenarios = catalog.scenarios.map((scenario) => ({
   transcript_test: scenario.transcript_test,
   endpoint_test: scenario.endpoint_test,
   transcript_pass: outputHasPassedTest(
-    volcengineOutput,
+    transcriptOutputs.get(scenario.transcript_test),
     'asr::volcengine::tests',
     scenario.transcript_test,
   ),
   endpoint_pass: outputHasPassedTest(
-    dictationOutput,
+    endpointOutputs.get(scenario.endpoint_test),
     'coordinator::dictation::tests',
     scenario.endpoint_test,
   ),

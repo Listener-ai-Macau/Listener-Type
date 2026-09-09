@@ -1624,7 +1624,8 @@ fn final_explicit_non_owner_tail(
         .and_then(Value::as_str)
         .unwrap_or_default();
     let cloud_row_is_verified_owner_continuation = filtered.stable_other_speaker_present
-        && sequential_speaker_split_gap_is_owner_safe(state, provider_result, target_text);
+        && (sequential_speaker_split_gap_is_owner_safe(state, provider_result, target_text)
+            || final_unsegmented_provider_tail_is_owner_safe(state, provider_result, target_text));
     filtered.stable_non_target_utterance_present
         || (filtered.stable_other_speaker_present && !cloud_row_is_verified_owner_continuation)
         || state.owner_isolation_frozen
@@ -4783,7 +4784,11 @@ impl VolcengineStreamingASR {
                         >= spoken_content_len(optimistic_text));
             let session_ledger_candidate = session_committed_transcript(&state);
             let session_ledger_recovery_safe = has_final
-                && !explicit_non_owner_tail
+                && (!explicit_non_owner_tail
+                    || (state
+                        .local_confirmed_transcript_foreign_hint_end_ms
+                        .is_none()
+                        && state.local_confirmed_transcript_non_target_end_ms.is_none()))
                 && session_ledger_candidate
                     .as_ref()
                     .is_some_and(|(ledger_text, _)| {
@@ -5882,7 +5887,7 @@ mod tests {
             },
             Vec::new(),
         );
-        asr.note_local_speaker_tracking_started("开始录音");
+        asr.note_verified_local_speaker_tracking_started("开始录音");
         for audio_end_ms in [3_600, 4_000, 4_400, 4_800] {
             asr.note_local_speaker_classification(
                 audio_end_ms,
@@ -6060,7 +6065,7 @@ mod tests {
             },
             Vec::new(),
         );
-        asr.note_local_speaker_tracking_started("开始录音");
+        asr.note_verified_local_speaker_tracking_started("开始录音");
         for audio_end_ms in [2_000, 2_400, 2_800, 3_200] {
             asr.note_local_speaker_classification(
                 audio_end_ms,
@@ -6151,7 +6156,7 @@ mod tests {
             },
             Vec::new(),
         );
-        asr.note_local_speaker_tracking_started("开始录音");
+        asr.note_verified_local_speaker_tracking_started("开始录音");
         for audio_end_ms in [3_600, 4_000, 4_400, 4_800, 5_200] {
             asr.note_local_speaker_classification(
                 audio_end_ms,
@@ -6476,10 +6481,12 @@ mod tests {
     }
 
     #[test]
-    fn optimistic_preview_gate_allows_ephemeral_uncertain_without_extending_endpoint() {
+    fn optimistic_preview_gate_allows_ephemeral_uncertain_with_established_endpoint_continuity() {
         let mut state = SyncState::default();
         assert!(local_speaker_allows_optimistic_preview(&state));
         state.local_speaker_tracking_enabled = true;
+        state.local_wake_owner_verified = true;
+        state.local_target_confirmed = true;
         state.local_speaker_stable_target = true;
         state.local_speaker_classification =
             Some(crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.6 });
@@ -6488,7 +6495,7 @@ mod tests {
             crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: 0.38 },
         );
         assert!(local_speaker_allows_optimistic_preview(&state));
-        assert!(!local_speaker_allows_owner_endpoint_refresh(&state));
+        assert!(local_speaker_allows_owner_endpoint_refresh(&state));
         state.local_speaker_classification = Some(
             crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.2 },
         );
@@ -6807,16 +6814,28 @@ mod tests {
         };
         let provider = json!({"text": "主人正文旁人干扰"});
         assert!(final_explicit_non_owner_tail(&state, &filtered, &provider));
+        let explicit = final_explicit_non_owner_tail(&state, &filtered, &provider);
         assert_eq!(
             crate::speech_decision_kernel::arbitrate_final_transcript(
                 crate::speech_decision_kernel::FinalTranscriptEvidence {
                     protocol_final: true,
-                    explicit_non_owner_tail: final_explicit_non_owner_tail(
-                        &state, &filtered, &provider,
-                    ),
+                    explicit_non_owner_tail: explicit,
                     provider_raw_recovery_safe: true,
                     provider_owner_recovery_safe: true,
                     session_ledger_recovery_safe: true,
+                    optimistic_owner_recovery_safe: true,
+                },
+            ),
+            crate::speech_decision_kernel::FinalTranscriptAuthority::SessionLedgerRecovery
+        );
+        assert_eq!(
+            crate::speech_decision_kernel::arbitrate_final_transcript(
+                crate::speech_decision_kernel::FinalTranscriptEvidence {
+                    protocol_final: true,
+                    explicit_non_owner_tail: explicit,
+                    provider_raw_recovery_safe: true,
+                    provider_owner_recovery_safe: true,
+                    session_ledger_recovery_safe: false,
                     optimistic_owner_recovery_safe: true,
                 },
             ),
@@ -8078,7 +8097,7 @@ mod tests {
             },
             Vec::new(),
         );
-        asr.note_local_speaker_tracking_started("开始录音");
+        asr.note_verified_local_speaker_tracking_started("开始录音");
 
         let wake_payload = serde_json::to_vec(&json!({
             "audio_info": { "duration": 1_800 },
@@ -8103,6 +8122,9 @@ mod tests {
         );
         assert!(asr.handle_frame(&wake_frame));
         assert_eq!(asr.state.lock().wake_target_speech_end_ms, Some(1_032));
+        // The wake gate has already established the owner before the
+        // cross-phrase body windows become Uncertain in this replay.
+        asr.state.lock().local_target_confirmed = true;
 
         for (audio_end_ms, score) in [
             (2_500, 0.330_394_54),
@@ -8507,6 +8529,7 @@ mod tests {
         });
         let mut state = SyncState::default();
         state.local_speaker_tracking_enabled = true;
+        state.local_target_confirmed = true;
         state.local_speaker_profile_adaptive = true;
         state.local_speaker_stable_target = true;
         state.local_speaker_classification = Some(
@@ -8535,6 +8558,8 @@ mod tests {
         {
             let mut runtime = asr.state.lock();
             runtime.local_speaker_tracking_enabled = true;
+            runtime.local_wake_owner_verified = true;
+            runtime.local_target_confirmed = true;
             runtime.local_speaker_profile_adaptive = true;
             runtime.local_speaker_stable_target = true;
             runtime.local_speaker_classification = state.local_speaker_classification;
@@ -9159,7 +9184,7 @@ mod tests {
             },
             Vec::new(),
         );
-        asr.note_local_speaker_tracking_started("开始录音");
+        asr.note_verified_local_speaker_tracking_started("开始录音");
 
         let wake_payload = serde_json::to_vec(&json!({
             "audio_info": { "duration": 1_400 },
