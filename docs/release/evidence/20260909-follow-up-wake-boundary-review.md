@@ -59,3 +59,16 @@ The runtime verifier now extracts the current MSI payload into a temporary
 directory and compares that packaged executable instead. This fixes a false
 stale-binary failure; it does not replace the missing fresh human interference
 run.
+
+## Workspace inventory boundary
+
+The repository worktree is clean, and no generated build output, runtime log,
+cache, user recording, credential or local artifact was added to the release
+commits. The workspace still contains older/sibling projects (`Listener-Type`,
+`Listener-Type-recut-wake`, `Listener-Design`, `Listener-Hardware`, and
+`Listener-Firmware`), plus separately generated MSI/firmware artifacts and
+workspace `.artifacts`/`.cache` directories. They are intentionally retained
+outside this repository's Git history; deleting or archiving them requires the
+owner's explicit confirmation. The tracked Qwen audio files are existing
+public test fixtures under `src-tauri/vendor/qwen-asr/samples`, not captured
+user recordings.
