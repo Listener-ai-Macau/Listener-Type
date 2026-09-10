@@ -35,7 +35,6 @@ export const zhTW: typeof zhCN = {
     error: '出錯了',
     inserted: '已上屏',
     translating: '正在翻譯',
-    speakNow: '請說話',
   },
   qa: {
     thinking: '思考中…',

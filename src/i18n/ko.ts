@@ -37,7 +37,6 @@ export const ko: typeof zhCN = {
     error: '오류 발생',
     inserted: '입력 완료',
     translating: '번역 중',
-    speakNow: '말씀하세요',
   },
   qa: {
     thinking: '생각 중…',
