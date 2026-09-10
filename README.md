@@ -12,6 +12,7 @@
 <p align="center">
   <a href="README.zh.md">中文</a> ·
   <a href="docs/product/features.md">Features</a> ·
+  <a href="docs/release/1.0.5.md">Release notes</a> ·
   <a href="docs/USAGE.md">Usage</a> ·
   <a href="https://github.com/Listener-ai-Macau/Listener-Firmware">Keyboard firmware</a>
 </p>
@@ -67,7 +68,7 @@ Full catalog, lights, and 1.0.5 limits: [Product features](docs/product/features
 - **Then the keyboard.** Open firmware: [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware).
 - **Recognition.** Bring your own cloud ASR account, or switch to local ASR. Quality and cost follow the provider you choose.
 
-Current release is **1.0.5**. Far-field voiceprint and live multi-speaker isolation are 1.0.6. A passing controlled-interference run is not “works in every room.”
+Current release is **1.0.5**. [Release notes](docs/release/1.0.5.md). Far-field voiceprint and live multi-speaker isolation are 1.0.6. A passing controlled-interference run is not “works in every room.”
 
 ## Open source
 

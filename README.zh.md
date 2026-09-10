@@ -12,6 +12,7 @@
 <p align="center">
   <a href="README.md">English</a> ·
   <a href="docs/product/features.md">产品功能</a> ·
+  <a href="docs/release/1.0.5.md">发布说明</a> ·
   <a href="docs/USAGE.md">使用说明</a> ·
   <a href="https://github.com/Listener-ai-Macau/Listener-Firmware">语音键盘固件</a>
 </p>
@@ -67,7 +68,7 @@ Listener Type 是 Listener 的桌面软件。它可以单独用电脑麦克风�
 - **再买键盘**：Listener 语音键盘。固件开源，见 [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware)。
 - **识别服务**：火山引擎等云端 ASR 用你自己的账号；也可以切本机识别。服务质量和费用由你选的服务商决定。
 
-当前版本是 **1.0.5**。主人声纹在更远、更乱的场景里，以及真人多人同时说话的泛化，放到 1.0.6。一次受控干扰通过，不等于任何房间都 100% 干净。
+当前版本是 **1.0.5**。[发布说明](docs/release/1.0.5.md)。主人声纹在更远、更乱的场景里，以及真人多人同时说话的泛化，放到 1.0.6。一次受控干扰通过，不等于任何房间都 100% 干净。
 
 ## 开源
 

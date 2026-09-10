@@ -34,6 +34,7 @@ This documentation set is organized so product behavior, implementation files an
 
 ## Release And Security
 
+- [1.0.5 release notes](release/1.0.5.md)
 - [Updater](release/updater.md)
 - [Branding and channels](release/branding-and-channels.md)
 - [Tauri CSP](security/tauri-csp.md)

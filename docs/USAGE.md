@@ -291,5 +291,5 @@ listener-type --cancel-dictation
 | `ListenerType_1.0.5_x64_en-US.msi` | `3A3042F7B5B598DB0BD32D4EEC4F5B3F1B79919F41D0CED1530551C52DCD05BE` |
 | `ListenerFirmware_1.0.5_ota.zip` | `D993765AC07838F798B71863F87A69A59DAC9EE47CBBCE3315266FBBB631BADC` |
 
-仓库中的 `.artifacts/` 是构建和验收缓存，不应与发布根目录产物混用。完整发布边界
-见 [`docs/release/1.0.5-commercial-readiness.md`](release/1.0.5-commercial-readiness.md)。
+仓库中的 `.artifacts/` 是构建和验收缓存，不应与发布根目录产物混用。这版有什么、不承诺什么、
+如何核对哈希，见 [1.0.5 发布说明](release/1.0.5.md)。

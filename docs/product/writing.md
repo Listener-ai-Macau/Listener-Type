@@ -39,6 +39,15 @@ Listener 的主工作不是这两件。主工作是：**桌面上的语音输入
 - 把一次受控干扰通过写成任意房间都可用
 - 把安装包 SHA、OTA 哈希当作功能介绍（那些放发布说明）
 
+## 发布说明怎么写
+
+`docs/release/<版本>.md` 回答四件事：**这版是什么、装哪个文件、相对上一版能感觉到什么、现在不承诺什么。**
+
+1. 第一句写用户结果，不写 commit、diarization、endpoint clock、keyword gate。
+2. 哈希、文件大小、未签名 / SmartScreen 放「装哪个包」，不要放开头。
+3. GitHub Release 正文必须和**该页附件**的哈希一致；仓库日常包若已换哈希，在仓库发布说明里写清，不要把两套同名文件写成同一包。
+4. Type 写完整用户路径；Firmware 只写键、灯、OTA，链回 Type。验收日志放 `docs/release/evidence/`。
+
 ## 写多少
 
 GitHub 首页不是说明书。宁可短、链出去，也不要把 USAGE 整页贴进 README。
@@ -50,6 +59,7 @@ GitHub 首页不是说明书。宁可短、链出去，也不要把 USAGE 整页
 | `docs/product/features.md` | 120–180 行 | 功能一览 + 每组「做什么 / 怎么用 / 看到什么 / 边界」 | 安装逐步操作 → USAGE；键位兜底 → 工程地图 |
 | `docs/product/writing.md` | 尽量一屏规则 | 以后怎么写、写多长 | 不要写成第二份调研报告 |
 | `docs/USAGE.md` | 可以长 | 照着能装上、配对、改设置 | 不要复制进 README |
+| `docs/release/<版本>.md` | 80–140 行 | 这版装哪个包、有什么、不承诺什么、哈希 | commit 列表、验收日志 → `evidence/` |
 | 录音会话 / 键盘手册 | 一篇只讲一件事，约 80–120 行 | 停顿和干扰，或配对和灯 | 第二件事另开一篇 |
 | `docs/features/*`、固件 feature map | 不限 | 代码位置和验收 | **禁止**当 GitHub 开场 |
 
