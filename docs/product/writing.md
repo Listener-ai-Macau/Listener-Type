@@ -47,6 +47,7 @@ Listener 的主工作不是这两件。主工作是：**桌面上的语音输入
 2. 哈希、文件大小、未签名 / SmartScreen 放「装哪个包」，不要放开头。
 3. GitHub Release 正文必须和**该页附件**的哈希一致；仓库日常包若已换哈希，在仓库发布说明里写清，不要把两套同名文件写成同一包。
 4. Type 写完整用户路径；Firmware 只写键、灯、OTA，链回 Type。验收日志放 `docs/release/evidence/`。
+5. 版本只在 `master` 打 `v主.次.修订` tag（如 `v1.0.5`），GitHub Release 挂这个 tag。不要开 `release/<版本>` 分支。
 
 ## 写多少
 
