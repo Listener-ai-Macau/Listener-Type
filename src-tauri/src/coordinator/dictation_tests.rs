@@ -4668,26 +4668,22 @@ fn rolling_wake_match_keeps_absolute_candidate_boundary() {
 #[test]
 fn rolling_local_confirmation_restarts_the_800ms_ladder_per_window() {
     let origin = 1_000 * 32;
-    // Fast pre-roll must not rotate away the wake phrase before its deferred
-    // first full-context local confirmation has run.
+    // Local confirmation never follows KWS rotation. Fast pre-roll can burn
+    // both 0.8 s and 1.8 s rungs in one second; following origin to ~1 s cuts
+    // 开始录音 out of the window.
     assert!(!super::should_advance_local_confirmation_window(
         true, false, 0, origin, 0, false
     ));
-    // The 800 ms rung is allowed to return Absent. Do not rotate the local
-    // confirmation origin until the 1.8 s complete-phrase rung has started.
     assert!(!super::should_advance_local_confirmation_window(
         true, false, 0, origin, 1, false
     ));
-    // Once the initial window has been examined through the complete-phrase
-    // rung, later ambient windows keep rolling and restart their bounded
-    // confirmation ladder.
-    assert!(super::should_advance_local_confirmation_window(
+    assert!(!super::should_advance_local_confirmation_window(
         true, false, 0, origin, 2, false
     ));
     assert!(!super::should_advance_local_confirmation_window(
         true, true, 0, origin, 1, false
     ));
-    assert!(super::should_advance_local_confirmation_window(
+    assert!(!super::should_advance_local_confirmation_window(
         true,
         false,
         origin,
@@ -4706,6 +4702,17 @@ fn rolling_local_confirmation_restarts_the_800ms_ladder_per_window() {
         super::local_confirmation_snapshot_for_window(1_800 * 32, origin, 0),
         Some(800 * 32)
     );
+}
+
+#[test]
+fn leading_quiet_prefix_skips_only_bounded_firmware_pre_roll() {
+    let quiet = vec![0u8; 400 * 32];
+    assert_eq!(super::leading_quiet_prefix_bytes(&quiet), 400 * 32);
+    let mut speech = vec![0u8; 200 * 32];
+    let peak = 2_000i16.to_le_bytes();
+    speech.extend_from_slice(&peak);
+    speech.extend_from_slice(&vec![0u8; 200 * 32]);
+    assert_eq!(super::leading_quiet_prefix_bytes(&speech), 200 * 32);
 }
 
 #[cfg(target_os = "windows")]

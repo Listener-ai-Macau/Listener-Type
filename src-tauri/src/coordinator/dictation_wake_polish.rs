@@ -898,24 +898,36 @@ fn should_advance_local_confirmation_window(
     local_confirmation_attempts: usize,
     local_confirmation_in_flight: bool,
 ) -> bool {
-    // A fast BLE pre-roll can reach the first KWS rotation before the deferred
-    // 2.4 s exploratory confirmation has run. Preserve origin zero until the
-    // 1.8 s complete-phrase rung has been attempted. Live 2026-09-10 misses
-    // advanced origin to ~2 s after the expected 800 ms Absent, so later
-    // confirms never saw 开始录音.
-    const MIN_HEAD_CONFIRMATION_ATTEMPTS: usize = 2;
-    let phrase_head_confirmation_pending =
-        current_origin_bytes == 0
-            && local_confirmation_attempts < MIN_HEAD_CONFIRMATION_ATTEMPTS;
-    rotated
-        && !keyword_model_hit
-        && next_origin_bytes > current_origin_bytes
-        && !phrase_head_confirmation_pending
-        // Never invalidate a confirmation that is still running. A fast
-        // pre-roll can rotate the KWS stream while Paraformer is decoding the
-        // origin-zero window; advancing here discards a valid wake at the
-        // head of the candidate and forces a slow terminal fallback.
-        && !local_confirmation_in_flight
+    let _ = (
+        rotated,
+        keyword_model_hit,
+        current_origin_bytes,
+        next_origin_bytes,
+        local_confirmation_attempts,
+        local_confirmation_in_flight,
+    );
+    // KWS may roll its stream; local confirmation must not follow. Fast BLE
+    // pre-roll can burn the 0.8 s and 1.8 s rungs in one wall-clock second and
+    // then rotate origin to ~1 s, cutting 开始录音 out of the window. Keep the
+    // candidate head until Accept or terminal reject.
+    false
+}
+
+const FIRMWARE_PREROLL_QUIET_SKIP_MAX_MS: usize = 400;
+const FIRMWARE_PREROLL_QUIET_SKIP_MAX_BYTES: usize = FIRMWARE_PREROLL_QUIET_SKIP_MAX_MS * 32;
+const FIRMWARE_PREROLL_QUIET_PEAK: u16 = 256;
+
+fn leading_quiet_prefix_bytes(pcm: &[u8]) -> usize {
+    let limit = FIRMWARE_PREROLL_QUIET_SKIP_MAX_BYTES.min(pcm.len()) & !1usize;
+    let mut offset = 0usize;
+    while offset + 2 <= limit {
+        let sample = i16::from_le_bytes([pcm[offset], pcm[offset + 1]]).unsigned_abs();
+        if sample > FIRMWARE_PREROLL_QUIET_PEAK {
+            return offset & !1usize;
+        }
+        offset += 2;
+    }
+    limit
 }
 
 #[cfg(target_os = "windows")]

@@ -1535,10 +1535,11 @@ fn reject_hidden_automatic_candidate(
     }
 }
 
-/// Show Recording capsule early so the user is not waiting on stage-2 alone.
-/// Prefer local ExactStart; also allow first KWS hit when no voiceprint is
-/// enrolled (open-gate contract — phrase alone accepts). With voiceprint,
-/// keep KWS as recall-only until local/owner gates pass (false-start risk).
+/// Show Recording capsule as soon as the phrase is heard. This is candidate
+/// UI, not product Accept: local ExactStart or first KWS hit can pop it.
+/// Owner verification still decides whether the session stays; a later reject
+/// dismisses the capsule. Waiting for owner before any capsule made 开始录音
+/// feel like 1.6–1.8 s of nothing.
 fn show_early_wake_recording_capsule(inner: &Arc<Inner>, candidate: &mut BufferedSpeakerCandidate) {
     if candidate.early_capsule_session_id.is_some() {
         return;

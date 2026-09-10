@@ -1907,7 +1907,20 @@ impl EmbeddedStreamingDictation {
                     candidate.kws_stream_origin_bytes,
                     candidate.kws_first_hit_at.is_some(),
                 );
-                let feed_start = rotation_start_bytes.unwrap_or(candidate.kws_fed_bytes);
+                if candidate.kws_fed_bytes == 0 && rotation_start_bytes.is_none() {
+                    let preroll_skip = leading_quiet_prefix_bytes(&candidate.pcm);
+                    if preroll_skip > 0 {
+                        candidate.kws_stream_origin_bytes = preroll_skip;
+                        log::info!(
+                            "[wake-phrase] skipped quiet firmware pre-roll embedded_session_id={} pcm_ms={}",
+                            embedded_session_id,
+                            preroll_skip / 32
+                        );
+                    }
+                }
+                let feed_start = rotation_start_bytes.unwrap_or(candidate.kws_fed_bytes.max(
+                    candidate.kws_stream_origin_bytes,
+                ));
                 let new_pcm = candidate.pcm[feed_start..].to_vec();
                 let incremental_pcm = candidate.pcm[candidate.kws_fed_bytes..].to_vec();
                 candidate.kws_fed_bytes = candidate.pcm.len();
@@ -2040,6 +2053,7 @@ impl EmbeddedStreamingDictation {
                             candidate.pcm.len() / 32,
                             KWS_SECONDARY_CONFIRM_BUDGET_MS
                         );
+                        show_early_wake_recording_capsule(inner, candidate);
                     }
                     maybe_prefetch_owner_verification(candidate, &phrase, embedded_session_id);
                 }
