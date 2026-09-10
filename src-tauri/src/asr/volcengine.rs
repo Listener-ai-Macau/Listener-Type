@@ -2966,16 +2966,33 @@ impl VolcengineStreamingASR {
     }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-    pub fn start_target_speaker_extraction(&self, wake_phrase: &str) {
+    pub fn start_target_speaker_extraction(&self, wake_phrase: &str, wake_pcm: &[u8], wake_end_seconds: f32) {
         let embedding = match crate::speaker_verification::target_speaker_embedding_for_phrase(
             wake_phrase,
         ) {
             Ok(Some(embedding)) => embedding,
             Ok(None) => {
-                log::warn!(
-                    "[target-speaker] owner-only stream skipped: persistent target-speaker enrollment is missing; re-enrollment required"
+                let enrollment = super::target_speaker_extraction::wake_phrase_enrollment_pcm(
+                    wake_pcm,
+                    wake_end_seconds,
                 );
-                return;
+                match super::target_speaker_extraction::speaker_embedding_from_enrollment_pcm(
+                    &enrollment,
+                ) {
+                    Ok(embedding) => {
+                        log::info!(
+                            "[target-speaker] WeSep enrollment encoded from this wake pcm_ms={}",
+                            enrollment.len() / 32
+                        );
+                        embedding
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "[target-speaker] owner-only stream skipped: could not encode wake enrollment: {err}"
+                        );
+                        return;
+                    }
+                }
             }
             Err(err) => {
                 log::warn!(
@@ -4564,12 +4581,28 @@ impl VolcengineStreamingASR {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
+            let raw_provider_preview = result
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
             let settled_preview = {
                 let mut state = self.state.lock();
-                let best = if filtered_target_preview.trim().is_empty() {
+                // Dictation live preview follows the growing provider transcript.
+                // Sentence-level speaker rows must not retract it (69→19 swallow).
+                // Isolation is WeSep waveform extraction + owner clock.
+                let filtered = if filtered_target_preview.trim().is_empty() {
                     state.best_transcript_text.clone()
                 } else {
                     filtered_target_preview
+                };
+                let best = if spoken_content_len(&raw_provider_preview)
+                    >= spoken_content_len(&filtered)
+                    && !raw_provider_preview.trim().is_empty()
+                {
+                    raw_provider_preview
+                } else {
+                    filtered
                 };
                 let best_len = spoken_content_len(&best);
                 let visible_len = spoken_content_len(&state.last_emitted_preview_text);
