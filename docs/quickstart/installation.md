@@ -27,8 +27,8 @@ Listener Type uses five user-facing states during the Voice Keyboard OOBE:
 
 | State | Meaning | User action |
 |---|---|---|
-| Ready | Device and desktop app are ready | Press KEY3 to record |
-| Recording | The device is listening | Press KEY3 again when done |
+| Ready | Device and desktop app are ready | Press the EC11 knob or the recording hotkey |
+| Recording | The device is listening | Press EC11 or the same hotkey again when done |
 | Transferring | Audio is being sent to the desktop | Wait for text |
 | Error | Connection, subscription, recording, or transcription failed | Retry or export diagnostics |
 | Recovery | Reconnect or re-pair is needed | Remove `listener` in Windows Bluetooth and pair again |

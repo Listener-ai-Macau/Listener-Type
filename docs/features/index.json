@@ -1,7 +1,26 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-05-26",
+  "updated_at": "2026-09-10",
   "features": [
+    {
+      "id": "recording_session_guide",
+      "status": "implemented",
+      "summary": "User-facing 1.0.5 recording lifecycle: start/stop, auto-endpoint, owner voiceprint, and interference handling for the installed product path.",
+      "doc": "recording-session-guide.md",
+      "primary_paths": [
+        "src-tauri/src/coordinator/",
+        "src-tauri/src/wake_phrase.rs",
+        "src-tauri/src/wake_interference.rs",
+        "src/components/Capsule.tsx",
+        "docs/USAGE.md"
+      ],
+      "validation": [
+        "Follow the short acceptance order in recording-session-guide.md on the installed 1.0.5 runtime"
+      ],
+      "known_limits": [
+        "Describes 1.0.5 input protection in controlled conditions, not 100% multi-speaker isolation"
+      ]
+    },
     {
       "id": "dictation_pipeline",
       "status": "implemented",

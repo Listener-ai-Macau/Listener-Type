@@ -14,12 +14,12 @@ Listener 语音键盘是一个 BLE 桌面语音输入设备。它用自定义按
 
 ## 安装
 
-1.0.1 下载入口：`docs/quickstart/voice-keyboard-download.md`
+1.0.5 下载入口：`docs/quickstart/voice-keyboard-download.md`
 
-- MSI：`.artifacts/windows-msvc/ListenerType_1.0.1_x64_en-US.msi`
-- MSI SHA256：`796EEFE942E49E2B00A043B409DE4FA59181BE0D36F6073654E599CA585DADC9`
-- 便携 ZIP：`.artifacts/windows-msvc/ListenerType_1.0.1_x64_portable.zip`
-- ZIP SHA256：`7AF3E6DEF8B9AFEB182524B321C848548DDFFBDB4D3BC144810BA1C7D2A08DFB`
+- MSI：仓库根目录 `ListenerType_1.0.5_x64_en-US.msi`
+- MSI SHA256：`3A3042F7B5B598DB0BD32D4EEC4F5B3F1B79919F41D0CED1530551C52DCD05BE`
+- 固件 OTA：仓库根目录 `ListenerFirmware_1.0.5_ota.zip`
+- OTA SHA256：`D993765AC07838F798B71863F87A69A59DAC9EE47CBBCE3315266FBBB631BADC`
 
 安装步骤：
 

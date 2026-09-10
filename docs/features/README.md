@@ -10,6 +10,7 @@ it, and which limits remain.
 | Feature | Document | Primary code |
 | --- | --- | --- |
 | Dictation pipeline | `dictation-pipeline.md` | `src-tauri/src/coordinator/`, `src-tauri/src/asr/`, `src-tauri/src/insertion.rs`, `src/components/Capsule.tsx` |
+| Recording session, auto-stop, and interference | `recording-session-guide.md` | `src-tauri/src/coordinator/`, `src/components/Capsule.tsx` |
 | Embedded BLE audio | `p13_embedded_audio_software_integration.md`, `embedded-ble-dictation-quality.md` | `src-tauri/src/embedded_audio.rs`, `src-tauri/src/embedded_ble.rs`, `tools/embedded_audio_replay/` |
 | Provider credentials and diagnostics | `provider-credentials-diagnostics.md` | `src-tauri/src/persistence.rs`, `src-tauri/src/commands/`, `src/pages/settings/ProvidersSection.tsx` |
 | Local ASR management | `local-asr-management.md` | `src-tauri/src/asr/local/`, `src/lib/localAsr.ts`, `tools/foundry_*` |

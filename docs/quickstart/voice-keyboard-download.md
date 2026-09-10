@@ -1,13 +1,14 @@
-# Listener 语音键盘 1.0.1 下载入口
+# Listener 语音键盘 1.0.5 下载入口
 
-本页记录 Listener Type `1.0.1` Windows 发布产物。安装前先核对文件名和 SHA256。
+本页记录 Listener Type `1.0.5` Windows 发布产物。安装前先核对文件名和 SHA256。
+当前日常可用桌面包与固件 OTA 以仓库根目录正式产物为准，不要混用 `.artifacts/` 缓存。
 
 ## Windows 产物
 
 | 产物 | 路径 | SHA256 |
 |---|---|---|
-| MSI 安装包 | `.artifacts/windows-msvc/ListenerType_1.0.1_x64_en-US.msi` | `796EEFE942E49E2B00A043B409DE4FA59181BE0D36F6073654E599CA585DADC9` |
-| 便携 ZIP | `.artifacts/windows-msvc/ListenerType_1.0.1_x64_portable.zip` | `7AF3E6DEF8B9AFEB182524B321C848548DDFFBDB4D3BC144810BA1C7D2A08DFB` |
+| MSI 安装包 | `ListenerType_1.0.5_x64_en-US.msi` | `3A3042F7B5B598DB0BD32D4EEC4F5B3F1B79919F41D0CED1530551C52DCD05BE` |
+| 固件 OTA | `ListenerFirmware_1.0.5_ota.zip` | `D993765AC07838F798B71863F87A69A59DAC9EE47CBBCE3315266FBBB631BADC` |
 
 ## 安装前检查
 
