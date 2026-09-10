@@ -362,6 +362,7 @@ function Invoke-MsvcBuild {
   Remove-Item -LiteralPath (Get-TauriMsiPath) -Force -ErrorAction SilentlyContinue
 
   $commandParts = @(
+    "cd /d `"$appRoot`"",
     "call `"$VsDevCmd`" -arch=x64 -host_arch=x64",
     "set `"PATH=$CargoBin;%PATH%`"",
     "set `"PATH=%PATH:C:\Program Files\Git\usr\bin;=%`""
