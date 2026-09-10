@@ -548,8 +548,20 @@ impl RecordingPreviewController {
             self.authoritative = Some(candidate.to_string());
         }
 
+        // Dictation F vs G: never retract already-shown spoken content.
+        // Isolation may refuse to ADD later other-speaker text; it must not
+        // replace a 69-char owner preview with a 19-char "filtered" string.
+        // Tail drop is allowed only when the new text is a spoken prefix of
+        // what is already visible AND shorter — that is still a retract, so
+        // keep the high-water mark for dictation. Confirmed-other energy is
+        // handled by the endpoint clock, not by shrinking the capsule.
+        let would_shrink = self.visible.as_ref().is_some_and(|current| {
+            spoken_preview_len(candidate) < spoken_preview_len(current)
+        });
         let visible_changed = self.visible.as_deref() != Some(candidate);
-        let visible_update = if visible_changed && (authoritative_changed || settle_visible) {
+        let visible_update = if would_shrink {
+            None
+        } else if visible_changed && (authoritative_changed || settle_visible) {
             let candidate = candidate.to_string();
             self.visible = Some(candidate.clone());
             Some(candidate)
@@ -1235,12 +1247,37 @@ mod tests {
 
         let settled = preview.observe_authoritative(session_id, "主人第一句", true);
         assert!(!settled.authoritative_changed);
-        assert_eq!(settled.visible_update.as_deref(), Some("主人第一句"));
+        assert_eq!(settled.visible_update, None);
         assert_eq!(
             preview.authoritative(session_id).as_deref(),
             Some("主人第一句")
         );
-        assert_eq!(preview.visible(session_id).as_deref(), Some("主人第一句"));
+        assert_eq!(
+            preview.visible(session_id).as_deref(),
+            Some("主人第一句旁人尾巴"),
+            "dictation must not retract a longer visible preview when owner-filtered text is shorter"
+        );
+    }
+
+    #[test]
+    fn dictation_preview_keeps_high_water_when_filter_returns_shorter_owner_text() {
+        let session_id = uuid::Uuid::new_v4();
+        let mut preview = RecordingPreviewController::default();
+        preview.begin_session(session_id);
+        assert_eq!(
+            preview
+                .observe_authoritative(session_id, "今天天气很好我们去公园", false)
+                .visible_update
+                .as_deref(),
+            Some("今天天气很好我们去公园")
+        );
+        let shrunk = preview.observe_authoritative(session_id, "今天天气很好", true);
+        assert!(shrunk.authoritative_changed);
+        assert_eq!(shrunk.visible_update, None);
+        assert_eq!(
+            preview.visible(session_id).as_deref(),
+            Some("今天天气很好我们去公园")
+        );
     }
 
     #[test]
