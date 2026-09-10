@@ -106,6 +106,13 @@ fn handle_target_speaker_endpoint_stop(
     // that same decision as a 3000 ms no-body stop.
     let body_started = endpoint_policy.body_started;
     let fusion_state = target_speaker_fusion_state(&update);
+    if owner_endpoint_stop_blocked_by_live_owner(fusion_state) {
+        log::info!(
+            "[asr] owner still continuing; ignore due endpoint session_id={session_id} fusion_state={fusion_state:?} reason={}",
+            endpoint_policy.stop_reason
+        );
+        return;
+    }
     let endpoint_timeout_ms = endpoint_policy.endpoint_timeout_ms;
     let stop_reason = endpoint_policy.stop_reason;
     let provider_stall_confirmed =

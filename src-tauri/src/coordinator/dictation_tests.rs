@@ -3251,6 +3251,18 @@ fn owner_identity_uncertainty_does_not_slow_the_one_second_endpoint() {
         super::TargetSpeakerFusionState::OwnerContinuing,
         "cloud target progress is explicit owner-continuation evidence",
     );
+    assert!(super::owner_endpoint_stop_blocked_by_live_owner(
+        super::TargetSpeakerFusionState::OwnerContinuing
+    ));
+    assert!(!super::owner_endpoint_stop_blocked_by_live_owner(
+        super::TargetSpeakerFusionState::Quiet
+    ));
+    assert!(!super::owner_endpoint_stop_blocked_by_live_owner(
+        super::TargetSpeakerFusionState::ConfirmedOther
+    ));
+    assert!(!super::owner_endpoint_stop_blocked_by_live_owner(
+        super::TargetSpeakerFusionState::UncertainOwnerTail
+    ));
 }
 
 #[test]

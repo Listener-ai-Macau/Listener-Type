@@ -608,6 +608,15 @@ fn target_speaker_endpoint_timeout_with_fusion(
     mode_timeout_ms
 }
 
+fn owner_endpoint_stop_blocked_by_live_owner(
+    fusion_state: TargetSpeakerFusionState,
+) -> bool {
+    // Live 2026-09-10: fusion_state=OwnerContinuing still claimed
+    // inactive_1000ms. Fusion was only logged. Do not extend the 1 s
+    // timeout (that becomes D); veto this due stop and let Quiet fire later.
+    matches!(fusion_state, TargetSpeakerFusionState::OwnerContinuing)
+}
+
 /// Recent *owner* activity that the provider has not covered yet.
 ///
 /// `local_speech_end_ms` is a generic energy/VAD watermark. It deliberately is
