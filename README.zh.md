@@ -13,6 +13,7 @@
   <a href="README.md">English</a> ·
   <a href="CHANGELOG.md">版本记录</a> ·
   <a href="docs/release/1.0.5-commercial-readiness.md">1.0.5 发布边界</a> ·
+  <a href="docs/product/features.md">产品功能</a> ·
   <a href="docs/USAGE.md">详细使用指南</a> ·
   <a href="docs/quickstart/voice-keyboard-readme.md">Listener 语音键盘手册</a> ·
   <a href="docs/quickstart/installation.md">安装与权限</a> ·

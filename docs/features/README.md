@@ -1,9 +1,12 @@
 # Listener Type Feature Map
 
 `tools/ai/repo_features.ps1` prints a machine-readable summary of the product
-surface. The files in this directory are the human-readable feature map: each
+surface. The files in this directory are the implementation feature map: each
 document should state what is implemented, where the code lives, how to validate
 it, and which limits remain.
+
+User-facing product copy lives in `docs/product/`. Do not copy GPIO, HID
+fallbacks, or test commands into those pages.
 
 ## Index
 

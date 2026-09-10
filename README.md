@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="README.zh.md">中文</a> ·
+  <a href="docs/product/features.md">Product features</a> ·
   <a href="docs/USAGE.md">Usage</a> ·
   <a href="specs/ARCHITECTURE.md">Architecture</a> ·
   <a href="specs/traceability/files.md">Code Traceability</a>
