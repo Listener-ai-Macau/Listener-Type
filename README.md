@@ -1,91 +1,84 @@
 <p align="center">
-  <img src="src-tauri/icons/128x128@2x.png" alt="Listener Type app icon" width="128" />
+  <img src="src-tauri/icons/128x128@2x.png" alt="Listener Type" width="128" />
 </p>
 
 <h1 align="center">Listener Type</h1>
 
 <p align="center">
-  <strong>Local-first voice input for macOS and Windows.</strong><br/>
-  Press a hotkey, speak, and insert clean text wherever your cursor is.
+  <strong>Speak. Text lands at the cursor.</strong><br/>
+  Chat, mail, docs, code comments — press, talk, press again.
 </p>
 
 <p align="center">
   <a href="README.zh.md">中文</a> ·
-  <a href="docs/product/features.md">Product features</a> ·
+  <a href="docs/product/features.md">Features</a> ·
   <a href="docs/USAGE.md">Usage</a> ·
-  <a href="specs/ARCHITECTURE.md">Architecture</a> ·
-  <a href="specs/traceability/files.md">Code Traceability</a>
+  <a href="https://github.com/Listener-ai-Macau/Listener-Firmware">Keyboard firmware</a>
 </p>
 
-## What It Does
+Listener Type is the desktop app for Listener. Try it with your computer microphone. Pair it with the [Listener voice keyboard](https://github.com/Listener-ai-Macau/Listener-Firmware) and start/stop live in your hand.
 
-Listener Type turns speech into usable written text at the current cursor. It supports raw transcript, light cleanup, structured prompt writing, formal writing, translation, vocabulary hotwords, history, style packs, a floating capsule, and a selection QA panel.
+This is not a meeting recorder and not an “AI writes the perfect email for you” bot. It is **daily voice input**: when you finish speaking, the words are already in the field you were using.
 
-The app is local-first:
+## Why people buy it
 
-- User preferences, style packs, vocabulary, history and recordings live on the local machine.
-- Provider credentials are stored in the platform credential vault.
-- Cloud ASR/LLM providers are bring-your-own-key.
-- Remote marketplace and OAuth are disabled until a Listener Type backend is configured.
+The app is free to install. The product you pay for is the loop: keyboard plus Type.
 
-## Brand Identity
+| Typing today | Listener |
+| --- | --- |
+| Hands leave the thought to hunt keys | Eyes stay on the screen; one click on the knob |
+| Voice trapped in a recorder app | Inserted at the live cursor |
+| Vendor lock-in for ASR and polish | Your keys, or on-device ASR; prefs stay local |
+| Software hotkey only | Real keys, real lights, wake phrase, a desk device |
 
-Listener Type is represented by a small puppy companion resting on the app's voice capsule. The mascot is intentionally simple: rounded floppy ears, happy closed eyes, soft cheeks, chunky paws, and a calm expression that makes voice input feel approachable instead of technical.
+1.0.5 is a shippable daily loop: start → speak → capsule and LEDs talk back → text at the cursor, clipboard if the target app blocks insert. That is the sales baseline, not a demo reel.
 
-The capsule beneath the puppy mirrors the in-app recording surface. Its five rounded vertical bars echo the live audio-level animation used while recording, with a warm amber center bar as the only highlight. The icon uses the product UI palette: quartz off-white surfaces, muted sage outlines, deep ink facial details, soft line gray, and a restrained warm amber accent.
+## 30 seconds
 
-The source brand asset is kept at [docs/assets/brand/listener-ai-app-icon.png](docs/assets/brand/listener-ai-app-icon.png), and generated desktop icon assets live under [src-tauri/icons](src-tauri/icons).
+```text
+Click a text field
+    → Right Ctrl (or EC11 on the keyboard)
+    → Speak
+    → Press again
+    → Look at the cursor, not our editor
+```
 
-## Status
+No keyboard: Settings → Recording → microphone.  
+With keyboard: Bluetooth name `listener`. Full device audio is Windows-first.
 
-- Tauri 2 + Rust backend + React/TypeScript frontend.
-- macOS 12+ and Windows 10+ target.
-- ASR: Volcengine streaming, OpenAI-compatible batch ASR, Apple Speech, local Qwen ASR, Windows Foundry Local.
-- Polish providers: Ark, DeepSeek/OpenAI-compatible, Anthropic-compatible, custom OpenAI-compatible endpoints.
-- Windows insertion: native hook path plus Listener Type TSF IME.
-- Auto-update metadata points at [Listener-ai-Macau/Listener-Type](https://github.com/Listener-ai-Macau/Listener-Type).
+Guides: [Usage](docs/USAGE.md) · [Voice keyboard](docs/quickstart/voice-keyboard-readme.md)
 
-## Install
+## What you get
 
-Release artifacts will be published from the Listener Type repository.
+| | |
+| --- | --- |
+| **Any text field** | Notepad, browser, chat, editors. Toggle recording, not hold-to-talk. |
+| **A keyboard in the hand** | EC11 click starts/stops; double-click re-pairs; four keys are yours. REC / AI / BLE lights show the stage. |
+| **Tone that matches the job** | Raw, Light, Structured, Formal, or translate on Shift. |
+| **Your words** | Local vocabulary for ASR and polish. Style packs copy/export without a remote store. |
+| **Mostly your voice** | Wake phrase defaults to “开始录音”. Optional three-sample voiceprint. In controlled rooms, playback of someone else should not become the body text. |
+| **Local-first** | History and settings on the machine. No bundled vendor keys. Local Whisper works; cloud Chinese ASR is usually stronger. |
 
-- macOS: download the `.dmg`, drag Listener Type to Applications, then grant Microphone and Accessibility permissions.
-- Windows: run the setup executable and allow Microphone access. The installer registers the Listener Type TSF IME used by the Windows insertion bridge.
+Full catalog, lights, and 1.0.5 limits: [Product features](docs/product/features.md)
 
-See [docs/quickstart/installation.md](docs/quickstart/installation.md) and [docs/quickstart/permissions.md](docs/quickstart/permissions.md).
+## What to buy, what to install
 
-## Build
+- **Start with the app.** Windows is the supported path for device audio. macOS can use the mic and hotkey first.
+- **Then the keyboard.** Open firmware: [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware).
+- **Recognition.** Bring your own cloud ASR account, or switch to local ASR. Quality and cost follow the provider you choose.
+
+Current release is **1.0.5**. Far-field voiceprint and live multi-speaker isolation are 1.0.6. A passing controlled-interference run is not “works in every room.”
+
+## Open source
+
+Read, build, file issues, send PRs. How we write product features: [writing guide](docs/product/writing.md).
+
+Source and docs live here. The Listener Type name, icon, and mascot are not a trademark grant for renamed builds. A full desktop build still needs the `third_party/denzic-platform` submodule. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 npm ci
 npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
-cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 
-Run audits before shipping:
-
-```bash
-npm run check:brand
-npm run check:cloud
-npm run check:traceability
-```
-
-## Documentation
-
-- [Usage](docs/USAGE.md)
-- [Provider setup: Volcengine](docs/setup/volcengine.md)
-- [Windows build](docs/platform/windows-build.md)
-- [Windows IME](docs/platform/windows-ime.md)
-- [Dictation pipeline](docs/features/dictation-pipeline.md)
-- [Style pack marketplace and local fallback](docs/features/style-pack-marketplace.md)
-- [Updater and release channels](docs/release/updater.md)
-- [Branding and channels](docs/release/branding-and-channels.md)
-- [Tauri CSP](docs/security/tauri-csp.md)
-- [Architecture](specs/ARCHITECTURE.md)
-- [Design](specs/DESIGN.md)
-- [Traceability](specs/traceability/files.md)
-
-## Repository
-
-Remote anchor: [github.com/Listener-ai-Macau/Listener-Type](https://github.com/Listener-ai-Macau/Listener-Type).
+Releases: [Listener-ai-Macau/Listener-Type](https://github.com/Listener-ai-Macau/Listener-Type)

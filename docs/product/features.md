@@ -1,10 +1,12 @@
 # Listener 能做什么（1.0.5）
 
-Listener 是一套桌面语音输入：说话，文字出现在当前光标。
-软件是 Listener Type，设备是 Listener 语音键盘。可以只用电脑麦克风试用；配上键盘后，开始、停止和状态都在手上完成。
+说话，文字出现在当前光标。聊天、邮件、文档、代码注释，不必先录进另一个 App 再复制。
 
-它不是会后录音笔，也不是「说完自动写成完美文章」的写作助手。
-1.0.5 交付的是**每天能用的输入闭环**。主人声纹在更多人、更远距离下的稳定性，以及真人多人同时说话的泛化，属于 1.0.6。
+软件是 [Listener Type](https://github.com/Listener-ai-Macau/Listener-Type)，开源，可先用电脑麦克风试用。
+设备是 Listener 语音键盘，固件开源：[Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware)。配上键盘后，开始、停止和灯都在手上。
+
+它不是会后录音笔，也不是「说完替你写成完美文章」的机器人。
+1.0.5 卖的是**每天能用的输入闭环**。更远、更乱场景里的声纹，以及真人多人同时说话，放到 1.0.6。
 
 逐步操作见 [使用说明](../USAGE.md)。录音停顿和旁人说话见 [录音会话](../features/recording-session-guide.md)。
 
