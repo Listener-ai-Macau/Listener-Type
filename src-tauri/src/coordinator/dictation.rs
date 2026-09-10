@@ -510,6 +510,13 @@ fn target_speaker_update_has_live_owner_activity(
     if !update.target_activity_advanced && !update.pending_activity_advanced {
         return false;
     }
+    // Confirmed other-speaker energy must not keep the owner clock alive (G).
+    if update
+        .local_speech_end_ms
+        .is_some_and(|speech_ms| local_speech_confidently_non_target(update, speech_ms))
+    {
+        return false;
+    }
     let audio_edge_ms = update
         .audio_duration_ms
         .max(update.provider_audio_duration_ms);
