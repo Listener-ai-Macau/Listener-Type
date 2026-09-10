@@ -6623,12 +6623,15 @@ fn terminal_offline_recall_stops_after_initial_plus_focused_absence() {
         false,
         false,
     ));
-    assert!(!super::should_run_terminal_offline_recall(
-        super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
-        super::TERMINAL_OFFLINE_SKIP_ABSENT_COUNT,
-        false,
-        false,
-    ));
+    assert!(
+        super::should_run_terminal_offline_recall(
+            super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
+            super::TERMINAL_OFFLINE_SKIP_ABSENT_COUNT,
+            false,
+            false,
+        ),
+        "early pre-roll Absents must not skip last-chance full-buffer confirm"
+    );
     assert!(super::should_run_terminal_offline_recall(
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
         u8::MAX,

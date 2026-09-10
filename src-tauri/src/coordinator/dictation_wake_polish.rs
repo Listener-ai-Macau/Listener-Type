@@ -1084,14 +1084,15 @@ fn terminal_inflight_local_decision(
 
 fn should_run_terminal_offline_recall(
     pcm_bytes: usize,
-    local_absent_count: u8,
-    local_kws_fusion_evidence: bool,
-    enrolled_owner_matched: bool,
+    _local_absent_count: u8,
+    _local_kws_fusion_evidence: bool,
+    _enrolled_owner_matched: bool,
 ) -> bool {
+    // Live 2026-09-10 second-wake miss (0744): four Absents on 0.8–2.4 s
+    // pre-roll snapshots skipped the full-buffer confirm. The next candidate
+    // (0745) ExactStart at 5 s. Early Absents must not veto last-chance
+    // local ASR on the complete hidden VA window.
     pcm_bytes >= MIN_TERMINAL_OFFLINE_PCM_BYTES
-        && (local_kws_fusion_evidence
-            || enrolled_owner_matched
-            || local_absent_count < TERMINAL_OFFLINE_SKIP_ABSENT_COUNT)
 }
 
 fn terminal_inflight_confirmation_remaining_ms(elapsed_ms: u64) -> u64 {
