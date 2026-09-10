@@ -194,9 +194,16 @@ pub(crate) struct ProductFinalEvidence {
     pub(crate) retained_audio_replay_available: bool,
     pub(crate) debug_override_available: bool,
     pub(crate) partial_preview_available: bool,
+    pub(crate) prefer_partial_preview: bool,
 }
 
 pub(crate) fn arbitrate_product_final(evidence: ProductFinalEvidence) -> ProductFinalAuthority {
+    if evidence.prefer_partial_preview
+        && evidence.partial_preview_available
+        && !evidence.target_filter_required
+    {
+        return ProductFinalAuthority::PartialPreviewRecovery;
+    }
     if evidence.separated_owner_available {
         return ProductFinalAuthority::SeparatedOwner;
     }
@@ -2156,6 +2163,7 @@ mod tests {
             retained_audio_replay_available: true,
             debug_override_available: true,
             partial_preview_available: true,
+            prefer_partial_preview: false,
         };
         assert_eq!(
             arbitrate_product_final(evidence),
@@ -2188,6 +2196,7 @@ mod tests {
             retained_audio_replay_available: true,
             debug_override_available: true,
             partial_preview_available: true,
+            prefer_partial_preview: false,
         };
         assert_eq!(
             arbitrate_product_final(all_recovery_candidates),
@@ -2207,6 +2216,31 @@ mod tests {
                 ..all_recovery_candidates
             }),
             ProductFinalAuthority::PartialPreviewRecovery
+        );
+    }
+
+    #[test]
+    fn auto_end_prefers_last_preview_over_later_provider_final() {
+        let evidence = ProductFinalEvidence {
+            target_filter_required: false,
+            separated_owner_available: false,
+            provider_primary_available: true,
+            retained_audio_replay_available: false,
+            debug_override_available: false,
+            partial_preview_available: true,
+            prefer_partial_preview: true,
+        };
+        assert_eq!(
+            arbitrate_product_final(evidence),
+            ProductFinalAuthority::PartialPreviewRecovery
+        );
+        assert_eq!(
+            arbitrate_product_final(ProductFinalEvidence {
+                target_filter_required: true,
+                provider_primary_available: false,
+                ..evidence
+            }),
+            ProductFinalAuthority::Empty
         );
     }
 }

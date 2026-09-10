@@ -1131,6 +1131,9 @@ pub(super) async fn request_embedded_ble_recording_stop_from_host(
     if !commit_recording_stop(inner, session_id, reason) {
         return Ok(false);
     }
+    if reason == "target_speaker_inactive_1000ms" {
+        *inner.auto_end_commit_preview_session.lock() = Some(session_id);
+    }
 
     record_embedded_ble_session_actor_command(
         inner,
@@ -2083,6 +2086,24 @@ fn embedded_pcm_rms_and_peak(pcm: &[u8]) -> (f64, u16) {
     }
 }
 
+async fn release_active_asr_without_sealed_final(asr: super::ActiveAsr) {
+    match asr {
+        super::ActiveAsr::Volcengine(asr) => {
+            let _ = asr.send_last_frame().await;
+            asr.cancel();
+        }
+        super::ActiveAsr::Bailian(asr) => {
+            let _ = asr.send_last_frame().await;
+            asr.cancel();
+        }
+        super::ActiveAsr::Whisper(_) => {}
+        #[cfg(target_os = "windows")]
+        super::ActiveAsr::FoundryLocalWhisper(_) => {}
+        #[cfg(target_os = "macos")]
+        super::ActiveAsr::Local(_) => {}
+    }
+}
+
 pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
     end_session_with_stop_origin(inner, true).await
 }
@@ -2201,7 +2222,34 @@ async fn finish_end_session_after_stop_transition(
     let target_speaker_filter_required = false;
     #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
     let separated_owner_candidate: Option<RawTranscript> = None;
-    let raw = match asr {
+    let auto_end_preview = {
+        let marked = inner
+            .auto_end_commit_preview_session
+            .lock()
+            .take()
+            .is_some_and(|id| id == current_session_id);
+        if marked {
+            current_embedded_audio_partial_preview(inner).and_then(|preview| {
+                let text =
+                    filter_automatic_wake_text(inner, current_session_id, &preview, false);
+                (!text.trim().is_empty()).then_some(text)
+            })
+        } else {
+            None
+        }
+    };
+    let raw = if let Some(preview_text) = auto_end_preview {
+        log::info!(
+            "[coord] auto-end committing last preview chars={} session_id={current_session_id}",
+            preview_text.chars().count()
+        );
+        release_active_asr_without_sealed_final(asr).await;
+        RawTranscript {
+            text: preview_text,
+            duration_ms: 0,
+        }
+    } else {
+    match asr {
         ActiveAsr::Volcengine(asr) => {
             debug_assert!(uses_global_timeout);
             let timeout_duration = std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS);
@@ -2459,6 +2507,7 @@ async fn finish_end_session_after_stop_transition(
                 }
             }
         }
+    }
     };
 
     // ASR 完成后 cancel 检查：用户在 transcribe 进行中按 Esc 时，这里就会命中。
@@ -2643,6 +2692,7 @@ async fn finish_end_session_after_stop_transition(
             local_shadow: local_shadow_candidate,
             local_shadow_owner_end_aligned,
             target_filter_required: target_speaker_filter_required,
+            prefer_partial_preview: false,
         },
         &enabled_hotwords(inner),
         inner.prefs.get().remove_filler_words,

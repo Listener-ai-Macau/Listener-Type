@@ -11,6 +11,7 @@ struct ProductFinalCandidates {
     local_shadow: Option<String>,
     local_shadow_owner_end_aligned: bool,
     target_filter_required: bool,
+    prefer_partial_preview: bool,
 }
 
 #[derive(Debug)]
@@ -46,6 +47,7 @@ fn arbitrate_product_final_transcript(
         retained_audio_replay_available: nonempty_transcript(&candidates.retained_audio_replay),
         debug_override_available: nonempty_transcript(&candidates.debug_override),
         partial_preview_available: nonempty_transcript(&candidates.partial_preview),
+        prefer_partial_preview: candidates.prefer_partial_preview,
     });
     let preview_for_hotwords = candidates
         .partial_preview

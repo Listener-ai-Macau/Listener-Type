@@ -7989,6 +7989,7 @@ fn product_final_candidates(primary: &str) -> super::ProductFinalCandidates {
         local_shadow: None,
         local_shadow_owner_end_aligned: false,
         target_filter_required: false,
+        prefer_partial_preview: false,
     }
 }
 

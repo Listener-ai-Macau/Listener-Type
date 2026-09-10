@@ -329,6 +329,9 @@ struct Inner {
     /// When stop→Transcribing feedback latches, record session + Instant so the
     /// completion path can log stop_to_done_ms for UX latency observability.
     dictation_stop_feedback_at: Mutex<Option<(SessionId, Instant)>>,
+    /// Owner-quiet auto-end should type the last capsule preview instead of
+    /// waiting for a later cloud final that can rewrite or swallow it.
+    auto_end_commit_preview_session: Mutex<Option<SessionId>>,
     /// Listener BLE 输入源的后台订阅代次。设置变化时递增，旧监听循环会自然退出。
     embedded_ble_listener_generation: AtomicU64,
     /// Firmware OTA 正在独占 BLE data plane。期间不要自动重启后台音频监听，避免抢占
@@ -709,6 +712,7 @@ impl Coordinator {
                     embedded_audio_last_capsule_level: Mutex::new(0.0),
                     embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                     dictation_stop_feedback_at: Mutex::new(None),
+                    auto_end_commit_preview_session: Mutex::new(None),
                     embedded_ble_listener_generation: AtomicU64::new(0),
                     embedded_ble_ota_active: AtomicBool::new(false),
                     embedded_ble_listener_cancel: Mutex::new(None),
@@ -797,6 +801,7 @@ impl Coordinator {
                 embedded_audio_last_capsule_level: Mutex::new(0.0),
                 embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                 dictation_stop_feedback_at: Mutex::new(None),
+                auto_end_commit_preview_session: Mutex::new(None),
                 embedded_ble_listener_generation: AtomicU64::new(0),
                 embedded_ble_ota_active: AtomicBool::new(false),
                 embedded_ble_listener_cancel: Mutex::new(None),
