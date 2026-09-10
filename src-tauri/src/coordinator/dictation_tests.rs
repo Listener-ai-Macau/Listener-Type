@@ -8006,6 +8006,29 @@ fn product_final_candidates(primary: &str) -> super::ProductFinalCandidates {
 }
 
 #[test]
+fn product_final_does_not_shrink_visible_owner_preview() {
+    let mut candidates = product_final_candidates("今天天气");
+    candidates.partial_preview = Some(crate::asr::RawTranscript {
+        text: "今天天气很好".into(),
+        duration_ms: 7_462,
+    });
+    let decision = super::arbitrate_product_final_transcript(candidates, &[], false);
+    assert_eq!(decision.transcript.text, "今天天气很好");
+}
+
+#[test]
+fn product_final_does_not_restore_preview_under_interference() {
+    let mut candidates = product_final_candidates("今天天气");
+    candidates.target_filter_required = true;
+    candidates.partial_preview = Some(crate::asr::RawTranscript {
+        text: "今天天气旁边的人还在说话".into(),
+        duration_ms: 7_462,
+    });
+    let decision = super::arbitrate_product_final_transcript(candidates, &[], false);
+    assert_eq!(decision.transcript.text, "今天天气");
+}
+
+#[test]
 fn target_speaker_endpoint_product_final_chooses_separated_owner_once_under_interference() {
     let mut candidates = product_final_candidates("主人第一句旁边的人无关内容主人第二句");
     candidates.target_filter_required = true;

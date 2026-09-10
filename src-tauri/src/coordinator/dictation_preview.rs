@@ -30,7 +30,8 @@ fn nonempty_transcript(candidate: &Option<RawTranscript>) -> bool {
 /// The only product-boundary text selector. Every upstream result is supplied
 /// as an immutable candidate, one authority is selected once, and optional
 /// omission/hotword/filler normalization happens before the returned content
-/// is sealed by the caller. No downstream recovery path may grow this result.
+/// is sealed by the caller. Downstream recovery may not invent new sources.
+/// A later cloud final still must not shrink an already-visible owner prefix.
 fn arbitrate_product_final_transcript(
     candidates: ProductFinalCandidates,
     hotwords: &[DictionaryHotword],
@@ -91,6 +92,11 @@ fn arbitrate_product_final_transcript(
         }
     }
 
+    if !candidates.target_filter_required {
+        if let Some(preview) = preview_for_hotwords.as_deref() {
+            transcript.text = restore_monotonic_owner_preview(&transcript.text, preview);
+        }
+    }
     if let Some(preview) = preview_for_hotwords.as_deref() {
         transcript.text = reconcile_final_transcript_with_preview_hotwords(
             &transcript.text,
@@ -106,6 +112,29 @@ fn arbitrate_product_final_transcript(
         transcript,
         authority,
         local_shadow_recovered,
+    }
+}
+
+fn compact_spoken_preview(text: &str) -> String {
+    text.chars()
+        .filter(|ch| {
+            !ch.is_whitespace() && !is_embedded_audio_partial_preview_decorative(*ch)
+        })
+        .collect()
+}
+
+fn restore_monotonic_owner_preview(final_text: &str, preview: &str) -> String {
+    let final_core = compact_spoken_preview(final_text);
+    let preview_core = compact_spoken_preview(preview);
+    if final_core.is_empty() || preview_core.is_empty() {
+        return final_text.to_string();
+    }
+    if preview_core.chars().count() > final_core.chars().count()
+        && preview_core.starts_with(&final_core)
+    {
+        preview.to_string()
+    } else {
+        final_text.to_string()
     }
 }
 
