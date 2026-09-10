@@ -1,78 +1,44 @@
 <p align="center">
-  <img src="src-tauri/icons/128x128@2x.png" alt="Listener Type" width="128" />
+  <img src="src-tauri/icons/128x128@2x.png" alt="Listener Type" width="96" />
 </p>
 
-<h1 align="center">Listener Type</h1>
+# Listener Type
 
-<p align="center">
-  <strong>Speak. Text lands at your cursor.</strong><br/>
-  Open-source voice input for the desktop — in whatever app you are already using.
-</p>
+Listener Type types what you say. Put the cursor in any text field, press Right Ctrl, talk, press again — the text shows up in that field, not in our window.
 
-<p align="center">
-  <strong>English</strong> ·
-  <a href="README.zh-CN.md">简体中文</a> ·
-  <a href="README.zh-TW.md">繁體中文</a>
-</p>
+It runs on Windows, macOS and Linux. A computer microphone is enough; if you want a physical record button on your desk, it pairs with the [Listener voice keyboard](https://github.com/Listener-ai-Macau/Listener-Firmware).
 
-<p align="center">
-  <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases"><img src="https://img.shields.io/github/v/release/Listener-ai-Macau/Listener-Type" alt="Release" /></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-blue" alt="Platform" />
-</p>
+[中文](README.zh.md) · [繁體中文](README.zh-TW.md) · [Usage](docs/USAGE.md) · [Release notes](docs/release/1.0.5.md)
 
-<p align="center">
-  <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases">Download</a> ·
-  <a href="docs/USAGE.md">Usage</a> ·
-  <a href="docs/product/features.md">Features</a> ·
-  <a href="docs/release/1.0.5.md">Release notes</a> ·
-  <a href="https://github.com/Listener-ai-Macau/Listener-Firmware">Keyboard firmware</a>
-</p>
+## Using it
 
-<!-- Hero: add a product screenshot or short demo GIF here once one exists. -->
+On Windows, download the MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases), install it, allow the microphone. That's the whole setup.
 
-Listener Type is a local-first dictation app: press a key, talk, press again — the words are typed into the field you were using. It is not a recorder and not a chatbot window: the text goes where your cursor already is.
+After that it's always the same motion: click into a text field, press Right Ctrl, speak, press Right Ctrl again. If the target app refuses inserted text, the result waits on your clipboard. macOS and Linux use Right Option / Right Alt instead — details in the [usage guide](docs/USAGE.md).
 
-It is free and open source (Tauri + React + Rust). Your computer's microphone is enough to start. Pair it with the [Listener voice keyboard](https://github.com/Listener-ai-Macau/Listener-Firmware) — a small desk device with a knob, four real keys, and status lights — and start, stop, and "did it hear me?" move into your hand, off the screen.
+## What it can do
 
-## Get started in 30 seconds
+- Type into whatever app has focus: notepad, browser, chat, code editor.
+- Clean up what you said — verbatim, lightly tidied, structured, formal, or translated with Shift. Styles are local files; copy and edit them as you like.
+- Learn your vocabulary: keep a local list of names and jargon that recognition and cleanup both consult.
+- Start hands-free: say 「开始录音」. If you enroll three voice samples, someone else talking — or a recording of you — won't start a session.
+- Run on your own accounts. Recognition through Volcengine, OpenAI-compatible endpoints, Apple Speech, or fully offline; cleanup through Ark, DeepSeek, or Anthropic-compatible endpoints. Keys live in the OS credential store, none are bundled.
+- Keep everything on the machine: history, styles, vocabulary, settings.
 
-**Windows:** download the MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases), install, allow the microphone.
+The full list, with platform notes, is in [docs/product/features.md](docs/product/features.md).
 
-```text
-Click any text field
-  → press Right Ctrl (or click the keyboard knob)
-  → speak
-  → press again
-  → the text is already at the cursor
-```
+## The keyboard
 
-No keyboard? Settings → Recording → input source → microphone.
-Have the keyboard? Pair the Bluetooth device named `listener` — the full device audio path is Windows-first today; on macOS and Linux, use the computer microphone.
+The [Listener voice keyboard](https://github.com/Listener-ai-Macau/Listener-Firmware) is a small USB-C desk device: a knob you click to start and stop, four keys you can bind, and lights for power, Bluetooth, recording and processing. Its firmware is open source too. You don't need it — the app works fine with a microphone — but a real button beats hunting for a hotkey.
 
-Step by step: [Usage guide](docs/USAGE.md) · [Voice keyboard handbook](docs/quickstart/voice-keyboard-readme.md)
+## What it doesn't do yet
 
-## Why it feels different
+- The keyboard's Bluetooth audio path is Windows-only for now; on macOS and Linux, use the computer mic.
+- The voiceprint prevents accidental recordings. It is not a security feature.
+- Far from the mic, or two people talking at once, it still struggles. That's planned for 1.0.6.
+- It's not a system IME — it types into the focused field.
 
-| | |
-| --- | --- |
-| **Types where you work** | Notepad, browser, chat, code editor — the text is inserted into the target app, and waits on the clipboard if an app refuses insertion. Press to start, press to stop; no holding a key. |
-| **A keyboard in your hand** | Click the knob to start/stop, double-click to re-pair, bind four keys to your own actions. PWR / BLE / REC / AI lights show exactly which stage you are in. |
-| **Polish for the occasion** | Raw transcript, light cleanup, structured notes, formal email — or translate with Shift. Style packs are local files: copy, edit, export, no store account. |
-| **Your words, literally** | A local vocabulary of names, products, and jargon feeds both recognition and polish. |
-| **Wake by voice** | Say 「开始录音」 and recording starts. Optional three-sample voiceprint keeps someone else's playback out of your text. |
-| **Your providers, your keys** | Recognition via Volcengine, OpenAI-compatible endpoints, Apple Speech, or fully on-device ASR; polish via Ark, DeepSeek, or Anthropic-compatible endpoints. Keys live in the OS credential store; none are bundled. |
-| **Local-first** | History, styles, vocabulary, and settings stay on your machine. The app works without any Listener backend. |
-
-Full catalog, light meanings, platform notes: [Product features](docs/product/features.md)
-
-## What 1.0.5 does not promise
-
-- Keyboard BLE audio is Windows-first; macOS and Linux use the computer microphone for now.
-- Voiceprint is input protection against stray speech — not identity verification, not a door lock.
-- Far-field voiceprint and live multi-speaker isolation are 1.0.6 work, not shipped here.
-- It is not a system IME; it inserts into the focused field.
-
-## Build from source
+## Building from source
 
 ```bash
 npm ci
@@ -80,6 +46,6 @@ npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-A full desktop build also needs the `third_party/denzic-platform` submodule. Read [CONTRIBUTING.md](CONTRIBUTING.md) before sending code; report vulnerabilities via [SECURITY.md](SECURITY.md).
+A full desktop build also needs the `third_party/denzic-platform` submodule. See [CONTRIBUTING.md](CONTRIBUTING.md) before sending code, and [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
 
-The source is open to read, build, and modify. The Listener Type name, icon, and mascot are not a trademark grant for renamed builds.
+The code is open; the Listener Type name, icon and mascot are not — please don't reuse them for a renamed fork.
