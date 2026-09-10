@@ -6610,6 +6610,20 @@ fn busy_local_wake_helper_is_retried_without_queue_or_keyword_fallback() {
 }
 
 #[test]
+fn terminal_local_confirmation_uses_last_2500ms_of_long_candidates() {
+    let short = vec![0u8; 1_000 * 32];
+    let (pcm, origin) = super::terminal_local_confirmation_pcm(&short);
+    assert_eq!(pcm.len(), short.len());
+    assert_eq!(origin, 0);
+
+    let mut long = vec![1u8; 5_000 * 32];
+    long[4_000 * 32] = 7;
+    let (pcm, origin) = super::terminal_local_confirmation_pcm(&long);
+    assert_eq!(origin, (5_000 - 2_500) * 32);
+    assert_eq!(pcm.len(), 2_500 * 32);
+    assert_eq!(pcm[0], 1);
+}
+
 fn terminal_offline_recall_stops_after_initial_plus_focused_absence() {
     assert!(!super::should_run_terminal_offline_recall(
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES - 2,

@@ -1082,6 +1082,17 @@ fn terminal_inflight_local_decision(
     }
 }
 
+const TERMINAL_LOCAL_TAIL_MS: usize = 2_500;
+const TERMINAL_LOCAL_TAIL_BYTES: usize = TERMINAL_LOCAL_TAIL_MS * 32;
+
+fn terminal_local_confirmation_pcm(pcm: &[u8]) -> (Vec<u8>, usize) {
+    if pcm.len() <= TERMINAL_LOCAL_TAIL_BYTES {
+        return (pcm.to_vec(), 0);
+    }
+    let start = (pcm.len() - TERMINAL_LOCAL_TAIL_BYTES) & !1usize;
+    (pcm[start..].to_vec(), start)
+}
+
 fn should_run_terminal_offline_recall(
     pcm_bytes: usize,
     _local_absent_count: u8,

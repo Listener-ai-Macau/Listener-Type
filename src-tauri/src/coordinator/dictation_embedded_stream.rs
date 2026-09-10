@@ -1066,9 +1066,11 @@ impl EmbeddedStreamingDictation {
                                 );
                                 #[cfg(target_os = "windows")]
                                 {
+                                    let (confirm_pcm, _) =
+                                        terminal_local_confirmation_pcm(&candidate.pcm);
                                     let confirm = spawn_local_wake_confirmation(
                                         inner,
-                                        candidate.pcm.clone(),
+                                        confirm_pcm,
                                         phrase.clone(),
                                         false,
                                     )
@@ -1148,9 +1150,11 @@ impl EmbeddedStreamingDictation {
                                 #[cfg(target_os = "windows")]
                                 {
                                     if candidate.pcm.len() >= LOCAL_CONFIRMATION_START_BYTES {
+                                        let (confirm_pcm, tail_origin_bytes) =
+                                            terminal_local_confirmation_pcm(&candidate.pcm);
                                         let result = spawn_local_wake_confirmation(
                                             inner,
-                                            candidate.pcm.clone(),
+                                            confirm_pcm,
                                             phrase.clone(),
                                             false,
                                         )
@@ -1183,7 +1187,8 @@ impl EmbeddedStreamingDictation {
                                                             0.0,
                                                             &result,
                                                             phrase.chars().count(),
-                                                        );
+                                                        )
+                                                            + tail_origin_bytes as f32 / 32_000.0;
                                                     Some(crate::wake_phrase::Match {
                                                         start_seconds: None,
                                                         end_seconds,
