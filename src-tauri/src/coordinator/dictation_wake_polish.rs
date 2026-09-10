@@ -899,15 +899,18 @@ fn should_advance_local_confirmation_window(
     local_confirmation_in_flight: bool,
 ) -> bool {
     // A fast BLE pre-roll can reach the first KWS rotation before the deferred
-    // 2.4 s exploratory confirmation has run. Preserve origin zero for that
-    // first confirmation or the wake phrase at the head of the pre-roll is
-    // discarded before local ASR ever sees it.
-    let initial_full_context_confirmation_pending =
-        current_origin_bytes == 0 && local_confirmation_attempts == 0;
+    // 2.4 s exploratory confirmation has run. Preserve origin zero until the
+    // 1.8 s complete-phrase rung has been attempted. Live 2026-09-10 misses
+    // advanced origin to ~2 s after the expected 800 ms Absent, so later
+    // confirms never saw 开始录音.
+    const MIN_HEAD_CONFIRMATION_ATTEMPTS: usize = 2;
+    let phrase_head_confirmation_pending =
+        current_origin_bytes == 0
+            && local_confirmation_attempts < MIN_HEAD_CONFIRMATION_ATTEMPTS;
     rotated
         && !keyword_model_hit
         && next_origin_bytes > current_origin_bytes
-        && !initial_full_context_confirmation_pending
+        && !phrase_head_confirmation_pending
         // Never invalidate a confirmation that is still running. A fast
         // pre-roll can rotate the KWS stream while Paraformer is decoding the
         // origin-zero window; advancing here discards a valid wake at the

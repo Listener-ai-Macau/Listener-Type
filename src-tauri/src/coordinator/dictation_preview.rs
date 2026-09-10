@@ -829,11 +829,11 @@ fn filter_automatic_wake_text(
         );
         return String::new();
     }
-    let filtered = phrase.map_or_else(
+    let filtered = phrase.as_deref().map_or_else(
         || preserve_recording_transcript(text),
-        |phrase| strip_automatic_activation_prefix(text, &phrase, partial),
+        |phrase| strip_automatic_activation_prefix(text, phrase, partial),
     );
-    if !filtered.trim().is_empty() {
+    if automatic_wake_filtered_text_is_body(&filtered, text, phrase.as_deref()) {
         let mut slot = inner.embedded_audio_automatic_wake_guard.lock();
         if let Some(guard) = slot
             .as_mut()
@@ -846,6 +846,46 @@ fn filter_automatic_wake_text(
         }
     }
     filtered
+}
+
+fn automatic_wake_text_counts_as_body(text: &str) -> bool {
+    text.chars().any(|ch| {
+        !ch.is_whitespace()
+            && !is_embedded_audio_partial_preview_decorative(ch)
+            && !matches!(ch, '嗯' | '呃' | '额' | '唔')
+    })
+}
+
+fn compact_automatic_wake_comparable(text: &str) -> String {
+    text.chars()
+        .filter(|ch| {
+            !ch.is_whitespace()
+                && !is_embedded_audio_partial_preview_decorative(*ch)
+                && !matches!(*ch, '嗯' | '呃' | '额' | '唔')
+        })
+        .collect()
+}
+
+fn automatic_wake_filtered_text_is_body(
+    filtered: &str,
+    original: &str,
+    phrase: Option<&str>,
+) -> bool {
+    if !automatic_wake_text_counts_as_body(filtered) {
+        return false;
+    }
+    let Some(phrase) = phrase else {
+        return true;
+    };
+    let compact_filtered = compact_automatic_wake_comparable(filtered);
+    let compact_phrase = compact_automatic_wake_comparable(phrase);
+    if compact_filtered == compact_phrase {
+        return false;
+    }
+    if filtered == original && compact_filtered.starts_with(&compact_phrase) {
+        return compact_filtered.len() > compact_phrase.len();
+    }
+    true
 }
 
 fn is_dictation_filler_word(word: &str) -> bool {

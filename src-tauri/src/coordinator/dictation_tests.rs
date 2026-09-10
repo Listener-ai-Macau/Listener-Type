@@ -3771,6 +3771,59 @@ fn automatic_wake_no_body_uses_longer_endpoint_timeout() {
 }
 
 #[test]
+fn automatic_wake_phrase_only_preview_does_not_latch_body_or_snappy_endpoint() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    arm_automatic_wake_text_guard(&coordinator.inner, session_id, "开始录音".into(), 1_200);
+    acknowledge_automatic_wake_capsule_visible(&coordinator.inner, session_id);
+
+    assert_eq!(
+        filter_automatic_wake_text(&coordinator.inner, session_id, "开始录音", true),
+        ""
+    );
+    assert!(!automatic_wake_body_started(&coordinator.inner, session_id));
+    assert_eq!(
+        filter_automatic_wake_text(&coordinator.inner, session_id, "开始录音。", true),
+        ""
+    );
+    assert!(!automatic_wake_body_started(&coordinator.inner, session_id));
+    assert_eq!(
+        filter_automatic_wake_text(&coordinator.inner, session_id, "嗯，开始录音", true),
+        ""
+    );
+    assert!(!automatic_wake_body_started(&coordinator.inner, session_id));
+
+    let policy = super::resolve_target_speaker_endpoint_policy(
+        &coordinator.inner,
+        session_id,
+        Some("开始录音"),
+        Some(2_500),
+    );
+    assert!(!policy.body_started);
+    assert_eq!(policy.endpoint_timeout_ms, 3_000);
+    assert_eq!(policy.stop_reason, "target_speaker_inactive_no_body_3000ms");
+
+    assert_eq!(
+        filter_automatic_wake_text(
+            &coordinator.inner,
+            session_id,
+            "开始录音，今天继续测试",
+            true,
+        ),
+        "今天继续测试"
+    );
+    assert!(automatic_wake_body_started(&coordinator.inner, session_id));
+    let body_policy = super::resolve_target_speaker_endpoint_policy(
+        &coordinator.inner,
+        session_id,
+        Some("今天继续测试"),
+        Some(3_200),
+    );
+    assert!(body_policy.body_started);
+    assert_eq!(body_policy.endpoint_timeout_ms, 1_000);
+}
+
+#[test]
 fn automatic_wake_target_speaker_endpoint_uses_one_policy_snapshot_for_decision_and_reason() {
     // Live session 1896 exposed a split policy: callback/watchdog committed on
     // the 900 ms body wall clock, while stop dispatch recomputed and logged the
@@ -4620,10 +4673,16 @@ fn rolling_local_confirmation_restarts_the_800ms_ladder_per_window() {
     assert!(!super::should_advance_local_confirmation_window(
         true, false, 0, origin, 0, false
     ));
-    // Once the initial window has been examined, later ambient windows keep
-    // rolling and restart their bounded confirmation ladder.
-    assert!(super::should_advance_local_confirmation_window(
+    // The 800 ms rung is allowed to return Absent. Do not rotate the local
+    // confirmation origin until the 1.8 s complete-phrase rung has started.
+    assert!(!super::should_advance_local_confirmation_window(
         true, false, 0, origin, 1, false
+    ));
+    // Once the initial window has been examined through the complete-phrase
+    // rung, later ambient windows keep rolling and restart their bounded
+    // confirmation ladder.
+    assert!(super::should_advance_local_confirmation_window(
+        true, false, 0, origin, 2, false
     ));
     assert!(!super::should_advance_local_confirmation_window(
         true, true, 0, origin, 1, false
