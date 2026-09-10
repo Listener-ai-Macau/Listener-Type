@@ -1535,11 +1535,10 @@ fn reject_hidden_automatic_candidate(
     }
 }
 
-/// Show Recording capsule as soon as the phrase is heard. This is candidate
-/// UI, not product Accept: local ExactStart or first KWS hit can pop it.
-/// Owner verification still decides whether the session stays; a later reject
-/// dismisses the capsule. Waiting for owner before any capsule made 开始录音
-/// feel like 1.6–1.8 s of nothing.
+/// Show Recording capsule after local ExactStart. Do not pop it on a bare KWS
+/// hit: enrolled voiceprint can still reject, which flashed the capsule then
+/// dismissed it (live 2026-09-10 9895). Product Accept still creates the
+/// coordinator session.
 fn show_early_wake_recording_capsule(inner: &Arc<Inner>, candidate: &mut BufferedSpeakerCandidate) {
     if candidate.early_capsule_session_id.is_some() {
         return;

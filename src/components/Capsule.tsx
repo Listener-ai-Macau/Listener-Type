@@ -386,7 +386,12 @@ function Pill({
         ? renderProcessingCenter(message || t('capsule.thinking'), Boolean(message))
         : message
           ? renderRecordingPreview(message)
-          : <AudioBars level={level} />;
+          : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <AudioBars level={level} />
+              <CenterText os={os} kind="default" text={t('capsule.speakNow')} />
+            </div>
+          );
       break;
     case 'transcribing':
     case 'polishing': {

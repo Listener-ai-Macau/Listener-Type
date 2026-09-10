@@ -2053,7 +2053,6 @@ impl EmbeddedStreamingDictation {
                             candidate.pcm.len() / 32,
                             KWS_SECONDARY_CONFIRM_BUDGET_MS
                         );
-                        show_early_wake_recording_capsule(inner, candidate);
                     }
                     maybe_prefetch_owner_verification(candidate, &phrase, embedded_session_id);
                 }

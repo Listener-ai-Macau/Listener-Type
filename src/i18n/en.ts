@@ -35,6 +35,7 @@ export const en: typeof zhCN = {
     error: 'Something went wrong',
     inserted: 'Typed',
     translating: 'Translating',
+    speakNow: 'Speak now',
   },
   qa: {
     thinking: 'Thinking…',

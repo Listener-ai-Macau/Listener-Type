@@ -33,6 +33,7 @@ export const zhCN = {
     error: '出错了',
     inserted: '已上屏',
     translating: '正在翻译',
+    speakNow: '请说话',
   },
   qa: {
     thinking: '思考中…',
