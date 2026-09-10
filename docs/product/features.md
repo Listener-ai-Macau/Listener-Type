@@ -145,4 +145,4 @@ Provider Key 进系统凭据库。应用不内置开发者 Key。
 - 未配置后端时的远程风格市场
 - macOS / Linux 上与 Windows 同等的 Listener BLE 音频验收
 
-这些不是缺陷列表，是当前版本边界。需要逐步操作时回到 [USAGE.md](../USAGE.md)。
+这些不是缺陷列表，是当前版本边界。需要逐步操作时回到 [USAGE.md](../USAGE.md)。装哪个包、哈希见 [1.0.5 发布说明](../release/1.0.5.md)。
