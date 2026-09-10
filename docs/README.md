@@ -13,6 +13,7 @@ This documentation set is organized so product behavior, implementation files an
 
 - [Feature map](features/README.md)
 - [Dictation pipeline](features/dictation-pipeline.md)
+- [Recording session, endpoint and interference guide](features/recording-session-guide.md)
 - [Embedded BLE audio integration](features/p13_embedded_audio_software_integration.md)
 - [Provider credentials and diagnostics](features/provider-credentials-diagnostics.md)
 - [Local ASR management](features/local-asr-management.md)

@@ -1,63 +1,292 @@
-# Listener Type Usage
+# Listener Type 使用说明（1.0.5）
 
-## First Launch
+这份说明以 `release/1.0.5` 的实际代码和已发布产物为准。1.0.5 是当前
+“日常可用”基线；更完整的主人声纹贯通和真人多人干扰泛化属于 1.0.6 计划，
+不能把一次受控环境通过记录理解为任何环境下 100% 过滤。
 
-1. Start Listener Type.
-2. Grant Microphone permission.
-3. Grant Accessibility permission on macOS, then quit and reopen the app.
-4. Open Settings and configure at least one ASR provider and one polish provider, or choose a local ASR runtime when available.
+## 先判断你要用哪条路径
 
-## Dictation
+Listener Type 有两种输入源：
 
-1. Place the cursor in any text field.
-2. Press the global hotkey. Defaults are right Option on macOS and right Control on Windows.
-3. Speak naturally.
-4. Press or release the hotkey based on the configured trigger mode.
-5. Listener Type transcribes, applies the selected output mode, and inserts the result. If direct insertion is blocked, the result is copied to the clipboard.
+- **电脑麦克风**：不需要 Listener 硬件，适合先试用。打开「设置 → 录音 →
+  输入源」，选择「麦克风」。
+- **Listener BLE**：Windows 上的完整硬件音频路径。配对名默认是 `listener`，
+  在「设置 → 设备」完成配对，再在「设置 → 录音」检查 BLE 音频通路。
 
-Press `Esc` while recording or processing to cancel the current session.
+默认偏好是 Listener BLE；如果用户明确改过输入源，应用会保留该选择。没有设备
+时切换为电脑麦克风即可，不需要修改配置文件。
 
-## Output Modes
+## 安装和首次启动
 
-| Mode | Behavior |
+### Windows
+
+1. 从发布页下载 `ListenerType_1.0.5_x64_en-US.msi` 并安装。1.0.5 当前稳定
+   MSI 的 SHA-256 是：
+   `3A3042F7B5B598DB0BD32D4EEC4F5B3F1B79919F41D0CED1530551C52DCD05BE`。
+2. 从开始菜单启动 Listener Type；首次启动允许麦克风访问。
+3. 使用硬件时按「开始配对」，在 Windows 蓝牙设置中选择 `listener`，回到
+   应用后点击「检查连接」。
+4. 首次使用建议在记事本中完成一条短句，确认录音、转写和插入都正常。
+
+安装程序会使用 Tauri/WebView2。联网时缺少 WebView2 会自动安装 Evergreen
+Runtime；离线电脑应预先安装 WebView2。当前正式安装包不注册旧版 TSF 输入法；
+Windows 文字插入会按运行时能力选择原生路径，失败时回退到粘贴/剪贴板。
+
+### macOS 和 Linux
+
+- macOS 12+：安装应用，允许「麦克风」和「辅助功能」；授权辅助功能后完全退出
+  并重新打开应用。
+- Linux：X11 使用 best-effort 全局热键；Wayland 不允许应用直接监听全局按键，
+  请在桌面环境中绑定下方 CLI 命令。Listener BLE 的完整验证仍以 Windows 为主。
+
+## 最短成功路径
+
+1. 把光标放进任意文本框（记事本、浏览器、聊天框或编辑器）。
+2. 按一次录音快捷键，看到胶囊进入 `Recording`。
+3. 正常说话；自然停顿不会自动提交。
+4. 再按一次同一快捷键，进入 `Transferring` / `Transcribing` / `Processing`。
+5. 处理完成后，文字会插入原来的光标位置；如果目标应用拒绝自动输入，文字会
+   保留在剪贴板并提示手动粘贴。
+
+录音期间按电脑键盘 `Esc` 会取消当前会话，不会插入半截文字。胶囊可以在「设置
+→ 录音 → 显示胶囊」关闭，但关闭只影响提示，不会关闭录音功能。
+
+想了解主人自然停顿、旁人/电脑播放干扰、自动结束和最终文本如何衔接，请看
+[录音会话与干扰处理说明](features/recording-session-guide.md)。
+
+## 录音快捷键
+
+1.0.5 的录音方式默认是 **Toggle（切换式）**：按一次开始，按一次停止。当前
+默认键由平台决定：
+
+| 平台 | 默认键 | 可选方式 |
+| --- | --- | --- |
+| Windows | 右 Ctrl（Right Control） | 右 Alt、左 Ctrl、右 Win、 自定义组合键 |
+| macOS | 右 Option（Right Option） | 左/右 Option、左右 Control、右 Command、Fn、自定义组合键 |
+| Linux/X11 | 右 Alt（best-effort） | 右 Ctrl、左 Ctrl、自定义组合键 |
+
+在「设置 → 快捷键」可以录制自定义组合键。录制时一次按下完整组合；保存后
+回到「设置 → 权限」确认全局 hook 状态。应用内的“按住说话”不是当前 1.0.5
+的默认路径，若界面显示不可用，请使用 Toggle。
+
+其它内置快捷键：
+
+| 功能 | 默认组合（Windows / Linux） | 默认组合（macOS） |
+| --- | --- | --- |
+| 划词问答开关 | Ctrl+Shift+; | Cmd+Shift+; |
+| 切换上一次风格 | Ctrl+Shift+S | Cmd+Shift+S |
+| 打开 Listener Type | Ctrl+Shift+O | Cmd+Shift+O |
+| 翻译触发 | Shift | Shift |
+
+翻译快捷键只在「翻译」页设置了目标语言时生效；按一次即可标记本次录音走翻译，
+不需要一直按住。
+
+## 自动唤醒和主人声纹
+
+在「设置 → 录音」打开「检测到人声后自动开始」后，Listener BLE 会等待唤醒词，
+默认是 **“开始录音”**。自动唤醒只在设备就绪、BLE 状态灯可用时监听；环境噪声
+本身不会启动录音。
+
+可以点击「录制声纹」按引导自然说三遍当前唤醒词（约 9 秒）：
+
+1. 在平时使用的距离和音量说第一遍；
+2. 看到下一步后再说第二遍和第三遍；
+3. 每一步之间可以自然停顿，不要关闭引导窗口；
+4. 完成后只保留本机受保护的声纹模板，原始样本会被丢弃。
+
+没有声纹时，任何能正确说出唤醒词的人都可能触发自动开始；共享办公室建议录入。
+声纹启用后会优先保留主人的语音，旁人语音不会单独写入正文，也不会单独拖长自动
+结束。它是输入保护，不是身份认证；距离太远、多人同时说话或设备被遮挡时仍应
+靠近设备并复核结果。修改唤醒词后必须重新录制声纹。
+
+## 输出模式
+
+在「设置 → 录音」选择默认模式；也可以在风格页启用/停用模式并选择默认风格。
+
+| 模式 | 适合场景 | 行为 |
+| --- | --- | --- |
+| Raw | 代码、会议原话、需要保留措辞 | 最小处理，尽量保持原始顺序 |
+| Light | 日常聊天、快速记事 | 去掉明显重复和口癖，补标点，不改变事实 |
+| Structured | 需求、任务、Prompt | 按主题、目标、约束整理成结构 |
+| Formal | 邮件、工作沟通 | 语气更正式清楚，不凭空添加事实 |
+| Translation | 双语沟通 | 按目标语言翻译后再插入 |
+
+云端润色不可用时，应用会尽量保留原始转写；Raw 和可用的本地 ASR 可以在不调用
+LLM 的情况下工作。
+
+## 词库、风格包和翻译
+
+### 词库（Vocabulary）
+
+在词库中加入人名、产品名、缩写和领域术语。启用的词条会作为 ASR 热词或语义提示
+发送给支持它们的 Provider，也会帮助后续润色。词库保存在本机，空词条不会生效。
+
+### 风格包（Style）
+
+内置 Raw、Light、Structured、Formal 风格可以离线使用。你可以复制内置风格创建
+自定义风格，编辑系统提示、示例和标签，再设为默认；也可以导出/导入本地 ZIP。
+远程 Marketplace 默认可能为空，这是本地优先策略，不代表本地风格坏了。只有配置
+Listener Type 后端并完成相应登录后，远程上传、点赞等能力才会出现。
+
+### 翻译（Translation）
+
+在翻译页选择目标语言和工作语言。录音中按一次翻译快捷键即可切换本次输出；选择
+“禁用”时 Shift 不会改变普通听写流程。翻译服务失败会回退为原始转写，避免整次
+输入丢失。
+
+## Provider 和网络
+
+Listener Type 不内置开发者 API Key，云端调用使用你自己配置的凭据。可选 ASR
+包括火山引擎流式、OpenAI-compatible 批量、Apple Speech、本地 Qwen ASR 和
+Windows Foundry Local；润色可使用 Ark、DeepSeek/OpenAI-compatible、Anthropic-
+compatible 或自定义 OpenAI-compatible 服务。
+
+在「设置 → Provider」选择服务并填写 Key、Base URL、模型等字段；在「设置 → 权限」
+确认网络状态。每个 Provider 都有 Network 选项：
+
+- **Direct**：不走系统代理，适合国内 Provider 或系统代理指向已关闭端口时；
+- **System**：使用系统 HTTP 代理及标准代理环境变量；
+- **Custom**：填写完整 HTTP 代理 URL，例如 `http://127.0.0.1:7890`。
+
+网络模式也用于流式 ASR WebSocket。应用不会把开发机的回环代理地址写进默认配置。
+本地 ASR 需要先下载模型，首次加载会占用磁盘和内存；模型驻留时间可在高级设置中
+调整。
+
+## Listener 语音键盘
+
+### 配对和输入
+
+设备充电并开机后，在 Listener Type 中选择「开始配对」，再在 Windows 蓝牙列表中
+选择 `listener`。连接成功后，先打开记事本测试。设备输入源选择 Listener BLE 时，
+「检查连接」会验证 VKA1 音频服务；设备离线时按唤醒键/KEY4，再重试连接。
+
+### 软件默认动作
+
+「设置 → 设备 → 设备自定义键」中的**单击默认动作**如下。它们是桌面端收到设备
+事件后执行的动作，可以逐项改成打开页面、录音、划词问答、翻译、粘贴模板或发送
+自定义快捷键：
+
+| 控件 | 1.0.5 默认动作 |
 | --- | --- |
-| Raw | Inserts the transcript with minimal post-processing. |
-| Light | Fixes filler words, punctuation and obvious recognition mistakes while preserving wording. |
-| Structured | Turns loose speech into a structured prompt with context, constraints and requested output. |
-| Formal | Converts spoken phrasing into a more formal written style. |
-| Translation | Uses the translation hotkey to speak directly into the configured target language. |
+| KEY1 单击 | 发送 Right Control |
+| KEY2 单击 | 发送 Ctrl+C（复制） |
+| KEY3 单击 | 发送 Ctrl+V（粘贴） |
+| KEY4 单击 | 发送 Ctrl+Z（撤销） |
+| EC11 单击 | 开始 / 停止录音 |
+| EC11 旋转 | 电脑系统音量 |
 
-## Vocabulary
+KEY1–KEY4 还支持双击和长按映射；这两组在默认偏好中是禁用的，启用后可分别绑定
+动作。EC11 的双击和长按由固件承担配对恢复/关机确认等硬件流程，桌面端不会把它们
+当成普通 KEY 手势覆盖。
 
-Use Vocabulary for names, product terms, acronyms and domain words. Enabled entries are injected into supported ASR providers as hotwords and are also sent as semantic hints to the polish step.
+### 没有自定义映射时的底层入口
 
-## Style Packs
+为了让设备在配置尚未同步时仍可被识别，固件会提供以下安全 HID fallback：
 
-Style packs define reusable writing behavior. Built-in packs work offline. User packs can be created, edited, exported and imported locally. Remote marketplace calls are disabled until a Listener Type backend is configured.
-
-## Provider Network
-
-Each cloud provider has its own Network setting in Settings. The default is provider-aware: domestic providers such as DeepSeek, Ark, SiliconFlow, Bailian and Volcengine use direct connections by default, while overseas, OAuth, aggregation and custom providers follow the system proxy by default.
-
-The streaming ASR WebSocket follows this same setting. System mode uses the computer's system HTTP proxy (or standard proxy environment variables) and custom mode accepts an HTTP proxy URL. The app never ships with a developer machine's loopback proxy address.
-
-Use Direct when a stale local system proxy points at a closed port such as `127.0.0.1:1087`. Use System proxy for providers that require a proxy on your network. Custom HTTP proxy accepts URLs such as `http://127.0.0.1:7890`.
-
-## History
-
-History stores recent sessions, including raw transcript, polished output, mode, provider metadata and optional debug recordings. Retention is controlled in Settings.
-
-## Selection QA
-
-Select text in another app and use the QA hotkey to open the floating QA panel. The panel answers against the selected text. Dictation and QA have separate hotkeys and state.
-
-## Troubleshooting
-
-| Symptom | Check |
+| 设备手势 | HID 入口 |
 | --- | --- |
-| Hotkey does not start recording | Check permissions, current hotkey mode, and whether another app captured the same key. |
-| Empty transcript | Check ASR credentials, microphone permission, selected input device and local model availability. |
-| DeepSeek or another domestic provider fails only when the proxy app is closed | In Settings, set that provider's Network mode to Direct, or disable the stale system proxy. |
-| Text copied instead of inserted | The target app blocked direct insertion; paste from clipboard manually or use Windows IME insertion where available. |
-| Remote marketplace is empty | Expected by default. Configure `LISTENER_TYPE_MARKETPLACE_BASE_URL` only when a Listener Type backend exists. |
-| No automatic update check on launch | Expected by default for local-first builds. Use the manual About-panel check or enable the setting after Listener Type releases are published. |
+| KEY1 单/双/长 | F13 / F17 / F21 |
+| KEY2 单/双/长 | F14 / F18 / F22 |
+| KEY3 单/双/长 | F15 / F19 / F23 |
+| KEY4 单/双/长 | F16 / F20 / F24 |
+| EC11 单击 | Shift+F13 |
+
+不要把 EC11 fallback 改成 F25；当前 Windows 热键支持矩阵没有 F25。物理 KEY3
+不等于“永远录音键”：在当前软件默认映射中它是 Ctrl+V，录音推荐使用 EC11
+单击或在设备设置中把某个手势改成 Dictation。
+
+### 灯光和状态
+
+设备灯区与屏幕胶囊共同表示状态：PWR（供电）、BLE（连接）、REC（录音）、AI
+（处理）、OK（完成）、WARN（错误），另有按键灯、EC11 环灯和板框氛围灯。默认最大
+亮度为：状态灯 50%、按键灯 80%、EC11 环灯 100%、板框灯 100%。亮度只改变可见度，
+不改变麦克风音量、声纹分数或自动结束条件。低功耗时灯熄灭属于省电行为。
+
+## 设备电源和低功耗
+
+「设置 → 设备 → 电源时间」把插电和电池两种模式分开：
+
+| 设置 | 1.0.5 默认 | 说明 |
+| --- | ---: | --- |
+| 插电允许低功耗 | 开启 | USB/充电/外部供电时允许进入低功耗 |
+| 插电进入低功耗 | 3 分钟 | 无操作后进入 `CONNECTED_IDLE`/低功耗空闲 |
+| 电池进入低功耗 | 1 分钟 | 拔电后无操作进入低功耗并灭灯 |
+| 电池自动关机 | 10 分钟 | 电池长时间空闲后关机；插电不使用该计时器 |
+
+时间范围是 0–1440 分钟，`0` 表示关闭该计时器。修改后必须点击「写入」同步到
+设备；设备未连接时只能编辑本地值，不能声称已经写入固件。电量读取不可用时界面
+会显示“供电未知”，不要把未知状态当成 0%。
+
+设备长按旋钮关机与软件退出是两件事。Windows 标题栏的 X 默认只隐藏到托盘；要
+真正退出 Listener Type，请在托盘菜单选择「退出」，或运行：
+
+```text
+listener-type.exe --quit
+```
+
+「开机自启」是单独的登录启动开关；关闭它不会改变设备的自动关机策略。
+
+## 剪贴板、历史和调试录音
+
+- 「转写保留到剪贴板」默认开启，最终文本可随时手动粘贴；它优先于恢复旧剪贴板。
+- 「插入后恢复剪贴板」默认开启，仅 Windows/Linux 的粘贴路径适用；macOS 走辅助
+  功能直写，不依赖该选项。
+- 「听写后自动发送」默认关闭；打开后可选 Enter 或 Ctrl+Enter。
+- 历史、历史条数上限、上下文窗口和原始调试录音是独立设置。调试录音开启后会把
+  WAV 留在本机，适合定位麦克风/BLE 问题，隐私敏感场景应关闭并及时清理。
+
+## 划词问答（Selection Ask）
+
+选中其它应用中的文字，按默认 `Ctrl/Cmd+Shift+;` 打开浮窗，再按录音快捷键提问。
+浮窗支持多轮追问，按 `Esc` 或右上角关闭；关闭会清除本轮对话。选区会发送给当前
+配置的 LLM，超过 4000 字符时只取开头 2000 和结尾 2000。QA 默认不写入普通历史，
+是否保存由单独的历史开关控制。
+
+## Wayland 快捷键绑定
+
+Wayland 下请在 GNOME/KDE/Hyprland/sway 的系统快捷键中绑定：
+
+```text
+listener-type --toggle-dictation
+listener-type --toggle-qa
+listener-type --cancel-dictation
+```
+
+其中 QA 和取消命令是可选的。应用会把第二个进程的参数转发给已经运行的主实例，
+不会启动第二套录音状态。
+
+## 故障排查
+
+| 现象 | 处理 |
+| --- | --- |
+| 快捷键没有反应 | 检查「设置 → 权限」hook 状态；确认没有其它软件占用同一组合键；macOS 授权后完全重启应用 |
+| 录音为空 | 检查麦克风权限、输入设备、ASR Key/模型；Listener BLE 则先检查连接和设备唤醒 |
+| 只能复制不能自动插入 | 目标应用可能拒绝自动输入，直接从剪贴板粘贴；Windows 可检查非 TSF 兜底开关 |
+| 国内 Provider 只有代理软件开着才成功 | 把该 Provider 的 Network 改为 Direct，或修正系统代理端口 |
+| 自动唤醒不稳定 | 靠近设备、降低背景噪声、确认唤醒词正确；共享环境先录制声纹 |
+| BLE 反复未连接 | 按 KEY4/唤醒键；仍失败时「设置 → 关于 → 设备恢复」，删除 Windows 中旧的 `listener` 后重新配对 |
+| 灯熄灭 | 先看设备是否处于低功耗；低功耗灭灯是预期行为，不代表录音或固件损坏 |
+| 关闭窗口后又出现 | X 只是隐藏到托盘；检查「开机自启」，需要结束进程请用托盘退出或 `--quit` |
+
+仍无法定位时，在「设置 → 关于」导出诊断包，并记录版本、复现步骤、输入源和安装
+包 SHA-256。诊断包用于连接、会话和设备状态定位，不包含 API Key、录音或转写正文；
+不要把凭据粘贴到 issue 或日志中。
+
+## 隐私和产品边界
+
+偏好、词库、风格包、历史和可选调试录音默认保存在本机。云端 ASR/LLM 是否接收
+音频或文本取决于你选择的 Provider；应用不会内置开发者 Key。声纹模板只用于本机
+主人判断，不是门禁、登录或身份认证。Listener Type 不是医疗设备、取证工具，也
+不承诺多人同时说话时 100% 正确。
+
+## 1.0.5 发布物
+
+当前发布根目录只保留以下两个正式产物；固件 OTA ZIP 不是桌面软件便携版：
+
+| 产物 | SHA-256 |
+| --- | --- |
+| `ListenerType_1.0.5_x64_en-US.msi` | `3A3042F7B5B598DB0BD32D4EEC4F5B3F1B79919F41D0CED1530551C52DCD05BE` |
+| `ListenerFirmware_1.0.5_ota.zip` | `D993765AC07838F798B71863F87A69A59DAC9EE47CBBCE3315266FBBB631BADC` |
+
+仓库中的 `.artifacts/` 是构建和验收缓存，不应与发布根目录产物混用。完整发布边界
+见 [`docs/release/1.0.5-commercial-readiness.md`](release/1.0.5-commercial-readiness.md)。
