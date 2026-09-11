@@ -6,7 +6,11 @@
 
 說話,文字出現在目前游標。Listener Type 是個桌面聽寫軟體:游標點進任何輸入框,按一下右 Ctrl,說,再按一下,字就打進去了。開源,Windows / macOS / Linux 都能裝,電腦麥克風就夠用。
 
-[English](README.md) · [简体中文](README.zh.md) · [使用說明](docs/USAGE.md) · [1.0.5 版本說明](docs/release/1.0.5.md)
+[English](README.md) · [简体中文](README.zh.md) · [使用說明](docs/USAGE.md) · [功能目錄](docs/product/features.md) · [1.0.5 版本說明](docs/release/1.0.5.md)
+
+<p align="center">
+  <img src="docs/assets/readme/overview.png" alt="Listener Type 主介面:ASR、模型、鍵盤連線狀態和今日統計" width="900" />
+</p>
 
 ## 先花 30 秒試一下
 
@@ -30,9 +34,13 @@ macOS 12+ 和 Linux 也能裝,先用電腦麥克風;鍵盤的藍牙音訊只在 
 
 順手再記三個熱鍵:`Ctrl+Shift+;` 對選中的文字提問,`Ctrl+Shift+S` 給上一段結果換個風格,`Ctrl+Shift+O` 喚起應用(macOS 把 `Ctrl` 換成 `Cmd`)。
 
+<p align="center">
+  <img src="docs/assets/readme/recording-settings.png" alt="錄音設定:右 Ctrl 熱鍵、輸入來源切換、錄音膠囊開關" width="720" />
+</p>
+
 ## 桌上的鍵盤
 
-[Listener 語音鍵盤](https://github.com/Listener-ai-Macau/Listener-Firmware) 是配套硬體:一顆能按的旋鈕管開始和停止,雙擊重新配對,轉一下調音量;四顆鍵在軟體裡隨便綁動作;六盞燈分別說電源、藍牙、錄音、處理到哪一步。
+[Listener 語音鍵盤](https://github.com/Listener-ai-Macau/Listener-Firmware) 是配套硬體:一顆能按的旋鈕管開始和停止,雙擊重新配對,轉一下調音量;四顆鍵在軟體裡隨便綁動作;六盞燈各管一件事——電源、藍牙、錄音、處理到哪一步。
 
 不想碰鍵盤也行:打開「檢測到人聲後自動開始」,說聲「開始錄音」就開工。照引導錄三遍聲紋之後,旁邊放別人的語音不會混進正文。聲紋是防誤錄的,不是身分認證,別當鎖用。
 
@@ -44,7 +52,7 @@ macOS 12+ 和 Linux 也能裝,先用電腦麥克風;鍵盤的藍牙音訊只在 
 
 ## 目前的邊界
 
-發的是 1.0.5。遠距離拾音、多人同時說話還不可靠,排在 1.0.6。它不是系統輸入法,文字進目前焦點框。完整功能清單(包括每條做不到什麼)在 [docs/product/features.md](docs/product/features.md)。
+現在發的是 1.0.5。遠距離拾音、多人同時說話還不可靠,排在 1.0.6。它不是系統輸入法,文字進目前焦點框。每條功能的邊界都寫進了[功能目錄](docs/product/features.md)。
 
 ## 自己動手
 

@@ -6,7 +6,11 @@
 
 说话,文字出现在当前光标。Listener Type 是个桌面听写软件:光标点进任何输入框,按一下右 Ctrl,说,再按一下,字就打进去了。开源,Windows / macOS / Linux 都能装,电脑麦克风就够用。
 
-[English](README.md) · [繁體中文](README.zh-TW.md) · [使用说明](docs/USAGE.md) · [1.0.5 发布说明](docs/release/1.0.5.md)
+[English](README.md) · [繁體中文](README.zh-TW.md) · [使用说明](docs/USAGE.md) · [功能目录](docs/product/features.md) · [1.0.5 发布说明](docs/release/1.0.5.md)
+
+<p align="center">
+  <img src="docs/assets/readme/overview.png" alt="Listener Type 主界面:ASR、模型、键盘连接状态和今日统计" width="900" />
+</p>
 
 ## 先花 30 秒试一下
 
@@ -30,9 +34,13 @@ macOS 12+ 和 Linux 也能装,先用电脑麦克风;键盘的蓝牙音频只在 
 
 顺手再记三个快捷键:`Ctrl+Shift+;` 对选中的文字提问,`Ctrl+Shift+S` 给上一段结果换个风格,`Ctrl+Shift+O` 唤起应用(macOS 把 `Ctrl` 换成 `Cmd`)。
 
+<p align="center">
+  <img src="docs/assets/readme/recording-settings.png" alt="录音设置:右 Ctrl 快捷键、输入源切换、录音胶囊开关" width="720" />
+</p>
+
 ## 桌上的键盘
 
-[Listener 语音键盘](https://github.com/Listener-ai-Macau/Listener-Firmware) 是配套硬件:一颗能按的旋钮管开始和停止,双击重新配对,转一下调音量;四颗键在软件里随便绑动作;六盏灯分别说电源、蓝牙、录音、处理到哪一步。
+[Listener 语音键盘](https://github.com/Listener-ai-Macau/Listener-Firmware) 是配套硬件:一颗能按的旋钮管开始和停止,双击重新配对,转一下调音量;四颗键在软件里随便绑动作;六盏灯各管一件事——电源、蓝牙、录音、处理到哪一步。
 
 不想碰键盘也行:打开「检测到人声后自动开始」,说声「开始录音」就开工。照引导录三遍声纹之后,旁边放别人的语音不会混进正文。声纹是防误录的,不是身份认证,别当锁用。
 
@@ -44,7 +52,7 @@ macOS 12+ 和 Linux 也能装,先用电脑麦克风;键盘的蓝牙音频只在 
 
 ## 目前的边界
 
-发的是 1.0.5。远距离拾音、多人同时说话还不可靠,排在 1.0.6。它不是系统输入法,文字进当前焦点框。完整功能清单(包括每条做不到什么)在 [docs/product/features.md](docs/product/features.md)。
+现在发的是 1.0.5。远距离拾音、多人同时说话还不可靠,排在 1.0.6。它不是系统输入法,文字进当前焦点框。每条功能的边界都写进了[功能目录](docs/product/features.md)。
 
 ## 自己动手
 
