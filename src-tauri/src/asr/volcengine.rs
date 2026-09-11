@@ -38,7 +38,7 @@ const BYTES_PER_MS: f64 = 32.0;
 const HOTWORD_CAP: usize = 80;
 const FINAL_RESULT_TIMEOUT: Duration = Duration::from_secs(12);
 const FINAL_PARTIAL_COVERAGE_SLACK_MS: u64 = 600;
-const WEBSOCKET_SEND_TIMEOUT: Duration = Duration::from_millis(1_200);
+const WEBSOCKET_SEND_TIMEOUT: Duration = Duration::from_millis(2_500);
 // F2 云端空转（2026-08-09 12:47:04：963 包全收、云端 audio_duration 长到
 // 10210ms 但 result_chars 停在 2）——终稿空但本地整段持续人声时允许一次留存
 // 重试的判定阈：本地音频至少 1.5s 且人声尾端正点距音频末尾不超过 0.5s。
@@ -4012,21 +4012,31 @@ impl VolcengineStreamingASR {
                     &chunk,
                     Some(seq),
                 );
-                if let Err(error) = send_binary(&writer_for_worker, frame).await {
-                    log::error!(
-                        "[asr] {} audio frame seq={} send 失败: {}",
+                if let Err(error) = send_binary(&writer_for_worker, frame.clone()).await {
+                    // Live 2c5042c2: preroll flush after overlap-rearm timed out
+                    // at 1200 ms, so the capsule stayed empty then no-body ended.
+                    log::warn!(
+                        "[asr] {} audio frame seq={} send retry after: {}",
                         role_label,
                         seq,
                         error
                     );
-                    if let Some(asr) = failed_delivery.upgrade() {
-                        asr.mark_audio_delivery_failed(error);
-                        *asr.audio_tx.lock() = None;
+                    if let Err(error) = send_binary(&writer_for_worker, frame).await {
+                        log::error!(
+                            "[asr] {} audio frame seq={} send 失败: {}",
+                            role_label,
+                            seq,
+                            error
+                        );
+                        if let Some(asr) = failed_delivery.upgrade() {
+                            asr.mark_audio_delivery_failed(error);
+                            *asr.audio_tx.lock() = None;
+                        }
+                        if pending_for_worker.fetch_sub(1, Ordering::SeqCst) == 1 {
+                            notify_for_worker.notify_waiters();
+                        }
+                        break;
                     }
-                    if pending_for_worker.fetch_sub(1, Ordering::SeqCst) == 1 {
-                        notify_for_worker.notify_waiters();
-                    }
-                    break;
                 }
                 if pending_for_worker.fetch_sub(1, Ordering::SeqCst) == 1 {
                     notify_for_worker.notify_waiters();
