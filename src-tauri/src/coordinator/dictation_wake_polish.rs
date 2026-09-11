@@ -1089,6 +1089,11 @@ fn terminal_inflight_local_decision(
 const TERMINAL_LOCAL_TAIL_MS: usize = 2_500;
 const TERMINAL_LOCAL_TAIL_BYTES: usize = TERMINAL_LOCAL_TAIL_MS * 32;
 
+fn terminal_local_result_can_activate(result: &LocalWakeConfirmation) -> bool {
+    local_confirmation_can_activate(false, result.phrase_relation)
+        || result.phrase_relation == crate::wake_phrase::LocalPhraseRelation::PresentLater
+}
+
 fn terminal_local_confirmation_pcm(pcm: &[u8]) -> (Vec<u8>, usize) {
     terminal_local_confirmation_windows(pcm)
         .into_iter()
@@ -1106,6 +1111,8 @@ fn terminal_local_confirmation_windows(pcm: &[u8]) -> Vec<(Vec<u8>, usize)> {
     if tail_start >= head_len {
         windows.push((pcm[..head_len].to_vec(), 0));
     }
+    // Cover the middle gap between head and tail (~0.8 s on a 5.8 s clip).
+    windows.push((pcm.to_vec(), 0));
     windows
 }
 
@@ -1396,9 +1403,7 @@ async fn confirm_terminal_local_windows(
                     result.phonetic_best_window_start,
                     result.inference_ms
                 );
-                if result.matched
-                    && local_confirmation_can_activate(false, result.phrase_relation)
-                {
+                if terminal_local_result_can_activate(&result) {
                     return Some((result, origin));
                 }
                 last = Some((result, origin));

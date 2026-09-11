@@ -6623,10 +6623,11 @@ fn terminal_local_confirmation_uses_last_2500ms_of_long_candidates() {
     assert_eq!(pcm.len(), 2_500 * 32);
     assert_eq!(pcm[0], 1);
     let windows = super::terminal_local_confirmation_windows(&long);
-    assert_eq!(windows.len(), 2);
+    assert_eq!(windows.len(), 3);
     assert_eq!(windows[0].1, (5_000 - 2_500) * 32);
     assert_eq!(windows[1].1, 0);
     assert_eq!(windows[1].0.len(), 2_500 * 32);
+    assert_eq!(windows[2].0.len(), long.len());
 }
 
 fn terminal_offline_recall_stops_after_initial_plus_focused_absence() {

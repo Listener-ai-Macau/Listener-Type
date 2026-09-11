@@ -1160,11 +1160,7 @@ impl EmbeddedStreamingDictation {
                                         .await
                                         {
                                             Some((result, origin_bytes))
-                                                if result.matched
-                                                    && local_confirmation_can_activate(
-                                                        false,
-                                                        result.phrase_relation,
-                                                    ) =>
+                                                if terminal_local_result_can_activate(&result) =>
                                             {
                                                 phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
                                                 let end_seconds =
