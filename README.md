@@ -6,7 +6,11 @@
 
 Speak, and the text appears at your cursor. Listener Type is a desktop dictation app: click into any text field, press Right Ctrl, talk, press again, and the words are typed in. It's open source, runs on Windows, macOS and Linux, and works with whatever microphone your computer has.
 
-[中文](README.zh.md) · [繁體中文](README.zh-TW.md) · [Usage guide](docs/USAGE.md) · [1.0.5 release notes](docs/release/1.0.5.md)
+[中文](README.zh.md) · [繁體中文](README.zh-TW.md) · [Usage guide](docs/USAGE.md) · [Feature catalog](docs/product/features.md) · [1.0.5 release notes](docs/release/1.0.5.md)
+
+<p align="center">
+  <img src="docs/assets/readme/overview.png" alt="The Listener Type main window: ASR, model, keyboard link and today's stats" width="900" />
+</p>
 
 ## Try it in 30 seconds
 
@@ -30,21 +34,25 @@ macOS 12+ and Linux run the app with the computer's microphone; the keyboard's B
 
 Three more shortcuts worth remembering: `Ctrl+Shift+;` asks a question about the selected text, `Ctrl+Shift+S` runs the last result through a different style, `Ctrl+Shift+O` opens the app (macOS: `Cmd` instead of `Ctrl`).
 
+<p align="center">
+  <img src="docs/assets/readme/recording-settings.png" alt="Recording settings: Right Ctrl hotkey, input source, capsule toggle" width="720" />
+</p>
+
 ## The keyboard on your desk
 
-The [Listener voice keyboard](https://github.com/Listener-ai-Macau/Listener-Firmware) is the companion hardware: a clickable knob for start/stop, double-click to re-pair, turn for volume; four keys you can bind in the app; six LEDs that say where things stand — power, Bluetooth, recording, processing.
+The [Listener voice keyboard](https://github.com/Listener-ai-Macau/Listener-Firmware) is the companion hardware: a clickable knob for start/stop, double-click to re-pair, turn for volume; four keys you can bind in the app; six LEDs, one per thing that matters — power, Bluetooth, recording, processing.
 
 Don't want to touch it? Turn on "start on voice" and say 「开始录音」. Enroll three voice samples and playback of someone else's speech won't end up in your text. The voiceprint guards against stray input; it is not authentication, so don't treat it as a lock.
 
-The app works fine without the keyboard — the keyboard just puts the record button under your finger. And if pairing ever gets messed up, Settings → About → Device recovery fixes it without any developer tools. The firmware is open source too: [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware).
+The app works fine without the keyboard — the keyboard just puts the record button under your finger. If pairing ever gets messed up, Settings → About → Device recovery fixes it without developer tools. The firmware is open source too: [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware).
 
 ## Your data, your keys
 
-Recognition can run through Volcengine's streaming API, any OpenAI-compatible endpoint, Apple Speech, or fully on-device; polish through Ark, DeepSeek, or any Anthropic- or OpenAI-compatible endpoint. Keys live in the OS credential store and none ship with the app; each provider can be set to direct connection, system proxy, or a custom proxy. History, vocabulary, styles and settings stay on your machine — the whole loop runs without any Listener server.
+Recognition can run through Volcengine's streaming API, any OpenAI-compatible endpoint, Apple Speech, or fully on-device; polish through Ark, DeepSeek, or any Anthropic- or OpenAI-compatible endpoint. Keys live in the OS credential store and none ship with the app; each provider can be set to a direct connection, the system proxy, or a custom proxy. History, vocabulary, styles and settings stay on your machine — the whole loop runs without any Listener server.
 
 ## Current limits
 
-Shipping is 1.0.5. Far-field pickup and overlapping speakers aren't reliable yet; that's on the 1.0.6 list. It isn't a system IME — text goes into the focused field. The full feature list, including what each feature doesn't do: [docs/product/features.md](docs/product/features.md).
+Shipping is 1.0.5. Far-field pickup and overlapping speakers aren't reliable yet; that's on the 1.0.6 list. It isn't a system IME — text goes into the focused field. Every feature's boundaries are written into the [feature catalog](docs/product/features.md).
 
 ## Hacking on it
 
