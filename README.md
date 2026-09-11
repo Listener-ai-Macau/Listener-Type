@@ -4,55 +4,51 @@
 
 # Listener Type
 
-Listener Type is a dictation app for the desktop. You put the cursor in a text field, press Right Ctrl, talk, and press it again; the transcribed text is typed into the field. It works in chat windows, browsers, editors, mail — anywhere that accepts typed text. If the target application refuses programmatic input, the text is left on the clipboard instead.
-
-The app is free and open source, and works with whatever microphone your computer already has. It pairs with the [Listener voice keyboard](https://github.com/Listener-ai-Macau/Listener-Firmware), a small desk device whose firmware lives in the companion repository, but the keyboard is optional.
+Speak, and the text appears at your cursor. Listener Type is a desktop dictation app: click into any text field, press Right Ctrl, talk, press again, and the words are typed in. It's open source, runs on Windows, macOS and Linux, and works with whatever microphone your computer has.
 
 [中文](README.zh.md) · [繁體中文](README.zh-TW.md) · [Usage guide](docs/USAGE.md) · [1.0.5 release notes](docs/release/1.0.5.md)
 
-### Installation
+## Try it in 30 seconds
 
-Windows is the primary platform: download the MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) and install it. The installer relies on WebView2 and fetches it automatically when the machine is online.
+1. On Windows, download the MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) and install it (it needs WebView2, fetched automatically when online).
+2. Launch it, allow the microphone.
+3. Click into Notepad, press Right Ctrl, say something, press again.
 
-| | Windows | macOS | Linux |
-| --- | --- | --- | --- |
-| Microphone dictation | ✓ | ✓ (12+) | ✓ |
-| Global hotkey | ✓ | ✓ | X11 best-effort; Wayland needs a desktop-level binding |
-| Keyboard Bluetooth audio | ✓ | not yet | not yet |
+The words should already be in Notepad. `Esc` cancels mid-recording; if an app refuses programmatic input, the text goes to the clipboard and you're asked to paste it. On macOS the hotkey is Right Option. If that worked, read on.
 
-### Using it
+macOS 12+ and Linux run the app with the computer's microphone; the keyboard's Bluetooth audio is validated on Windows only. On Linux the global hotkey is best-effort under X11, and on Wayland you bind the CLI commands in your desktop environment — details in the [usage guide](docs/USAGE.md).
 
-Recording is a toggle, not push-to-talk. Press Right Ctrl (Right Option on macOS) once to start, speak, press again to stop. While it works, a small capsule window shows the stage it's in: recording, transcribing, processing, done. `Esc` cancels a recording in progress, and nothing half-finished gets inserted.
+## A day with it
 
-What you get back depends on the style you picked. Raw keeps your words as spoken; Light removes fillers and adds punctuation; Structured and Formal reshape the text for notes and mail. If you've set a target language, Shift marks the next recording for translation. Styles are plain local files, so you can copy a built-in one and edit it, or share packs as ZIP files.
+**Answering messages.** The default Light style removes the "um"s and adds punctuation, nothing else. You talk like you talk; it reads like a person wrote it.
 
-Other built-in shortcuts: `Ctrl+Shift+;` asks a question about the selected text, `Ctrl+Shift+S` runs the last result through a different style, `Ctrl+Shift+O` brings up the app. On macOS, use `Cmd` instead of `Ctrl`.
+**Mail and formal writing.** Switch to Formal for a tidier tone — it won't invent content. If the other side reads another language, set a target language once, then press Shift before speaking and out comes the translation.
 
-### How it works
+**Notes, tasks, prompts.** Structured organizes what you said by topic and goal. For code comments, or anything you want verbatim, use Raw — it leaves your words alone.
 
-Audio goes from the microphone (or the keyboard, over Bluetooth) to a recognizer; the transcript optionally passes through a style; the result is inserted into the focused field. On Windows, insertion goes through a small TSF text service; on macOS, through the Accessibility API; if the target app refuses both, the text waits on the clipboard.
+**It learns your words.** Names, product terms and abbreviations go into a local vocabulary that both recognition and polish consult. That's how it stops mangling your colleagues' names.
 
-None of the providers are locked in. Recognition can run through Volcengine's streaming API, any OpenAI-compatible endpoint, Apple Speech, or entirely on-device. Styles can run through Ark, DeepSeek, or any Anthropic- or OpenAI-compatible endpoint. API keys live in the OS credential store and none ship with the app. History, vocabulary, styles and settings never leave the machine — the whole loop works without any Listener server.
+Three more shortcuts worth remembering: `Ctrl+Shift+;` asks a question about the selected text, `Ctrl+Shift+S` runs the last result through a different style, `Ctrl+Shift+O` opens the app (macOS: `Cmd` instead of `Ctrl`).
 
-A local vocabulary list (names, product terms, abbreviations) is fed to both the recognizer and the style pass. That's how it learns to stop mangling your colleagues' names.
+## The keyboard on your desk
 
-### The keyboard
+The [Listener voice keyboard](https://github.com/Listener-ai-Macau/Listener-Firmware) is the companion hardware: a clickable knob for start/stop, double-click to re-pair, turn for volume; four keys you can bind in the app; six LEDs that say where things stand — power, Bluetooth, recording, processing.
 
-The Listener keyboard is a USB-C desk device with a clickable knob (start/stop, double-click to re-pair, turn for volume), four keys you can bind in the app, and six LEDs for power, Bluetooth, recording and processing state.
+Don't want to touch it? Turn on "start on voice" and say 「开始录音」. Enroll three voice samples and playback of someone else's speech won't end up in your text. The voiceprint guards against stray input; it is not authentication, so don't treat it as a lock.
 
-With the keyboard, you can also start hands-free: the device waits for a wake phrase (default: 「开始录音」), and an optional three-sample voiceprint keeps playback of other people's speech out of your text. The voiceprint is input protection, not authentication — treat it accordingly.
+The app works fine without the keyboard — the keyboard just puts the record button under your finger. Its firmware is open source too: [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware).
 
-The app works fine without the keyboard; the keyboard just puts the record button under your finger. Its firmware is open source: [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware).
+## Your data, your keys
 
-### Current limits (1.0.5)
+Recognition can run through Volcengine's streaming API, any OpenAI-compatible endpoint, Apple Speech, or fully on-device; polish through Ark, DeepSeek, or any Anthropic- or OpenAI-compatible endpoint. Keys live in the OS credential store and none ship with the app. History, vocabulary, styles and settings stay on your machine — the whole loop runs without any Listener server.
 
-The keyboard's Bluetooth audio path is validated on Windows only; on macOS and Linux, use the computer's microphone. Far-field pickup and overlapping speakers don't work reliably yet — both are on the 1.0.6 list. And it isn't a system IME: text goes into the focused field.
+## Current limits
 
-The complete feature list (including what each feature doesn't do) is in [docs/product/features.md](docs/product/features.md).
+Shipping is 1.0.5. Far-field pickup and overlapping speakers aren't reliable yet; that's on the 1.0.6 list. It isn't a system IME — text goes into the focused field. The full feature list, including what each feature doesn't do: [docs/product/features.md](docs/product/features.md).
 
-### Building from source
+## Hacking on it
 
-The app is Tauri v2: a React + TypeScript frontend over a Rust backend, plus a small native text service for Windows insertion.
+Tauri v2 + React + Rust. Windows insertion goes through a TSF text service in `windows-ime/`; macOS goes through the Accessibility API.
 
 ```bash
 npm ci
@@ -60,4 +56,4 @@ npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-A full desktop build additionally needs the `third_party/denzic-platform` submodule. [CONTRIBUTING.md](CONTRIBUTING.md) covers the rest; security reports go to [SECURITY.md](SECURITY.md). The source is open; the Listener Type name, icon and mascot are not licensed for renamed forks.
+A full desktop build also needs the `third_party/denzic-platform` submodule. See [CONTRIBUTING.md](CONTRIBUTING.md) before sending code; security reports go to [SECURITY.md](SECURITY.md). The source is open; the Listener Type name, icon and mascot are not licensed for renamed forks.
