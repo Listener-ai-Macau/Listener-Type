@@ -525,6 +525,58 @@ fn wake_phrase_character_matches(actual: char, expected: char) -> bool {
         .is_some_and(|(actual, expected)| actual.plain() == expected.plain())
 }
 
+fn strip_activation_after_short_lead_in(text: &str, phrase: &[char]) -> Option<String> {
+    const MAX_LEAD_IN_CONTENT_CHARS: usize = 2;
+    if phrase.len() < 2 || text.is_empty() {
+        return None;
+    }
+    let mut content_starts = Vec::new();
+    for (index, ch) in text.char_indices() {
+        if is_embedded_audio_partial_preview_decorative(ch)
+            || matches!(ch, '嗯' | '呃' | '额' | '唔')
+        {
+            continue;
+        }
+        content_starts.push(index);
+        if content_starts.len() > MAX_LEAD_IN_CONTENT_CHARS + phrase.len() {
+            break;
+        }
+    }
+    let max_lead = MAX_LEAD_IN_CONTENT_CHARS.min(content_starts.len());
+    for lead in 1..=max_lead {
+        let remainder = &text[content_starts[lead]..];
+        let mut phrase_index = 0usize;
+        let mut consumed_end = 0usize;
+        for (index, ch) in remainder.char_indices() {
+            let next = index + ch.len_utf8();
+            if is_embedded_audio_partial_preview_decorative(ch) {
+                if phrase_index > 0 {
+                    consumed_end = next;
+                }
+                continue;
+            }
+            if phrase_index == phrase.len() {
+                break;
+            }
+            if !wake_phrase_character_matches(ch, phrase[phrase_index]) {
+                phrase_index = 0;
+                break;
+            }
+            phrase_index += 1;
+            consumed_end = next;
+        }
+        if phrase_index == phrase.len() {
+            return Some(
+                remainder[consumed_end..]
+                    .trim_start_matches(is_embedded_audio_partial_preview_decorative)
+                    .trim()
+                    .to_string(),
+            );
+        }
+    }
+    None
+}
+
 fn strip_bounded_activation_suffix(text: &str, phrase: &[char]) -> Option<String> {
     if phrase.len() < 2 {
         return None;
@@ -607,7 +659,8 @@ fn strip_automatic_activation_prefix(text: &str, phrase: &str, partial: bool) ->
             break;
         }
         if !wake_phrase_character_matches(ch, phrase[phrase_index]) {
-            return strip_bounded_activation_suffix(activation_candidate, &phrase)
+            return strip_activation_after_short_lead_in(activation_candidate, &phrase)
+                .or_else(|| strip_bounded_activation_suffix(activation_candidate, &phrase))
                 .unwrap_or_else(|| text.to_string());
         }
         phrase_index += 1;
@@ -864,19 +917,30 @@ fn filter_automatic_wake_text(
         || preserve_recording_transcript(text),
         |phrase| strip_automatic_activation_prefix(text, phrase, partial),
     );
-    if automatic_wake_filtered_text_is_body(&filtered, text, phrase.as_deref()) {
-        let mut slot = inner.embedded_audio_automatic_wake_guard.lock();
-        if let Some(guard) = slot
-            .as_mut()
-            .filter(|guard| guard.session_id == session_id && !guard.body_started)
-        {
-            guard.body_started = true;
-            log::info!(
-                "[wake-phrase] automatic body started after capsule session_id={session_id}"
-            );
-        }
-    }
+    latch_automatic_wake_body_if_filtered(inner, session_id, &filtered, text, phrase.as_deref());
     filtered
+}
+
+fn latch_automatic_wake_body_if_filtered(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    filtered: &str,
+    original: &str,
+    phrase: Option<&str>,
+) {
+    if !automatic_wake_filtered_text_is_body(filtered, original, phrase) {
+        return;
+    }
+    let mut slot = inner.embedded_audio_automatic_wake_guard.lock();
+    if let Some(guard) = slot
+        .as_mut()
+        .filter(|guard| guard.session_id == session_id && !guard.body_started)
+    {
+        guard.body_started = true;
+        log::info!(
+            "[wake-phrase] automatic body started after capsule session_id={session_id}"
+        );
+    }
 }
 
 fn automatic_wake_text_counts_as_body(text: &str) -> bool {
@@ -1084,9 +1148,18 @@ fn filter_dictation_visual_preview_text(
         .as_ref()
         .filter(|guard| guard.session_id == session_id)
         .map(|guard| guard.phrase.clone());
+    let original = text;
+    let phrase_for_latch = phrase.clone();
     let text = phrase.map_or_else(
         || preserve_recording_transcript(text),
         |phrase| strip_automatic_activation_prefix(text, &phrase, true),
+    );
+    latch_automatic_wake_body_if_filtered(
+        inner,
+        session_id,
+        &text,
+        original,
+        phrase_for_latch.as_deref(),
     );
     if inner.prefs.get().remove_filler_words {
         remove_standalone_dictation_fillers(&text)

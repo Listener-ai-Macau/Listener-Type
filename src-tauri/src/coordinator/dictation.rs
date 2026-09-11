@@ -96,6 +96,8 @@ include!("dictation_endpoint_policy.rs");
 fn target_speaker_inactive_stop_reason(timeout_ms: u64) -> &'static str {
     if timeout_ms >= EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS {
         "target_speaker_inactive_no_body_3000ms"
+    } else if timeout_ms >= EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS {
+        "target_speaker_inactive_2500ms"
     } else {
         "target_speaker_inactive_1000ms"
     }

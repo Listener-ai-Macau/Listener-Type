@@ -56,6 +56,9 @@ struct SettledTargetEndpointClock {
     /// callbacks can repeat the same snapshot; dedupe it so a stale snapshot
     /// cannot keep recording alive indefinitely.
     last_firmware_lease_owner_speech_ms: Option<u64>,
+    /// Last host-driven VREC:SPEECH sent to keep firmware's 1s silence
+    /// fallback from cutting a session the product hang clock still owns.
+    last_host_hang_lease_at: Option<Instant>,
     /// A bounded diagnostic latch: when the endpoint deadline is reached but
     /// evidence keeps it in Hold/CatchingUp, report the first reason for this
     /// generation only.  This avoids per-50ms log spam while making a stuck
@@ -242,6 +245,28 @@ impl SettledTargetEndpointClock {
             return false;
         }
         self.last_firmware_lease_owner_speech_ms = owner_speech_ms;
+        true
+    }
+
+    fn should_keep_firmware_alive_for_host_hang(
+        &mut self,
+        hang_ms: u64,
+        last_visible_growth_at: Option<Instant>,
+        now: Instant,
+    ) -> bool {
+        let Some(grown_at) = last_visible_growth_at else {
+            return false;
+        };
+        if now.saturating_duration_since(grown_at) >= Duration::from_millis(hang_ms) {
+            return false;
+        }
+        if self.last_host_hang_lease_at.is_some_and(|last| {
+            now.saturating_duration_since(last)
+                < Duration::from_millis(EMBEDDED_DANGLING_FIRMWARE_KEEPALIVE_INTERVAL_MS)
+        }) {
+            return false;
+        }
+        self.last_host_hang_lease_at = Some(now);
         true
     }
 
@@ -760,6 +785,20 @@ fn start_settled_target_endpoint_watchdog(
                 log::info!(
                     "[asr] target endpoint hold session_id={session_id} generation={generation} reason={reason} lifecycle={lifecycle:?}"
                 );
+            }
+            if update.is_none() && endpoint_policy.body_started {
+                let growth = inner
+                    .embedded_audio_preview
+                    .lock()
+                    .last_visible_growth_at(session_id);
+                let keep_firmware = endpoint_clock.lock().should_keep_firmware_alive_for_host_hang(
+                    endpoint_policy.endpoint_timeout_ms,
+                    growth,
+                    Instant::now(),
+                );
+                if keep_firmware {
+                    note_embedded_asr_speech_activity(&inner, session_id);
+                }
             }
             if let Some(update) = update {
                 handle_target_speaker_endpoint_stop(

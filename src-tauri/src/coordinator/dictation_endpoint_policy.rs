@@ -217,13 +217,12 @@ impl SettledTargetEndpointClock {
 }
 
 fn target_speaker_end_timeout_ms_for_preview(preview: Option<&str>) -> u64 {
-    if preview_has_dangling_continuation(preview) {
-        EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
-    } else if preview_ends_with_sentence_terminal(preview) {
-        EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
-    } else if preview.map(str::trim).is_some_and(|text| !text.is_empty()) {
-        // Open body without a terminal mark. Prefer hang over cutting a
-        // clause that ASR has not punctuated yet.
+    if preview.map(str::trim).is_some_and(|text| !text.is_empty()) {
+        // One hang clock after last visible growth. Chinese ASR inserts 。
+        // mid-utterance; treating that as a finished command made session
+        // 6c362e19 stop 1.0s after the last shown char while the owner was
+        // still talking. Firmware's 1s silence fallback is kept alive by the
+        // host hang lease, not used as the product endpoint.
         EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
     } else {
         EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS

@@ -273,6 +273,24 @@ fn automatic_wake_guard_hides_partial_prefix_and_bounded_tail() {
         super::strip_automatic_activation_prefix("音频测试", "开始录音", false),
         "音频测试"
     );
+    assert_eq!(
+        super::strip_automatic_activation_prefix("请开始录音今天下午开会", "开始录音", false),
+        "今天下午开会",
+        "a one-character ASR lead-in before the confirmed wake phrase must still strip"
+    );
+    assert_eq!(
+        super::strip_automatic_activation_prefix("好，开始录音，正文留下", "开始录音", false),
+        "正文留下"
+    );
+    assert_eq!(
+        super::strip_automatic_activation_prefix(
+            "正常语句里开始录音只是普通内容。",
+            "开始录音",
+            false,
+        ),
+        "正常语句里开始录音只是普通内容。",
+        "mid-utterance wake words stay when they are not the activation prefix"
+    );
 }
 
 #[test]
@@ -1337,20 +1355,19 @@ fn body_preview_endpoint_extends_only_explicit_dangling_continuations() {
         super::target_speaker_inactive_stop_reason(1_000),
         "target_speaker_inactive_1000ms"
     );
-    // Punctuated complete sentences keep the snappy 1.0s clock. Open body
-    // without a terminal mark hangs like a dangling connector so a clause
-    // pause cannot cut the owner off.
+    // Any visible body shares the 2.5s hang clock. A terminal mark is not
+    // "the owner finished speaking" — ASR inserts 。 mid-utterance.
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("用全刷。")),
-        1_000
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("简单说一下。")),
-        1_000
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("现在整体是一个什么进度？")),
-        1_000
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("我先检查一下，然后。")),
@@ -1362,8 +1379,8 @@ fn body_preview_endpoint_extends_only_explicit_dangling_continuations() {
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("最后一句要完整。")),
-        1_000,
-        "ordinary words containing a connector are still complete",
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS,
+        "ordinary complete sentences still hang; punctuation is not a stop",
     );
     assert!(super::preview_has_dangling_continuation(Some(
         "这部分已经完成，但是。"
@@ -2063,7 +2080,7 @@ fn dangling_continuation_gets_bounded_pause_without_slowing_complete_text() {
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("我已经说完了。")),
-        super::EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("普通一句话")),
@@ -3699,7 +3716,7 @@ fn incomplete_and_short_body_previews_hang_until_a_terminal_mark() {
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("你帮。")),
-        1_000
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
     );
     // Empty / no body keeps base snappy; no-body abandon is layered separately.
     assert_eq!(
