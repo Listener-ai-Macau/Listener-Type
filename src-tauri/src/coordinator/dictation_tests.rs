@@ -3274,22 +3274,34 @@ fn owner_identity_uncertainty_does_not_slow_the_one_second_endpoint() {
     };
     assert!(super::owner_endpoint_stop_blocked_by_live_owner(
         super::TargetSpeakerFusionState::OwnerContinuing,
-        &quiet_update
+        &quiet_update,
+        true
     ));
     assert!(
         super::owner_endpoint_stop_blocked_by_live_owner(
             super::TargetSpeakerFusionState::Quiet,
-            &speaking_update
+            &speaking_update,
+            false
         ),
-        "fresh local speech must block no-body/1s stop even if fusion is still Quiet"
+        "fresh local speech must block no-body stop even if fusion is still Quiet"
+    );
+    assert!(
+        !super::owner_endpoint_stop_blocked_by_live_owner(
+            super::TargetSpeakerFusionState::Quiet,
+            &speaking_update,
+            true
+        ),
+        "after body text exists, Quiet plus a frozen speech clock must still auto-end"
     );
     assert!(!super::owner_endpoint_stop_blocked_by_live_owner(
         super::TargetSpeakerFusionState::Quiet,
-        &quiet_update
+        &quiet_update,
+        true
     ));
     assert!(!super::owner_endpoint_stop_blocked_by_live_owner(
         super::TargetSpeakerFusionState::ConfirmedOther,
-        &speaking_update
+        &speaking_update,
+        false
     ));
 }
 
