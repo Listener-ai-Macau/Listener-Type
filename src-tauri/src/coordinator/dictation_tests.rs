@@ -6761,7 +6761,7 @@ fn terminal_offline_recall_stops_after_initial_plus_focused_absence() {
             && stream.contains("candidate.local_absent_count.saturating_add(1)"),
         "terminal offline recovery must remain bounded; repeated focused Absents suppress ambient work but not one owner-backed independent KWS check"
     );
-    assert_eq!(super::TERMINAL_OFFLINE_RECALL_BUDGET_MS, 500);
+    assert_eq!(super::TERMINAL_OFFLINE_RECALL_BUDGET_MS, 1_200);
 }
 
 #[cfg(target_os = "windows")]
@@ -6966,6 +6966,7 @@ fn terminal_wait_budget_gives_the_inflight_5s_confirm_time_to_finish() {
     assert_eq!(super::terminal_inflight_confirmation_remaining_ms(0), 1_200);
     assert_eq!(super::terminal_inflight_confirmation_remaining_ms(283), 1_200);
     assert_eq!(super::terminal_inflight_confirmation_remaining_ms(999), 1_200);
+    assert_eq!(super::TERMINAL_OFFLINE_RECALL_BUDGET_MS, 1_200);
 }
 
 #[test]
