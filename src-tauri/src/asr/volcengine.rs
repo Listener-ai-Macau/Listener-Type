@@ -4596,7 +4596,22 @@ impl VolcengineStreamingASR {
                 } else {
                     filtered_target_preview
                 };
-                let best = if spoken_content_len(&raw_provider_preview)
+                let visible_len = spoken_content_len(&state.last_emitted_preview_text);
+                // High priority: never retract shown owner text.
+                // Low priority G: if a stable other-speaker row is present,
+                // refuse to ADD that longer raw tail. Do not shrink.
+                let best = if speaker_filtered_result.stable_non_target_utterance_present
+                    && spoken_content_len(&raw_provider_preview)
+                        > spoken_content_len(&filtered)
+                {
+                    if spoken_content_len(&filtered) >= visible_len
+                        && !filtered.trim().is_empty()
+                    {
+                        filtered
+                    } else {
+                        String::new()
+                    }
+                } else if spoken_content_len(&raw_provider_preview)
                     >= spoken_content_len(&filtered)
                     && !raw_provider_preview.trim().is_empty()
                 {
@@ -4605,7 +4620,6 @@ impl VolcengineStreamingASR {
                     filtered
                 };
                 let best_len = spoken_content_len(&best);
-                let visible_len = spoken_content_len(&state.last_emitted_preview_text);
                 if !best.trim().is_empty()
                     && best != state.last_emitted_preview_text
                     && best_len >= visible_len
