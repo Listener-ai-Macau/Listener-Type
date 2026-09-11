@@ -542,7 +542,7 @@ fn strip_activation_after_short_lead_in(text: &str, phrase: &[char]) -> Option<S
             break;
         }
     }
-    let max_lead = MAX_LEAD_IN_CONTENT_CHARS.min(content_starts.len());
+    let max_lead = MAX_LEAD_IN_CONTENT_CHARS.min(content_starts.len().saturating_sub(1));
     for lead in 1..=max_lead {
         let remainder = &text[content_starts[lead]..];
         let mut phrase_index = 0usize;

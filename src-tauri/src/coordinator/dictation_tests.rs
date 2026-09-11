@@ -291,6 +291,15 @@ fn automatic_wake_guard_hides_partial_prefix_and_bounded_tail() {
         "正常语句里开始录音只是普通内容。",
         "mid-utterance wake words stay when they are not the activation prefix"
     );
+    assert_eq!(
+        super::strip_automatic_activation_prefix("下", "开始录音", true),
+        "下",
+        "a one-character non-prefix must not panic in lead-in scan"
+    );
+    assert_eq!(
+        super::strip_automatic_activation_prefix("下午", "开始录音", true),
+        "下午"
+    );
 }
 
 #[test]
