@@ -702,7 +702,7 @@ fn start_settled_target_endpoint_watchdog(
             if !session_active {
                 return;
             }
-            let preview = current_embedded_audio_partial_preview(&inner);
+            let preview = current_embedded_audio_endpoint_preview(&inner);
             let decision_snapshot = asr.endpoint_update_snapshot();
             let decision_audio_ms = decision_snapshot
                 .audio_duration_ms

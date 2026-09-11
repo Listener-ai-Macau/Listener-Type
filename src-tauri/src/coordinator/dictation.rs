@@ -619,7 +619,7 @@ fn owner_endpoint_stop_blocked_by_live_owner(
     fusion_state: TargetSpeakerFusionState,
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
     body_started: bool,
-    preview_grew_within_1s: bool,
+    preview_grew_recently: bool,
 ) -> bool {
     // Product bias: prefer not ending too early over hanging forever.
     // Confirmed other-speaker can still stop (G is lower priority).
@@ -636,9 +636,9 @@ fn owner_endpoint_stop_blocked_by_live_owner(
     if !body_started && update_has_fresh_unclassified_local_speech(update, 1_000) {
         return true;
     }
-    // After body exists, hold only while the capsule is still growing.
-    // Frozen audio_ms-speech_ms must not block the 1 s clock.
-    body_started && preview_grew_within_1s
+    // After body exists, hold while the capsule text is still changing.
+    // Frozen audio_ms-speech_ms must not block the body clock.
+    body_started && preview_grew_recently
 }
 
 /// Recent *owner* activity that the provider has not covered yet.
@@ -1137,6 +1137,11 @@ pub(super) fn current_embedded_audio_partial_preview(inner: &Arc<Inner>) -> Opti
 fn current_embedded_audio_visual_preview(inner: &Arc<Inner>) -> Option<String> {
     let session_id = inner.state.lock().session_id;
     inner.embedded_audio_preview.lock().visible(session_id)
+}
+
+fn current_embedded_audio_endpoint_preview(inner: &Arc<Inner>) -> Option<String> {
+    current_embedded_audio_visual_preview(inner)
+        .or_else(|| current_embedded_audio_partial_preview(inner))
 }
 
 include!("dictation_preview.rs");

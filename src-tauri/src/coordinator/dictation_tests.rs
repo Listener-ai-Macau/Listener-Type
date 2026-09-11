@@ -1337,8 +1337,9 @@ fn body_preview_endpoint_extends_only_explicit_dangling_continuations() {
         super::target_speaker_inactive_stop_reason(1_000),
         "target_speaker_inactive_1000ms"
     );
-    // Complete/open body shapes keep the same 1.0s owner-inactivity contract.
-    // Only an explicit dangling connector receives the bounded thinking pause.
+    // Punctuated complete sentences keep the snappy 1.0s clock. Open body
+    // without a terminal mark hangs like a dangling connector so a clause
+    // pause cannot cut the owner off.
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("用全刷。")),
         1_000
@@ -1378,15 +1379,15 @@ fn body_preview_endpoint_extends_only_explicit_dangling_continuations() {
     )));
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("你继续帮我看一下吧")),
-        1_000
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("现在是进入")),
-        1_000
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("那你")),
-        1_000
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
     );
     assert!(super::preview_ends_with_sentence_terminal(Some(
         "现在整体是一个什么进度？你跟我简单说一下。"
@@ -2066,7 +2067,7 @@ fn dangling_continuation_gets_bounded_pause_without_slowing_complete_text() {
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("普通一句话")),
-        super::EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
     );
 }
 
@@ -3683,18 +3684,18 @@ fn target_speaker_endpoint_waits_for_startup_body_calibration() {
 }
 
 #[test]
-fn incomplete_and_short_body_previews_keep_one_second_endpoint() {
+fn incomplete_and_short_body_previews_hang_until_a_terminal_mark() {
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("你帮")),
-        1_000
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("那你")),
-        1_000
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("你继续帮我看一下吧")),
-        1_000
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
     );
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(Some("你帮。")),

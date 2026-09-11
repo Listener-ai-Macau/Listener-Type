@@ -100,7 +100,7 @@ fn set_volcengine_preview_callbacks(
     let clock_for_speaker = Arc::clone(&endpoint_clock);
     let asr_for_speaker = Arc::clone(asr);
     asr.set_target_speaker_update_callback(Some(Arc::new(move |update| {
-        let preview = current_embedded_audio_partial_preview(&inner_for_speaker);
+        let preview = current_embedded_audio_endpoint_preview(&inner_for_speaker);
         let decision_audio_ms = update.audio_duration_ms.or(update.provider_audio_duration_ms);
         let endpoint_policy = resolve_target_speaker_endpoint_policy(
             &inner_for_speaker,

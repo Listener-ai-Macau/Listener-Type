@@ -573,11 +573,6 @@ impl RecordingPreviewController {
         // what is already visible AND shorter — that is still a retract, so
         // keep the high-water mark for dictation. Confirmed-other energy is
         // handled by the endpoint clock, not by shrinking the capsule.
-        let previous_visible_len = self
-            .visible
-            .as_deref()
-            .map(spoken_preview_len)
-            .unwrap_or(0);
         let would_shrink = self.visible.as_ref().is_some_and(|current| {
             spoken_preview_len(candidate) < spoken_preview_len(current)
         });
@@ -587,9 +582,11 @@ impl RecordingPreviewController {
         } else if visible_changed && (authoritative_changed || settle_visible) {
             let candidate = candidate.to_string();
             self.visible = Some(candidate.clone());
-            if spoken_preview_len(&candidate) > previous_visible_len {
-                self.last_visible_growth_at = Some(Instant::now());
-            }
+            // Punctuation-only revisions must rearm the hang clock. Session
+            // 41b3de62 added 。 without new alphanumeric chars, so the 1s
+            // body clock kept counting from the previous CJK char and cut
+            // the owner mid-utterance.
+            self.last_visible_growth_at = Some(Instant::now());
             Some(candidate)
         } else {
             None
@@ -620,16 +617,9 @@ impl RecordingPreviewController {
         {
             return None;
         }
-        let previous_visible_len = self
-            .visible
-            .as_deref()
-            .map(spoken_preview_len)
-            .unwrap_or(0);
         let candidate = candidate.to_string();
         self.visible = Some(candidate.clone());
-        if spoken_preview_len(&candidate) > previous_visible_len {
-            self.last_visible_growth_at = Some(Instant::now());
-        }
+        self.last_visible_growth_at = Some(Instant::now());
         Some(candidate)
     }
 
@@ -1290,6 +1280,26 @@ mod tests {
             preview.visible(session_id).as_deref(),
             Some("主人第一句旁人尾巴"),
             "dictation must not retract a longer visible preview when owner-filtered text is shorter"
+        );
+    }
+
+    #[test]
+    fn punctuation_only_visible_revision_rearms_growth_clock() {
+        let session_id = uuid::Uuid::new_v4();
+        let mut preview = RecordingPreviewController::default();
+        preview.begin_session(session_id);
+        preview.observe_authoritative(session_id, "今天开会", false);
+        let before = preview
+            .last_visible_growth_at(session_id)
+            .expect("body text arms the hang clock");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        preview.observe_provisional(session_id, "今天开会。");
+        let after = preview
+            .last_visible_growth_at(session_id)
+            .expect("punctuation still arms the hang clock");
+        assert!(
+            after > before,
+            "adding 。 must rearm the visible hang clock so a 1s body endpoint cannot fire from the previous CJK char"
         );
     }
 

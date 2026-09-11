@@ -99,23 +99,26 @@ fn handle_target_speaker_endpoint_stop(
     if !session_active {
         return;
     }
-    let preview = current_embedded_audio_partial_preview(inner);
+    let preview = current_embedded_audio_endpoint_preview(inner);
     // The callback/watchdog already resolved the product session mode before
     // committing the endpoint decision. Never recalculate it here: doing so
     // previously let the controller stop on a 900 ms body clock and then label
     // that same decision as a 3000 ms no-body stop.
     let body_started = endpoint_policy.body_started;
     let fusion_state = target_speaker_fusion_state(&update);
-    let preview_grew_within_1s = inner
+    let preview_grew_recently = inner
         .embedded_audio_preview
         .lock()
         .last_visible_growth_at(session_id)
-        .is_some_and(|grown_at| grown_at.elapsed() < Duration::from_secs(1));
+        .is_some_and(|grown_at| {
+            grown_at.elapsed()
+                < Duration::from_millis(endpoint_policy.endpoint_timeout_ms)
+        });
     if owner_endpoint_stop_blocked_by_live_owner(
         fusion_state,
         &update,
         body_started,
-        preview_grew_within_1s,
+        preview_grew_recently,
     ) {
         log::info!(
             "[asr] owner still continuing; ignore due endpoint session_id={session_id} fusion_state={fusion_state:?} reason={}",
