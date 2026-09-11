@@ -1524,7 +1524,10 @@ impl EmbeddedStreamingDictation {
             // Opening a host dictation session with <1s post-wake scrap produces
             // empty ASR + Error capsule (owner: completely unusable).
             const MIN_POST_WAKE_DICTATION_PCM_BYTES: usize = 16_000 * 2; // 1.0 s
-            if post_wake_pcm_bytes < MIN_POST_WAKE_DICTATION_PCM_BYTES {
+            // Terminal STOP means the VA window is over. Attaching dictation to
+            // the dying clip produced 2152: 11 wake chars, then empty insert.
+            // Always open a fresh host recording for the body.
+            {
                 log::info!(
                     "[wake-phrase] terminal accept requires body continuation embedded_session_id={} post_wake_pcm_ms={} min_ms={}",
                     embedded_session_id,

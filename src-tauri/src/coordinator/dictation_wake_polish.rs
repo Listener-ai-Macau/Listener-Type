@@ -878,7 +878,7 @@ const LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT: u8 = 4;
 /// hidden CPU contention and visible WebView/capsule stalls.
 const TERMINAL_OFFLINE_SKIP_ABSENT_COUNT: u8 = 4;
 const PHONETIC_NEAR_MAX_DISTANCE: usize = 1;
-const TERMINAL_INFLIGHT_CONFIRM_BUDGET_MS: u64 = 250;
+const TERMINAL_INFLIGHT_CONFIRM_BUDGET_MS: u64 = 1_200;
 const MIN_TERMINAL_OFFLINE_PCM_BYTES: usize = 16_000 * 2 * 2;
 const TERMINAL_OFFLINE_RECALL_BUDGET_MS: u64 = 500;
 const WAKE_END_PAD_SECONDS: f32 = 0.12;
@@ -1133,8 +1133,12 @@ fn should_run_terminal_offline_recall(
     pcm_bytes >= MIN_TERMINAL_OFFLINE_PCM_BYTES
 }
 
-fn terminal_inflight_confirmation_remaining_ms(elapsed_ms: u64) -> u64 {
-    TERMINAL_INFLIGHT_CONFIRM_BUDGET_MS.saturating_sub(elapsed_ms)
+fn terminal_inflight_confirmation_remaining_ms(_elapsed_ms: u64) -> u64 {
+    // Live 2150: the 5s ladder confirm had already run 283ms when STOP
+    // arrived. A 250ms budget charged from task start left remaining=0, so
+    // ExactStart never landed; replacement windows then transcribed 0–2 chars.
+    // Last-chance wait is from now, not from when the rung started.
+    TERMINAL_INFLIGHT_CONFIRM_BUDGET_MS
 }
 
 /// Bytes of candidate PCM to discard before ASR for an automatic wake accept.

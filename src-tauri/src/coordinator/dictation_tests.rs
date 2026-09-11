@@ -6962,11 +6962,10 @@ fn repeated_start_aligned_half_phrase_requires_enrolled_owner_for_overlap_recove
 }
 
 #[test]
-fn terminal_wait_budget_counts_time_already_spent_by_the_inflight_confirmation() {
-    assert_eq!(super::terminal_inflight_confirmation_remaining_ms(0), 250);
-    assert_eq!(super::terminal_inflight_confirmation_remaining_ms(43), 207);
-    assert_eq!(super::terminal_inflight_confirmation_remaining_ms(250), 0);
-    assert_eq!(super::terminal_inflight_confirmation_remaining_ms(999), 0);
+fn terminal_wait_budget_gives_the_inflight_5s_confirm_time_to_finish() {
+    assert_eq!(super::terminal_inflight_confirmation_remaining_ms(0), 1_200);
+    assert_eq!(super::terminal_inflight_confirmation_remaining_ms(283), 1_200);
+    assert_eq!(super::terminal_inflight_confirmation_remaining_ms(999), 1_200);
 }
 
 #[test]
