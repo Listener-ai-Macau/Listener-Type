@@ -660,33 +660,39 @@ fn strip_automatic_activation_prefix(text: &str, phrase: &str, partial: bool) ->
             break;
         }
         if !wake_phrase_character_matches(ch, phrase[phrase_index]) {
-            return strip_activation_after_short_lead_in(activation_candidate, &phrase)
-                .or_else(|| strip_bounded_activation_suffix(activation_candidate, &phrase))
-                .unwrap_or_else(|| text.to_string());
+            return keep_body_if_strip_emptied(
+                text,
+                phrase.len(),
+                strip_activation_after_short_lead_in(activation_candidate, &phrase)
+                    .or_else(|| strip_bounded_activation_suffix(activation_candidate, &phrase))
+                    .unwrap_or_else(|| text.to_string()),
+            );
         }
         phrase_index += 1;
         consumed_end = next;
     }
 
-    if phrase_index == phrase.len() {
-        let remainder = activation_candidate[consumed_end..]
+    let stripped = if phrase_index == phrase.len() {
+        activation_candidate[consumed_end..]
             .trim_start_matches(is_embedded_audio_partial_preview_decorative)
             .trim()
-            .to_string();
-        if remainder.is_empty() {
-            let core = compact_spoken_preview(text);
-            if core.chars().count() > phrase.len() + 2 {
-                // Live b975cd6b: 51-char body stripped to empty and sealed as
-                // wake-only. A long transcript is not the wake phrase.
-                return text.to_string();
-            }
-        }
-        remainder
+            .to_string()
     } else if partial && phrase_index > 0 {
         String::new()
     } else {
         text.to_string()
+    };
+    keep_body_if_strip_emptied(text, phrase.len(), stripped)
+}
+
+fn keep_body_if_strip_emptied(text: &str, phrase_len: usize, stripped: String) -> String {
+    if stripped.trim().is_empty() {
+        let core = compact_spoken_preview(text);
+        if core.chars().count() > phrase_len + 2 {
+            return text.to_string();
+        }
     }
+    stripped
 }
 
 fn clear_automatic_wake_text_guard(inner: &Arc<Inner>) {

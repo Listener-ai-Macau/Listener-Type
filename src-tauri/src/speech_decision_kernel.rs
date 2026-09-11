@@ -71,6 +71,16 @@ pub(crate) fn arbitrate_wake(
     {
         decision = GateDecision::Accept;
     }
+    // Terminal VA window + enrolled owner, but local ASR/KWS missed the
+    // phrase (2254). The owner is speaking; keep-wake accepts and lets the
+    // body continuation capture the utterance.
+    if matches!(decision, GateDecision::Reject | GateDecision::Pending)
+        && terminal
+        && matches!(phrase_signal, PhraseSignal::None)
+        && matches!(owner_access, OwnerAccessEvidence::EnrolledMatch)
+    {
+        decision = GateDecision::Accept;
+    }
     WakeArbitration {
         decision,
         owner_access,
@@ -1514,6 +1524,16 @@ mod tests {
             )
             .decision,
             GateDecision::Pending
+        );
+        assert_eq!(
+            arbitrate_wake(
+                PhraseSignal::None,
+                OwnerAccessEvidence::EnrolledMatch,
+                true,
+            )
+            .decision,
+            GateDecision::Accept,
+            "terminal enrolled-owner match must keep-wake when local phrase is deaf"
         );
     }
 

@@ -1439,6 +1439,18 @@ impl EmbeddedStreamingDictation {
                 enrolled_owner_matched,
                 owner_gate.recovered_by_local_phrase
             );
+            if wake_match.is_none()
+                && gate_decision == denzic_voice_activation_v1_core::GateDecision::Accept
+            {
+                log::info!(
+                    "[wake-phrase] terminal enrolled-owner keep-wake without local phrase embedded_session_id={embedded_session_id}"
+                );
+                wake_match = Some(crate::wake_phrase::Match {
+                    start_seconds: None,
+                    end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
+                    matched_keyword: None,
+                });
+            }
             let Some(wake_match) = wake_match else {
                 log::info!(
                     "[wake-phrase] automatic candidate rejected embedded_session_id={} phrase={}",
