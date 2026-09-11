@@ -4650,8 +4650,11 @@ impl VolcengineStreamingASR {
         // NonTarget/owner-absence evidence. This callback is deliberately not
         // the product partial callback: it cannot refresh endpoint clocks,
         // repair/fallback the final, or enter insertion.
+        // Live 2026-09-11 02:07: owner_safe split set pending_unattributed,
+        // which blocked settled preview, while this gate also blocked visual.
+        // Capsule stayed empty ~5.4 s. Owner-safe split is growing owner text;
+        // it must still display.
         if !has_final
-            && !owner_safe_provider_split_preview
             && self
                 .session_options
                 .endpoint
