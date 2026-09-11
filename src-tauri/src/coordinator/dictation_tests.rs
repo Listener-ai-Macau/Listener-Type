@@ -6969,6 +6969,40 @@ fn terminal_wait_budget_gives_the_inflight_5s_confirm_time_to_finish() {
 }
 
 #[test]
+fn known_good_2026_09_11_contracts_must_not_regress() {
+    assert_eq!(
+        crate::speech_decision_kernel::arbitrate_wake(
+            denzic_voice_activation_v1_core::PhraseSignal::None,
+            crate::speech_decision_kernel::OwnerAccessEvidence::EnrolledMatch,
+            true,
+        )
+        .decision,
+        denzic_voice_activation_v1_core::GateDecision::Accept
+    );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(Some("今天下午三点开会")),
+        super::EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
+    );
+    let body = "开始录音今天下午三点开会然后我们把方案再过一遍如果没问题就按这个执行";
+    let stripped = super::strip_automatic_activation_prefix(body, "开始录音", false);
+    assert!(
+        stripped.chars().count() > 8,
+        "wake-prefix strip must not swallow the spoken body"
+    );
+    let mut candidates = product_final_candidates("");
+    candidates.target_filter_required = true;
+    candidates.partial_preview = Some(crate::asr::RawTranscript {
+        text: "今天下午三点开会然后我们把方案再过一遍".into(),
+        duration_ms: 8_000,
+    });
+    let decision = super::arbitrate_product_final_transcript(candidates, &[], false);
+    assert_eq!(
+        decision.transcript.text,
+        "今天下午三点开会然后我们把方案再过一遍"
+    );
+}
+
+#[test]
 fn terminal_consumes_the_running_confirmation_before_applying_absent_skip() {
     let stream = include_str!("dictation_embedded_stream.rs");
     let terminal = stream
