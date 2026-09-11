@@ -30,7 +30,7 @@ Windows 是主平台:从 [Releases](https://github.com/Listener-ai-Macau/Listene
 
 ### 工作原理
 
-音频从麦克风(或蓝牙连着的键盘)进到识别,转写结果可选地过一遍风格,然后经由系统的原生输入路径打进焦点框。
+音频从麦克风(或蓝牙连着的键盘)进到识别,转写结果可选地过一遍风格,然后打进焦点框。Windows 上插入走一个小的 TSF 文本服务,macOS 走辅助功能接口;目标软件两边都不让插时,文字留在剪贴板。
 
 服务商没有锁定。识别可以走火山引擎的流式接口、任意 OpenAI 兼容端点、Apple Speech,或者完全在本机跑;风格可以接 Ark、DeepSeek,或任意 Anthropic / OpenAI 兼容端点。API Key 存在系统凭据库,软件不带任何 Key;历史、词库、风格、设置都不出这台电脑,整条流程不依赖 Listener 的服务器。
 
@@ -44,13 +44,9 @@ Listener 键盘是个 USB-C 小设备:一颗能按的旋钮(开始/停止,双击
 
 没有键盘软件一样好用,它只是把录音键放到你手指底下。固件开源:[Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware)。
 
-### 它不做什么
+### 目前的边界(1.0.5)
 
-既然发的是 1.0.5,还是说清楚:
-
-- 键盘的蓝牙音频目前只有 Windows。
-- 远距离拾音、两个人同时说话还不行,那是 1.0.6 的活。
-- 它不是系统输入法,也没打算做——它把字打进当前焦点框。
+键盘的蓝牙音频只在 Windows 上验收过,macOS 和 Linux 先用电脑麦克风。远距离拾音和多人同时说话还不可靠,排在 1.0.6。另外它不是系统输入法:文字进当前焦点框。
 
 完整功能清单(包括每条做不到什么)在 [docs/product/features.md](docs/product/features.md)。
 
