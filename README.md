@@ -30,7 +30,7 @@ Other built-in shortcuts: `Ctrl+Shift+;` asks a question about the selected text
 
 ### How it works
 
-Audio goes from the microphone (or the keyboard, over Bluetooth) to a recognizer; the transcript optionally passes through a style; the result is inserted into the focused field through the OS's native input path.
+Audio goes from the microphone (or the keyboard, over Bluetooth) to a recognizer; the transcript optionally passes through a style; the result is inserted into the focused field. On Windows, insertion goes through a small TSF text service; on macOS, through the Accessibility API; if the target app refuses both, the text waits on the clipboard.
 
 None of the providers are locked in. Recognition can run through Volcengine's streaming API, any OpenAI-compatible endpoint, Apple Speech, or entirely on-device. Styles can run through Ark, DeepSeek, or any Anthropic- or OpenAI-compatible endpoint. API keys live in the OS credential store and none ship with the app. History, vocabulary, styles and settings never leave the machine — the whole loop works without any Listener server.
 
@@ -44,13 +44,9 @@ With the keyboard, you can also start hands-free: the device waits for a wake ph
 
 The app works fine without the keyboard; the keyboard just puts the record button under your finger. Its firmware is open source: [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware).
 
-### What it doesn't do
+### Current limits (1.0.5)
 
-Worth being explicit, since 1.0.5 is what's shipping:
-
-- The keyboard's Bluetooth audio is Windows-only for now.
-- Far-field pickup and two people talking at once are still unreliable; that's 1.0.6 work.
-- It isn't a system IME and doesn't try to be — it types into the focused field.
+The keyboard's Bluetooth audio path is validated on Windows only; on macOS and Linux, use the computer's microphone. Far-field pickup and overlapping speakers don't work reliably yet — both are on the 1.0.6 list. And it isn't a system IME: text goes into the focused field.
 
 The complete feature list (including what each feature doesn't do) is in [docs/product/features.md](docs/product/features.md).
 
