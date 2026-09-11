@@ -617,11 +617,18 @@ fn target_speaker_endpoint_timeout_with_fusion(
 
 fn owner_endpoint_stop_blocked_by_live_owner(
     fusion_state: TargetSpeakerFusionState,
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
 ) -> bool {
-    // Live 2026-09-10: fusion_state=OwnerContinuing still claimed
-    // inactive_1000ms. Fusion was only logged. Do not extend the 1 s
-    // timeout (that becomes D); veto this due stop and let Quiet fire later.
+    // Do not extend the 1 s timeout (that becomes D). Veto this due stop
+    // and let a later Quiet fire. Live 2026-09-11 01:13: fusion Quiet
+    // claimed no_body_3000ms while speech was starting; OwnerContinuing
+    // arrived 600 ms later. Fresh local owner-compatible speech must
+    // block the same way as OwnerContinuing.
+    if matches!(fusion_state, TargetSpeakerFusionState::ConfirmedOther) {
+        return false;
+    }
     matches!(fusion_state, TargetSpeakerFusionState::OwnerContinuing)
+        || update_has_fresh_unclassified_local_speech(update, 1_000)
 }
 
 /// Recent *owner* activity that the provider has not covered yet.

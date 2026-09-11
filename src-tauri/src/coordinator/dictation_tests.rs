@@ -3251,17 +3251,45 @@ fn owner_identity_uncertainty_does_not_slow_the_one_second_endpoint() {
         super::TargetSpeakerFusionState::OwnerContinuing,
         "cloud target progress is explicit owner-continuation evidence",
     );
+    let quiet_update = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(1_000),
+        provider_audio_duration_ms: Some(4_000),
+        audio_duration_ms: Some(4_000),
+        local_speech_end_ms: Some(1_000),
+        local_target_speech_end_ms: Some(1_000),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(1_000),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let speaking_update = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(4_000),
+        local_speech_end_ms: Some(3_800),
+        local_target_speech_end_ms: Some(3_800),
+        ..quiet_update.clone()
+    };
     assert!(super::owner_endpoint_stop_blocked_by_live_owner(
-        super::TargetSpeakerFusionState::OwnerContinuing
+        super::TargetSpeakerFusionState::OwnerContinuing,
+        &quiet_update
+    ));
+    assert!(
+        super::owner_endpoint_stop_blocked_by_live_owner(
+            super::TargetSpeakerFusionState::Quiet,
+            &speaking_update
+        ),
+        "fresh local speech must block no-body/1s stop even if fusion is still Quiet"
+    );
+    assert!(!super::owner_endpoint_stop_blocked_by_live_owner(
+        super::TargetSpeakerFusionState::Quiet,
+        &quiet_update
     ));
     assert!(!super::owner_endpoint_stop_blocked_by_live_owner(
-        super::TargetSpeakerFusionState::Quiet
-    ));
-    assert!(!super::owner_endpoint_stop_blocked_by_live_owner(
-        super::TargetSpeakerFusionState::ConfirmedOther
-    ));
-    assert!(!super::owner_endpoint_stop_blocked_by_live_owner(
-        super::TargetSpeakerFusionState::UncertainOwnerTail
+        super::TargetSpeakerFusionState::ConfirmedOther,
+        &speaking_update
     ));
 }
 
