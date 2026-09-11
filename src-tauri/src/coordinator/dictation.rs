@@ -2278,7 +2278,7 @@ async fn finish_end_session_after_stop_transition(
             None
         }
     };
-    let raw = if let Some(preview_text) = auto_end_preview {
+    let mut raw = if let Some(preview_text) = auto_end_preview {
         log::info!(
             "[coord] auto-end committing last preview chars={} session_id={current_session_id}",
             preview_text.chars().count()
@@ -2550,13 +2550,28 @@ async fn finish_end_session_after_stop_transition(
     }
     };
 
-    // ASR 完成后 cancel 检查：用户在 transcribe 进行中按 Esc 时，这里就会命中。
-    // 优先级高于 empty 检查 — 用户取消 → 静默丢弃，不写失败历史也不弹错误胶囊。
+    // ASR 完成后 cancel 检查。Live e865918f: 胶囊已有 15 字，转写卡住后点取消，
+    // 账本被丢掉。已显示的字是上屏下限，取消也要插入，不得静默吞掉。
     if inner.state.lock().cancelled {
-        log::info!("[coord] cancel detected after ASR — discarding transcript");
-        restore_prepared_windows_ime_session(inner, current_session_id);
-        clear_embedded_audio_stats(inner);
-        return Ok(());
+        let shown = current_embedded_audio_visual_preview(inner)
+            .or_else(|| current_embedded_audio_partial_preview(inner))
+            .unwrap_or_default();
+        if shown.trim().is_empty() && raw.text.trim().is_empty() {
+            log::info!("[coord] cancel detected after ASR — nothing shown to insert");
+            restore_prepared_windows_ime_session(inner, current_session_id);
+            clear_embedded_audio_stats(inner);
+            return Ok(());
+        }
+        log::info!(
+            "[coord] cancel after ASR; inserting last shown preview chars={} asr_chars={}",
+            shown.chars().count(),
+            raw.text.chars().count()
+        );
+        if shown.chars().count() >= compact_spoken_preview(&raw.text).chars().count()
+            && !shown.trim().is_empty()
+        {
+            raw.text = shown;
+        }
     }
 
     // Build immutable evidence candidates first. Wake-prefix stripping is a
