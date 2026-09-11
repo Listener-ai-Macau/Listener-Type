@@ -923,6 +923,28 @@ fn filter_automatic_wake_text(
         })
         .unwrap_or((None, false));
     if late_body_blocked {
+        // Live afd9e265: 28-char final arrived after stop with no visual
+        // latch, then late_body returned empty and the spoken sentence was
+        // swallowed. Keep a stripped body even after stop; only drop true
+        // wake-only leftovers.
+        let filtered = phrase.as_deref().map_or_else(
+            || preserve_recording_transcript(text),
+            |phrase| strip_automatic_activation_prefix(text, phrase, false),
+        );
+        if automatic_wake_filtered_text_is_body(&filtered, text, phrase.as_deref()) {
+            latch_automatic_wake_body_if_filtered(
+                inner,
+                session_id,
+                &filtered,
+                text,
+                phrase.as_deref(),
+            );
+            log::info!(
+                "[wake-phrase] kept spoken body after stop before visual latch session_id={session_id} chars={}",
+                filtered.chars().count()
+            );
+            return filtered;
+        }
         log::debug!(
             "[wake-phrase] ignored late text after stop before body start session_id={session_id} partial={partial} chars={}",
             text.chars().count()

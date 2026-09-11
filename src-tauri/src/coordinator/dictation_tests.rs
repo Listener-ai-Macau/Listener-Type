@@ -7000,6 +7000,11 @@ fn known_good_2026_09_11_contracts_must_not_regress() {
         decision.transcript.text,
         "今天下午三点开会然后我们把方案再过一遍"
     );
+    let preview_src = include_str!("dictation_preview.rs");
+    assert!(
+        preview_src.contains("kept spoken body after stop before visual latch"),
+        "late stop must not swallow a spoken body that never latched visually"
+    );
 }
 
 #[test]
