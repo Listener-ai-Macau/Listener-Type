@@ -2,11 +2,13 @@
 
 Owner 验收通过。这是当前体验报告应对照的 Type 包。后续改动不得静默改掉下面合同。
 
+当前体验不错的包（在本标签合同上往前，未退包）：git `a7c1d12`，exe `E6B108BA59199A46999ACE20FB4330292C9B6203F7FA3C09CFCF0FE13D9C9915`。成功原因与试错教训见 `why-success-2026-09-11.md`。
+
 ## 包
 
-- Git：`220e7fd`（`use/1.0.5-good`）
+- Git 标签合同：`220e7fd`（`use/1.0.5-good` / `known-good-2026-09-11`）
 - 已装 exe：`C:\Program Files\Listener Type\listener-type.exe`
-- SHA-256：`FDE19997C64081D7DA33BAC845BA08980F5F96EE786B919FF2AEF31B13559F7F`
+- 当时 SHA-256：`FDE19997C64081D7DA33BAC845BA08980F5F96EE786B919FF2AEF31B13559F7F`
 - MSI：`Listener-Type/.artifacts/windows-msvc/ListenerType_1.0.5_x64_en-US.msi`
 - MSI SHA-256：`2709EE079014350777CC57EE7FD775A06C1DD56DCA4ECBACD538C4188F9B30CE`
 - 固件未改：`1.0.5` / `5304d27a2a93a2c9`
