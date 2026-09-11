@@ -4872,9 +4872,10 @@ fn ambient_speech_bounds_each_window_but_never_disables_late_phrase_confirmation
     assert!(super::exploratory_local_confirmation_allowed(
         false, 3, 0, 3
     ));
-    assert!(!super::exploratory_local_confirmation_allowed(
-        false, 4, 0, 4
-    ));
+    assert!(
+        super::exploratory_local_confirmation_allowed(false, 4, 0, 4),
+        "four early Absents must not disable the 3s/5s phrase-first rungs"
+    );
     // Every rolling window gets exactly one focused retry regardless of older
     // candidate-wide Absents; repeated work inside that window remains blocked.
     assert!(super::exploratory_local_confirmation_allowed(
@@ -8146,7 +8147,7 @@ fn product_final_does_not_shrink_visible_owner_preview() {
 }
 
 #[test]
-fn product_final_does_not_restore_preview_under_interference() {
+fn product_final_does_not_retract_shown_preview_under_interference() {
     let mut candidates = product_final_candidates("今天天气");
     candidates.target_filter_required = true;
     candidates.partial_preview = Some(crate::asr::RawTranscript {
@@ -8154,7 +8155,11 @@ fn product_final_does_not_restore_preview_under_interference() {
         duration_ms: 7_462,
     });
     let decision = super::arbitrate_product_final_transcript(candidates, &[], false);
-    assert_eq!(decision.transcript.text, "今天天气");
+    assert_eq!(
+        decision.transcript.text,
+        "今天天气旁边的人还在说话",
+        "already shown capsule text must not shrink for isolation"
+    );
 }
 
 #[test]
@@ -8173,7 +8178,11 @@ fn target_speaker_endpoint_product_final_chooses_separated_owner_once_under_inte
     candidates.local_shadow_owner_end_aligned = true;
 
     let decision = super::arbitrate_product_final_transcript(candidates, &[], false);
-    assert_eq!(decision.transcript.text, "主人第一句主人第二句");
+    assert_eq!(
+        decision.transcript.text,
+        "主人第一句旁边的人无关内容主人第二句",
+        "separated owner may win authority, but shown preview is the insert floor"
+    );
     assert_eq!(
         decision.authority,
         crate::speech_decision_kernel::ProductFinalAuthority::SeparatedOwner
@@ -8197,7 +8206,11 @@ fn target_speaker_endpoint_product_final_never_restores_unverified_text_when_fil
     candidates.local_shadow_owner_end_aligned = true;
 
     let decision = super::arbitrate_product_final_transcript(candidates, &[], false);
-    assert!(decision.transcript.text.is_empty());
+    assert_eq!(
+        decision.transcript.text,
+        "预览混入旁人内容",
+        "an already shown preview is still inserted when isolation has no owner text"
+    );
     assert_eq!(
         decision.authority,
         crate::speech_decision_kernel::ProductFinalAuthority::Empty

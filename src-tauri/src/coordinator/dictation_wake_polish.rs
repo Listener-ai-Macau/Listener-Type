@@ -869,6 +869,7 @@ const LOCAL_ABSENT_KEYWORD_TAIL_SLACK_BYTES: usize = LOCAL_ABSENT_KEYWORD_TAIL_S
 /// carry ~1 s pre-roll, so an older candidate-wide Absent cap permanently
 /// disabled recognition after the first few windows. Per-window work stays
 /// bounded, and a later KWS hit still receives its full stage-2 confirmation.
+#[allow(dead_code)]
 const LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT: u8 = 4;
 /// After the initial ladder plus one focused retry, repeated explicit Absent is
 /// authoritative enough to skip the expensive terminal recall cascade. A
@@ -956,7 +957,10 @@ fn exploratory_local_confirmation_allowed(
         return true;
     }
     if window_origin_bytes == 0 {
-        return absent_count < LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT;
+        // Live 2293891870: four Absents on 0.8–2.4 s snapshots disabled the
+        // 3.0 s and 5.0 s rungs, then terminal ASR never saw the phrase.
+        // Keep-wake: early Absents must not abort the rest of the ladder.
+        return true;
     }
     window_attempts == 0
 }
@@ -1387,7 +1391,7 @@ async fn confirm_terminal_local_windows(
 ) -> Option<(LocalWakeConfirmation, usize)> {
     let mut last = None;
     for (confirm_pcm, origin) in terminal_local_confirmation_windows(pcm) {
-        match spawn_local_wake_confirmation(inner, confirm_pcm, phrase.to_string(), false).await {
+        match spawn_local_wake_confirmation(inner, confirm_pcm, phrase.to_string(), true).await {
             Ok(Ok(result)) => {
                 *local_confirmation_ms = local_confirmation_ms.saturating_add(result.inference_ms);
                 log::info!(

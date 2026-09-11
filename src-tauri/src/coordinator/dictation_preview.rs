@@ -92,10 +92,11 @@ fn arbitrate_product_final_transcript(
         }
     }
 
-    if !candidates.target_filter_required {
-        if let Some(preview) = preview_for_hotwords.as_deref() {
-            transcript.text = restore_monotonic_owner_preview(&transcript.text, preview);
-        }
+    if let Some(preview) = preview_for_hotwords.as_deref() {
+        // Shown capsule text is the floor even under interference filtering.
+        // Live 4726b57d displayed 92 chars then inserted 63 because WeSep
+        // won and restore was skipped when target_filter_required.
+        transcript.text = restore_monotonic_owner_preview(&transcript.text, preview);
     }
     if let Some(preview) = preview_for_hotwords.as_deref() {
         transcript.text = reconcile_final_transcript_with_preview_hotwords(
@@ -126,11 +127,11 @@ fn compact_spoken_preview(text: &str) -> String {
 fn restore_monotonic_owner_preview(final_text: &str, preview: &str) -> String {
     let final_core = compact_spoken_preview(final_text);
     let preview_core = compact_spoken_preview(preview);
-    if final_core.is_empty() || preview_core.is_empty() {
+    if preview_core.is_empty() {
         return final_text.to_string();
     }
-    if preview_core.chars().count() > final_core.chars().count()
-        && preview_core.starts_with(&final_core)
+    if final_core.is_empty()
+        || preview_core.chars().count() >= final_core.chars().count()
     {
         preview.to_string()
     } else {
