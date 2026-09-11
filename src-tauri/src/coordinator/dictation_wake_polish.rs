@@ -949,7 +949,7 @@ fn local_confirmation_snapshot_for_window(
 #[cfg(target_os = "windows")]
 fn exploratory_local_confirmation_allowed(
     keyword_model_hit: bool,
-    absent_count: u8,
+    _absent_count: u8,
     window_origin_bytes: usize,
     window_attempts: usize,
 ) -> bool {

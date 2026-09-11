@@ -296,6 +296,11 @@ fn automatic_wake_guard_hides_partial_prefix_and_bounded_tail() {
         "下",
         "a one-character non-prefix must not panic in lead-in scan"
     );
+    let long_body = "开始录音今天下午三点开会然后我们把方案再过一遍如果没问题就按这个执行";
+    assert_eq!(
+        super::strip_automatic_activation_prefix(long_body, "开始录音", false),
+        "今天下午三点开会然后我们把方案再过一遍如果没问题就按这个执行"
+    );
     assert_eq!(
         super::strip_automatic_activation_prefix("下午", "开始录音", true),
         "下午"
@@ -8213,7 +8218,7 @@ fn target_speaker_endpoint_product_final_never_restores_unverified_text_when_fil
     );
     assert_eq!(
         decision.authority,
-        crate::speech_decision_kernel::ProductFinalAuthority::Empty
+        crate::speech_decision_kernel::ProductFinalAuthority::PartialPreviewRecovery
     );
 }
 

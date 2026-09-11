@@ -207,10 +207,7 @@ pub(crate) struct ProductFinalEvidence {
 }
 
 pub(crate) fn arbitrate_product_final(evidence: ProductFinalEvidence) -> ProductFinalAuthority {
-    if evidence.prefer_partial_preview
-        && evidence.partial_preview_available
-        && !evidence.target_filter_required
-    {
+    if evidence.prefer_partial_preview && evidence.partial_preview_available {
         return ProductFinalAuthority::PartialPreviewRecovery;
     }
     if evidence.separated_owner_available {
@@ -219,21 +216,21 @@ pub(crate) fn arbitrate_product_final(evidence: ProductFinalEvidence) -> Product
     if evidence.provider_primary_available {
         return ProductFinalAuthority::ProviderPrimary;
     }
-    // Once explicit interference requires owner filtering, unverified replay,
-    // preview and local-shadow text must fail closed. The provider primary is
-    // still permitted above because it has already passed the provider's
-    // protocol-final speaker arbiter and is sealed against later expansion.
+    if evidence.retained_audio_replay_available && !evidence.target_filter_required {
+        return ProductFinalAuthority::RetainedAudioReplay;
+    }
+    // Shown capsule text is the insert floor. Isolation may refuse to ADD a
+    // new tail, but it must not discard what the owner already saw.
+    // Live 52db192d showed 68 chars then sealed Empty because filter_required
+    // returned before PartialPreviewRecovery.
+    if evidence.partial_preview_available {
+        return ProductFinalAuthority::PartialPreviewRecovery;
+    }
     if evidence.target_filter_required {
         return ProductFinalAuthority::Empty;
     }
-    if evidence.retained_audio_replay_available {
-        return ProductFinalAuthority::RetainedAudioReplay;
-    }
     if evidence.debug_override_available {
         return ProductFinalAuthority::DebugOverride;
-    }
-    if evidence.partial_preview_available {
-        return ProductFinalAuthority::PartialPreviewRecovery;
     }
     ProductFinalAuthority::Empty
 }
@@ -2268,7 +2265,8 @@ mod tests {
         };
         assert_eq!(
             arbitrate_product_final(evidence),
-            ProductFinalAuthority::Empty
+            ProductFinalAuthority::PartialPreviewRecovery,
+            "already shown preview still inserts under isolation"
         );
         assert_eq!(
             arbitrate_product_final(ProductFinalEvidence {
@@ -2308,7 +2306,7 @@ mod tests {
                 retained_audio_replay_available: false,
                 ..all_recovery_candidates
             }),
-            ProductFinalAuthority::DebugOverride
+            ProductFinalAuthority::PartialPreviewRecovery
         );
         assert_eq!(
             arbitrate_product_final(ProductFinalEvidence {
@@ -2341,7 +2339,8 @@ mod tests {
                 provider_primary_available: false,
                 ..evidence
             }),
-            ProductFinalAuthority::Empty
+            ProductFinalAuthority::PartialPreviewRecovery,
+            "shown preview must still insert under isolation"
         );
     }
 }

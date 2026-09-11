@@ -339,7 +339,17 @@ pub(crate) struct ExtractedChunk {
 }
 
 impl ExtractedChunk {
+    fn separator_failed(&self) -> bool {
+        self.target_to_mix_energy < EXTRACTED_NON_TARGET_MAX_ENERGY_RATIO
+    }
+
     fn confidently_non_target(&self) -> bool {
+        // Near-silent extracts are separator failure, not another speaker.
+        // Live b975/52db zeroed owner chunks (energy ~3e-5, sim 0.16) and the
+        // final arbiter then discarded a 68-character shown preview.
+        if self.separator_failed() {
+            return false;
+        }
         self.target_similarity.is_some_and(|similarity| {
             similarity < EXTRACTED_HARD_NON_TARGET_MAX_SIMILARITY
                 || (similarity < EXTRACTED_SOFT_NON_TARGET_MAX_SIMILARITY
@@ -370,7 +380,9 @@ impl ExtractedChunk {
         // positive: every extracted owner chunk was suppressed, yet a 14.9%
         // residual opened the authoritative secondary ASR and erased a clean
         // 53-character primary transcript with an empty result.
-        self.target_similarity.is_some() && !self.confidently_non_target()
+        self.target_similarity.is_some()
+            && !self.separator_failed()
+            && !self.confidently_non_target()
     }
 }
 
@@ -928,10 +940,13 @@ mod tests {
 
     #[test]
     fn hard_mismatch_or_dual_soft_evidence_can_suppress_a_chunk() {
-        assert!(classified_chunk(Some(0.30), 0.002).confidently_non_target());
+        assert!(
+            !classified_chunk(Some(0.16), 0.00003).confidently_non_target(),
+            "near-silent extract is separator failure, not another speaker"
+        );
         assert!(classified_chunk(Some(0.32), 0.041).confidently_non_target());
         assert!(!classified_chunk(Some(0.65), 0.002).confidently_non_target());
-        assert!(classified_chunk(Some(0.38), 0.002).confidently_non_target());
+        assert!(!classified_chunk(Some(0.38), 0.002).confidently_non_target());
         assert!(!classified_chunk(Some(0.38), 0.037).confidently_non_target());
         assert!(!classified_chunk(None, 0.002).confidently_non_target());
     }
@@ -979,7 +994,10 @@ mod tests {
 
     #[test]
     fn suppression_preserves_timeline_with_silence() {
-        let mut chunk = classified_chunk(Some(0.30), 0.002);
+        let mut silent = classified_chunk(Some(0.30), 0.002);
+        assert!(!silent.suppress_confident_non_target("test"));
+        assert_eq!(silent.pcm, vec![1, 2, 3, 4]);
+        let mut chunk = classified_chunk(Some(0.30), 0.08);
         assert!(chunk.suppress_confident_non_target("test"));
         assert_eq!(chunk.pcm, vec![0, 0, 0, 0]);
     }

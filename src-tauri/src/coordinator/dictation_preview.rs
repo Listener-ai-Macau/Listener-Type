@@ -669,10 +669,19 @@ fn strip_automatic_activation_prefix(text: &str, phrase: &str, partial: bool) ->
     }
 
     if phrase_index == phrase.len() {
-        activation_candidate[consumed_end..]
+        let remainder = activation_candidate[consumed_end..]
             .trim_start_matches(is_embedded_audio_partial_preview_decorative)
             .trim()
-            .to_string()
+            .to_string();
+        if remainder.is_empty() {
+            let core = compact_spoken_preview(text);
+            if core.chars().count() > phrase.len() + 2 {
+                // Live b975cd6b: 51-char body stripped to empty and sealed as
+                // wake-only. A long transcript is not the wake phrase.
+                return text.to_string();
+            }
+        }
+        remainder
     } else if partial && phrase_index > 0 {
         String::new()
     } else {

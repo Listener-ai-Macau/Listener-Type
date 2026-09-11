@@ -2649,12 +2649,11 @@ async fn finish_end_session_after_stop_transition(
         }
     }
 
-    let partial_preview_candidate = current_embedded_audio_partial_preview(inner).map(|preview| {
-        let text = filter_automatic_wake_text(inner, current_session_id, &preview, false);
-        RawTranscript {
-            text,
-            duration_ms: provider_primary.duration_ms,
-        }
+    let visible_preview = current_embedded_audio_visual_preview(inner)
+        .or_else(|| current_embedded_audio_partial_preview(inner));
+    let partial_preview_candidate = visible_preview.map(|preview| RawTranscript {
+        text: preview,
+        duration_ms: provider_primary.duration_ms,
     });
 
     let any_verified_base_text = !provider_primary.text.trim().is_empty()
@@ -2728,11 +2727,11 @@ async fn finish_end_session_after_stop_transition(
             separated_owner: separated_owner_candidate,
             retained_audio_replay: retained_audio_replay_candidate,
             debug_override: debug_override_candidate,
+            prefer_partial_preview: nonempty_transcript(&partial_preview_candidate),
             partial_preview: partial_preview_candidate,
             local_shadow: local_shadow_candidate,
             local_shadow_owner_end_aligned,
             target_filter_required: target_speaker_filter_required,
-            prefer_partial_preview: false,
         },
         &enabled_hotwords(inner),
         inner.prefs.get().remove_filler_words,
