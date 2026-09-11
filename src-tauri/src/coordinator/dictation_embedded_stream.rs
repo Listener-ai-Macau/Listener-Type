@@ -1035,10 +1035,6 @@ impl EmbeddedStreamingDictation {
                                 &offline_phrase,
                             )
                         });
-                        // Live 2499–2508: cascade needed ~1.5s; a 500ms actor
-                        // budget rejected first, then the miss log arrived later.
-                        // Wait as long as the in-flight 5s confirm (1.2s). Do not
-                        // accept enrolled_non_match + no phrase.
                         let offline = match tokio::time::timeout(
                             Duration::from_millis(TERMINAL_OFFLINE_RECALL_BUDGET_MS),
                             offline_task,
