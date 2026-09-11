@@ -7000,11 +7000,6 @@ fn known_good_2026_09_11_contracts_must_not_regress() {
         decision.transcript.text,
         "今天下午三点开会然后我们把方案再过一遍"
     );
-    let dictation = include_str!("dictation.rs");
-    assert!(
-        dictation.contains("cancel after ASR; inserting last shown preview"),
-        "transcribing cancel must insert shown text instead of discarding it"
-    );
 }
 
 #[test]

@@ -1803,7 +1803,7 @@ async fn request_embedded_ble_recording_start_from_host(
         CapsuleState::Recording,
         0.0,
         0,
-        None,
+        Some("Listener 录音已启动，正在接收音频...".to_string()),
         None,
     );
 
