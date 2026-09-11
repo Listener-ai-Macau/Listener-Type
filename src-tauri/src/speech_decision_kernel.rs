@@ -761,6 +761,23 @@ impl RecordingLifecycleController {
             .flatten()
     }
 
+    /// Release a leftover WakeCandidate/Active/Stopping lock when the BLE
+    /// actor has no session and no speaker candidate. Live 2462580845 stayed
+    /// Active after a dropped end-packet, so every later 开始录音 was rejected.
+    pub(crate) fn force_close_stale_lock(&mut self) {
+        if matches!(
+            self.state,
+            RecordingLifecycleState::Idle | RecordingLifecycleState::Closed
+        ) {
+            return;
+        }
+        self.state = RecordingLifecycleState::Closed;
+        self.embedded_session_id = None;
+        self.coordinator_session_id = None;
+        self.candidate_promotion_requested = false;
+        self.device_key_takeover_pending = false;
+    }
+
     /// A delayed physical STOP for a rejected candidate is safe only while the
     /// exact candidate tombstone still owns the lifecycle.  Merely observing
     /// that there is no *new candidate* is insufficient: the product may
@@ -1440,6 +1457,18 @@ mod tests {
         assert!(!lifecycle.rejected_candidate_still_owns_transport_stop(51));
         assert!(!lifecycle.rejected_candidate_still_owns_transport_stop(52));
         assert_eq!(lifecycle.state(), RecordingLifecycleState::Active);
+    }
+
+    #[test]
+    fn actor_idle_can_release_a_stale_active_lock() {
+        let mut lifecycle = RecordingLifecycleController::default();
+        let owner = uuid::Uuid::new_v4();
+        assert!(lifecycle.begin_candidate(845));
+        assert!(lifecycle.promote_candidate_to_owner(845, owner));
+        assert_eq!(lifecycle.state(), RecordingLifecycleState::Active);
+        lifecycle.force_close_stale_lock();
+        assert!(lifecycle.begin_candidate(846));
+        assert_eq!(lifecycle.current_candidate_session_id(), Some(846));
     }
 
     #[test]

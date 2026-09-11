@@ -80,9 +80,7 @@ impl EmbeddedStreamingDictation {
                     // and froze automatic wake until Type restart. Do not steal
                     // an in-flight candidate or live dictation.
                     if self.session.is_none() && self.speaker_candidate.is_none() {
-                        if let Some(stale_id) = lifecycle.current_candidate_session_id() {
-                            let _ = lifecycle.close_candidate(stale_id);
-                        }
+                        lifecycle.force_close_stale_lock();
                     }
                     if !lifecycle.begin_candidate(embedded_session_id) {
                         return Err(format!(
