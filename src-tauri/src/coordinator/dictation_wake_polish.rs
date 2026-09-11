@@ -1090,11 +1090,23 @@ const TERMINAL_LOCAL_TAIL_MS: usize = 2_500;
 const TERMINAL_LOCAL_TAIL_BYTES: usize = TERMINAL_LOCAL_TAIL_MS * 32;
 
 fn terminal_local_confirmation_pcm(pcm: &[u8]) -> (Vec<u8>, usize) {
+    terminal_local_confirmation_windows(pcm)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| (pcm.to_vec(), 0))
+}
+
+fn terminal_local_confirmation_windows(pcm: &[u8]) -> Vec<(Vec<u8>, usize)> {
     if pcm.len() <= TERMINAL_LOCAL_TAIL_BYTES {
-        return (pcm.to_vec(), 0);
+        return vec![(pcm.to_vec(), 0)];
     }
-    let start = (pcm.len() - TERMINAL_LOCAL_TAIL_BYTES) & !1usize;
-    (pcm[start..].to_vec(), start)
+    let tail_start = (pcm.len() - TERMINAL_LOCAL_TAIL_BYTES) & !1usize;
+    let head_len = TERMINAL_LOCAL_TAIL_BYTES.min(pcm.len()) & !1usize;
+    let mut windows = vec![(pcm[tail_start..].to_vec(), tail_start)];
+    if tail_start >= head_len {
+        windows.push((pcm[..head_len].to_vec(), 0));
+    }
+    windows
 }
 
 fn should_run_terminal_offline_recall(
@@ -1356,6 +1368,54 @@ fn spawn_local_wake_confirmation(
             .max(started.elapsed().as_millis() as u64);
         Ok(result)
     })
+}
+
+#[cfg(target_os = "windows")]
+async fn confirm_terminal_local_windows(
+    inner: &Arc<Inner>,
+    pcm: &[u8],
+    phrase: &str,
+    local_confirmation_ms: &mut u64,
+    embedded_session_id: u32,
+) -> Option<(LocalWakeConfirmation, usize)> {
+    let mut last = None;
+    for (confirm_pcm, origin) in terminal_local_confirmation_windows(pcm) {
+        match spawn_local_wake_confirmation(inner, confirm_pcm, phrase.to_string(), false).await {
+            Ok(Ok(result)) => {
+                *local_confirmation_ms = local_confirmation_ms.saturating_add(result.inference_ms);
+                log::info!(
+                    "[wake-phrase] terminal local confirmation finished embedded_session_id={} origin_pcm_ms={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} phonetic_prefix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={}",
+                    embedded_session_id,
+                    origin / 32,
+                    result.matched,
+                    result.phrase_relation,
+                    result.snapshot_pcm_ms,
+                    result.transcript_chars,
+                    result.phonetic_prefix_units,
+                    result.phonetic_best_distance,
+                    result.phonetic_best_window_start,
+                    result.inference_ms
+                );
+                if result.matched
+                    && local_confirmation_can_activate(false, result.phrase_relation)
+                {
+                    return Some((result, origin));
+                }
+                last = Some((result, origin));
+            }
+            Ok(Err(err)) => {
+                log::warn!(
+                    "[wake-phrase] terminal local confirmation failed embedded_session_id={embedded_session_id}: {err}"
+                );
+            }
+            Err(err) => {
+                log::warn!(
+                    "[wake-phrase] terminal local confirmation join failed embedded_session_id={embedded_session_id}: {err}"
+                );
+            }
+        }
+    }
+    last
 }
 
 struct EmbeddedStreamingDictation {

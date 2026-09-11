@@ -1150,56 +1150,44 @@ impl EmbeddedStreamingDictation {
                                 #[cfg(target_os = "windows")]
                                 {
                                     if candidate.pcm.len() >= LOCAL_CONFIRMATION_START_BYTES {
-                                        let (confirm_pcm, tail_origin_bytes) =
-                                            terminal_local_confirmation_pcm(&candidate.pcm);
-                                        let result = spawn_local_wake_confirmation(
+                                        match confirm_terminal_local_windows(
                                             inner,
-                                            confirm_pcm,
-                                            phrase.clone(),
-                                            false,
+                                            &candidate.pcm,
+                                            &phrase,
+                                            &mut local_confirmation_ms,
+                                            embedded_session_id,
                                         )
-                                        .await;
-                                        match result {
-                                            Ok(Ok(result)) => {
-                                                local_confirmation_ms = local_confirmation_ms
-                                                    .saturating_add(result.inference_ms);
-                                                log::info!(
-                                                    "[wake-phrase] terminal local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} phonetic_prefix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={}",
-                                                    embedded_session_id,
-                                                    result.matched,
-                                                    result.phrase_relation,
-                                                    result.snapshot_pcm_ms,
-                                                    result.transcript_chars,
-                                                    result.phonetic_prefix_units,
-                                                    result.phonetic_best_distance,
-                                                    result.phonetic_best_window_start,
-                                                    result.inference_ms
-                                                );
+                                        .await
+                                        {
+                                            Some((result, origin_bytes))
                                                 if result.matched
                                                     && local_confirmation_can_activate(
                                                         false,
                                                         result.phrase_relation,
+                                                    ) =>
+                                            {
+                                                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                                                let end_seconds =
+                                                    refined_wake_end_seconds(
+                                                        0.0,
+                                                        &result,
+                                                        phrase.chars().count(),
                                                     )
-                                                {
-                                                    phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                                                    let end_seconds =
-                                                        refined_wake_end_seconds(
-                                                            0.0,
-                                                            &result,
-                                                            phrase.chars().count(),
-                                                        )
-                                                            + tail_origin_bytes as f32 / 32_000.0;
-                                                    Some(crate::wake_phrase::Match {
-                                                        start_seconds: None,
-                                                        end_seconds,
-                                                        matched_keyword: None,
-                                                    })
-                                                } else if enrolled_terminal_local_near_can_accept(
+                                                        + origin_bytes as f32 / 32_000.0;
+                                                Some(crate::wake_phrase::Match {
+                                                    start_seconds: None,
+                                                    end_seconds,
+                                                    matched_keyword: None,
+                                                })
+                                            }
+                                            Some((result, _))
+                                                if enrolled_terminal_local_near_can_accept(
                                                     enrolled_owner_matched,
                                                     &result,
                                                     phrase.chars().count(),
                                                     0,
-                                                ) {
+                                                ) =>
+                                            {
                                                     phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
                                                     log::info!(
                                                         "[wake-phrase] terminal enrolled owner recovered start-aligned local near-match embedded_session_id={} prefix_units={} distance={} transcript_chars={}",
@@ -1213,7 +1201,8 @@ impl EmbeddedStreamingDictation {
                                                         end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
                                                         matched_keyword: None,
                                                     })
-                                                } else {
+                                            }
+                                            Some((result, _)) => {
                                                     if result.phrase_relation
                                                         == crate::wake_phrase::LocalPhraseRelation::Absent
                                                         && result.phonetic_best_distance <= 2
@@ -1251,20 +1240,8 @@ impl EmbeddedStreamingDictation {
                                                         );
                                                     }
                                                     None
-                                                }
                                             }
-                                            Ok(Err(err)) => {
-                                                log::warn!(
-                                                    "[wake-phrase] terminal local confirmation unavailable embedded_session_id={embedded_session_id}: {err}"
-                                                );
-                                                None
-                                            }
-                                            Err(err) => {
-                                                log::warn!(
-                                                    "[wake-phrase] terminal local confirmation task failed embedded_session_id={embedded_session_id}: {err}"
-                                                );
-                                                None
-                                            }
+                                            None => None,
                                         }
                                     } else {
                                         None
