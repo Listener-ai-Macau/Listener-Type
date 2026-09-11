@@ -2380,12 +2380,33 @@ impl EmbeddedStreamingDictation {
                                             pcm_ms,
                                             absent.authoritative_full_absent
                                         );
-                                        // Do NOT midstream-abort on exploratory Absents.
-                                        // Owner evidence 2026-07-30: real 「开始录音」 can
-                                        // get stage-1 KWS only at ~2.7 s; aborting at 2.4 s
-                                        // (count=4 Absent) killed those wakes with zero KWS
-                                        // hit. Firmware already caps hidden VA at ~4.5 s;
-                                        // Type host VREC:STOP on terminal reject is enough.
+                                        if should_fail_fast_rearm_hidden_candidate(
+                                            task_has_keyword_model_hit,
+                                            absent.prefix_retry,
+                                            result.snapshot_pcm_ms,
+                                            result.transcript_chars,
+                                            phrase_chars,
+                                            result.phrase_relation,
+                                        ) {
+                                            log::info!(
+                                                "[wake-phrase] fail-fast re-arm after non-phrase speech embedded_session_id={} snapshot_pcm_ms={} transcript_chars={}",
+                                                embedded_session_id,
+                                                result.snapshot_pcm_ms,
+                                                result.transcript_chars
+                                            );
+                                            let candidate = self
+                                                .speaker_candidate
+                                                .as_mut()
+                                                .ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
+                                            candidate.kind =
+                                                BufferedSpeakerCandidateKind::Rejected;
+                                            reject_hidden_automatic_candidate(
+                                                inner,
+                                                "wake_phrase_non_match",
+                                                embedded_session_id,
+                                            );
+                                            return Ok(false);
+                                        }
                                     } else if absent.counted_kws_absent
                                         && absent.kws_absent_count
                                             >= KWS_SECONDARY_ABSENT_REJECT_COUNT
