@@ -1038,13 +1038,13 @@ fn collapsed_filler_gap(gap: &str, terminal: bool) -> String {
     if punctuation.is_empty() {
         return (!terminal).then_some(" ").unwrap_or_default().to_string();
     }
-    let chosen = punctuation
-        .iter()
-        .rev()
-        .find(|ch| matches!(ch, '。' | '！' | '？' | '.' | '!' | '?'))
-        .or_else(|| punctuation.last())
-        .copied();
-    chosen.map(|ch| ch.to_string()).unwrap_or_default()
+    // Keep the punctuation attached to the previous real word. Preferring
+    // 。 over ， swallowed clause commas (开会，呃然后 → 开会。然后).
+    punctuation
+        .first()
+        .copied()
+        .map(|ch| ch.to_string())
+        .unwrap_or_default()
 }
 
 fn remove_standalone_dictation_fillers(text: &str) -> String {
@@ -1199,11 +1199,10 @@ fn filter_dictation_visual_preview_text(
         original,
         phrase_for_latch.as_deref(),
     );
-    if inner.prefs.get().remove_filler_words {
-        remove_standalone_dictation_fillers(&text)
-    } else {
-        text
-    }
+    // Filler cleanup belongs on the sealed insert, not the live capsule.
+    // Stripping 嗯/呃 from short partials delayed the first visible body
+    // and made the preview look like it was swallowing text.
+    text
 }
 
 

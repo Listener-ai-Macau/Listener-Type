@@ -341,6 +341,14 @@ fn remove_standalone_dictation_fillers_also_strips_inlined_chinese_fillers() {
         "今天测试。"
     );
     assert_eq!(
+        remove_standalone_dictation_fillers("今天下午三点开会，呃然后我们把方案再过一遍。"),
+        "今天下午三点开会，然后我们把方案再过一遍。"
+    );
+    assert_eq!(
+        remove_standalone_dictation_fillers("开会，呃，然后继续。"),
+        "开会，然后继续。"
+    );
+    assert_eq!(
         remove_standalone_dictation_fillers("那个文件就是额外版本。"),
         "那个文件就是额外版本。"
     );
