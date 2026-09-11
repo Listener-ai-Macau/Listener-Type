@@ -13,6 +13,8 @@ impl EmbeddedStreamingDictation {
             if let Some(embedded_session_id) = self.embedded_session_id {
                 let _ = lifecycle.close_candidate(embedded_session_id);
             }
+        } else if let Some(embedded_session_id) = lifecycle.current_candidate_session_id() {
+            let _ = lifecycle.close_candidate(embedded_session_id);
         }
     }
 

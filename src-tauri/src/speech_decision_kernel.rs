@@ -701,6 +701,17 @@ impl RecordingLifecycleController {
             {
                 true
             }
+            RecordingLifecycleState::WakeCandidate => {
+                // Live 2293892828/2872: a dropped end-packet left WakeCandidate
+                // locked on the old id, so every later 开始录音 was rejected.
+                // A hidden candidate is not a live dictation; admit the new window.
+                self.state = RecordingLifecycleState::WakeCandidate;
+                self.embedded_session_id = Some(embedded_session_id);
+                self.coordinator_session_id = None;
+                self.candidate_promotion_requested = self.device_key_takeover_pending;
+                self.device_key_takeover_pending = false;
+                true
+            }
             _ => false,
         }
     }
@@ -1425,6 +1436,17 @@ mod tests {
         assert!(lifecycle.begin_candidate(42));
         assert!(!lifecycle.close_candidate(41));
         assert_eq!(lifecycle.current_candidate_session_id(), Some(42));
+    }
+
+    #[test]
+    fn stale_hidden_wake_candidate_does_not_block_the_next_window() {
+        let mut lifecycle = RecordingLifecycleController::default();
+        assert!(lifecycle.begin_candidate(2828));
+        assert!(
+            lifecycle.begin_candidate(2829),
+            "a dropped end-packet must not freeze automatic wake"
+        );
+        assert_eq!(lifecycle.current_candidate_session_id(), Some(2829));
     }
 
     #[test]
