@@ -2380,33 +2380,6 @@ impl EmbeddedStreamingDictation {
                                             pcm_ms,
                                             absent.authoritative_full_absent
                                         );
-                                        if should_fail_fast_rearm_hidden_candidate(
-                                            task_has_keyword_model_hit,
-                                            absent.prefix_retry,
-                                            result.snapshot_pcm_ms,
-                                            result.transcript_chars,
-                                            phrase_chars,
-                                            result.phrase_relation,
-                                        ) {
-                                            log::info!(
-                                                "[wake-phrase] fail-fast re-arm after non-phrase speech embedded_session_id={} snapshot_pcm_ms={} transcript_chars={}",
-                                                embedded_session_id,
-                                                result.snapshot_pcm_ms,
-                                                result.transcript_chars
-                                            );
-                                            let candidate = self
-                                                .speaker_candidate
-                                                .as_mut()
-                                                .ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
-                                            candidate.kind =
-                                                BufferedSpeakerCandidateKind::Rejected;
-                                            reject_hidden_automatic_candidate(
-                                                inner,
-                                                "wake_phrase_non_match",
-                                                embedded_session_id,
-                                            );
-                                            return Ok(false);
-                                        }
                                     } else if absent.counted_kws_absent
                                         && absent.kws_absent_count
                                             >= KWS_SECONDARY_ABSENT_REJECT_COUNT

@@ -1116,27 +1116,6 @@ fn terminal_local_confirmation_windows(pcm: &[u8]) -> Vec<(Vec<u8>, usize)> {
     windows
 }
 
-fn should_fail_fast_rearm_hidden_candidate(
-    keyword_model_hit: bool,
-    prefix_retry: bool,
-    snapshot_pcm_ms: usize,
-    transcript_chars: usize,
-    phrase_chars: usize,
-    relation: crate::wake_phrase::LocalPhraseRelation,
-) -> bool {
-    // Structure change: if ~1.8 s already transcribed a non-phrase utterance,
-    // stop and re-arm instead of occupying the remaining 4 s VA window.
-    // Quiet/short Absents still wait (KWS can arrive later around 2.7 s).
-    !keyword_model_hit
-        && !prefix_retry
-        && snapshot_pcm_ms >= 1_800
-        && transcript_chars >= phrase_chars
-        && matches!(
-            relation,
-            crate::wake_phrase::LocalPhraseRelation::Absent
-        )
-}
-
 fn should_run_terminal_offline_recall(
     pcm_bytes: usize,
     _local_absent_count: u8,

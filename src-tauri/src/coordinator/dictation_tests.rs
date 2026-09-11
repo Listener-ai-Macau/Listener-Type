@@ -6671,33 +6671,6 @@ fn terminal_local_confirmation_uses_last_2500ms_of_long_candidates() {
 }
 
 #[test]
-fn fail_fast_rearm_only_after_non_phrase_speech_at_complete_rung() {
-    assert!(super::should_fail_fast_rearm_hidden_candidate(
-        false,
-        false,
-        1_800,
-        13,
-        4,
-        crate::wake_phrase::LocalPhraseRelation::Absent,
-    ));
-    assert!(!super::should_fail_fast_rearm_hidden_candidate(
-        false,
-        false,
-        800,
-        0,
-        4,
-        crate::wake_phrase::LocalPhraseRelation::Absent,
-    ));
-    assert!(!super::should_fail_fast_rearm_hidden_candidate(
-        true,
-        false,
-        1_800,
-        13,
-        4,
-        crate::wake_phrase::LocalPhraseRelation::Absent,
-    ));
-}
-
 fn terminal_offline_recall_stops_after_initial_plus_focused_absence() {
     assert!(!super::should_run_terminal_offline_recall(
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES - 2,
