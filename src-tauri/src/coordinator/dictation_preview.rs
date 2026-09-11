@@ -650,9 +650,13 @@ fn strip_automatic_activation_prefix(text: &str, phrase: &str, partial: bool) ->
 
     let mut phrase_index = 0usize;
     let mut consumed_end = 0usize;
+    let mut matched_then_decorative = false;
     for (index, ch) in activation_candidate.char_indices() {
         let next = index + ch.len_utf8();
         if is_embedded_audio_partial_preview_decorative(ch) {
+            if phrase_index > 0 {
+                matched_then_decorative = true;
+            }
             consumed_end = next;
             continue;
         }
@@ -660,6 +664,19 @@ fn strip_automatic_activation_prefix(text: &str, phrase: &str, partial: bool) ->
             break;
         }
         if !wake_phrase_character_matches(ch, phrase[phrase_index]) {
+            // Live 6599aae8: ASR wrote "开始。今天下午…" so the capsule and
+            // insert kept 开始。 Full 开始录音 did not match. A 开始 + punct
+            // prefix is still the wake remnant, not body text.
+            if phrase_index >= 2 && matched_then_decorative {
+                return keep_body_if_strip_emptied(
+                    text,
+                    phrase.len(),
+                    activation_candidate[index..]
+                        .trim_start_matches(is_embedded_audio_partial_preview_decorative)
+                        .trim()
+                        .to_string(),
+                );
+            }
             return keep_body_if_strip_emptied(
                 text,
                 phrase.len(),
@@ -670,6 +687,7 @@ fn strip_automatic_activation_prefix(text: &str, phrase: &str, partial: bool) ->
         }
         phrase_index += 1;
         consumed_end = next;
+        matched_then_decorative = false;
     }
 
     let stripped = if phrase_index == phrase.len() {

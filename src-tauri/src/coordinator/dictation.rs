@@ -2652,7 +2652,7 @@ async fn finish_end_session_after_stop_transition(
     let visible_preview = current_embedded_audio_visual_preview(inner)
         .or_else(|| current_embedded_audio_partial_preview(inner));
     let partial_preview_candidate = visible_preview.map(|preview| RawTranscript {
-        text: preview,
+        text: filter_automatic_wake_text(inner, current_session_id, &preview, false),
         duration_ms: provider_primary.duration_ms,
     });
 

@@ -274,6 +274,19 @@ fn automatic_wake_guard_hides_partial_prefix_and_bounded_tail() {
         "音频测试"
     );
     assert_eq!(
+        super::strip_automatic_activation_prefix("开始。今天下午三点开会", "开始录音", false),
+        "今天下午三点开会"
+    );
+    assert_eq!(
+        super::strip_automatic_activation_prefix("开始，今天下午三点开会", "开始录音", false),
+        "今天下午三点开会"
+    );
+    assert_eq!(
+        super::strip_automatic_activation_prefix("开始我们开会", "开始录音", false),
+        "开始我们开会",
+        "开始 as real body must stay when 录音 is absent and no punct remnant"
+    );
+    assert_eq!(
         super::strip_automatic_activation_prefix("请开始录音今天下午开会", "开始录音", false),
         "今天下午开会",
         "a one-character ASR lead-in before the confirmed wake phrase must still strip"
