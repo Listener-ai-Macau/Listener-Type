@@ -106,7 +106,17 @@ fn handle_target_speaker_endpoint_stop(
     // that same decision as a 3000 ms no-body stop.
     let body_started = endpoint_policy.body_started;
     let fusion_state = target_speaker_fusion_state(&update);
-    if owner_endpoint_stop_blocked_by_live_owner(fusion_state, &update, body_started) {
+    let preview_grew_within_1s = inner
+        .embedded_audio_preview
+        .lock()
+        .last_visible_growth_at(session_id)
+        .is_some_and(|grown_at| grown_at.elapsed() < Duration::from_secs(1));
+    if owner_endpoint_stop_blocked_by_live_owner(
+        fusion_state,
+        &update,
+        body_started,
+        preview_grew_within_1s,
+    ) {
         log::info!(
             "[asr] owner still continuing; ignore due endpoint session_id={session_id} fusion_state={fusion_state:?} reason={}",
             endpoint_policy.stop_reason

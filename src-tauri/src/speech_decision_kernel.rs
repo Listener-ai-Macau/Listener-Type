@@ -58,12 +58,21 @@ pub(crate) fn arbitrate_wake(
     owner_access: OwnerAccessEvidence,
     terminal: bool,
 ) -> WakeArbitration {
+    let mut decision = decide_gate(GateInput {
+        phrase_signal,
+        owner_match: owner_access.gate_pass(),
+        terminal,
+    });
+    // Product bias: keep wake over false-wake. A first voiceprint miss
+    // must not throw away ExactStart/PresentLater/KeywordModel.
+    if matches!(decision, GateDecision::Reject | GateDecision::Pending)
+        && !matches!(phrase_signal, PhraseSignal::None)
+        && matches!(owner_access, OwnerAccessEvidence::EnrolledNonMatch)
+    {
+        decision = GateDecision::Accept;
+    }
     WakeArbitration {
-        decision: decide_gate(GateInput {
-            phrase_signal,
-            owner_match: owner_access.gate_pass(),
-            terminal,
-        }),
+        decision,
         owner_access,
     }
 }
@@ -489,6 +498,7 @@ pub(crate) struct RecordingPreviewController {
     session_id: Option<SessionId>,
     authoritative: Option<String>,
     visible: Option<String>,
+    last_visible_growth_at: Option<Instant>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -505,6 +515,7 @@ impl RecordingPreviewController {
         self.session_id = Some(session_id);
         self.authoritative = None;
         self.visible = None;
+        self.last_visible_growth_at = None;
     }
 
     pub(crate) fn clear_session(&mut self, session_id: SessionId) -> bool {
@@ -514,12 +525,19 @@ impl RecordingPreviewController {
         self.session_id = None;
         self.authoritative = None;
         self.visible = None;
+        self.last_visible_growth_at = None;
         true
     }
 
     pub(crate) fn authoritative(&self, session_id: SessionId) -> Option<String> {
         (self.session_id == Some(session_id))
             .then(|| self.authoritative.clone())
+            .flatten()
+    }
+
+    pub(crate) fn last_visible_growth_at(&self, session_id: SessionId) -> Option<Instant> {
+        (self.session_id == Some(session_id))
+            .then_some(self.last_visible_growth_at)
             .flatten()
     }
 
@@ -555,6 +573,11 @@ impl RecordingPreviewController {
         // what is already visible AND shorter — that is still a retract, so
         // keep the high-water mark for dictation. Confirmed-other energy is
         // handled by the endpoint clock, not by shrinking the capsule.
+        let previous_visible_len = self
+            .visible
+            .as_deref()
+            .map(spoken_preview_len)
+            .unwrap_or(0);
         let would_shrink = self.visible.as_ref().is_some_and(|current| {
             spoken_preview_len(candidate) < spoken_preview_len(current)
         });
@@ -564,6 +587,9 @@ impl RecordingPreviewController {
         } else if visible_changed && (authoritative_changed || settle_visible) {
             let candidate = candidate.to_string();
             self.visible = Some(candidate.clone());
+            if spoken_preview_len(&candidate) > previous_visible_len {
+                self.last_visible_growth_at = Some(Instant::now());
+            }
             Some(candidate)
         } else {
             None
@@ -594,8 +620,16 @@ impl RecordingPreviewController {
         {
             return None;
         }
+        let previous_visible_len = self
+            .visible
+            .as_deref()
+            .map(spoken_preview_len)
+            .unwrap_or(0);
         let candidate = candidate.to_string();
         self.visible = Some(candidate.clone());
+        if spoken_preview_len(&candidate) > previous_visible_len {
+            self.last_visible_growth_at = Some(Instant::now());
+        }
         Some(candidate)
     }
 
@@ -1400,6 +1434,26 @@ mod tests {
         );
         assert_eq!(result.decision, GateDecision::Accept);
         assert!(!result.owner_access.enrolled_owner_verified());
+    }
+
+    #[test]
+    fn phrase_hit_accepts_even_when_first_voiceprint_misses() {
+        let result = arbitrate_wake(
+            PhraseSignal::LocalTranscript,
+            OwnerAccessEvidence::EnrolledNonMatch,
+            false,
+        );
+        assert_eq!(result.decision, GateDecision::Accept);
+        assert!(!result.owner_access.enrolled_owner_verified());
+        assert_eq!(
+            arbitrate_wake(
+                PhraseSignal::None,
+                OwnerAccessEvidence::EnrolledNonMatch,
+                true,
+            )
+            .decision,
+            GateDecision::Reject
+        );
     }
 
     #[test]

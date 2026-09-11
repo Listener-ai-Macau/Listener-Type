@@ -619,19 +619,26 @@ fn owner_endpoint_stop_blocked_by_live_owner(
     fusion_state: TargetSpeakerFusionState,
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
     body_started: bool,
+    preview_grew_within_1s: bool,
 ) -> bool {
-    // Confirmed other-speaker must not keep the session alive (G / D).
+    // Product bias: prefer not ending too early over hanging forever.
+    // Confirmed other-speaker can still stop (G is lower priority).
     if matches!(fusion_state, TargetSpeakerFusionState::ConfirmedOther) {
         return false;
     }
-    if matches!(fusion_state, TargetSpeakerFusionState::OwnerContinuing) {
+    if matches!(
+        fusion_state,
+        TargetSpeakerFusionState::OwnerContinuing
+            | TargetSpeakerFusionState::UncertainOwnerTail
+    ) {
         return true;
     }
-    // Live 2026-09-11: no_body_3000ms fired while speech was starting and
-    // fusion was still Quiet. Only hold that empty-body wait. After body
-    // text exists, audio_ms-speech_ms can freeze below 1 s and the same
-    // check loops forever (379 ignores then D).
-    !body_started && update_has_fresh_unclassified_local_speech(update, 1_000)
+    if !body_started && update_has_fresh_unclassified_local_speech(update, 1_000) {
+        return true;
+    }
+    // After body exists, hold only while the capsule is still growing.
+    // Frozen audio_ms-speech_ms must not block the 1 s clock.
+    body_started && preview_grew_within_1s
 }
 
 /// Recent *owner* activity that the provider has not covered yet.

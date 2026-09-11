@@ -3275,12 +3275,20 @@ fn owner_identity_uncertainty_does_not_slow_the_one_second_endpoint() {
     assert!(super::owner_endpoint_stop_blocked_by_live_owner(
         super::TargetSpeakerFusionState::OwnerContinuing,
         &quiet_update,
-        true
+        true,
+        false
+    ));
+    assert!(super::owner_endpoint_stop_blocked_by_live_owner(
+        super::TargetSpeakerFusionState::UncertainOwnerTail,
+        &quiet_update,
+        true,
+        false
     ));
     assert!(
         super::owner_endpoint_stop_blocked_by_live_owner(
             super::TargetSpeakerFusionState::Quiet,
             &speaking_update,
+            false,
             false
         ),
         "fresh local speech must block no-body stop even if fusion is still Quiet"
@@ -3289,19 +3297,25 @@ fn owner_identity_uncertainty_does_not_slow_the_one_second_endpoint() {
         !super::owner_endpoint_stop_blocked_by_live_owner(
             super::TargetSpeakerFusionState::Quiet,
             &speaking_update,
+            true,
+            false
+        ),
+        "after body text exists, Quiet without recent preview growth must auto-end"
+    );
+    assert!(
+        super::owner_endpoint_stop_blocked_by_live_owner(
+            super::TargetSpeakerFusionState::Quiet,
+            &quiet_update,
+            true,
             true
         ),
-        "after body text exists, Quiet plus a frozen speech clock must still auto-end"
+        "preview still growing must hold the 1s clock"
     );
-    assert!(!super::owner_endpoint_stop_blocked_by_live_owner(
-        super::TargetSpeakerFusionState::Quiet,
-        &quiet_update,
-        true
-    ));
     assert!(!super::owner_endpoint_stop_blocked_by_live_owner(
         super::TargetSpeakerFusionState::ConfirmedOther,
         &speaking_update,
-        false
+        false,
+        true
     ));
 }
 
