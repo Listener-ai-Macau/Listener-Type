@@ -39,3 +39,33 @@ export function getCapsuleDisplayMessage(
   }
   return message;
 }
+
+const PREVIEW_RETAIN_STATES: ReadonlySet<CapsuleState> = new Set([
+  'recording',
+  'transcribing',
+  'polishing',
+]);
+
+/**
+ * Level-only ticks and filtered startup copy must not wipe a live body
+ * preview. Session 505f79e4 streamed 2→27 chars from the backend, then a
+ * PCM tick with message=None arrived 7ms later and the capsule looked empty
+ * until the 27-char dump.
+ */
+export function shouldRetainCapsulePreview(options: {
+  state: CapsuleState;
+  sessionId: string | null;
+  messageSessionId: string | null;
+  currentMessage: string | undefined;
+}): boolean {
+  if (!options.currentMessage) return false;
+  if (!PREVIEW_RETAIN_STATES.has(options.state)) return false;
+  if (
+    options.sessionId
+    && options.messageSessionId
+    && options.sessionId !== options.messageSessionId
+  ) {
+    return false;
+  }
+  return true;
+}

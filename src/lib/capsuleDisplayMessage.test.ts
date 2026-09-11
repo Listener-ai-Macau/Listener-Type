@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { getCapsuleDisplayMessage } from './capsuleDisplayMessage.ts';
+import {
+  getCapsuleDisplayMessage,
+  shouldRetainCapsulePreview,
+} from './capsuleDisplayMessage.ts';
 
 assert.equal(
   getCapsuleDisplayMessage('recording', 'Listener 录音已启动，正在接收音频...'),
@@ -41,6 +44,61 @@ assert.equal(
   getCapsuleDisplayMessage('reconnecting', '正在等待 Listener 音频...'),
   '正在等待 Listener 音频...',
   'actionable waiting messages should remain visible',
+);
+
+assert.equal(
+  shouldRetainCapsulePreview({
+    state: 'recording',
+    sessionId: 's1',
+    messageSessionId: 's1',
+    currentMessage: '今天下午',
+  }),
+  true,
+  'same-session PCM ticks must keep the live recording preview',
+);
+
+assert.equal(
+  shouldRetainCapsulePreview({
+    state: 'recording',
+    sessionId: null,
+    messageSessionId: 's1',
+    currentMessage: '今天下午',
+  }),
+  true,
+  'level ticks that omit session id must not wipe the current preview',
+);
+
+assert.equal(
+  shouldRetainCapsulePreview({
+    state: 'recording',
+    sessionId: 's2',
+    messageSessionId: 's1',
+    currentMessage: '今天下午',
+  }),
+  false,
+  'a different session may replace the previous preview',
+);
+
+assert.equal(
+  shouldRetainCapsulePreview({
+    state: 'recording',
+    sessionId: 's1',
+    messageSessionId: 's1',
+    currentMessage: undefined,
+  }),
+  false,
+  'there is nothing to retain before the first body preview',
+);
+
+assert.equal(
+  shouldRetainCapsulePreview({
+    state: 'idle',
+    sessionId: 's1',
+    messageSessionId: 's1',
+    currentMessage: '今天下午',
+  }),
+  false,
+  'idle must still be allowed to clear the capsule',
 );
 
 console.log('capsuleDisplayMessage: all assertions passed');

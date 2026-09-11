@@ -822,6 +822,21 @@ impl CapsuleUiThrottleState {
         now: Instant,
     ) -> bool {
         if self.last_frontend_request.as_ref() != Some(&request) {
+            // A PCM level tick with message=None is a different payload from
+            // the preview that just arrived. Emitting it lets the capsule
+            // replace growing text with an empty recording frame. Keep the
+            // last preview on-screen; waveform level is unused once text is
+            // showing.
+            if request.visible_recording_level_tick() {
+                if let Some(last) = self.last_frontend_request.as_ref() {
+                    if last.session_id == request.session_id
+                        && matches!(last.state, CapsuleState::Recording)
+                        && last.message.as_ref().is_some_and(|message| !message.is_empty())
+                    {
+                        return false;
+                    }
+                }
+            }
             self.last_frontend_request = Some(request);
             self.last_frontend_emit_at = Some(now);
             return true;

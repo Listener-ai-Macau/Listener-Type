@@ -4850,7 +4850,7 @@ fn capsule_recording_diagnostics_are_sampled_but_state_and_text_are_retained() {
 }
 
 #[test]
-fn capsule_recording_level_ticks_continue_after_preview_payload() {
+fn capsule_recording_level_ticks_do_not_replace_preview_payload() {
     let mut throttle = CapsuleUiThrottleState::default();
     let start = Instant::now();
     let preview = CapsuleFrontendRequest {
@@ -4867,10 +4867,23 @@ fn capsule_recording_level_ticks_continue_after_preview_payload() {
         ..preview.clone()
     };
 
-    assert!(throttle.should_emit_frontend(preview, start));
-    assert!(throttle.should_emit_frontend(level_tick.clone(), start + Duration::from_millis(10),));
+    assert!(throttle.should_emit_frontend(preview.clone(), start));
+    assert!(
+        !throttle.should_emit_frontend(level_tick.clone(), start + Duration::from_millis(10),),
+        "PCM ticks must not emit an empty recording payload after preview text"
+    );
     assert!(!throttle.should_emit_frontend(level_tick.clone(), start + Duration::from_millis(40),));
-    assert!(throttle.should_emit_frontend(level_tick, start + Duration::from_millis(60),));
+    assert!(!throttle.should_emit_frontend(level_tick, start + Duration::from_millis(60),));
+    assert!(
+        throttle.should_emit_frontend(
+            CapsuleFrontendRequest {
+                message: Some("preview more".to_string()),
+                ..preview
+            },
+            start + Duration::from_millis(80),
+        ),
+        "later growing preview text must still reach the capsule"
+    );
 }
 
 #[test]

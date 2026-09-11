@@ -9,7 +9,7 @@ import {
 } from '../lib/capsuleLayout';
 import { invokeOrMock, isTauri } from '../lib/ipc';
 import { capsuleCancelEnabled, capsuleConfirmEnabled } from '../lib/capsuleActionRules';
-import { getCapsuleDisplayMessage } from '../lib/capsuleDisplayMessage';
+import { getCapsuleDisplayMessage, shouldRetainCapsulePreview } from '../lib/capsuleDisplayMessage';
 import {
   buildPreviewRevealFrames,
   CAPSULE_APPEARANCE,
@@ -462,7 +462,6 @@ const DEV_CAPSULE_PREVIEW_MESSAGE = !isTauri && import.meta.env.DEV
   : undefined;
 const DISMISSED_NON_SESSION_SUPPRESS_MS = 13_000;
 const ERROR_AUTO_DISMISS_MS = 2_500;
-const STARTUP_MESSAGE_CARRYOVER_MS = 3_000;
 // 初始可见 state：Tauri 内运行从 idle 开始（等后端 capsule:state 事件），
 // 浏览器 dev 模式从 recording 开始以便直接看到胶囊。
 const INITIAL_VISIBLE_STATE: CapsuleState = isTauri ? 'idle' : 'recording';
@@ -485,39 +484,6 @@ function traceCapsule(
     },
     () => undefined,
   ).catch(() => undefined);
-}
-
-function shouldPreserveMessageWithoutPayload(
-  state: CapsuleState,
-  sessionId: string | null,
-  messageSessionId: string | null,
-  previousState: CapsuleState,
-  elapsedMs: number,
-): boolean {
-  if (state !== 'recording' && state !== 'transcribing' && state !== 'polishing') {
-    return false;
-  }
-  // Sticky body preview for the same recording session: level-only / filtered
-  // status ticks must not wipe the last non-empty partial.
-  if (sessionId && messageSessionId === sessionId) {
-    return true;
-  }
-  // Also keep the last preview when a level tick omits the session id (cannot
-  // be attributed to another session) and we are still in the same recording
-  // continuum. A tick from a *different* session must fall through and clear,
-  // so the previous session's preview never sticks across the boundary.
-  if (
-    sessionId == null &&
-    messageSessionId != null &&
-    (previousState === 'recording' || previousState === 'transcribing' || previousState === 'polishing')
-  ) {
-    return true;
-  }
-  return (
-    messageSessionId === null &&
-    previousState === 'recording' &&
-    elapsedMs <= STARTUP_MESSAGE_CARRYOVER_MS
-  );
 }
 
 export function Capsule() {
@@ -752,17 +718,12 @@ export function Capsule() {
             resetPreviewReveal(false);
             commitMessage(displayMessage);
           }
-        } else if (p.message) {
-          messageSessionIdRef.current = null;
-          resetPreviewReveal(false);
-          commitMessage(undefined);
-        } else if (!shouldPreserveMessageWithoutPayload(
-          p.state,
-          p.sessionId ?? null,
-          messageSessionIdRef.current,
-          previousState,
-          p.elapsedMs,
-        )) {
+        } else if (!shouldRetainCapsulePreview({
+          state: p.state,
+          sessionId: p.sessionId ?? null,
+          messageSessionId: messageSessionIdRef.current,
+          currentMessage: messageRef.current,
+        })) {
           messageSessionIdRef.current = null;
           resetPreviewReveal(false);
           commitMessage(undefined);
