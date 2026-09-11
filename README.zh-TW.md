@@ -4,41 +4,43 @@
 
 # Listener Type
 
-說話,它幫你打字。游標點進任意輸入框,按一下右 Ctrl,說,再按一下——字出現在那個框裡,不在我們的視窗裡。
+Listener Type 是個桌面聽寫軟體。把游標點進一個輸入框,按一下右 Ctrl,說話,再按一下,轉寫出來的文字就打進了那個框。聊天視窗、瀏覽器、編輯器、郵件——凡是能打字的地方都行。目標軟體不讓程式輸入時,文字會留在剪貼簿裡。
 
-Windows、macOS、Linux 都能跑,電腦麥克風拿來就能用。想要桌上有顆實體錄音鍵的話,可以配 [Listener 語音鍵盤](https://github.com/Listener-ai-Macau/Listener-Firmware)。
+軟體免費、開源,電腦上現有的麥克風就能用。配套的硬體是 [Listener 語音鍵盤](https://github.com/Listener-ai-Macau/Listener-Firmware):一個桌面小裝置,韌體在隔壁倉庫,但沒有鍵盤也能正常用。
 
-[English](README.md) · [简体中文](README.zh.md) · [使用說明](docs/USAGE.md) · [版本說明](docs/release/1.0.5.md)
+[English](README.md) · [简体中文](README.zh.md) · [使用說明](docs/USAGE.md) · [1.0.5 版本說明](docs/release/1.0.5.md)
 
-## 怎麼用
+### 安裝
 
-Windows 上從 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 下載 MSI,安裝,允許麥克風。設定就這麼多。
+Windows 是主平台:從 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 下載 MSI 裝上即可。macOS 和 Linux 上也能跑,用電腦麥克風;鍵盤的藍牙音訊鏈路目前只在 Windows 上驗收過。
 
-之後永遠是同一個動作:點進輸入框,按右 Ctrl,說話,再按一次。碰到不讓插入文字的軟體,結果會先放在剪貼簿裡。macOS 和 Linux 的熱鍵換成右 Option / 右 Alt,細節看[使用說明](docs/USAGE.md)。
+### 用法
 
-## 能做什麼
+錄音是切換式的,不用按住。按一下右 Ctrl(macOS 是右 Option)開始,說完再按一下。工作期間螢幕上有顆小膠囊,顯示進行到哪一步:錄音、轉寫、處理、完成。中途反悔按 `Esc` 取消。
 
-- 寫進目前焦點的軟體:記事本、瀏覽器、聊天、程式碼編輯器都行。
-- 把說過的話收拾好:原文照錄、輕度整理、列成條目、改成正式郵件,按 Shift 還能翻譯。風格就是本機檔案,隨便複製隨便改。
-- 記住你的用詞:人名、行話寫進本機詞庫,辨識和整理都會參考。
-- 動口開工:說一句「開始錄音」就開始。錄入三遍聲紋之後,別人說話——或者放你的錄音——都不會觸發。
-- 跑在你自己的帳號上。辨識可以走火山引擎、OpenAI 相容介面、Apple Speech,也可以完全離線;整理可以接 Ark、DeepSeek、Anthropic 相容介面。Key 存在系統憑證裡,軟體不自帶任何 Key。
-- 東西都留在本機:歷史、風格、詞庫、設定,不出這台電腦。
+輸出成什麼樣,看你選了哪種風格。Raw 盡量保留原話;Light 去口癖、補標點;Structured 和 Formal 分別面向筆記和郵件;設了目標語言之後,Shift 改成翻譯。風格就是本機檔案,內建的幾個可以複製出來隨便改。
 
-完整清單和平台差異在 [docs/product/features.md](docs/product/features.md)。
+幾件值得知道的事:
 
-## 關於鍵盤
+- 可以教它認詞。本機詞庫裡的人名、產品名、縮寫會同時餵給辨識和改寫兩步,行話聽錯的機率會低不少。
+- 配上鍵盤可以動口開工:打開「檢測到人聲後自動開始」,裝置會先等喚醒詞,預設「開始錄音」。再照引導錄三遍自己的聲音,旁人播放的語音就不會混進正文。這是防誤錄的輸入保護,不是身分認證,別拿它當鎖用。
+- 沒有鎖定。辨識可以走火山引擎、OpenAI 相容介面、Apple Speech,或者完全在本機跑;改寫可以接 Ark、DeepSeek、Anthropic 相容介面。Key 進系統憑證庫,軟體不帶任何 Key;歷史、風格、設定都留在本機。
 
-[Listener 語音鍵盤](https://github.com/Listener-ai-Macau/Listener-Firmware)是個 USB-C 小裝置:一顆能按的旋鈕管開始停止,四顆鍵隨便綁,幾盞燈分別管電源、藍牙、錄音、處理。韌體同樣開源。不是必需品——用麥克風就挺好——但一顆真按鍵總比摸快捷鍵強。
+完整功能清單(包括每條做不到什麼)在 [docs/product/features.md](docs/product/features.md)。
 
-## 還做不到的
+### 鍵盤
 
-- 鍵盤的藍牙音訊目前只有 Windows;macOS 和 Linux 先用電腦麥克風。
-- 聲紋是防誤觸發的,不是安全功能。
-- 離麥克風太遠、或者兩個人同時說話,還是處理不好。排在 1.0.6。
-- 不是系統輸入法,是把字打進目前焦點框。
+Listener 鍵盤是個 USB-C 小裝置:一顆能按的旋鈕(開始/停止,雙擊重新配對,轉動調音量)、四顆可以在軟體裡綁動作的鍵、六盞分別表示電源、藍牙、錄音和處理狀態的燈。沒有它軟體一樣好用,它只是把錄音鍵放到你手指底下。韌體開源:[Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware)。
 
-## 自己建構
+### 它不做什麼
+
+既然發的是 1.0.5,還是說清楚:
+
+- 鍵盤的藍牙音訊目前只有 Windows。
+- 遠距離拾音、兩個人同時說話還不行,那是 1.0.6 的活。
+- 它不是系統輸入法,也沒打算做——它把字打進目前焦點框。
+
+### 從原始碼建構
 
 ```bash
 npm ci
@@ -46,6 +48,4 @@ npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-完整的桌面建構還需要 `third_party/denzic-platform` 子模組。提交程式碼前看 [CONTRIBUTING.md](CONTRIBUTING.md),回報漏洞看 [SECURITY.md](SECURITY.md)。
-
-程式碼是開源的;Listener Type 的名字、圖示和吉祥物不是——改了名的分支請別再用它們。
+完整的桌面建構還需要 `third_party/denzic-platform` 子模組,其餘見 [CONTRIBUTING.md](CONTRIBUTING.md);安全問題發 [SECURITY.md](SECURITY.md)。原始碼開放,但 Listener Type 的名字、圖示和吉祥物不授權給改名後的分支。
