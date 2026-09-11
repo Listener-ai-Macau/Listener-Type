@@ -24,7 +24,7 @@ macOS 12+ and Linux run the app with the computer's microphone; the keyboard's B
 
 **Mail and formal writing.** Switch to Formal for a tidier tone — it won't invent content. If the other side reads another language, set a target language once, then press Shift before speaking and out comes the translation.
 
-**Notes, tasks, prompts.** Structured organizes what you said by topic and goal. For code comments, or anything you want verbatim, use Raw — it leaves your words alone.
+**Notes, tasks, prompts.** Structured organizes what you said by topic and goal. For code comments, or anything you want verbatim, use Raw — it leaves your words alone. Styles are plain local files: copy a built-in one and edit it, or share packs as ZIP files.
 
 **It learns your words.** Names, product terms and abbreviations go into a local vocabulary that both recognition and polish consult. That's how it stops mangling your colleagues' names.
 
@@ -36,11 +36,11 @@ The [Listener voice keyboard](https://github.com/Listener-ai-Macau/Listener-Firm
 
 Don't want to touch it? Turn on "start on voice" and say 「开始录音」. Enroll three voice samples and playback of someone else's speech won't end up in your text. The voiceprint guards against stray input; it is not authentication, so don't treat it as a lock.
 
-The app works fine without the keyboard — the keyboard just puts the record button under your finger. Its firmware is open source too: [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware).
+The app works fine without the keyboard — the keyboard just puts the record button under your finger. And if pairing ever gets messed up, Settings → About → Device recovery fixes it without any developer tools. The firmware is open source too: [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware).
 
 ## Your data, your keys
 
-Recognition can run through Volcengine's streaming API, any OpenAI-compatible endpoint, Apple Speech, or fully on-device; polish through Ark, DeepSeek, or any Anthropic- or OpenAI-compatible endpoint. Keys live in the OS credential store and none ship with the app. History, vocabulary, styles and settings stay on your machine — the whole loop runs without any Listener server.
+Recognition can run through Volcengine's streaming API, any OpenAI-compatible endpoint, Apple Speech, or fully on-device; polish through Ark, DeepSeek, or any Anthropic- or OpenAI-compatible endpoint. Keys live in the OS credential store and none ship with the app; each provider can be set to direct connection, system proxy, or a custom proxy. History, vocabulary, styles and settings stay on your machine — the whole loop runs without any Listener server.
 
 ## Current limits
 
