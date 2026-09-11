@@ -12,25 +12,37 @@ The app is free and open source, and works with whatever microphone your compute
 
 ### Installation
 
-Windows is the primary platform: download the MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) and install it. The app also runs on macOS and Linux with the computer's microphone; the keyboard's Bluetooth audio path has only been validated on Windows.
+Windows is the primary platform: download the MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) and install it. The installer relies on WebView2 and fetches it automatically when the machine is online.
+
+| | Windows | macOS | Linux |
+| --- | --- | --- | --- |
+| Microphone dictation | ✓ | ✓ (12+) | ✓ |
+| Global hotkey | ✓ | ✓ | X11 best-effort; Wayland needs a desktop-level binding |
+| Keyboard Bluetooth audio | ✓ | not yet | not yet |
 
 ### Using it
 
-Recording is a toggle, not push-to-talk. Press Right Ctrl (Right Option on macOS) once to start, speak, press again to stop. While it works, a small capsule window shows what stage it's in — recording, transcribing, processing, done. `Esc` cancels a recording in progress.
+Recording is a toggle, not push-to-talk. Press Right Ctrl (Right Option on macOS) once to start, speak, press again to stop. While it works, a small capsule window shows the stage it's in: recording, transcribing, processing, done. `Esc` cancels a recording in progress, and nothing half-finished gets inserted.
 
-What you get back depends on the style you picked. Raw keeps your words as spoken; Light removes fillers and adds punctuation; Structured and Formal reshape the text for notes and mail. If you've set a target language, Shift translates instead. Styles are plain local files — you can copy the built-in ones and edit them.
+What you get back depends on the style you picked. Raw keeps your words as spoken; Light removes fillers and adds punctuation; Structured and Formal reshape the text for notes and mail. If you've set a target language, Shift marks the next recording for translation. Styles are plain local files, so you can copy a built-in one and edit it, or share packs as ZIP files.
 
-A few things worth knowing:
+Other built-in shortcuts: `Ctrl+Shift+;` asks a question about the selected text, `Ctrl+Shift+S` runs the last result through a different style, `Ctrl+Shift+O` brings up the app. On macOS, use `Cmd` instead of `Ctrl`.
 
-- You can teach it vocabulary. Names, product terms and abbreviations from a local list go to both the recognizer and the rewriting step, which cuts down on misheard jargon.
-- With the keyboard paired, it can start hands-free: the device waits for a wake phrase (default: 「开始录音」). Enrolling three samples of your voice keeps playback of other people's speech out of your text. That's protection against stray input, not authentication — treat it accordingly.
-- Nothing is locked in. Recognition can run through Volcengine, an OpenAI-compatible endpoint, Apple Speech, or fully on-device; rewriting through Ark, DeepSeek, or Anthropic-compatible endpoints. Keys live in the OS credential store and none ship with the app. History, styles and settings stay on your machine.
+### How it works
 
-The complete feature list (including what each feature doesn't do) is in [docs/product/features.md](docs/product/features.md).
+Audio goes from the microphone (or the keyboard, over Bluetooth) to a recognizer; the transcript optionally passes through a style; the result is inserted into the focused field through the OS's native input path.
+
+None of the providers are locked in. Recognition can run through Volcengine's streaming API, any OpenAI-compatible endpoint, Apple Speech, or entirely on-device. Styles can run through Ark, DeepSeek, or any Anthropic- or OpenAI-compatible endpoint. API keys live in the OS credential store and none ship with the app. History, vocabulary, styles and settings never leave the machine — the whole loop works without any Listener server.
+
+A local vocabulary list (names, product terms, abbreviations) is fed to both the recognizer and the style pass. That's how it learns to stop mangling your colleagues' names.
 
 ### The keyboard
 
-The Listener keyboard is a USB-C desk device with a clickable knob (start/stop, double-click to re-pair, turn for volume), four keys you can bind in the app, and six LEDs for power, Bluetooth, recording and processing state. The app works fine without it; the keyboard just puts the record button under your finger. Its firmware is open source: [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware).
+The Listener keyboard is a USB-C desk device with a clickable knob (start/stop, double-click to re-pair, turn for volume), four keys you can bind in the app, and six LEDs for power, Bluetooth, recording and processing state.
+
+With the keyboard, you can also start hands-free: the device waits for a wake phrase (default: 「开始录音」), and an optional three-sample voiceprint keeps playback of other people's speech out of your text. The voiceprint is input protection, not authentication — treat it accordingly.
+
+The app works fine without the keyboard; the keyboard just puts the record button under your finger. Its firmware is open source: [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware).
 
 ### What it doesn't do
 
@@ -40,7 +52,11 @@ Worth being explicit, since 1.0.5 is what's shipping:
 - Far-field pickup and two people talking at once are still unreliable; that's 1.0.6 work.
 - It isn't a system IME and doesn't try to be — it types into the focused field.
 
+The complete feature list (including what each feature doesn't do) is in [docs/product/features.md](docs/product/features.md).
+
 ### Building from source
+
+The app is Tauri v2: a React + TypeScript frontend over a Rust backend, plus a small native text service for Windows insertion.
 
 ```bash
 npm ci
