@@ -869,22 +869,12 @@ fn local_speaker_allows_optimistic_preview(state: &SyncState) -> bool {
 fn display_only_provisional_preview_candidate(
     state: &mut SyncState,
     provider_result: &Value,
-    pending_unattributed_speech: bool,
+    _pending_unattributed_speech: bool,
 ) -> Option<String> {
-    if !pending_unattributed_speech
-        || !state.local_speaker_tracking_enabled
-        || !state.local_wake_owner_verified
-        || !state.local_speaker_stable_target
-        || state.owner_isolation_frozen
-        || state.local_owner_absence_run_confirmed
-        || state.local_non_target_speech_end_ms.is_some()
-        || matches!(
-            state.local_speaker_classification.as_ref(),
-            Some(crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. })
-        )
-    {
-        return None;
-    }
+    // Live 2026-09-11 02:21: capsule empty ~8 s because this helper required
+    // pending diarization AND stable owner. Visual preview is display-only
+    // (no endpoint refresh). Publish growing provider text as soon as it is
+    // longer than what was already shown.
     let candidate = provider_result
         .get("text")
         .and_then(Value::as_str)
