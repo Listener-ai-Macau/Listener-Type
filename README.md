@@ -9,7 +9,7 @@ Speak, and the text appears at your cursor. Listener Type is a desktop dictation
 [中文](README.zh.md) · [繁體中文](README.zh-TW.md) · [Usage guide](docs/USAGE.md) · [Feature catalog](docs/product/features.md) · [1.0.5 release notes](docs/release/1.0.5.md)
 
 <p align="center">
-  <img src="docs/assets/readme/overview.png" alt="The Listener Type main window: ASR, model, keyboard link and today's stats" width="900" />
+  <img src="docs/assets/readme/overview-en.png" alt="The Listener Type main window: ASR, model, keyboard link and today's stats" width="900" />
 </p>
 
 ## Try it in 30 seconds
@@ -35,7 +35,7 @@ macOS 12+ and Linux run the app with the computer's microphone; the keyboard's B
 Three more shortcuts worth remembering: `Ctrl+Shift+;` asks a question about the selected text, `Ctrl+Shift+S` runs the last result through a different style, `Ctrl+Shift+O` opens the app (macOS: `Cmd` instead of `Ctrl`).
 
 <p align="center">
-  <img src="docs/assets/readme/recording-settings.png" alt="Recording settings: Right Ctrl hotkey, input source, capsule toggle" width="720" />
+  <img src="docs/assets/readme/recording-settings-en.png" alt="Recording settings: Right Ctrl hotkey, input source, capsule toggle" width="720" />
 </p>
 
 ## The keyboard on your desk
