@@ -5324,6 +5324,14 @@ impl AudioConsumer for VolcengineStreamingASR {
             // pending_sends 必须在 tx.send 之前 +1：否则 worker 可能先 recv + 发送 +
             // 减 1，把 usize 计数器 underflow。
             let pending_frames = self.pending_sends.fetch_add(1, Ordering::SeqCst) + 1;
+            if pending_frames > 8 {
+                // Live c871e0bd: overlap preroll queued faster than the
+                // websocket could send, so the first preview arrived at 12 s.
+                if self.pending_sends.fetch_sub(1, Ordering::SeqCst) == 1 {
+                    self.send_done.notify_waiters();
+                }
+                continue;
+            }
             update_pending_send_high_water(&self.pending_sends_high_water, pending_frames);
             if tx.send(entry).is_err() {
                 // worker 已退出（cancel / 错误路径里 audio_tx 被 take）。

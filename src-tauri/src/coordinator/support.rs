@@ -989,6 +989,13 @@ impl DeferredAsrBridge {
         {
             let mut state = self.state.lock();
             state.attaching = true;
+            // Keep only the last 300 ms of preroll. Overlap-rearm can dump ~2 s
+            // at once; flushing that stalls Volcengine and the capsule stays empty.
+            const MAX_DEFERRED_BYTES: usize = 16_000 * 2 * 3 / 10;
+            if state.pending_audio.len() > MAX_DEFERRED_BYTES {
+                let skip = state.pending_audio.len() - MAX_DEFERRED_BYTES;
+                state.pending_audio.drain(..skip);
+            }
         }
 
         loop {
