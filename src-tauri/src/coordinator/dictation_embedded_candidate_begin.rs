@@ -75,9 +75,20 @@ impl EmbeddedStreamingDictation {
             if candidate_kind == BufferedSpeakerCandidateKind::Verification {
                 let mut lifecycle = inner.recording_lifecycle.lock();
                 if !lifecycle.begin_candidate(embedded_session_id) {
-                    return Err(format!(
-                        "录音生命周期拒绝新的唤醒候选 embedded_session_id={embedded_session_id}"
-                    ));
+                    // Actor-local work is empty: a dropped end-packet left the
+                    // global lifecycle on the old WakeCandidate id (2828/2872)
+                    // and froze automatic wake until Type restart. Do not steal
+                    // an in-flight candidate or live dictation.
+                    if self.session.is_none() && self.speaker_candidate.is_none() {
+                        if let Some(stale_id) = lifecycle.current_candidate_session_id() {
+                            let _ = lifecycle.close_candidate(stale_id);
+                        }
+                    }
+                    if !lifecycle.begin_candidate(embedded_session_id) {
+                        return Err(format!(
+                            "录音生命周期拒绝新的唤醒候选 embedded_session_id={embedded_session_id}"
+                        ));
+                    }
                 }
                 if !lifecycle.hidden_candidate_active() {
                     log::info!(
