@@ -1542,6 +1542,16 @@ fn record_embedded_ble_listener_cancelled(inner: &Arc<Inner>, reason: &str) {
 fn record_embedded_ble_recovery_failure(inner: &Arc<Inner>, err: &str) {
     let mut snapshot = inner.embedded_ble_wake_recovery.lock();
     let failure = crate::embedded_ble::classify_ble_failure(err);
+    /* After USB unplug the last firmware snapshot still says usb_powered=true.
+     * Type then reconnects in 200ms and wakes CONNECTED_IDLE (owner: 自动开回来了).
+     * Forget power until firmware reports it again on the next live link. */
+    if matches!(
+        failure.kind,
+        crate::embedded_ble::BleFailureKind::PairedButDisconnected
+            | crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect
+    ) {
+        snapshot.usb_powered = None;
+    }
     snapshot.status = match failure.kind {
         crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect
         | crate::embedded_ble::BleFailureKind::PairedButDisconnected => {
@@ -1997,6 +2007,17 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                         );
                     }
                     retry_delay = adjusted_retry_delay;
+                    if usb_powered != Some(true) && is_embedded_ble_link_loss_error(&err) {
+                        let idle_hold = Duration::from_secs(180);
+                        if retry_delay < idle_hold {
+                            log::info!(
+                                "[embedded-ble] holding BLE reconnect so firmware can stay idle/shutdown usb_powered={usb_powered:?} from_ms={} to_ms={}",
+                                retry_delay.as_millis(),
+                                idle_hold.as_millis(),
+                            );
+                            retry_delay = idle_hold;
+                        }
+                    }
                 }
                 log::warn!(
                     "[embedded-ble] background listen retrying in {} ms after: {err}",
