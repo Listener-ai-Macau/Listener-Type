@@ -245,6 +245,7 @@ interface PillProps {
   message?: string;
   stopRequested?: boolean;
   stopAcknowledged?: boolean;
+  recordingBarsActive?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
   onDismiss: () => void;
@@ -258,6 +259,7 @@ function Pill({
   message,
   stopRequested = false,
   stopAcknowledged = false,
+  recordingBarsActive = false,
   onCancel,
   onConfirm,
   onDismiss,
@@ -384,7 +386,7 @@ function Pill({
     case 'recording':
       center = stopPending
         ? renderProcessingCenter(message || t('capsule.thinking'), Boolean(message))
-        : message
+        : message && !recordingBarsActive
           ? renderRecordingPreview(message)
           : <AudioBars level={level} />;
       break;
@@ -520,6 +522,9 @@ export function Capsule() {
   const errorAutoDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [stopRequested, setStopRequested] = useState<boolean>(false);
   const [stopAcknowledged, setStopAcknowledged] = useState<boolean>(false);
+  // 录音开始先显示音波：预览文本现在一秒内就会到，但 owner 验收过的视觉合同是
+  // 「先音波、有正文再上字」，给音波一个短暂节拍再切换。
+  const [recordingBarsActive, setRecordingBarsActive] = useState<boolean>(false);
   // Windows 端 host 在翻译模式从 84 长到 118；macOS / Linux 上 capsuleLayout 已固定 42 忽略此参数。
   const hostMetrics = getCapsuleHostMetrics(os, translation);
 
@@ -761,6 +766,16 @@ export function Capsule() {
   }, [state]);
 
   useEffect(() => {
+    if (state !== 'recording') {
+      setRecordingBarsActive(false);
+      return undefined;
+    }
+    setRecordingBarsActive(true);
+    const timer = window.setTimeout(() => setRecordingBarsActive(false), 900);
+    return () => window.clearTimeout(timer);
+  }, [state]);
+
+  useEffect(() => {
     clearErrorAutoDismiss();
     if (state !== 'error') {
       return undefined;
@@ -947,6 +962,7 @@ export function Capsule() {
         message={message}
         stopRequested={!leaving && renderedState === 'recording' && stopRequested}
         stopAcknowledged={!leaving && shouldShowStopAcknowledgement(renderedState, stopAcknowledged)}
+        recordingBarsActive={!leaving && renderedState === 'recording' && recordingBarsActive}
         onCancel={onCancel}
         onConfirm={onConfirm}
         onDismiss={onDismiss}

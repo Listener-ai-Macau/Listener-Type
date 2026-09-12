@@ -1171,8 +1171,22 @@ pub(super) async fn request_embedded_ble_recording_stop_from_host(
     if !commit_recording_stop(inner, session_id, reason) {
         return Ok(false);
     }
-    if reason == "target_speaker_inactive_1000ms" {
+    // 预览即终稿的捷径原本只覆盖 1 秒停顿的自动结束。2500ms 的结尾同样意味着
+    // 主人已经停口 2.5 秒、说过的内容早已流入预览，直接提交预览可以省掉一次
+    // 多余的 provider 终稿等待。
+    if matches!(
+        reason,
+        "target_speaker_inactive_1000ms" | "target_speaker_inactive_2500ms"
+    ) {
         *inner.auto_end_commit_preview_session.lock() = Some(session_id);
+    }
+    // 手动停止不提交预览（尾部音频可能还在路上，见 46bcdda），但可以提前预热
+    // 润色：delta 只进缓冲不上屏，终稿逐字一致才被采用，不一致自动丢弃。
+    if matches!(
+        reason,
+        "capsule_confirm_stop_processing_start" | "device_key_stop" | "device_key_stop_retry"
+    ) {
+        maybe_start_polish_prefetch(inner, session_id);
     }
 
     record_embedded_ble_session_actor_command(
