@@ -1158,6 +1158,14 @@ pub fn read_embedded_audio_status(_timeout: Duration) -> Result<EmbeddedAudioBle
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn read_embedded_audio_status_for_device(
+    _address: u64,
+    _timeout: Duration,
+) -> Result<EmbeddedAudioBleStatus, String> {
+    Err("Embedded BLE audio status is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn send_recording_control_toggle(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE recording control is only supported on Windows".to_string())
 }
@@ -1650,6 +1658,11 @@ pub fn native_windows_hid_pairing_addresses() -> Result<Vec<u64>, String> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn native_windows_hid_present_pairing_addresses() -> Result<Vec<u64>, String> {
+    Ok(Vec::new())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn native_windows_hid_present_pairing_addresses_for_startup() -> Result<Vec<u64>, String> {
     Ok(Vec::new())
 }
 

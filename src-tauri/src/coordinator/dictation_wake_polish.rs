@@ -1033,6 +1033,7 @@ fn kws_absent_counts_toward_reject(
     }
 }
 
+#[cfg(target_os = "windows")]
 fn phonetic_near_phrase_evidence(
     confirmation: &LocalWakeConfirmation,
     phrase_chars: usize,

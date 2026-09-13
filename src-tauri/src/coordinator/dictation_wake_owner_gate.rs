@@ -414,6 +414,13 @@ fn terminal_wake_source_owner_compatible(
     })
 }
 
+#[cfg(not(target_os = "windows"))]
+fn terminal_wake_source_owner_compatible(
+    _verification: &Result<crate::speaker_verification::VerificationResult, String>,
+) -> bool {
+    false
+}
+
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 fn target_wake_extraction_has_weak_phrase_evidence(
     kws_phrase_detected: bool,
