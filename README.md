@@ -60,10 +60,11 @@ The standard Windows installer writes into the focused field. It does not instal
 
 ## This repository
 
-Listener is split across two repositories:
+Listener is split across three repositories:
 
 - **Listener Type** owns recording sessions, recognition, writing, insertion, history, settings, and the desktop device experience.
 - [**Listener Firmware**](https://github.com/Listener-ai-Macau/Listener-Firmware) owns microphone capture, BLE audio and HID, physical controls, lights, battery and power behavior, diagnostics, and device OTA.
+- [**Denzic Platform**](https://github.com/Listener-ai-Macau/Denzic-Platform) keeps the versioned protocols and portable state machines shared by the app and firmware.
 
 The app is built with Tauri 2, Rust, React, TypeScript, and Vite.
 

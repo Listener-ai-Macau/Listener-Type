@@ -60,10 +60,11 @@ Windows 标准安装包会把文字写入当前焦点框，不会把 Listener �
 
 ## 这个仓库
 
-Listener 分成两个仓库维护：
+Listener 分成三个仓库维护：
 
 - **Listener Type** 负责录音会话、识别、文字处理、插入、历史、设置和桌面端设备体验。
 - [**Listener Firmware**](https://github.com/Listener-ai-Macau/Listener-Firmware) 负责麦克风采集、BLE 音频与 HID、实体控制、灯、电池与电源、诊断和设备 OTA。
+- [**Denzic Platform**](https://github.com/Listener-ai-Macau/Denzic-Platform) 维护桌面端与固件共用的版本化协议和可移植状态机。
 
 桌面应用使用 Tauri 2、Rust、React、TypeScript 和 Vite。
 
