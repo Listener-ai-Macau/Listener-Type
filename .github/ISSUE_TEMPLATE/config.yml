@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Listener Firmware device issues
+    url: https://github.com/Listener-ai-Macau/Listener-Firmware/issues
+    about: Report capture transport, controls, LEDs, battery, power, settings, diagnostics, or OTA defects in the firmware repository.
+  - name: Security report
+    url: https://github.com/Listener-ai-Macau/Listener-Type/security/advisories/new
+    about: Report vulnerabilities privately and exclude credentials, recordings, transcripts, and signing material.

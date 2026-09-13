@@ -4,6 +4,17 @@
 
 # Listener Type
 
+<p align="center">
+  <strong>Windows、macOS、Linux 的本地优先语音输入</strong><br />
+  Tauri 2 · Rust · React · 电脑麦克风或 Listener 语音键盘
+</p>
+
+<p align="center">
+  <a href="https://github.com/Listener-ai-Macau/Listener-Type/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Listener-ai-Macau/Listener-Type/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases"><img alt="1.0.5 版本" src="https://img.shields.io/badge/release-1.0.5-6f42c1" /></a>
+  <img alt="本地优先" src="https://img.shields.io/badge/design-local--first-238636" />
+</p>
+
 在正在工作的地方直接说，文字回到当前光标。Listener Type 把语音变成文字，还可以按需要去口癖、补标点、整理结构或翻译。Windows、macOS、Linux 使用电脑麦克风就能运行；配上 Listener 语音键盘后，多了实体录音控制、蓝牙收音、状态灯和设备设置。
 
 [English](README.md) · [繁體中文](README.zh-TW.md) · [下载](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [使用说明](docs/USAGE.md) · [功能目录](docs/product/features.md)
@@ -20,6 +31,16 @@
 | Listener Firmware | 麦克风采集、BLE 音频与 HID、按键、旋钮、灯、电池与电源管理、诊断和 OTA | [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware) |
 
 没有语音键盘，软件也能独立使用。键盘扩展的是同一条听写流程；它本身不负责把语音识别成文字。
+
+```mermaid
+flowchart LR
+    Mic[电脑麦克风] --> Session[Listener Type 会话]
+    Keyboard[Listener 语音键盘] -->|BLE 音频| Session
+    Session --> ASR[云端或本地识别]
+    ASR --> Writing[词库、纠错、风格或翻译]
+    Writing --> Output[当前光标或剪贴板]
+    Session <-->|设置、状态与 OTA| Keyboard
+```
 
 ## 30 秒开始使用
 
@@ -75,16 +96,16 @@ Light 清理独立语气词并补标点，同时保留原意；Structured 整理
 
 核心使用链路不依赖 Listener 自营后端。远程市场和账号功能只有显式配置兼容后端后才启用。
 
-## 平台支持与当前边界
+## 产品状态
 
-| 平台或能力 | 当前范围 |
-| --- | --- |
-| Windows | 主要发布路径；支持电脑麦克风、Listener BLE 音频与设备控制、安装包和光标插入 |
-| macOS 12+ | 电脑麦克风、Apple/本地识别路径、全局快捷键和辅助功能插入 |
-| Linux | 电脑麦克风；X11 全局快捷键尽力支持，Wayland 使用桌面环境绑定 CLI 命令 |
-| 自动唤醒与声纹 | 用于输入便利和降低干扰；远距离或嘈杂环境要复核最终文字 |
-| 多人或重叠说话 | 仍在持续修复，1.0.5 不保证可靠过滤 |
-| Windows 输入法 | 标准安装包向焦点框插入文字，不会把 Listener 注册成系统输入法 |
+| 状态 | 平台或能力 | 当前范围 |
+| --- | --- | --- |
+| **主要发布** | Windows | 电脑麦克风、Listener BLE 音频与设备控制、安装包、更新和光标插入 |
+| **正式支持** | macOS 12+ | 电脑麦克风、Apple/本地识别路径、全局快捷键和辅助功能插入 |
+| **开发者支持** | Linux | 电脑麦克风；X11 快捷键尽力支持，Wayland 使用桌面环境绑定 CLI 命令 |
+| **受限** | 自动唤醒与声纹 | 用于输入便利和降低干扰；远距离或嘈杂环境仍要复核最终文字 |
+| **持续修复** | 多人或重叠说话 | 1.0.5 不保证可靠区分说话人 |
+| **工程验证** | Windows TSF 路径 | 可用于验证；标准安装包向焦点框插入文字，不注册系统输入法 |
 
 这些边界属于产品说明的一部分，详细行为见[功能目录](docs/product/features.md)。
 
@@ -106,6 +127,7 @@ Light 清理独立语气词并补标点，同时保留原意；Structured 整理
 - [使用说明](docs/USAGE.md)
 - [产品功能目录](docs/product/features.md)
 - [语音键盘与设备恢复](docs/quickstart/voice-keyboard-readme.md)
+- [支持与问题报告](SUPPORT.md)
 - [安全策略](SECURITY.md)
 
 ## 从源码构建

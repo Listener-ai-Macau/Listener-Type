@@ -4,6 +4,17 @@
 
 # Listener Type
 
+<p align="center">
+  <strong>Local-first voice typing for Windows, macOS, and Linux</strong><br />
+  Tauri 2 · Rust · React · computer microphone or Listener voice keyboard
+</p>
+
+<p align="center">
+  <a href="https://github.com/Listener-ai-Macau/Listener-Type/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Listener-ai-Macau/Listener-Type/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases"><img alt="Release 1.0.5" src="https://img.shields.io/badge/release-1.0.5-6f42c1" /></a>
+  <img alt="Local-first" src="https://img.shields.io/badge/design-local--first-238636" />
+</p>
+
 Speak where you work. Listener Type turns speech into text at the current cursor, then optionally cleans, structures, or translates it. Use a computer microphone on Windows, macOS, or Linux; add the Listener voice keyboard for physical recording controls, Bluetooth audio, status lights, and device settings.
 
 [简体中文](README.zh.md) · [繁體中文](README.zh-TW.md) · [Download](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [Usage guide](docs/USAGE.md) · [Feature catalog](docs/product/features.md)
@@ -20,6 +31,16 @@ Speak where you work. Listener Type turns speech into text at the current cursor
 | Listener Firmware | Microphone capture, BLE audio and HID, keys, knob, LEDs, battery and power management, diagnostics, and OTA | [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware) |
 
 The app works without the keyboard. The keyboard extends the same dictation flow; it does not perform recognition by itself.
+
+```mermaid
+flowchart LR
+    Mic[Computer microphone] --> Session[Listener Type session]
+    Keyboard[Listener voice keyboard] -->|BLE audio| Session
+    Session --> ASR[Cloud or local ASR]
+    ASR --> Writing[Vocabulary, correction, style or translation]
+    Writing --> Output[Focused field or clipboard]
+    Session <-->|settings, status and OTA| Keyboard
+```
 
 ## Try it in 30 seconds
 
@@ -75,16 +96,16 @@ Settings, history, vocabulary, styles, and correction rules stay on the computer
 
 The product loop does not require a Listener-operated backend. Remote marketplace and account features remain disabled unless a compatible backend is explicitly configured.
 
-## Platform support and current limits
+## Product status
 
-| Platform or feature | Current scope |
-| --- | --- |
-| Windows | Primary release path; computer microphone, Listener BLE audio/device controls, packaging, and cursor insertion |
-| macOS 12+ | Computer microphone, Apple/local recognition paths, global shortcut, and Accessibility insertion |
-| Linux | Computer microphone; X11 global shortcut is best effort, while Wayland uses desktop-bound CLI commands |
-| Automatic wake and voiceprint | Input convenience and interference reduction; validate final text in noisy or far-field use |
-| Multiple or overlapping speakers | Still under active repair and not guaranteed in release 1.0.5 |
-| Windows input method | The standard installer inserts into the focused field; it does not register Listener as a system IME |
+| Status | Platform or capability | Current scope |
+| --- | --- | --- |
+| **Primary** | Windows | Computer microphone, Listener BLE audio/device controls, packaging, updater, and cursor insertion |
+| **Supported** | macOS 12+ | Computer microphone, Apple/local recognition paths, global shortcut, and Accessibility insertion |
+| **Developer** | Linux | Computer microphone; X11 shortcut support is best effort, while Wayland uses desktop-bound CLI commands |
+| **Limited** | Automatic wake and voiceprint | Input convenience and interference reduction; final text still needs review in noisy or far-field use |
+| **Active repair** | Multiple or overlapping speakers | Release 1.0.5 does not guarantee reliable speaker isolation |
+| **Engineering** | Windows TSF path | Available for validation; the standard installer inserts into the focused field and does not register a system IME |
 
 These limits are part of the product contract. Detailed behavior is tracked in the [feature catalog](docs/product/features.md).
 
@@ -106,6 +127,7 @@ Exact artifacts, checksums, and changes are kept on the [GitHub Releases page](h
 - [Usage guide](docs/USAGE.md)
 - [Product feature catalog](docs/product/features.md)
 - [Voice keyboard and device recovery](docs/quickstart/voice-keyboard-readme.md)
+- [Support and bug reports](SUPPORT.md)
 - [Security policy](SECURITY.md)
 
 ## Build from source

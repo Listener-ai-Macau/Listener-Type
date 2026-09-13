@@ -21,3 +21,5 @@
 - [ ] No upstream product branding or service endpoint was reintroduced.
 - [ ] Marketplace/OAuth remain disabled unless Listener Type-owned config is present.
 - [ ] Traceability docs were updated for changed source files.
+- [ ] Product status and limitations remain accurate for user-visible changes.
+- [ ] Recording changes include replay or hardware-log evidence for the affected timing boundary.

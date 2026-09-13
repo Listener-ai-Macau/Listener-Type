@@ -4,6 +4,17 @@
 
 # Listener Type
 
+<p align="center">
+  <strong>Windows、macOS、Linux 的本機優先語音輸入</strong><br />
+  Tauri 2 · Rust · React · 電腦麥克風或 Listener 語音鍵盤
+</p>
+
+<p align="center">
+  <a href="https://github.com/Listener-ai-Macau/Listener-Type/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Listener-ai-Macau/Listener-Type/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases"><img alt="1.0.5 版本" src="https://img.shields.io/badge/release-1.0.5-6f42c1" /></a>
+  <img alt="本機優先" src="https://img.shields.io/badge/design-local--first-238636" />
+</p>
+
 在正在工作的地方直接說，文字回到目前游標。Listener Type 把語音變成文字，還可以按需要去口癖、補標點、整理結構或翻譯。Windows、macOS、Linux 使用電腦麥克風就能執行；配上 Listener 語音鍵盤後，多了實體錄音控制、藍牙收音、狀態燈和裝置設定。
 
 [English](README.md) · [简体中文](README.zh.md) · [下載](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [使用說明](docs/USAGE.md) · [功能目錄](docs/product/features.md)
@@ -20,6 +31,16 @@
 | Listener Firmware | 麥克風採集、BLE 音訊與 HID、按鍵、旋鈕、燈、電池與電源管理、診斷和 OTA | [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware) |
 
 沒有語音鍵盤，軟體也能獨立使用。鍵盤擴充的是同一條聽寫流程；它本身不負責把語音辨識成文字。
+
+```mermaid
+flowchart LR
+    Mic[電腦麥克風] --> Session[Listener Type 工作階段]
+    Keyboard[Listener 語音鍵盤] -->|BLE 音訊| Session
+    Session --> ASR[雲端或本機辨識]
+    ASR --> Writing[詞庫、糾錯、風格或翻譯]
+    Writing --> Output[目前游標或剪貼簿]
+    Session <-->|設定、狀態與 OTA| Keyboard
+```
 
 ## 30 秒開始使用
 
@@ -75,16 +96,16 @@ Light 清理獨立語氣詞並補標點，同時保留原意；Structured 整理
 
 核心使用鏈路不依賴 Listener 自營後端。遠端市集和帳號功能只有明確設定相容後端後才啟用。
 
-## 平台支援與目前邊界
+## 產品狀態
 
-| 平台或能力 | 目前範圍 |
-| --- | --- |
-| Windows | 主要發布路徑；支援電腦麥克風、Listener BLE 音訊與裝置控制、安裝包和游標插入 |
-| macOS 12+ | 電腦麥克風、Apple/本機辨識路徑、全域快速鍵和輔助使用插入 |
-| Linux | 電腦麥克風；X11 全域快速鍵盡力支援，Wayland 使用桌面環境綁定 CLI 命令 |
-| 自動喚醒與聲紋 | 用於輸入便利和降低干擾；遠距離或嘈雜環境要複核最終文字 |
-| 多人或重疊說話 | 仍在持續修復，1.0.5 不保證可靠過濾 |
-| Windows 輸入法 | 標準安裝包向焦點框插入文字，不會把 Listener 註冊成系統輸入法 |
+| 狀態 | 平台或能力 | 目前範圍 |
+| --- | --- | --- |
+| **主要發布** | Windows | 電腦麥克風、Listener BLE 音訊與裝置控制、安裝包、更新和游標插入 |
+| **正式支援** | macOS 12+ | 電腦麥克風、Apple/本機辨識路徑、全域快速鍵和輔助使用插入 |
+| **開發者支援** | Linux | 電腦麥克風；X11 快速鍵盡力支援，Wayland 使用桌面環境綁定 CLI 命令 |
+| **受限** | 自動喚醒與聲紋 | 用於輸入便利和降低干擾；遠距離或嘈雜環境仍要複核最終文字 |
+| **持續修復** | 多人或重疊說話 | 1.0.5 不保證可靠區分說話人 |
+| **工程驗證** | Windows TSF 路徑 | 可用於驗證；標準安裝包向焦點框插入文字，不註冊系統輸入法 |
 
 這些邊界屬於產品說明的一部分，詳細行為見[功能目錄](docs/product/features.md)。
 
@@ -106,6 +127,7 @@ Light 清理獨立語氣詞並補標點，同時保留原意；Structured 整理
 - [使用說明](docs/USAGE.md)
 - [產品功能目錄](docs/product/features.md)
 - [語音鍵盤與裝置復原](docs/quickstart/voice-keyboard-readme.md)
+- [支援與問題回報](SUPPORT.md)
 - [安全策略](SECURITY.md)
 
 ## 從原始碼建置
