@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Listener-ai-Macau/Listener-Type/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Listener-ai-Macau/Listener-Type/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="https://github.com/Listener-ai-Macau/Listener-Type/actions/workflows/ci.yml"><img alt="Repository audits" src="https://github.com/Listener-ai-Macau/Listener-Type/actions/workflows/ci.yml/badge.svg" /></a>
   <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases"><img alt="Release 1.0.5" src="https://img.shields.io/badge/release-1.0.5-6f42c1" /></a>
   <img alt="Local-first" src="https://img.shields.io/badge/design-local--first-238636" />
 </p>
