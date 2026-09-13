@@ -75,4 +75,4 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 完整构建还需要固定版本的 `third_party/denzic-platform` 子模块。开发流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，问题报告见 [SUPPORT.md](SUPPORT.md)，安全问题请按 [SECURITY.md](SECURITY.md) 私下提交。
 
-版本说明和校验值保存在 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases)。当前仓库还没有 `LICENSE`，因此能看到源码不代表已经获得再分发或修改授权。
+版本说明和校验值保存在 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases)。Listener Type 采用 [Apache License 2.0](LICENSE) 开源；由其他开源项目改编的部分仍遵循原始许可，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

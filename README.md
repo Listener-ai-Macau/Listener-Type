@@ -75,4 +75,4 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 A full build also needs the pinned `third_party/denzic-platform` submodule. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, [SUPPORT.md](SUPPORT.md) for bug reports, and [SECURITY.md](SECURITY.md) for private security reports.
 
-Release notes and checksums live on the [Releases page](https://github.com/Listener-ai-Macau/Listener-Type/releases). This repository does not yet include a `LICENSE`, so viewing the source does not grant permission to redistribute or modify it.
+Release notes and checksums live on the [Releases page](https://github.com/Listener-ai-Macau/Listener-Type/releases). Listener Type is available under the [Apache License 2.0](LICENSE). Parts adapted from other open-source projects remain covered by their original terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

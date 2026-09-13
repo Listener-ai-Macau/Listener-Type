@@ -16,63 +16,43 @@ jobs:
 
   frontend-build:
     runs-on: ubuntu-latest
-    env:
-      PRIVATE_PLATFORM_AVAILABLE: ${{ secrets.DENZIC_PLATFORM_DEPLOY_KEY != '' }}
     steps:
       - uses: actions/checkout@v6
       - name: Resolve pinned Denzic Platform commit
         id: platform-ref
         run: echo "commit=$(git rev-parse HEAD:third_party/denzic-platform)" >> "$GITHUB_OUTPUT"
-      - name: Report private build availability
-        if: env.PRIVATE_PLATFORM_AVAILABLE != 'true'
-        run: echo "::notice title=Private platform build skipped::Configure the read-only DENZIC_PLATFORM_DEPLOY_KEY secret to enable the full frontend build."
       - uses: actions/checkout@v6
-        if: env.PRIVATE_PLATFORM_AVAILABLE == 'true'
         with:
           repository: Listener-ai-Macau/Denzic-Platform
           ref: ${{ steps.platform-ref.outputs.commit }}
           path: third_party/denzic-platform
-          ssh-key: ${{ secrets.DENZIC_PLATFORM_DEPLOY_KEY }}
           persist-credentials: false
       - uses: actions/setup-node@v6
-        if: env.PRIVATE_PLATFORM_AVAILABLE == 'true'
         with:
           node-version: 22
           cache: npm
-      - if: env.PRIVATE_PLATFORM_AVAILABLE == 'true'
-        run: npm ci
-      - if: env.PRIVATE_PLATFORM_AVAILABLE == 'true'
-        run: npm run build
+      - run: npm ci
+      - run: npm run build
 
   rust-check:
     runs-on: ubuntu-latest
-    env:
-      PRIVATE_PLATFORM_AVAILABLE: ${{ secrets.DENZIC_PLATFORM_DEPLOY_KEY != '' }}
     steps:
       - uses: actions/checkout@v6
       - name: Resolve pinned Denzic Platform commit
         id: platform-ref
         run: echo "commit=$(git rev-parse HEAD:third_party/denzic-platform)" >> "$GITHUB_OUTPUT"
-      - name: Report private build availability
-        if: env.PRIVATE_PLATFORM_AVAILABLE != 'true'
-        run: echo "::notice title=Private platform check skipped::Configure the read-only DENZIC_PLATFORM_DEPLOY_KEY secret to enable the full Rust check."
       - uses: actions/checkout@v6
-        if: env.PRIVATE_PLATFORM_AVAILABLE == 'true'
         with:
           repository: Listener-ai-Macau/Denzic-Platform
           ref: ${{ steps.platform-ref.outputs.commit }}
           path: third_party/denzic-platform
-          ssh-key: ${{ secrets.DENZIC_PLATFORM_DEPLOY_KEY }}
           persist-credentials: false
       - uses: actions/setup-node@v6
-        if: env.PRIVATE_PLATFORM_AVAILABLE == 'true'
         with:
           node-version: 22
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
-        if: env.PRIVATE_PLATFORM_AVAILABLE == 'true'
       - name: Install Tauri Linux dependencies
-        if: env.PRIVATE_PLATFORM_AVAILABLE == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -86,9 +66,6 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libxdo-dev \
             wget
-      - if: env.PRIVATE_PLATFORM_AVAILABLE == 'true'
-        run: npm ci
-      - if: env.PRIVATE_PLATFORM_AVAILABLE == 'true'
-        run: npm run build
-      - if: env.PRIVATE_PLATFORM_AVAILABLE == 'true'
-        run: cargo check --manifest-path src-tauri/Cargo.toml
+      - run: npm ci
+      - run: npm run build
+      - run: cargo check --manifest-path src-tauri/Cargo.toml

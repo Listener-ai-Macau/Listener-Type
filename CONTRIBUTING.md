@@ -6,12 +6,15 @@ TypeScript frontend.
 ## Development
 
 ```bash
+git submodule update --init --recursive
 npm ci
 npm run build
 npm test
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml --lib --no-run
 ```
+
+The submodule command checks out the exact Denzic Platform revision recorded by this repository.
 
 Run the release audits before proposing packaging or updater changes:
 
