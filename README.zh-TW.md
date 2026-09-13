@@ -4,59 +4,113 @@
 
 # Listener Type
 
-說話,文字出現在目前游標。Listener Type 是個桌面聽寫軟體:游標點進任何輸入框,按一下右 Ctrl,說,再按一下,字就打進去了。開源,Windows / macOS / Linux 都能裝,電腦麥克風就夠用。
+在正在工作的地方直接說，文字回到目前游標。Listener Type 把語音變成文字，還可以按需要去口癖、補標點、整理結構或翻譯。Windows、macOS、Linux 使用電腦麥克風就能執行；配上 Listener 語音鍵盤後，多了實體錄音控制、藍牙收音、狀態燈和裝置設定。
 
-[English](README.md) · [简体中文](README.zh.md) · [使用說明](docs/USAGE.md) · [功能目錄](docs/product/features.md) · [1.0.5 版本說明](docs/release/1.0.5.md)
-
-<p align="center">
-  <img src="docs/assets/readme/overview.png" alt="Listener Type 主介面:ASR、模型、鍵盤連線狀態和今日統計" width="900" />
-</p>
-
-## 先花 30 秒試一下
-
-1. Windows 上從 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 下載 MSI 安裝(要 WebView2,連網會自動補)。
-2. 打開,允許麥克風。
-3. 點進記事本,按右 Ctrl,說一句話,再按一次。
-
-字應該已經在記事本裡了。中途按 `Esc` 取消;某個軟體不讓自動輸入時,文字會進剪貼簿,提示你自己貼上。macOS 上熱鍵是右 Option。到這步能用了,再往下看。
-
-macOS 12+ 和 Linux 也能裝,先用電腦麥克風;鍵盤的藍牙音訊只在 Windows 上驗收過。Linux 的全域熱鍵在 X11 下盡力而為,Wayland 要在桌面環境裡綁定命令,細節在[使用說明](docs/USAGE.md)。
-
-## 一天裡怎麼用
-
-**回訊息。** 預設的 Light 風格:去掉「那個」「嗯」,補上標點,別的不動。說的時候是口水話,發出去是正常人話。
-
-**寫郵件和正式溝通。** 切到 Formal,語氣收拾整齊,但不替你編內容。對方讀另一種語言時,設好目標語言,按 Shift 再說,出來就是譯文。
-
-**記需求、任務、prompt。** Structured 按主題和目標整理成條目。寫程式碼註解、或者要留原話的時候用 Raw,它盡量不動你的詞。風格本身就是本機檔案:內建的可以複製出來改,也能匯出成 ZIP 分享。
-
-**它認識你的詞。** 人名、產品名、縮寫加進本機詞庫,辨識和整理都會參考——同事的名字就是這麼不再被寫錯的。
-
-順手再記三個熱鍵:`Ctrl+Shift+;` 對選中的文字提問,`Ctrl+Shift+S` 給上一段結果換個風格,`Ctrl+Shift+O` 喚起應用(macOS 把 `Ctrl` 換成 `Cmd`)。
+[English](README.md) · [简体中文](README.zh.md) · [下載](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [使用說明](docs/USAGE.md) · [功能目錄](docs/product/features.md)
 
 <p align="center">
-  <img src="docs/assets/readme/recording-settings.png" alt="錄音設定:右 Ctrl 熱鍵、輸入來源切換、錄音膠囊開關" width="720" />
+  <img src="docs/assets/readme/overview.png" alt="Listener Type 主介面：辨識、模型、裝置和使用狀態" width="900" />
 </p>
 
-## 桌上的鍵盤
+## 一個產品，兩個倉庫
 
-[Listener 語音鍵盤](https://github.com/Listener-ai-Macau/Listener-Firmware) 是配套硬體:一顆能按的旋鈕管開始和停止,雙擊重新配對,轉一下調音量;四顆鍵在軟體裡隨便綁動作;六盞燈各管一件事——電源、藍牙、錄音、處理到哪一步。
+| 部分 | 負責什麼 | 倉庫 |
+| --- | --- | --- |
+| Listener Type | 錄音工作階段、語音辨識、文字處理、游標插入、設定、歷史和桌面端裝置體驗 | 目前倉庫 |
+| Listener Firmware | 麥克風採集、BLE 音訊與 HID、按鍵、旋鈕、燈、電池與電源管理、診斷和 OTA | [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware) |
 
-不想碰鍵盤也行:打開「檢測到人聲後自動開始」,說聲「開始錄音」就開工。照引導錄三遍聲紋之後,旁邊放別人的語音不會混進正文。聲紋是防誤錄的,不是身分認證,別當鎖用。
+沒有語音鍵盤，軟體也能獨立使用。鍵盤擴充的是同一條聽寫流程；它本身不負責把語音辨識成文字。
 
-沒有鍵盤軟體照常用,鍵盤只是把錄音鍵放到手指底下。配對亂了也不用開發工具:設定 → 關於 → 裝置恢復。韌體也開源:[Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware)。
+## 30 秒開始使用
 
-## 你的資料和你的 Key
+1. Windows 從 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 安裝最新 MSI；macOS/Linux 可以從原始碼建置。
+2. 允許麥克風權限，在設定 → 錄音中選擇「電腦麥克風」。
+3. 游標點進輸入框，Windows 按一下右 Ctrl，說話，再按一下；macOS 預設是右 Option。
 
-辨識可以走火山引擎流式介面、任意 OpenAI 相容端點、Apple Speech,或完全在本機;潤飾接 Ark、DeepSeek,或任意 Anthropic / OpenAI 相容端點。Key 存在系統憑證庫,軟體不自帶任何 Key;每個服務商可以單獨選直連、系統代理或自訂代理。歷史、詞庫、風格、設定都在本機——整條鏈路不依賴 Listener 的伺服器。
+結果會插回原來的游標位置。目標應用程式不允許直接插入時，Listener 會把文字保留在剪貼簿並提示貼上。錄音中按 `Esc` 可以取消。
 
-## 目前的邊界
+## Listener 包含的完整能力
 
-現在發的是 1.0.5。遠距離拾音、多人同時說話還不可靠,排在 1.0.6。它不是系統輸入法,文字進目前焦點框。每條功能的邊界都寫進了[功能目錄](docs/product/features.md)。
+| 範圍 | 功能 |
+| --- | --- |
+| 聽寫 | 切換式錄音、手動停止、自動結束、取消、膠囊即時預覽、電腦麥克風和 Listener BLE 音訊 |
+| 辨識 | 火山引擎串流、OpenAI 相容批次 ASR、Apple Speech、百鍊即時、macOS Qwen 本機辨識、Windows Foundry Local Whisper |
+| 文字處理 | Raw、Light、Structured、Formal；語氣詞清理、標點、糾錯規則、翻譯、自訂風格包和 ZIP 匯入匯出 |
+| 個人詞庫 | 人名、術語、縮寫和熱詞；供支援的辨識及潤飾服務使用 |
+| 後續處理 | 對選取文字提問、為上一條結果切換風格、可設定全域快速鍵 |
+| 輸出 | 目前焦點框插入、剪貼簿備援、可選 Windows TSF 驗證路徑、macOS 輔助使用插入 |
+| 歷史 | 本機工作階段歷史、上一條結果、保留期限和可選診斷錄音 |
+| Provider | 自備雲端 Key 或使用本機引擎；每個服務可選直連、系統代理或自訂代理 |
+| 桌面體驗 | 系統匣、開機啟動、單一執行個體、深色模式、更新介面、權限狀態和診斷包匯出 |
+| 語音鍵盤 | 配對與健康狀態、四顆自訂鍵、按壓/旋轉旋鈕、燈光亮度、低功耗時間、電量、OTA 和裝置復原 |
 
-## 自己動手
+## 從說話到游標
 
-Tauri v2 + React + Rust;Windows 的插入走 `windows-ime/` 裡的 TSF 文字服務,macOS 走輔助使用介面。
+```text
+電腦麥克風或 Listener 語音鍵盤
+    → 一次錄音工作階段
+    → 雲端串流或本機辨識
+    → 詞庫與糾錯
+    → Raw / Light / Structured / Formal / 翻譯
+    → 目前游標，或剪貼簿備援
+```
+
+Light 清理獨立語氣詞並補標點，同時保留原意；Structured 整理需求和筆記；Formal 收拾商務表達；Raw 儘量保持辨識原文；翻譯按已選目標語言輸出。潤飾服務不可用時，Listener 會保住可用的辨識原文，不讓整段聽寫遺失。
+
+## Listener 語音鍵盤
+
+在設定 → 裝置中配對。單擊旋鈕開始或停止，雙擊重設配對，長按關機，旋轉可調音量或亮度。KEY1–KEY4 的單擊、雙擊、長按都能設定動作。PWR、BLE、REC、AI、OK、WARN 分別顯示電源、連線、收音、處理、成功和錯誤狀態。
+
+自動語音開始可以等待自訂喚醒詞，並可錄三段引導聲紋作為輸入保護。聲紋不是身分認證。韌體可以在 Listener Type 中 OTA，正常升級會保留配對和裝置設定。
+
+詳細操作見[語音鍵盤手冊](docs/quickstart/voice-keyboard-readme.md)和[韌體倉庫](https://github.com/Listener-ai-Macau/Listener-Firmware)。
+
+<p align="center">
+  <img src="docs/assets/readme/recording-settings.png" alt="Listener Type 錄音設定" width="720" />
+</p>
+
+## 本機優先
+
+設定、歷史、詞庫、風格和糾錯規則保存在電腦上。Provider 憑證進入系統憑證庫，應用程式不內建任何服務商 Key。可選診斷錄音預設關閉。診斷包用於報告產品和連線狀態，設計上不包含 API Key、錄音和轉寫正文。
+
+核心使用鏈路不依賴 Listener 自營後端。遠端市集和帳號功能只有明確設定相容後端後才啟用。
+
+## 平台支援與目前邊界
+
+| 平台或能力 | 目前範圍 |
+| --- | --- |
+| Windows | 主要發布路徑；支援電腦麥克風、Listener BLE 音訊與裝置控制、安裝包和游標插入 |
+| macOS 12+ | 電腦麥克風、Apple/本機辨識路徑、全域快速鍵和輔助使用插入 |
+| Linux | 電腦麥克風；X11 全域快速鍵盡力支援，Wayland 使用桌面環境綁定 CLI 命令 |
+| 自動喚醒與聲紋 | 用於輸入便利和降低干擾；遠距離或嘈雜環境要複核最終文字 |
+| 多人或重疊說話 | 仍在持續修復，1.0.5 不保證可靠過濾 |
+| Windows 輸入法 | 標準安裝包向焦點框插入文字，不會把 Listener 註冊成系統輸入法 |
+
+這些邊界屬於產品說明的一部分，詳細行為見[功能目錄](docs/product/features.md)。
+
+## 版本脈絡
+
+| 版本 | 產品進展 |
+| --- | --- |
+| 1.0.1 | 收攏為 Listener 獨立桌面產品，形成首套辨識、預覽和安裝包流程 |
+| 1.0.3 | 完成喚醒靈敏度與誤觸發調整，並配套韌體音訊傳輸路徑 |
+| 1.0.4 | 建立單人喚醒、停頓續說、自動結束和文字插入基線；多人隔離仍是實驗能力 |
+| 1.0.5 | 改善喚醒後正文連續性、膠囊與終稿分離、輕聲喚醒和鍵盤回饋；遠距離與多人重疊仍在修復 |
+
+準確安裝包、校驗值和逐版改動以 [GitHub Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 為準。
+
+## 下載與文件
+
+- [最新發布](https://github.com/Listener-ai-Macau/Listener-Type/releases)
+- [1.0.5 版本說明](docs/release/1.0.5.md)
+- [使用說明](docs/USAGE.md)
+- [產品功能目錄](docs/product/features.md)
+- [語音鍵盤與裝置復原](docs/quickstart/voice-keyboard-readme.md)
+- [安全策略](SECURITY.md)
+
+## 從原始碼建置
+
+Listener Type 使用 Tauri 2、Rust、React、TypeScript 和 Vite。
 
 ```bash
 npm ci
@@ -64,4 +118,4 @@ npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-完整的桌面建構還需要 `third_party/denzic-platform` 子模組。貢獻見 [CONTRIBUTING.md](CONTRIBUTING.md),安全問題發 [SECURITY.md](SECURITY.md)。原始碼開放;Listener Type 的名字、圖示和吉祥物不授權給改名後的分支。
+完整桌面建置還需要 `third_party/denzic-platform` 子模組。貢獻前請閱讀 [CONTRIBUTING.md](CONTRIBUTING.md)。目前倉庫沒有 `LICENSE` 檔案，因此能看到原始碼不代表自動獲得再散布或修改授權。
