@@ -4,69 +4,117 @@
 
 # Listener Type
 
-Listener Type is a desktop voice typing app. Put the cursor where you want to write, start recording, and speak. Listener turns the recording into text and puts it back into the app you were using.
+Speak where you work. Listener Type turns speech into text at the current cursor, then optionally cleans, structures, or translates it. Use a computer microphone on Windows, macOS, or Linux; add the Listener voice keyboard for physical recording controls, Bluetooth audio, status lights, and device settings.
 
-It works with the microphone already in your computer. If you use the Listener voice keyboard, the same workflow is available from the knob and keys, with Bluetooth audio and status lights on the desk.
-
-[简体中文](README.zh.md) · [繁體中文](README.zh-TW.md) · [Download](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [Usage guide](docs/USAGE.md) · [All features](docs/product/features.md)
+[简体中文](README.zh.md) · [繁體中文](README.zh-TW.md) · [Download](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [Usage guide](docs/USAGE.md) · [Feature catalog](docs/product/features.md)
 
 <p align="center">
-  <img src="docs/assets/readme/overview-en.png" alt="Listener Type home screen" width="900" />
+  <img src="docs/assets/readme/overview-en.png" alt="Listener Type home screen with recognition, model, device, and usage status" width="900" />
 </p>
 
-## What you can do
+## One product, two repositories
 
-- **Dictate into the app in front of you.** Start and stop with a global shortcut or let Listener end after you finish speaking. A small capsule shows the live result; `Esc` cancels the recording.
-- **Choose how the text should read.** Keep the raw transcript, lightly remove filler words and restore punctuation, turn it into structured notes, tidy it for formal writing, or translate it.
-- **Teach Listener your words.** Personal names, product terms, abbreviations, hotwords, and correction rules are kept with your local settings.
-- **Use cloud or local recognition.** Listener supports Volcengine, OpenAI-compatible batch ASR, Apple Speech, Bailian realtime, macOS Qwen local ASR, and Windows Foundry Local Whisper.
-- **Keep working after dictation.** Restyle the previous result, ask about selected text, browse local history, and configure shortcuts for the actions you use most.
+| Part | What it owns | Repository |
+| --- | --- | --- |
+| Listener Type | Recording sessions, speech recognition, text processing, cursor insertion, settings, history, and the desktop device experience | This repository |
+| Listener Firmware | Microphone capture, BLE audio and HID, keys, knob, LEDs, battery and power management, diagnostics, and OTA | [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware) |
 
-When an app does not accept direct insertion, Listener keeps the result on the clipboard and asks you to paste it instead of losing the text.
+The app works without the keyboard. The keyboard extends the same dictation flow; it does not perform recognition by itself.
 
-## Try it
+## Try it in 30 seconds
 
-1. On Windows, install the latest MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases). macOS and Linux builds can be run from source.
-2. Allow microphone access and choose **Computer microphone** in Settings → Recording.
-3. Click into a text field. Press Right Ctrl on Windows or Right Option on macOS, speak, then press the shortcut again.
+1. Install the latest Windows MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases), or build the app for macOS/Linux.
+2. Allow microphone access and select **Computer microphone** under Settings → Recording.
+3. Focus a text field, press Right Ctrl on Windows, speak, then press it again. On macOS the default is Right Option.
 
-The [usage guide](docs/USAGE.md) covers providers, writing styles, vocabulary, shortcuts, history, and troubleshooting.
+The result returns to the original cursor. If the target app blocks direct insertion, Listener keeps the text on the clipboard and asks you to paste it. Press `Esc` to cancel an active recording.
+
+## What Listener includes
+
+| Area | Capabilities |
+| --- | --- |
+| Dictation | Toggle-to-record, manual stop, automatic end, cancellation, live capsule preview, computer microphone, and Listener BLE audio |
+| Recognition | Volcengine streaming, OpenAI-compatible batch ASR, Apple Speech, Bailian realtime, macOS Qwen local ASR, and Windows Foundry Local Whisper |
+| Writing | Raw, Light, Structured, and Formal styles; filler cleanup; punctuation; correction rules; translation; custom style packs with ZIP import/export |
+| Personal vocabulary | Local names, terms, abbreviations, and hotwords used by supported recognition and polish providers |
+| Follow-up tools | Ask about selected text, restyle the previous result, and use configurable global shortcuts |
+| Output | Insert into the focused field, clipboard fallback, optional Windows TSF validation path, and macOS Accessibility insertion |
+| History | Local session history, previous results, retention controls, and optional diagnostic recording |
+| Providers | Bring your own cloud keys or use supported local engines; direct, system-proxy, or custom-proxy routing per provider |
+| Desktop | Tray controls, autostart, single-instance handling, dark mode, updater UI, permissions, and exportable diagnostics |
+| Voice keyboard | Pairing, connection health, four configurable keys, clickable/rotary knob, LED brightness, low-power timers, battery status, OTA, and recovery |
+
+## From speech to the cursor
+
+```text
+microphone or Listener keyboard
+    → one recording session
+    → streaming or local recognition
+    → vocabulary and correction
+    → Raw / Light / Structured / Formal / Translation
+    → focused field, or clipboard fallback
+```
+
+Light removes standalone filler words and restores punctuation while preserving meaning. Structured organizes requests and notes. Formal tidies business writing. Raw keeps the recognition result close to what was said. Translation uses the selected target language. If a polish provider is unavailable, Listener preserves a usable raw result instead of losing the dictation.
 
 ## The Listener voice keyboard
 
-Pair the keyboard from Settings → Device. Click the knob to start or stop a dictation, rotate it for volume or brightness, and assign actions to KEY1–KEY4. The PWR, BLE, REC, AI, OK, and WARN lights show what the keyboard and desktop app are doing.
+<p align="center">
+  <img src="docs/assets/readme/keyboard-front.jpg" alt="The Listener voice keyboard: four clear keycaps, a metal knob, and status lights" width="900" />
+</p>
 
-The device page also manages battery status, light brightness, idle timers, pairing recovery, and firmware updates. Normal OTA updates preserve the Bluetooth bond and device settings.
+Pair the keyboard in Settings → Device. Click the knob to start or stop recording, double-click to reset pairing, long-press to power off, and rotate it for volume or brightness. KEY1–KEY4 support configurable single-, double-, and long-press actions. Six lights — PWR, BLE, REC, AI, OK, WARN — speak for the device; the full vocabulary is in the firmware's [light language](https://github.com/Listener-ai-Macau/Listener-Firmware#reading-the-lights).
 
-Voice-triggered recording and an optional three-sample voiceprint can be enabled from the app. They are useful input guards rather than identity authentication. We are still tuning noisy, far-field, and overlapping-speaker use, so those situations need a quick check of the final text.
+Voice-triggered recording can listen for a configurable wake phrase, with three guided voiceprint samples as an optional input guard. Voiceprint is not authentication. Firmware updates run from Listener Type and preserve pairing and device settings during a normal OTA.
 
-Read the [voice keyboard handbook](docs/quickstart/voice-keyboard-readme.md) for setup and recovery.
+See the [voice keyboard handbook](docs/quickstart/voice-keyboard-readme.md) and [firmware repository](https://github.com/Listener-ai-Macau/Listener-Firmware).
 
 <p align="center">
   <img src="docs/assets/readme/recording-settings-en.png" alt="Listener Type recording settings" width="720" />
 </p>
 
-## Your data
+## Local-first by design
 
-Settings, history, vocabulary, styles, and correction rules stay on your computer. Provider credentials use the operating system credential store, and Listener ships without provider keys. Debug audio is optional and off by default.
+Settings, history, vocabulary, styles, and correction rules stay on the computer. Provider credentials use the OS credential store; no provider key ships with the app. Optional debug audio is off by default. The exported diagnostic package is designed to report product and connection state without API keys, recordings, or transcript text.
 
-The normal dictation path does not depend on a Listener-operated account service. Recognition audio is sent only to the provider you choose when you use a cloud provider; local engines keep recognition on the computer.
+The product loop does not require a Listener-operated backend. Remote marketplace and account features remain disabled unless a compatible backend is explicitly configured.
 
-## Platform notes
+## Platform support and current limits
 
-Windows is the main release platform and supports both the computer microphone and the Listener keyboard. macOS 12+ supports computer-microphone dictation, Apple and local recognition paths, global shortcuts, and Accessibility insertion. Linux is currently a developer path; microphone dictation works, while shortcut behavior depends on X11 or the Wayland desktop environment.
+| Platform or feature | Current scope |
+| --- | --- |
+| Windows | Primary release path; computer microphone, Listener BLE audio/device controls, packaging, and cursor insertion |
+| macOS 12+ | Computer microphone, Apple/local recognition paths, global shortcut, and Accessibility insertion |
+| Linux | Computer microphone; X11 global shortcut is best effort, while Wayland uses desktop-bound CLI commands |
+| Automatic wake and voiceprint | Input convenience and interference reduction; validate final text in noisy or far-field use |
+| Multiple or overlapping speakers | Still under active repair and not guaranteed in release 1.0.5 |
+| Windows input method | The standard installer inserts into the focused field; it does not register Listener as a system IME |
 
-The standard Windows installer writes into the focused field. It does not install Listener as a system input method. A separate TSF path remains an engineering validation tool.
+These limits are part of the product contract. Detailed behavior is tracked in the [feature catalog](docs/product/features.md).
 
-## This repository
+## Release history
 
-Listener is split across three repositories:
+| Release | Product milestone |
+| --- | --- |
+| 1.0.1 | Consolidated the Listener-only desktop surface and its first packaged recognition/preview flow |
+| 1.0.3 | Accepted wake-sensitivity and false-trigger refinements with the matching firmware transfer path |
+| 1.0.4 | Established the single-user wake, pause continuation, automatic ending, and insertion baseline; multi-speaker isolation remained experimental |
+| 1.0.5 | Improved wake-to-body continuity, capsule/final separation, quiet wake capture, and keyboard feedback; far-field and overlapping-speaker reliability remain active work |
 
-- **Listener Type** owns recording sessions, recognition, writing, insertion, history, settings, and the desktop device experience.
-- [**Listener Firmware**](https://github.com/Listener-ai-Macau/Listener-Firmware) owns microphone capture, BLE audio and HID, physical controls, lights, battery and power behavior, diagnostics, and device OTA.
-- [**Denzic Platform**](https://github.com/Listener-ai-Macau/Denzic-Platform) keeps the versioned protocols and portable state machines shared by the app and firmware.
+Exact artifacts, checksums, and changes are kept on the [GitHub Releases page](https://github.com/Listener-ai-Macau/Listener-Type/releases).
 
-The app is built with Tauri 2, Rust, React, TypeScript, and Vite.
+## Download and documentation
+
+- [Latest releases](https://github.com/Listener-ai-Macau/Listener-Type/releases)
+- [1.0.5 release notes](docs/release/1.0.5.md)
+- [Usage guide](docs/USAGE.md)
+- [Product feature catalog](docs/product/features.md)
+- [Voice keyboard and device recovery](docs/quickstart/voice-keyboard-readme.md)
+- [Security policy](SECURITY.md)
+
+## Build from source
+
+Listener Type uses Tauri 2, Rust, React, TypeScript, and Vite.
 
 ```bash
 npm ci
@@ -74,6 +122,4 @@ npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-A full build also needs the pinned `third_party/denzic-platform` submodule. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, [SUPPORT.md](SUPPORT.md) for bug reports, and [SECURITY.md](SECURITY.md) for private security reports.
-
-Release notes and checksums live on the [Releases page](https://github.com/Listener-ai-Macau/Listener-Type/releases). Listener Type is available under the [Apache License 2.0](LICENSE). Parts adapted from other open-source projects remain covered by their original terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+A full desktop build also needs the `third_party/denzic-platform` submodule. Read [CONTRIBUTING.md](CONTRIBUTING.md) before contributing. This repository currently has no `LICENSE` file, so source availability alone does not grant redistribution or modification rights.
