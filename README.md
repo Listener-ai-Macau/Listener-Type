@@ -24,7 +24,7 @@ The app works without the keyboard. The keyboard extends the same dictation flow
 ## Try it in 30 seconds
 
 1. Install the latest Windows MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases), or build the app for macOS/Linux.
-2. Allow microphone access and select **Computer microphone** under Settings → Recording.
+2. Allow microphone access, select **Computer microphone** under Settings → Recording, and pick a recognition engine: paste a cloud API key, or download a local model (on macOS, Apple Speech works with no setup).
 3. Focus a text field, press Right Ctrl on Windows, speak, then press it again. On macOS the default is Right Option.
 
 The result returns to the original cursor. If the target app blocks direct insertion, Listener keeps the text on the clipboard and asks you to paste it. Press `Esc` to cancel an active recording.
