@@ -24,7 +24,7 @@
 ## 30 秒開始使用
 
 1. Windows 從 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 安裝最新 MSI；macOS/Linux 可以從原始碼建置。
-2. 允許麥克風權限，在設定 → 錄音中選擇「電腦麥克風」。
+2. 允許麥克風權限，在設定 → 錄音中選擇「電腦麥克風」，並選一個辨識引擎：填入雲端服務 API Key，或下載本機模型（macOS 上 Apple Speech 開箱即用）。
 3. 游標點進輸入框，Windows 按一下右 Ctrl，說話，再按一下；macOS 預設是右 Option。
 
 結果會插回原來的游標位置。目標應用程式不允許直接插入時，Listener 會把文字保留在剪貼簿並提示貼上。錄音中按 `Esc` 可以取消。
