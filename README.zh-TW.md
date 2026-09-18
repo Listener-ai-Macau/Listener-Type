@@ -122,4 +122,4 @@ npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-完整桌面建置還需要 `third_party/denzic-platform` 子模組。貢獻前請閱讀 [CONTRIBUTING.md](CONTRIBUTING.md)。目前倉庫沒有 `LICENSE` 檔案，因此能看到原始碼不代表自動獲得再散布或修改授權。
+完整桌面建置還需要 `third_party/denzic-platform` 子模組。貢獻前請閱讀 [CONTRIBUTING.md](CONTRIBUTING.md)。本倉庫以 [Apache-2.0 授權條款](LICENSE) 開源。

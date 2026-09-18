@@ -122,4 +122,4 @@ npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-A full desktop build also needs the `third_party/denzic-platform` submodule. Read [CONTRIBUTING.md](CONTRIBUTING.md) before contributing. This repository currently has no `LICENSE` file, so source availability alone does not grant redistribution or modification rights.
+A full desktop build also needs the `third_party/denzic-platform` submodule. Read [CONTRIBUTING.md](CONTRIBUTING.md) before contributing. Listener Type is open source under the [Apache-2.0 license](LICENSE).
