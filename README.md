@@ -42,7 +42,7 @@ The result returns to the original cursor. If the target app blocks direct inser
 | History | Local session history, previous results, retention controls, and optional diagnostic recording |
 | Providers | Bring your own cloud keys or use supported local engines; direct, system-proxy, or custom-proxy routing per provider |
 | Desktop | Tray controls, autostart, single-instance handling, dark mode, updater UI, permissions, and exportable diagnostics |
-| Voice keyboard | Pairing, connection health, four configurable keys, clickable/rotary knob, LED brightness, low-power timers, battery status, OTA, and recovery |
+| Voice keyboard | Pairing, connection health, four configurable keys, clickable/rotary knob, LED brightness, low-power timers, battery status, over-the-air (OTA) firmware updates, and recovery |
 
 ## From speech to the cursor
 
