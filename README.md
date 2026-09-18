@@ -12,6 +12,14 @@ Speak where you work. Listener Type turns speech into text at the current cursor
   <img src="docs/assets/readme/overview-en.png" alt="Listener Type home screen with recognition, model, device, and usage status" width="900" />
 </p>
 
+## Try it in 30 seconds
+
+1. Install the latest Windows MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases), or build the app for macOS/Linux.
+2. Allow microphone access, select **Computer microphone** under Settings → Recording, and pick a recognition engine: paste a cloud API key, or download a local model (on macOS, Apple Speech works with no setup).
+3. Focus a text field, press Right Ctrl on Windows, speak, then press it again. On macOS the default is Right Option.
+
+The result returns to the original cursor. If the target app blocks direct insertion, Listener keeps the text on the clipboard and asks you to paste it. Press `Esc` to cancel an active recording.
+
 ## One product, two repositories
 
 | Part | What it owns | Repository |
@@ -20,14 +28,6 @@ Speak where you work. Listener Type turns speech into text at the current cursor
 | Listener Firmware | Microphone capture, BLE audio and HID, keys, knob, LEDs, battery and power management, diagnostics, and OTA | [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware) |
 
 The app works without the keyboard. The keyboard extends the same dictation flow; it does not perform recognition by itself.
-
-## Try it in 30 seconds
-
-1. Install the latest Windows MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases), or build the app for macOS/Linux.
-2. Allow microphone access, select **Computer microphone** under Settings → Recording, and pick a recognition engine: paste a cloud API key, or download a local model (on macOS, Apple Speech works with no setup).
-3. Focus a text field, press Right Ctrl on Windows, speak, then press it again. On macOS the default is Right Option.
-
-The result returns to the original cursor. If the target app blocks direct insertion, Listener keeps the text on the clipboard and asks you to paste it. Press `Esc` to cancel an active recording.
 
 ## What Listener includes
 
@@ -90,17 +90,6 @@ The product loop does not require a Listener-operated backend. Remote marketplac
 | Windows input method | The standard installer inserts into the focused field; it does not register Listener as a system IME |
 
 These limits are part of the product contract. Detailed behavior is tracked in the [feature catalog](docs/product/features.md).
-
-## Release history
-
-| Release | Product milestone |
-| --- | --- |
-| 1.0.1 | Consolidated the Listener-only desktop surface and its first packaged recognition/preview flow |
-| 1.0.3 | Accepted wake-sensitivity and false-trigger refinements with the matching firmware transfer path |
-| 1.0.4 | Established the single-user wake, pause continuation, automatic ending, and insertion baseline; multi-speaker isolation remained experimental |
-| 1.0.5 | Improved wake-to-body continuity, capsule/final separation, quiet wake capture, and keyboard feedback; far-field and overlapping-speaker reliability remain active work |
-
-Exact artifacts, checksums, and changes are kept on the [GitHub Releases page](https://github.com/Listener-ai-Macau/Listener-Type/releases).
 
 ## Download and documentation
 
