@@ -46,14 +46,12 @@ The result returns to the original cursor. If the target app blocks direct inser
 
 ## From speech to the cursor
 
-```text
-microphone or Listener keyboard
-    → one recording session
-    → streaming or local recognition
-    → vocabulary and correction
-    → Raw / Light / Structured / Formal / Translation
-    → focused field, or clipboard fallback
-```
+<p align="center">
+  <img src="docs/assets/readme/flow.png" alt="Speak into the keyboard, Listener transcribes and cleans it, text lands at your cursor" width="900" />
+</p>
+
+> **You say:** "um tomorrow, the, the 3pm meeting, can you remind me"
+> **You get:** Remind me about the 3pm meeting tomorrow.
 
 Light removes standalone filler words and restores punctuation while preserving meaning. Structured organizes requests and notes. Formal tidies business writing. Raw keeps the recognition result close to what was said. Translation uses the selected target language. If a polish provider is unavailable, Listener preserves a usable raw result instead of losing the dictation.
 

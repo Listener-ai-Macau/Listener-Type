@@ -46,14 +46,12 @@
 
 ## 从说话到光标
 
-```text
-电脑麦克风或 Listener 语音键盘
-    → 一次录音会话
-    → 云端流式或本地识别
-    → 词库与纠错
-    → Raw / Light / Structured / Formal / 翻译
-    → 当前光标，或剪贴板兜底
-```
+<p align="center">
+  <img src="docs/assets/readme/flow.png" alt="对着键盘说话，Listener 识别并整理，文字落在光标处" width="900" />
+</p>
+
+> **你说**：「呃明天那个，就是，下午三点的会，帮我记一下」
+> **你得到**：「明天下午三点的会，帮我记一下。」
 
 Light 清理独立语气词并补标点，同时保留原意；Structured 整理需求和笔记；Formal 收拾商务表达；Raw 尽量保持识别原文；翻译按已选目标语言输出。润色服务不可用时，Listener 会保住可用的识别原文，不让整段听写丢失。
 

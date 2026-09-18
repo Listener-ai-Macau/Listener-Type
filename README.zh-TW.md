@@ -46,14 +46,12 @@
 
 ## 從說話到游標
 
-```text
-電腦麥克風或 Listener 語音鍵盤
-    → 一次錄音工作階段
-    → 雲端串流或本機辨識
-    → 詞庫與糾錯
-    → Raw / Light / Structured / Formal / 翻譯
-    → 目前游標，或剪貼簿備援
-```
+<p align="center">
+  <img src="docs/assets/readme/flow.png" alt="對著鍵盤說話，Listener 辨識並整理，文字落在游標處" width="900" />
+</p>
+
+> **你說**：「呃明天那個，就是，下午三點的會，幫我記一下」
+> **你得到**：「明天下午三點的會，幫我記一下。」
 
 Light 清理獨立語氣詞並補標點，同時保留原意；Structured 整理需求和筆記；Formal 收拾商務表達；Raw 儘量保持辨識原文；翻譯按已選目標語言輸出。潤飾服務不可用時，Listener 會保住可用的辨識原文，不讓整段聽寫遺失。
 
