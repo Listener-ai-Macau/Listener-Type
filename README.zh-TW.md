@@ -12,6 +12,14 @@
   <img src="docs/assets/readme/overview.png" alt="Listener Type 主介面：辨識、模型、裝置和使用狀態" width="900" />
 </p>
 
+## 30 秒開始使用
+
+1. Windows 從 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 安裝最新 MSI；macOS/Linux 可以從原始碼建置。
+2. 允許麥克風權限，在設定 → 錄音中選擇「電腦麥克風」，並選一個辨識引擎：填入雲端服務 API Key，或下載本機模型（macOS 上 Apple Speech 開箱即用）。
+3. 游標點進輸入框，Windows 按一下右 Ctrl，說話，再按一下；macOS 預設是右 Option。
+
+結果會插回原來的游標位置。目標應用程式不允許直接插入時，Listener 會把文字保留在剪貼簿並提示貼上。錄音中按 `Esc` 可以取消。
+
 ## 一個產品，兩個倉庫
 
 | 部分 | 負責什麼 | 倉庫 |
@@ -20,14 +28,6 @@
 | Listener Firmware | 麥克風採集、BLE 音訊與 HID、按鍵、旋鈕、燈、電池與電源管理、診斷和 OTA | [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware) |
 
 沒有語音鍵盤，軟體也能獨立使用。鍵盤擴充的是同一條聽寫流程；它本身不負責把語音辨識成文字。
-
-## 30 秒開始使用
-
-1. Windows 從 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 安裝最新 MSI；macOS/Linux 可以從原始碼建置。
-2. 允許麥克風權限，在設定 → 錄音中選擇「電腦麥克風」，並選一個辨識引擎：填入雲端服務 API Key，或下載本機模型（macOS 上 Apple Speech 開箱即用）。
-3. 游標點進輸入框，Windows 按一下右 Ctrl，說話，再按一下；macOS 預設是右 Option。
-
-結果會插回原來的游標位置。目標應用程式不允許直接插入時，Listener 會把文字保留在剪貼簿並提示貼上。錄音中按 `Esc` 可以取消。
 
 ## Listener 包含的完整能力
 
@@ -90,17 +90,6 @@ Light 清理獨立語氣詞並補標點，同時保留原意；Structured 整理
 | Windows 輸入法 | 標準安裝包向焦點框插入文字，不會把 Listener 註冊成系統輸入法 |
 
 這些邊界屬於產品說明的一部分，詳細行為見[功能目錄](docs/product/features.md)。
-
-## 版本脈絡
-
-| 版本 | 產品進展 |
-| --- | --- |
-| 1.0.1 | 收攏為 Listener 獨立桌面產品，形成首套辨識、預覽和安裝包流程 |
-| 1.0.3 | 完成喚醒靈敏度與誤觸發調整，並配套韌體音訊傳輸路徑 |
-| 1.0.4 | 建立單人喚醒、停頓續說、自動結束和文字插入基線；多人隔離仍是實驗能力 |
-| 1.0.5 | 改善喚醒後正文連續性、膠囊與終稿分離、輕聲喚醒和鍵盤回饋；遠距離與多人重疊仍在修復 |
-
-準確安裝包、校驗值和逐版改動以 [GitHub Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 為準。
 
 ## 下載與文件
 

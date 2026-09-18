@@ -12,6 +12,14 @@
   <img src="docs/assets/readme/overview.png" alt="Listener Type 主界面：识别、模型、设备和使用状态" width="900" />
 </p>
 
+## 30 秒开始使用
+
+1. Windows 从 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 安装最新 MSI；macOS/Linux 可以从源码构建。
+2. 允许麦克风权限，在设置 → 录音中选择“电脑麦克风”，并选一个识别引擎：填入云服务 API Key，或下载本地模型（macOS 上 Apple Speech 开箱即用）。
+3. 光标点进输入框，Windows 按一下右 Ctrl，说话，再按一下；macOS 默认是右 Option。
+
+结果会插回原来的光标位置。目标应用不允许直接插入时，Listener 会把文字保留在剪贴板并提示粘贴。录音中按 `Esc` 可以取消。
+
 ## 一个产品，两个仓库
 
 | 部分 | 负责什么 | 仓库 |
@@ -20,14 +28,6 @@
 | Listener Firmware | 麦克风采集、BLE 音频与 HID、按键、旋钮、灯、电池与电源管理、诊断和 OTA | [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware) |
 
 没有语音键盘，软件也能独立使用。键盘扩展的是同一条听写流程；它本身不负责把语音识别成文字。
-
-## 30 秒开始使用
-
-1. Windows 从 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 安装最新 MSI；macOS/Linux 可以从源码构建。
-2. 允许麦克风权限，在设置 → 录音中选择“电脑麦克风”，并选一个识别引擎：填入云服务 API Key，或下载本地模型（macOS 上 Apple Speech 开箱即用）。
-3. 光标点进输入框，Windows 按一下右 Ctrl，说话，再按一下；macOS 默认是右 Option。
-
-结果会插回原来的光标位置。目标应用不允许直接插入时，Listener 会把文字保留在剪贴板并提示粘贴。录音中按 `Esc` 可以取消。
 
 ## Listener 包含的完整能力
 
@@ -90,17 +90,6 @@ Light 清理独立语气词并补标点，同时保留原意；Structured 整理
 | Windows 输入法 | 标准安装包向焦点框插入文字，不会把 Listener 注册成系统输入法 |
 
 这些边界属于产品说明的一部分，详细行为见[功能目录](docs/product/features.md)。
-
-## 版本脉络
-
-| 版本 | 产品进展 |
-| --- | --- |
-| 1.0.1 | 收拢为 Listener 独立桌面产品，形成首套识别、预览和安装包链路 |
-| 1.0.3 | 完成唤醒灵敏度与误触发调整，并配套固件音频传输路径 |
-| 1.0.4 | 建立单人唤醒、停顿续说、自动结束和文字插入基线；多人隔离仍是实验能力 |
-| 1.0.5 | 改善唤醒后正文连续性、胶囊与终稿分离、轻声唤醒和键盘反馈；远距离与多人重叠仍在修复 |
-
-准确安装包、校验值和逐版改动以 [GitHub Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 为准。
 
 ## 下载与文档
 
