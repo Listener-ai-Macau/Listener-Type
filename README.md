@@ -51,6 +51,7 @@ The result returns to the original cursor. If the target app blocks direct inser
 </p>
 
 > **You say:** "um tomorrow, the, the 3pm meeting, can you remind me"
+>
 > **You get:** Remind me about the 3pm meeting tomorrow.
 
 Light removes standalone filler words and restores punctuation while preserving meaning. Structured organizes requests and notes. Formal tidies business writing. Raw keeps the recognition result close to what was said. Translation uses the selected target language. If a polish provider is unavailable, Listener preserves a usable raw result instead of losing the dictation.
