@@ -39,6 +39,7 @@ Windows 文字插入会按运行时能力选择原生路径，失败时回退到
 
 - macOS 12+：1.0.5 只发布了 Windows 安装包，macOS 需要按仓库 README 从源码构建；
   运行后允许「麦克风」和「辅助功能」，授权辅助功能后完全退出并重新打开应用。
+  macOS 正式支持（含 Apple Speech 识别与安装包）在路线图中。
 - Linux：X11 使用 best-effort 全局热键；Wayland 不允许应用直接监听全局按键，
   请在桌面环境中绑定下方 CLI 命令。Listener BLE 的完整验证仍以 Windows 为主。
 
