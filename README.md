@@ -12,6 +12,16 @@ Speak where you work. Listener Type turns speech into text at the current cursor
   <img src="docs/assets/readme/overview-en.png" alt="Listener Type home screen with recognition, model, device, and usage status" width="900" />
 </p>
 
+## Why Listener
+
+- **No account, no subscription.** The app is open source; recognition runs on your own cloud keys or fully on local models. Your audio goes only where you choose.
+- **Finished text, not raw speech.** Filler words removed, punctuation restored, structure tidied — what lands at the cursor is ready to send.
+- **Hands stay where they are.** Say the wake phrase and recording starts; with the voice keyboard you can lean back from the desk and just talk — click the knob to stop.
+- **It knows your voice.** An optional voiceprint keeps a colleague's chatter out of your text.
+- **Point and ask.** Select any text on screen and ask about it out loud — the answer opens right there.
+
+Built-in dictation types what you said and stops. Listener takes one more step — cleanup, translation, your own vocabulary — and leaves you in control of where the data goes.
+
 ## Try it in 30 seconds
 
 1. Install the latest Windows MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases), or build the app for macOS/Linux.
@@ -64,7 +74,7 @@ Light removes standalone filler words and restores punctuation while preserving 
 
 Pair the keyboard in Settings → Device. Click the knob to start or stop recording, double-click to reset pairing, long-press to power off, and rotate it for volume or brightness. KEY1–KEY4 support configurable single-, double-, and long-press actions. Six lights — PWR, BLE, REC, AI, OK, WARN — speak for the device; the full vocabulary is in the firmware's [light language](https://github.com/Listener-ai-Macau/Listener-Firmware#reading-the-lights).
 
-Voice-triggered recording can listen for a configurable wake phrase, with three guided voiceprint samples as an optional input guard. Voiceprint is not authentication. Firmware updates run from Listener Type and preserve pairing and device settings during a normal OTA.
+Just start talking: a configurable wake phrase begins recording hands-free, and three guided voiceprint samples teach the device to prefer your voice over nearby chatter. Firmware updates run from Listener Type and preserve pairing and device settings during a normal OTA.
 
 See the [voice keyboard handbook](docs/quickstart/voice-keyboard-readme.md) and [firmware repository](https://github.com/Listener-ai-Macau/Listener-Firmware).
 
