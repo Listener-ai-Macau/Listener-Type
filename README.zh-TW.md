@@ -12,6 +12,16 @@
   <img src="docs/assets/readme/overview.png" alt="Listener Type 主介面：辨識、模型、裝置和使用狀態" width="900" />
 </p>
 
+## 為什麼是 Listener
+
+- **不用註冊，沒有訂閱。** 軟體開源免費；辨識可以走你自己的雲 Key，也可以完全用本機模型。聲音去了哪裡，由你決定。
+- **說完就是成品。** 不只是把語音變成字——順手去掉「呃」「那個」、補好標點、理出結構，落進游標的文字直接能發。
+- **手不用回到鍵盤。** 說聲喚醒詞就開始錄；配上語音鍵盤，靠著椅背、離開桌面也能說，旋鈕一按就停。
+- **只認你的聲音。** 可選聲紋讓旁邊人的閒聊不進你的正文。
+- **選中就能問。** 螢幕上任何一段文字，選中它，開口提問，答案在原地展開。
+
+系統內建語音輸入把字打出來就結束了；Listener 多走半步——整理、翻譯、記住你的詞庫，並且資料去向由你選的 Provider 決定。
+
 ## 30 秒開始使用
 
 1. Windows 從 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 安裝最新 MSI；macOS/Linux 可以從原始碼建置。
@@ -64,7 +74,7 @@ Light 清理獨立語氣詞並補標點，同時保留原意；Structured 整理
 
 在設定 → 裝置中配對。單擊旋鈕開始或停止，雙擊重設配對，長按關機，旋轉可調音量或亮度。KEY1–KEY4 的單擊、雙擊、長按都能設定動作。PWR、BLE、REC、AI、OK、WARN 六顆燈替裝置說話，完整「燈語」見韌體倉庫的[燈效說明](https://github.com/Listener-ai-Macau/Listener-Firmware/blob/master/README.zh-TW.md#燈在說什麼)。
 
-自動語音開始可以等待自訂喚醒詞，並可錄三段引導聲紋作為輸入保護。聲紋不是身分認證。韌體可以在 Listener Type 中 OTA，正常升級會保留配對和裝置設定。
+開口即錄：自訂喚醒詞，說一句話就開始；可選錄三段引導聲紋，讓裝置優先認你的聲音，旁邊人的閒聊不進正文。韌體可以在 Listener Type 中 OTA，正常升級會保留配對和裝置設定。
 
 詳細操作見[語音鍵盤手冊](docs/quickstart/voice-keyboard-readme.md)和[韌體倉庫](https://github.com/Listener-ai-Macau/Listener-Firmware)。
 
