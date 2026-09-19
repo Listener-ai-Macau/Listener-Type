@@ -14,17 +14,17 @@ Speak where you work. Listener Type turns speech into text at the current cursor
 
 ## Why Listener
 
-- **Buy the keyboard, get the subscription.** The app is open source and free today — no sign-up needed; the keyboard ships with a bundled cloud subscription for the full experience. Recognition can also run fully on local models, so your audio goes only where you choose.
-- **Finished text, not raw speech.** Filler words removed, punctuation restored, structure tidied — what lands at the cursor is ready to send.
-- **Hands stay where they are.** Say the wake phrase and recording starts; with the voice keyboard you can lean back from the desk and just talk — click the knob to stop.
-- **It knows your voice.** An optional voiceprint keeps a colleague's chatter out of your text.
-- **Point and ask.** Select any text on screen and ask about it out loud — the answer opens right there.
-- **Six lights watch the progress for you.** Green is done, gold is listening, purple is thinking, red needs attention — no need to look at the screen.
-- **Looks good on a desk.** Clear keycaps, a metal knob, per-zone lighting — an object on your desk, not just a peripheral.
-- **Useful keys out of the box.** KEY3 is paste by default; all four keys remap click, double-click, and long-press. Unassigned keys only emit harmless F13–F24 codes — nothing ever types itself.
-- **It naps when you don't.** Idle dims to sleep and any key wakes it; long idle powers off, one knob click brings it back.
+- **Buy the keyboard, get the subscription.** The app itself is open source and free — download it and use it today, no sign-up. The keyboard ships with a bundled cloud subscription. Prefer to stay offline? Recognition can run entirely on local models, so your audio goes only where you choose.
+- **Finished text, not raw speech.** It drops the "um"s, fixes the punctuation, and turns a ramble into text you can send as-is.
+- **Hands stay where they are.** Say your wake phrase and it starts; click the knob to stop. No need to be at the keyboard.
+- **It knows your voice.** Record three voiceprint samples, and a colleague's chatter stays out of your text.
+- **Point and ask.** See a passage you don't understand? Select it and just ask out loud.
+- **Six lights, one job each.** Green is done, gold is listening, purple is thinking, red means trouble. No need to watch the screen.
+- **Looks good on a desk.** Clear keycaps, a metal knob, and lighting you can tune zone by zone.
+- **Useful keys out of the box.** KEY3 is paste by default; every key's click, double-click, and long-press can be remapped. Keys you haven't set up can't type garbage — they only emit harmless fallback codes.
+- **Left alone, it naps.** A minute or so of quiet and the lights go dark; any key wakes it. Ignore it for ten minutes and it powers off — one knob click brings it back.
 
-Built-in dictation types what you said and stops. Listener takes one more step — cleanup, translation, your own vocabulary — and leaves you in control of where the data goes.
+Built-in dictation stops at the words. Listener goes one step further — cleanup, translation, and it learns your vocabulary — while you decide where the data goes.
 
 ## Try it in 30 seconds
 
