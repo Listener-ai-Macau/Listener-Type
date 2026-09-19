@@ -12,6 +12,16 @@
   <img src="docs/assets/readme/overview.png" alt="Listener Type 主界面：识别、模型、设备和使用状态" width="900" />
 </p>
 
+## 为什么是 Listener
+
+- **不用注册，没有订阅。** 软件开源免费；识别可以走你自己的云 Key，也可以完全用本地模型。声音去了哪里，由你决定。
+- **说完就是成品。** 不只是把语音变成字——顺手去掉「呃」「那个」、补好标点、理出结构，落进光标的文字直接能发。
+- **手不用回到键盘。** 说声唤醒词就开始录；配上语音键盘，靠着椅背、离开桌面也能说，旋钮一按就停。
+- **只认你的声音。** 可选声纹让旁边人的闲聊不进你的正文。
+- **选中就能问。** 屏幕上任何一段文字，选中它，开口提问，答案在原地展开。
+
+系统自带语音输入把字打出来就结束了；Listener 多走半步——整理、翻译、记住你的词库，并且数据去向由你选的 Provider 决定。
+
 ## 30 秒开始使用
 
 1. Windows 从 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 安装最新 MSI；macOS/Linux 可以从源码构建。
@@ -64,7 +74,7 @@ Light 清理独立语气词并补标点，同时保留原意；Structured 整理
 
 在设置 → 设备中配对。单击旋钮开始或停止，双击重置配对，长按关机，旋转可调音量或亮度。KEY1–KEY4 的单击、双击、长按都能配置动作。PWR、BLE、REC、AI、OK、WARN 六颗灯替设备说话，完整「灯语」见固件仓库的[灯效说明](https://github.com/Listener-ai-Macau/Listener-Firmware/blob/master/README.zh.md#灯在说什么)。
 
-自动语音开始可以等待自定义唤醒词，并可录三段引导声纹作为输入保护。声纹不是身份认证。固件可以在 Listener Type 中 OTA，正常升级会保留配对和设备设置。
+开口即录：自定义唤醒词，说一句话就开始；可选录三段引导声纹，让设备优先认你的声音，旁边人的闲聊不进正文。固件可以在 Listener Type 中 OTA，正常升级会保留配对和设备设置。
 
 详细操作见[语音键盘手册](docs/quickstart/voice-keyboard-readme.md)和[固件仓库](https://github.com/Listener-ai-Macau/Listener-Firmware)。
 
