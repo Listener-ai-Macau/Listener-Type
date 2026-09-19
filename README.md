@@ -14,11 +14,15 @@ Speak where you work. Listener Type turns speech into text at the current cursor
 
 ## Why Listener
 
-- **No account, no subscription.** The app is open source; recognition runs on your own cloud keys or fully on local models. Your audio goes only where you choose.
+- **Buy the keyboard, get the subscription.** The app is open source and free today — no sign-up needed; the keyboard ships with a bundled cloud subscription for the full experience. Recognition can also run fully on local models, so your audio goes only where you choose.
 - **Finished text, not raw speech.** Filler words removed, punctuation restored, structure tidied — what lands at the cursor is ready to send.
 - **Hands stay where they are.** Say the wake phrase and recording starts; with the voice keyboard you can lean back from the desk and just talk — click the knob to stop.
 - **It knows your voice.** An optional voiceprint keeps a colleague's chatter out of your text.
 - **Point and ask.** Select any text on screen and ask about it out loud — the answer opens right there.
+- **Six lights watch the progress for you.** Green is done, gold is listening, purple is thinking, red needs attention — no need to look at the screen.
+- **Looks good on a desk.** Clear keycaps, a metal knob, per-zone lighting — an object on your desk, not just a peripheral.
+- **Useful keys out of the box.** KEY3 is paste by default; all four keys remap click, double-click, and long-press. Unassigned keys only emit harmless F13–F24 codes — nothing ever types itself.
+- **It naps when you don't.** Idle dims to sleep and any key wakes it; long idle powers off, one knob click brings it back.
 
 Built-in dictation types what you said and stops. Listener takes one more step — cleanup, translation, your own vocabulary — and leaves you in control of where the data goes.
 
