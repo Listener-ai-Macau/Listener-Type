@@ -45,9 +45,9 @@ Windows 文字插入会按运行时能力选择原生路径，失败时回退到
 ## 最短成功路径
 
 1. 把光标放进任意文本框（记事本、浏览器、聊天框或编辑器）。
-2. 按一次录音快捷键，看到胶囊进入 `Recording`。
+2. 按一次录音快捷键，胶囊出现并开始跟着你的声音显示实时文字。
 3. 正常说话；自然停顿不会自动提交。
-4. 再按一次同一快捷键，进入 `Transferring` / `Transcribing` / `Processing`。
+4. 再按一次同一快捷键，胶囊转为处理状态（识别、整理、翻译）。
 5. 处理完成后，文字会插入原来的光标位置；如果目标应用拒绝自动输入，文字会
    保留在剪贴板并提示手动粘贴。
 
@@ -140,9 +140,9 @@ Listener Type 后端并完成相应登录后，远程上传、点赞等能力才
 ## Provider 和网络
 
 Listener Type 不内置开发者 API Key，云端调用使用你自己配置的凭据。可选 ASR
-包括火山引擎流式、OpenAI-compatible 批量、Apple Speech、本地 Qwen ASR 和
-Windows Foundry Local；润色可使用 Ark、DeepSeek/OpenAI-compatible、Anthropic-
-compatible 或自定义 OpenAI-compatible 服务。
+包括火山引擎流式、OpenAI-compatible 批量、百炼实时、本地 Qwen ASR（macOS）和
+Windows Foundry Local；润色可使用 Ark、DeepSeek 或其他 OpenAI-compatible
+服务，以「设置 → Provider」中的列表为准。
 
 在「设置 → Provider」选择服务并填写 Key、Base URL、模型等字段；在「设置 → 权限」
 确认网络状态。每个 Provider 都有 Network 选项：
@@ -272,8 +272,8 @@ listener-type --cancel-dictation
 | 关闭窗口后又出现 | X 只是隐藏到托盘；检查「开机自启」，需要结束进程请用托盘退出或 `--quit` |
 
 仍无法定位时，在「设置 → 关于」导出诊断包，并记录版本、复现步骤、输入源和安装
-包 SHA-256。诊断包用于连接、会话和设备状态定位，不包含 API Key、录音或转写正文；
-不要把凭据粘贴到 issue 或日志中。
+包 SHA-256。诊断包用于连接、会话和设备状态定位，不包含 API Key 或转写正文；
+开启过调试录音时会附带最近的调试音频样本。不要把凭据粘贴到 issue 或日志中。
 
 ## 隐私和产品边界
 
