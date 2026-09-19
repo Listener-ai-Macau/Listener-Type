@@ -25,7 +25,7 @@
 ## 30 秒开始使用
 
 1. Windows 从 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 安装最新 MSI；macOS/Linux 可以从源码构建。
-2. 允许麦克风权限，在设置 → 录音中选择“电脑麦克风”，并选一个识别引擎：填入云服务 API Key，或下载本地模型（macOS 上 Apple Speech 开箱即用）。
+2. 允许麦克风权限，在设置 → 录音中选择“电脑麦克风”，并选一个识别引擎：填入云服务 API Key，或下载本地模型离线识别。
 3. 光标点进输入框，Windows 按一下右 Ctrl，说话，再按一下；macOS 默认是右 Option。
 
 结果会插回原来的光标位置。目标应用不允许直接插入时，Listener 会把文字保留在剪贴板并提示粘贴。录音中按 `Esc` 可以取消。
@@ -44,7 +44,7 @@
 | 范围 | 功能 |
 | --- | --- |
 | 听写 | 切换式录音、手动停止、自动结束、取消、胶囊实时预览、电脑麦克风和 Listener BLE 音频 |
-| 识别 | 火山引擎流式、OpenAI 兼容批量 ASR、Apple Speech、百炼实时、macOS Qwen 本地识别、Windows Foundry Local Whisper |
+| 识别 | 火山引擎流式、OpenAI 兼容批量 ASR、百炼实时、macOS Qwen 本地识别、Windows Foundry Local Whisper |
 | 文字处理 | Raw、Light、Structured、Formal；语气词清理、标点、纠错规则、翻译、自定义风格包和 ZIP 导入导出 |
 | 个人词库 | 人名、术语、缩写和热词；供支持的识别及润色服务使用 |
 | 后续处理 | 对选中文字提问、给上一条结果切换风格、可配置全局快捷键 |
@@ -84,7 +84,7 @@ Light 清理独立语气词并补标点，同时保留原意；Structured 整理
 
 ## 本地优先
 
-设置、历史、词库、风格和纠错规则保存在电脑上。Provider 凭据进入系统凭据库，应用不内置任何服务商 Key。可选调试录音默认关闭。诊断包用于报告产品和连接状态，设计上不包含 API Key、录音和转写正文。
+设置、历史、词库、风格和纠错规则保存在电脑上。Provider 凭据进入系统凭据库，应用不内置任何服务商 Key。可选调试录音默认关闭。诊断包用于报告产品和连接状态，不包含 API Key 和转写正文；只有你主动开启过调试录音，才会附带最近的调试音频样本。
 
 核心使用链路不依赖 Listener 自营后端。远程市场和账号功能只有显式配置兼容后端后才启用。
 
