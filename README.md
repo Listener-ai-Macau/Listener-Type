@@ -44,7 +44,7 @@ The app works without the keyboard. The keyboard extends the same dictation flow
 | Area | Capabilities |
 | --- | --- |
 | Dictation | Toggle-to-record, manual stop, automatic end, cancellation, live capsule preview, computer microphone, and Listener BLE audio |
-| Recognition | Volcengine streaming, OpenAI-compatible batch ASR, Bailian realtime, macOS Qwen local ASR, and Windows Foundry Local Whisper |
+| Recognition | Volcengine streaming, OpenAI-compatible batch ASR, Bailian realtime, macOS Qwen local ASR (Apple Speech planned), and Windows Foundry Local Whisper |
 | Writing | Raw, Light, Structured, and Formal styles; filler cleanup; punctuation; correction rules; translation; custom style packs with ZIP import/export |
 | Personal vocabulary | Local names, terms, abbreviations, and hotwords used by supported recognition and polish providers |
 | Follow-up tools | Ask about selected text, restyle the previous result, and use configurable global shortcuts |
@@ -93,7 +93,7 @@ The product loop does not require a Listener-operated backend. Remote marketplac
 | Platform or feature | Current scope |
 | --- | --- |
 | Windows | Primary release path; computer microphone, Listener BLE audio/device controls, packaging, and cursor insertion |
-| macOS 12+ | Computer microphone, Apple/local recognition paths, global shortcut, and Accessibility insertion |
+| macOS 12+ | Planned: Apple Speech recognition, Accessibility insertion, packaged app. Today: build from source — computer microphone, local-model recognition, global shortcut |
 | Linux | Computer microphone; X11 global shortcut is best effort, while Wayland uses desktop-bound CLI commands |
 | Automatic wake and voiceprint | Input convenience and interference reduction; validate final text in noisy or far-field use |
 | Multiple or overlapping speakers | Still under active repair and not guaranteed in release 1.0.5 |
