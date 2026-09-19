@@ -25,7 +25,7 @@ Built-in dictation types what you said and stops. Listener takes one more step �
 ## Try it in 30 seconds
 
 1. Install the latest Windows MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases), or build the app for macOS/Linux.
-2. Allow microphone access, select **Computer microphone** under Settings → Recording, and pick a recognition engine: paste a cloud API key, or download a local model (on macOS, Apple Speech works with no setup).
+2. Allow microphone access, select **Computer microphone** under Settings → Recording, and pick a recognition engine: paste a cloud API key, or download a local model for offline recognition.
 3. Focus a text field, press Right Ctrl on Windows, speak, then press it again. On macOS the default is Right Option.
 
 The result returns to the original cursor. If the target app blocks direct insertion, Listener keeps the text on the clipboard and asks you to paste it. Press `Esc` to cancel an active recording.
@@ -44,7 +44,7 @@ The app works without the keyboard. The keyboard extends the same dictation flow
 | Area | Capabilities |
 | --- | --- |
 | Dictation | Toggle-to-record, manual stop, automatic end, cancellation, live capsule preview, computer microphone, and Listener BLE audio |
-| Recognition | Volcengine streaming, OpenAI-compatible batch ASR, Apple Speech, Bailian realtime, macOS Qwen local ASR, and Windows Foundry Local Whisper |
+| Recognition | Volcengine streaming, OpenAI-compatible batch ASR, Bailian realtime, macOS Qwen local ASR, and Windows Foundry Local Whisper |
 | Writing | Raw, Light, Structured, and Formal styles; filler cleanup; punctuation; correction rules; translation; custom style packs with ZIP import/export |
 | Personal vocabulary | Local names, terms, abbreviations, and hotwords used by supported recognition and polish providers |
 | Follow-up tools | Ask about selected text, restyle the previous result, and use configurable global shortcuts |
@@ -84,7 +84,7 @@ See the [voice keyboard handbook](docs/quickstart/voice-keyboard-readme.md) and 
 
 ## Local-first by design
 
-Settings, history, vocabulary, styles, and correction rules stay on the computer. Provider credentials use the OS credential store; no provider key ships with the app. Optional debug audio is off by default. The exported diagnostic package is designed to report product and connection state without API keys, recordings, or transcript text.
+Settings, history, vocabulary, styles, and correction rules stay on the computer. Provider credentials use the OS credential store; no provider key ships with the app. Optional debug audio is off by default. The exported diagnostic package reports product and connection state without API keys or transcript text; recent debug audio samples are included only if you explicitly enabled debug recording.
 
 The product loop does not require a Listener-operated backend. Remote marketplace and account features remain disabled unless a compatible backend is explicitly configured.
 
