@@ -35,6 +35,29 @@ fn enrolled_terminal_local_near_can_accept(
 }
 
 #[cfg(target_os = "windows")]
+fn open_terminal_local_near_can_accept(
+    verification: &Result<crate::speaker_verification::VerificationResult, String>,
+    confirmation: &LocalWakeConfirmation,
+    phrase_chars: usize,
+    task_origin_bytes: usize,
+) -> bool {
+    // Session 2274297156 (2026-09-20 08:37): accented owner wake transcribed
+    // "开su音…" (prefix 1, distance 2, head-aligned, body text) while the
+    // drifted bank could not enroll-match, so every enrolled near tier was
+    // dead. The kernel tier adds the voiceprint floor as the bystander guard.
+    crate::speech_decision_kernel::open_near_phrase_wake_can_activate(
+        crate::speech_decision_kernel::OpenNearPhraseWakeEvidence {
+            voiceprint_score: verification.as_ref().ok().map(|result| result.score),
+            task_origin_bytes,
+            best_window_start: confirmation.phonetic_best_window_start,
+            best_distance: confirmation.phonetic_best_distance,
+            transcript_chars: confirmation.transcript_chars,
+            phrase_chars,
+        },
+    )
+}
+
+#[cfg(target_os = "windows")]
 fn enrolled_terminal_kws_phonetic_fusion_signal(
     enrolled_owner_matched: bool,
     confirmation: &LocalWakeConfirmation,

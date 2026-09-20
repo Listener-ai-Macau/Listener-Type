@@ -1266,6 +1266,49 @@ pub(crate) const fn repeated_owner_near_phrase_wake_can_activate(
     owner_matched && owner_score >= 0.42 && confirmations >= 2
 }
 
+pub(crate) const OPEN_NEAR_PHRASE_MAX_DISTANCE: usize = 2;
+/// Same non-owner floor the local-phrase owner-gate recovery trusts
+/// (OWNER_LOCAL_PHRASE_FALLBACK_MIN_SCORE). Media-only windows measure
+/// 0.01-0.11 against the re-enrolled bank while the drifted owner reads
+/// 0.2-0.44, so this boundary is the bystander guard for near-phrase wakes.
+pub(crate) const OPEN_NEAR_PHRASE_MIN_VOICEPRINT_SCORE: f32 = 0.20;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct OpenNearPhraseWakeEvidence {
+    /// Verification score of the wake audio against the enrolled bank.
+    /// None means the verifier was unavailable; the tier fails closed.
+    pub(crate) voiceprint_score: Option<f32>,
+    pub(crate) task_origin_bytes: usize,
+    pub(crate) best_window_start: usize,
+    pub(crate) best_distance: usize,
+    pub(crate) transcript_chars: usize,
+    pub(crate) phrase_chars: usize,
+}
+
+/// 2026-09-20 08:37:58 (session 2274297156): the owner's accented "开始录音"
+/// was transcribed "开su音…" — head-aligned, phonetic distance 2, body text
+/// after it — and was rejected because every near-phrase tier required the
+/// enrolled match the drifted bank could not produce, forcing the user to
+/// repeat ("wake too slow"). Open-acceptance wakes already activate on an
+/// exact phrase with no voiceprint floor at all, so this tier is strictly
+/// stricter than the existing open path: head-aligned at the candidate origin,
+/// bounded phonetic distance, body text, and a voiceprint floor at the
+/// non-owner boundary. Media near-misses of the same distance ("开始上课")
+/// read 0.01-0.11 and stay out.
+pub(crate) const fn open_near_phrase_wake_can_activate(
+    evidence: OpenNearPhraseWakeEvidence,
+) -> bool {
+    evidence.best_distance > 0
+        && evidence.best_distance <= OPEN_NEAR_PHRASE_MAX_DISTANCE
+        && evidence.task_origin_bytes == 0
+        && evidence.best_window_start == 0
+        && evidence.transcript_chars > evidence.phrase_chars
+        && match evidence.voiceprint_score {
+            Some(score) => score >= OPEN_NEAR_PHRASE_MIN_VOICEPRINT_SCORE,
+            None => false,
+        }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct LiveOwnerNearWakeEvidence {
     pub(crate) phrase_enrolled: bool,
@@ -2372,6 +2415,53 @@ mod tests {
             true, 0.419, 2
         ));
         assert!(!repeated_owner_near_phrase_wake_can_activate(true, 0.8, 1));
+    }
+
+    #[test]
+    fn open_near_phrase_tier_separates_drifted_owner_from_media_by_voiceprint_floor() {
+        use OpenNearPhraseWakeEvidence as Evidence;
+        // Session 2274297156 (2026-09-20 08:37): accented "开su音…" wake —
+        // head-aligned, distance 2, body text, bank drifted to non-match.
+        let accented_owner = Evidence {
+            voiceprint_score: Some(0.27),
+            task_origin_bytes: 0,
+            best_window_start: 0,
+            best_distance: 2,
+            transcript_chars: 21,
+            phrase_chars: 4,
+        };
+        assert!(open_near_phrase_wake_can_activate(accented_owner));
+        // Media shares the phonetic shape ("开始上课…") but reads below the
+        // non-owner floor; the verifier being unavailable fails closed.
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            voiceprint_score: Some(0.11),
+            ..accented_owner
+        }));
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            voiceprint_score: Some(0.199),
+            ..accented_owner
+        }));
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            voiceprint_score: None,
+            ..accented_owner
+        }));
+        // Head alignment, body text, and bounded distance are all required.
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            best_window_start: 2,
+            ..accented_owner
+        }));
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            task_origin_bytes: 2_560_000,
+            ..accented_owner
+        }));
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            transcript_chars: 4,
+            ..accented_owner
+        }));
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            best_distance: 3,
+            ..accented_owner
+        }));
     }
 
     #[test]

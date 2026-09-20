@@ -7984,7 +7984,9 @@ fn rolling_local_confirmation_discards_only_stale_exploratory_tasks() {
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::PresentLater,
         ..exact
     };
-    assert!(!super::stale_local_confirmation_can_activate(
+    // 2026-09-20: PresentLater no longer waits for a KWS hit, so a rotated
+    // window that contained the phrase is an activation-grade positive.
+    assert!(super::stale_local_confirmation_can_activate(
         true,
         &present_later,
         false
@@ -11667,9 +11669,11 @@ fn phonetic_near_match_requires_independent_kws_and_never_wakes_alone() {
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::PresentLater,
         ..exact
     };
+    // 2026-09-20: PresentLater no longer waits for a KWS hit at the terminal
+    // in-flight boundary either — the caller's arbitration is the safety gate.
     assert_eq!(
         super::terminal_inflight_local_decision(&later, false, 4),
-        PreserveKwsFusion
+        AcceptLocal
     );
     assert_eq!(
         super::terminal_inflight_local_decision(&later, true, 4),
@@ -11746,6 +11750,108 @@ fn terminal_owner_local_near_recovery_matches_installed_session_501_without_broa
     assert!(!super::enrolled_terminal_local_near_can_accept(
         true,
         &phrase_like_text_later,
+        4,
+        0,
+    ));
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn terminal_open_near_recovery_matches_session_2274297156_gated_by_voiceprint_floor() {
+    // 2026-09-20 08:37:58: the owner's accented wake was transcribed
+    // "开su音那你看一下…" — prefix 1, distance 2, head-aligned, body text —
+    // with a drifted bank that could not enroll-match. Every enrolled tier
+    // was dead, the only window containing the phrase was rejected, and the
+    // user had to repeat ("wake too slow"). The open tier's only bystander
+    // guard is the voiceprint floor (media-only windows read 0.01-0.11).
+    let accented_owner_wake = super::LocalWakeConfirmation {
+        matched: false,
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
+        transcript_chars: 21,
+        phonetic_prefix_units: 1,
+        phonetic_best_distance: 2,
+        phonetic_best_window_start: 0,
+        inference_ms: 640,
+        snapshot_pcm_ms: 5_000,
+        recovered_keyword_end_seconds: None,
+    };
+    let drifted_owner_voice = Ok(crate::speaker_verification::VerificationResult {
+        matched: false,
+        owner_matched: false,
+        score: 0.27,
+        policy: crate::speaker_verification::VerificationPolicy::Enrolled,
+    });
+    assert!(super::open_terminal_local_near_can_accept(
+        &drifted_owner_voice,
+        &accented_owner_wake,
+        4,
+        0,
+    ));
+
+    // Media near-misses ("开始上课…") share the phonetic shape; only the
+    // voiceprint floor separates them.
+    let media_voice = crate::speaker_verification::VerificationResult {
+        score: 0.08,
+        ..drifted_owner_voice.clone().unwrap()
+    };
+    assert!(!super::open_terminal_local_near_can_accept(
+        &Ok(media_voice),
+        &accented_owner_wake,
+        4,
+        0,
+    ));
+    let just_below_floor = crate::speaker_verification::VerificationResult {
+        score: 0.19,
+        ..drifted_owner_voice.clone().unwrap()
+    };
+    assert!(!super::open_terminal_local_near_can_accept(
+        &Ok(just_below_floor),
+        &accented_owner_wake,
+        4,
+        0,
+    ));
+    // Verifier unavailable fails closed.
+    assert!(!super::open_terminal_local_near_can_accept(
+        &Err("verify unavailable".to_string()),
+        &accented_owner_wake,
+        4,
+        0,
+    ));
+    // Buried near-miss, tail confirm window, no body text, and distance 3
+    // all stay out.
+    let buried = super::LocalWakeConfirmation {
+        phonetic_best_window_start: 2,
+        ..accented_owner_wake
+    };
+    assert!(!super::open_terminal_local_near_can_accept(
+        &drifted_owner_voice,
+        &buried,
+        4,
+        0,
+    ));
+    assert!(!super::open_terminal_local_near_can_accept(
+        &drifted_owner_voice,
+        &accented_owner_wake,
+        4,
+        80_000 * 32,
+    ));
+    let no_body = super::LocalWakeConfirmation {
+        transcript_chars: 4,
+        ..accented_owner_wake
+    };
+    assert!(!super::open_terminal_local_near_can_accept(
+        &drifted_owner_voice,
+        &no_body,
+        4,
+        0,
+    ));
+    let too_far = super::LocalWakeConfirmation {
+        phonetic_best_distance: 3,
+        ..accented_owner_wake
+    };
+    assert!(!super::open_terminal_local_near_can_accept(
+        &drifted_owner_voice,
+        &too_far,
         4,
         0,
     ));
@@ -11941,7 +12047,7 @@ fn exact_phrase_only_local_confirmation_refines_late_keyword_boundary() {
 
 #[cfg(target_os = "windows")]
 #[test]
-fn local_only_second_chance_requires_a_start_aligned_phrase() {
+fn local_only_second_chance_accepts_present_later_without_waiting_for_kws() {
     use crate::wake_phrase::LocalPhraseRelation;
 
     assert!(super::local_confirmation_can_activate(
@@ -11952,7 +12058,11 @@ fn local_only_second_chance_requires_a_start_aligned_phrase() {
         false,
         LocalPhraseRelation::PhoneticStart
     ));
-    assert!(!super::local_confirmation_can_activate(
+    // 2026-09-20 (session 2274297156 family): holding PresentLater for a KWS
+    // hit only delayed the same acceptance to the terminal pass. The contained
+    // phrase now releases immediately; voiceprint arbitration stays at the
+    // caller.
+    assert!(super::local_confirmation_can_activate(
         false,
         LocalPhraseRelation::PresentLater
     ));

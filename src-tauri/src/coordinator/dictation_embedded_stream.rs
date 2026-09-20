@@ -1696,6 +1696,28 @@ impl EmbeddedStreamingDictation {
                                     matched_keyword: None,
                                 });
                             }
+                            if open_terminal_local_near_can_accept(
+                                &verification,
+                                &result,
+                                phrase.chars().count(),
+                                task_origin_bytes,
+                            ) {
+                                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                                log::info!(
+                                    "[wake-phrase] terminal open near-phrase wake accepted (voiceprint floor) embedded_session_id={} prefix_units={} distance={} window_start={} transcript_chars={} owner_score={:.6}",
+                                    embedded_session_id,
+                                    result.phonetic_prefix_units,
+                                    result.phonetic_best_distance,
+                                    result.phonetic_best_window_start,
+                                    result.transcript_chars,
+                                    verification.as_ref().map(|result| result.score).unwrap_or_default()
+                                );
+                                return Some(crate::wake_phrase::Match {
+                                    start_seconds: None,
+                                    end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
+                                    matched_keyword: None,
+                                });
+                            }
                             match terminal_inflight_local_decision(
                                 &result,
                                 task_has_keyword_model_hit,
@@ -1939,6 +1961,30 @@ impl EmbeddedStreamingDictation {
                                                         result.phonetic_prefix_units,
                                                         result.phonetic_best_distance,
                                                         result.transcript_chars
+                                                    );
+                                                    Some(crate::wake_phrase::Match {
+                                                        start_seconds: None,
+                                                        end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
+                                                        matched_keyword: None,
+                                                    })
+                                            }
+                                            Some((result, origin_bytes))
+                                                if open_terminal_local_near_can_accept(
+                                                    &verification,
+                                                    &result,
+                                                    phrase.chars().count(),
+                                                    origin_bytes,
+                                                ) =>
+                                            {
+                                                    phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                                                    log::info!(
+                                                        "[wake-phrase] terminal open near-phrase wake accepted (voiceprint floor) embedded_session_id={} prefix_units={} distance={} window_start={} transcript_chars={} owner_score={:.6}",
+                                                        embedded_session_id,
+                                                        result.phonetic_prefix_units,
+                                                        result.phonetic_best_distance,
+                                                        result.phonetic_best_window_start,
+                                                        result.transcript_chars,
+                                                        verification.as_ref().map(|result| result.score).unwrap_or_default()
                                                     );
                                                     Some(crate::wake_phrase::Match {
                                                         start_seconds: None,
