@@ -245,6 +245,17 @@ impl EmbeddedStreamingDictation {
                 Some(message.to_string()),
                 None,
             );
+            // Session 90e1415f (2026-09-20 16:46): a stream abort that raced
+            // session begin left the coordinator in Listening with an error
+            // capsule that could never dismiss — schedule_capsule_idle only
+            // fires on phase==Idle, and nothing else drove the state machine
+            // down. Publish the pipeline error against the coordinator's
+            // current session so the phase resets; when the state is already
+            // Idle the event is ignored (InvalidPhase) and this is a no-op.
+            let coordinator_session_id = inner.state.lock().session_id;
+            if coordinator_session_id != uuid::Uuid::nil() {
+                publish_dictation_pipeline_error(inner, coordinator_session_id, message.to_string());
+            }
         }
         schedule_capsule_idle(inner, CAPSULE_STREAM_ERROR_HIDE_DELAY_MS, event_session_id);
         self.terminal_received = true;

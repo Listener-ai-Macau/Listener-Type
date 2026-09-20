@@ -1347,7 +1347,7 @@ fn wake_diagnostic_cleanup_caps_matching_files_and_keeps_unrelated_files() {
         std::process::id()
     ));
     std::fs::create_dir_all(&directory).expect("create retention fixture");
-    for index in 0..130 {
+    for index in 0..514 {
         std::fs::write(
             directory.join(format!("wake-candidate-{index:03}.wav")),
             [index as u8],
@@ -1368,8 +1368,10 @@ fn wake_diagnostic_cleanup_caps_matching_files_and_keeps_unrelated_files() {
                 .is_some_and(|value| value.eq_ignore_ascii_case("wav"))
         })
         .count();
+    // 2026-09-20: caps raised 128→512 — the per-process budget exhausted
+    // mid-day on live incident 2274297663, blinding forensics when needed.
     assert_eq!(removed, 2);
-    assert_eq!(remaining_wavs, 128);
+    assert_eq!(remaining_wavs, 512);
     assert!(unrelated.exists());
 
     std::fs::remove_dir_all(&directory).expect("remove retention fixture");
