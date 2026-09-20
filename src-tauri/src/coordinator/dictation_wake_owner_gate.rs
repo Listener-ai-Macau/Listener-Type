@@ -384,9 +384,15 @@ fn maybe_start_terminal_owner_compatible_wake_extraction(
     phrase_evidence: bool,
 ) {
     let terminal_owner_compatible = terminal_wake_source_owner_compatible(verification);
+    // 2026-09-20 (session 2274297707): interference can mask the phrase from
+    // every detector while the owner's voice still clears the non-owner floor.
+    // That masked shape is retained on the candidate and is a valid reason to
+    // start the bounded extraction — the extracted audio still has to pass
+    // phrase + enrolled verification before it can wake.
+    let masked_owner_shape = candidate.local_owner_masked_phrase_evidence;
     let decision = crate::speech_decision_kernel::decide_wake_recovery(
         crate::speech_decision_kernel::WakeRecoveryEvidence {
-            weak_phrase_hint: interference_owner_rise || phrase_evidence,
+            weak_phrase_hint: interference_owner_rise || phrase_evidence || masked_owner_shape,
             terminal_owner_compatible,
         },
     );

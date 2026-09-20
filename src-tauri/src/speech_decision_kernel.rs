@@ -1267,6 +1267,43 @@ pub(crate) const fn repeated_owner_near_phrase_wake_can_activate(
 }
 
 pub(crate) const OPEN_NEAR_PHRASE_MAX_DISTANCE: usize = 2;
+/// Same non-owner floor as the open-near tier: media-only windows read
+/// 0.01-0.11 against the enrolled bank, the owner (even mixed/drifted) 0.2+.
+/// This floor is what keeps the extraction recovery from burning CPU on
+/// ambient media windows.
+pub(crate) const MASKED_OWNER_PHRASE_MIN_VOICEPRINT_SCORE: f32 = 0.20;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct MaskedOwnerPhraseRecoveryEvidence {
+    pub(crate) bank_enrolled: bool,
+    /// Verification score of the (masked) wake audio against the bank.
+    /// None = verifier unavailable; recovery fails closed.
+    pub(crate) voiceprint_score: Option<f32>,
+    pub(crate) best_distance: usize,
+    pub(crate) transcript_chars: usize,
+}
+
+/// 2026-09-20 18:08 (session 2274297707): with interference playing, the wake
+/// window opened on the media and the owner's phrase was fully masked — local
+/// ASR transcribed unrelated garbage ("儿童衣服") at distance 4 and the KWS
+/// model missed too, so the extraction recovery (built for exactly this
+/// contamination) never started: it required phrase or owner evidence that
+/// the masking had destroyed. Start the bounded extraction when the terminal
+/// transcript heard real speech with no phrase shape and the wake audio still
+/// clears the non-owner floor. Acceptance stays fully gated on the extracted
+/// audio independently passing phrase + enrolled verification; starting the
+/// recovery only spends CPU.
+pub(crate) const fn masked_owner_phrase_recovery_should_start(
+    evidence: MaskedOwnerPhraseRecoveryEvidence,
+) -> bool {
+    evidence.bank_enrolled
+        && evidence.best_distance >= 3
+        && evidence.transcript_chars >= 4
+        && match evidence.voiceprint_score {
+            Some(score) => score >= MASKED_OWNER_PHRASE_MIN_VOICEPRINT_SCORE,
+            None => false,
+        }
+}
 /// Same non-owner floor the local-phrase owner-gate recovery trusts
 /// (OWNER_LOCAL_PHRASE_FALLBACK_MIN_SCORE). Media-only windows measure
 /// 0.01-0.11 against the re-enrolled bank while the drifted owner reads
@@ -2415,6 +2452,43 @@ mod tests {
             true, 0.419, 2
         ));
         assert!(!repeated_owner_near_phrase_wake_can_activate(true, 0.8, 1));
+    }
+
+    #[test]
+    fn masked_owner_phrase_recovery_starts_only_for_owner_shaped_garbage() {
+        use MaskedOwnerPhraseRecoveryEvidence as Evidence;
+        // Session 2274297707 (2026-09-20 18:08): interference masked the wake
+        // word into unrelated garbage ("儿童衣服", distance 4) while the owner's
+        // mixed voice still cleared the non-owner floor.
+        let masked_owner = Evidence {
+            bank_enrolled: true,
+            voiceprint_score: Some(0.27),
+            best_distance: 4,
+            transcript_chars: 4,
+        };
+        assert!(masked_owner_phrase_recovery_should_start(masked_owner));
+        // Media-only windows stay below the floor; no bank, no verifier, no
+        // real speech, and near-miss shapes (other tiers own them) stay out.
+        assert!(!masked_owner_phrase_recovery_should_start(Evidence {
+            voiceprint_score: Some(0.11),
+            ..masked_owner
+        }));
+        assert!(!masked_owner_phrase_recovery_should_start(Evidence {
+            bank_enrolled: false,
+            ..masked_owner
+        }));
+        assert!(!masked_owner_phrase_recovery_should_start(Evidence {
+            voiceprint_score: None,
+            ..masked_owner
+        }));
+        assert!(!masked_owner_phrase_recovery_should_start(Evidence {
+            transcript_chars: 2,
+            ..masked_owner
+        }));
+        assert!(!masked_owner_phrase_recovery_should_start(Evidence {
+            best_distance: 2,
+            ..masked_owner
+        }));
     }
 
     #[test]

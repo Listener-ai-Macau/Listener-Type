@@ -2043,6 +2043,12 @@ struct BufferedSpeakerCandidate {
     /// Interference can shift the phrase inside a rolling window, so this
     /// ledger is intentionally not limited to start-aligned matches.
     owner_near_phrase_confirmations: u8,
+    /// Terminal local ASR heard real speech but the phrase was fully masked
+    /// (distance >= 3) — the extraction recovery exists for exactly this
+    /// shape, but nothing started it because both phrase and owner evidence
+    /// were masked too. Consumed only with an owner voiceprint floor.
+    #[cfg(target_os = "windows")]
+    local_owner_masked_phrase_evidence: bool,
     /// Interference calibration is scoped to this candidate. A process-global
     /// baseline let a previous room/foreign-speaker candidate bias later wake
     /// decisions, making sensitivity intermittent across recordings.

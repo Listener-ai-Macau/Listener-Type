@@ -1748,6 +1748,32 @@ impl EmbeddedStreamingDictation {
                                 TerminalInflightLocalDecision::RecordAbsent => {
                                     candidate.local_absent_count =
                                         candidate.local_absent_count.saturating_add(1);
+                                    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+                                    if crate::speech_decision_kernel::masked_owner_phrase_recovery_should_start(
+                                        crate::speech_decision_kernel::MaskedOwnerPhraseRecoveryEvidence {
+                                            bank_enrolled: verification
+                                                .as_ref()
+                                                .is_ok_and(|result| matches!(
+                                                    result.policy,
+                                                    crate::speaker_verification::VerificationPolicy::Enrolled
+                                                )),
+                                            voiceprint_score: verification
+                                                .as_ref()
+                                                .ok()
+                                                .map(|result| result.score),
+                                            best_distance: result.phonetic_best_distance,
+                                            transcript_chars: result.transcript_chars,
+                                        },
+                                    ) {
+                                        candidate.local_owner_masked_phrase_evidence = true;
+                                        log::info!(
+                                            "[wake-phrase] masked owner phrase evidence retained for extraction embedded_session_id={} distance={} transcript_chars={} owner_score={:.6}",
+                                            embedded_session_id,
+                                            result.phonetic_best_distance,
+                                            result.transcript_chars,
+                                            verification.as_ref().map(|result| result.score).unwrap_or_default()
+                                        );
+                                    }
                                     if let Some(coverage) = authoritative_local_absent_coverage(
                                         result.phrase_relation,
                                         result.transcript_chars,
@@ -2010,6 +2036,32 @@ impl EmbeddedStreamingDictation {
                                                             result.phonetic_best_distance,
                                                             result.phonetic_best_window_start,
                                                             result.transcript_chars
+                                                        );
+                                                    }
+                                                    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+                                                    if crate::speech_decision_kernel::masked_owner_phrase_recovery_should_start(
+                                                        crate::speech_decision_kernel::MaskedOwnerPhraseRecoveryEvidence {
+                                                            bank_enrolled: verification
+                                                                .as_ref()
+                                                                .is_ok_and(|result| matches!(
+                                                                    result.policy,
+                                                                    crate::speaker_verification::VerificationPolicy::Enrolled
+                                                                )),
+                                                            voiceprint_score: verification
+                                                                .as_ref()
+                                                                .ok()
+                                                                .map(|result| result.score),
+                                                            best_distance: result.phonetic_best_distance,
+                                                            transcript_chars: result.transcript_chars,
+                                                        },
+                                                    ) {
+                                                        candidate.local_owner_masked_phrase_evidence = true;
+                                                        log::info!(
+                                                            "[wake-phrase] masked owner phrase evidence retained for extraction embedded_session_id={} distance={} transcript_chars={} owner_score={:.6}",
+                                                            embedded_session_id,
+                                                            result.phonetic_best_distance,
+                                                            result.transcript_chars,
+                                                            verification.as_ref().map(|result| result.score).unwrap_or_default()
                                                         );
                                                     }
                                                     if overlap_degraded_owner_phrase_evidence(
