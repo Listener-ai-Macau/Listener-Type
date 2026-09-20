@@ -2531,6 +2531,54 @@ fn final_partial_coverage_gap_from_state(state: &SyncState) -> Option<(u64, u64)
         .then_some((sent_audio_ms, transcript_end_ms))
 }
 
+/// Assemble the wake-anchored session-ownership evidence for the pure kernel
+/// decision `open_session_wake_owned_body_can_recover`. The facts are purely
+/// textual/session-state: the filter kept exactly the wake phrase while the
+/// provider transcript starts with that phrase and carries a substantial body.
+fn open_session_wake_owned_body_recovery(
+    state: &SyncState,
+    filtered: &SpeakerFilteredResult,
+    provider_result: &Value,
+) -> bool {
+    let normalize = |text: &str| {
+        text.chars()
+            .filter(|ch| ch.is_alphanumeric())
+            .collect::<String>()
+    };
+    let target_text = filtered
+        .result
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let provider_text = provider_result
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let normalized_target = normalize(target_text);
+    let normalized_provider = normalize(provider_text);
+    let normalized_phrase = state
+        .wake_speaker_phrase
+        .as_deref()
+        .map(|phrase| normalize(phrase))
+        .unwrap_or_default();
+    crate::speech_decision_kernel::open_session_wake_owned_body_can_recover(
+        crate::speech_decision_kernel::OpenSessionWakeOwnedBodyEvidence {
+            tracking_enabled: state.local_speaker_tracking_enabled,
+            wake_owner_verified: state.local_wake_owner_verified,
+            owner_isolation_frozen: state.owner_isolation_frozen,
+            hard_non_target_latched: state.local_non_target_speech_end_ms.is_some(),
+            filtered_is_wake_only: !normalized_target.is_empty()
+                && !normalized_phrase.is_empty()
+                && normalized_target == normalized_phrase,
+            provider_has_wake_anchored_body: !normalized_phrase.is_empty()
+                && normalized_provider.starts_with(&normalized_phrase)
+                && normalized_provider.len()
+                    >= normalized_phrase.len()
+                        + crate::speech_decision_kernel::OPEN_SESSION_WAKE_OWNED_MIN_BODY_CHARS,
+        },
+    )
+}
+
 /// A stable provider row that is not the verified target (or its tightly
 /// contiguous body alias) is already explicit foreign-speaker evidence.  It
 /// must reach the single final arbiter even when the local verifier has not
@@ -2541,6 +2589,13 @@ fn final_explicit_non_owner_tail(
     filtered: &SpeakerFilteredResult,
     provider_result: &Value,
 ) -> bool {
+    // 2026-09-20 0dbc59da/86768c0e: a wake that itself failed bank
+    // verification cannot license the same verifier to veto the
+    // wake-anchored body as foreign. See the kernel decision for the full
+    // rationale; a latched hard NonTarget window still vetoes inside it.
+    if open_session_wake_owned_body_recovery(state, filtered, provider_result) {
+        return false;
+    }
     let target_text = filtered
         .result
         .get("text")
@@ -7204,11 +7259,28 @@ impl VolcengineStreamingASR {
                     &speaker_filtered_result,
                     result,
                 );
+            let open_session_body_recovery =
+                open_session_wake_owned_body_recovery(&state, &speaker_filtered_result, result);
+            if has_final && open_session_body_recovery {
+                log::warn!(
+                    "[asr] open-session wake-owned body recovery: unverified wake cannot veto the wake-anchored body provider_chars={} filtered_chars={}",
+                    result
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .map_or(0, spoken_content_len),
+                    spoken_content_len(target_text),
+                );
+            }
             let provider_owner_recovery_safe = has_final
-                && !speaker_filtered_result.stable_non_target_utterance_present
-                && (final_wake_only_provider_gap_is_owner_safe(&state, result, target_text)
-                    || sequential_speaker_split_gap_is_owner_safe(&state, result, target_text)
-                    || final_unsegmented_provider_tail_is_owner_safe(&state, result, target_text));
+                && (open_session_body_recovery
+                    || (!speaker_filtered_result.stable_non_target_utterance_present
+                        && (final_wake_only_provider_gap_is_owner_safe(&state, result, target_text)
+                            || sequential_speaker_split_gap_is_owner_safe(
+                                &state, result, target_text,
+                            )
+                            || final_unsegmented_provider_tail_is_owner_safe(
+                                &state, result, target_text,
+                            ))));
             let optimistic_candidate_is_already_accepted = {
                 let normalize = |text: &str| {
                     text.chars()
@@ -13500,6 +13572,104 @@ mod tests {
             ),
             crate::speech_decision_kernel::FinalTranscriptAuthority::SpeakerFiltered
         );
+    }
+
+    #[test]
+    fn unverified_wake_cluster_split_body_is_session_owned_not_foreign() {
+        // Live sessions 0dbc59da / 86768c0e (2026-09-20): the enrolled bank
+        // drifted to a non-match, the wake was accepted through open
+        // acceptance (local_wake_owner_verified=false), and cloud diarization
+        // split the user's own continuous body into a stable speaker-1
+        // cluster while every local window read drifted-owner Uncertain
+        // (0.16-0.30, above the 0.10 hard-NonTarget floor). The filter kept
+        // only "开始录音。", the wake-phrase strip emptied the delivery, and
+        // the product reported "没有识别到语音" for 44 chars it had previewed.
+        let body = "这个任务是为什么要关闭呢？是另外的一个并行的任务。就是你这个任务，一瞬间只能执行一个吗？";
+        let result = json!({
+            "text": format!("开始录音。{body}"),
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 1032,
+                    "end_time": 2018,
+                    "text": "开始录音。"
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 2653,
+                    "end_time": 10977,
+                    "text": body,
+                }
+            ]
+        });
+        let base_state = || SyncState {
+            local_speaker_tracking_enabled: true,
+            local_wake_owner_verified: false,
+            local_speaker_profile_adaptive: false,
+            local_speaker_stable_target: true,
+            target_speaker_id: Some("0".into()),
+            wake_speaker_phrase: Some("开始录音".into()),
+            ..SyncState::default()
+        };
+        let filtered = SpeakerFilteredResult {
+            result: json!({ "text": "开始录音。" }),
+            optimistic_result: json!({ "text": "开始录音。" }),
+            speaker_info_present: true,
+            response_local_body_alias_present: false,
+            stable_non_target_utterance_present: true,
+            stable_other_speaker_present: true,
+            target_speech_end_ms: Some(2018),
+            wake_target_speech_end_ms: Some(2018),
+            stable_attributed_speech_end_ms: Some(10977),
+            pending_unattributed_text: String::new(),
+        };
+
+        assert!(open_session_wake_owned_body_recovery(
+            &base_state(),
+            &filtered,
+            &result
+        ));
+        assert!(!final_explicit_non_owner_tail(
+            &base_state(),
+            &filtered,
+            &result
+        ));
+
+        // A bank-verified wake licenses the strict isolation: the same
+        // cluster split stays an explicit non-owner veto.
+        let verified_wake_state = SyncState {
+            local_wake_owner_verified: true,
+            ..base_state()
+        };
+        assert!(!open_session_wake_owned_body_recovery(
+            &verified_wake_state,
+            &filtered,
+            &result
+        ));
+        assert!(final_explicit_non_owner_tail(
+            &verified_wake_state,
+            &filtered,
+            &result
+        ));
+
+        // A latched hard NonTarget window (media / a real second speaker)
+        // keeps the absolute veto even when the wake itself was unverified.
+        let hard_non_target_state = SyncState {
+            local_non_target_speech_end_ms: Some(10_500),
+            ..base_state()
+        };
+        assert!(!open_session_wake_owned_body_recovery(
+            &hard_non_target_state,
+            &filtered,
+            &result
+        ));
+        assert!(final_explicit_non_owner_tail(
+            &hard_non_target_state,
+            &filtered,
+            &result
+        ));
     }
 
     #[test]

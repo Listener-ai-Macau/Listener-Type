@@ -233,6 +233,51 @@ pub(crate) fn arbitrate_product_final(evidence: ProductFinalEvidence) -> Product
     ProductFinalAuthority::Empty
 }
 
+pub(crate) const OPEN_SESSION_WAKE_OWNED_MIN_BODY_CHARS: usize = 8;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct OpenSessionWakeOwnedBodyEvidence {
+    pub(crate) tracking_enabled: bool,
+    /// The wake was accepted without bank verification (open acceptance or a
+    /// drifted enrolled non-match), so the session admitted it could not
+    /// verify the waker.
+    pub(crate) wake_owner_verified: bool,
+    pub(crate) owner_isolation_frozen: bool,
+    /// A local hard NonTarget window latched during the body. Media and a
+    /// genuinely foreign speaker both produce this; the veto keeps standing.
+    pub(crate) hard_non_target_latched: bool,
+    /// Speaker filtering collapsed to exactly the wake phrase.
+    pub(crate) filtered_is_wake_only: bool,
+    /// The provider transcript starts with the wake phrase and carries at
+    /// least OPEN_SESSION_WAKE_OWNED_MIN_BODY_CHARS of body after it.
+    pub(crate) provider_has_wake_anchored_body: bool,
+}
+
+/// 2026-09-20 sessions 0dbc59da / 86768c0e: the wake itself failed bank
+/// verification (open acceptance after an enrolled non-match), the provider
+/// then transcribed 44/47 chars of continuous wake-anchored dictation, and
+/// cloud diarization split the user's own body into a second stable cluster.
+/// Every bank-relative judgment inherited the wake verifier's failure on the
+/// true owner, so the final arbiter collapsed to the wake phrase, the
+/// wake-phrase strip emptied the delivery, and the product reported
+/// "没有识别到语音" for speech it had already previewed. A session that
+/// admitted it could not verify the waker may not use the same verifier to
+/// prove the body is somebody else: the wake-anchored continuous body is
+/// session-owned, the same preference the wake-only schema gap already makes
+/// for adaptive profiles. A bank-verified wake keeps the full strict
+/// isolation; a latched hard NonTarget window (media, a real second speaker)
+/// still vetoes.
+pub(crate) const fn open_session_wake_owned_body_can_recover(
+    evidence: OpenSessionWakeOwnedBodyEvidence,
+) -> bool {
+    evidence.tracking_enabled
+        && !evidence.wake_owner_verified
+        && !evidence.owner_isolation_frozen
+        && !evidence.hard_non_target_latched
+        && evidence.filtered_is_wake_only
+        && evidence.provider_has_wake_anchored_body
+}
+
 /// Transcript ownership evidence is deliberately separate from the wake and
 /// endpoint classification. Short, high-energy windows are too small to erase
 /// text on their own, but two of them may corroborate a provider-final speaker
@@ -2557,6 +2602,53 @@ mod tests {
                 ..unrelated_phrase
             }
         ));
+    }
+
+    #[test]
+    fn open_session_wake_owned_body_recovers_unverified_cluster_split() {
+        use OpenSessionWakeOwnedBodyEvidence as Evidence;
+        // Session 0dbc59da (2026-09-20 20:47): enrolled non-match wake (open
+        // acceptance), provider heard 44 body chars, the filter kept only the
+        // wake phrase, and the delivery emptied after the wake-phrase strip.
+        let drifted_owner = Evidence {
+            tracking_enabled: true,
+            wake_owner_verified: false,
+            owner_isolation_frozen: false,
+            hard_non_target_latched: false,
+            filtered_is_wake_only: true,
+            provider_has_wake_anchored_body: true,
+        };
+        assert!(open_session_wake_owned_body_can_recover(drifted_owner));
+        // The E/F strict isolation is untouched for a bank-verified wake.
+        assert!(!open_session_wake_owned_body_can_recover(Evidence {
+            wake_owner_verified: true,
+            ..drifted_owner
+        }));
+        // A latched hard NonTarget window (media, a real second speaker) keeps
+        // its absolute veto even in an unverified session.
+        assert!(!open_session_wake_owned_body_can_recover(Evidence {
+            hard_non_target_latched: true,
+            ..drifted_owner
+        }));
+        assert!(!open_session_wake_owned_body_can_recover(Evidence {
+            owner_isolation_frozen: true,
+            ..drifted_owner
+        }));
+        assert!(!open_session_wake_owned_body_can_recover(Evidence {
+            tracking_enabled: false,
+            ..drifted_owner
+        }));
+        // No collapse signature, no recovery: a filter that kept body text is
+        // not the failure shape, and a provider without wake-anchored body has
+        // nothing session-owned to recover.
+        assert!(!open_session_wake_owned_body_can_recover(Evidence {
+            filtered_is_wake_only: false,
+            ..drifted_owner
+        }));
+        assert!(!open_session_wake_owned_body_can_recover(Evidence {
+            provider_has_wake_anchored_body: false,
+            ..drifted_owner
+        }));
     }
 
     #[test]
