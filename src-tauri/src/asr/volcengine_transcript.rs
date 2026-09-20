@@ -179,6 +179,47 @@ fn content_equal_ignoring_punctuation(left: &str, right: &str) -> bool {
     alphanumeric_fold(left) == alphanumeric_fold(right)
 }
 
+fn text_has_punctuation(text: &str) -> bool {
+    text.chars().any(|ch| ch.is_ascii_punctuation() || is_cjk_punctuation(ch))
+}
+
+fn is_cjk_punctuation(ch: char) -> bool {
+    matches!(
+        ch,
+        '，' | '。' | '！' | '？' | '；' | '：' | '、' | '“' | '”' | '‘' | '’' | '（' | '）' | '《'
+            | '》' | '…' | '—'
+    )
+}
+
+/// Session cdcf2e70 (2026-09-20 21:33): every streaming row of the final two
+/// minutes carried full punctuation (82 chars), then the protocol-final packet
+/// re-emitted the same corrected content with every punctuation mark stripped
+/// (74 = 82 - 8 marks) in BOTH `result.text` and its own utterance list. The
+/// per-response guard above has nothing punctuated to recover from inside
+/// that response; the punctuated rendering only exists in the session ledger.
+/// When the sealed final is punctuation-free but content-equal to the
+/// punctuated ledger, keep the ledger rendering — the words are identical, so
+/// this only restores display punctuation and never overrides a real content
+/// correction.
+pub(super) fn restore_punctuation_from_session_ledger(candidate: &mut String, ledger: &str) -> bool {
+    let ledger = ledger.trim();
+    if ledger.is_empty()
+        || candidate.trim().is_empty()
+        || text_has_punctuation(candidate)
+        || !text_has_punctuation(ledger)
+        || !content_equal_ignoring_punctuation(candidate, ledger)
+    {
+        return false;
+    }
+    log::info!(
+        "[asr] restored punctuation from session ledger (final re-emitted content-equal text without punctuation: {} -> {} chars)",
+        candidate.chars().count(),
+        ledger.chars().count()
+    );
+    *candidate = ledger.to_string();
+    true
+}
+
 fn choose_transcript_text(result_text: &str, utterance_text: &str) -> String {
     let result_text = result_text.trim();
     let utterance_text = utterance_text.trim();
@@ -2502,5 +2543,42 @@ mod tests {
         // "你好世界" vs "你好世界。" — not a duplicate prefix, should merge sensibly
         let result = merge_streaming_transcript("你好世界", "你好世界。");
         assert!(result.contains("你好世界"), "should contain the base text");
+    }
+
+    #[test]
+    fn punctuation_restored_from_session_ledger_for_content_equal_final() {
+        // Session cdcf2e70 (2026-09-20 21:33): the protocol-final packet
+        // re-emitted the corrected text with every punctuation mark stripped
+        // while the session ledger carried the same words punctuated.
+        let mut final_no_punct =
+            "开始录音我感觉修来修去修不好还是因为你那个什么声纹记录跟那个比对感觉是有问题或者是声纹识别的模型有问题".to_string();
+        let ledger =
+            "开始录音。我感觉修来修去修不好，还是因为你那个什么声纹记录跟那个比对，感觉是有问题，或者是声纹识别的模型有问题".to_string();
+        assert!(restore_punctuation_from_session_ledger(
+            &mut final_no_punct, &ledger
+        ));
+        assert_eq!(final_no_punct, ledger);
+
+        // A real content correction is never overridden.
+        let mut corrected = "开始录音。我感觉修不好".to_string();
+        assert!(!restore_punctuation_from_session_ledger(&mut corrected, &ledger));
+        assert_eq!(corrected, "开始录音。我感觉修不好");
+
+        // An already-punctuated final, empty inputs, an unpunctuated ledger,
+        // and different content all stay untouched.
+        let mut punctuated = ledger.clone();
+        assert!(!restore_punctuation_from_session_ledger(&mut punctuated, &ledger));
+        let mut empty = String::new();
+        assert!(!restore_punctuation_from_session_ledger(&mut empty, &ledger));
+        let mut no_ledger_punct = "你好世界".to_string();
+        assert!(!restore_punctuation_from_session_ledger(
+            &mut no_ledger_punct,
+            "再见世界"
+        ));
+        let mut different = "完全不同的内容".to_string();
+        assert!(!restore_punctuation_from_session_ledger(
+            &mut different,
+            &ledger
+        ));
     }
 }

@@ -7433,6 +7433,16 @@ impl VolcengineStreamingASR {
         } else {
             transcript_candidate_from_result(selected_result.expect("non-ledger final authority"))
         };
+        // Punctuation restoration happens before the boundary snapshot: it is
+        // a rendering fix for content-identical text (see the helper), never
+        // an ownership or shrink decision.
+        if has_final {
+            let ledger = self.state.lock().best_transcript_text.clone();
+            super::volcengine_transcript::restore_punctuation_from_session_ledger(
+                &mut candidate.text,
+                &ledger,
+            );
+        }
         // Apply the stop-boundary ceiling while this is still an unsealed
         // candidate. It is a shrink-only ownership normalization, never a
         // second final writer after the authority has been logged and sealed.
