@@ -6,23 +6,26 @@ on:
     branches: [master]
 
 jobs:
-  frontend-and-audits:
+  repository-audits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: npm run check:brand
+      - run: npm run check:cloud
+      - run: npm run check:traceability
+
+  frontend-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - name: Resolve pinned Denzic Platform commit
         id: platform-ref
         run: echo "commit=$(git rev-parse HEAD:third_party/denzic-platform)" >> "$GITHUB_OUTPUT"
-      - name: Require Denzic Platform deploy key
-        env:
-          DENZIC_PLATFORM_DEPLOY_KEY: ${{ secrets.DENZIC_PLATFORM_DEPLOY_KEY }}
-        run: test -n "$DENZIC_PLATFORM_DEPLOY_KEY" || { echo "Missing read-only DENZIC_PLATFORM_DEPLOY_KEY repository secret" >&2; exit 1; }
       - uses: actions/checkout@v6
         with:
           repository: Listener-ai-Macau/Denzic-Platform
           ref: ${{ steps.platform-ref.outputs.commit }}
           path: third_party/denzic-platform
-          ssh-key: ${{ secrets.DENZIC_PLATFORM_DEPLOY_KEY }}
           persist-credentials: false
       - uses: actions/setup-node@v6
         with:
@@ -30,9 +33,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npm run check:brand
-      - run: npm run check:cloud
-      - run: npm run check:traceability
 
   rust-check:
     runs-on: ubuntu-latest
@@ -41,16 +41,11 @@ jobs:
       - name: Resolve pinned Denzic Platform commit
         id: platform-ref
         run: echo "commit=$(git rev-parse HEAD:third_party/denzic-platform)" >> "$GITHUB_OUTPUT"
-      - name: Require Denzic Platform deploy key
-        env:
-          DENZIC_PLATFORM_DEPLOY_KEY: ${{ secrets.DENZIC_PLATFORM_DEPLOY_KEY }}
-        run: test -n "$DENZIC_PLATFORM_DEPLOY_KEY" || { echo "Missing read-only DENZIC_PLATFORM_DEPLOY_KEY repository secret" >&2; exit 1; }
       - uses: actions/checkout@v6
         with:
           repository: Listener-ai-Macau/Denzic-Platform
           ref: ${{ steps.platform-ref.outputs.commit }}
           path: third_party/denzic-platform
-          ssh-key: ${{ secrets.DENZIC_PLATFORM_DEPLOY_KEY }}
           persist-credentials: false
       - uses: actions/setup-node@v6
         with:
@@ -68,6 +63,7 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libssl-dev \
+            libudev-dev \
             libwebkit2gtk-4.1-dev \
             libxdo-dev \
             wget

@@ -12,10 +12,24 @@ Speak where you work. Listener Type turns speech into text at the current cursor
   <img src="docs/assets/readme/overview-en.png" alt="Listener Type home screen with recognition, model, device, and usage status" width="900" />
 </p>
 
+## Why Listener
+
+- **Buy the keyboard, get the subscription.** The app itself is open source and free — download it and use it today, no sign-up. The keyboard ships with a bundled cloud subscription. Prefer to stay offline? Recognition can run entirely on local models, so your audio goes only where you choose.
+- **Finished text, not raw speech.** It drops the "um"s, fixes the punctuation, and turns a ramble into text you can send as-is.
+- **Hands stay where they are.** Say your wake phrase and it starts; click the knob to stop. No need to be at the keyboard.
+- **It knows your voice.** Record three voiceprint samples, and a colleague's chatter stays out of your text.
+- **Point and ask.** See a passage you don't understand? Select it and just ask out loud.
+- **Six lights, one job each.** Green is done, gold is listening, purple is thinking, red means trouble. No need to watch the screen.
+- **Looks good on a desk.** Clear keycaps, a metal knob, and lighting you can tune zone by zone.
+- **Useful keys out of the box.** KEY3 is paste by default; every key's click, double-click, and long-press can be remapped. Keys you haven't set up can't type garbage — they only emit harmless fallback codes.
+- **Left alone, it naps.** A minute or so of quiet and the lights go dark; any key wakes it. Ignore it for ten minutes and it powers off — one knob click brings it back.
+
+Built-in dictation stops at the words. Listener goes one step further — cleanup, translation, and it learns your vocabulary — while you decide where the data goes.
+
 ## Try it in 30 seconds
 
 1. Install the latest Windows MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases), or build the app for macOS/Linux.
-2. Allow microphone access, select **Computer microphone** under Settings → Recording, and pick a recognition engine: paste a cloud API key, or download a local model (on macOS, Apple Speech works with no setup).
+2. Allow microphone access, select **Computer microphone** under Settings → Recording, and pick a recognition engine: paste a cloud API key, or download a local model for offline recognition.
 3. Focus a text field, press Right Ctrl on Windows, speak, then press it again. On macOS the default is Right Option.
 
 The result returns to the original cursor. If the target app blocks direct insertion, Listener keeps the text on the clipboard and asks you to paste it. Press `Esc` to cancel an active recording.
@@ -34,7 +48,7 @@ The app works without the keyboard. The keyboard extends the same dictation flow
 | Area | Capabilities |
 | --- | --- |
 | Dictation | Toggle-to-record, manual stop, automatic end, cancellation, live capsule preview, computer microphone, and Listener BLE audio |
-| Recognition | Volcengine streaming, OpenAI-compatible batch ASR, Apple Speech, Bailian realtime, macOS Qwen local ASR, and Windows Foundry Local Whisper |
+| Recognition | Volcengine streaming, OpenAI-compatible batch ASR, Bailian realtime, macOS Qwen local ASR (Apple Speech planned), and Windows Foundry Local Whisper |
 | Writing | Raw, Light, Structured, and Formal styles; filler cleanup; punctuation; correction rules; translation; custom style packs with ZIP import/export |
 | Personal vocabulary | Local names, terms, abbreviations, and hotwords used by supported recognition and polish providers |
 | Follow-up tools | Ask about selected text, restyle the previous result, and use configurable global shortcuts |
@@ -64,7 +78,7 @@ Light removes standalone filler words and restores punctuation while preserving 
 
 Pair the keyboard in Settings → Device. Click the knob to start or stop recording, double-click to reset pairing, long-press to power off, and rotate it for volume or brightness. KEY1–KEY4 support configurable single-, double-, and long-press actions. Six lights — PWR, BLE, REC, AI, OK, WARN — speak for the device; the full vocabulary is in the firmware's [light language](https://github.com/Listener-ai-Macau/Listener-Firmware#reading-the-lights).
 
-Voice-triggered recording can listen for a configurable wake phrase, with three guided voiceprint samples as an optional input guard. Voiceprint is not authentication. Firmware updates run from Listener Type and preserve pairing and device settings during a normal OTA.
+Just start talking: a configurable wake phrase begins recording hands-free, and three guided voiceprint samples teach the device to prefer your voice over nearby chatter. Firmware updates run from Listener Type and preserve pairing and device settings during a normal OTA.
 
 See the [voice keyboard handbook](docs/quickstart/voice-keyboard-readme.md) and [firmware repository](https://github.com/Listener-ai-Macau/Listener-Firmware).
 
@@ -74,7 +88,7 @@ See the [voice keyboard handbook](docs/quickstart/voice-keyboard-readme.md) and 
 
 ## Local-first by design
 
-Settings, history, vocabulary, styles, and correction rules stay on the computer. Provider credentials use the OS credential store; no provider key ships with the app. Optional debug audio is off by default. The exported diagnostic package is designed to report product and connection state without API keys, recordings, or transcript text.
+Settings, history, vocabulary, styles, and correction rules stay on the computer. Provider credentials use the OS credential store; no provider key ships with the app. Optional debug audio is off by default. The exported diagnostic package reports product and connection state without API keys or transcript text; recent debug audio samples are included only if you explicitly enabled debug recording.
 
 The product loop does not require a Listener-operated backend. Remote marketplace and account features remain disabled unless a compatible backend is explicitly configured.
 
@@ -83,7 +97,7 @@ The product loop does not require a Listener-operated backend. Remote marketplac
 | Platform or feature | Current scope |
 | --- | --- |
 | Windows | Primary release path; computer microphone, Listener BLE audio/device controls, packaging, and cursor insertion |
-| macOS 12+ | Computer microphone, Apple/local recognition paths, global shortcut, and Accessibility insertion |
+| macOS 12+ | Planned: Apple Speech recognition, Accessibility insertion, packaged app. Today: build from source — computer microphone, local-model recognition, global shortcut |
 | Linux | Computer microphone; X11 global shortcut is best effort, while Wayland uses desktop-bound CLI commands |
 | Automatic wake and voiceprint | Input convenience and interference reduction; validate final text in noisy or far-field use |
 | Multiple or overlapping speakers | Still under active repair and not guaranteed in release 1.0.5 |

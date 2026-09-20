@@ -21,6 +21,7 @@ const ignoredPrefixes = [
   'ref/',
   'src-tauri/target/',
   'docs/archive/upstream-provenance.md',
+  'THIRD_PARTY_NOTICES.md',
   'scripts/check-brand-residue.mjs',
   'scripts/check-cloud-services.mjs',
   'scripts/check-doc-inheritance.mjs',

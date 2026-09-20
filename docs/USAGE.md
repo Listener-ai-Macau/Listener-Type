@@ -3,7 +3,7 @@
 先看产品能做什么，用 [产品功能](product/features.md)。
 这份说明是安装、快捷键和设置的逐步操作。
 
-以 `master` 上的 tag `v1.0.5` 和已发布产物为准。不要用 `release/<版本>` 分支。
+以 GitHub Releases 上 `v1.0.5` 的发布产物为准。
 1.0.5 是当前“日常可用”基线；更完整的主人声纹贯通和真人多人干扰泛化属于 1.0.6 计划，
 不能把一次受控环境通过记录理解为任何环境下 100% 过滤。
 
@@ -37,17 +37,18 @@ Windows 文字插入会按运行时能力选择原生路径，失败时回退到
 
 ### macOS 和 Linux
 
-- macOS 12+：安装应用，允许「麦克风」和「辅助功能」；授权辅助功能后完全退出
-  并重新打开应用。
+- macOS 12+：1.0.5 只发布了 Windows 安装包，macOS 需要按仓库 README 从源码构建；
+  运行后允许「麦克风」和「辅助功能」，授权辅助功能后完全退出并重新打开应用。
+  macOS 正式支持（含 Apple Speech 识别与安装包）在路线图中。
 - Linux：X11 使用 best-effort 全局热键；Wayland 不允许应用直接监听全局按键，
   请在桌面环境中绑定下方 CLI 命令。Listener BLE 的完整验证仍以 Windows 为主。
 
 ## 最短成功路径
 
 1. 把光标放进任意文本框（记事本、浏览器、聊天框或编辑器）。
-2. 按一次录音快捷键，看到胶囊进入 `Recording`。
+2. 按一次录音快捷键，胶囊出现并开始跟着你的声音显示实时文字。
 3. 正常说话；自然停顿不会自动提交。
-4. 再按一次同一快捷键，进入 `Transferring` / `Transcribing` / `Processing`。
+4. 再按一次同一快捷键，胶囊转为处理状态（识别、整理、翻译）。
 5. 处理完成后，文字会插入原来的光标位置；如果目标应用拒绝自动输入，文字会
    保留在剪贴板并提示手动粘贴。
 
@@ -140,9 +141,9 @@ Listener Type 后端并完成相应登录后，远程上传、点赞等能力才
 ## Provider 和网络
 
 Listener Type 不内置开发者 API Key，云端调用使用你自己配置的凭据。可选 ASR
-包括火山引擎流式、OpenAI-compatible 批量、Apple Speech、本地 Qwen ASR 和
-Windows Foundry Local；润色可使用 Ark、DeepSeek/OpenAI-compatible、Anthropic-
-compatible 或自定义 OpenAI-compatible 服务。
+包括火山引擎流式、OpenAI-compatible 批量、百炼实时、本地 Qwen ASR（macOS）和
+Windows Foundry Local；润色可使用 Ark、DeepSeek 或其他 OpenAI-compatible
+服务，以「设置 → Provider」中的列表为准。
 
 在「设置 → Provider」选择服务并填写 Key、Base URL、模型等字段；在「设置 → 权限」
 确认网络状态。每个 Provider 都有 Network 选项：
@@ -272,8 +273,8 @@ listener-type --cancel-dictation
 | 关闭窗口后又出现 | X 只是隐藏到托盘；检查「开机自启」，需要结束进程请用托盘退出或 `--quit` |
 
 仍无法定位时，在「设置 → 关于」导出诊断包，并记录版本、复现步骤、输入源和安装
-包 SHA-256。诊断包用于连接、会话和设备状态定位，不包含 API Key、录音或转写正文；
-不要把凭据粘贴到 issue 或日志中。
+包 SHA-256。诊断包用于连接、会话和设备状态定位，不包含 API Key 或转写正文；
+开启过调试录音时会附带最近的调试音频样本。不要把凭据粘贴到 issue 或日志中。
 
 ## 隐私和产品边界
 

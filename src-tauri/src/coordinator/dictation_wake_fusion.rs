@@ -115,6 +115,14 @@ fn enrolled_owner_repeated_overlap_near_can_accept(
     )
 }
 
+#[cfg(not(target_os = "windows"))]
+fn enrolled_owner_repeated_overlap_near_can_accept(
+    _enrolled_owner_matched: bool,
+    _confirmations: u8,
+) -> bool {
+    false
+}
+
 #[cfg(target_os = "windows")]
 fn live_owner_near_wake_can_attempt(
     phrase_enrolled: bool,

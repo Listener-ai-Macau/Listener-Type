@@ -102,7 +102,7 @@ fn foundry_language_hint_for_working_language(language: &str) -> Option<&'static
 fn dictation_asr_engine_backend_id(active_asr: &str) -> &'static str {
     if crate::asr::local::is_local_qwen3(active_asr) {
         "local-qwen3"
-    } else if foundry::is_foundry_local_whisper(active_asr) {
+    } else if crate::asr::local::foundry::is_foundry_local_whisper(active_asr) {
         "foundry-local-whisper"
     } else if is_bailian_provider(active_asr) {
         "bailian"
@@ -153,4 +153,3 @@ fn log_dictation_asr_engine_selection(session_id: SessionId, active_asr: &str) {
         );
     }
 }
-
