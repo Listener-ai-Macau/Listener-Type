@@ -313,36 +313,44 @@ fn append_verified_wake_session_exemplar(
     true
 }
 
-/// Union the persisted owner bank with the wake exemplar that anchors the
-/// session, and label which path supplied the anchor.
+/// Compose the session-local speaker reference from the persisted owner bank
+/// and the wake exemplar that anchors the session, and label which path
+/// supplied the anchor.
 ///
-/// The persisted template is only ever written by guided enrollment — the
-/// union here is session-local, so a bystander wake can never pollute the
-/// stored bank. The r40 regression (2026-09-19, tik build, session d4c45b6d)
-/// came from dropping the exemplar entirely when the wake reached tracking via
-/// open acceptance (EnrolledNonMatch + exact phrase): the bank had drifted
-/// (0.58+ at enrollment → ~0.20 the next morning), so the session target
-/// became the very bank that had just rejected the live voice, every body
-/// window scored strong NonTarget under mixed interference, ConfirmedOther
-/// armed, and `no_body_3000ms` cut the read mid-sentence (37/52 chars). The
-/// wake gate's product bias is "keep wake over false-wake" — whoever passed
-/// the exact-phrase gate owns the session, so their wake anchor must stay in
-/// the session profile. `observe_session_speaker` scores by max cosine, so the
-/// anchor only lifts the wake speaker's own windows; a different bystander
-/// voice still has to clear the full bank.
+/// Bank-matched wake ("enrolled_match"): union of the bank plus the fresh
+/// anchor. The bank just agreed with the live voice, so both references are
+/// trustworthy; the union maximizes owner recall. If the bank is at capacity
+/// the union degrades to "bank_only".
+///
+/// Open acceptance ("open_acceptance", EnrolledNonMatch + exact phrase): the
+/// reference is the wake anchor ALONE — same trust model as an unenrolled
+/// profile. The bank just failed on the owner's own live voice (the
+/// 2026-09-17/20 drift: 0.58+ at enrollment → 0.11-0.27 the same evening), so
+/// keeping its exemplars in the reference means measuring the body with a
+/// ruler that was already proven wrong this session, and it hands bank-like
+/// media a free vote toward Target. Whoever passed the exact-phrase gate owns
+/// the session; their wake utterance is the freshest, same-condition
+/// reference available and cannot drift across days. A different bystander
+/// voice or media audio has to clear the anchor itself, which is the simple
+/// owner-vs-rest separation this path needs.
+///
+/// The persisted template is only ever written by guided enrollment or by
+/// bank-verified adaptation — the composition here is session-local, so a
+/// bystander wake can never pollute the stored bank (r40, tik d4c45b6d:
+/// dropping the anchor entirely for open acceptance let the drifted bank turn
+/// every body window strong NonTarget and `no_body_3000ms` cut the read).
 fn session_target_with_wake_anchor(
     mut bank: Vec<Vec<f32>>,
     verified_wake_embedding: Vec<f32>,
     live_wake_matches_enrolled_owner: bool,
 ) -> (Vec<Vec<f32>>, &'static str) {
-    if live_wake_matches_enrolled_owner
-        && append_verified_wake_session_exemplar(&mut bank, verified_wake_embedding.clone())
-    {
-        return (bank, "enrolled_match");
+    if live_wake_matches_enrolled_owner {
+        if append_verified_wake_session_exemplar(&mut bank, verified_wake_embedding) {
+            return (bank, "enrolled_match");
+        }
+        return (bank, "bank_only");
     }
-    let anchored =
-        append_verified_wake_session_exemplar(&mut bank, verified_wake_embedding);
-    (bank, if anchored { "open_acceptance" } else { "bank_only" })
+    (vec![verified_wake_embedding], "open_acceptance")
 }
 
 /// 银行自适应 (persisted-bank adaptation) constants and pure decision logic.
@@ -2121,17 +2129,24 @@ mod platform {
                         verified_wake_embedding,
                         live_wake_matches_enrolled_owner,
                     );
+                    // Open acceptance mirrors the unenrolled trust model: the
+                    // anchor-only reference may grow from this session's own
+                    // confident windows (never persisted), because the bank
+                    // that just rejected the live voice must not keep voting
+                    // on the body either.
+                    let anchor_only_reference = wake_anchor == "open_acceptance";
                     log::info!(
-                        "[speaker-verification] enrolled session target prepared phrase={} wake_end_ms={} speech_ms={} model_input_ms={} inference_ms={inference_ms} persisted_exemplars={bank_exemplars} session_embeddings={} wake_anchor={wake_anchor} live_wake_owner_matched={live_wake_matches_enrolled_owner}",
+                        "[speaker-verification] enrolled session target prepared phrase={} wake_end_ms={} speech_ms={} model_input_ms={} inference_ms={inference_ms} persisted_exemplars={bank_exemplars} session_embeddings={} wake_anchor={wake_anchor} bank_in_session_target={} live_wake_owner_matched={live_wake_matches_enrolled_owner}",
                         phrase,
                         (wake_end_seconds * 1000.0).round() as u64,
                         source_speech_ms,
                         model_input_ms,
                         embeddings.len(),
+                        !anchor_only_reference,
                     );
                     return Ok(SessionSpeakerProfile {
                         embeddings: Arc::new(embeddings),
-                        adaptive: false,
+                        adaptive: anchor_only_reference,
                     });
                 }
                 Err(err) => log::warn!(
@@ -3187,14 +3202,15 @@ mod platform {
             let (session, anchor) =
                 session_target_with_wake_anchor(bank.clone(), vec![0.0, 1.0], false);
             assert_eq!(anchor, "open_acceptance");
-            assert_eq!(session.len(), bank.len() + 1);
-            assert_eq!(session.last(), Some(&vec![0.0, 1.0]));
+            // The open-acceptance reference is the wake anchor ALONE: the bank
+            // that just rejected the live voice no longer votes on the body.
+            assert_eq!(session, vec![vec![0.0, 1.0]]);
             // The stored bank must stay untouched: purity is what keeps a
             // bystander wake from ever rewriting the enrolled template.
             assert_eq!(bank.len(), 3);
 
-            // r40 shape: the wake speaker's body window max-cosines the union
-            // at Target level through the fresh anchor, while the drifted bank
+            // r40 shape: the wake speaker's body window max-cosines the
+            // anchor-only reference at Target level, while the drifted bank
             // alone would have scored it strong NonTarget and cut the read.
             let body_window = vec![0.04, 0.999];
             let score = |profile: &[Vec<f32>]| {
@@ -3208,7 +3224,44 @@ mod platform {
         }
 
         #[test]
-        fn enrolled_match_and_open_acceptance_take_the_same_union_path() {
+        fn open_acceptance_reference_excludes_bank_like_media_the_bank_just_failed_on() {
+            // 2026-09-20/21 drift shape: the persisted bank slid toward
+            // TTS-ish media audio, so the owner's live wake scored under the
+            // verification threshold (open acceptance) while bank-like media
+            // kept max-cosining the bank slots at Target level. With the bank
+            // still in the session reference, such a media window would ride
+            // the bank vote straight into the transcript as owner speech.
+            let anchor = vec![1.0, 0.0];
+            let drifted_bank = vec![
+                vec![0.3, 0.954],
+                vec![0.32, 0.947],
+                vec![0.28, 0.960],
+            ];
+            let media_window = vec![0.1, 0.995];
+            let owner_body_window = vec![0.95, 0.312];
+            let score = |profile: &[Vec<f32>], candidate: &[f32]| {
+                profile
+                    .iter()
+                    .map(|embedding| cosine(embedding, candidate).unwrap())
+                    .fold(f32::MIN, f32::max)
+            };
+            // The drift premise: the wake (== anchor direction) no longer
+            // matches the bank, which is exactly why this wake was
+            // open-accepted rather than bank-verified.
+            assert!(score(&drifted_bank, &anchor) < VERIFICATION_THRESHOLD);
+            // Bank-like media still scores Target against the drifted bank…
+            assert!(score(&drifted_bank, &media_window) >= SESSION_SPEAKER_CONFIDENT_TARGET_MIN_SCORE);
+            // …but the anchor-only session reference keeps it hard NonTarget.
+            let (session, label) =
+                session_target_with_wake_anchor(drifted_bank.clone(), anchor.clone(), false);
+            assert_eq!(label, "open_acceptance");
+            assert!(score(&session, &media_window) <= SESSION_SPEAKER_NON_TARGET_MAX_SCORE);
+            // The owner's own body still reaches Target through the anchor.
+            assert!(score(&session, &owner_body_window) >= SESSION_SPEAKER_CONFIDENT_TARGET_MIN_SCORE);
+        }
+
+        #[test]
+        fn enrolled_match_unions_the_bank_while_open_acceptance_is_anchor_only() {
             let bank = vec![vec![1.0, 0.0], vec![0.99, 0.02], vec![0.97, 0.04]];
             let (matched, matched_anchor) =
                 session_target_with_wake_anchor(bank.clone(), vec![0.0, 1.0], true);
@@ -3216,16 +3269,28 @@ mod platform {
                 session_target_with_wake_anchor(bank, vec![0.0, 1.0], false);
             assert_eq!(matched_anchor, "enrolled_match");
             assert_eq!(open_anchor, "open_acceptance");
-            assert_eq!(matched.len(), open.len());
+            // Bank-matched wake: union maximizes owner recall.
+            assert_eq!(matched.len(), 4);
+            assert_eq!(matched.last(), Some(&vec![0.0, 1.0]));
+            // Open acceptance: the failed bank is not part of the reference.
+            assert_eq!(open, vec![vec![0.0, 1.0]]);
         }
 
         #[test]
-        fn full_bank_cannot_take_a_wake_anchor() {
-            let bank = vec![vec![1.0, 0.0]; SESSION_SPEAKER_MAX_EMBEDDINGS];
-            let (session, anchor) =
-                session_target_with_wake_anchor(bank.clone(), vec![0.0, 1.0], false);
-            assert_eq!(anchor, "bank_only");
-            assert_eq!(session.len(), SESSION_SPEAKER_MAX_EMBEDDINGS);
+        fn full_bank_degrades_to_bank_only_only_for_a_bank_matched_wake() {
+            let full_bank = vec![vec![1.0, 0.0]; SESSION_SPEAKER_MAX_EMBEDDINGS];
+            // A bank-matched wake keeps the matched bank when the union slot
+            // is at capacity — the bank just agreed with the live voice.
+            let (matched, matched_anchor) =
+                session_target_with_wake_anchor(full_bank.clone(), vec![0.0, 1.0], true);
+            assert_eq!(matched_anchor, "bank_only");
+            assert_eq!(matched.len(), SESSION_SPEAKER_MAX_EMBEDDINGS);
+            // An open-acceptance wake ignores capacity entirely: its reference
+            // is the fresh anchor, never a full drifted bank.
+            let (open, open_anchor) =
+                session_target_with_wake_anchor(full_bank, vec![0.0, 1.0], false);
+            assert_eq!(open_anchor, "open_acceptance");
+            assert_eq!(open, vec![vec![0.0, 1.0]]);
         }
 
         #[test]
