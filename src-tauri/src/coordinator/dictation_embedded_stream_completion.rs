@@ -2,6 +2,87 @@
 // Included into `coordinator::dictation` via `include!`.
 
 impl EmbeddedStreamingDictation {
+    fn abort_accepted_wake_capture_ensure(&mut self, reason: &'static str) {
+        let Some(ensure) = self.accepted_wake_capture_ensure.take() else {
+            return;
+        };
+        log::info!(
+            "[wake-phrase] aborting accepted wake capture ensure request_id={} previous_segment_id={} reason={reason}",
+            ensure.request_id,
+            ensure.previous_segment_id
+        );
+        #[cfg(not(test))]
+        tauri::async_runtime::spawn_blocking(move || {
+            match crate::embedded_ble::send_recording_control_abort_wake_capture(
+                ensure.request_id,
+                Duration::from_secs(2),
+            ) {
+                Ok(()) => log::info!(
+                    "[wake-phrase] accepted wake capture ensure abort sent request_id={} reason={reason}",
+                    ensure.request_id
+                ),
+                Err(error) => log::warn!(
+                    "[wake-phrase] accepted wake capture ensure abort failed request_id={} reason={reason}: {error}",
+                    ensure.request_id
+                ),
+            }
+        });
+    }
+
+    fn expire_accepted_wake_capture_if_due(&mut self, inner: &Arc<Inner>) -> bool {
+        let Some(ensure) = self.accepted_wake_capture_ensure else {
+            return false;
+        };
+        if ensure.confirmed_segment_id.is_some() {
+            return false;
+        }
+        if Instant::now() < ensure.deadline_at {
+            return false;
+        }
+        // r46f: an unconfirmed continuation handshake must not destroy a
+        // session that is already producing recognized body text (the
+        // confirmation marker can still be in flight while the wake-era
+        // deadline expires — aborting there sealed 0 of 23 previewed chars).
+        // With live body evidence the product session keeps running under the
+        // ordinary endpoint contract; only the zombie case (no body ever)
+        // stays a hard abort. The device-side ensure state is left to its own
+        // latch timeouts instead of sending an abort that would cancel the
+        // active recording.
+        let live_session_id = self
+            .session
+            .as_ref()
+            .map(|session| session.session_id);
+        let body_live = live_session_id.is_some_and(|session_id| {
+            automatic_wake_body_started(inner, session_id)
+                || current_embedded_audio_partial_preview(inner)
+                    .is_some_and(|text| !text.trim().is_empty())
+        });
+        if body_live {
+            let request_id = ensure.request_id;
+            let previous_segment_id = ensure.previous_segment_id;
+            self.accepted_wake_capture_ensure.take();
+            log::warn!(
+                "[wake-phrase] accepted wake capture ensure timed out request_id={} previous_segment_id={} wait_ms={} replacement_wait_started={} action=keep_live_body_session",
+                request_id,
+                previous_segment_id,
+                ensure.requested_at.elapsed().as_millis(),
+                ensure.replacement_wait_started_at.is_some()
+            );
+            return false;
+        }
+        log::warn!(
+            "[wake-phrase] accepted wake capture ensure timed out request_id={} previous_segment_id={} wait_ms={} replacement_wait_started={} action=abort_session",
+            ensure.request_id,
+            ensure.previous_segment_id,
+            ensure.requested_at.elapsed().as_millis(),
+            ensure.replacement_wait_started_at.is_some()
+        );
+        self.abort_accepted_wake_capture_ensure("continuation_timeout");
+        cancel_session(inner);
+        let _ = self.discard_active_session_after_user_cancel(inner);
+        true
+    }
+
     /// Close only lifecycle identity owned by this actor instance. A transport
     /// event without actor-local work must never mutate a newer product
     /// candidate/session.
@@ -117,6 +198,7 @@ impl EmbeddedStreamingDictation {
 
     fn abort_active_session(&mut self, inner: &Arc<Inner>, message: &str) {
         self.close_owned_product_lifecycle(inner);
+        self.abort_accepted_wake_capture_ensure("stream_abort");
         self.activation_segment_race_guard = None;
         set_device_ai_processing_async(inner, false, "embedded_stream_abort");
         if matches!(
@@ -128,12 +210,32 @@ impl EmbeddedStreamingDictation {
             crate::speaker_verification::fail_enrollment(message);
         }
         let event_session_id = self.session.as_ref().map(|session| session.session_id);
-        if let Some(session) = self.session.take() {
+        if let Some(session_id) = event_session_id {
+            clear_embedded_source_integrity_ledger(inner, session_id);
+        }
+        if let Some(mut session) = self.session.take() {
+            self.preserve_session_candidate_fact_ledger(&mut session);
             crate::observability::record_embedded_audio_failure(session.session_id, message);
             cancel_asr_for_session(inner, session.session_id);
             restore_prepared_windows_ime_session(inner, session.session_id);
             publish_dictation_pipeline_error(inner, session.session_id, message.to_string());
         } else {
+            if let Some(mut candidate) = self.speaker_candidate.take() {
+                let rejected_bytes = candidate.pcm.len();
+                candidate.record_outcome_fact(
+                    self.pipeline_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Rejected,
+                    "stream_aborted",
+                    rejected_bytes,
+                );
+                candidate.record_outcome_fact(
+                    self.pipeline_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Closed,
+                    "stream_aborted",
+                    0,
+                );
+                self.preserve_candidate_fact_ledger(&mut candidate);
+            }
             let elapsed = inner.state.lock().started_at.elapsed().as_millis() as u64;
             emit_capsule(
                 inner,
@@ -159,6 +261,7 @@ impl EmbeddedStreamingDictation {
             return false;
         }
         self.close_owned_product_lifecycle(inner);
+        self.abort_accepted_wake_capture_ensure("user_cancel");
         set_device_ai_processing_async(inner, false, "embedded_stream_user_cancel");
         if matches!(
             self.speaker_candidate
@@ -168,7 +271,11 @@ impl EmbeddedStreamingDictation {
         ) {
             crate::speaker_verification::fail_enrollment("用户取消录音");
         }
-        if let Some(session) = self.session.take() {
+        if let Some(session_id) = self.session.as_ref().map(|session| session.session_id) {
+            clear_embedded_source_integrity_ledger(inner, session_id);
+        }
+        if let Some(mut session) = self.session.take() {
+            self.preserve_session_candidate_fact_ledger(&mut session);
             cancel_asr_for_session(inner, session.session_id);
             restore_prepared_windows_ime_session(inner, session.session_id);
         }
@@ -192,13 +299,33 @@ impl EmbeddedStreamingDictation {
         ) {
             crate::speaker_verification::fail_enrollment(message);
         }
-        if let Some(session) = self.session.take() {
+        if let Some(session_id) = self.session.as_ref().map(|session| session.session_id) {
+            clear_embedded_source_integrity_ledger(inner, session_id);
+        }
+        if let Some(mut session) = self.session.take() {
+            self.preserve_session_candidate_fact_ledger(&mut session);
             crate::observability::record_embedded_audio_failure(session.session_id, message);
             cancel_asr_for_session(inner, session.session_id);
             restore_prepared_windows_ime_session(inner, session.session_id);
             // Only surface error UI when a host session was live; candidate-only
             // wake rejections should not bounce the BLE link.
             publish_dictation_pipeline_error(inner, session.session_id, message.to_string());
+        }
+        if let Some(mut candidate) = self.speaker_candidate.take() {
+            let rejected_bytes = candidate.pcm.len();
+            candidate.record_outcome_fact(
+                self.pipeline_observation.as_ref(),
+                crate::observability::CandidateFactKind::Rejected,
+                "stream_error",
+                rejected_bytes,
+            );
+            candidate.record_outcome_fact(
+                self.pipeline_observation.as_ref(),
+                crate::observability::CandidateFactKind::Closed,
+                "stream_error",
+                0,
+            );
+            self.preserve_candidate_fact_ledger(&mut candidate);
         }
         self.reset_for_next_session();
         log::warn!(
@@ -231,15 +358,26 @@ impl EmbeddedStreamingDictation {
     }
 
     fn reset_for_next_session(&mut self) {
+        self.abort_accepted_wake_capture_ensure("stream_reset");
         self.collector.reset();
-        self.session = None;
-        self.speaker_candidate = None;
+        if let Some(mut session) = self.session.take() {
+            // Keep candidate provenance even when the host session is reset
+            // before a final snapshot can be emitted.
+            self.preserve_session_candidate_fact_ledger(&mut session);
+        }
+        if let Some(mut candidate) = self.speaker_candidate.take() {
+            // A reset without an explicit candidate terminal branch must not
+            // invent an end reason. Preserve the still-open ledger so the
+            // missing end remains observable as UNKNOWN.
+            self.preserve_candidate_fact_ledger(&mut candidate);
+        }
         self.embedded_session_id = None;
         self.transcript = None;
         self.pending_stop_expected_packet_count = None;
         self.pending_stop_force_after = None;
         self.activation_segment_race_guard = None;
         self.terminal_received = false;
+        self.last_actor_pcm_consumed = false;
     }
 
     /// Continuous background: force-finish a STOP that never recovered missing

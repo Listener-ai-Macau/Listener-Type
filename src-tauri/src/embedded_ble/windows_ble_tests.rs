@@ -2,6 +2,7 @@
 //! Loaded via `#[path = "windows_ble_tests.rs"]` from `windows_ble.rs`.
 
 use super::*;
+use crate::embedded_ble::STOP_DRAIN_TIMEOUT;
 
 macro_rules! include_str {
     ("embedded_ble.rs") => {{
@@ -2846,4 +2847,196 @@ fn transient_device_disconnect_does_not_abort_active_gatt_capture() {
         "an idle target with no device connection must still enter normal recovery"
     );
     assert!(!should_ignore_stale_disconnect_status(true, false, true));
+}
+
+#[test]
+fn active_capture_recovery_qualification_waits_for_current_segment_pcm() {
+    let mut deadline = Some(Instant::now() + ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT);
+    let mut notify_refresh_required = false;
+
+    // Link-level notification arrival is not enough to consume recovery
+    // waiting; the deadline remains until accepted current-segment PCM.
+    assert!(active_capture_link_recovery_notification_pending(deadline));
+    assert!(deadline.is_some());
+
+    let started = crate::embedded_audio::SessionEvent::Started {
+        session_id: 7,
+        origin: crate::embedded_audio::SessionStartOrigin::User,
+    };
+    let pcm = crate::embedded_audio::SessionEvent::AudioData {
+        session_id: 7,
+        packet_sequence: 0,
+        pcm_bytes: 4,
+    };
+    let terminal = crate::embedded_audio::SessionEvent::Stopped {
+        session_id: 7,
+        expected_packet_count: 1,
+        origin: crate::embedded_audio::SessionStopOrigin::User,
+    };
+    let ignored = crate::embedded_audio::SessionEvent::Ignored(
+        crate::embedded_audio::IgnoredPacketReason::ForeignSession,
+    );
+
+    assert_eq!(
+        active_capture_recovery_fact(true, Some(&started)),
+        ActiveCaptureRecoveryFact::CurrentSegmentStarted
+    );
+    assert_eq!(
+        active_capture_recovery_fact(true, Some(&pcm)),
+        ActiveCaptureRecoveryFact::CurrentSegmentPcm
+    );
+    assert_eq!(
+        active_capture_recovery_fact(true, Some(&terminal)),
+        ActiveCaptureRecoveryFact::CurrentSegmentTerminal
+    );
+    assert_eq!(
+        active_capture_recovery_fact(true, Some(&ignored)),
+        ActiveCaptureRecoveryFact::IgnoredPacket(
+            crate::embedded_audio::IgnoredPacketReason::ForeignSession
+        )
+    );
+    assert_eq!(
+        active_capture_recovery_fact(false, None),
+        ActiveCaptureRecoveryFact::ParseRejected
+    );
+
+    // Ignored/terminal facts leave the original deadline in place.
+    assert!(deadline.is_some());
+    assert!(!notify_refresh_required);
+    assert!(take_active_capture_link_recovery_after_valid_pcm(
+        &mut deadline,
+        &mut notify_refresh_required,
+    ));
+    assert!(deadline.is_none());
+    assert!(notify_refresh_required);
+}
+
+#[test]
+fn active_capture_recovery_audit_keeps_no_pcm_and_terminal_facts_distinct() {
+    let deadline = Some(Instant::now() + ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT);
+    let notify_refresh_required = false;
+    assert!(active_capture_link_recovery_notification_pending(deadline));
+
+    // A valid SessionStart proves that a segment exists, but it is not PCM
+    // progress; a valid STOP is terminal progress, not audio recovery.
+    let started = crate::embedded_audio::SessionEvent::Started {
+        session_id: 11,
+        origin: crate::embedded_audio::SessionStartOrigin::User,
+    };
+    let stop = crate::embedded_audio::SessionEvent::Stopped {
+        session_id: 11,
+        expected_packet_count: 0,
+        origin: crate::embedded_audio::SessionStopOrigin::User,
+    };
+    assert_eq!(
+        active_capture_recovery_fact(true, Some(&started)),
+        ActiveCaptureRecoveryFact::CurrentSegmentStarted
+    );
+    assert_eq!(
+        active_capture_recovery_fact(true, Some(&stop)),
+        ActiveCaptureRecoveryFact::CurrentSegmentTerminal
+    );
+    assert!(deadline.is_some());
+    assert!(!notify_refresh_required);
+}
+
+#[test]
+fn active_capture_recovery_terminal_paths_clear_only_the_old_segment_wait() {
+    let now = Instant::now();
+    let mut deadline = Some(now + ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT);
+    let mut reason = Some("old physical segment disconnected".to_string());
+
+    let mut collector = crate::embedded_audio::SessionCollector::default();
+    collector
+        .handle_notification(&crate::embedded_audio::build_session_start_notification(
+            901,
+        ))
+        .expect("segment start");
+    let cancel = collector
+        .handle_notification(&crate::embedded_audio::build_session_cancel_notification(
+            901, 0,
+        ))
+        .expect("segment cancel");
+    assert!(matches!(
+        active_capture_recovery_fact(true, Some(&cancel)),
+        ActiveCaptureRecoveryFact::CurrentSegmentTerminal
+    ));
+
+    assert!(clear_active_capture_link_recovery_wait(
+        &mut deadline,
+        &mut reason,
+    ));
+    assert!(deadline.is_none());
+    assert!(reason.is_none());
+    assert!(!active_capture_link_recovery_expired(deadline, now));
+
+    // A new segment after the terminal reset cannot be killed by the old
+    // segment's deadline because that deadline has been consumed at the
+    // terminal boundary, without claiming audio recovery.
+    collector.reset();
+    let next_start = collector
+        .handle_notification(&crate::embedded_audio::build_session_start_notification(
+            902,
+        ))
+        .expect("next segment start");
+    assert!(matches!(
+        active_capture_recovery_fact(true, Some(&next_start)),
+        ActiveCaptureRecoveryFact::CurrentSegmentStarted
+    ));
+    assert!(!active_capture_link_recovery_expired(deadline, now));
+}
+
+#[test]
+fn active_capture_recovery_stop_drain_does_not_compete_with_old_link_wait() {
+    let now = Instant::now();
+    let mut recovery_deadline = Some(now + ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT);
+    let mut recovery_reason = Some("old segment link loss".to_string());
+    let mut collector = crate::embedded_audio::SessionCollector::default();
+    collector
+        .handle_notification(&crate::embedded_audio::build_session_start_notification(
+            903,
+        ))
+        .expect("segment start");
+    collector
+        .handle_notification(
+            &crate::embedded_audio::build_audio_data_notification(903, 0, &[1, 2])
+                .expect("segment PCM"),
+        )
+        .expect("segment PCM");
+    let stop = collector
+        .handle_notification(&crate::embedded_audio::build_session_stop_notification(
+            903, 1,
+        ))
+        .expect("segment STOP");
+    assert!(matches!(
+        active_capture_recovery_fact(true, Some(&stop)),
+        ActiveCaptureRecoveryFact::CurrentSegmentTerminal
+    ));
+    assert!(clear_active_capture_link_recovery_wait(
+        &mut recovery_deadline,
+        &mut recovery_reason,
+    ));
+
+    // The real loop starts its independent STOP drain after this boundary;
+    // only the stop-drain deadline remains in this audit sequence.
+    let stop_drain_deadline = now + STOP_DRAIN_TIMEOUT;
+    assert!(!active_capture_link_recovery_expired(
+        recovery_deadline,
+        stop_drain_deadline,
+    ));
+    assert!(recovery_reason.is_none());
+}
+
+#[test]
+fn active_capture_recovery_invalid_without_terminal_keeps_original_expiry() {
+    let now = Instant::now();
+    let recovery_deadline = Some(now + ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT);
+    assert!(active_capture_link_recovery_expired(
+        recovery_deadline,
+        now + ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT,
+    ));
+    assert_eq!(
+        active_capture_recovery_fact(false, None),
+        ActiveCaptureRecoveryFact::ParseRejected
+    );
 }

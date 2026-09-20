@@ -71,16 +71,10 @@ pub(crate) fn arbitrate_wake(
     {
         decision = GateDecision::Accept;
     }
-    // Terminal VA window + enrolled owner, but local ASR/KWS missed the
-    // phrase (2254). The owner is speaking; keep-wake accepts and lets the
-    // body continuation capture the utterance.
-    if matches!(decision, GateDecision::Reject | GateDecision::Pending)
-        && terminal
-        && matches!(phrase_signal, PhraseSignal::None)
-        && matches!(owner_access, OwnerAccessEvidence::EnrolledMatch)
-    {
-        decision = GateDecision::Accept;
-    }
+    // VoiceActivation only means the device detected speech. Owner identity
+    // cannot replace activation intent, even when that transport segment ends.
+    // Phrase/phonetic recovery runs before this boundary and supplies a real
+    // phrase signal; without one, retain Pending/Reject from the core gate.
     WakeArbitration {
         decision,
         owner_access,
@@ -213,31 +207,25 @@ pub(crate) struct ProductFinalEvidence {
     pub(crate) retained_audio_replay_available: bool,
     pub(crate) debug_override_available: bool,
     pub(crate) partial_preview_available: bool,
-    pub(crate) prefer_partial_preview: bool,
 }
 
 pub(crate) fn arbitrate_product_final(evidence: ProductFinalEvidence) -> ProductFinalAuthority {
-    if evidence.prefer_partial_preview && evidence.partial_preview_available {
-        return ProductFinalAuthority::PartialPreviewRecovery;
-    }
     if evidence.separated_owner_available {
         return ProductFinalAuthority::SeparatedOwner;
     }
     if evidence.provider_primary_available {
         return ProductFinalAuthority::ProviderPrimary;
     }
+    // Once upstream ownership filtering is required, no unsegmented replay,
+    // preview, or local shadow candidate is safe enough to become final text.
+    if evidence.target_filter_required {
+        return ProductFinalAuthority::Empty;
+    }
     if evidence.retained_audio_replay_available && !evidence.target_filter_required {
         return ProductFinalAuthority::RetainedAudioReplay;
     }
-    // Shown capsule text is the insert floor. Isolation may refuse to ADD a
-    // new tail, but it must not discard what the owner already saw.
-    // Live 52db192d showed 68 chars then sealed Empty because filter_required
-    // returned before PartialPreviewRecovery.
     if evidence.partial_preview_available {
         return ProductFinalAuthority::PartialPreviewRecovery;
-    }
-    if evidence.target_filter_required {
-        return ProductFinalAuthority::Empty;
     }
     if evidence.debug_override_available {
         return ProductFinalAuthority::DebugOverride;
@@ -506,6 +494,10 @@ pub(crate) struct RecordingPreviewController {
     authoritative: Option<String>,
     visible: Option<String>,
     last_visible_growth_at: Option<Instant>,
+    /// Once ownership arbitration invalidates the authoritative preview, a
+    /// late callback from the same provider session must not resurrect it.
+    /// A new session (or clear_session) reopens admission.
+    authoritative_invalidated: bool,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -523,6 +515,7 @@ impl RecordingPreviewController {
         self.authoritative = None;
         self.visible = None;
         self.last_visible_growth_at = None;
+        self.authoritative_invalidated = false;
     }
 
     pub(crate) fn clear_session(&mut self, session_id: SessionId) -> bool {
@@ -533,6 +526,7 @@ impl RecordingPreviewController {
         self.authoritative = None;
         self.visible = None;
         self.last_visible_growth_at = None;
+        self.authoritative_invalidated = false;
         true
     }
 
@@ -540,6 +534,14 @@ impl RecordingPreviewController {
         (self.session_id == Some(session_id))
             .then(|| self.authoritative.clone())
             .flatten()
+    }
+
+    pub(crate) fn invalidate_authoritative(&mut self, session_id: SessionId) -> bool {
+        if self.session_id != Some(session_id) {
+            return false;
+        }
+        self.authoritative_invalidated = true;
+        self.clear_authoritative(session_id)
     }
 
     pub(crate) fn last_visible_growth_at(&self, session_id: SessionId) -> Option<Instant> {
@@ -563,9 +565,19 @@ impl RecordingPreviewController {
         if !self.admit(session_id) {
             return RecordingPreviewReduction::default();
         }
+        if self.authoritative_invalidated {
+            return RecordingPreviewReduction::default();
+        }
         let candidate = candidate.trim();
         if candidate.is_empty() {
-            return RecordingPreviewReduction::default();
+            return RecordingPreviewReduction {
+                // An ordinary empty provider terminal clears the current
+                // candidate but is not an ownership revocation. A later
+                // accepted revision in the same live session must still be
+                // admissible; explicit invalidation is the only fenced path.
+                authoritative_changed: self.clear_authoritative(session_id),
+                visible_update: None,
+            };
         }
 
         let authoritative_changed = self.authoritative.as_deref() != Some(candidate);
@@ -580,9 +592,10 @@ impl RecordingPreviewController {
         // what is already visible AND shorter — that is still a retract, so
         // keep the high-water mark for dictation. Confirmed-other energy is
         // handled by the endpoint clock, not by shrinking the capsule.
-        let would_shrink = self.visible.as_ref().is_some_and(|current| {
-            spoken_preview_len(candidate) < spoken_preview_len(current)
-        });
+        let would_shrink = self
+            .visible
+            .as_ref()
+            .is_some_and(|current| spoken_preview_len(candidate) < spoken_preview_len(current));
         let visible_changed = self.visible.as_deref() != Some(candidate);
         let visible_update = if would_shrink {
             None
@@ -613,12 +626,15 @@ impl RecordingPreviewController {
         if !self.admit(session_id) {
             return None;
         }
+        if self.authoritative_invalidated {
+            return None;
+        }
         let candidate = candidate.trim();
         if candidate.is_empty() || self.visible.as_deref() == Some(candidate) {
             return None;
         }
         if self
-            .authoritative
+            .visible
             .as_deref()
             .is_some_and(|current| spoken_preview_len(candidate) < spoken_preview_len(current))
         {
@@ -633,11 +649,18 @@ impl RecordingPreviewController {
     fn admit(&mut self, session_id: SessionId) -> bool {
         match self.session_id {
             Some(current) => current == session_id,
-            None => {
-                self.begin_session(session_id);
-                true
-            }
+            // Session admission is owned by the coordinator's explicit
+            // begin_session transition. A callback after clear_session must
+            // not create a new session from an old session id.
+            None => false,
         }
+    }
+
+    fn clear_authoritative(&mut self, session_id: SessionId) -> bool {
+        if self.session_id != Some(session_id) {
+            return false;
+        }
+        self.authoritative.take().is_some()
     }
 }
 
@@ -664,6 +687,10 @@ pub(crate) struct RecordingLifecycleController {
     state: RecordingLifecycleState,
     embedded_session_id: Option<u32>,
     coordinator_session_id: Option<SessionId>,
+    /// Non-None only for the automatic endpoint transaction that owns the
+    /// current Stopping transition. Manual/device stops keep this None so a
+    /// late automatic task cannot reopen their lifecycle.
+    stop_owner_attempt_id: Option<u64>,
     /// A physical key press may arrive before the BLE actor has published its
     /// hidden wake candidate.  Keep that intent beside the candidate identity
     /// so it cannot be consumed by a later, unrelated segment.
@@ -692,6 +719,7 @@ impl RecordingLifecycleController {
                 self.state = RecordingLifecycleState::WakeCandidate;
                 self.embedded_session_id = Some(embedded_session_id);
                 self.coordinator_session_id = None;
+                self.stop_owner_attempt_id = None;
                 self.candidate_promotion_requested = self.device_key_takeover_pending;
                 self.device_key_takeover_pending = false;
                 true
@@ -721,6 +749,7 @@ impl RecordingLifecycleController {
                 self.embedded_session_id = Some(embedded_session_id);
                 self.coordinator_session_id = Some(coordinator_session_id);
                 self.state = RecordingLifecycleState::Active;
+                self.stop_owner_attempt_id = None;
                 self.device_key_takeover_pending = false;
                 self.candidate_promotion_requested = false;
                 true
@@ -746,6 +775,7 @@ impl RecordingLifecycleController {
         }
         self.coordinator_session_id = Some(coordinator_session_id);
         self.state = RecordingLifecycleState::Active;
+        self.stop_owner_attempt_id = None;
         self.device_key_takeover_pending = false;
         self.candidate_promotion_requested = false;
         true
@@ -774,6 +804,7 @@ impl RecordingLifecycleController {
         self.state = RecordingLifecycleState::Closed;
         self.embedded_session_id = None;
         self.coordinator_session_id = None;
+        self.stop_owner_attempt_id = None;
         self.candidate_promotion_requested = false;
         self.device_key_takeover_pending = false;
     }
@@ -855,12 +886,21 @@ impl RecordingLifecycleController {
     /// Returns true only for the first active/pending -> Stopping
     /// transition. Repeated stop requests are harmless and return false.
     pub(crate) fn commit_stop(&mut self, coordinator_session_id: SessionId) -> bool {
+        self.commit_stop_owned(coordinator_session_id, None)
+    }
+
+    pub(crate) fn commit_stop_owned(
+        &mut self,
+        coordinator_session_id: SessionId,
+        attempt_id: Option<u64>,
+    ) -> bool {
         if self.coordinator_session_id != Some(coordinator_session_id) {
             return false;
         }
         match self.state {
             RecordingLifecycleState::Active => {
                 self.state = RecordingLifecycleState::Stopping;
+                self.stop_owner_attempt_id = attempt_id;
                 true
             }
             RecordingLifecycleState::Stopping | RecordingLifecycleState::Closed => false,
@@ -869,12 +909,22 @@ impl RecordingLifecycleController {
     }
 
     pub(crate) fn reopen_after_failed_stop(&mut self, coordinator_session_id: SessionId) -> bool {
+        self.reopen_after_failed_stop_owned(coordinator_session_id, None)
+    }
+
+    pub(crate) fn reopen_after_failed_stop_owned(
+        &mut self,
+        coordinator_session_id: SessionId,
+        attempt_id: Option<u64>,
+    ) -> bool {
         if self.coordinator_session_id != Some(coordinator_session_id)
             || self.state != RecordingLifecycleState::Stopping
+            || self.stop_owner_attempt_id != attempt_id
         {
             return false;
         }
         self.state = RecordingLifecycleState::Active;
+        self.stop_owner_attempt_id = None;
         true
     }
 
@@ -889,6 +939,7 @@ impl RecordingLifecycleController {
             return false;
         }
         self.state = RecordingLifecycleState::Closed;
+        self.stop_owner_attempt_id = None;
         self.device_key_takeover_pending = false;
         self.candidate_promotion_requested = false;
         true
@@ -964,14 +1015,10 @@ impl OwnerEndpointController {
         if evidence.latest_speech_confirmed_non_target {
             return false;
         }
-        if evidence.pending_provider_text && evidence.unresolved_owner_tail {
-            return true;
-        }
-        let provider_behind_owner = evidence
-            .owner_watermark_ms
-            .zip(evidence.provider_coverage_ms)
-            .is_some_and(|(owner, provider)| provider < owner);
-        evidence.unresolved_owner_tail && provider_behind_owner
+        // Provider coverage can already exceed the previous owner boundary
+        // while a newer local tail still awaits attribution. Comparing only
+        // those two old clocks stopped before the late text callback arrived.
+        evidence.unresolved_owner_tail
     }
 
     pub(crate) fn decide_stop(
@@ -1308,6 +1355,90 @@ mod tests {
     }
 
     #[test]
+    fn empty_or_filtered_authoritative_update_cannot_restore_stale_preview() {
+        let session_id = uuid::Uuid::new_v4();
+        let mut preview = RecordingPreviewController::default();
+        preview.begin_session(session_id);
+        preview.observe_authoritative(session_id, "主人完整正文", true);
+        preview.observe_provisional(session_id, "主人完整正文旁人尾巴");
+
+        let cleared = preview.observe_authoritative(session_id, "", true);
+        assert!(cleared.authoritative_changed);
+        assert_eq!(preview.authoritative(session_id), None);
+        assert_eq!(
+            preview.visible(session_id).as_deref(),
+            Some("主人完整正文旁人尾巴"),
+            "the visual high-water mark may remain, but it is no longer final evidence"
+        );
+
+        assert!(!preview.invalidate_authoritative(session_id));
+        assert_eq!(preview.authoritative(session_id), None);
+    }
+
+    #[test]
+    fn explicit_preview_invalidation_rejects_late_callbacks_but_empty_terminal_does_not() {
+        let session_id = uuid::Uuid::new_v4();
+        let mut preview = RecordingPreviewController::default();
+        preview.begin_session(session_id);
+        preview.observe_authoritative(session_id, "主人前句", true);
+
+        // An ordinary empty provider terminal is a missing revision, not an
+        // ownership revocation. A later accepted revision may still arrive
+        // while the coordinator keeps this session open.
+        let cleared = preview.observe_authoritative(session_id, "", true);
+        assert!(cleared.authoritative_changed);
+        let resumed = preview.observe_authoritative(session_id, "主人后句", true);
+        assert!(resumed.authoritative_changed);
+        assert_eq!(
+            preview.authoritative(session_id).as_deref(),
+            Some("主人后句")
+        );
+
+        assert!(preview.invalidate_authoritative(session_id));
+        assert_eq!(preview.authoritative(session_id), None);
+        assert_eq!(
+            preview.observe_authoritative(session_id, "旧 session 迟到正文", true),
+            RecordingPreviewReduction::default()
+        );
+        assert_eq!(
+            preview.observe_provisional(session_id, "旧 session 迟到旁路"),
+            None
+        );
+        assert_eq!(preview.authoritative(session_id), None);
+    }
+
+    #[test]
+    fn cleared_preview_does_not_admit_a_late_callback_as_a_new_session() {
+        let old_session = uuid::Uuid::new_v4();
+        let current_session = uuid::Uuid::new_v4();
+        let mut preview = RecordingPreviewController::default();
+        preview.begin_session(old_session);
+        preview.observe_authoritative(old_session, "旧正文", true);
+        assert!(preview.clear_session(old_session));
+
+        assert_eq!(
+            preview.observe_authoritative(old_session, "迟到旧正文", true),
+            RecordingPreviewReduction::default()
+        );
+        assert_eq!(preview.authoritative(old_session), None);
+
+        preview.begin_session(current_session);
+        assert!(
+            preview
+                .observe_authoritative(current_session, "新 session 正文", true)
+                .authoritative_changed
+        );
+        assert_eq!(
+            preview.observe_authoritative(old_session, "再次迟到旧正文", true),
+            RecordingPreviewReduction::default()
+        );
+        assert_eq!(
+            preview.authoritative(current_session).as_deref(),
+            Some("新 session 正文")
+        );
+    }
+
+    #[test]
     fn punctuation_only_visible_revision_rearms_growth_clock() {
         let session_id = uuid::Uuid::new_v4();
         let mut preview = RecordingPreviewController::default();
@@ -1360,6 +1491,28 @@ mod tests {
     }
 
     #[test]
+    fn provisional_preview_cannot_retract_a_longer_provisional_update() {
+        let session_id = uuid::Uuid::new_v4();
+        let mut preview = RecordingPreviewController::default();
+        preview.begin_session(session_id);
+        preview.observe_authoritative(session_id, "今天", false);
+        preview.observe_provisional(session_id, "今天讨论发布以及所有已知问题");
+        let growth = preview.last_visible_growth_at(session_id);
+        assert_eq!(
+            preview.observe_provisional(session_id, "今天讨论发布"),
+            None
+        );
+        assert_eq!(
+            preview.visible(session_id).as_deref(),
+            Some("今天讨论发布以及所有已知问题")
+        );
+        assert_eq!(preview.last_visible_growth_at(session_id), growth);
+        assert!(preview
+            .observe_provisional(session_id, "今天讨论发布以及所有已知问题的修复")
+            .is_some());
+    }
+
+    #[test]
     fn target_speaker_endpoint_recording_lifecycle_serializes_candidate_owner_stop_and_close() {
         let coordinator_id = uuid::Uuid::new_v4();
         let mut lifecycle = RecordingLifecycleController::default();
@@ -1375,6 +1528,17 @@ mod tests {
         assert!(!lifecycle.commit_stop(coordinator_id));
         assert!(lifecycle.close_owner(coordinator_id));
         assert_eq!(lifecycle.state(), RecordingLifecycleState::Closed);
+    }
+
+    #[test]
+    fn target_speaker_endpoint_owned_stop_cannot_reopen_another_stop_attempt() {
+        let coordinator_id = uuid::Uuid::new_v4();
+        let mut lifecycle = RecordingLifecycleController::default();
+        assert!(lifecycle.begin_manual_owner(9, coordinator_id));
+        assert!(lifecycle.commit_stop_owned(coordinator_id, Some(42)));
+        assert!(!lifecycle.reopen_after_failed_stop(coordinator_id));
+        assert!(lifecycle.reopen_after_failed_stop_owned(coordinator_id, Some(42)));
+        assert_eq!(lifecycle.state(), RecordingLifecycleState::Active);
     }
 
     #[test]
@@ -1555,14 +1719,9 @@ mod tests {
             GateDecision::Pending
         );
         assert_eq!(
-            arbitrate_wake(
-                PhraseSignal::None,
-                OwnerAccessEvidence::EnrolledMatch,
-                true,
-            )
-            .decision,
-            GateDecision::Accept,
-            "terminal enrolled-owner match must keep-wake when local phrase is deaf"
+            arbitrate_wake(PhraseSignal::None, OwnerAccessEvidence::EnrolledMatch, true,).decision,
+            GateDecision::Reject,
+            "speaker identity cannot authorize dictation without activation phrase evidence"
         );
     }
 
@@ -2310,12 +2469,11 @@ mod tests {
             retained_audio_replay_available: true,
             debug_override_available: true,
             partial_preview_available: true,
-            prefer_partial_preview: false,
         };
         assert_eq!(
             arbitrate_product_final(evidence),
-            ProductFinalAuthority::PartialPreviewRecovery,
-            "already shown preview still inserts under isolation"
+            ProductFinalAuthority::Empty,
+            "unverified replay and preview are blocked under isolation"
         );
         assert_eq!(
             arbitrate_product_final(ProductFinalEvidence {
@@ -2344,7 +2502,6 @@ mod tests {
             retained_audio_replay_available: true,
             debug_override_available: true,
             partial_preview_available: true,
-            prefer_partial_preview: false,
         };
         assert_eq!(
             arbitrate_product_final(all_recovery_candidates),
@@ -2368,7 +2525,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_end_prefers_last_preview_over_later_provider_final() {
+    fn product_final_prefers_provider_over_preview() {
         let evidence = ProductFinalEvidence {
             target_filter_required: false,
             separated_owner_available: false,
@@ -2376,11 +2533,10 @@ mod tests {
             retained_audio_replay_available: false,
             debug_override_available: false,
             partial_preview_available: true,
-            prefer_partial_preview: true,
         };
         assert_eq!(
             arbitrate_product_final(evidence),
-            ProductFinalAuthority::PartialPreviewRecovery
+            ProductFinalAuthority::ProviderPrimary
         );
         assert_eq!(
             arbitrate_product_final(ProductFinalEvidence {
@@ -2388,8 +2544,8 @@ mod tests {
                 provider_primary_available: false,
                 ..evidence
             }),
-            ProductFinalAuthority::PartialPreviewRecovery,
-            "shown preview must still insert under isolation"
+            ProductFinalAuthority::Empty,
+            "preview-only recovery must be blocked under isolation"
         );
     }
 }

@@ -88,7 +88,11 @@
     "resources": [
       "resources/models/wesep-bsrnn-voicefilter-3s-int8.onnx",
       "resources/models/wesep-speaker-encoder-int8.onnx",
-      "resources/models/wesep-bsrnn-voicefilter-3s-int8.LICENSE.txt"
+      "resources/models/wesep-bsrnn-voicefilter-3s-int8.LICENSE.txt",
+      "resources/models/silero_vad.onnx",
+      "resources/models/silero_vad.onnx.LICENSE.txt",
+      "resources/windows-ime/x64/ListenerTypeIme.dll",
+      "resources/windows-ime/x86/ListenerTypeIme.dll"
     ],
     "targets": [
       "msi"

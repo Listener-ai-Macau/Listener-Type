@@ -146,9 +146,13 @@ HRESULT RegisterLanguageProfile() {
         static_cast<ULONG>(ARRAYSIZE(kListenerTypeImeName) - 1), nullptr, 0, 0);
   }
   if (SUCCEEDED(hr)) {
+    // Owner request 2026-09-18: keep Listener Type out of the Windows input
+    // switcher (Win+Space). The host activates the profile programmatically
+    // (ITfInputProcessorProfileMgr::ActivateProfile); the enable flag only
+    // controls user selectability.
     hr = profiles->EnableLanguageProfile(CLSID_ListenerTypeTextService,
                                          kListenerTypeLangId, GUID_ListenerTypeProfile,
-                                         TRUE);
+                                         FALSE);
   }
 
   profiles->Release();
@@ -168,7 +172,7 @@ HRESULT RegisterLanguageProfile() {
   hr = manager->RegisterProfile(
       CLSID_ListenerTypeTextService, kListenerTypeLangId, GUID_ListenerTypeProfile,
       kListenerTypeImeName, static_cast<ULONG>(ARRAYSIZE(kListenerTypeImeName) - 1),
-      nullptr, 0, 0, nullptr, 0, TRUE,
+      nullptr, 0, 0, nullptr, 0, FALSE,
       TF_IPP_CAPS_IMMERSIVESUPPORT | TF_IPP_CAPS_SYSTRAYSUPPORT);
   manager->Release();
   return hr;

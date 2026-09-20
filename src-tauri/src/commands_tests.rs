@@ -80,6 +80,35 @@ fn normalized_commands_source() -> String {
 }
 
 #[test]
+fn dictation_runtime_snapshot_rejects_zero_request_id_without_fallback() {
+    assert_eq!(
+        super::get_dictation_runtime_snapshot_request_error(0),
+        Some("requestId must be non-zero".to_string())
+    );
+    assert_eq!(super::get_dictation_runtime_snapshot_request_error(1), None);
+}
+
+#[test]
+fn dictation_runtime_snapshot_command_is_registered_and_read_only() {
+    let source = normalized_commands_source();
+    let start = source
+        .find("pub fn get_dictation_runtime_snapshot(")
+        .expect("runtime snapshot command should exist");
+    let end = source[start..]
+        .find("\n#[tauri::command]")
+        .map(|offset| start + offset)
+        .expect("runtime snapshot command boundary should exist");
+    let body = &source[start..end];
+    assert!(body.contains("coord.dictation_runtime_snapshot(request_id)"));
+    assert!(!body.contains("start_dictation"));
+    assert!(!body.contains("stop_dictation"));
+    assert!(!body.contains("refresh_embedded_ble_listener"));
+
+    let lib_source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"));
+    assert!(lib_source.contains("commands::get_dictation_runtime_snapshot"));
+}
+
+#[test]
 fn settings_save_refreshes_ble_only_when_input_source_changes() {
     let source = normalized_commands_source();
     let start = source

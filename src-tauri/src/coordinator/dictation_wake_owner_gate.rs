@@ -450,6 +450,12 @@ async fn evaluate_target_wake_extraction(
 ) -> Result<Option<ExtractedOwnerWakeEvidence>, String> {
     let confirmation_task = spawn_local_wake_confirmation(
         inner,
+        LocalWakeConfirmationDiagnosticContext {
+            embedded_session_id,
+            attempt: None,
+            source_origin_bytes: 0,
+            branch: "target-extraction",
+        },
         extracted.pcm.clone(),
         phrase.to_string(),
         true,

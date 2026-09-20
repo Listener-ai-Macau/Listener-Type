@@ -42,8 +42,8 @@ use crate::polish::{
 };
 use crate::recorder::{AudioConsumer, Recorder};
 use crate::types::{
-    builtin_style_pack_id, default_active_style_pack_id, ChineseScriptPreference, ComboBinding,
-    CorrectionRule, CredentialsStatus, DeviceCustomKeyAction, DeviceCustomKeyGesture,
+    builtin_style_pack_id, default_active_style_pack_id, CapsulePayload, ChineseScriptPreference,
+    ComboBinding, CorrectionRule, CredentialsStatus, DeviceCustomKeyAction, DeviceCustomKeyGesture,
     DeviceCustomKeyId, DeviceCustomKeyMapping, DeviceCustomKeys, DictationInputSource,
     DictationSession, DictionaryEntry, HotkeyCapability, HotkeyStatus, OutputLanguagePreference,
     PolishMode, ShortcutBinding, StylePack, StylePackKind, StylePackRuntimeDiagnostics,
@@ -364,6 +364,14 @@ pub fn record_ui_timeline_event(coord: CoordinatorState<'_>, payload: UiTimeline
                 .unwrap_or_else(|| "{}".into())
         ),
     );
+}
+
+/// Restore the latest display-only capsule state after the capsule WebView has
+/// been recreated or missed an event while hidden. It cannot trigger dictation
+/// or insertion.
+#[tauri::command]
+pub fn get_capsule_state(coord: CoordinatorState<'_>) -> Option<CapsulePayload> {
+    coord.capsule_latest_payload()
 }
 
 trait SettingsWriter {
@@ -2298,6 +2306,21 @@ include!("marketplace.rs");
 #[tauri::command]
 pub fn get_embedded_ble_runtime_status(coord: CoordinatorState<'_>) -> EmbeddedBleRuntimeStatus {
     device::get_embedded_ble_runtime_status(coord)
+}
+
+fn get_dictation_runtime_snapshot_request_error(request_id: u32) -> Option<String> {
+    (request_id == 0).then(|| "requestId must be non-zero".to_string())
+}
+
+#[tauri::command]
+pub fn get_dictation_runtime_snapshot(
+    coord: CoordinatorState<'_>,
+    request_id: u32,
+) -> Result<crate::coordinator::DictationRuntimeSnapshot, String> {
+    if let Some(error) = get_dictation_runtime_snapshot_request_error(request_id) {
+        return Err(error);
+    }
+    Ok(coord.dictation_runtime_snapshot(request_id))
 }
 
 #[tauri::command]

@@ -637,8 +637,7 @@ export function Capsule() {
     let cancelled = false;
     (async () => {
       const { listen } = await import('@tauri-apps/api/event');
-      const handle = await listen<CapsulePayload>('capsule:state', event => {
-        const p = event.payload;
+      const applyPayload = (p: CapsulePayload, replayed: boolean) => {
         if (p.sessionId) {
           suppressNonSessionEventsUntilRef.current = 0;
         } else if (p.state === 'idle') {
@@ -679,6 +678,7 @@ export function Capsule() {
               translation: p.translation === true,
               seq: p.seq,
               sessionId: p.sessionId,
+              replayed,
             },
           });
         }
@@ -734,9 +734,37 @@ export function Capsule() {
           commitMessage(undefined);
         }
         setTranslation(p.translation === true);
+      };
+      const handle = await listen<CapsulePayload>('capsule:state', event => {
+        applyPayload(event.payload, false);
       });
       if (cancelled) handle();
-      else unlisten = handle;
+      else {
+        unlisten = handle;
+        // Register the event listener first, then replay the latest backend
+        // snapshot. Sequence ordering makes a live event racing this request
+        // win over an older replay. This restores the capsule after a hidden
+        // or recreated WebView without touching dictation or insertion.
+        try {
+          const latest = await invokeOrMock<CapsulePayload | null>(
+            'get_capsule_state',
+            undefined,
+            () => null,
+          );
+          if (!cancelled && latest) {
+            traceCapsule('snapshot_replayed', {
+              state: latest.state,
+              elapsedMs: latest.elapsedMs,
+              detail: { seq: latest.seq, sessionId: latest.sessionId },
+            });
+            applyPayload(latest, true);
+          }
+        } catch (error) {
+          traceCapsule('snapshot_replay_failed', {
+            detail: { error: String(error) },
+          });
+        }
+      }
     })();
     return () => {
       cancelled = true;

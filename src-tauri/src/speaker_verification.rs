@@ -95,6 +95,8 @@ pub enum SessionSpeakerClassification {
 pub struct SessionSpeakerObservation {
     pub classification: SessionSpeakerClassification,
     pub real_speech_ms: usize,
+    /// Only adequately voiced windows may imply interference from score drift.
+    pub signal_quality_sufficient: bool,
     /// Transcript-only ownership evidence. It is intentionally typed rather
     /// than folded into wake/endpoint classification: short foreign fragments
     /// can corroborate provider diarization without independently deleting
@@ -114,7 +116,7 @@ pub struct SessionSpeakerAdaptationGate {
     bootstrap_complete: bool,
 }
 
-const SESSION_SPEAKER_MIN_NON_TARGET_MS: usize = 1_000;
+pub(crate) const SESSION_SPEAKER_MIN_NON_TARGET_MS: usize = 1_000;
 // The ESP32 microphone's idle floor is normally around 60-150 RMS while real
 // speech windows in installed sessions are in the thousands.  A flat idle
 // window used to satisfy the relative VAD (all frames are equally "active"),
@@ -152,6 +154,13 @@ impl SessionSpeakerObservation {
                 self.classification,
                 SessionSpeakerClassification::Target { .. }
             )
+    }
+
+    /// Embedding of the observed window, for bank-admission callers only.
+    /// Attribution callers must keep consuming the classification: an
+    /// embedding must never influence whether text survives a session.
+    pub fn embedding(&self) -> &[f32] {
+        &self.embedding
     }
 }
 
@@ -285,9 +294,7 @@ fn adapt_session_speaker_profile(
 /// enrolled owner. Persistent enrollment may have been recorded at another
 /// distance, volume, or on another day; comparing natural dictation only with
 /// those old wake-phrase samples left otherwise valid owner speech in the
-/// Uncertain band for an entire session. The fresh exemplar is safe to use
-/// here because the automatic wake gate has already matched the persisted
-/// owner template before `session_profile_from_wake` is called.
+/// Uncertain band for an entire session.
 ///
 /// This deliberately does not change `adaptive`: enrolled profiles still
 /// cannot learn from later body windows, and this exemplar is never persisted.
@@ -304,6 +311,92 @@ fn append_verified_wake_session_exemplar(
     }
     embeddings.push(verified_wake_embedding);
     true
+}
+
+/// Union the persisted owner bank with the wake exemplar that anchors the
+/// session, and label which path supplied the anchor.
+///
+/// The persisted template is only ever written by guided enrollment — the
+/// union here is session-local, so a bystander wake can never pollute the
+/// stored bank. The r40 regression (2026-09-19, tik build, session d4c45b6d)
+/// came from dropping the exemplar entirely when the wake reached tracking via
+/// open acceptance (EnrolledNonMatch + exact phrase): the bank had drifted
+/// (0.58+ at enrollment → ~0.20 the next morning), so the session target
+/// became the very bank that had just rejected the live voice, every body
+/// window scored strong NonTarget under mixed interference, ConfirmedOther
+/// armed, and `no_body_3000ms` cut the read mid-sentence (37/52 chars). The
+/// wake gate's product bias is "keep wake over false-wake" — whoever passed
+/// the exact-phrase gate owns the session, so their wake anchor must stay in
+/// the session profile. `observe_session_speaker` scores by max cosine, so the
+/// anchor only lifts the wake speaker's own windows; a different bystander
+/// voice still has to clear the full bank.
+fn session_target_with_wake_anchor(
+    mut bank: Vec<Vec<f32>>,
+    verified_wake_embedding: Vec<f32>,
+    live_wake_matches_enrolled_owner: bool,
+) -> (Vec<Vec<f32>>, &'static str) {
+    if live_wake_matches_enrolled_owner
+        && append_verified_wake_session_exemplar(&mut bank, verified_wake_embedding.clone())
+    {
+        return (bank, "enrolled_match");
+    }
+    let anchored =
+        append_verified_wake_session_exemplar(&mut bank, verified_wake_embedding);
+    (bank, if anchored { "open_acceptance" } else { "bank_only" })
+}
+
+/// 银行自适应 (persisted-bank adaptation) constants and pure decision logic.
+///
+/// The persisted owner bank is written by guided enrollment today, so a bank
+/// recorded on one quiet morning drifts away from the same voice on other
+/// days (installed 2026-09-18/19: 0.58-0.68 at enrollment → ~0.20 the next
+/// morning) and the only remedy has been "record it again". Adaptation
+/// instead lets the bank refresh itself from live audio the bank ALREADY
+/// verified — never from open-acceptance wakes, never from windows the bank
+/// did not confidently claim (the `ADAPTIVE_BANK_MIN_CONFIDENT_BODY_SCORE`
+/// floor sits above the Target threshold, so a media-mixed 0.26-0.44 window
+/// can never enter the bank either).
+///
+/// Slot policy: slot 0 of each bank keeps the original guided-enrollment
+/// anchor forever (a mis-admitted exemplar can therefore never fully own the
+/// bank), and only the churn slot tracks the freshest verified voice. A
+/// candidate that is already well represented (similarity >=
+/// `ADAPTIVE_BANK_REPRESENTED_MAX_SCORE` against ANY slot) is skipped, which
+/// is also the write-churn control.
+const ADAPTIVE_BANK_REPRESENTED_MAX_SCORE: f32 = 0.80;
+pub(crate) const ADAPTIVE_BANK_MIN_CONFIDENT_BODY_SCORE: f32 = 0.60;
+const ADAPTIVE_BANK_CHURN_SLOT: usize = 1;
+
+fn normalized_cosine(left: &[f32], right: &[f32]) -> Option<f32> {
+    if left.is_empty() || left.len() != right.len() {
+        return None;
+    }
+    let mut dot = 0.0f32;
+    let mut left_norm = 0.0f32;
+    let mut right_norm = 0.0f32;
+    for (left_value, right_value) in left.iter().zip(right.iter()) {
+        dot += left_value * right_value;
+        left_norm += left_value * left_value;
+        right_norm += right_value * right_value;
+    }
+    if left_norm <= f32::EPSILON || right_norm <= f32::EPSILON {
+        return None;
+    }
+    Some(dot / (left_norm.sqrt() * right_norm.sqrt()))
+}
+
+/// May a live exemplar that this session just verified refresh the persisted
+/// bank? Requires at least the anchor plus one more slot, matching embedding
+/// dimensions across the whole bank, and no existing slot that already
+/// represents the candidate closely.
+pub(crate) fn adaptive_bank_should_refresh(bank: &[Vec<f32>], candidate: &[f32]) -> bool {
+    !candidate.is_empty()
+        && bank.len() > ADAPTIVE_BANK_CHURN_SLOT
+        && bank.iter().all(|slot| slot.len() == candidate.len())
+        && bank.iter().all(|slot| {
+            normalized_cosine(slot, candidate)
+                .is_none_or(|similarity| similarity < ADAPTIVE_BANK_REPRESENTED_MAX_SCORE)
+        })
 }
 
 // 会话分段分类阈值。2026-08-09 的第二个人得分可达 0.426–0.58；而
@@ -338,6 +431,11 @@ fn session_speaker_classification_for_evidence(
     } else {
         classification
     }
+}
+
+fn session_speaker_signal_quality_sufficient(real_speech_ms: usize, peak_rms: f32) -> bool {
+    real_speech_ms >= SESSION_SPEAKER_MIN_NON_TARGET_MS
+        && peak_rms >= SESSION_SPEAKER_MIN_IDENTITY_PEAK_RMS
 }
 
 fn session_speaker_classification_for_signal(
@@ -1883,10 +1981,116 @@ mod platform {
             .and_then(|template| template.target_speaker_embedding.clone()))
     }
 
+    // ---- 银行自适应 (persisted-bank adaptation) ----
+
+    static ADAPTIVE_BANK_LAST_WRITE: Lazy<Mutex<Option<std::time::Instant>>> =
+        Lazy::new(|| Mutex::new(None));
+    /// At most one persisted-bank write per interval across both banks. The
+    /// represented-similarity skip already stops most writes; this caps
+    /// keyring churn even when the voice moves daily.
+    const ADAPTIVE_BANK_MIN_WRITE_INTERVAL_MS: u128 = 600_000;
+
+    #[derive(Clone, Copy)]
+    enum AdaptiveBankKind {
+        Wake,
+        Session,
+    }
+
+    impl AdaptiveBankKind {
+        fn label(self) -> &'static str {
+            match self {
+                Self::Wake => "wake",
+                Self::Session => "session",
+            }
+        }
+    }
+
+    /// Refresh one persisted bank slot with a live exemplar this session
+    /// already verified. Slot 0 (the guided-enrollment anchor) is never
+    /// replaced; only the churn slot tracks the freshest voice. The caller
+    /// must have established owner identity through the bank itself (an
+    /// enrolled-match wake, or a >= ADAPTIVE_BANK_MIN_CONFIDENT_BODY_SCORE
+    /// window) — open acceptance must never reach this write.
+    fn adapt_owner_bank_locked(
+        state: &mut State,
+        phrase: &str,
+        embedding: &[f32],
+        kind: AdaptiveBankKind,
+    ) -> Result<bool, String> {
+        load_template_for_phrase_locked(state, phrase);
+        let mut template = state
+            .template
+            .clone()
+            .filter(|template| template_matches_phrase(template, phrase) && !template.invalidated)
+            .ok_or_else(|| "voiceprint bank is not enrolled for this phrase".to_string())?;
+        let bank = match kind {
+            AdaptiveBankKind::Wake => &mut template.wake_embeddings,
+            AdaptiveBankKind::Session => &mut template.session_embeddings,
+        };
+        if !super::adaptive_bank_should_refresh(bank, embedding) {
+            return Ok(false);
+        }
+        bank[super::ADAPTIVE_BANK_CHURN_SLOT] = embedding.to_vec();
+        persist_template(&template)?;
+        state.template = Some(template);
+        Ok(true)
+    }
+
+    fn adapt_owner_bank(
+        wake_phrase: &str,
+        embedding: &[f32],
+        kind: AdaptiveBankKind,
+    ) -> Result<bool, String> {
+        let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
+        if embedding.is_empty() {
+            return Ok(false);
+        }
+        if ADAPTIVE_BANK_LAST_WRITE.lock().is_some_and(|last| {
+            last.elapsed().as_millis() < ADAPTIVE_BANK_MIN_WRITE_INTERVAL_MS
+        }) {
+            return Ok(false);
+        }
+        let mut state = STATE.lock();
+        let result = adapt_owner_bank_locked(&mut state, &phrase, embedding, kind);
+        if matches!(result, Ok(true)) {
+            *ADAPTIVE_BANK_LAST_WRITE.lock() = Some(std::time::Instant::now());
+        }
+        match result {
+            Ok(true) => log::info!(
+                "[speaker-verification] owner bank adapted kind={} churn_slot={} embedding_dim={} phrase={}",
+                kind.label(),
+                super::ADAPTIVE_BANK_CHURN_SLOT,
+                embedding.len(),
+                phrase
+            ),
+            Ok(false) => {}
+            Err(ref err) => log::warn!(
+                "[speaker-verification] owner bank adaptation skipped kind={}: {err}",
+                kind.label()
+            ),
+        }
+        result
+    }
+
+    pub fn adapt_owner_wake_bank(
+        wake_phrase: &str,
+        verified_wake_embedding: &[f32],
+    ) -> Result<bool, String> {
+        adapt_owner_bank(wake_phrase, verified_wake_embedding, AdaptiveBankKind::Wake)
+    }
+
+    pub fn adapt_owner_session_bank(
+        wake_phrase: &str,
+        body_embedding: &[f32],
+    ) -> Result<bool, String> {
+        adapt_owner_bank(wake_phrase, body_embedding, AdaptiveBankKind::Session)
+    }
+
     pub fn session_profile_from_wake(
         pcm: &[u8],
         wake_end_seconds: f32,
         wake_phrase: &str,
+        live_wake_matches_enrolled_owner: bool,
     ) -> Result<SessionSpeakerProfile, String> {
         let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
         let enrolled = {
@@ -1898,28 +2102,44 @@ mod platform {
                 .filter(|template| template_matches_phrase(template, &phrase))
                 .map(|template| template.session_embeddings.clone())
         };
-        if let Some(mut embeddings) = enrolled {
+        if let Some(enrolled) = enrolled {
+            let bank_exemplars = enrolled.len();
             match verified_wake_session_embedding(pcm, wake_end_seconds) {
                 Ok((verified_wake_embedding, source_speech_ms, model_input_ms, inference_ms)) => {
-                    let added = super::append_verified_wake_session_exemplar(
-                        &mut embeddings,
+                    // 银行自适应 wake echo: only a wake the persisted bank
+                    // itself matched may refresh the wake bank — an
+                    // open-acceptance wake (bank did not match) must never
+                    // write, the same contract the 2026-09-17 bank-purifying
+                    // hardening established. Rate-limited and
+                    // similarity-gated inside; failures never affect this
+                    // session's profile.
+                    if live_wake_matches_enrolled_owner {
+                        let _ = adapt_owner_wake_bank(&phrase, &verified_wake_embedding);
+                    }
+                    let (embeddings, wake_anchor) = super::session_target_with_wake_anchor(
+                        enrolled,
                         verified_wake_embedding,
+                        live_wake_matches_enrolled_owner,
                     );
                     log::info!(
-                        "[speaker-verification] enrolled session target prepared phrase={} wake_end_ms={} speech_ms={} model_input_ms={} inference_ms={inference_ms} persisted_exemplars={} live_verified_exemplar_added={added}",
+                        "[speaker-verification] enrolled session target prepared phrase={} wake_end_ms={} speech_ms={} model_input_ms={} inference_ms={inference_ms} persisted_exemplars={bank_exemplars} session_embeddings={} wake_anchor={wake_anchor} live_wake_owner_matched={live_wake_matches_enrolled_owner}",
                         phrase,
                         (wake_end_seconds * 1000.0).round() as u64,
                         source_speech_ms,
                         model_input_ms,
-                        embeddings.len().saturating_sub(usize::from(added)),
+                        embeddings.len(),
                     );
+                    return Ok(SessionSpeakerProfile {
+                        embeddings: Arc::new(embeddings),
+                        adaptive: false,
+                    });
                 }
                 Err(err) => log::warn!(
                     "[speaker-verification] live verified wake exemplar unavailable; preserving enrolled session bank: {err}"
                 ),
             }
             return Ok(SessionSpeakerProfile {
-                embeddings: Arc::new(embeddings),
+                embeddings: Arc::new(enrolled),
                 adaptive: false,
             });
         }
@@ -2003,6 +2223,10 @@ mod platform {
         Ok(SessionSpeakerObservation {
             classification,
             real_speech_ms,
+            signal_quality_sufficient: super::session_speaker_signal_quality_sufficient(
+                real_speech_ms,
+                peak_rms,
+            ),
             transcript_speaker_evidence,
             embedding: candidate,
         })
@@ -2116,6 +2340,10 @@ mod platform {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use super::super::{
+            session_target_with_wake_anchor, SESSION_SPEAKER_CONFIDENT_TARGET_MIN_SCORE,
+            SESSION_SPEAKER_MAX_EMBEDDINGS, SESSION_SPEAKER_NON_TARGET_MAX_SCORE,
+        };
 
         #[test]
         fn guided_enrollment_step_boundaries_match_the_three_visible_prompts() {
@@ -2953,6 +3181,54 @@ mod platform {
         }
 
         #[test]
+        fn r40_open_acceptance_wake_still_anchors_the_session_target() {
+            // Drifted bank: every reference is far from the live wake voice.
+            let bank = vec![vec![1.0, 0.0], vec![0.99, 0.02], vec![0.97, 0.04]];
+            let (session, anchor) =
+                session_target_with_wake_anchor(bank.clone(), vec![0.0, 1.0], false);
+            assert_eq!(anchor, "open_acceptance");
+            assert_eq!(session.len(), bank.len() + 1);
+            assert_eq!(session.last(), Some(&vec![0.0, 1.0]));
+            // The stored bank must stay untouched: purity is what keeps a
+            // bystander wake from ever rewriting the enrolled template.
+            assert_eq!(bank.len(), 3);
+
+            // r40 shape: the wake speaker's body window max-cosines the union
+            // at Target level through the fresh anchor, while the drifted bank
+            // alone would have scored it strong NonTarget and cut the read.
+            let body_window = vec![0.04, 0.999];
+            let score = |profile: &[Vec<f32>]| {
+                profile
+                    .iter()
+                    .map(|embedding| cosine(embedding, &body_window).unwrap())
+                    .fold(f32::MIN, f32::max)
+            };
+            assert!(score(&bank) <= SESSION_SPEAKER_NON_TARGET_MAX_SCORE);
+            assert!(score(&session) >= SESSION_SPEAKER_CONFIDENT_TARGET_MIN_SCORE);
+        }
+
+        #[test]
+        fn enrolled_match_and_open_acceptance_take_the_same_union_path() {
+            let bank = vec![vec![1.0, 0.0], vec![0.99, 0.02], vec![0.97, 0.04]];
+            let (matched, matched_anchor) =
+                session_target_with_wake_anchor(bank.clone(), vec![0.0, 1.0], true);
+            let (open, open_anchor) =
+                session_target_with_wake_anchor(bank, vec![0.0, 1.0], false);
+            assert_eq!(matched_anchor, "enrolled_match");
+            assert_eq!(open_anchor, "open_acceptance");
+            assert_eq!(matched.len(), open.len());
+        }
+
+        #[test]
+        fn full_bank_cannot_take_a_wake_anchor() {
+            let bank = vec![vec![1.0, 0.0]; SESSION_SPEAKER_MAX_EMBEDDINGS];
+            let (session, anchor) =
+                session_target_with_wake_anchor(bank.clone(), vec![0.0, 1.0], false);
+            assert_eq!(anchor, "bank_only");
+            assert_eq!(session.len(), SESSION_SPEAKER_MAX_EMBEDDINGS);
+        }
+
+        #[test]
         fn evaluation_calibration_prefers_a_threshold_that_meets_both_hard_gates() {
             let mut scores = Vec::new();
             for index in 0..20 {
@@ -3127,10 +3403,11 @@ pub(crate) use platform::prepare_runtime_assets;
 pub(crate) use platform::target_speaker_embedding_for_phrase;
 #[cfg(target_os = "windows")]
 pub use platform::{
-    begin_enrollment_processing, cancel_enrollment, delete_template, enrollment_should_process,
-    fail_enrollment, finish_enrollment, invalidate_for_phrase_change, is_enrolled_for_phrase,
-    observe_enrollment_capture, observe_session_speaker, prepare_for_phrase,
-    session_profile_from_wake, start_enrollment, status_for_phrase, take_enrollment_arm, verify,
+    adapt_owner_session_bank, begin_enrollment_processing, cancel_enrollment, delete_template,
+    enrollment_should_process, fail_enrollment, finish_enrollment, invalidate_for_phrase_change,
+    is_enrolled_for_phrase, observe_enrollment_capture, observe_session_speaker,
+    prepare_for_phrase, session_profile_from_wake, start_enrollment, status_for_phrase,
+    take_enrollment_arm, verify,
 };
 
 #[cfg(not(target_os = "windows"))]
@@ -3211,10 +3488,27 @@ pub fn verify(_pcm: &[u8], _wake_phrase: &str) -> Result<VerificationResult, Str
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn adapt_owner_wake_bank(
+    _wake_phrase: &str,
+    _verified_wake_embedding: &[f32],
+) -> Result<bool, String> {
+    Ok(false)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn adapt_owner_session_bank(
+    _wake_phrase: &str,
+    _body_embedding: &[f32],
+) -> Result<bool, String> {
+    Ok(false)
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn session_profile_from_wake(
     _pcm: &[u8],
     _wake_end_seconds: f32,
     _wake_phrase: &str,
+    _live_wake_matches_enrolled_owner: bool,
 ) -> Result<SessionSpeakerProfile, String> {
     Err("session speaker tracking is currently available on Windows only".into())
 }
@@ -3270,10 +3564,25 @@ mod tests {
         SessionSpeakerObservation {
             classification,
             real_speech_ms,
+            signal_quality_sufficient: real_speech_ms >= SESSION_SPEAKER_MIN_NON_TARGET_MS,
             transcript_speaker_evidence:
                 crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive,
             embedding: embedding.to_vec(),
         }
+    }
+
+    #[test]
+    fn interference_quality_uses_existing_identity_signal_requirements() {
+        assert!(!session_speaker_signal_quality_sufficient(1200, 194.0));
+        assert!(!session_speaker_signal_quality_sufficient(700, 4000.0));
+        assert!(session_speaker_signal_quality_sufficient(1000, 512.0));
+        assert!(session_speaker_signal_quality_sufficient(1200, 3000.0));
+        // A quiet real owner's audio is still processed and remains uncertain;
+        // this quality check supplies no authority to delete or stop speech.
+        assert!(matches!(
+            session_speaker_classification_for_signal(0.65, 1200, 194.0),
+            SessionSpeakerClassification::Uncertain { .. }
+        ));
     }
 
     #[test]
@@ -3302,6 +3611,48 @@ mod tests {
             session_speaker_classification_for_score(0.38),
             SessionSpeakerClassification::Uncertain { .. }
         ));
+    }
+
+    #[test]
+    fn adaptive_bank_refresh_keeps_anchor_and_skips_represented_exemplars() {
+        let anchor = vec![1.0, 0.0, 0.0, 0.0];
+        let churn = vec![0.0, 1.0, 0.0, 0.0];
+        let third = vec![0.0, 0.0, 1.0, 0.0];
+        let bank = vec![anchor.clone(), churn.clone(), third.clone()];
+
+        // Already represented — identical slot, or the same direction at a
+        // different recording level — must not rewrite the credential bank.
+        assert!(!adaptive_bank_should_refresh(&bank, &churn));
+        assert!(
+            !adaptive_bank_should_refresh(&bank, &[0.0, 3.5, 0.0, 0.0]),
+            "normalized similarity must ignore vector scale"
+        );
+        // Close-but-not-identical (cosine ~0.96) is still representation.
+        assert!(!adaptive_bank_should_refresh(&bank, &[0.0, 2.0, 0.6, 0.0]));
+        // A genuinely drifted voice (cosine 0.36-0.54 against every slot, the
+        // installed 0.58→0.20 overnight shape) refreshes the churn slot.
+        assert!(adaptive_bank_should_refresh(
+            &bank,
+            &[1.0, 1.5, 1.5, 1.5]
+        ));
+        // Guard rails: empty candidate, bank without a churn slot,
+        // dimension mismatch.
+        assert!(!adaptive_bank_should_refresh(&bank, &[]));
+        assert!(!adaptive_bank_should_refresh(&[anchor], &[1.0, 1.5, 1.5, 1.5]));
+        assert!(!adaptive_bank_should_refresh(
+            &bank,
+            &[0.0, 0.0, 0.0, 1.0, 0.0]
+        ));
+    }
+
+    #[test]
+    fn observation_embedding_accessor_exposes_bank_admission_payload() {
+        let observation = observation(SessionSpeakerClassification::Target { score: 0.62 }, 1_200, [0.5, 0.25]);
+        assert_eq!(observation.embedding(), &[0.5, 0.25]);
+        // The confident-body admission floor must sit above the Target
+        // classification threshold: a media-mixed 0.26-0.44 window can never
+        // qualify even when classified Target on a clean day.
+        assert!(ADAPTIVE_BANK_MIN_CONFIDENT_BODY_SCORE > SESSION_SPEAKER_CONFIDENT_TARGET_MIN_SCORE);
     }
 
     #[test]

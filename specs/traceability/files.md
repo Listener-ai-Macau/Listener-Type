@@ -7,8 +7,6 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `index.html` | Core app | Build and targeted tests |
 | `package-lock.json` | Build and release config | Build, updater and audit scripts |
 | `package.json` | Build and release config | Build, updater and audit scripts |
-| `docs/architecture/owner_audio_pipeline.md` | Owner-centric wake, speaker activity and endpoint contract | Architecture review and targeted replay tests |
-| `docs/architecture/recording-wake-endpoint-reset-rules.md` | Unified recording, wake, endpoint and reset investigation rules | Architecture review and targeted replay tests |
 | `scripts/advance-preproduction-total-review.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/analyze-listener-runtime-log.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/build-mac.sh` | Automation and audits | Node/PowerShell script tests |
@@ -70,22 +68,23 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/run-multi-speaker-timeline-regressions.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-recording-consumption-physical-validation.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-speaker-verification-evaluation.ps1` | Automation and audits | Node/PowerShell script tests |
-| `scripts/run-synthetic-speaker-ab.ps1` | Automation and audits | Synthetic owner/non-owner and overlap speaker A/B replay |
+| `scripts/run-synthetic-speaker-ab.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-target-speaker-overlap-regressions.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-v1.0.2-regression.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/show-cn-interference-development-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-cn-interference-final-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
-| `scripts/show-cn-interference-development-acceptance.ps1` | Automation and audits | Current-tree interference acceptance helper |
+| `scripts/show-interference-playback-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-live-wake-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-live-wake-acceptance.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/speaker-evaluation-manifest.example.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/validation/run_ble_recording_cancel_matrix.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-frontend.mjs` | Automation and audits | Node/PowerShell script tests |
-| `scripts/verify_latest_runtime.ps1` | Automation and audits | Latest installed runtime hash/path gate |
 | `scripts/verify-listener-1.0.4-clean-env.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-listener-1.0.4-identity.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-listener-1.0.4-protected-contracts.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify_device_control_ble_settings_static.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify_device_control_recovery_root_cause.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/verify_latest_runtime.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify_native_hid_gatt_recovery_static.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/watch-1.0.5-accept-logs.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-ble-focused-human-review.ps1` | Automation and audits | Node/PowerShell script tests |

@@ -187,6 +187,35 @@ pub fn send_recording_control_activate(timeout: Duration) -> Result<(), String> 
     )
 }
 
+pub fn send_recording_control_ensure_wake_capture(
+    request_id: u32,
+    previous_segment_id: u32,
+    timeout: Duration,
+) -> Result<(), String> {
+    let command = format!(
+        "VREC:ENSURE:{request_id:08X}:{previous_segment_id:08X}\n"
+    );
+    send_recording_control_command(
+        command.as_bytes(),
+        timeout,
+        "accepted wake capture ensure",
+        ActiveControlTransientFallback::ReturnError,
+    )
+}
+
+pub fn send_recording_control_abort_wake_capture(
+    request_id: u32,
+    timeout: Duration,
+) -> Result<(), String> {
+    let command = format!("VREC:ABORT:{request_id:08X}\n");
+    send_recording_control_command(
+        command.as_bytes(),
+        timeout,
+        "accepted wake capture abort",
+        ActiveControlTransientFallback::TryFreshGatt,
+    )
+}
+
 pub fn send_recording_control_enrollment(timeout: Duration) -> Result<(), String> {
     send_recording_control_command(
         b"VREC:ENROLL\n",

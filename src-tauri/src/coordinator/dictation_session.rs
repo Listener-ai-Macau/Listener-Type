@@ -177,11 +177,14 @@ pub(super) fn request_stop_during_starting(inner: &Arc<Inner>, reason: &str) {
 pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
     let current_session_id = {
         let mut state = inner.state.lock();
+        // r23：HWND 与标题原子成对抓取，自愈路径靠标题识别真实窗口。
+        let (focus_target, focus_title) = capture_focus_target_with_title();
         let Some(session_id) =
-            begin_session_state(&mut state, capture_focus_target(), capture_frontmost_app())
+            begin_session_state(&mut state, focus_target, capture_frontmost_app())
         else {
             return Ok(());
         };
+        state.focus_target_title = focus_title;
         if let Some(label) = state.front_app.as_deref() {
             log::info!("[coord] front_app captured: {label}");
         }

@@ -232,12 +232,18 @@ assert.ok(
 );
 assert.ok(
   voiceprintWizardSource.includes('status?.signalLevel') &&
-    voiceprintWizardSource.includes('status?.stepSpeechMs') &&
+    voiceprintWizardSource.includes('status?.captureFeedback') &&
     voiceprintWizardSource.includes('voiceprintWizardFeedback'),
-  'voiceprint wizard must render live signal and per-step speech evidence',
+  'voiceprint wizard must render live signal and speech-quality feedback evidence',
 );
 assert.ok(
-  voiceprintWizardSource.includes('const STEP_TARGET_MS = [600, 600, 600] as const;') &&
+  voiceprintWizardSource.includes('const stepDone = (step: number) => processing || (capturing && step < currentStep);') &&
+    !voiceprintWizardSource.includes('STEP_TARGET_MS') &&
+    !voiceprintWizardSource.includes('stepSpeechMs'),
+  'voiceprint wizard checkmarks must appear only after a step slot has finished capturing, never from speech accumulation',
+);
+assert.ok(
+  voiceprintWizardSource.includes('const ENROLLMENT_STEP_SLOT_MS = 3000;') &&
     voiceprintWizardSource.includes('Array.from({ length: 3 }') &&
     voiceprintWizardSource.includes('total: 3') &&
     !voiceprintWizardSource.includes('voiceprintWizardNaturalStep') &&

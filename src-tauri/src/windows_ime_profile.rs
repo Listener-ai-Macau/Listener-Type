@@ -145,6 +145,12 @@ impl WindowsImeProfileManager {
     pub fn is_listener_type_profile_active(&self) -> WindowsImeProfileResult<bool> {
         windows_impl::is_listener_type_profile_active()
     }
+
+    pub fn hide_listener_type_profile_from_input_switcher(
+        &self,
+    ) -> WindowsImeProfileResult<()> {
+        windows_impl::hide_listener_type_profile_from_input_switcher()
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -177,6 +183,14 @@ impl WindowsImeProfileManager {
     pub fn is_listener_type_profile_active(&self) -> WindowsImeProfileResult<bool> {
         Ok(false)
     }
+
+    pub fn hide_listener_type_profile_from_input_switcher(
+        &self,
+    ) -> WindowsImeProfileResult<()> {
+        Err(WindowsImeProfileError::Unavailable(
+            "Windows TSF profiles are only available on Windows".to_string(),
+        ))
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -207,8 +221,16 @@ mod windows_impl {
     const LISTENER_TYPE_TSF_KEYBOARD_CATEGORY_KEY: &str = r"Software\Microsoft\CTF\TIP\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767}\Category\Category\{34745C63-B2F0-4784-8B67-5E12C8701A31}\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767}";
     const LISTENER_TYPE_TSF_IMMERSIVE_CATEGORY_KEY: &str = r"Software\Microsoft\CTF\TIP\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767}\Category\Category\{13A016DF-560B-46CD-947A-4C3AF1E0E35D}\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767}";
     const LISTENER_TYPE_TSF_SYSTRAY_CATEGORY_KEY: &str = r"Software\Microsoft\CTF\TIP\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767}\Category\Category\{25504FB4-7BAB-4BC1-9C69-CF81890F0EF5}\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767}";
+    // Owner request 2026-09-18: Listener Type must not appear in the Windows
+    // input switcher (Win+Space). The enable flag only governs user
+    // selectability; programmatic ActivateProfile does not require it. If the
+    // running Windows build refuses to activate a disabled profile, the
+    // activate path retries once with the enable-on-activate flag so true TSF
+    // insert is never lost to the cosmetic hiding goal.
     const LISTENER_TYPE_PROFILE_ACTIVATION_FLAGS: u32 =
-        TF_IPPMF_FORSESSION | TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE | TF_IPPMF_ENABLEPROFILE;
+        TF_IPPMF_FORSESSION | TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE;
+    const LISTENER_TYPE_PROFILE_ENABLE_ON_ACTIVATE_FLAGS: u32 =
+        LISTENER_TYPE_PROFILE_ACTIVATION_FLAGS | TF_IPPMF_ENABLEPROFILE;
     const PROFILE_RESTORE_FLAGS: u32 = TF_IPPMF_FORSESSION | TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE;
 
     pub(super) struct ComInitializeOwnership {
@@ -300,12 +322,18 @@ mod windows_impl {
         let clsid = parse_guid(LISTENER_TYPE_TEXT_SERVICE_CLSID_BRACED)?;
         let profile_guid = parse_guid(LISTENER_TYPE_PROFILE_GUID_BRACED)?;
 
-        // Best-effort enable/activate on ITfInputProcessorProfiles. Owner
-        // logs show ChangeCurrentLanguage / ActivateLanguageProfile often
-        // return E_FAIL (0x80004005) when another TIP owns the thread; that
-        // used to abort before ActivateProfile. Soft-fail those steps and
-        // still try the profile manager path, which is what actually lands
-        // Listener Type for true TSF insert.
+        // Best-effort activate prep on ITfInputProcessorProfiles. Owner logs
+        // show ChangeCurrentLanguage / ActivateLanguageProfile often return
+        // E_FAIL (0x80004005) when another TIP owns the thread; that used to
+        // abort before ActivateProfile. Soft-fail those steps and still try
+        // the profile manager path, which is what actually lands Listener
+        // Type for true TSF insert. The enable here is deliberately
+        // TRANSIENT: TSF will not instantiate a disabled TIP inside the
+        // foreground app, so keeping it disabled at activation time produced
+        // "no Listener Type IME client is ready" (2026-09-18, every insert
+        // degraded to the unconfirmed unicode route). restore_session hides
+        // the profile again, so it only shows in the input switcher while a
+        // dictation session is actually running.
         if let Err(error) = with_input_processor_profiles(|profiles| unsafe {
             let _ = profiles.EnableLanguageProfile(
                 &clsid,
@@ -330,6 +358,11 @@ mod windows_impl {
             log::debug!("[windows-ime] ITfInputProcessorProfiles pre-activate soft-fail: {error}");
         }
 
+        // r24（2026-09-18，session 999a5b67）：先试不带 enable 的 ActivateProfile
+        // 返回成功，但已运行的前台应用（操作弹窗）不会为迟到启用的 TIP 重建输入
+        // 处理器——IPC 始终 "no Listener Type IME client is ready"。改用
+        // TF_IPPMF_ENABLEPROFILE 一步启用+激活：等价于用户手动切 IME 的系统级
+        // 切换语义，能把 TIP 实例化进已运行进程；失败再退回无 enable 版本。
         with_profile_manager(|manager| unsafe {
             manager.ActivateProfile(
                 TF_PROFILETYPE_INPUTPROCESSOR,
@@ -337,8 +370,23 @@ mod windows_impl {
                 &clsid,
                 &profile_guid,
                 null_hkl(),
-                LISTENER_TYPE_PROFILE_ACTIVATION_FLAGS,
+                LISTENER_TYPE_PROFILE_ENABLE_ON_ACTIVATE_FLAGS,
             )
+        })
+        .or_else(|error| {
+            log::warn!(
+                "[windows-ime] ActivateProfile with TF_IPPMF_ENABLEPROFILE failed ({error:?}); retrying without enable so TSF insert stays available"
+            );
+            with_profile_manager(|manager| unsafe {
+                manager.ActivateProfile(
+                    TF_PROFILETYPE_INPUTPROCESSOR,
+                    LISTENER_TYPE_TSF_LANG_ID,
+                    &clsid,
+                    &profile_guid,
+                    null_hkl(),
+                    LISTENER_TYPE_PROFILE_ACTIVATION_FLAGS,
+                )
+            })
         })
     }
 
@@ -376,6 +424,26 @@ mod windows_impl {
                 })
             }
         }
+    }
+
+    pub fn hide_listener_type_profile_from_input_switcher() -> WindowsImeProfileResult<()> {
+        let clsid = parse_guid(LISTENER_TYPE_TEXT_SERVICE_CLSID_BRACED)?;
+        let profile_guid = parse_guid(LISTENER_TYPE_PROFILE_GUID_BRACED)?;
+
+        // Owner request 2026-09-18: Listener Type must not sit in the user's
+        // input switcher at rest. Activation enables the profile transiently
+        // (TSF refuses to instantiate a disabled TIP inside foreground apps —
+        // observed as "no Listener Type IME client is ready" with every insert
+        // degrading to the unconfirmed unicode route), so this runs at session
+        // end to take it back out of the switcher.
+        with_input_processor_profiles(|profiles| unsafe {
+            profiles.EnableLanguageProfile(
+                &clsid,
+                LISTENER_TYPE_TSF_LANG_ID,
+                &profile_guid,
+                false,
+            )
+        })
     }
 
     pub fn is_listener_type_profile_active() -> WindowsImeProfileResult<bool> {

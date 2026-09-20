@@ -63,6 +63,682 @@ fn session_id(n: u128) -> SessionId {
 }
 
 #[test]
+fn dictation_runtime_snapshot_is_stable_and_read_only() {
+    let phases = [
+        (SessionPhase::Idle, "idle"),
+        (SessionPhase::Starting, "starting"),
+        (SessionPhase::Listening, "listening"),
+        (SessionPhase::Processing, "processing"),
+        (SessionPhase::Inserting, "inserting"),
+    ];
+    for (phase, expected_label) in phases {
+        let state = SessionState {
+            phase,
+            ..Default::default()
+        };
+        let snapshot = super::dictation_runtime_snapshot_from_state(7, &state);
+        assert_eq!(snapshot.phase, expected_label);
+        assert_eq!(snapshot.request_id, 7);
+        assert_eq!(snapshot.session_id, None);
+        assert!(!snapshot.pending_stop);
+        assert!(!snapshot.cancelled);
+        let json = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(json["schema"], "listener.dictation_runtime_snapshot.v1");
+        assert_eq!(json["requestId"], 7);
+        assert_eq!(json["phase"], expected_label);
+        assert!(json["sessionId"].is_null());
+    }
+}
+
+#[test]
+fn dictation_runtime_snapshot_preserves_old_idle_identity_without_calling_it_active() {
+    let previous = session_id(99);
+    let state = SessionState {
+        phase: SessionPhase::Idle,
+        session_id: previous,
+        pending_stop: true,
+        cancelled: true,
+        ..Default::default()
+    };
+
+    let snapshot = super::dictation_runtime_snapshot_from_state(8, &state);
+    assert_eq!(snapshot.phase, "idle");
+    assert_eq!(snapshot.session_id, Some(previous));
+    assert!(snapshot.pending_stop);
+    assert!(snapshot.cancelled);
+}
+
+#[derive(Default)]
+struct DeliveryHistorySink {
+    sessions: Vec<DictationSession>,
+    append_calls: usize,
+    fail: bool,
+}
+
+impl DeliveryHistorySink {
+    fn append(&mut self, session: DictationSession) -> Result<(), String> {
+        self.append_calls += 1;
+        if self.fail {
+            Err("fake history write failed".to_string())
+        } else {
+            self.sessions.push(session);
+            Ok(())
+        }
+    }
+}
+
+#[derive(Default)]
+struct DeliveryTestInserter {
+    submitted: Vec<String>,
+    requests: Vec<DeliveryRequest>,
+}
+
+impl DeliveryTestInserter {
+    fn submit(&mut self, text: &str) -> String {
+        self.submitted.push(text.to_string());
+        text.to_string()
+    }
+
+    fn submit_request(&mut self, request: DeliveryRequest) -> DeliverySubmission {
+        self.requests.push(request.clone());
+        self.submitted.push(request.text.clone());
+        DeliverySubmission {
+            status: InsertStatus::Inserted,
+            target_confirmed: false,
+            route: DeliveryRoute::Paste,
+            submitted_text: Some(request.text),
+        }
+    }
+}
+
+fn delivery_test_session(
+    id: &str,
+    raw: &str,
+    final_text: &str,
+    status: InsertStatus,
+    error_code: Option<&str>,
+) -> DictationSession {
+    DictationSession {
+        id: id.to_string(),
+        created_at: "2026-09-14T00:00:00Z".to_string(),
+        raw_transcript: raw.to_string(),
+        final_text: final_text.to_string(),
+        mode: PolishMode::Raw,
+        app_bundle_id: None,
+        app_name: None,
+        insert_status: status,
+        error_code: error_code.map(str::to_string),
+        duration_ms: Some(100),
+        dictionary_entry_count: Some(0),
+        has_audio_recording: Some(false),
+        embedded_audio_stats: None,
+    }
+}
+
+fn record_test_delivery(
+    session_id: SessionId,
+    delivery_id: &str,
+    intended_text: &str,
+    submitted_text: Option<String>,
+    route: DeliveryRoute,
+    status: InsertStatus,
+    target_confirmed: bool,
+    mut sink: DeliveryHistorySink,
+    session: DictationSession,
+) -> (DeliveryFact, DeliveryHistorySink) {
+    let fact = record_delivery_fact(
+        session_id,
+        delivery_id.to_string(),
+        intended_text.to_string(),
+        submitted_text,
+        route,
+        status,
+        target_confirmed,
+        || sink.append(session),
+    );
+    (fact, sink)
+}
+
+async fn dispatch_with_fake_system(
+    policy: DeliveryDispatchPolicy,
+    streamed_submitted_text: Option<String>,
+    external_result: DeliveryExternalResult,
+) -> (
+    DeliverySubmission,
+    Vec<(DeliveryExternalOperation, DeliveryRequest)>,
+) {
+    let request = DeliveryRequest {
+        session_id: session_id(0xD8),
+        delivery_id: "delivery-dispatch".to_string(),
+        text: "测试正文".to_string(),
+    };
+    let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let calls_for_submit = std::sync::Arc::clone(&calls);
+    let submission = dispatch_delivery_request(
+        request,
+        policy,
+        streamed_submitted_text,
+        move |operation, request| {
+            let calls_for_submit = std::sync::Arc::clone(&calls_for_submit);
+            let external_result = external_result.clone();
+            async move {
+                calls_for_submit.lock().unwrap().push((operation, request));
+                external_result
+            }
+        },
+    )
+    .await;
+    let calls = calls.lock().unwrap().clone();
+    (submission, calls)
+}
+
+#[tokio::test]
+async fn delivery_dispatch_policy_maps_platform_branches_in_production() {
+    let tsf_result = DeliveryExternalResult {
+        status: InsertStatus::Inserted,
+        target_confirmed: true,
+        route: DeliveryRoute::Tsf,
+        submitted_text: Some("测试正文".to_string()),
+    };
+    let (streamed, calls) = dispatch_with_fake_system(
+        DeliveryDispatchPolicy {
+            already_streamed: true,
+            wayland_session: false,
+            allow_clipboard_fallback: false,
+            focus_ready_for_paste: false,
+            allow_foreground_insert_fallback: false,
+        },
+        Some("已排空正文".to_string()),
+        DeliveryExternalResult {
+            status: InsertStatus::Failed,
+            target_confirmed: true,
+            route: DeliveryRoute::Tsf,
+            submitted_text: None,
+        },
+    )
+    .await;
+    assert!(
+        calls.is_empty(),
+        "already-streamed must not call input again"
+    );
+    assert_eq!(streamed.status, InsertStatus::SubmittedUnconfirmed);
+    assert_eq!(streamed.route, DeliveryRoute::Streaming);
+    assert_eq!(streamed.submitted_text.as_deref(), Some("已排空正文"));
+    assert!(!streamed.target_confirmed);
+
+    let (copy_only, calls) = dispatch_with_fake_system(
+        DeliveryDispatchPolicy {
+            already_streamed: false,
+            wayland_session: true,
+            allow_clipboard_fallback: true,
+            focus_ready_for_paste: false,
+            allow_foreground_insert_fallback: false,
+        },
+        None,
+        DeliveryExternalResult {
+            status: InsertStatus::CopiedFallback,
+            target_confirmed: true,
+            route: DeliveryRoute::Paste,
+            submitted_text: Some("不应视为上屏".to_string()),
+        },
+    )
+    .await;
+    assert_eq!(calls[0].0, DeliveryExternalOperation::CopyOnly);
+    assert_eq!(copy_only.route, DeliveryRoute::CopyOnly);
+    assert_eq!(copy_only.status, InsertStatus::CopiedFallback);
+    assert!(copy_only.submitted_text.is_none());
+    assert!(!copy_only.target_confirmed);
+
+    let (blocked, calls) = dispatch_with_fake_system(
+        DeliveryDispatchPolicy {
+            already_streamed: false,
+            wayland_session: false,
+            allow_clipboard_fallback: false,
+            focus_ready_for_paste: false,
+            allow_foreground_insert_fallback: false,
+        },
+        None,
+        tsf_result.clone(),
+    )
+    .await;
+    assert!(calls.is_empty(), "disabled fallback must not call input");
+    assert_eq!(blocked.status, InsertStatus::Failed);
+    assert_eq!(blocked.route, DeliveryRoute::Failed);
+    assert!(blocked.submitted_text.is_none());
+
+    let (tsf, calls) = dispatch_with_fake_system(
+        DeliveryDispatchPolicy {
+            already_streamed: false,
+            wayland_session: false,
+            allow_clipboard_fallback: true,
+            focus_ready_for_paste: true,
+            allow_foreground_insert_fallback: false,
+        },
+        None,
+        tsf_result,
+    )
+    .await;
+    assert_eq!(calls[0].0, DeliveryExternalOperation::OriginalTarget);
+    assert_eq!(tsf.route, DeliveryRoute::Tsf);
+    assert!(tsf.target_confirmed);
+    assert_eq!(tsf.submitted_text.as_deref(), Some("测试正文"));
+
+    let (unicode, calls) = dispatch_with_fake_system(
+        DeliveryDispatchPolicy {
+            already_streamed: false,
+            wayland_session: false,
+            allow_clipboard_fallback: true,
+            focus_ready_for_paste: true,
+            allow_foreground_insert_fallback: false,
+        },
+        None,
+        DeliveryExternalResult {
+            status: InsertStatus::Inserted,
+            target_confirmed: false,
+            route: DeliveryRoute::Unicode,
+            submitted_text: Some("测试正文".to_string()),
+        },
+    )
+    .await;
+    assert_eq!(calls[0].0, DeliveryExternalOperation::OriginalTarget);
+    assert_eq!(unicode.status, InsertStatus::SubmittedUnconfirmed);
+    assert_eq!(unicode.route, DeliveryRoute::Unicode);
+    assert!(!unicode.target_confirmed);
+
+    let (foreground, calls) = dispatch_with_fake_system(
+        DeliveryDispatchPolicy {
+            already_streamed: false,
+            wayland_session: false,
+            allow_clipboard_fallback: true,
+            focus_ready_for_paste: false,
+            allow_foreground_insert_fallback: true,
+        },
+        None,
+        DeliveryExternalResult {
+            status: InsertStatus::Inserted,
+            target_confirmed: true,
+            route: DeliveryRoute::Tsf,
+            submitted_text: Some("测试正文".to_string()),
+        },
+    )
+    .await;
+    assert_eq!(calls[0].0, DeliveryExternalOperation::ForegroundFallback);
+    assert_eq!(foreground.status, InsertStatus::SubmittedUnconfirmed);
+    assert_eq!(foreground.route, DeliveryRoute::Tsf);
+    assert!(!foreground.target_confirmed);
+}
+
+#[tokio::test]
+async fn production_delivery_path_reuses_request_id_and_payload_for_closeout() {
+    let request = DeliveryRequest {
+        session_id: session_id(0xD0),
+        delivery_id: "delivery-d0".to_string(),
+        text: "整理后的正文".to_string(),
+    };
+    let inserter = std::sync::Arc::new(tokio::sync::Mutex::new(DeliveryTestInserter::default()));
+    let inserter_for_submit = std::sync::Arc::clone(&inserter);
+    let submission = execute_delivery_submission(request.clone(), move |request| async move {
+        inserter_for_submit.lock().await.submit_request(request)
+    })
+    .await;
+
+    let history = std::sync::Arc::new(std::sync::Mutex::new(DeliveryHistorySink::default()));
+    let history_for_closeout = std::sync::Arc::clone(&history);
+    let history_delivery_id = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+    let history_delivery_id_for_closeout = std::sync::Arc::clone(&history_delivery_id);
+    let history_request = request.clone();
+    let session = delivery_test_session(
+        &request.session_id.to_string(),
+        "整理正文",
+        &request.text,
+        InsertStatus::Inserted,
+        None,
+    );
+    let fact = finalize_delivery_fact(
+        request.clone(),
+        request.text.clone(),
+        submission,
+        move || {
+            *history_delivery_id_for_closeout.lock().unwrap() =
+                Some(history_request.delivery_id.clone());
+            history_for_closeout.lock().unwrap().append(session)
+        },
+    );
+
+    let inserter = inserter.lock().await;
+    assert_eq!(inserter.requests, vec![request.clone()]);
+    assert_eq!(inserter.submitted, vec![request.text.clone()]);
+    drop(inserter);
+    let history = history.lock().unwrap();
+    assert_eq!(history.append_calls, 1);
+    assert_eq!(history.sessions[0].id, request.session_id.to_string());
+    assert_eq!(history.sessions[0].final_text, request.text);
+    assert_eq!(
+        *history_delivery_id.lock().unwrap(),
+        Some("delivery-d0".to_string())
+    );
+    assert_eq!(fact.delivery_id, "delivery-d0");
+    assert_eq!(fact.intended_bytes, "整理后的正文".len());
+    assert_eq!(
+        fact.intended_digest,
+        delivery_payload_digest(Some("整理后的正文"))
+    );
+    assert_eq!(
+        fact.submitted_digest,
+        delivery_payload_digest(Some("整理后的正文"))
+    );
+    assert_ne!(
+        delivery_payload_digest(None),
+        delivery_payload_digest(Some(""))
+    );
+}
+
+#[test]
+fn delivery_fact_d1_non_streamed_payload_history_and_session_are_identical() {
+    let mut inserter = DeliveryTestInserter::default();
+    let submitted = inserter.submit("整理后的正文");
+    let session = delivery_test_session(
+        "delivery-d1",
+        "整理正文",
+        &submitted,
+        InsertStatus::Inserted,
+        None,
+    );
+    let (fact, sink) = record_test_delivery(
+        session_id(0xD1),
+        "delivery-d1",
+        "整理后的正文",
+        Some(submitted.clone()),
+        DeliveryRoute::Paste,
+        InsertStatus::Inserted,
+        false,
+        DeliveryHistorySink::default(),
+        session,
+    );
+
+    assert_eq!(inserter.submitted, vec![submitted.clone()]);
+    assert_eq!(sink.append_calls, 1);
+    assert_eq!(sink.sessions[0].final_text, submitted);
+    assert_eq!(
+        fact.submitted_text,
+        Some(sink.sessions[0].final_text.clone())
+    );
+    assert_eq!(fact.persistence, DeliveryPersistenceOutcome::Saved);
+    assert_eq!(fact.session_id, session_id(0xD1));
+}
+
+#[test]
+fn delivery_fact_d2_polish_success_and_failure_follow_the_established_fallback() {
+    for (suffix, intended, error_code) in [
+        ("success", "润色后的正文", None),
+        ("failure", "原始正文", Some("polishFailed")),
+    ] {
+        let mut inserter = DeliveryTestInserter::default();
+        let submitted = inserter.submit(intended);
+        let session = delivery_test_session(
+            &format!("delivery-d2-{suffix}"),
+            "原始正文",
+            &submitted,
+            InsertStatus::Inserted,
+            error_code,
+        );
+        let (fact, sink) = record_test_delivery(
+            session_id(0xD2),
+            &format!("delivery-d2-{suffix}"),
+            intended,
+            Some(submitted.clone()),
+            DeliveryRoute::Paste,
+            InsertStatus::Inserted,
+            false,
+            DeliveryHistorySink::default(),
+            session,
+        );
+
+        assert_eq!(inserter.submitted.len(), 1);
+        assert_eq!(sink.sessions[0].final_text, submitted);
+        assert_eq!(
+            fact.submitted_text,
+            Some(sink.sessions[0].final_text.clone())
+        );
+        assert_eq!(sink.sessions[0].error_code.as_deref(), error_code);
+    }
+}
+
+#[test]
+fn delivery_fact_d3_final_seal_rejects_duplicate_completion_without_second_delivery() {
+    use crate::coordinator_state::{apply_dictation_event, DictationEvent, DictationTransition};
+
+    let mut state = SessionState::default();
+    let session_id = begin_session_state(&mut state, None, None).expect("session starts");
+    assert!(matches!(
+        apply_dictation_event(&mut state, DictationEvent::BleStart { session_id }),
+        DictationTransition::Applied { .. }
+    ));
+    assert!(matches!(
+        apply_dictation_event(
+            &mut state,
+            DictationEvent::Stop {
+                session_id,
+                user_initiated: true,
+            }
+        ),
+        DictationTransition::Applied { .. }
+    ));
+    assert!(matches!(
+        apply_dictation_event(
+            &mut state,
+            DictationEvent::AsrFinal {
+                session_id,
+                transcript_empty: false,
+            }
+        ),
+        DictationTransition::Applied { .. }
+    ));
+    assert!(matches!(
+        apply_dictation_event(
+            &mut state,
+            DictationEvent::InsertionStarted {
+                session_id,
+                already_streamed: false,
+            }
+        ),
+        DictationTransition::Applied { .. }
+    ));
+
+    let mut inserter = DeliveryTestInserter::default();
+    assert_eq!(inserter.submitted.len(), 0);
+    inserter.submit("只交付一次");
+    assert!(matches!(
+        apply_dictation_event(&mut state, DictationEvent::InsertionComplete { session_id }),
+        DictationTransition::Applied { .. }
+    ));
+    assert!(matches!(
+        apply_dictation_event(&mut state, DictationEvent::InsertionComplete { session_id }),
+        DictationTransition::Ignored { .. }
+    ));
+    assert_eq!(inserter.submitted, vec!["只交付一次"]);
+}
+
+#[test]
+fn delivery_fact_d4_old_session_cannot_deliver_into_a_new_session() {
+    use crate::coordinator_state::{apply_dictation_event, DictationEvent, DictationTransition};
+
+    let mut state = SessionState::default();
+    let old_session = begin_session_state(&mut state, None, None).expect("old session starts");
+    assert!(matches!(
+        apply_dictation_event(
+            &mut state,
+            DictationEvent::Cancel {
+                session_id: old_session
+            }
+        ),
+        DictationTransition::Applied { .. }
+    ));
+    let new_session = begin_session_state(&mut state, None, None).expect("new session starts");
+    assert_ne!(old_session, new_session);
+
+    let late = apply_dictation_event(
+        &mut state,
+        DictationEvent::InsertionStarted {
+            session_id: old_session,
+            already_streamed: false,
+        },
+    );
+    assert!(matches!(
+        late,
+        DictationTransition::Ignored {
+            reason: crate::coordinator_state::DictationIgnoreReason::StaleSession
+        }
+    ));
+    assert_eq!(state.phase, SessionPhase::Starting);
+}
+
+#[test]
+fn delivery_fact_d5_non_tsf_and_copy_only_never_claim_target_confirmation() {
+    let (unicode, _) = record_test_delivery(
+        session_id(0xD5),
+        "delivery-d5-unicode",
+        "Unicode 正文",
+        Some("Unicode 正文".to_string()),
+        DeliveryRoute::Unicode,
+        InsertStatus::Inserted,
+        false,
+        DeliveryHistorySink::default(),
+        delivery_test_session(
+            "delivery-d5-unicode",
+            "正文",
+            "Unicode 正文",
+            InsertStatus::Inserted,
+            None,
+        ),
+    );
+    assert_eq!(unicode.status, InsertStatus::Inserted);
+    assert!(!unicode.target_confirmed);
+
+    let (copy_only, _) = record_test_delivery(
+        session_id(0xD5),
+        "delivery-d5-copy",
+        "复制正文",
+        None,
+        DeliveryRoute::CopyOnly,
+        InsertStatus::CopiedFallback,
+        false,
+        DeliveryHistorySink::default(),
+        delivery_test_session(
+            "delivery-d5-copy",
+            "正文",
+            "复制正文",
+            InsertStatus::CopiedFallback,
+            None,
+        ),
+    );
+    assert_eq!(copy_only.route, DeliveryRoute::CopyOnly);
+    assert!(copy_only.submitted_text.is_none());
+    assert!(!copy_only.target_confirmed);
+}
+
+#[test]
+fn delivery_fact_d6_streaming_success_partial_failure_and_zero_fallback_are_single_send_paths() {
+    let mut inserter = DeliveryTestInserter::default();
+    let full = inserter.submit("完整流式正文");
+    assert_eq!(inserter.submitted.len(), 1);
+    let (success, _) = record_test_delivery(
+        session_id(0xD6),
+        "delivery-d6-success",
+        &full,
+        Some(full.clone()),
+        DeliveryRoute::Streaming,
+        InsertStatus::Inserted,
+        false,
+        DeliveryHistorySink::default(),
+        delivery_test_session(
+            "delivery-d6-success",
+            "原文",
+            &full,
+            InsertStatus::Inserted,
+            None,
+        ),
+    );
+    assert_eq!(success.intended_text, full);
+    assert_eq!(success.submitted_text, Some(full));
+    assert_eq!(success.route, DeliveryRoute::Streaming);
+
+    let prefix = inserter.submit("流式前缀");
+    let (partial, _) = record_test_delivery(
+        session_id(0xD6),
+        "delivery-d6-partial",
+        "流式完整目标",
+        Some(prefix.clone()),
+        DeliveryRoute::Streaming,
+        InsertStatus::Inserted,
+        false,
+        DeliveryHistorySink::default(),
+        delivery_test_session(
+            "delivery-d6-partial",
+            "原文",
+            &prefix,
+            InsertStatus::Inserted,
+            Some("typing partially failed"),
+        ),
+    );
+    assert_ne!(partial.intended_text, partial.submitted_text.unwrap());
+    assert_eq!(inserter.submitted.len(), 2);
+
+    // A zero-byte stream failure must use the ordinary one-shot fallback once,
+    // rather than report a streamed delivery and skip insertion.
+    let fallback = inserter.submit("零字故障回退");
+    let (zero_failure, _) = record_test_delivery(
+        session_id(0xD6),
+        "delivery-d6-zero",
+        &fallback,
+        Some(fallback.clone()),
+        DeliveryRoute::Paste,
+        InsertStatus::Inserted,
+        false,
+        DeliveryHistorySink::default(),
+        delivery_test_session(
+            "delivery-d6-zero",
+            "零字故障回退",
+            &fallback,
+            InsertStatus::Inserted,
+            Some("polishFailed"),
+        ),
+    );
+    assert_eq!(zero_failure.submitted_text, Some(fallback));
+    assert_eq!(inserter.submitted.len(), 3);
+}
+
+#[tokio::test]
+async fn delivery_fact_history_failure_is_recorded_without_retrying_input() {
+    let request = DeliveryRequest {
+        session_id: session_id(0xD7),
+        delivery_id: "delivery-d7".to_string(),
+        text: "history failure body".to_string(),
+    };
+    let inserter = std::sync::Arc::new(tokio::sync::Mutex::new(DeliveryTestInserter::default()));
+    let inserter_for_submit = std::sync::Arc::clone(&inserter);
+    let submission = execute_delivery_submission(request.clone(), move |request| async move {
+        inserter_for_submit.lock().await.submit_request(request)
+    })
+    .await;
+    let mut sink = DeliveryHistorySink::default();
+    sink.fail = true;
+    let fact = finalize_delivery_fact(request.clone(), request.text.clone(), submission, || {
+        sink.append(delivery_test_session(
+            &request.session_id.to_string(),
+            "raw",
+            &request.text,
+            InsertStatus::Inserted,
+            None,
+        ))
+    });
+    assert_eq!(sink.append_calls, 1);
+    assert!(sink.sessions.is_empty());
+    assert_eq!(fact.persistence, DeliveryPersistenceOutcome::Failed);
+    assert_eq!(inserter.lock().await.submitted, vec![request.text]);
+}
+
+#[test]
 fn device_custom_keys_do_not_register_parallel_global_hotkeys() {
     let coordinator = Coordinator::new();
 
@@ -1727,7 +2403,8 @@ fn embedded_ble_wake_recovery_tracks_idle_disconnect_as_reconnecting() {
         snapshot.notify_subscription_state,
         EmbeddedBleNotifySubscriptionState::Lost
     );
-    assert!(snapshot.user_guidance.contains("离线状态断开"));
+    assert_eq!(snapshot.usb_powered, None);
+    assert!(snapshot.user_guidance.contains("当前未确认"));
     assert!(snapshot
         .recent_disconnect_reason
         .as_deref()
@@ -1771,7 +2448,7 @@ fn embedded_ble_notify_ready_suppresses_unknown_power_idle_recovery_capsule() {
 }
 
 #[test]
-fn embedded_ble_startup_power_snapshot_keeps_plugged_recovery_context() {
+fn embedded_ble_disconnect_forgets_startup_plugged_power_snapshot() {
     let coordinator = Coordinator::new();
     let firmware = firmware_snapshot_for_auto_input_test(true);
 
@@ -1786,9 +2463,9 @@ fn embedded_ble_startup_power_snapshot_keeps_plugged_recovery_context() {
     );
     let snapshot = coordinator.embedded_ble_wake_recovery_snapshot();
 
-    assert_eq!(snapshot.usb_powered, Some(true));
+    assert_eq!(snapshot.usb_powered, None);
     assert_eq!(snapshot.status, EmbeddedBleWakeRecoveryStatus::Reconnecting);
-    assert!(snapshot.user_guidance.contains("临时中断"));
+    assert!(snapshot.user_guidance.contains("连接临时中断"));
 }
 
 #[test]
@@ -1803,6 +2480,11 @@ fn embedded_ble_notify_ready_reports_recovered_for_powered_disconnect() {
     record_embedded_ble_recovery_failure(
         &coordinator.inner,
         "Windows BLE disconnected; reason=546; audio path returned transport_not_ready",
+    );
+    record_embedded_ble_firmware_power_snapshot(
+        &coordinator.inner,
+        &firmware_snapshot_for_auto_input_test(true),
+        "fresh_reconnect_power_probe",
     );
     assert!(record_embedded_ble_notify_ready(&coordinator.inner));
 }
@@ -4984,4 +5666,41 @@ fn embedded_ble_pcm_capsule_trace_is_sampled() {
     assert!(trace.should_trace(session_a, false, start + Duration::from_millis(500)));
     assert!(trace.should_trace(session_b, false, start + Duration::from_millis(510)));
     assert!(trace.should_trace(session_b, true, start + Duration::from_millis(520)));
+}
+
+#[test]
+fn non_tsf_insert_attempts_paste_before_unicode_keystrokes() {
+    // 2026-09-19 text-loss fix: a CJK IME in a composition state swallows
+    // Unicode SendInput events while SendInput still reports them injected,
+    // so the old unicode-first order produced a false-positive Inserted and
+    // the clipboard paste path was unreachable (daily-use sessions all ended
+    // route=unicode SubmittedUnconfirmed). Lock the paste-first order.
+    let source = include_str!("coordinator.rs");
+    let start = source
+        .find("fn insert_via_non_tsf_fallback")
+        .expect("non-TSF insertion fallback should exist");
+    let end = source[start..]
+        .find("fn hotkey_injection_dry_run_enabled")
+        .map(|offset| start + offset)
+        .expect("non-TSF insertion fallback boundary should exist");
+    let body = &source[start..end];
+
+    let paste_index = body
+        .find("insert_via_clipboard_fallback")
+        .expect("non-TSF fallback must attempt clipboard paste");
+    let unicode_index = body
+        .find("insert_via_unicode_keystrokes_ime_safe")
+        .expect("non-TSF fallback must keep the Unicode keystroke path");
+    assert!(
+        paste_index < unicode_index,
+        "clipboard paste must run before Unicode keystrokes: the target window's IME can swallow Unicode SendInput with a false-positive Inserted"
+    );
+    assert!(
+        body.contains("DeliveryRoute::Unicode"),
+        "Unicode fallback must keep its own route label"
+    );
+    assert!(
+        body.contains("clipboard_transport_is_reversible"),
+        "paste transport must be declined while the clipboard holds content the restore path cannot write back"
+    );
 }

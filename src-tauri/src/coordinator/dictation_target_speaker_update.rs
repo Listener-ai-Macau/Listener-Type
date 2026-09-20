@@ -15,11 +15,36 @@ pub(super) fn commit_recording_stop(
     committed
 }
 
+fn commit_recording_stop_owned(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    reason: &'static str,
+    attempt_id: u64,
+) -> bool {
+    let committed = inner
+        .recording_lifecycle
+        .lock()
+        .commit_stop_owned(session_id, Some(attempt_id));
+    if !committed {
+        log::info!(
+            "[asr] recording lifecycle rejected stale/duplicate automatic owned stop session_id={session_id} attempt_id={attempt_id} source={reason}"
+        );
+    }
+    committed
+}
+
 pub(super) fn reopen_recording_stop(inner: &Arc<Inner>, session_id: SessionId) {
     let _ = inner
         .recording_lifecycle
         .lock()
         .reopen_after_failed_stop(session_id);
+}
+
+fn reopen_recording_stop_owned(inner: &Arc<Inner>, session_id: SessionId, attempt_id: u64) -> bool {
+    inner
+        .recording_lifecycle
+        .lock()
+        .reopen_after_failed_stop_owned(session_id, Some(attempt_id))
 }
 
 /// Reduce every fresh identity/provider observation into the product
@@ -46,9 +71,11 @@ fn renew_firmware_lease_from_owner_observation(
     if !session_active {
         return;
     }
-    let attributed_owner_activity = (update.target_activity_advanced
-        || update.pending_activity_advanced)
-        && target_speaker_update_has_live_owner_activity(update);
+    let qualified_owner_activity = update.qualified_owner_activity_advanced
+        && has_current_qualified_owner_observation(update);
+    let attributed_owner_activity = qualified_owner_activity
+        || ((update.target_activity_advanced || update.pending_activity_advanced)
+            && target_speaker_update_has_live_owner_activity(update));
     // Evaluate even when attributed activity already renews the firmware so
     // the same local edge cannot renew a second time on a repeated callback.
     let owner_catch_up_lease_due = endpoint_clock
@@ -58,16 +85,21 @@ fn renew_firmware_lease_from_owner_observation(
     if attributed_owner_activity || renew_owner_catch_up_lease {
         if renew_owner_catch_up_lease {
             log::info!(
-                "[asr] bounded owner catch-up renewed firmware endpoint session_id={session_id} provider_audio_ms={:?} local_audio_ms={:?} local_speech_end_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?}",
+                "[asr] bounded owner catch-up renewed firmware endpoint session_id={session_id} provider_audio_ms={:?} local_audio_ms={:?} local_speech_end_ms={:?} qualified_owner_end_ms={:?} qualified_advanced={} cloud_target_end_ms={:?} local_target_end_ms={:?}",
                 update.provider_audio_duration_ms,
                 update.audio_duration_ms,
                 update.local_speech_end_ms,
+                update.qualified_owner_speech_end_ms,
+                update.qualified_owner_activity_advanced,
                 update.target_speech_end_ms,
                 update.local_target_speech_end_ms,
             );
         }
         note_embedded_asr_speech_activity(inner, session_id);
-    } else if update.target_activity_advanced || update.pending_activity_advanced {
+    } else if update.target_activity_advanced
+        || update.pending_activity_advanced
+        || update.qualified_owner_activity_advanced
+    {
         log::info!(
             "[asr] stale attributed activity did not refresh firmware endpoint provider_audio_ms={:?} local_audio_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?} stable_attributed_end_ms={:?}",
             update.provider_audio_duration_ms,
@@ -79,11 +111,110 @@ fn renew_firmware_lease_from_owner_observation(
     }
 }
 
+const ENDPOINT_STOP_MAX_LOCAL_VAD_LAG_MS: u64 = 250;
+// The watchdog's wall clock only schedules a candidate.  Before the physical
+// STOP write, the local VAD must also have analysed a full endpoint interval
+// after the last confirmed speech sample.  Without this audio-time gate, a
+// worker that is 30 ms behind can authorize STOP just before it publishes a
+// new PendingSpeech onset (the r10 failure).
+const ENDPOINT_STOP_MIN_CONFIRMED_SILENCE_MS: u64 = EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS;
+
+fn local_vad_confirmed_silence_ms(
+    evidence: &crate::asr::volcengine::LocalSpeechEvidence,
+) -> Option<u64> {
+    evidence
+        .last_detected_speech_end_ms
+        .map(|speech_end_ms| evidence.analyzed_through_ms.saturating_sub(speech_end_ms))
+}
+
+fn local_vad_stop_silence_is_qualified(
+    evidence: &crate::asr::volcengine::LocalSpeechEvidence,
+) -> bool {
+    local_vad_confirmed_silence_ms(evidence)
+        .is_some_and(|silence| silence >= ENDPOINT_STOP_MIN_CONFIRMED_SILENCE_MS)
+}
+
+#[derive(Clone)]
+struct EndpointStopAdmission {
+    asr: Arc<crate::asr::volcengine::VolcengineStreamingASR>,
+    endpoint_clock: Arc<Mutex<SettledTargetEndpointClock>>,
+    stop_state: Arc<Mutex<EndpointStopDispatchState>>,
+    ticket: EndpointStopTicket,
+}
+
+impl EndpointStopAdmission {
+    fn is_valid(&self, inner: &Arc<Inner>) -> bool {
+        if !self.stop_state.lock().is_current(self.ticket) {
+            return false;
+        }
+        let session_active = {
+            let state = inner.state.lock();
+            state.session_id == self.ticket.session_id
+                && !state.cancelled
+                && matches!(
+                    state.phase,
+                    SessionPhase::Starting | SessionPhase::Listening
+                )
+        };
+        if !session_active {
+            return false;
+        }
+        let endpoint_current = {
+            let clock = self.endpoint_clock.lock();
+            clock.generation == self.ticket.endpoint_generation && clock.stop_proposed
+        };
+        if !endpoint_current {
+            return false;
+        }
+        if !self.ticket.manual_vad_guard {
+            return true;
+        }
+
+        let evidence = self.asr.local_speech_activity_snapshot();
+        let captured_audio_ms = self
+            .asr
+            .endpoint_update_snapshot()
+            .audio_duration_ms
+            .or(Some(evidence.analyzed_through_ms));
+        let vad_lag_ms = captured_audio_ms
+            .map(|captured| captured.saturating_sub(evidence.analyzed_through_ms));
+        let confirmed_silence_ms = local_vad_confirmed_silence_ms(&evidence);
+        let valid = evidence.state == crate::asr::volcengine::LocalSpeechActivityState::NonSpeech
+            && evidence.activity_epoch == self.ticket.activity_epoch
+            && evidence.revision >= self.ticket.local_vad_revision
+            && vad_lag_ms.is_some_and(|lag| lag <= ENDPOINT_STOP_MAX_LOCAL_VAD_LAG_MS)
+            && local_vad_stop_silence_is_qualified(&evidence);
+        if !valid {
+            log::info!(
+                "[asr] endpoint STOP admission revoked session_id={} proposal_id={} generation={} ticket_vad_revision={} current_vad_revision={} ticket_activity_epoch={} current_activity_epoch={} vad_state={:?} analyzed_through_ms={} last_speech_end_ms={:?} confirmed_silence_ms={:?} required_silence_ms={} captured_audio_ms={:?} vad_lag_ms={:?}",
+                self.ticket.session_id,
+                self.ticket.proposal_id,
+                self.ticket.endpoint_generation,
+                self.ticket.local_vad_revision,
+                evidence.revision,
+                self.ticket.activity_epoch,
+                evidence.activity_epoch,
+                evidence.state,
+                evidence.analyzed_through_ms,
+                evidence.last_detected_speech_end_ms,
+                confirmed_silence_ms,
+                ENDPOINT_STOP_MIN_CONFIRMED_SILENCE_MS,
+                captured_audio_ms,
+                vad_lag_ms,
+            );
+        }
+        valid
+    }
+}
+
 fn handle_target_speaker_endpoint_stop(
     inner: &Arc<Inner>,
     session_id: SessionId,
     stop_dispatched: &Arc<AtomicBool>,
+    stop_completed: &Arc<AtomicBool>,
+    stop_state: &Arc<Mutex<EndpointStopDispatchState>>,
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
+    asr: &Arc<crate::asr::volcengine::VolcengineStreamingASR>,
     update: crate::asr::volcengine::TargetSpeakerUpdate,
     endpoint_policy: TargetSpeakerEndpointPolicy,
 ) {
@@ -114,12 +245,21 @@ fn handle_target_speaker_endpoint_stop(
             grown_at.elapsed()
                 < Duration::from_millis(endpoint_policy.endpoint_timeout_ms)
         });
-    if owner_endpoint_stop_blocked_by_live_owner(
+    let body_started_recently = automatic_wake_body_started_recently(
+        inner,
+        session_id,
+        Duration::from_millis(endpoint_policy.endpoint_timeout_ms.max(1_000)),
+    );
+    if body_started && owner_endpoint_stop_blocked_by_live_owner(
         fusion_state,
         &update,
         body_started,
         preview_grew_recently,
+        body_started_recently,
     ) {
+        // A concurrent preview can invalidate a proposed stop. Keep the
+        // controller retryable after that preview settles.
+        endpoint_clock.lock().reopen_after_failed_stop();
         log::info!(
             "[asr] owner still continuing; ignore due endpoint session_id={session_id} fusion_state={fusion_state:?} reason={}",
             endpoint_policy.stop_reason
@@ -157,24 +297,62 @@ fn handle_target_speaker_endpoint_stop(
         );
     }
 
+    let (endpoint_generation, manual_vad_guard) = {
+        let clock = endpoint_clock.lock();
+        (
+            clock.generation,
+            manual_endpoint_vad_allowed(inner, session_id, endpoint_policy, &update),
+        )
+    };
+    let vad_evidence = asr.local_speech_activity_snapshot();
+    let ticket = {
+        let mut state = stop_state.lock();
+        state.propose(
+            session_id,
+            endpoint_generation,
+            vad_evidence.revision,
+            vad_evidence.activity_epoch,
+            manual_vad_guard,
+        )
+    };
+    let Some(ticket) = ticket else {
+        stop_dispatched.store(false, Ordering::SeqCst);
+        return;
+    };
     let endpoint_lifecycle = endpoint_clock.lock().lifecycle();
     log::info!(
-        "[asr] owner endpoint claimed stop proposal session_id={session_id} lifecycle={endpoint_lifecycle:?} reason={stop_reason} body_started={} endpoint_timeout_ms={} wall_clock_timeout_ms={} initial_body_wait_active={}",
+        "[asr] owner endpoint proposed STOP session_id={session_id} proposal_id={} generation={} lifecycle={endpoint_lifecycle:?} reason={stop_reason} body_started={} endpoint_timeout_ms={} wall_clock_timeout_ms={} initial_body_wait_active={} manual_vad_guard={}",
+        ticket.proposal_id,
+        ticket.endpoint_generation,
         endpoint_policy.body_started,
         endpoint_policy.endpoint_timeout_ms,
         endpoint_policy.wall_clock_timeout_ms,
         endpoint_policy.initial_body_wait_active,
+        manual_vad_guard,
     );
 
     let inner = Arc::clone(inner);
     let stop_dispatched = Arc::clone(stop_dispatched);
+    let stop_completed = Arc::clone(stop_completed);
+    let stop_state = Arc::clone(stop_state);
     let endpoint_clock = Arc::clone(endpoint_clock);
-    let early_final_asr = clone_volcengine_asr_for_session(&inner, session_id);
+    let admission = EndpointStopAdmission {
+        asr: Arc::clone(asr),
+        endpoint_clock: Arc::clone(&endpoint_clock),
+        stop_state: Arc::clone(&stop_state),
+        ticket,
+    };
     async_runtime::spawn(async move {
-        let stop_result =
-            request_embedded_ble_recording_stop_from_host(&inner, stop_reason).await;
+        let stop_result = request_embedded_ble_recording_stop_from_host_for_endpoint(
+            &inner,
+            stop_reason,
+            admission,
+        )
+        .await;
         match stop_result {
             Ok(true) => {
+                stop_state.lock().mark_sent_if_current(ticket);
+                stop_completed.store(true, Ordering::SeqCst);
                 // Only cross the public Listening -> Processing boundary after
                 // the physical STOP write succeeds. The previous eager UI
                 // transition plus concurrent final-frame send made a transient
@@ -192,19 +370,13 @@ fn handle_target_speaker_endpoint_stop(
                         preview_has_dangling_continuation(preview.as_deref()),
                     );
                 }
-                if let Some(asr) = early_final_asr {
-                    let started = Instant::now();
-                    match asr.send_last_frame().await {
-                        Ok(()) => log::info!(
-                            "[asr] proactive endpoint final frame sent session_id={session_id} provider_stall_fallback={provider_stall_fallback} controller_committed=true elapsed_ms={}",
-                            started.elapsed().as_millis()
-                        ),
-                        Err(err) => log::warn!(
-                            "[asr] proactive endpoint final frame failed session_id={session_id} provider_stall_fallback={provider_stall_fallback} controller_committed=true elapsed_ms={} error={err}",
-                            started.elapsed().as_millis()
-                        ),
-                    }
-                }
+                // A successful STOP write only requests capture to stop. The
+                // device still drains audio recorded before that boundary.
+                // finish_streaming_session flushes the last PCM block and then
+                // finalizes ASR when physical completion arrives. Sealing here
+                // discarded 1.427 s in installed session 74b7ab15 while its WAV
+                // misleadingly retained those bytes. Keep immediate UI feedback
+                // above, but leave the provider open for the captured tail.
                 log::info!(
                     "[embedded-ble] target-speaker auto-stop sent session_id={session_id} reason={stop_reason}"
                 );
@@ -214,18 +386,20 @@ fn handle_target_speaker_endpoint_stop(
                 // wake-only session now. A replacement segment clears this
                 // actor hand-off before we inspect it, so active body capture
                 // retains the ordinary physical completion path.
-                if !body_started
-                    && take_embedded_ble_awaiting_post_activation_segment(&inner, session_id)
+                if take_embedded_ble_awaiting_post_activation_segment(&inner, session_id)
                 {
                     log::info!(
                         "[embedded-ble] logical no-body endpoint owns finalization after pre-activation segment rotation session_id={session_id}"
                     );
-                    if let Err(err) = end_embedded_ble_session(
+                    let source_integrity_ledger =
+                        embedded_source_integrity_ledger_for_session(&inner, session_id);
+                    if let Err(err) = end_embedded_ble_session_with_source_integrity(
                         &inner,
                         false,
                         format!(
                             "logical_no_body_after_rotated_segment session_id={session_id} reason={stop_reason}"
                         ),
+                        source_integrity_ledger,
                     )
                     .await
                     {
@@ -239,17 +413,25 @@ fn handle_target_speaker_endpoint_stop(
                 // A transient Starting/Listening ownership race must not burn
                 // the one-shot endpoint latch forever. A later provider/local
                 // update may retry while the same session is still active.
-                stop_dispatched.store(false, Ordering::SeqCst);
-                endpoint_clock.lock().reopen_after_failed_stop();
+                let cancelled = stop_state.lock().cancel_if_current(ticket);
+                if cancelled {
+                    stop_dispatched.store(false, Ordering::SeqCst);
+                    endpoint_clock.lock().reopen_after_failed_stop();
+                }
                 log::info!(
-                    "[embedded-ble] target-speaker auto-stop not dispatched; retry armed session_id={session_id} reason={stop_reason}"
+                    "[embedded-ble] target-speaker auto-stop not dispatched; retry armed session_id={session_id} proposal_id={} reason={stop_reason} ticket_current={cancelled}",
+                    ticket.proposal_id,
                 );
             }
             Err(err) => {
-                stop_dispatched.store(false, Ordering::SeqCst);
-                endpoint_clock.lock().reopen_after_failed_stop();
+                let failed = stop_state.lock().cancel_if_current(ticket);
+                if failed {
+                    stop_dispatched.store(false, Ordering::SeqCst);
+                    endpoint_clock.lock().reopen_after_failed_stop();
+                }
                 log::warn!(
-                    "[embedded-ble] target-speaker auto-stop failed; retry armed session_id={session_id} reason={stop_reason}: {err}"
+                    "[embedded-ble] target-speaker auto-stop failed; retry armed session_id={session_id} proposal_id={} reason={stop_reason} ticket_current={failed}: {err}",
+                    ticket.proposal_id,
                 );
             }
         }

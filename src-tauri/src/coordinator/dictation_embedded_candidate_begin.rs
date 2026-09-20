@@ -1,4 +1,35 @@
 impl EmbeddedStreamingDictation {
+    fn bind_post_activation_segment(
+        &mut self,
+        inner: &Arc<Inner>,
+        embedded_session_id: u32,
+        promote_hidden_segment: bool,
+    ) {
+        if let Some(session_id) = self.session.as_ref().map(|session| session.session_id) {
+            clear_embedded_ble_awaiting_post_activation_segment(inner, session_id);
+        }
+        self.embedded_session_id = Some(embedded_session_id);
+        self.activation_segment_race_guard = None;
+        // The replacement is still a hidden candidate on the device. Promote
+        // it for the already accepted product session, including PCM-before-
+        // START notification ordering. Unit tests exercise the state hand-off;
+        // the physical write is covered by installed-device acceptance.
+        if promote_hidden_segment {
+            #[cfg(not(test))]
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(error) = crate::embedded_ble::send_recording_control_activate(
+                    Duration::from_secs(2),
+                ) {
+                    log::warn!("[embedded-ble] post-activation segment promotion failed embedded_session_id={embedded_session_id}: {error}");
+                }
+            });
+        } else {
+            log::info!(
+                "[wake-phrase] ensured continuation segment already visible embedded_session_id={embedded_session_id}"
+            );
+        }
+    }
+
     async fn begin_candidate_or_session(
         &mut self,
         inner: &Arc<Inner>,
@@ -15,23 +46,74 @@ impl EmbeddedStreamingDictation {
             return Ok(());
         }
         if self.session.is_some() || self.speaker_candidate.is_some() {
+            // ENSURE owns this boundary, but only the firmware's request-tagged
+            // SessionStart marker is proof of ownership.  A time window plus a
+            // different session id is not enough: a manual recording can land
+            // in exactly that window and must never be stolen by an old wake.
+            if let Some(ensure) = self.accepted_wake_capture_ensure {
+                if embedded_ensure_start_origin_matches(start_origin, ensure.request_id) {
+                    if Instant::now() > ensure.deadline_at {
+                        log::warn!(
+                            "[wake-phrase] ignoring expired ENSURE continuation marker embedded_session_id={embedded_session_id} previous_segment_id={} request_id={}",
+                            ensure.previous_segment_id,
+                            ensure.request_id
+                        );
+                        return Ok(());
+                    }
+                    if embedded_session_id == ensure.previous_segment_id {
+                        if ensure.replacement_wait_started_at.is_some()
+                            || self.embedded_session_id != Some(ensure.previous_segment_id)
+                        {
+                            // A same-id marker arriving after the predecessor
+                            // STOP is stale.  It cannot resurrect a segment
+                            // that has already crossed its terminal boundary.
+                            log::warn!(
+                                "[wake-phrase] ignoring late same-segment ENSURE marker embedded_session_id={embedded_session_id} request_id={} after predecessor stop",
+                                ensure.request_id
+                            );
+                            return Ok(());
+                        }
+                        if let Some(active_ensure) = self.accepted_wake_capture_ensure.as_mut() {
+                            active_ensure.confirmed_segment_id = Some(embedded_session_id);
+                        }
+                        self.activation_segment_race_guard = None;
+                        log::info!(
+                            "[wake-phrase] ENSURE confirmed existing segment embedded_session_id={embedded_session_id} request_id={}",
+                            ensure.request_id
+                        );
+                        return Ok(());
+                    }
+                    if self.session.is_some()
+                        && (ensure.replacement_wait_started_at.is_some()
+                            || self.activation_segment_race_guard.is_some())
+                    {
+                        if let Some(active_ensure) = self.accepted_wake_capture_ensure.as_mut() {
+                            active_ensure.confirmed_segment_id = Some(embedded_session_id);
+                        }
+                        self.bind_post_activation_segment(inner, embedded_session_id, false);
+                        log::info!(
+                            "[wake-phrase] ENSURE continuation marker bound embedded_session_id={embedded_session_id} previous_segment_id={} request_id={}",
+                            ensure.previous_segment_id,
+                            ensure.request_id
+                        );
+                        return Ok(());
+                    }
+                }
+            }
             // 2026-08-09 12:46:59 激活竞态：听写会话在等激活后的新设备段时，
             // 新段（唤醒监听窗 rotation）直接绑定给听写，而不是报 session 不一致。
-            if let Some((pre_segment_id, _)) = self.activation_segment_race_guard {
-                if self.session.is_some()
-                    && embedded_session_id != pre_segment_id
-                    && start_origin == crate::embedded_audio::SessionStartOrigin::VoiceActivation
-                {
-                    if let Some(session_id) = self.session.as_ref().map(|session| session.session_id)
+            if self.accepted_wake_capture_ensure.is_none() {
+                if let Some((pre_segment_id, _)) = self.activation_segment_race_guard {
+                    if self.session.is_some()
+                        && embedded_session_id != pre_segment_id
+                        && start_origin == crate::embedded_audio::SessionStartOrigin::VoiceActivation
                     {
-                        clear_embedded_ble_awaiting_post_activation_segment(inner, session_id);
+                        self.bind_post_activation_segment(inner, embedded_session_id, true);
+                        log::info!(
+                            "[coord] dictation session bound to post-activation embedded segment embedded_session_id={embedded_session_id} (pre-activation segment {pre_segment_id} did not finalize)"
+                        );
+                        return Ok(());
                     }
-                    self.embedded_session_id = Some(embedded_session_id);
-                    self.activation_segment_race_guard = None;
-                    log::info!(
-                        "[coord] dictation session bound to post-activation embedded segment embedded_session_id={embedded_session_id} (pre-activation segment {pre_segment_id} did not finalize)"
-                    );
-                    return Ok(());
                 }
             }
             if self.embedded_session_id != Some(embedded_session_id) {
@@ -113,8 +195,18 @@ impl EmbeddedStreamingDictation {
                 wake_detector_init.is_some()
             );
             self.speaker_candidate = Some(BufferedSpeakerCandidate {
+                candidate_id: next_buffered_candidate_id(),
                 kind: candidate_kind,
                 pcm: Vec::new(),
+                pcm_base_offset: Some(0),
+                candidate_cursor: PcmDiagnosticCursor::default(),
+                source_runs: VecDeque::new(),
+                source_admission_ledger: Arc::new(std::sync::Mutex::new(
+                    SourceAdmissionDependencyLedger::default(),
+                )),
+                fact_ledger: crate::observability::CandidateFactLedger::default(),
+                next_operation_id: Some(1),
+                source_admission_operation_id: Some(1),
                 wake_detector: None,
                 wake_detector_init,
                 pending_phrase_match: None,

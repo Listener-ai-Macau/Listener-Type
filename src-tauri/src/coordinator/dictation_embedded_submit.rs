@@ -186,7 +186,102 @@ fn embedded_ble_stream_idle_timeout(
 
 enum EmbeddedBleStreamSignal {
     Ready,
-    Notification(Vec<u8>),
+    Notification {
+        notification: Vec<u8>,
+        capture_generation: u64,
+        pipeline_observation:
+            Option<Arc<crate::observability::EmbeddedAudioPipelineObservation>>,
+        capture_admission_fact: Option<crate::embedded_audio::SessionAdmissionFact>,
+        capture_admission_receipt:
+            Option<crate::embedded_audio::SessionAdmissionReceipt>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmbeddedBleNotificationAction {
+    /// Keep consuming the current actor queue.
+    Continue,
+    /// The foreground one-shot owns the result and must leave the actor loop.
+    Break,
+    /// A continuous listener completed and reset its actor-local session state.
+    ContinueAfterCompletedSession,
+}
+
+/// The production actor's notification boundary.  Keeping the handler return
+/// processing here is important: tests must exercise the same completion,
+/// submission-result, error, reset, and loop-exit decisions as the live actor.
+async fn process_embedded_ble_notification(
+    inner: &Arc<Inner>,
+    streaming: &mut EmbeddedStreamingDictation,
+    notification: &[u8],
+    capture_generation: u64,
+    pipeline_observation: Option<Arc<crate::observability::EmbeddedAudioPipelineObservation>>,
+    capture_admission_fact: Option<crate::embedded_audio::SessionAdmissionFact>,
+    capture_admission_receipt: Option<crate::embedded_audio::SessionAdmissionReceipt>,
+    emit_idle_capture_errors: bool,
+    cancel_capture: &Arc<AtomicBool>,
+) -> Result<EmbeddedBleNotificationAction, String> {
+    match streaming
+        .handle_notification_with_capture_generation_and_admission(
+            inner,
+            notification,
+            Some(capture_generation),
+            pipeline_observation,
+            capture_admission_fact,
+            capture_admission_receipt,
+        )
+        .await
+    {
+        Ok(true) => {
+            if emit_idle_capture_errors {
+                cancel_capture.store(true, Ordering::SeqCst);
+                return Ok(EmbeddedBleNotificationAction::Break);
+            }
+            match streaming.submission_result() {
+                Ok(result) => {
+                    log::info!(
+                        "[embedded-ble] background session completed while keeping notify open pcm_bytes={} missing_packets={}",
+                        result.reconstructed_pcm_bytes,
+                        result.stats.missing_packet_count
+                    );
+                }
+                Err(err) => {
+                    // Continuous path: logical post-stop failure must not tear
+                    // down TYPE:READY; reset and keep listening.
+                    log::warn!(
+                        "[embedded-ble] background session submission incomplete while keeping notify open: {err}"
+                    );
+                    streaming.discard_active_session_after_stream_error(inner, &err);
+                    return Ok(EmbeddedBleNotificationAction::Continue);
+                }
+            }
+            streaming.reset_for_next_session();
+            record_embedded_ble_session_actor_command(
+                inner,
+                EmbeddedBleSessionActorCommand::ActorRestart,
+                None,
+                "background listener ready for next BLE session without reopening notify",
+            );
+            Ok(EmbeddedBleNotificationAction::ContinueAfterCompletedSession)
+        }
+        Ok(false) => Ok(EmbeddedBleNotificationAction::Continue),
+        Err(err) => {
+            if !emit_idle_capture_errors {
+                streaming.discard_active_session_after_stream_error(inner, &err);
+                record_embedded_ble_session_actor_command(
+                    inner,
+                    EmbeddedBleSessionActorCommand::ActorRestart,
+                    None,
+                    format!("background listener kept notify open after stream error: {err}"),
+                );
+                return Ok(EmbeddedBleNotificationAction::Continue);
+            }
+            streaming.abort_active_session(inner, &err);
+            cancel_capture.store(true, Ordering::SeqCst);
+            clear_embedded_ble_cancel_flag(inner, cancel_capture);
+            Err(err)
+        }
+    }
 }
 
 fn embedded_ble_stats_only_enabled() -> bool {
@@ -390,8 +485,20 @@ async fn submit_embedded_audio_ble_stream_impl(
                 cancel_capture_for_task,
                 &mut on_ready,
                 &mut |event| {
-                    tx.send(EmbeddedBleStreamSignal::Notification(event.notification))
-                        .map_err(|_| "嵌入式音频流式处理已结束".to_string())
+                    let capture_generation = event.capture_generation;
+                    let pipeline_observation =
+                        crate::observability::pipeline_observation(capture_generation);
+                    let result = tx.send(EmbeddedBleStreamSignal::Notification {
+                        notification: event.notification,
+                        capture_generation,
+                        pipeline_observation: pipeline_observation.clone(),
+                        capture_admission_fact: event.capture_admission_fact,
+                        capture_admission_receipt: event.capture_admission_receipt,
+                    });
+                    if let Some(observation) = pipeline_observation {
+                        observation.record_coordinator_channel_forward(result.is_ok());
+                    }
+                    result.map_err(|_| "嵌入式音频流式处理已结束".to_string())
                 },
             )
         } else {
@@ -402,8 +509,20 @@ async fn submit_embedded_audio_ble_stream_impl(
                     .expect("background Listener capture always has a cancellation handoff flag"),
                 &mut on_ready,
                 &mut |event| {
-                    tx.send(EmbeddedBleStreamSignal::Notification(event.notification))
-                        .map_err(|_| "嵌入式音频流式处理已结束".to_string())
+                    let capture_generation = event.capture_generation;
+                    let pipeline_observation =
+                        crate::observability::pipeline_observation(capture_generation);
+                    let result = tx.send(EmbeddedBleStreamSignal::Notification {
+                        notification: event.notification,
+                        capture_generation,
+                        pipeline_observation: pipeline_observation.clone(),
+                        capture_admission_fact: event.capture_admission_fact,
+                        capture_admission_receipt: event.capture_admission_receipt,
+                    });
+                    if let Some(observation) = pipeline_observation {
+                        observation.record_coordinator_channel_forward(result.is_ok());
+                    }
+                    result.map_err(|_| "嵌入式音频流式处理已结束".to_string())
                 },
             )
         };
@@ -427,6 +546,15 @@ async fn submit_embedded_audio_ble_stream_impl(
                 EmbeddedBleSessionActorCommand::ActorRestart,
                 None,
                 "background listener ready after logical no-body finalization",
+            );
+            continue;
+        }
+        if streaming.expire_accepted_wake_capture_if_due(inner) {
+            record_embedded_ble_session_actor_command(
+                inner,
+                EmbeddedBleSessionActorCommand::ActorRestart,
+                None,
+                "background listener aborted timed-out wake capture ensure",
             );
             continue;
         }
@@ -482,7 +610,13 @@ async fn submit_embedded_audio_ble_stream_impl(
         let Some(signal) = maybe_signal else {
             break;
         };
-        let notification = match signal {
+        let (
+            notification,
+            capture_generation,
+            pipeline_observation,
+            capture_admission_fact,
+            capture_admission_receipt,
+        ) = match signal {
             EmbeddedBleStreamSignal::Ready => {
                 if emit_idle_capture_errors && !control_signal_worker_started {
                     control_signal_worker_started = true;
@@ -501,7 +635,21 @@ async fn submit_embedded_audio_ble_stream_impl(
                 }
                 continue;
             }
-            EmbeddedBleStreamSignal::Notification(notification) => notification,
+            EmbeddedBleStreamSignal::Notification {
+                notification,
+                capture_generation,
+                pipeline_observation,
+                capture_admission_fact,
+                capture_admission_receipt,
+            } => {
+                (
+                    notification,
+                    capture_generation,
+                    pipeline_observation,
+                    capture_admission_fact,
+                    capture_admission_receipt,
+                )
+            }
         };
         // Re-check soft cancel before applying a packet that may race the cancel.
         if let Some(session_abort) = session_abort.as_ref() {
@@ -509,55 +657,22 @@ async fn submit_embedded_audio_ble_stream_impl(
                 let _ = streaming.discard_active_session_after_user_cancel(inner);
             }
         }
-        match streaming.handle_notification(inner, &notification).await {
-            Ok(true) => {
-                if emit_idle_capture_errors {
-                    cancel_capture.store(true, Ordering::SeqCst);
-                    break;
-                }
-                match streaming.submission_result() {
-                    Ok(result) => {
-                        log::info!(
-                            "[embedded-ble] background session completed while keeping notify open pcm_bytes={} missing_packets={}",
-                            result.reconstructed_pcm_bytes,
-                            result.stats.missing_packet_count
-                        );
-                    }
-                    Err(err) => {
-                        // Continuous path: logical post-stop failure must not tear
-                        // down TYPE:READY; reset and keep listening.
-                        log::warn!(
-                            "[embedded-ble] background session submission incomplete while keeping notify open: {err}"
-                        );
-                        streaming.discard_active_session_after_stream_error(inner, &err);
-                        continue;
-                    }
-                }
-                streaming.reset_for_next_session();
-                record_embedded_ble_session_actor_command(
-                    inner,
-                    EmbeddedBleSessionActorCommand::ActorRestart,
-                    None,
-                    "background listener ready for next BLE session without reopening notify",
-                );
-            }
-            Ok(false) => {}
-            Err(err) => {
-                if !emit_idle_capture_errors {
-                    streaming.discard_active_session_after_stream_error(inner, &err);
-                    record_embedded_ble_session_actor_command(
-                        inner,
-                        EmbeddedBleSessionActorCommand::ActorRestart,
-                        None,
-                        format!("background listener kept notify open after stream error: {err}"),
-                    );
-                    continue;
-                }
-                streaming.abort_active_session(inner, &err);
-                cancel_capture.store(true, Ordering::SeqCst);
-                clear_embedded_ble_cancel_flag(inner, &cancel_capture);
-                return Err(err);
-            }
+        match process_embedded_ble_notification(
+            inner,
+            &mut streaming,
+            &notification,
+            capture_generation,
+            pipeline_observation,
+            capture_admission_fact,
+            capture_admission_receipt,
+            emit_idle_capture_errors,
+            &cancel_capture,
+        )
+        .await?
+        {
+            EmbeddedBleNotificationAction::Continue
+            | EmbeddedBleNotificationAction::ContinueAfterCompletedSession => {}
+            EmbeddedBleNotificationAction::Break => break,
         }
     }
     let capture_cancel_requested = cancel_capture.load(Ordering::SeqCst);

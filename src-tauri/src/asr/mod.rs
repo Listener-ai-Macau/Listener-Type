@@ -29,6 +29,31 @@ pub use whisper::WhisperBatchASR;
 /// is free to batch internally before flushing to the network.
 pub trait AudioConsumer: Send + Sync {
     fn consume_pcm_chunk(&self, pcm: &[u8]);
+
+    /// Evidence-only variant that carries the immutable capture source across
+    /// deferred bridges. Providers that do not use pipeline observation keep
+    /// the original audio path through the default implementation.
+    fn consume_pcm_chunk_with_source(
+        &self,
+        pcm: &[u8],
+        observation: Option<std::sync::Arc<crate::observability::EmbeddedAudioPipelineObservation>>,
+        segment_id: Option<u32>,
+    ) {
+        self.consume_pcm_chunk_with_source_interval(pcm, observation, segment_id, None);
+    }
+
+    /// Explicit source-coordinate variant.  The interval travels with this
+    /// PCM call; it is never recovered from a shared observation-side queue.
+    fn consume_pcm_chunk_with_source_interval(
+        &self,
+        pcm: &[u8],
+        observation: Option<std::sync::Arc<crate::observability::EmbeddedAudioPipelineObservation>>,
+        segment_id: Option<u32>,
+        source_interval: Option<crate::observability::PcmSourceInterval>,
+    ) {
+        let _ = (observation, segment_id, source_interval);
+        self.consume_pcm_chunk(pcm);
+    }
 }
 
 /// What the ASR session yielded once the stream closed.

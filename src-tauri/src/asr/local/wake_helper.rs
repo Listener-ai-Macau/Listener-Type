@@ -27,6 +27,7 @@ mod imp {
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct WakeHelperResult {
+        pub request_id: String,
         pub matched: bool,
         pub phrase_relation: crate::wake_phrase::LocalPhraseRelation,
         pub transcript_chars: usize,
@@ -34,6 +35,7 @@ mod imp {
         pub phonetic_best_distance: usize,
         pub phonetic_best_window_start: usize,
         pub inference_ms: u64,
+        pub transcript_text: Option<String>,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +75,8 @@ mod imp {
             phonetic_best_distance: usize,
             phonetic_best_window_start: usize,
             inference_ms: u64,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            transcript_text: Option<String>,
             error: Option<String>,
         },
         Transcript {
@@ -91,8 +95,20 @@ mod imp {
 
     impl HelperProcess {
         fn spawn() -> Result<Self, String> {
-            let executable = std::env::current_exe()
-                .map_err(|err| format!("resolve Listener Type executable: {err}"))?;
+            // The production process uses its own executable. An explicitly
+            // selected executable is allowed only for the ignored, offline
+            // captured-PCM diagnostic, whose test harness has a different
+            // current_exe and cannot serve the helper protocol itself.
+            let diagnostic_mode = std::env::var_os("LISTENER_WAKE_DIAGNOSTIC_DIR")
+                .is_some_and(|value| !value.to_string_lossy().trim().is_empty());
+            let executable = if diagnostic_mode {
+                std::env::var_os("LISTENER_WAKE_HELPER_EXE")
+                    .map(std::path::PathBuf::from)
+                    .or_else(|| std::env::current_exe().ok())
+            } else {
+                std::env::current_exe().ok()
+            }
+            .ok_or_else(|| "resolve Listener Type executable".to_string())?;
             let mut child = Command::new(executable)
                 .arg("--local-wake-helper")
                 .stdin(Stdio::piped())
@@ -255,12 +271,14 @@ mod imp {
                     phonetic_best_distance,
                     phonetic_best_window_start,
                     inference_ms,
+                    transcript_text,
                     error,
                 } if response_id == request_id => {
                     if let Some(error) = error {
                         Err(error)
                     } else {
                         Ok(WakeHelperResult {
+                            request_id: response_id,
                             matched,
                             phrase_relation,
                             transcript_chars,
@@ -268,6 +286,7 @@ mod imp {
                             phonetic_best_distance,
                             phonetic_best_window_start,
                             inference_ms,
+                            transcript_text,
                         })
                     }
                 }
@@ -489,6 +508,7 @@ mod imp {
     }
 
     struct WakeTranscriptEvidence {
+        text: String,
         phrase_relation: crate::wake_phrase::LocalPhraseRelation,
         transcript_chars: usize,
         diagnostics: RedactedPhraseDiagnostics,
@@ -496,6 +516,7 @@ mod imp {
 
     fn transcript_evidence(text: &str, phrase: &str) -> WakeTranscriptEvidence {
         WakeTranscriptEvidence {
+            text: text.to_string(),
             phrase_relation: crate::wake_phrase::local_transcript_phrase_relation(text, phrase),
             transcript_chars: text.chars().count(),
             diagnostics: redacted_phrase_diagnostics(text, phrase),
@@ -591,17 +612,26 @@ mod imp {
                         &phrase,
                     );
                     match transcript {
-                        Ok(evidence) => HelperResponse::Result {
-                            request_id,
-                            matched: phrase_relation_matches(evidence.phrase_relation),
-                            phrase_relation: evidence.phrase_relation,
-                            transcript_chars: evidence.transcript_chars,
-                            phonetic_prefix_units: evidence.diagnostics.prefix_units,
-                            phonetic_best_distance: evidence.diagnostics.best_distance,
-                            phonetic_best_window_start: evidence.diagnostics.best_window_start,
-                            inference_ms: started.elapsed().as_millis() as u64,
-                            error: None,
-                        },
+                        Ok(evidence) => {
+                            let transcript_text = std::env::var(
+                                "LISTENER_WAKE_DIAGNOSTIC_DIR",
+                            )
+                            .ok()
+                            .filter(|directory| !directory.trim().is_empty())
+                            .map(|_| evidence.text);
+                            HelperResponse::Result {
+                                request_id,
+                                matched: phrase_relation_matches(evidence.phrase_relation),
+                                phrase_relation: evidence.phrase_relation,
+                                transcript_chars: evidence.transcript_chars,
+                                phonetic_prefix_units: evidence.diagnostics.prefix_units,
+                                phonetic_best_distance: evidence.diagnostics.best_distance,
+                                phonetic_best_window_start: evidence.diagnostics.best_window_start,
+                                inference_ms: started.elapsed().as_millis() as u64,
+                                transcript_text,
+                                error: None,
+                            }
+                        }
                         Err(err) => HelperResponse::Result {
                             request_id,
                             matched: false,
@@ -611,6 +641,7 @@ mod imp {
                             phonetic_best_distance: 0,
                             phonetic_best_window_start: 0,
                             inference_ms: started.elapsed().as_millis() as u64,
+                            transcript_text: None,
                             error: Some(format!("{err:#}")),
                         },
                     }
@@ -683,6 +714,7 @@ mod imp {
                 phonetic_best_distance: 0,
                 phonetic_best_window_start: 0,
                 inference_ms: 123,
+                transcript_text: None,
                 error: None,
             };
 
@@ -1379,6 +1411,7 @@ pub use imp::{
 #[cfg(not(target_os = "windows"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WakeHelperResult {
+    pub request_id: String,
     pub matched: bool,
     pub phrase_relation: crate::wake_phrase::LocalPhraseRelation,
     pub transcript_chars: usize,
@@ -1386,6 +1419,7 @@ pub struct WakeHelperResult {
     pub phonetic_best_distance: usize,
     pub phonetic_best_window_start: usize,
     pub inference_ms: u64,
+    pub transcript_text: Option<String>,
 }
 
 #[cfg(not(target_os = "windows"))]

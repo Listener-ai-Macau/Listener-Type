@@ -4,7 +4,10 @@ import { useTranslation } from 'react-i18next';
 import type { VoiceprintStatus } from '../../lib/types';
 import { Btn } from '../_atoms';
 
-const STEP_TARGET_MS = [600, 600, 600] as const;
+// 与后端 ENROLLMENT_WAKE_STEP_SECONDS 对齐：整个录入是一次连续采集，按 3s 一个
+// 时间槽切步。步骤"已录好"的唯一权威信号是采集已推进过该槽（captureStep 前进 /
+// 进入 processing）——绝不能在用户还在说话时就打勾。
+const ENROLLMENT_STEP_SLOT_MS = 3000;
 
 interface VoiceprintEnrollmentWizardProps {
   open: boolean;
@@ -47,11 +50,16 @@ export function VoiceprintEnrollmentWizard({
 
   if (!open) return null;
 
+  const captureState = status?.state ?? '';
+  const capturing = captureState === 'capturing';
+  const processing = captureState === 'processing';
   const currentStep = Math.max(1, Math.min(3, status?.captureStep ?? 1));
-  const speechMs = status?.stepSpeechMs ?? [0, 0, 0];
-  const currentSpeechProgress = Math.min(
+  const elapsedMs = status?.captureElapsedMs ?? 0;
+  const stepDone = (step: number) => processing || (capturing && step < currentStep);
+  const stepRecording = (step: number) => capturing && step === currentStep;
+  const stepSlotProgress = Math.min(
     100,
-    Math.round(((speechMs[currentStep - 1] ?? 0) / STEP_TARGET_MS[currentStep - 1]) * 100),
+    Math.round(((elapsedMs % ENROLLMENT_STEP_SLOT_MS) / ENROLLMENT_STEP_SLOT_MS) * 100),
   );
   const feedbackKey = status?.captureFeedback ?? 'waiting';
   const signalLevel = Math.max(0, Math.min(100, status?.signalLevel ?? 0));
@@ -155,19 +163,22 @@ export function VoiceprintEnrollmentWizard({
             <div className="ol-voiceprint-wizard-steps">
               {stepLabels.map((label, index) => {
                 const step = index + 1;
-                const good = (speechMs[index] ?? 0) >= STEP_TARGET_MS[index];
-                const active = status?.state === 'capturing' && step === currentStep;
+                const done = stepDone(step);
+                const recordingNow = stepRecording(step);
                 return (
-                  <div key={step} className={`${good ? 'is-good' : ''}${active ? ' is-active' : ''}`}>
-                    <span>{good ? '✓' : step}</span>
+                  <div key={step} className={done ? 'is-good' : recordingNow ? 'is-recording' : undefined}>
+                    <span aria-hidden={recordingNow || undefined}>{done ? '✓' : recordingNow ? '●' : step}</span>
                     <small>{label}</small>
                   </div>
                 );
               })}
             </div>
-            {status?.state === 'capturing' && (
-              <div className="ol-voiceprint-wizard-speech-progress" aria-label={`${currentSpeechProgress}%`}>
-                <span style={{ width: `${Math.max(3, currentSpeechProgress)}%` }} />
+            {capturing && (
+              <div
+                className="ol-voiceprint-wizard-step-progress"
+                aria-label={`${currentStep}/${status?.captureStepCount ?? 3} ${stepSlotProgress}%`}
+              >
+                <span style={{ width: `${Math.max(3, stepSlotProgress)}%` }} />
               </div>
             )}
             <p className="ol-voiceprint-wizard-tip">

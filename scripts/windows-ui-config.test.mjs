@@ -17,7 +17,8 @@ const config = JSON.parse(raw);
 const capsuleWindow = config.app.windows.find((window) => window.label === 'capsule');
 const mainWindow = config.app.windows.find((window) => window.label === 'main');
 const libRs = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf-8');
-const coordinatorRs = await readFile(new URL('../src-tauri/src/coordinator.rs', import.meta.url), 'utf-8');
+const coordinatorRs = (await readFile(new URL('../src-tauri/src/coordinator.rs', import.meta.url), 'utf-8'))
+  + '\n' + (await readFile(new URL('../src-tauri/src/coordinator/support.rs', import.meta.url), 'utf-8'));
 const mainTsx = await readFile(new URL('../src/main.tsx', import.meta.url), 'utf-8');
 const errorBoundaryTsx = await readFile(new URL('../src/components/ErrorBoundary.tsx', import.meta.url), 'utf-8');
 const capsuleTsx = await readFile(new URL('../src/components/Capsule.tsx', import.meta.url), 'utf-8');
@@ -91,9 +92,11 @@ assertMatch(
 
 assertMatch(
   coordinatorRs,
-  /#\[cfg\(target_os = "macos"\)\][\s\S]*?orderFrontRegardless/,
-  'macOS capsule should show without taking the key window',
+  /crate::restore_main_window_key_if_active\(app\);/,
+  'capsule display should restore the main window focus through the platform helper',
 );
+assertMatch(libRs, /#\[cfg\(target_os = "macos"\)\][\s\S]*?orderFrontRegardless/,
+  'macOS focus restoration should retain the non-activating native show path');
 
 assertMatch(
   windowChromeTsx,

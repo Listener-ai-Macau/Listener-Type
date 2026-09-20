@@ -231,6 +231,7 @@ pub fn run_enrolled_wake_recovery_diagnostic(
     Ok(accepted)
 }
 
+use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::mpsc;
@@ -261,6 +262,7 @@ use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, RunEvent, Runtime,
     WebviewWindow,
 };
+use uuid::Uuid;
 
 use crate::types::{DictationInputSource, PolishMode};
 
@@ -312,11 +314,227 @@ fn exit_after_headless_cli(exit_code: i32) -> ! {
     std::process::exit(exit_code);
 }
 
+const DICTATION_SNAPSHOT_RESPONSE_SCHEMA: &str = "listener.dictation_runtime_snapshot_response.v1";
+const DICTATION_SNAPSHOT_RESULT_DIR: &str = "diagnostic-dictation-snapshot";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DictationSnapshotDiagnosticResponse {
+    token: String,
+    request_id: u32,
+    service_pid: Option<u32>,
+    schema: &'static str,
+    snapshot: Option<coordinator::DictationRuntimeSnapshot>,
+    error: Option<String>,
+}
+
+fn dictation_snapshot_request_id(token: Uuid) -> u32 {
+    let bytes = token.as_bytes();
+    u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]).max(1)
+}
+
+fn dictation_snapshot_result_path(token: Uuid) -> std::path::PathBuf {
+    log_dir_path()
+        .join(DICTATION_SNAPSHOT_RESULT_DIR)
+        .join(format!("{token}.json"))
+}
+
+/// Publish a complete diagnostic response without accepting an external path
+/// or overwriting a previous token. The temp file is fully flushed first;
+/// hard-link publication gives create-new semantics on Windows and Unix.
+fn publish_dictation_snapshot_response(
+    token: Uuid,
+    response: &DictationSnapshotDiagnosticResponse,
+) -> Result<std::path::PathBuf, String> {
+    let path = dictation_snapshot_result_path(token);
+    let directory = path
+        .parent()
+        .ok_or_else(|| "snapshot result path has no parent".to_string())?;
+    std::fs::create_dir_all(directory)
+        .map_err(|error| format!("create snapshot result directory failed: {error}"))?;
+    let temporary = path.with_extension("json.tmp");
+    let bytes = serde_json::to_vec_pretty(response)
+        .map_err(|error| format!("encode snapshot response failed: {error}"))?;
+    let mut owns_temporary = false;
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| format!("create snapshot temporary file failed: {error}"))?;
+        owns_temporary = true;
+        std::io::Write::write_all(&mut file, &bytes)
+            .map_err(|error| format!("write snapshot temporary file failed: {error}"))?;
+        std::io::Write::flush(&mut file)
+            .map_err(|error| format!("flush snapshot temporary file failed: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("sync snapshot temporary file failed: {error}"))?;
+        std::fs::hard_link(&temporary, &path)
+            .map_err(|error| format!("publish snapshot result failed: {error}"))?;
+        Ok(path.clone())
+    })();
+    if owns_temporary {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn diagnostic_snapshot_no_running_instance(token: Uuid) -> i32 {
+    let request_id = dictation_snapshot_request_id(token);
+    let response = DictationSnapshotDiagnosticResponse {
+        token: token.to_string(),
+        request_id,
+        service_pid: None,
+        schema: DICTATION_SNAPSHOT_RESPONSE_SCHEMA,
+        snapshot: None,
+        error: Some("no running Listener Type instance".to_string()),
+    };
+    match publish_dictation_snapshot_response(token, &response) {
+        Ok(path) => eprintln!(
+            "dictation_snapshot_result=ERROR reason=no_running_instance path={}",
+            path.display()
+        ),
+        Err(error) => eprintln!("dictation_snapshot_result=ERROR reason={error}"),
+    }
+    1
+}
+
+fn diagnostic_snapshot_rejected(reason: cli::DiagnosticDictationSnapshotRejectReason) -> i32 {
+    eprintln!("dictation_snapshot_result=ERROR reason={reason:?}");
+    2
+}
+
+fn dispatch_dictation_snapshot_request<R: Runtime>(app: &AppHandle<R>, token: Uuid) {
+    let request_id = dictation_snapshot_request_id(token);
+    let Some(coordinator) = app.try_state::<Arc<coordinator::Coordinator>>() else {
+        log::error!("[diagnostic] coordinator missing for dictation snapshot request");
+        return;
+    };
+    let response = DictationSnapshotDiagnosticResponse {
+        token: token.to_string(),
+        request_id,
+        service_pid: Some(std::process::id()),
+        schema: DICTATION_SNAPSHOT_RESPONSE_SCHEMA,
+        snapshot: Some(coordinator.dictation_runtime_snapshot(request_id)),
+        error: None,
+    };
+    match publish_dictation_snapshot_response(token, &response) {
+        Ok(path) => log::info!(
+            "[diagnostic] dictation snapshot published token={} request_id={} pid={} path={}",
+            response.token,
+            response.request_id,
+            std::process::id(),
+            path.display()
+        ),
+        Err(error) => log::error!(
+            "[diagnostic] dictation snapshot publish failed token={} request_id={}: {error}",
+            response.token,
+            response.request_id
+        ),
+    }
+}
+
+fn is_diagnostic_snapshot_intent(intent: Option<&cli::CliIntent>) -> bool {
+    matches!(
+        intent,
+        Some(
+            cli::CliIntent::DiagnosticDictationSnapshot { .. }
+                | cli::CliIntent::DiagnosticDictationSnapshotRejected { .. }
+        )
+    )
+}
+
+fn construct_business_services() -> (
+    Arc<coordinator::Coordinator>,
+    Arc<asr::local::DownloadManager>,
+    Arc<asr::local::FoundryLocalRuntime>,
+) {
+    let foundry_local_runtime = Arc::new(asr::local::FoundryLocalRuntime::new());
+    #[cfg(target_os = "windows")]
+    let coordinator = Arc::new(coordinator::Coordinator::new_with_foundry_runtime(
+        Arc::clone(&foundry_local_runtime),
+    ));
+    #[cfg(not(target_os = "windows"))]
+    let coordinator = Arc::new(coordinator::Coordinator::new());
+    let local_asr_download_manager = Arc::new(asr::local::DownloadManager::new());
+    (
+        coordinator,
+        local_asr_download_manager,
+        foundry_local_runtime,
+    )
+}
+
+fn construct_business_services_if_needed<T>(
+    first_run_intent: Option<&cli::CliIntent>,
+    construct: impl FnOnce() -> T,
+) -> Option<T> {
+    if is_diagnostic_snapshot_intent(first_run_intent) {
+        None
+    } else {
+        Some(construct())
+    }
+}
+
+fn dispatch_single_instance_callback<R: Runtime>(app: &AppHandle<R>, argv: Vec<String>) {
+    if let Some(intent) = cli::parse_cli_intent(&argv) {
+        let dispatch_options = CliDispatchOptions {
+            suppress_capsule_window: cli::suppress_capsule_window_requested(&argv),
+            force_raw_output: cli::force_raw_output_requested(&argv),
+        };
+        log::info!(
+            "[single-instance] secondary_forwarded intent={intent:?} argv_len={}",
+            argv.len()
+        );
+        dispatch_cli_intent(app, intent, dispatch_options);
+        return;
+    }
+    log::info!(
+        "[single-instance] secondary_forwarded intent=focus_main argv_len={}",
+        argv.len()
+    );
+    show_main_window(app);
+}
+
+fn single_instance_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        // tauri-plugin-single-instance forwards the complete process argv on
+        // every supported platform. Keep argv[0] intact so the production CLI
+        // parser applies the same rules as the first-run path.
+        dispatch_single_instance_callback(app, argv);
+    })
+}
+
+fn run_diagnostic_snapshot_process(intent: cli::CliIntent) {
+    let mut tauri_context = tauri::generate_context!();
+    // A diagnostic primary must not create any configured WebView window before
+    // it reports that no service instance is available.
+    tauri_context.config_mut().app.windows.clear();
+
+    tauri::Builder::default()
+        .plugin(single_instance_plugin())
+        .setup(move |_app| {
+            init_file_logger();
+            match intent {
+                cli::CliIntent::DiagnosticDictationSnapshot { token } => {
+                    exit_after_headless_cli(diagnostic_snapshot_no_running_instance(token));
+                }
+                cli::CliIntent::DiagnosticDictationSnapshotRejected { reason } => {
+                    exit_after_headless_cli(diagnostic_snapshot_rejected(reason));
+                }
+                _ => unreachable!("diagnostic process received a non-diagnostic intent"),
+            }
+        })
+        .build(tauri_context)
+        .expect("error while building diagnostic tauri application")
+        .run(|_, _| {});
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     startup_evidence::begin_process_evidence();
     let first_run_args: Vec<String> = std::env::args().collect();
-    if let Some(intent) = cli::parse_cli_intent(&first_run_args) {
+    let first_run_intent = cli::parse_cli_intent(&first_run_args);
+    if let Some(intent) = first_run_intent.clone() {
         match intent {
             cli::CliIntent::LocalWakeHelper => {
                 exit_after_headless_cli(asr::local::wake_helper::run_helper());
@@ -347,17 +565,13 @@ pub fn run() {
         }
     }
 
-    #[cfg(target_os = "windows")]
-    embedded_ble::warm_native_windows_hid_present_pairing_snapshot();
+    if let Some(intent) = first_run_intent.clone() {
+        if is_diagnostic_snapshot_intent(Some(&intent)) {
+            run_diagnostic_snapshot_process(intent);
+            return;
+        }
+    }
 
-    let foundry_local_runtime = Arc::new(asr::local::FoundryLocalRuntime::new());
-    #[cfg(target_os = "windows")]
-    let coordinator = Arc::new(coordinator::Coordinator::new_with_foundry_runtime(
-        Arc::clone(&foundry_local_runtime),
-    ));
-    #[cfg(not(target_os = "windows"))]
-    let coordinator = Arc::new(coordinator::Coordinator::new());
-    let local_asr_download_manager = Arc::new(asr::local::DownloadManager::new());
     let mut tauri_context = tauri::generate_context!();
     apply_webview2_test_browser_args_from_env(&mut tauri_context);
 
@@ -369,31 +583,7 @@ pub fn run() {
         // 第二个进程的 argv 还有一个用处：作为 Linux/Wayland 下的「触发器入口」。
         // 桌面环境快捷键执行 `listener-type --toggle-dictation` 时，第二个进程被本插件
         // 拦截 → argv 直接转给主实例 coordinator。详见 issue #420 / `cli.rs`。
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            // tauri-plugin-single-instance may pass only the forwarded arguments on
-            // Windows, while `parse_cli_intent` accepts a normal argv vector and
-            // skips argv[0]. Prefix a harmless dummy so both shapes parse the same.
-            let mut forwarded_argv = Vec::with_capacity(argv.len() + 1);
-            forwarded_argv.push("listener-type".to_string());
-            forwarded_argv.extend(argv);
-            if let Some(intent) = cli::parse_cli_intent(&forwarded_argv) {
-                let dispatch_options = CliDispatchOptions {
-                    suppress_capsule_window: cli::suppress_capsule_window_requested(
-                        &forwarded_argv,
-                    ),
-                    force_raw_output: cli::force_raw_output_requested(&forwarded_argv),
-                };
-                log::info!(
-                    "[single-instance] another instance launched with intent={intent:?}, dispatching"
-                );
-                dispatch_cli_intent(app, intent, dispatch_options);
-                return;
-            }
-            log::info!(
-                "[single-instance] another instance launched, focusing existing main window"
-            );
-            show_main_window(app);
-        }))
+        .plugin(single_instance_plugin())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
@@ -404,11 +594,6 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .manage(coordinator.clone())
-        .manage(local_asr_download_manager.clone())
-        .manage(foundry_local_runtime.clone())
-        .manage(commands::MicrophoneMonitorState::new(None))
-        .manage(commands::TrayMicrophoneMenuState::new(Vec::new()))
         .setup(move |app| {
             init_file_logger();
             log::info!("=== Listener Type 启动 ===");
@@ -427,6 +612,28 @@ pub fn run() {
                 },
                 candidate_id,
                 executable
+            );
+
+            // The single-instance plugin runs before this setup callback. Keep
+            // all business-service construction here so a secondary intent
+            // cannot construct a Coordinator/BLE runtime/hotkey owner before
+            // the plugin forwards it to the primary process.
+            #[cfg(target_os = "windows")]
+            embedded_ble::warm_native_windows_hid_present_pairing_snapshot();
+            let (coordinator, local_asr_download_manager, foundry_local_runtime) =
+                construct_business_services_if_needed(
+                    first_run_intent.as_ref(),
+                    construct_business_services,
+                )
+                .expect("normal startup must construct business services");
+            app.manage(coordinator.clone());
+            app.manage(local_asr_download_manager.clone());
+            app.manage(foundry_local_runtime.clone());
+            app.manage(commands::MicrophoneMonitorState::new(None));
+            app.manage(commands::TrayMicrophoneMenuState::new(Vec::new()));
+            log::info!(
+                "[single-instance] primary_started pid={} candidate_id={candidate_id}",
+                std::process::id()
             );
             #[cfg(target_os = "windows")]
             if std::env::var_os(LISTENER_TYPE_WEBVIEW2_ADDITIONAL_BROWSER_ARGS_ENV).is_some() {
@@ -657,7 +864,7 @@ pub fn run() {
 
             // 首次启动也可能带 CLI flag（用户双击 .desktop 之前先用 CLI 起一遍）。
             // 等 coordinator 准备好后再 dispatch；GUI 仍然照常起来。
-            if let Some(intent) = cli::parse_cli_intent(&first_run_args) {
+            if let Some(intent) = first_run_intent.clone() {
                 let dispatch_options = CliDispatchOptions {
                     suppress_capsule_window: cli::suppress_capsule_window_requested(
                         &first_run_args,
@@ -680,6 +887,7 @@ pub fn run() {
             commands::get_default_style_system_prompts,
             commands::list_installed_applications,
             commands::record_ui_timeline_event,
+            commands::get_capsule_state,
             commands::set_settings,
             commands::start_voiceprint_enrollment,
             commands::cancel_voiceprint_enrollment,
@@ -730,6 +938,7 @@ pub fn run() {
             commands::repair_embedded_ble_connection,
             commands::recover_embedded_ble_device,
             commands::get_embedded_ble_runtime_status,
+            commands::get_dictation_runtime_snapshot,
             commands::get_device_settings,
             commands::set_device_settings,
             commands::get_firmware_ota_preflight_snapshot,
@@ -871,13 +1080,20 @@ pub fn run() {
                 coordinator.stop_switch_style_hotkey_listener();
                 coordinator.stop_open_app_hotkey_listener();
                 coordinator.stop_device_custom_key_hotkey_listeners();
+                log::info!(
+                    "[lifecycle] shutdown_completed pid={}",
+                    std::process::id()
+                );
             }
             _ => {}
         });
 }
 
 fn request_app_quit<R: Runtime>(app: &AppHandle<R>) {
-    log::info!("[main] explicit quit requested");
+    log::info!(
+        "[lifecycle] shutdown_requested pid={} reason=explicit_quit",
+        std::process::id()
+    );
     APP_QUIT_REQUESTED.store(true, Ordering::Relaxed);
     TRAY_MICROPHONE_WATCHER_STOPPING.store(true, Ordering::Relaxed);
     let coordinator = app.state::<Arc<coordinator::Coordinator>>();
@@ -1754,6 +1970,17 @@ fn dispatch_cli_intent<R: Runtime>(
     intent: cli::CliIntent,
     options: CliDispatchOptions,
 ) {
+    match &intent {
+        cli::CliIntent::DiagnosticDictationSnapshot { token } => {
+            dispatch_dictation_snapshot_request(app, *token);
+            return;
+        }
+        cli::CliIntent::DiagnosticDictationSnapshotRejected { reason } => {
+            log::warn!("[diagnostic] dictation snapshot request rejected: {reason:?}");
+            return;
+        }
+        _ => {}
+    }
     let coordinator = app
         .try_state::<Arc<coordinator::Coordinator>>()
         .map(|s| Arc::clone(&*s));
@@ -1987,6 +2214,10 @@ fn dispatch_cli_intent<R: Runtime>(
         }
         cli::CliIntent::WiredFirmware { .. } => {
             log::warn!("[cli] wired firmware commands are headless-only and were ignored by the running GUI instance");
+        }
+        cli::CliIntent::DiagnosticDictationSnapshot { .. }
+        | cli::CliIntent::DiagnosticDictationSnapshotRejected { .. } => {
+            unreachable!("diagnostic snapshot intents are handled before normal CLI dispatch")
         }
     }
 }
@@ -3044,17 +3275,160 @@ fn capsule_height_for_qa() -> f64 {
 mod tests {
     use super::{
         capsule_bottom_center_physical_position, capsule_bottom_center_position,
-        capsule_height_for_qa, capsule_visual_height, capsule_window_bounds, log_dir_path,
-        parse_tray_polish_mode_id, rect_intersects_any_monitor, rotate_log_if_too_large,
+        capsule_height_for_qa, capsule_visual_height, capsule_window_bounds,
+        construct_business_services_if_needed, dictation_snapshot_request_id,
+        dictation_snapshot_result_path, log_dir_path, parse_tray_polish_mode_id,
+        publish_dictation_snapshot_response, rect_intersects_any_monitor, rotate_log_if_too_large,
         should_hide_main_on_close, should_keep_alive_on_exit_request,
         tray_polish_mode_menu_entries, tray_style_menu_enabled, CapsuleWindowBounds,
-        OnlineRotatingLogWriter, LOG_MAX_RECORD_BYTES, LOG_ROTATE_LIMIT_BYTES,
+        DictationSnapshotDiagnosticResponse, OnlineRotatingLogWriter,
+        DICTATION_SNAPSHOT_RESPONSE_SCHEMA, LOG_MAX_RECORD_BYTES, LOG_ROTATE_LIMIT_BYTES,
         LOG_SEGMENT_LIMIT_BYTES,
     };
     #[cfg(target_os = "windows")]
     use super::{merge_webview2_test_browser_args, WRY_DEFAULT_DISABLED_WEBVIEW2_FEATURES};
     use crate::types::PolishMode;
     use std::io::Write;
+    use uuid::Uuid;
+
+    #[test]
+    fn dictation_snapshot_response_uses_camel_case_and_never_overwrites() {
+        let token = Uuid::new_v4();
+        let response = DictationSnapshotDiagnosticResponse {
+            token: token.to_string(),
+            request_id: dictation_snapshot_request_id(token),
+            service_pid: Some(1234),
+            schema: DICTATION_SNAPSHOT_RESPONSE_SCHEMA,
+            snapshot: None,
+            error: None,
+        };
+        let path = publish_dictation_snapshot_response(token, &response)
+            .expect("snapshot response should publish");
+        let value: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&path).expect("published snapshot response should be readable"),
+        )
+        .expect("published snapshot response should be valid JSON");
+        assert_eq!(value["requestId"], response.request_id);
+        assert_eq!(value["servicePid"], 1234);
+        assert_eq!(value["schema"], DICTATION_SNAPSHOT_RESPONSE_SCHEMA);
+        assert!(value.get("request_id").is_none());
+        assert!(publish_dictation_snapshot_response(token, &response).is_err());
+        assert_eq!(dictation_snapshot_request_id(Uuid::nil()), 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn snapshot_publish_does_not_remove_another_request_temporary_file() {
+        let token = Uuid::new_v4();
+        let path = dictation_snapshot_result_path(token);
+        let temporary = path.with_extension("json.tmp");
+        std::fs::create_dir_all(path.parent().expect("snapshot path should have a parent"))
+            .expect("snapshot directory should be creatable");
+        let sentinel = b"owned by another request";
+        std::fs::write(&temporary, sentinel).expect("sentinel temporary file should be writable");
+
+        let response = DictationSnapshotDiagnosticResponse {
+            token: token.to_string(),
+            request_id: dictation_snapshot_request_id(token),
+            service_pid: None,
+            schema: DICTATION_SNAPSHOT_RESPONSE_SCHEMA,
+            snapshot: None,
+            error: None,
+        };
+        assert!(publish_dictation_snapshot_response(token, &response).is_err());
+        assert_eq!(
+            std::fs::read(&temporary).expect("sentinel must survive"),
+            sentinel
+        );
+        assert!(!path.exists(), "a failed publish must not create a result");
+        let _ = std::fs::remove_file(temporary);
+    }
+
+    #[test]
+    fn diagnostic_primary_and_secondary_skip_business_construction() {
+        let valid = crate::cli::CliIntent::DiagnosticDictationSnapshot {
+            token: Uuid::new_v4(),
+        };
+        let rejected = crate::cli::CliIntent::DiagnosticDictationSnapshotRejected {
+            reason: crate::cli::DiagnosticDictationSnapshotRejectReason::InvalidToken,
+        };
+        for intent in [valid, rejected] {
+            let mut construction_count = 0;
+            let result = construct_business_services_if_needed(Some(&intent), || {
+                construction_count += 1;
+                7_u8
+            });
+            assert!(result.is_none());
+            assert_eq!(construction_count, 0);
+        }
+
+        let normal = crate::cli::CliIntent::ToggleDictation;
+        let mut construction_count = 0;
+        let result = construct_business_services_if_needed(Some(&normal), || {
+            construction_count += 1;
+            7_u8
+        });
+        assert_eq!(result, Some(7));
+        assert_eq!(construction_count, 1);
+    }
+
+    #[test]
+    fn diagnostic_snapshot_cli_dispatch_is_before_coordinator_and_has_no_ui_fallback() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("fn dispatch_cli_intent")
+            .expect("CLI dispatch helper should exist");
+        let end = source[start..]
+            .find("fn run_embedded_ble_headless_cli")
+            .map(|offset| start + offset)
+            .expect("CLI dispatch helper boundary should exist");
+        let body = &source[start..end];
+        let diagnostic_branch = body
+            .find("dispatch_dictation_snapshot_request(app, *token);")
+            .expect("diagnostic snapshot should have a dedicated dispatch branch");
+        let coordinator_lookup = body
+            .find("try_state::<Arc<coordinator::Coordinator>>()")
+            .expect("normal CLI dispatch should still use the production Coordinator");
+        assert!(diagnostic_branch < coordinator_lookup);
+        assert!(!body[diagnostic_branch..coordinator_lookup].contains("show_main_window"));
+        assert!(!body[diagnostic_branch..coordinator_lookup].contains("start_dictation"));
+        assert!(!body[diagnostic_branch..coordinator_lookup].contains("stop_dictation"));
+    }
+
+    #[test]
+    fn single_instance_callback_uses_the_plugin_complete_argv() {
+        let source = include_str!("lib.rs");
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source should precede tests");
+        assert!(production.contains("dispatch_single_instance_callback(app, argv);"));
+        assert!(production.contains("cli::parse_cli_intent(&argv)"));
+        assert!(!production.contains("forwarded_argv"));
+    }
+
+    #[test]
+    fn diagnostic_snapshot_primary_path_is_windowless_and_exits_without_instance() {
+        let source = include_str!("lib.rs");
+        let diagnostic_process = source
+            .find("fn run_diagnostic_snapshot_process")
+            .expect("diagnostic process helper should exist");
+        let clear_windows = source[diagnostic_process..]
+            .find("tauri_context.config_mut().app.windows.clear();")
+            .map(|offset| diagnostic_process + offset)
+            .expect("primary diagnostic launch must clear configured WebView windows");
+        let setup = source[diagnostic_process..]
+            .find(".setup(move |_app|")
+            .map(|offset| diagnostic_process + offset)
+            .expect("Tauri setup callback should exist");
+        assert!(clear_windows < setup);
+        let no_instance_exit = source[diagnostic_process..]
+            .find("exit_after_headless_cli(diagnostic_snapshot_no_running_instance(token));")
+            .map(|offset| diagnostic_process + offset)
+            .expect("primary diagnostic launch must exit instead of becoming the service");
+        assert!(setup < no_instance_exit);
+        assert!(source.contains("exit_after_headless_cli(diagnostic_snapshot_rejected(*reason));"));
+    }
 
     #[test]
     #[cfg(target_os = "windows")]

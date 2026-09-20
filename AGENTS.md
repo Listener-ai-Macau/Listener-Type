@@ -52,12 +52,13 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 For Windows IME edits, also run the static scripts under `scripts/windows-*.test.mjs` and document any Windows runtime gap if you are not on Windows.
 
-## Shared agent rules (Grok / Claude / Codex)
+## Product delivery
 
-Also follow `C:\Users\Billy\Desktop\Denzic\ai-collaboration-workflow\docs\shared_product_engineering_rules.md`
-(or `$env:AI_WORKFLOW_REPO\docs\shared_product_engineering_rules.md`): fix-before-acceptance,
-fresh test binary, anti-regression contracts, **§1 always-latest Program Files Type + matching firmware**
-(install MSI / flash or OTA before owner opens the app for acceptance).
+- Follow the user's current scope and the product behavior in this repository. AIW Goal contracts, archives and blocking acceptance popups are not development prerequisites.
+- Preserve existing uncommitted work. Use focused behavioral regressions while iterating; run release checks once a candidate is ready.
+- For delivery, build and install the candidate MSI, verify its payload against the installed executable, and identify the matching firmware. Distinguish source tests, installed-app tests and real-device evidence.
+- Do not claim hardware or end-to-end acceptance from static checks. Report an unavailable device or external service precisely and continue independent work.
+- Recording priorities and accepted behavior: `docs/architecture/repair-order-a-g.md` and `docs/architecture/known-good-2026-09-11.md`.
 
 ### Voice wake / voiceprint (anti-regression)
 

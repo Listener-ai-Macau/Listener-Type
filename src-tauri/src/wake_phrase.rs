@@ -1164,6 +1164,28 @@ mod platform {
     /// When the live streaming detector misses, re-run offline over multiple
     /// windows with the same attenuation-only limiter and a sensitive cascade.
     pub fn detect_with_recall_cascade(pcm: &[u8], phrase: &str) -> Result<Option<Match>, String> {
+        detect_with_recall_deadline(pcm, phrase, None)
+    }
+
+    /// The actor timeout cannot cancel native inference. Stop scheduling more
+    /// windows after its deadline and never queue overlapping live cascades.
+    pub fn detect_with_recall_cascade_bounded(
+        pcm: &[u8],
+        phrase: &str,
+        budget: std::time::Duration,
+    ) -> Result<Option<Match>, String> {
+        static LIVE_RECALL: Mutex<()> = Mutex::new(());
+        let Some(_guard) = LIVE_RECALL.try_lock() else {
+            return Ok(None);
+        };
+        detect_with_recall_deadline(pcm, phrase, Some(std::time::Instant::now() + budget))
+    }
+
+    fn detect_with_recall_deadline(
+        pcm: &[u8],
+        phrase: &str,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<Option<Match>, String> {
         if pcm.len() < SAMPLE_RATE as usize {
             return Ok(None);
         }
@@ -1175,6 +1197,10 @@ mod platform {
             let slice = &pcm[start..end];
             let offset_s = start as f32 / (SAMPLE_RATE as f32 * 2.0);
             for &(score, threshold) in RECALL_CASCADE {
+                if deadline.is_some_and(|end| std::time::Instant::now() >= end) {
+                    log::info!("[wake-phrase] offline recall stopped scheduling after live budget");
+                    return Ok(None);
+                }
                 let key = (
                     start as i32,
                     (score * 100.0) as i32,
@@ -2132,6 +2158,15 @@ pub fn detect(_pcm: &[u8], _phrase: &str) -> Result<Option<Match>, String> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn detect_with_recall_cascade(_pcm: &[u8], _phrase: &str) -> Result<Option<Match>, String> {
+    Err("当前平台暂不支持本地唤醒词".into())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn detect_with_recall_cascade_bounded(
+    _pcm: &[u8],
+    _phrase: &str,
+    _budget: std::time::Duration,
+) -> Result<Option<Match>, String> {
     Err("当前平台暂不支持本地唤醒词".into())
 }
 

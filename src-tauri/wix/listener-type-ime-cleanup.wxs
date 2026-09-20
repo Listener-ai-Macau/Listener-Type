@@ -1,6 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Fragment>
+    <!--
+      The MSI ships the ListenerTypeIme TSF text-service DLLs under
+      resources\windows-ime\ and registers them at install time. Without this,
+      a clean install has no TSF registration, every dictation falls back to
+      the unconfirmed non-TSF unicode path, and text never reaches the cursor
+      (installed session fa457bfe 2026-09-18: "TSF not registered
+      (NotInstalled)" -> submittedUnconfirmed -> operator saw no output).
+
+      Sequence on install: the RemoveRegistryKey/removeOnInstall rows below
+      first clear any stale registration left by dev-side staging scripts
+      (they run with RemoveRegistryValues before InstallFiles), then the
+      deferred regsvr32 actions after InstallFiles register the freshly
+      installed DLLs. On uninstall the same DLLs are unregistered first.
+    -->
     <DirectoryRef Id="INSTALLDIR">
       <Component Id="LegacyListenerTypeImeRegistryCleanupComponent" Guid="{8E9CCDF6-0E93-4FF7-A720-2A71F2E91E76}" Win64="yes">
         <RegistryValue Root="HKLM" Key="Software\ListenerType\InstallerCleanup" Name="LegacyImeCleanup" Type="integer" Value="1" KeyPath="yes" />
@@ -11,39 +25,39 @@
     </DirectoryRef>
 
     <CustomAction
-      Id="UnregisterLegacyListenerTypeImeX64OnInstall"
+      Id="RegisterListenerTypeImeX64OnInstall"
       Directory="INSTALLDIR"
       Execute="deferred"
       Impersonate="no"
-      ExeCommand='&quot;[System64Folder]regsvr32.exe&quot; /s /u &quot;[INSTALLDIR]windows-ime\x64\ListenerTypeIme.dll&quot;'
+      ExeCommand='&quot;[System64Folder]regsvr32.exe&quot; /s &quot;[INSTALLDIR]resources\windows-ime\x64\ListenerTypeIme.dll&quot;'
+      Return="check" />
+    <CustomAction
+      Id="RegisterListenerTypeImeX86OnInstall"
+      Directory="INSTALLDIR"
+      Execute="deferred"
+      Impersonate="no"
+      ExeCommand='&quot;[WindowsFolder]SysWOW64\regsvr32.exe&quot; /s &quot;[INSTALLDIR]resources\windows-ime\x86\ListenerTypeIme.dll&quot;'
+      Return="check" />
+    <CustomAction
+      Id="UnregisterListenerTypeImeX64OnRemove"
+      Directory="INSTALLDIR"
+      Execute="deferred"
+      Impersonate="no"
+      ExeCommand='&quot;[System64Folder]regsvr32.exe&quot; /s /u &quot;[INSTALLDIR]resources\windows-ime\x64\ListenerTypeIme.dll&quot;'
       Return="ignore" />
     <CustomAction
-      Id="UnregisterLegacyListenerTypeImeX86OnInstall"
+      Id="UnregisterListenerTypeImeX86OnRemove"
       Directory="INSTALLDIR"
       Execute="deferred"
       Impersonate="no"
-      ExeCommand='&quot;[WindowsFolder]SysWOW64\regsvr32.exe&quot; /s /u &quot;[INSTALLDIR]windows-ime\x86\ListenerTypeIme.dll&quot;'
-      Return="ignore" />
-    <CustomAction
-      Id="UnregisterLegacyListenerTypeImeX64OnRemove"
-      Directory="INSTALLDIR"
-      Execute="deferred"
-      Impersonate="no"
-      ExeCommand='&quot;[System64Folder]regsvr32.exe&quot; /s /u &quot;[INSTALLDIR]windows-ime\x64\ListenerTypeIme.dll&quot;'
-      Return="ignore" />
-    <CustomAction
-      Id="UnregisterLegacyListenerTypeImeX86OnRemove"
-      Directory="INSTALLDIR"
-      Execute="deferred"
-      Impersonate="no"
-      ExeCommand='&quot;[WindowsFolder]SysWOW64\regsvr32.exe&quot; /s /u &quot;[INSTALLDIR]windows-ime\x86\ListenerTypeIme.dll&quot;'
+      ExeCommand='&quot;[WindowsFolder]SysWOW64\regsvr32.exe&quot; /s /u &quot;[INSTALLDIR]resources\windows-ime\x86\ListenerTypeIme.dll&quot;'
       Return="ignore" />
 
     <InstallExecuteSequence>
-      <Custom Action="UnregisterLegacyListenerTypeImeX64OnInstall" Before="InstallFiles"><![CDATA[NOT REMOVE]]></Custom>
-      <Custom Action="UnregisterLegacyListenerTypeImeX86OnInstall" After="UnregisterLegacyListenerTypeImeX64OnInstall"><![CDATA[NOT REMOVE]]></Custom>
-      <Custom Action="UnregisterLegacyListenerTypeImeX64OnRemove" Before="RemoveFiles"><![CDATA[REMOVE]]></Custom>
-      <Custom Action="UnregisterLegacyListenerTypeImeX86OnRemove" After="UnregisterLegacyListenerTypeImeX64OnRemove"><![CDATA[REMOVE]]></Custom>
+      <Custom Action="RegisterListenerTypeImeX64OnInstall" After="InstallFiles"><![CDATA[NOT REMOVE]]></Custom>
+      <Custom Action="RegisterListenerTypeImeX86OnInstall" After="RegisterListenerTypeImeX64OnInstall"><![CDATA[NOT REMOVE]]></Custom>
+      <Custom Action="UnregisterListenerTypeImeX64OnRemove" Before="RemoveFiles"><![CDATA[REMOVE]]></Custom>
+      <Custom Action="UnregisterListenerTypeImeX86OnRemove" After="UnregisterListenerTypeImeX64OnRemove"><![CDATA[REMOVE]]></Custom>
     </InstallExecuteSequence>
   </Fragment>
 </Wix>

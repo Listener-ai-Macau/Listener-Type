@@ -99,6 +99,10 @@ impl<'de> Deserialize<'de> for UpdateChannel {
 pub enum InsertStatus {
     Inserted,
     PasteSent,
+    /// The OS accepted the synthetic input events, but Listener has no
+    /// receiver acknowledgement proving that the original target rendered the
+    /// text. This must not be presented as confirmed on-screen insertion.
+    SubmittedUnconfirmed,
     CopiedFallback,
     Failed,
 }

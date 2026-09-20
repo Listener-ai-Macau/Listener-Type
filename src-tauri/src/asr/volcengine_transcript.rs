@@ -65,7 +65,20 @@ pub(super) fn transcript_candidate_from_result(result: &Value) -> TranscriptCand
     // this response's time range. Its older utterance list can be longer
     // because it still contains the superseded streaming branch.
     let text = if has_authoritative_two_pass_correction && !result_text.trim().is_empty() {
-        result_text.trim().to_string()
+        let trimmed = result_text.trim();
+        // Punctuation-only regression guard: the provider occasionally re-emits
+        // the corrected final text with every punctuation mark stripped while
+        // the same response's utterance list still carries them (hybrid r2
+        // 2026-09-18: the final on-screen text lost all commas and periods).
+        // Content-identical modulo punctuation must keep the punctuated
+        // variant; a real content correction still wins untouched.
+        if !utterance_text.trim().is_empty()
+            && content_equal_ignoring_punctuation(trimmed, &utterance_text)
+        {
+            choose_transcript_text(trimmed, &utterance_text)
+        } else {
+            trimmed.to_string()
+        }
     } else {
         choose_transcript_text(result_text, &utterance_text)
     };
@@ -150,6 +163,20 @@ fn value_as_i64(value: &Value) -> Option<i64> {
         }
     }
     value.as_str()?.trim().parse::<i64>().ok()
+}
+
+/// True when both strings carry identical alphanumeric content (ignoring all
+/// punctuation and whitespace, case-folded). Used to detect punctuation-only
+/// re-emissions of the same corrected text.
+fn content_equal_ignoring_punctuation(left: &str, right: &str) -> bool {
+    fn alphanumeric_fold(value: &str) -> String {
+        value
+            .chars()
+            .filter(|ch| ch.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect()
+    }
+    alphanumeric_fold(left) == alphanumeric_fold(right)
 }
 
 fn choose_transcript_text(result_text: &str, utterance_text: &str) -> String {
@@ -660,7 +687,7 @@ fn is_cjk_unified_ideograph(ch: char) -> bool {
     )
 }
 
-fn char_edit_distance(left: &str, right: &str) -> usize {
+pub(super) fn char_edit_distance(left: &str, right: &str) -> usize {
     let left: Vec<char> = left.chars().collect();
     let right: Vec<char> = right.chars().collect();
     if left.is_empty() {
@@ -921,6 +948,35 @@ pub(super) fn merge_streaming_candidate(
         merge_streaming_transcript(previous_text, &append_text),
         merged_segments,
     )
+}
+
+/// Speaker filtering removes text, not the provider's coverage of the old
+/// streaming hypothesis. A complete corrected prefix plus an excluded later
+/// speaker still revises that entire interval. Without this coverage, the
+/// rolling hypothesis can be appended to the corrected owner text again.
+pub(super) fn authoritative_owner_prefix_covers_ledger(
+    previous_segments: &[TranscriptSegment],
+    selected: &TranscriptCandidate,
+    provider: &TranscriptCandidate,
+) -> bool {
+    selected.authoritative_cumulative
+        && provider.authoritative_cumulative
+        && !selected.timed_segments.is_empty()
+        && selected.timed_segments.len() < provider.timed_segments.len()
+        && provider
+            .timed_segments
+            .starts_with(&selected.timed_segments)
+        && timed_segments_represent_text(&selected.timed_segments, &selected.text)
+        && timed_segments_represent_text(&provider.timed_segments, &provider.text)
+        && provider
+            .timed_segments
+            .iter()
+            .all(|segment| segment.end_ms.is_some_and(|end| end >= segment.start_ms))
+        && provider
+            .timed_segments
+            .windows(2)
+            .all(|pair| pair[0].end_ms.is_some_and(|end| end <= pair[1].start_ms))
+        && authoritative_segments_cover_previous(previous_segments, &provider.timed_segments)
 }
 
 fn authoritative_segments_cover_previous(
@@ -1423,6 +1479,57 @@ mod tests {
         assert_eq!(
             transcript_candidate_from_result(&result).text,
             "帮我录音。怎么退？"
+        );
+    }
+
+    #[test]
+    fn authoritative_two_pass_result_text_keeps_punctuation_when_content_matches() {
+        // ef-hybrid-r2 2026-09-18: the provider's final response re-emitted the
+        // corrected text with every punctuation mark stripped in result.text
+        // while its own utterance list still carried them. The authoritative
+        // two-pass branch must not ship the punctuation-less variant when the
+        // content is identical modulo punctuation.
+        let result = json!({
+        "text": "开始录音我现在做端点复测第一部分先完整保留中间自然停顿大于一秒然后继续第二部分最后这句话也必须完整保留",
+        "utterances": [
+        {
+            "text": "开始录音，我现在做端点复测。",
+            "definite": true,
+            "additions": { "source": "two_pass" }
+        },
+        {
+            "text": "第一部分先完整保留，中间自然停顿大于一秒，然后继续第二部分，最后这句话也必须完整保留。",
+            "definite": true,
+            "additions": { "source": "two_pass" }
+        }
+        ]
+        });
+
+        let text = transcript_candidate_from_result(&result).text;
+        assert_eq!(
+            text,
+            "开始录音，我现在做端点复测。第一部分先完整保留，中间自然停顿大于一秒，然后继续第二部分，最后这句话也必须完整保留。"
+        );
+    }
+
+    #[test]
+    fn authoritative_two_pass_result_text_wins_when_content_actually_differs() {
+        // A genuine content correction (digit vs numeral wording) must still
+        // override the older punctuated hypothesis.
+        let result = json!({
+        "text": "中间自然停顿大于一秒",
+        "utterances": [
+        {
+            "text": "中间自然停顿大于1秒，",
+            "definite": true,
+            "additions": { "source": "two_pass" }
+        }
+        ]
+        });
+
+        assert_eq!(
+            transcript_candidate_from_result(&result).text,
+            "中间自然停顿大于一秒"
         );
     }
 

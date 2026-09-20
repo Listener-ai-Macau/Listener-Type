@@ -16,6 +16,7 @@
 //! - **同一份解析复用**首次启动 + single-instance 回调两个入口，行为完全一致。
 
 use std::path::PathBuf;
+use uuid::Uuid;
 
 /// 桌面环境快捷键能给 Listener Type 触发的动作集合。
 ///
@@ -77,6 +78,20 @@ pub enum CliIntent {
         baud: Option<u32>,
         action: WiredFirmwareCliAction,
     },
+    /// 调试 / 自动化入口：请求已运行的单实例把当前听写 phase 写入固定诊断文件。
+    DiagnosticDictationSnapshot { token: Uuid },
+    /// 诊断 snapshot 参数存在但不满足严格单请求语法；必须拒绝，不能落入普通启动/聚焦路径。
+    DiagnosticDictationSnapshotRejected {
+        reason: DiagnosticDictationSnapshotRejectReason,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticDictationSnapshotRejectReason {
+    MissingToken,
+    InvalidToken,
+    Duplicate,
+    MixedArguments,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +106,10 @@ pub enum WiredFirmwareCliAction {
 /// `args` 通常是 `std::env::args().collect::<Vec<_>>()` 或 single-instance 回调里
 /// 传入的 `Vec<String>`；两条路径走同一份解析。
 pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
+    if let Some(diagnostic) = parse_diagnostic_snapshot_intent(args) {
+        return Some(diagnostic);
+    }
+
     // 跳过 argv[0]（自身路径），逐项匹配。命中第一个就返回 —
     // 多个 flag 时取首个，避免出现"toggle + cancel"这种自相矛盾组合。
     let mut args = args.iter().skip(1).peekable();
@@ -249,6 +268,57 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
     None
 }
 
+/// Parse the snapshot request before ordinary CLI matching. Once the flag is
+/// present, every extra argument is rejected so a malformed diagnostic call
+/// can never fall through to a focus or control intent.
+fn parse_diagnostic_snapshot_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
+    let mut positions = args.iter().enumerate().skip(1).filter_map(|(index, arg)| {
+        (arg.as_ref() == "--diagnostic-dictation-snapshot").then_some(index)
+    });
+    let Some(index) = positions.next() else {
+        return None;
+    };
+    if positions.next().is_some() {
+        return Some(CliIntent::DiagnosticDictationSnapshotRejected {
+            reason: DiagnosticDictationSnapshotRejectReason::Duplicate,
+        });
+    }
+
+    let Some(token) = args.get(index + 1).map(AsRef::as_ref) else {
+        return Some(CliIntent::DiagnosticDictationSnapshotRejected {
+            reason: DiagnosticDictationSnapshotRejectReason::MissingToken,
+        });
+    };
+    if token.starts_with("--") {
+        return Some(CliIntent::DiagnosticDictationSnapshotRejected {
+            reason: DiagnosticDictationSnapshotRejectReason::MissingToken,
+        });
+    }
+
+    let extra_argument = args
+        .iter()
+        .enumerate()
+        .skip(1)
+        .any(|(position, _)| position != index && position != index + 1);
+    if extra_argument {
+        return Some(CliIntent::DiagnosticDictationSnapshotRejected {
+            reason: DiagnosticDictationSnapshotRejectReason::MixedArguments,
+        });
+    }
+
+    match parse_strict_uuid(token) {
+        Some(token) => Some(CliIntent::DiagnosticDictationSnapshot { token }),
+        None => Some(CliIntent::DiagnosticDictationSnapshotRejected {
+            reason: DiagnosticDictationSnapshotRejectReason::InvalidToken,
+        }),
+    }
+}
+
+fn parse_strict_uuid(value: &str) -> Option<Uuid> {
+    let parsed = Uuid::parse_str(value).ok()?;
+    (parsed.to_string() == value).then_some(parsed)
+}
+
 pub fn suppress_capsule_window_requested<S: AsRef<str>>(args: &[S]) -> bool {
     args.iter()
         .any(|arg| arg.as_ref() == "--suppress-capsule-window")
@@ -373,6 +443,87 @@ mod tests {
     fn parse_recognizes_cancel_dictation() {
         let args = vec!["listener-type", "--cancel-dictation"];
         assert_eq!(parse_cli_intent(&args), Some(CliIntent::CancelDictation));
+    }
+
+    #[test]
+    fn parse_recognizes_strict_diagnostic_dictation_snapshot() {
+        let args = vec![
+            r"C:\Program Files\Listener Type\listener-type.exe",
+            "--diagnostic-dictation-snapshot",
+            "11111111-1111-1111-1111-111111111111",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::DiagnosticDictationSnapshot {
+                token: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_accepts_complete_single_instance_argv_without_synthetic_prefix() {
+        let args = vec![
+            r"C:\Program Files\Listener Type\listener-type.exe",
+            "--diagnostic-dictation-snapshot",
+            "22222222-2222-2222-2222-222222222222",
+        ];
+        assert!(matches!(
+            parse_cli_intent(&args),
+            Some(CliIntent::DiagnosticDictationSnapshot { token })
+                if token == Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap()
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_invalid_diagnostic_snapshot_arguments_without_fallback() {
+        let cases = [
+            (
+                vec!["listener-type", "--diagnostic-dictation-snapshot"],
+                DiagnosticDictationSnapshotRejectReason::MissingToken,
+            ),
+            (
+                vec![
+                    "listener-type",
+                    "--diagnostic-dictation-snapshot",
+                    "not-a-uuid",
+                ],
+                DiagnosticDictationSnapshotRejectReason::InvalidToken,
+            ),
+            (
+                vec![
+                    "listener-type",
+                    "--diagnostic-dictation-snapshot",
+                    "11111111-1111-1111-1111-111111111111",
+                    "--diagnostic-dictation-snapshot",
+                    "22222222-2222-2222-2222-222222222222",
+                ],
+                DiagnosticDictationSnapshotRejectReason::Duplicate,
+            ),
+            (
+                vec![
+                    "listener-type",
+                    "--diagnostic-dictation-snapshot",
+                    "11111111-1111-1111-1111-111111111111",
+                    "--toggle-dictation",
+                ],
+                DiagnosticDictationSnapshotRejectReason::MixedArguments,
+            ),
+            (
+                vec![
+                    "listener-type",
+                    "--diagnostic-dictation-snapshot",
+                    "11111111-1111-1111-1111-111111111111",
+                    "extra",
+                ],
+                DiagnosticDictationSnapshotRejectReason::MixedArguments,
+            ),
+        ];
+        for (args, reason) in cases {
+            assert_eq!(
+                parse_cli_intent(&args),
+                Some(CliIntent::DiagnosticDictationSnapshotRejected { reason })
+            );
+        }
     }
 
     #[test]

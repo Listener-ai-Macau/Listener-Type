@@ -150,14 +150,28 @@ impl Default for TextInserter {
 #[derive(Debug)]
 struct ClipboardRestorePlan {
     inserted_text: String,
-    previous_text: Option<String>,
+    previous: ClipboardSnapshot,
+}
+
+/// What the user's clipboard held before a dictation borrowed it as paste
+/// transport.  `Absent` covers both a truly empty clipboard and content this
+/// crate cannot write back; restoring `Absent` clears the dictation text out,
+/// so a user who never opted into clipboard retention finds an empty — not a
+/// dictated — clipboard afterwards (2026-09-19: the old text-only restore
+/// silently left the dictation text behind in exactly those cases).
+#[cfg(not(target_os = "macos"))]
+#[derive(Debug, Clone)]
+enum ClipboardSnapshot {
+    Text(String),
+    Image(arboard::ImageData<'static>),
+    Absent,
 }
 
 #[cfg(not(target_os = "macos"))]
 #[derive(Debug, Clone)]
 struct PendingClipboardRestore {
     latest_restore_id: u64,
-    original_text: Option<String>,
+    original: ClipboardSnapshot,
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -182,25 +196,52 @@ fn copy_to_clipboard(text: &str) -> bool {
     true
 }
 
+/// May the clipboard be borrowed as paste transport without destroying
+/// content the restore path cannot write back?  Copied files and other
+/// exotic formats have no arboard read/write round trip, so while such
+/// content is held the Windows insert path declines the paste transport and
+/// uses keystrokes for that one dictation instead (2026-09-19).
+#[cfg(target_os = "windows")]
+pub fn clipboard_transport_is_reversible() -> bool {
+    use windows::Win32::System::DataExchange::CountClipboardFormats;
+    if unsafe { CountClipboardFormats() } == 0 {
+        // Empty clipboard: transport is reversible via clear-on-restore.
+        return true;
+    }
+    let Ok(mut clipboard) = arboard::Clipboard::new() else {
+        // Cannot inspect right now. The paste path itself fails safely on a
+        // busy clipboard, so do not pre-empt it here.
+        return true;
+    };
+    clipboard.get_text().is_ok() || clipboard.get_image().is_ok()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn clipboard_transport_is_reversible() -> bool {
+    true
+}
+
+#[cfg(not(target_os = "macos"))]
+fn snapshot_clipboard(clipboard: &mut arboard::Clipboard) -> ClipboardSnapshot {
+    match clipboard.get_text() {
+        Ok(text) => ClipboardSnapshot::Text(text),
+        Err(_) => match clipboard.get_image() {
+            Ok(image) => ClipboardSnapshot::Image(image),
+            Err(_) => ClipboardSnapshot::Absent,
+        },
+    }
+}
+
 #[cfg(not(target_os = "macos"))]
 fn copy_to_clipboard_with_restore_plan(text: &str) -> Result<ClipboardRestorePlan, String> {
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-    let previous_text = match clipboard.get_text() {
-        Ok(existing) => Some(existing),
-        Err(err) => {
-            log::warn!(
-                "[insertion] clipboard get_text failed before overwrite: {}",
-                err
-            );
-            None
-        }
-    };
+    let previous = snapshot_clipboard(&mut clipboard);
     clipboard
         .set_text(text.to_string())
         .map_err(|e| e.to_string())?;
     Ok(ClipboardRestorePlan {
         inserted_text: text.to_string(),
-        previous_text,
+        previous,
     })
 }
 
@@ -232,35 +273,60 @@ fn insert_with_clipboard_restore(
 
 #[cfg(not(target_os = "macos"))]
 fn schedule_clipboard_restore(plan: ClipboardRestorePlan) {
-    let (restore_id, original_text) =
-        remember_pending_clipboard_restore(plan.previous_text.clone());
+    let (restore_id, original) = remember_pending_clipboard_restore(plan.previous.clone());
     std::thread::spawn(move || {
-        restore_clipboard_after_delay(plan, original_text, restore_id, CLIPBOARD_RESTORE_DELAY)
+        restore_clipboard_after_delay(plan, original, restore_id, CLIPBOARD_RESTORE_DELAY)
     });
 }
 
 #[cfg(not(target_os = "macos"))]
-fn remember_pending_clipboard_restore(previous_text: Option<String>) -> (u64, Option<String>) {
+fn remember_pending_clipboard_restore(
+    previous: ClipboardSnapshot,
+) -> (u64, ClipboardSnapshot) {
     let restore_id = NEXT_CLIPBOARD_RESTORE_ID.fetch_add(1, Ordering::SeqCst);
-    let original_text = {
+    let original = {
         let mut pending = PENDING_CLIPBOARD_RESTORE.lock();
         let original = pending
             .as_ref()
-            .map(|batch| batch.original_text.clone())
-            .unwrap_or(previous_text);
+            .map(|batch| batch.original.clone())
+            .unwrap_or(previous);
         *pending = Some(PendingClipboardRestore {
             latest_restore_id: restore_id,
-            original_text: original.clone(),
+            original: original.clone(),
         });
         original
     };
-    (restore_id, original_text)
+    (restore_id, original)
+}
+
+#[cfg(not(target_os = "macos"))]
+enum ClipboardRestoreAction<'a> {
+    PutText(&'a str),
+    PutImage(&'a arboard::ImageData<'static>),
+    Clear,
+    Skip,
+}
+
+#[cfg(not(target_os = "macos"))]
+fn clipboard_restore_action<'a>(
+    current_text: Option<&str>,
+    inserted_text: &str,
+    snapshot: &'a ClipboardSnapshot,
+) -> ClipboardRestoreAction<'a> {
+    if !should_restore_clipboard(current_text, inserted_text) {
+        return ClipboardRestoreAction::Skip;
+    }
+    match snapshot {
+        ClipboardSnapshot::Text(text) => ClipboardRestoreAction::PutText(text),
+        ClipboardSnapshot::Image(image) => ClipboardRestoreAction::PutImage(image),
+        ClipboardSnapshot::Absent => ClipboardRestoreAction::Clear,
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
 fn restore_clipboard_after_delay(
     plan: ClipboardRestorePlan,
-    original_text: Option<String>,
+    original: ClipboardSnapshot,
     restore_id: u64,
     delay: Duration,
 ) {
@@ -293,16 +359,27 @@ fn restore_clipboard_after_delay(
         }
     };
 
-    if should_restore_clipboard(current_text.as_deref(), &plan.inserted_text) {
-        if let Some(previous_text) = original_text {
-            if let Err(err) = clipboard.set_text(previous_text) {
+    match clipboard_restore_action(current_text.as_deref(), &plan.inserted_text, &original) {
+        ClipboardRestoreAction::PutText(text) => {
+            if let Err(err) = clipboard.set_text(text.to_string()) {
                 log::warn!("[insertion] clipboard restore failed: {}", err);
             }
         }
-    } else {
-        log::info!(
-            "[insertion] skip clipboard restore: latest clipboard no longer matches inserted text"
-        );
+        ClipboardRestoreAction::PutImage(image) => {
+            if let Err(err) = clipboard.set_image(image.clone()) {
+                log::warn!("[insertion] clipboard image restore failed: {}", err);
+            }
+        }
+        ClipboardRestoreAction::Clear => {
+            if let Err(err) = clipboard.clear() {
+                log::warn!("[insertion] clipboard clear failed: {}", err);
+            }
+        }
+        ClipboardRestoreAction::Skip => {
+            log::info!(
+                "[insertion] skip clipboard restore: latest clipboard no longer matches inserted text"
+            );
+        }
     }
 
     clear_pending_clipboard_restore(restore_id);
@@ -596,13 +673,20 @@ mod tests {
         *PENDING_CLIPBOARD_RESTORE.lock() = None;
 
         let (first_id, first_original) =
-            remember_pending_clipboard_restore(Some("user clipboard".to_string()));
-        let (second_id, second_original) =
-            remember_pending_clipboard_restore(Some("first dictated text".to_string()));
+            remember_pending_clipboard_restore(ClipboardSnapshot::Text("user clipboard".to_string()));
+        let (second_id, second_original) = remember_pending_clipboard_restore(
+            ClipboardSnapshot::Text("first dictated text".to_string()),
+        );
 
         assert_ne!(first_id, second_id);
-        assert_eq!(first_original.as_deref(), Some("user clipboard"));
-        assert_eq!(second_original.as_deref(), Some("user clipboard"));
+        assert!(matches!(
+            &first_original,
+            ClipboardSnapshot::Text(text) if text == "user clipboard"
+        ));
+        assert!(matches!(
+            &second_original,
+            ClipboardSnapshot::Text(text) if text == "user clipboard"
+        ));
         assert!(!is_latest_clipboard_restore(first_id));
         assert!(is_latest_clipboard_restore(second_id));
 
@@ -610,6 +694,49 @@ mod tests {
         assert!(is_latest_clipboard_restore(second_id));
         clear_pending_clipboard_restore(second_id);
         assert!(!is_latest_clipboard_restore(second_id));
+    }
+
+    /// 2026-09-19: the dictation text must never linger for a user who did
+    /// not opt into clipboard retention. An empty (or unwritable) original
+    /// clipboard restores by clearing, not by skipping.
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn absent_clipboard_snapshot_restores_by_clearing() {
+        let snapshot = ClipboardSnapshot::Absent;
+        assert!(matches!(
+            clipboard_restore_action(Some("dictated"), "dictated", &snapshot),
+            ClipboardRestoreAction::Clear
+        ));
+        // A user copy made in between still wins over any restore.
+        assert!(matches!(
+            clipboard_restore_action(Some("user changed clipboard"), "dictated", &snapshot),
+            ClipboardRestoreAction::Skip
+        ));
+        assert!(matches!(
+            clipboard_restore_action(None, "dictated", &snapshot),
+            ClipboardRestoreAction::Skip
+        ));
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn clipboard_restore_puts_back_text_and_image_snapshots() {
+        let text_snapshot = ClipboardSnapshot::Text("user text".to_string());
+        assert!(matches!(
+            clipboard_restore_action(Some("dictated"), "dictated", &text_snapshot),
+            ClipboardRestoreAction::PutText(text) if *text == *"user text"
+        ));
+
+        let image = arboard::ImageData {
+            width: 1,
+            height: 1,
+            bytes: std::borrow::Cow::Owned(vec![0u8, 0, 0, 255]),
+        };
+        let image_snapshot = ClipboardSnapshot::Image(image);
+        assert!(matches!(
+            clipboard_restore_action(Some("dictated"), "dictated", &image_snapshot),
+            ClipboardRestoreAction::PutImage(_)
+        ));
     }
 
     #[test]

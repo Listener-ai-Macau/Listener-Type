@@ -101,4 +101,17 @@ assert.equal(
   'idle must still be allowed to clear the capsule',
 );
 
+for (const messageSessionId of [null, 'previous-session']) {
+  assert.equal(
+    shouldRetainCapsulePreview({
+      state: 'recording',
+      sessionId: 'new-session',
+      messageSessionId,
+      currentMessage: 'Previous completion or error',
+    }),
+    false,
+    'a new recording must clear both dismissed and session-owned old messages',
+  );
+}
+
 console.log('capsuleDisplayMessage: all assertions passed');

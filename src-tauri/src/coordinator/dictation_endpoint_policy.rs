@@ -71,8 +71,17 @@ fn authoritative_preview_growth_has_recent_owner_speech(
         return false;
     }
 
-    let owner_established = update.target_speech_end_ms.is_some()
-        || update.local_target_speech_end_ms.is_some();
+    let owner_established = endpoint_owner_watermark(update).is_some();
+    // The latest local window must positively classify the current speech as
+    // the target speaker with usable quality. The quality-qualified watermark
+    // can legitimately trail the live edge by one verifier cadence while the
+    // owner keeps talking (installed 363), so the fresh Target speech edge
+    // counts; an Uncertain or low-quality window does not (session 1378
+    // family), no matter how recently the qualified watermark moved.
+    let current_target_speech_ms = local_target_edge_is_fresh_target_observation(update);
+    if update.local_speaker_tracking_enabled && current_target_speech_ms.is_none() {
+        return false;
+    }
     let provider_other_speaker_advanced = update
         .target_speech_end_ms
         .zip(update.stable_attributed_speech_end_ms)
@@ -89,11 +98,16 @@ fn authoritative_preview_growth_has_recent_owner_speech(
         .into_iter()
         .chain(update.provider_audio_duration_ms)
         .max();
+    let owner_edge_ms = endpoint_owner_watermark(update)
+        .into_iter()
+        .chain(current_target_speech_ms)
+        .max();
     latest_audio_ms
-        .zip(update.local_speech_end_ms)
+        .zip(owner_edge_ms)
         .is_some_and(|(audio_ms, speech_ms)| {
             audio_ms.saturating_sub(speech_ms) < EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
-                && !local_speech_confidently_non_target(update, speech_ms)
+                && (!update.local_speaker_tracking_enabled
+                    || !local_speech_confidently_non_target(update, speech_ms))
         })
 }
 
@@ -105,15 +119,17 @@ impl SettledTargetEndpointClock {
         manual_terminal_bridge_until: Option<Instant>,
         armed_at: Instant,
         now: Instant,
+        positive_owner_evidence_live: bool,
     ) -> bool {
         // A boundary frame can settle the preview before a continuing clause.
         // Protect only risky body shapes; a general uncertainty hold made
         // short-command auto-end vary between 1.2 and 3.7 seconds.
-        let fresh_unclassified_local_speech = update_has_fresh_unclassified_local_speech(
-            update,
-            EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
-        );
-        let pending_owner_tail = update.pending_unattributed_speech
+        // Every hold below that survives on unclassified/cloud evidence is
+        // bounded by the positive-evidence budget: after it expires, room
+        // noise edges and a cloud row absorbing them into the target id can
+        // no longer hold the endpoint open ("不能自动结束", 2026-09-19).
+        let pending_owner_tail = positive_owner_evidence_live
+            && update.pending_unattributed_speech
             && !update_has_recent_strong_non_target(update)
             && has_unresolved_recent_owner_speech(
                 update,
@@ -126,8 +142,12 @@ impl SettledTargetEndpointClock {
         // retained below solely for manual/no-profile sessions.
         let uncertain_tail_within_wall_ceiling = now.saturating_duration_since(armed_at)
             < Duration::from_millis(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS);
+        let fresh_unclassified_local_speech = update_has_fresh_unclassified_local_speech(
+            update,
+            EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+        );
         let bounded_unclassified_local_speech = if update.local_speaker_tracking_enabled
-            && update.local_target_speech_end_ms.is_some()
+            && update.qualified_owner_speech_end_ms.is_some()
         {
             // Once the wake owner is established, a later local window can be
             // genuinely the same speaker while its embedding is temporarily
@@ -137,19 +157,33 @@ impl SettledTargetEndpointClock {
             // Uncertain tail as silence and fired `inactive_1000ms` mid-word.
             // Keep the bounded identity-uncertainty hold here. Explicit
             // NonTarget evidence still wins through
-            // `local_speech_confidently_non_target`, and the existing
-            // two-second cap guarantees that room noise cannot hold forever.
-            has_uncertain_owner_identity_tail(update)
-                || has_unresolved_recent_owner_speech(
-                    update,
-                    EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
-                )
+            // `local_speech_confidently_non_target`; independent VAD evidence
+            // below is what distinguishes a quiet tail from continuing speech.
+            // `has_established_owner_uncertain_continuation` extends the same
+            // idea past the 2 s-from-boundary window: under continuous
+            // interference the owner's whole body stays Uncertain (installed
+            // r10), so only this hold — bounded by the uncertainty wall in
+            // the caller — keeps the one-second clock from firing at the
+            // user's deliberate mid-sentence pause.  Both Uncertain-driven
+            // disjuncts additionally require live positive evidence: while
+            // the owner is really reading, preview growth keeps the budget
+            // alive; once they stop, the budget expires and the hold lifts.
+            (positive_owner_evidence_live
+                && uncertain_tail_within_wall_ceiling
+                && has_established_owner_uncertain_continuation(update))
+                || has_uncertain_owner_identity_tail(update)
+                || (positive_owner_evidence_live
+                    && has_unresolved_recent_owner_speech(
+                        update,
+                        EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+                    ))
         } else if update.local_speaker_tracking_enabled && update.target_speech_end_ms.is_some() {
             // Cloud attribution without a positive local owner edge is weaker:
             // retain only speech close to that owner boundary. Otherwise fresh
             // room energy could consume the whole uncertainty wall after every
             // settled command. The wall bound also expires a stale snapshot.
-            uncertain_tail_within_wall_ceiling
+            positive_owner_evidence_live
+                && uncertain_tail_within_wall_ceiling
                 && has_unresolved_recent_owner_speech(
                     update,
                     EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
@@ -167,9 +201,10 @@ impl SettledTargetEndpointClock {
         // expires on the original endpoint timeout; this does not extend it.
         let enrolled_owner_established = update.local_speaker_tracking_enabled
             && (update.target_speech_end_ms.is_some()
-                || update.local_target_speech_end_ms.is_some());
+                || update.qualified_owner_speech_end_ms.is_some());
         let active_body_still_speaking = bounded_unclassified_local_speech
-            && (enrolled_owner_established
+            && (!update.local_speaker_tracking_enabled
+                || enrolled_owner_established
                 || latest_visible_body_ends_terminal == Some(false)
                 || manual_terminal_bridge_until.is_some_and(|until| now < until));
         !active_body_still_speaking
@@ -187,6 +222,17 @@ impl SettledTargetEndpointClock {
         visible_chars: usize,
         now: Instant,
     ) {
+        // Visible text growth is positive dictation evidence: recognized
+        // owner-attributed words appearing is the strongest "still dictating"
+        // signal, so it refreshes the unclassified-evidence budget (see
+        // EMBEDDED_OWNER_POSITIVE_EVIDENCE_BUDGET_MS).
+        if visible_chars
+            > self
+                .last_visible_body_signature
+                .map_or(0, |(_, previous_chars)| previous_chars)
+        {
+            self.note_positive_owner_evidence(now);
+        }
         let signature = (ends_terminal, visible_chars);
         if self.last_visible_body_signature != Some(signature) {
             self.last_visible_body_signature = Some(signature);
@@ -201,7 +247,13 @@ impl SettledTargetEndpointClock {
                     Some(now + Duration::from_millis(MANUAL_TERMINAL_BRIDGE_MAX_MS));
                 self.manual_terminal_bridge_rearm_pending = true;
             }
-            self.open_body_peak_visible_chars = 0;
+            // 2026-09-19 12:36Z: do NOT zero the run peak on a terminal mark.
+            // The provider punctuating a rhetorical question ("…怎么弄哦？")
+            // used to wipe the peak here, so the automatic continuation gate
+            // saw 0 established chars and the 1 s clock cut the resumed tail
+            // ("我快点把…").  Spoken length stays dictation evidence whether
+            // or not the current preview ends in punctuation.
+            self.open_body_peak_visible_chars = transition_visible_chars;
         } else {
             self.manual_terminal_bridge_until = None;
             self.manual_terminal_bridge_rearm_pending = false;
@@ -217,16 +269,13 @@ impl SettledTargetEndpointClock {
 }
 
 fn target_speaker_end_timeout_ms_for_preview(preview: Option<&str>) -> u64 {
-    if preview.map(str::trim).is_some_and(|text| !text.is_empty()) {
-        // One hang clock after last visible growth. Chinese ASR inserts 。
-        // mid-utterance; treating that as a finished command made session
-        // 6c362e19 stop 1.0s after the last shown char while the owner was
-        // still talking. Firmware's 1s silence fallback is kept alive by the
-        // host hang lease, not used as the product endpoint.
-        EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS
-    } else {
-        EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
-    }
+    // Preview punctuation and sentence shape are provider guesses, not speech
+    // activity. Every accepted body uses the same one-second product contract;
+    // the endpoint clock is rearmed by a newer preview or a newer owner speech
+    // edge. This keeps a natural mid-sentence pause alive without making an
+    // already-finished command wait 2.5 seconds.
+    let _ = preview;
+    EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
 }
 
 /// One immutable interpretation of the current product session for an
@@ -253,8 +302,12 @@ fn resolve_target_speaker_endpoint_policy(
     preview: Option<&str>,
     audio_duration_ms: Option<u64>,
 ) -> TargetSpeakerEndpointPolicy {
-    let body_started = automatic_wake_body_started(inner, session_id);
     let automatic_wake = automatic_wake_session_active(inner, session_id);
+    let body_started = if automatic_wake {
+        automatic_wake_body_started(inner, session_id)
+    } else {
+        preview.is_some_and(|text| !text.trim().is_empty())
+    };
     let mode_timeout_ms = target_speaker_end_timeout_ms_for_preview(preview);
     let endpoint_timeout_ms = if automatic_wake && !body_started {
         EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS.max(mode_timeout_ms)
@@ -276,6 +329,17 @@ fn resolve_target_speaker_endpoint_policy(
         wall_clock_timeout_ms: settled_target_wall_clock_timeout_ms(endpoint_timeout_ms),
         stop_reason: target_speaker_inactive_stop_reason(endpoint_timeout_ms),
     }
+}
+
+fn manual_endpoint_vad_allowed(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    policy: TargetSpeakerEndpointPolicy,
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+) -> bool {
+    policy.body_started
+        && !automatic_wake_session_active(inner, session_id)
+        && !update.local_speaker_tracking_enabled
 }
 
 fn settled_target_wall_clock_timeout_ms(endpoint_timeout_ms: u64) -> u64 {

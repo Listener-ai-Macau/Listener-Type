@@ -177,11 +177,31 @@ fn publish_embedded_ble_wake_only_expired(inner: &Arc<Inner>, session_id: Sessio
     }
 }
 
+fn cleanup_cancelled_dictation_completion(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    let transition = {
+        let mut state = inner.state.lock();
+        if state.session_id != session_id || !state.cancelled {
+            return false;
+        }
+        let transition = apply_dictation_event(&mut state, DictationEvent::Cancel { session_id });
+        // Keep cleanup under the identity lock: a late completion from the
+        // cancelled session must never clear the next recording's statistics.
+        clear_embedded_audio_stats(inner);
+        transition
+    };
+    restore_prepared_windows_ime_session(inner, session_id);
+    publish_dictation_transition(inner, transition, 0.0, None, None);
+    true
+}
+
 fn finish_dictation_pipeline_error(
     inner: &Arc<Inner>,
     session_id: SessionId,
     message: String,
 ) -> bool {
+    if cleanup_cancelled_dictation_completion(inner, session_id) {
+        return false;
+    }
     let observability_message = message.clone();
     set_device_ai_processing_warning_async(
         inner,
@@ -198,6 +218,9 @@ fn finish_dictation_pipeline_error(
 }
 
 fn finish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message: String) -> bool {
+    if cleanup_cancelled_dictation_completion(inner, session_id) {
+        return false;
+    }
     set_device_ai_processing_warning_async(inner, "dictation_timeout", Duration::from_millis(0));
     let published = if embedded_ble_actor_context_active(inner) {
         apply_embedded_ble_session_actor_dictation_event(

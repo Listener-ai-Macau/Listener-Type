@@ -1,12 +1,372 @@
 // EmbeddedStreamingDictation actor / PCM submit path.
 // Included into `coordinator::dictation` via `include!`.
 
+use std::io::Write;
+
+const BLE_CANDIDATE_INGRESS_DIAGNOSTIC_CHANNEL_CAPACITY: usize = 512;
+
+fn wake_anchor_mode(
+    wake_start_seconds: Option<f32>,
+    wake_end_seconds: f32,
+) -> &'static str {
+    match wake_start_seconds {
+        None => "fallback_missing_start",
+        Some(start) if start.is_finite() && start >= 0.0 && start <= wake_end_seconds => {
+            "keyword_start"
+        }
+        Some(_) => "fallback_invalid_start",
+    }
+}
+
+fn log_wake_candidate_crop(
+    path: &'static str,
+    embedded_session_id: u32,
+    candidate: &BufferedSpeakerCandidate,
+    wake_match: &crate::wake_phrase::Match,
+    candidate_pcm_before: usize,
+    pcm_base_before: Option<u64>,
+    post_wake_offset: usize,
+    wake_anchor_offset: usize,
+) {
+    let candidate_pcm_after = candidate.pcm.len();
+    let expected_after = candidate_pcm_before.saturating_sub(wake_anchor_offset);
+    let first_capture_generation = candidate
+        .source_runs
+        .iter()
+        .find_map(|run| run.capture_generation);
+    let last_capture_generation = candidate
+        .source_runs
+        .iter()
+        .rev()
+        .find_map(|run| run.capture_generation);
+    log::info!(
+        "[wake-phrase] candidate crop path={} embedded_session_id={} candidate_id={} kind={:?} capture_generation_first={:?} capture_generation_last={:?} wake_start_s={:?} wake_end_s={:.3} anchor_mode={} candidate_bytes_before={} wake_anchor_offset_bytes={} post_wake_offset_bytes={} candidate_bytes_after={} expected_after_bytes={} crop_invariant={} pcm_base_before={:?} pcm_base_after={:?} candidate_range_before={:?} candidate_range_after={:?}",
+        path,
+        embedded_session_id,
+        candidate.candidate_id,
+        candidate.kind,
+        first_capture_generation,
+        last_capture_generation,
+        wake_match.start_seconds,
+        wake_match.end_seconds,
+        wake_anchor_mode(wake_match.start_seconds, wake_match.end_seconds),
+        candidate_pcm_before,
+        wake_anchor_offset,
+        post_wake_offset,
+        candidate_pcm_after,
+        expected_after,
+        candidate_pcm_after == expected_after,
+        pcm_base_before,
+        candidate.pcm_base_offset,
+        candidate_slice_range(pcm_base_before, 0, candidate_pcm_before),
+        candidate_slice_range(candidate.pcm_base_offset, 0, candidate_pcm_after),
+    );
+}
+
+enum BleCandidateIngressDiagnosticMessage {
+    Append {
+        capture_generation: u64,
+        candidate_id: u64,
+        candidate_kind: String,
+        session_id: u32,
+        packet_sequence: u16,
+        candidate_range: Option<crate::observability::CandidateRange>,
+        collector_metadata: Option<crate::embedded_audio::StreamingPcmChunkMetadata>,
+        capture_fact: Option<crate::embedded_audio::SessionAdmissionFact>,
+        actor_fact: Option<crate::embedded_audio::SessionAdmissionFact>,
+        appended_unix_ms: u64,
+        pcm: Vec<u8>,
+    },
+}
+
+#[derive(Clone)]
+struct BleCandidateIngressDiagnosticSink {
+    tx: std::sync::mpsc::SyncSender<BleCandidateIngressDiagnosticMessage>,
+    dropped_count: Arc<AtomicUsize>,
+}
+
+impl BleCandidateIngressDiagnosticSink {
+    fn for_capture_generation(capture_generation: u64) -> Option<Self> {
+        let directory = explicit_wake_diagnostic_directory(
+            std::env::var(WAKE_DIAGNOSTIC_DIR_ENV).ok(),
+        )?;
+        let timestamp_ms = ble_candidate_ingress_diagnostic_unix_ms();
+        let stem = format!(
+            "ble-ingress-candidate-capture-{capture_generation}-{}-{timestamp_ms}",
+            std::process::id()
+        );
+        let events_path = directory.join(format!("{stem}-events.jsonl"));
+        let pcm_path = directory.join(format!("{stem}.pcm"));
+        let (tx, rx) = std::sync::mpsc::sync_channel(
+            BLE_CANDIDATE_INGRESS_DIAGNOSTIC_CHANNEL_CAPACITY,
+        );
+        let dropped_count = Arc::new(AtomicUsize::new(0));
+        let dropped_count_for_worker = Arc::clone(&dropped_count);
+        let spawn = std::thread::Builder::new()
+            .name(format!(
+                "listener-type-ble-candidate-ingress-{capture_generation}"
+            ))
+            .spawn(move || {
+                run_ble_candidate_ingress_diagnostic_worker(
+                    capture_generation,
+                    directory,
+                    events_path,
+                    pcm_path,
+                    rx,
+                    dropped_count_for_worker,
+                );
+            });
+        if let Err(err) = spawn {
+            log::warn!(
+                "[speaker-verification] candidate ingress diagnostic worker unavailable capture_generation={capture_generation}: {err}"
+            );
+            return None;
+        }
+        Some(Self { tx, dropped_count })
+    }
+
+    fn record_append(
+        &self,
+        capture_generation: u64,
+        candidate_id: u64,
+        candidate_kind: BufferedSpeakerCandidateKind,
+        session_id: u32,
+        packet_sequence: u16,
+        candidate_range: Option<crate::observability::CandidateRange>,
+        collector_metadata: Option<crate::embedded_audio::StreamingPcmChunkMetadata>,
+        capture_fact: Option<crate::embedded_audio::SessionAdmissionFact>,
+        actor_fact: Option<crate::embedded_audio::SessionAdmissionFact>,
+        pcm: &[u8],
+    ) {
+        let message = BleCandidateIngressDiagnosticMessage::Append {
+            capture_generation,
+            candidate_id,
+            candidate_kind: format!("{candidate_kind:?}"),
+            session_id,
+            packet_sequence,
+            candidate_range,
+            collector_metadata,
+            capture_fact,
+            actor_fact,
+            appended_unix_ms: ble_candidate_ingress_diagnostic_unix_ms(),
+            pcm: pcm.to_vec(),
+        };
+        if self.tx.try_send(message).is_err()
+            && self.dropped_count.fetch_add(1, Ordering::Relaxed) == 0
+        {
+            log::warn!(
+                "[speaker-verification] candidate ingress diagnostic queue dropped at least one record; audio flow is unaffected"
+            );
+        }
+    }
+}
+
+fn ble_candidate_ingress_diagnostic_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u64::MAX as u128) as u64
+}
+
+fn ble_candidate_ingress_diagnostic_sinks(
+) -> &'static std::sync::Mutex<
+    std::collections::BTreeMap<u64, BleCandidateIngressDiagnosticSink>,
+> {
+    static SINKS: OnceLock<
+        std::sync::Mutex<
+            std::collections::BTreeMap<u64, BleCandidateIngressDiagnosticSink>,
+        >,
+    > = OnceLock::new();
+    SINKS.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+}
+
+fn ble_candidate_ingress_diagnostic_sink(
+    capture_generation: u64,
+) -> Option<BleCandidateIngressDiagnosticSink> {
+    let sinks = ble_candidate_ingress_diagnostic_sinks();
+    let mut sinks = sinks.lock().ok()?;
+    if let Some(sink) = sinks.get(&capture_generation) {
+        return Some(sink.clone());
+    }
+    while sinks.len() >= 8 {
+        let oldest = sinks.keys().next().copied()?;
+        sinks.remove(&oldest);
+    }
+    let sink = BleCandidateIngressDiagnosticSink::for_capture_generation(capture_generation)?;
+    sinks.insert(capture_generation, sink.clone());
+    Some(sink)
+}
+
+fn ble_candidate_ingress_admission_fact_json(
+    fact: Option<&crate::embedded_audio::SessionAdmissionFact>,
+) -> serde_json::Value {
+    let Some(fact) = fact else {
+        return serde_json::Value::Null;
+    };
+    serde_json::json!({
+        "collectorInstanceId": fact.collector_instance_id,
+        "resetEpoch": fact.reset_epoch,
+        "notificationId": fact.notification_id,
+        "admissionId": fact.admission_id,
+        "physicalSessionId": fact.physical_session_id,
+        "packetSequence": fact.packet_sequence,
+        "disposition": serde_json::to_value(fact.disposition).unwrap_or(serde_json::Value::Null),
+        "supersedesAdmissionId": fact.supersedes_admission_id,
+        "predecessorUnknown": fact.predecessor_unknown,
+        "afterStopBoundary": fact.after_stop_boundary,
+        "wirePayloadBytes": fact.wire_payload_bytes,
+        "declaredPcmBytes": fact.declared_pcm_bytes,
+        "expandedPcmBytes": fact.expanded_pcm_bytes,
+        "metadataIncomplete": fact.metadata_incomplete,
+    })
+}
+
+fn write_ble_candidate_ingress_json_line(
+    writer: &mut std::io::BufWriter<std::fs::File>,
+    value: serde_json::Value,
+) -> bool {
+    if serde_json::to_writer(&mut *writer, &value).is_err()
+        || writer.write_all(b"\n").is_err()
+        || writer.flush().is_err()
+    {
+        return false;
+    }
+    true
+}
+
+fn run_ble_candidate_ingress_diagnostic_worker(
+    capture_generation: u64,
+    directory: std::path::PathBuf,
+    events_path: std::path::PathBuf,
+    pcm_path: std::path::PathBuf,
+    rx: std::sync::mpsc::Receiver<BleCandidateIngressDiagnosticMessage>,
+    dropped_count: Arc<AtomicUsize>,
+) {
+    if let Err(err) = fs::create_dir_all(&directory) {
+        log::warn!(
+            "[speaker-verification] candidate ingress diagnostic directory unavailable capture_generation={capture_generation}: {err}"
+        );
+        return;
+    }
+    let Ok(events_file) = fs::File::create(&events_path) else {
+        log::warn!(
+            "[speaker-verification] candidate ingress events file unavailable capture_generation={} path={}",
+            capture_generation,
+            events_path.display()
+        );
+        return;
+    };
+    let Ok(mut pcm_file) = fs::File::create(&pcm_path) else {
+        log::warn!(
+            "[speaker-verification] candidate ingress PCM file unavailable capture_generation={} path={}",
+            capture_generation,
+            pcm_path.display()
+        );
+        return;
+    };
+    let mut events = std::io::BufWriter::new(events_file);
+    let mut saved_pcm_bytes = 0usize;
+    while let Ok(message) = rx.recv() {
+        let BleCandidateIngressDiagnosticMessage::Append {
+            capture_generation,
+            candidate_id,
+            candidate_kind,
+            session_id,
+            packet_sequence,
+            candidate_range,
+            collector_metadata,
+            capture_fact,
+            actor_fact,
+            appended_unix_ms,
+            pcm,
+        } = message;
+        let pcm_hash = crate::firmware_ota::sha256_hex(&pcm);
+        let remaining = WAKE_DIAGNOSTIC_MAX_PCM_BYTES.saturating_sub(saved_pcm_bytes);
+        let save_bytes = remaining.min(pcm.len());
+        if save_bytes > 0 {
+            if let Err(err) = pcm_file.write_all(&pcm[..save_bytes]) {
+                log::warn!(
+                    "[speaker-verification] candidate ingress PCM append failed capture_generation={} path={}: {err}",
+                    capture_generation,
+                    pcm_path.display()
+                );
+                saved_pcm_bytes = WAKE_DIAGNOSTIC_MAX_PCM_BYTES;
+            } else {
+                let _ = pcm_file.flush();
+                saved_pcm_bytes = saved_pcm_bytes.saturating_add(save_bytes);
+            }
+        }
+        let _ = write_ble_candidate_ingress_json_line(
+            &mut events,
+            serde_json::json!({
+                "boundary": "candidate_append",
+                "captureGeneration": capture_generation,
+                "candidateId": candidate_id,
+                "candidateKind": candidate_kind,
+                "sessionId": session_id,
+                "packetSequence": packet_sequence,
+                "appendedUnixMs": appended_unix_ms,
+                "candidateRange": candidate_range,
+                "collectorMetadata": collector_metadata,
+                "captureAdmissionFact": ble_candidate_ingress_admission_fact_json(capture_fact.as_ref()),
+                "actorAdmissionFact": ble_candidate_ingress_admission_fact_json(actor_fact.as_ref()),
+                "pcmBytes": pcm.len(),
+                "pcmSha256": pcm_hash,
+                "pcmSavedBytes": save_bytes,
+                "pcmSaveTruncated": save_bytes < pcm.len(),
+                "pcmPath": pcm_path,
+                "diagnosticQueueDroppedCount": dropped_count.load(Ordering::Relaxed),
+            }),
+        );
+    }
+}
+
+fn record_ble_candidate_ingress_append(
+    source_context: Option<&CaptureAdmissionSourceContext>,
+    candidate_id: u64,
+    candidate_kind: BufferedSpeakerCandidateKind,
+    session_id: u32,
+    packet_sequence: u16,
+    candidate_range: Option<crate::observability::CandidateRange>,
+    collector_metadata: Option<crate::embedded_audio::StreamingPcmChunkMetadata>,
+    pcm: &[u8],
+) {
+    let Some(source_context) = source_context else {
+        return;
+    };
+    let Some(capture_generation) = source_context.capture_generation else {
+        return;
+    };
+    let Some(sink) = ble_candidate_ingress_diagnostic_sink(capture_generation) else {
+        return;
+    };
+    sink.record_append(
+        capture_generation,
+        candidate_id,
+        candidate_kind,
+        session_id,
+        packet_sequence,
+        candidate_range,
+        collector_metadata,
+        source_context.capture_fact.clone(),
+        source_context.actor_fact.clone(),
+        pcm,
+    );
+}
+
 impl EmbeddedStreamingDictation {
     async fn apply_ble_packet_actor_command(
         &mut self,
         inner: &Arc<Inner>,
         event: crate::embedded_audio::StreamingSessionEvent,
+        source_observation: Option<
+            Arc<crate::observability::EmbeddedAudioPipelineObservation>,
+        >,
+        source_observation_is_explicit: bool,
+        source_admission_context: Option<CaptureAdmissionSourceContext>,
     ) -> Result<bool, String> {
+        self.last_actor_pcm_consumed = false;
         match event {
             crate::embedded_audio::StreamingSessionEvent::Started { session_id, origin } => {
                 // A failed orphan-tail recovery is quarantined by session id.
@@ -58,14 +418,42 @@ impl EmbeddedStreamingDictation {
                             chunk.session_id
                         );
                         self.close_owned_product_lifecycle(inner);
-                        self.session = None;
-                        self.speaker_candidate = None;
+                        if let Some(mut session) = self.session.take() {
+                            self.preserve_session_candidate_fact_ledger(&mut session);
+                        }
+                        if let Some(mut candidate) = self.speaker_candidate.take() {
+                            let discarded_bytes = candidate.pcm.len();
+                            candidate.record_outcome_fact(
+                                self.pipeline_observation.as_ref(),
+                                crate::observability::CandidateFactKind::Discarded,
+                                "recording_gate_denied",
+                                discarded_bytes,
+                            );
+                            candidate.record_outcome_fact(
+                                self.pipeline_observation.as_ref(),
+                                crate::observability::CandidateFactKind::Closed,
+                                "recording_gate_denied",
+                                0,
+                            );
+                            self.preserve_candidate_fact_ledger(&mut candidate);
+                        }
                         self.embedded_session_id = None;
                         self.pending_stop_expected_packet_count = None;
                     }
                     return Ok(false);
                 }
                 let chunk_session_id = chunk.session_id;
+                // The session observation is only the fact sink. A candidate's
+                // physical source must come from this packet's explicit
+                // observation; falling back to the previous session observation
+                // would rebind an unobserved packet to an old generation.
+                let candidate_observation = self
+                    .pipeline_observation
+                    .clone()
+                    .or_else(|| source_observation.clone());
+                let candidate_source_observation = source_observation_is_explicit
+                    .then_some(source_observation.clone())
+                    .flatten();
                 if let Some(candidate) = self.speaker_candidate.as_mut() {
                     if candidate.kind == BufferedSpeakerCandidateKind::Rejected {
                         return Ok(false);
@@ -73,9 +461,93 @@ impl EmbeddedStreamingDictation {
                     if candidate.pcm.len().saturating_add(chunk.pcm.len())
                         > MAX_BUFFERED_SPEAKER_CANDIDATE_BYTES
                     {
+                        candidate.record_fact(
+                            candidate_observation.as_ref(),
+                            crate::observability::CandidateFactKind::Rejected,
+                            candidate.current_candidate_range(),
+                            None,
+                            None,
+                            None,
+                            None,
+                            Vec::new(),
+                            chunk.pcm.len(),
+                            Some("candidate_buffer_limit"),
+                        );
                         return Err("声纹候选录音超过安全缓冲上限".to_string());
                     }
+                    let candidate_range = candidate
+                        .candidate_cursor
+                        .append(chunk.pcm.len())
+                        .map(|range| crate::observability::CandidateRange {
+                            start: range.start,
+                            end: range.end,
+                        });
+                    record_ble_candidate_ingress_append(
+                        source_admission_context.as_ref(),
+                        candidate.candidate_id,
+                        candidate.kind,
+                        chunk_session_id,
+                        chunk.packet_sequence,
+                        candidate_range,
+                        chunk.metadata,
+                        &chunk.pcm,
+                    );
                     candidate.pcm.extend_from_slice(&chunk.pcm);
+                    self.last_actor_pcm_consumed = true;
+                    candidate.source_runs.push_back(BufferedCandidateSourceRun {
+                        bytes: chunk.pcm.len(),
+                        capture_generation: candidate_source_observation
+                            .as_ref()
+                            .map(|observation| observation.capture_generation()),
+                        segment_id: Some(chunk_session_id),
+                        candidate_range,
+                        collector_metadata: chunk.metadata,
+                        collector_emitted_range: chunk
+                            .metadata
+                            .map(|metadata| metadata.emitted_range),
+                        capture_admission_context: source_admission_context.clone(),
+                    });
+                    let source_fact = crate::observability::CandidateSourceRunFact {
+                        capture_generation: candidate_source_observation
+                            .as_ref()
+                            .map(|observation| observation.capture_generation()),
+                        segment_id: Some(chunk_session_id),
+                        candidate_range,
+                        collector_metadata: chunk.metadata,
+                        collector_emitted_range: chunk
+                            .metadata
+                            .map(|metadata| metadata.emitted_range),
+                        bytes: chunk.pcm.len() as u64,
+                    };
+                    candidate.record_fact(
+                        candidate_observation.as_ref(),
+                        crate::observability::CandidateFactKind::Buffered,
+                        candidate_range,
+                        None,
+                        None,
+                        None,
+                        None,
+                        vec![source_fact],
+                        chunk.pcm.len(),
+                        None,
+                    );
+                    let source_admission_operation_id =
+                        candidate.next_source_admission_operation_id();
+                    record_source_admission_dependency(
+                        &candidate.source_admission_ledger,
+                        source_admission_context.as_ref(),
+                        SourceAdmissionOperationOwner::Candidate {
+                            candidate_id: candidate.candidate_id,
+                        },
+                        SourceAdmissionUse::CandidateGateInput,
+                        candidate_range.map(|range| SourceAdmissionOwnerRange::Candidate {
+                            start: range.start,
+                            end: range.end,
+                        }),
+                        None,
+                        chunk.pcm.len(),
+                        source_admission_operation_id,
+                    );
                     if candidate.kind == BufferedSpeakerCandidateKind::Enrollment { crate::speaker_verification::observe_enrollment_capture(&candidate.pcm); }
                     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
                     if candidate.kind == BufferedSpeakerCandidateKind::Verification {
@@ -191,19 +663,29 @@ impl EmbeddedStreamingDictation {
                     }
                     return Ok(false);
                 }
-                // 2026-08-09 12:46:59 激活竞态：新设备段的包先于 Started 到达时
-                // 兜底懒绑定；旧段（同段）包正常喂入——正常路径里正文就在激活后的
-                // 同段延续里，只有「旧段在竞态窗口内 STOP 且正文未开始」才重绑定。
-                if let Some((pre_segment_id, _)) = self.activation_segment_race_guard {
-                    if chunk_session_id != pre_segment_id {
-                        if let Some(session_id) = self.session.as_ref().map(|session| session.session_id) {
-                            clear_embedded_ble_awaiting_post_activation_segment(inner, session_id);
-                        }
-                        self.embedded_session_id = Some(chunk_session_id);
-                        self.activation_segment_race_guard = None;
+                // A continuation is admitted only after the request-tagged
+                // SessionStart marker has been observed.  A raw PCM packet is
+                // deliberately not enough evidence: notify reordering can
+                // otherwise bind an unrelated manual segment to this wake.
+                if let Some(ensure) = self.accepted_wake_capture_ensure {
+                    if ensure.confirmed_segment_id == Some(chunk_session_id)
+                        && self.embedded_session_id != Some(chunk_session_id)
+                    {
+                        self.bind_post_activation_segment(inner, chunk_session_id, false);
                         log::info!(
-                            "[coord] dictation session lazily bound to post-activation embedded segment embedded_session_id={chunk_session_id}"
+                            "[wake-phrase] ENSURE-confirmed continuation PCM bound embedded_session_id={chunk_session_id} request_id={}",
+                            ensure.request_id
                         );
+                    }
+                }
+                if self.accepted_wake_capture_ensure.is_none() {
+                    if let Some((pre_segment_id, _)) = self.activation_segment_race_guard {
+                        if chunk_session_id != pre_segment_id {
+                            self.bind_post_activation_segment(inner, chunk_session_id, true);
+                            log::info!(
+                                "[coord] dictation session lazily bound to post-activation embedded segment embedded_session_id={chunk_session_id}"
+                            );
+                        }
                     }
                 }
                     if embedded_streaming_chunk_is_asr_input(&chunk) {
@@ -214,14 +696,60 @@ impl EmbeddedStreamingDictation {
                                 .session
                                 .as_mut()
                                 .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
+                            let accepted_destination_start = session.accepted_pcm_cursor.position();
+                            let streamed_pcm_bytes_before = session.streamed_pcm_bytes;
                             crate::observability::record_embedded_audio_first_packet(
                                 session.session_id,
                             );
-                            session.consume_streaming_pcm(
+                            let accepted_source_interval = session
+                                .consume_streaming_pcm_from_segment_with_collector_metadata(
                                 inner,
                                 &chunk.pcm,
                                 chunk.raw_input_level_percent,
+                                Some(chunk_session_id),
+                                source_observation.clone(),
+                                source_observation_is_explicit,
+                                chunk.metadata,
                             )?;
+                            // This method returns Ok(()) for inactive or
+                            // stop-rejected sessions. The accepted-byte
+                            // boundary is the product fact; diagnostic
+                            // cursors are not an acceptance signal.
+                            let accepted_bytes = session
+                                .streamed_pcm_bytes
+                                .saturating_sub(streamed_pcm_bytes_before);
+                            self.last_actor_pcm_consumed = accepted_bytes > 0;
+                            if accepted_bytes > 0 {
+                                let source_admission_operation_id =
+                                    session.next_source_admission_operation_id();
+                                let accepted_destination_range = accepted_destination_start
+                                    .zip(session.accepted_pcm_cursor.position())
+                                    .and_then(|(start, end)| {
+                                        (end >= start
+                                            && end - start == accepted_bytes as u64)
+                                            .then_some(crate::observability::PcmRange {
+                                                start,
+                                                end,
+                                            })
+                                    });
+                                record_source_admission_dependency(
+                                    &session.source_admission_ledger,
+                                    source_admission_context.as_ref(),
+                                    SourceAdmissionOperationOwner::Session {
+                                        session_id: session.session_id,
+                                    },
+                                    SourceAdmissionUse::SessionBodyInput,
+                                    accepted_destination_range.map(|range| {
+                                        SourceAdmissionOwnerRange::Session {
+                                            start: range.start,
+                                            end: range.end,
+                                        }
+                                    }),
+                                    accepted_source_interval,
+                                    accepted_bytes,
+                                    source_admission_operation_id,
+                                );
+                            }
                             // Normally endpointing is content-aware and driven by
                             // ASR/speaker callbacks. If the provider failed, use
                             // only the local safety fallback to avoid an endless
@@ -291,7 +819,7 @@ impl EmbeddedStreamingDictation {
             crate::embedded_audio::StreamingSessionEvent::Stopped {
                 session_id,
                 expected_packet_count,
-                ..
+                origin,
             } => {
                 // Mid-reopen / orphan VoiceActivation streams often deliver STOP with no
                 // host session and no wake candidate. Finishing that path used to enter
@@ -304,11 +832,36 @@ impl EmbeddedStreamingDictation {
                     self.reset_for_next_session();
                     return Ok(true);
                 }
-                // 2026-08-09 12:46:59 激活竞态：旧唤醒段在 ACTIVATE 后 0.1s complete，
+                // A request-tagged marker resolves the ENSURE before this STOP.
+                // In that case the same hidden segment was promoted and this
+                // STOP is its real terminal boundary, not a request for a
+                // second segment.  If a different segment was bound, the old
+                // predecessor STOP is stale and must be ignored.
+                let ensure_confirmed_same_segment = self
+                    .accepted_wake_capture_ensure
+                    .is_some_and(|ensure| {
+                        ensure.confirmed_segment_id == Some(session_id)
+                            && ensure.previous_segment_id == session_id
+                    });
+                let ensure_confirmed_replacement = self
+                    .accepted_wake_capture_ensure
+                    .is_some_and(|ensure| {
+                        ensure.confirmed_segment_id.is_some_and(|actual| {
+                            actual != ensure.previous_segment_id && session_id == ensure.previous_segment_id
+                        })
+                    });
+                if ensure_confirmed_replacement {
+                    log::info!(
+                        "[wake-phrase] ignoring predecessor STOP after ENSURE continuation bound embedded_session_id={session_id}"
+                    );
+                    return Ok(false);
+                }
+                // 2026-08-09 12:46:59 激活竞态：旧唤醒段在 ENSURE 后 0.1s complete，
                 // 只含 1845ms 唤醒词——此时 finalize 必空稿。竞态窗口内且正文未开始
-                // 时，旧段 STOP 视为段 rotation：不 finalize，绑定激活后的新设备段。
-                if let Some((pre_segment_id, activated_at)) = self.activation_segment_race_guard {
-                    if self.session.is_some() && session_id == pre_segment_id {
+                // 时，旧段 STOP 视为段 rotation：不 finalize，绑定激活后的新设备段.
+                if !ensure_confirmed_same_segment {
+                    if let Some((pre_segment_id, activated_at)) = self.activation_segment_race_guard {
+                        if self.session.is_some() && session_id == pre_segment_id {
                         let body_started = self
                             .session
                             .as_ref()
@@ -319,16 +872,30 @@ impl EmbeddedStreamingDictation {
                                         .as_deref()
                                         .is_some_and(|text| !text.trim().is_empty())
                             });
-                        if !body_started
+                        let hidden_timeout = origin
+                            == crate::embedded_audio::SessionStopOrigin::VoiceActivationMaxDuration;
+                        let automatic_stop = matches!(origin,
+                            crate::embedded_audio::SessionStopOrigin::VoiceActivation
+                                | crate::embedded_audio::SessionStopOrigin::VoiceActivationMaxDuration);
+                        if automatic_stop && (!body_started || hidden_timeout)
+                            && !embedded_audio_stop_feedback_latched(inner)
                             && activated_at.elapsed() <= EMBEDDED_ACTIVATION_SEGMENT_RACE_WINDOW
                         {
                             log::info!(
-                                "[coord] pre-activation embedded segment {session_id} stopped {}ms after wake activation with no body; dictation session stays open for the post-activation segment",
+                                "[coord] pre-activation embedded segment {session_id} stopped {}ms after wake activation origin={origin:?} body_started={body_started}; dictation session stays open for the post-activation segment",
                                 activated_at.elapsed().as_millis()
                             );
                             if let Some(coordinator_session_id) =
                                 self.session.as_ref().map(|session| session.session_id)
                             {
+                                if let Some(ensure) = self.accepted_wake_capture_ensure.as_mut() {
+                                    ensure.replacement_wait_started_at = Some(Instant::now());
+                                    log::info!(
+                                        "[wake-phrase] accepted wake capture predecessor stopped; awaiting ENSURE continuation marker request_id={} previous_segment_id={} embedded_session_id={session_id}",
+                                        ensure.request_id,
+                                        ensure.previous_segment_id
+                                    );
+                                }
                                 mark_embedded_ble_awaiting_post_activation_segment(
                                     inner,
                                     coordinator_session_id,
@@ -346,9 +913,10 @@ impl EmbeddedStreamingDictation {
                             // post-activation segment arrives.
                             return Ok(false);
                         }
-                        // 窗口外或正文已开始：正常 finalize，竞态守卫使命结束。
-                        self.activation_segment_race_guard = None;
                     }
+                    // 窗口外或正文已开始：正常 finalize，竞态守卫使命结束。
+                    self.activation_segment_race_guard = None;
+                }
                 }
                 if let Some(session) = self.session.as_ref() {
                     crate::observability::record_embedded_audio_stop(session.session_id);
@@ -384,7 +952,22 @@ impl EmbeddedStreamingDictation {
             }
             crate::embedded_audio::StreamingSessionEvent::Cancelled { session_id, .. } => {
                 if self.session.is_none() {
-                    if let Some(candidate) = self.speaker_candidate.take() {
+                    if let Some(mut candidate) = self.speaker_candidate.take() {
+                        let candidate_observation = self.pipeline_observation.clone();
+                        let discarded_bytes = candidate.pcm.len();
+                        candidate.record_outcome_fact(
+                            candidate_observation.as_ref(),
+                            crate::observability::CandidateFactKind::Discarded,
+                            "candidate_cancelled",
+                            discarded_bytes,
+                        );
+                        candidate.record_outcome_fact(
+                            candidate_observation.as_ref(),
+                            crate::observability::CandidateFactKind::Closed,
+                            "candidate_cancelled",
+                            0,
+                        );
+                        self.preserve_candidate_fact_ledger(&mut candidate);
                         if candidate.kind == BufferedSpeakerCandidateKind::Enrollment {
                             crate::speaker_verification::fail_enrollment("嵌入式音频会话已取消");
                             complete_voiceprint_enrollment_candidate(
@@ -395,6 +978,7 @@ impl EmbeddedStreamingDictation {
                                 inner,
                                 "hidden_candidate_cancelled",
                                 session_id,
+                                HiddenCandidateTransportState::Ended,
                             );
                         }
                         self.reset_for_next_session();
@@ -511,6 +1095,7 @@ impl EmbeddedStreamingDictation {
             .session
             .take()
             .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
+        self.preserve_session_candidate_fact_ledger(&mut session);
         // STOP ends device delivery, so commit the final partial provider block before
         // finalizing ASR. This keeps the final syllables in the authoritative stream.
         session.flush_streaming_pcm();
@@ -560,17 +1145,54 @@ impl EmbeddedStreamingDictation {
         let coordinator_session_id = session.session_id;
         let user_initiated_stop =
             embedded_audio_stop_is_user_initiated(self.collector.inner().stats().stop_origin);
-        let end_result = end_embedded_ble_session(
+        let end_result = end_embedded_ble_session_with_source_integrity(
             inner,
             user_initiated_stop,
             format!(
                 "embedded_session_id={embedded_session_id} coordinator_session_id={} expected_packets={expected_packet_count}",
                 coordinator_session_id
             ),
+            Some(Arc::clone(&session.source_admission_ledger)),
         )
         .await;
         if end_result.is_ok() {
             self.transcript = take_embedded_audio_final_result(inner, coordinator_session_id);
+        }
+        // Keep the provider timeline for failed finalization as well.  The WAV is
+        // deliberately archived before this point, so an empty/error result is
+        // exactly the case where the trace is most useful for separating device
+        // delivery, provider recognition, and product arbitration.  This is
+        // observation-only: it does not change the final-result or stop path.
+        if archive_active && record_embedded_audio_for_debug_enabled(inner) {
+            if let Some(asr) = session.volcengine_asr.as_ref() {
+                let trace = asr.take_diagnostic_trace();
+                if let (Ok(wav), Ok(path)) = (
+                    crate::persistence::recording_path_for_session(&coordinator_session_id.to_string()),
+                    crate::persistence::asr_trace_path_for_session(&coordinator_session_id.to_string()),
+                ) {
+                    if wav.exists() {
+                        let final_text = self.transcript.as_ref().map(|t| t.final_text.as_str());
+                        let payload = serde_json::json!({
+                            "sessionId": coordinator_session_id.to_string(),
+                            "finalCoordinatorText": final_text,
+                            "finalCoordinatorTextAvailable": final_text.is_some(),
+                            "finalizationSucceeded": end_result.is_ok(),
+                            "finalizationError": end_result.as_ref().err().cloned(),
+                            "userInitiatedStop": user_initiated_stop,
+                            "streamedPcmBytes": session.streamed_pcm_bytes,
+                            "normalizedPcmBytes": session.normalized_pcm_bytes,
+                            "archivePcmBytes": session.archive_pcm.as_ref().map_or(0, Vec::len),
+                            "audioDelivery": asr.diagnostic_audio_delivery(),
+                            "trace": trace,
+                        });
+                        if let Ok(bytes) = serde_json::to_vec(&payload) {
+                            if let Err(err) = std::fs::write(path, bytes) {
+                                log::warn!("[coord] ASR diagnostic archive failed: {err}");
+                            }
+                        }
+                    }
+                }
+            }
         }
         if end_result.is_ok() {
             let _ = inner
@@ -596,23 +1218,45 @@ impl EmbeddedStreamingDictation {
             return Ok(false);
         };
         if candidate.kind == BufferedSpeakerCandidateKind::Rejected {
+            candidate.record_outcome_fact(
+                self.pipeline_observation.as_ref(),
+                crate::observability::CandidateFactKind::Closed,
+                "candidate_rejected",
+                0,
+            );
             if let Some(sid) = take_early_capsule_session_id(&mut candidate) {
                 dismiss_early_wake_recording_capsule(inner, sid);
             }
+            self.preserve_candidate_fact_ledger(&mut candidate);
             reject_hidden_automatic_candidate(
                 inner,
                 "automatic_candidate_rejected",
                 embedded_session_id,
+                HiddenCandidateTransportState::Ended,
             );
             return Ok(true);
         }
         if candidate.kind == BufferedSpeakerCandidateKind::Enrollment {
             if !crate::speaker_verification::enrollment_should_process() {
                 log::info!("[speaker-verification] discarded cancelled enrollment candidate embedded_session_id={embedded_session_id}");
+                let discarded_bytes = candidate.pcm.len();
+                candidate.record_outcome_fact(
+                    self.pipeline_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Discarded,
+                    "voiceprint_enrollment_cancelled",
+                    discarded_bytes,
+                );
+                candidate.record_outcome_fact(
+                    self.pipeline_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Closed,
+                    "voiceprint_enrollment_cancelled",
+                    0,
+                );
+                self.preserve_candidate_fact_ledger(&mut candidate);
                 complete_voiceprint_enrollment_candidate("voiceprint_enrollment_cancelled");
                 return Ok(true);
             }
-            let pcm = candidate.pcm;
+            let pcm = std::mem::take(&mut candidate.pcm);
             let phrase = inner.prefs.get().voice_wake_phrase;
             crate::speaker_verification::begin_enrollment_processing();
             let result = tauri::async_runtime::spawn_blocking(move || {
@@ -628,6 +1272,19 @@ impl EmbeddedStreamingDictation {
                     log::warn!(
                         "[speaker-verification] enrollment failed embedded_session_id={embedded_session_id}: {err}"
                     );
+                    candidate.record_outcome_fact(
+                        self.pipeline_observation.as_ref(),
+                        crate::observability::CandidateFactKind::Rejected,
+                        "voiceprint_enrollment_failed",
+                        0,
+                    );
+                    candidate.record_outcome_fact(
+                        self.pipeline_observation.as_ref(),
+                        crate::observability::CandidateFactKind::Closed,
+                        "voiceprint_enrollment_failed",
+                        0,
+                    );
+                    self.preserve_candidate_fact_ledger(&mut candidate);
                     complete_voiceprint_enrollment_candidate("voiceprint_enrollment_failed");
                     return Ok(true);
                 }
@@ -651,6 +1308,13 @@ impl EmbeddedStreamingDictation {
                     }
                 });
             }
+            candidate.record_outcome_fact(
+                self.pipeline_observation.as_ref(),
+                crate::observability::CandidateFactKind::Closed,
+                "voiceprint_enrollment_complete",
+                0,
+            );
+            self.preserve_candidate_fact_ledger(&mut candidate);
             complete_voiceprint_enrollment_candidate("voiceprint_enrollment_complete");
             return Ok(true);
         }
@@ -766,15 +1430,43 @@ impl EmbeddedStreamingDictation {
                     "detector-unavailable",
                     &candidate.pcm,
                 );
+                let rejected_bytes = candidate.pcm.len();
+                candidate.record_outcome_fact(
+                    self.pipeline_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Rejected,
+                    "wake_phrase_detection_failed",
+                    rejected_bytes,
+                );
+                candidate.record_outcome_fact(
+                    self.pipeline_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Closed,
+                    "wake_phrase_detection_failed",
+                    0,
+                );
+                self.preserve_candidate_fact_ledger(&mut candidate);
                 reject_hidden_automatic_candidate(
                     inner,
                     "wake_phrase_detection_failed",
                     embedded_session_id,
+                    HiddenCandidateTransportState::Ended,
                 );
                 return Ok(true);
             };
-            let remaining_pcm = candidate.pcm[candidate.kws_fed_bytes..].to_vec();
-            candidate.kws_fed_bytes = candidate.pcm.len();
+            let terminal_feed_start = candidate.kws_fed_bytes;
+            let remaining_pcm = candidate.pcm[terminal_feed_start..].to_vec();
+            let terminal_feed_bytes = remaining_pcm.len();
+            let terminal_kws_feed_range = terminal_feed_start
+                .checked_add(terminal_feed_bytes)
+                .filter(|end| *end <= candidate.pcm.len())
+                .and_then(|_| {
+                    candidate_slice_range(
+                        candidate.pcm_base_offset,
+                        terminal_feed_start,
+                        terminal_feed_bytes,
+                    )
+                });
+            let terminal_kws_source_runs =
+                candidate.source_facts_for_range(terminal_kws_feed_range);
             let stream_origin_bytes = candidate.kws_stream_origin_bytes;
             let wake_task = tauri::async_runtime::spawn_blocking(move || {
                 let started = Instant::now();
@@ -788,15 +1480,58 @@ impl EmbeddedStreamingDictation {
             })
             .await;
             let (_, wake_match, final_kws_ms) = match wake_task {
-                Ok(result) => result,
+                Ok(result) => {
+                    candidate.kws_fed_bytes = candidate.pcm.len();
+                    candidate.record_fact(
+                        self.pipeline_observation.as_ref(),
+                        crate::observability::CandidateFactKind::KwsFed,
+                        candidate.current_candidate_range(),
+                        terminal_kws_feed_range,
+                        None,
+                        None,
+                        None,
+                        terminal_kws_source_runs,
+                        terminal_feed_bytes,
+                        Some("terminal_accept_pcm_feed"),
+                    );
+                    result
+                }
                 Err(err) => {
                     log::warn!(
                         "[wake-phrase] terminal streaming detector task failed embedded_session_id={embedded_session_id}: {err}"
                     );
+                    candidate.kws_fed_bytes = terminal_feed_start;
+                    candidate.record_fact(
+                        self.pipeline_observation.as_ref(),
+                        crate::observability::CandidateFactKind::KwsFeedUnknown,
+                        candidate.current_candidate_range(),
+                        terminal_kws_feed_range,
+                        None,
+                        None,
+                        None,
+                        candidate.source_facts_for_range(terminal_kws_feed_range),
+                        terminal_feed_bytes,
+                        Some("terminal_kws_task_join_unknown"),
+                    );
+                    let rejected_bytes = candidate.pcm.len();
+                    candidate.record_outcome_fact(
+                        self.pipeline_observation.as_ref(),
+                        crate::observability::CandidateFactKind::Rejected,
+                        "wake_phrase_detection_failed",
+                        rejected_bytes,
+                    );
+                    candidate.record_outcome_fact(
+                        self.pipeline_observation.as_ref(),
+                        crate::observability::CandidateFactKind::Closed,
+                        "wake_phrase_detection_failed",
+                        0,
+                    );
+                    self.preserve_candidate_fact_ledger(&mut candidate);
                     reject_hidden_automatic_candidate(
                         inner,
                         "wake_phrase_detection_failed",
                         embedded_session_id,
+                        HiddenCandidateTransportState::Ended,
                     );
                     return Ok(true);
                 }
@@ -818,6 +1553,12 @@ impl EmbeddedStreamingDictation {
                     {
                         let confirm = spawn_local_wake_confirmation(
                             inner,
+                            LocalWakeConfirmationDiagnosticContext {
+                                embedded_session_id,
+                                attempt: None,
+                                source_origin_bytes: 0,
+                                branch: "terminal-kws",
+                            },
                             candidate.pcm.clone(),
                             phrase.clone(),
                             false,
@@ -1030,9 +1771,10 @@ impl EmbeddedStreamingDictation {
                         let offline_pcm = candidate.pcm.clone();
                         let offline_phrase = phrase.clone();
                         let offline_task = tauri::async_runtime::spawn_blocking(move || {
-                            crate::wake_phrase::detect_with_recall_cascade(
+                            crate::wake_phrase::detect_with_recall_cascade_bounded(
                                 &offline_pcm,
                                 &offline_phrase,
+                                Duration::from_millis(TERMINAL_OFFLINE_RECALL_BUDGET_MS),
                             )
                         });
                         let offline = match tokio::time::timeout(
@@ -1066,10 +1808,16 @@ impl EmbeddedStreamingDictation {
                                 );
                                 #[cfg(target_os = "windows")]
                                 {
-                                    let (confirm_pcm, _) =
+                                    let (confirm_pcm, confirm_origin) =
                                         terminal_local_confirmation_pcm(&candidate.pcm);
                                     let confirm = spawn_local_wake_confirmation(
                                         inner,
+                                        LocalWakeConfirmationDiagnosticContext {
+                                            embedded_session_id,
+                                            attempt: None,
+                                            source_origin_bytes: confirm_origin,
+                                            branch: "terminal-offline",
+                                        },
                                         confirm_pcm,
                                         phrase.clone(),
                                         false,
@@ -1260,10 +2008,25 @@ impl EmbeddedStreamingDictation {
                         "detector-failed",
                         &candidate.pcm,
                     );
+                    let rejected_bytes = candidate.pcm.len();
+                    candidate.record_outcome_fact(
+                        self.pipeline_observation.as_ref(),
+                        crate::observability::CandidateFactKind::Rejected,
+                        "wake_phrase_detection_failed",
+                        rejected_bytes,
+                    );
+                    candidate.record_outcome_fact(
+                        self.pipeline_observation.as_ref(),
+                        crate::observability::CandidateFactKind::Closed,
+                        "wake_phrase_detection_failed",
+                        0,
+                    );
+                    self.preserve_candidate_fact_ledger(&mut candidate);
                     reject_hidden_automatic_candidate(
                         inner,
                         "wake_phrase_detection_failed",
                         embedded_session_id,
+                        HiddenCandidateTransportState::Ended,
                     );
                     return Ok(true);
                 }
@@ -1465,10 +2228,25 @@ impl EmbeddedStreamingDictation {
                     "phrase-non-match",
                     &candidate.pcm,
                 );
+                let rejected_bytes = candidate.pcm.len();
+                candidate.record_outcome_fact(
+                    self.pipeline_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Rejected,
+                    "wake_phrase_non_match",
+                    rejected_bytes,
+                );
+                candidate.record_outcome_fact(
+                    self.pipeline_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Closed,
+                    "wake_phrase_non_match",
+                    0,
+                );
+                self.preserve_candidate_fact_ledger(&mut candidate);
                 reject_hidden_automatic_candidate(
                     inner,
                     "wake_phrase_non_match",
                     embedded_session_id,
+                    HiddenCandidateTransportState::Ended,
                 );
                 return Ok(true);
             };
@@ -1493,7 +2271,21 @@ impl EmbeddedStreamingDictation {
                     dismiss_early_wake_recording_capsule(inner, sid);
                 }
                 save_bounded_wake_diagnostic(embedded_session_id, reason, &candidate.pcm);
-                reject_hidden_automatic_candidate(inner, reason, embedded_session_id);
+                let rejected_bytes = candidate.pcm.len();
+                candidate.record_outcome_fact(
+                    self.pipeline_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Rejected,
+                    reason,
+                    rejected_bytes,
+                );
+                candidate.record_outcome_fact(
+                    self.pipeline_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Closed,
+                    reason,
+                    0,
+                );
+                self.preserve_candidate_fact_ledger(&mut candidate);
+                reject_hidden_automatic_candidate(inner, reason, embedded_session_id, HiddenCandidateTransportState::Ended);
                 return Ok(true);
             }
             let result = match verification {
@@ -1525,13 +2317,35 @@ impl EmbeddedStreamingDictation {
             let post_wake_offset =
                 post_wake_pcm_offset_bytes(wake_match.end_seconds, candidate.pcm.len());
             let post_wake_pcm_bytes = candidate.pcm.len().saturating_sub(post_wake_offset);
+            // Capture the legal post-wake body before trimming the candidate to
+            // its speaker anchor. The old terminal path retained only
+            // `wake_pcm`, so the fresh continuation session started without
+            // the already-received tail and could lose the first words.
+            let terminal_wake_body = candidate.terminal_wake_body(post_wake_offset);
             let wake_anchor_offset =
                 wake_speaker_anchor_pcm_offset_bytes(
                     wake_match.start_seconds,
                     wake_match.end_seconds,
                     candidate.pcm.len(),
                 );
+            let candidate_pcm_before = candidate.pcm.len();
+            let pcm_base_before = candidate.pcm_base_offset;
             candidate.pcm.drain(..wake_anchor_offset);
+            candidate.pcm_base_offset = candidate.pcm_base_offset.and_then(|base| {
+                u64::try_from(wake_anchor_offset)
+                    .ok()
+                    .and_then(|offset| base.checked_add(offset))
+            });
+            log_wake_candidate_crop(
+                "terminal",
+                embedded_session_id,
+                &candidate,
+                &wake_match,
+                candidate_pcm_before,
+                pcm_base_before,
+                post_wake_offset,
+                wake_anchor_offset,
+            );
             // Terminal accept often happens after the device already auto-stopped.
             // Opening a host dictation session with <1s post-wake scrap produces
             // empty ASR + Error capsule (owner: completely unusable).
@@ -1549,7 +2363,7 @@ impl EmbeddedStreamingDictation {
                 if let Some(sid) = take_early_capsule_session_id(&mut candidate) {
                     dismiss_early_wake_recording_capsule(inner, sid);
                 }
-                if !stage_terminal_wake_continuation(
+                if !stage_terminal_wake_continuation_with_body_at(
                     inner,
                     local_speaker_seed
                         .as_ref()
@@ -1559,14 +2373,31 @@ impl EmbeddedStreamingDictation {
                     wake_match.end_seconds,
                     phrase.clone(),
                     enrolled_owner_matched,
+                    terminal_wake_body,
+                    Instant::now(),
                 ) {
                     log::warn!(
                         "[wake-phrase] terminal continuation already active; rejecting duplicate embedded_session_id={embedded_session_id}"
                     );
+                    let rejected_bytes = candidate.pcm.len();
+                    candidate.record_outcome_fact(
+                        self.pipeline_observation.as_ref(),
+                        crate::observability::CandidateFactKind::Rejected,
+                        "wake_phrase_continuation_already_active",
+                        rejected_bytes,
+                    );
+                    candidate.record_outcome_fact(
+                        self.pipeline_observation.as_ref(),
+                        crate::observability::CandidateFactKind::Closed,
+                        "wake_phrase_continuation_already_active",
+                        0,
+                    );
+                    self.preserve_candidate_fact_ledger(&mut candidate);
                     reject_hidden_automatic_candidate(
                         inner,
                         "wake_phrase_continuation_already_active",
                         embedded_session_id,
+                        HiddenCandidateTransportState::Ended,
                     );
                     return Ok(true);
                 }
@@ -1575,7 +2406,7 @@ impl EmbeddedStreamingDictation {
                     "accepted-terminal-continuation",
                     &candidate.pcm,
                 );
-                match request_embedded_ble_recording_start_from_host(
+                let continuation_requested = match request_embedded_ble_recording_start_from_host(
                     inner,
                     "terminal_wake_body_continuation",
                 )
@@ -1590,6 +2421,7 @@ impl EmbeddedStreamingDictation {
                         log::info!(
                             "[wake-phrase] terminal continuation recording requested embedded_session_id={embedded_session_id} coordinator_session_id={session_id}"
                         );
+                        true
                     }
                     Err(err) => {
                         discard_terminal_wake_continuation(inner);
@@ -1600,8 +2432,29 @@ impl EmbeddedStreamingDictation {
                         log::warn!(
                             "[wake-phrase] terminal continuation recording failed embedded_session_id={embedded_session_id}: {err}"
                         );
+                        false
                     }
+                };
+                if !continuation_requested {
+                    let rejected_bytes = candidate.pcm.len();
+                    candidate.record_outcome_fact(
+                        self.pipeline_observation.as_ref(),
+                        crate::observability::CandidateFactKind::Rejected,
+                        "terminal_continuation_request_failed",
+                        rejected_bytes,
+                    );
                 }
+                candidate.record_outcome_fact(
+                    self.pipeline_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Closed,
+                    if continuation_requested {
+                        "terminal_continuation_staged"
+                    } else {
+                        "terminal_continuation_request_failed"
+                    },
+                    0,
+                );
+                self.preserve_candidate_fact_ledger(&mut candidate);
                 return Ok(true);
             }
         } else {
@@ -1610,7 +2463,26 @@ impl EmbeddedStreamingDictation {
             );
         }
 
-        let mut session = begin_embedded_audio_dictation_session(inner).await?;
+        let mut session = match begin_embedded_audio_dictation_session(inner).await {
+            Ok(session) => session,
+            Err(err) => {
+                candidate.record_outcome_fact(
+                    self.pipeline_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Rejected,
+                    "coordinator_session_begin_failed",
+                    candidate.pcm.len(),
+                );
+                candidate.record_outcome_fact(
+                    self.pipeline_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Closed,
+                    "coordinator_session_begin_failed",
+                    0,
+                );
+                self.preserve_candidate_fact_ledger(&mut candidate);
+                return Err(err);
+            }
+        };
+        session.attach_pipeline_observation(self.pipeline_observation.clone());
         if let Some((wake_pcm, wake_end_seconds, wake_phrase, enrolled_owner_matched)) =
             local_speaker_seed
         {
@@ -1627,6 +2499,19 @@ impl EmbeddedStreamingDictation {
                 .lock()
                 .promote_candidate_to_owner(embedded_session_id, session.session_id)
         {
+            candidate.record_outcome_fact(
+                self.pipeline_observation.as_ref(),
+                crate::observability::CandidateFactKind::Rejected,
+                "coordinator_lifecycle_promotion_rejected",
+                candidate.pcm.len(),
+            );
+            candidate.record_outcome_fact(
+                self.pipeline_observation.as_ref(),
+                crate::observability::CandidateFactKind::Closed,
+                "coordinator_lifecycle_promotion_rejected",
+                0,
+            );
+            self.preserve_candidate_fact_ledger(&mut candidate);
             let _ = inner
                 .recording_lifecycle
                 .lock()
@@ -1639,6 +2524,19 @@ impl EmbeddedStreamingDictation {
             ));
         }
         if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
+            candidate.record_outcome_fact(
+                self.pipeline_observation.as_ref(),
+                crate::observability::CandidateFactKind::Rejected,
+                "coordinator_session_activation_cancelled",
+                candidate.pcm.len(),
+            );
+            candidate.record_outcome_fact(
+                self.pipeline_observation.as_ref(),
+                crate::observability::CandidateFactKind::Closed,
+                "coordinator_session_activation_cancelled",
+                0,
+            );
+            self.preserve_candidate_fact_ledger(&mut candidate);
             let _ = inner
                 .recording_lifecycle
                 .lock()
@@ -1656,20 +2554,192 @@ impl EmbeddedStreamingDictation {
                 candidate.early_capsule_session_id.is_some(),
             );
         }
+        // Promotion transfers the live dependency ledger itself. The session
+        // and any finalization task must continue reading the same receipts
+        // after the actor drops its candidate wrapper.
+        session.source_admission_ledger = Arc::clone(&candidate.source_admission_ledger);
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
+        let source_integrity_ledger = Arc::clone(&session.source_admission_ledger);
+        register_embedded_source_integrity_ledger(inner, session.session_id, &source_integrity_ledger);
         self.session = Some(session);
         let session = self
             .session
             .as_mut()
             .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
         crate::observability::record_embedded_audio_first_packet(session.session_id);
-        for chunk in candidate.pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
-            session.consume_streaming_pcm(inner, chunk, None)?;
+        let released_pcm_bytes = candidate.pcm.len();
+        let destination_session_id = session.session_id.to_string();
+        let destination_stream_id = Some(session.source_stream_id);
+        let mut release_accepted_bytes = 0usize;
+        let mut release_unaccepted_bytes = 0usize;
+        let mut release_coordinates_unknown = false;
+        let mut release_outcome_unknown = false;
+        let mut release_offset = 0usize;
+        while release_offset < candidate.pcm.len() {
+            let release_end = (release_offset + EMBEDDED_AUDIO_FEED_CHUNK_BYTES)
+                .min(candidate.pcm.len());
+            let release_bytes = release_end - release_offset;
+            let candidate_range = candidate_slice_range(
+                candidate.pcm_base_offset,
+                release_offset,
+                release_bytes,
+            );
+            let source_runs = candidate.source_facts_for_range(candidate_range);
+            let release_operation_id = candidate.next_operation_id();
+            candidate.record_fact_with_operation_id(
+                self.pipeline_observation.as_ref(),
+                release_operation_id,
+                crate::observability::CandidateFactKind::ReleaseAttempted,
+                candidate_range,
+                None,
+                None,
+                Some(destination_session_id.clone()),
+                destination_stream_id,
+                source_runs.clone(),
+                release_bytes,
+                None,
+            );
+            let destination_start = session.accepted_pcm_cursor.position();
+            let accepted_bytes_before = session.streamed_pcm_bytes;
+            let release_result = {
+                let pcm = &candidate.pcm[release_offset..release_end];
+                session.consume_streaming_pcm_from_segment(
+                    inner,
+                    pcm,
+                    None,
+                    Some(embedded_session_id),
+                )
+            };
+            let release_source_interval = release_result.as_ref().ok().copied().flatten();
+            let destination_range = destination_start
+                .zip(session.accepted_pcm_cursor.position())
+                .and_then(|(start, end)| {
+                    (end >= start && end - start == release_bytes as u64).then_some(
+                        crate::observability::PcmRange { start, end },
+                    )
+                });
+            let accepted_bytes = session
+                .streamed_pcm_bytes
+                .saturating_sub(accepted_bytes_before);
+            if accepted_bytes > 0 {
+                let source_admission_operation_id =
+                    session.next_source_admission_operation_id();
+                record_candidate_release_source_dependencies(
+                    &candidate,
+                    candidate_range,
+                    destination_range,
+                    release_source_interval,
+                    release_bytes,
+                    accepted_bytes,
+                    SourceAdmissionOperationOwner::Session {
+                        session_id: session.session_id,
+                    },
+                    source_admission_operation_id,
+                    &session.source_admission_ledger,
+                );
+            }
+            match release_result {
+                Ok(_) if accepted_bytes == release_bytes => {
+                    release_accepted_bytes = release_accepted_bytes.saturating_add(accepted_bytes);
+                    release_coordinates_unknown |= destination_range.is_none();
+                    candidate.record_fact_with_operation_id(
+                        self.pipeline_observation.as_ref(),
+                        release_operation_id,
+                        crate::observability::CandidateFactKind::ReleaseAccepted,
+                        candidate_range,
+                        None,
+                        destination_range,
+                        Some(destination_session_id.clone()),
+                        destination_stream_id,
+                        source_runs,
+                        accepted_bytes,
+                        if destination_range.is_some() {
+                            None
+                        } else {
+                            Some("coordinator_acceptance_coordinates_unknown")
+                        },
+                    );
+                }
+                Ok(_) if accepted_bytes > 0 => {
+                    release_accepted_bytes = release_accepted_bytes.saturating_add(accepted_bytes);
+                    release_unaccepted_bytes = release_unaccepted_bytes
+                        .saturating_add(release_bytes.saturating_sub(accepted_bytes));
+                    release_outcome_unknown = true;
+                    candidate.record_fact_with_operation_id(
+                        self.pipeline_observation.as_ref(),
+                        release_operation_id,
+                        crate::observability::CandidateFactKind::ReleaseOutcomeUnknown,
+                        None,
+                        None,
+                        None,
+                        Some(destination_session_id.clone()),
+                        destination_stream_id,
+                        candidate.source_facts_for_range(None),
+                        accepted_bytes,
+                        Some("coordinator_partial_acceptance_range_unknown"),
+                    );
+                }
+                Ok(_) => {
+                    release_unaccepted_bytes =
+                        release_unaccepted_bytes.saturating_add(release_bytes);
+                    candidate.record_fact_with_operation_id(
+                        self.pipeline_observation.as_ref(),
+                        release_operation_id,
+                        crate::observability::CandidateFactKind::ReleaseRejected,
+                        candidate_range,
+                        None,
+                        destination_range,
+                        Some(destination_session_id.clone()),
+                        destination_stream_id,
+                        source_runs,
+                        release_bytes,
+                        Some("coordinator_did_not_accept_release"),
+                    );
+                }
+                Err(err) => {
+                    candidate.record_fact_with_operation_id(
+                        self.pipeline_observation.as_ref(),
+                        release_operation_id,
+                        crate::observability::CandidateFactKind::ReleaseRejected,
+                        candidate_range,
+                        None,
+                        destination_range,
+                        Some(destination_session_id.clone()),
+                        destination_stream_id,
+                        source_runs,
+                        release_bytes,
+                        Some("coordinator_rejected_release"),
+                    );
+                    session.candidate_id = Some(candidate.candidate_id);
+                    session.candidate_fact_ledger = Some(std::mem::take(&mut candidate.fact_ledger));
+                    return Err(err);
+                }
+            }
+            release_offset = release_end;
         }
+        let release_close_reason = if release_outcome_unknown {
+            "release_partial_acceptance_range_unknown"
+        } else if release_unaccepted_bytes > 0 {
+            "release_not_fully_accepted"
+        } else if release_coordinates_unknown {
+            "released_to_coordinator_coordinates_unknown"
+        } else {
+            "released_to_coordinator"
+        };
+        candidate.record_outcome_fact(
+            self.pipeline_observation.as_ref(),
+            crate::observability::CandidateFactKind::Closed,
+            release_close_reason,
+            0,
+        );
+        session.candidate_id = Some(candidate.candidate_id);
+        session.candidate_fact_ledger = Some(std::mem::take(&mut candidate.fact_ledger));
         log::info!(
-            "[speaker-verification] released buffered candidate to ASR embedded_session_id={} pcm_bytes={}",
+            "[speaker-verification] released buffered candidate to ASR embedded_session_id={} pcm_bytes={} accepted_pcm_bytes={} unaccepted_pcm_bytes={}",
             embedded_session_id,
-            candidate.pcm.len()
+            released_pcm_bytes,
+            release_accepted_bytes,
+            release_unaccepted_bytes
         );
         Ok(false)
     }
@@ -1693,20 +2763,79 @@ impl EmbeddedStreamingDictation {
             self.speaker_candidate = Some(candidate);
             return Ok(false);
         }
+        let candidate_observation = self.pipeline_observation.clone();
         if self.embedded_session_id != Some(embedded_session_id) {
+            candidate.record_outcome_fact(
+                candidate_observation.as_ref(),
+                crate::observability::CandidateFactKind::Rejected,
+                "candidate_session_mismatch",
+                candidate.pcm.len(),
+            );
+            candidate.record_outcome_fact(
+                candidate_observation.as_ref(),
+                crate::observability::CandidateFactKind::Closed,
+                "candidate_session_mismatch",
+                0,
+            );
+            self.preserve_candidate_fact_ledger(&mut candidate);
             return Err(format!(
                 "物理录音接管 session 不一致: current={:?}, incoming={embedded_session_id}",
                 self.embedded_session_id
             ));
         }
 
-        let discarded_pcm_bytes = discard_pre_press_candidate_pcm(&mut candidate.pcm);
-        let session = begin_embedded_audio_dictation_session(inner).await?;
+        let discarded_pcm_bytes = candidate.pcm.len();
+        candidate.record_outcome_fact(
+            candidate_observation.as_ref(),
+            crate::observability::CandidateFactKind::Discarded,
+            "promoted_to_physical_recording",
+            discarded_pcm_bytes,
+        );
+        candidate.record_outcome_fact(
+            candidate_observation.as_ref(),
+            crate::observability::CandidateFactKind::Closed,
+            "promoted_to_physical_recording",
+            0,
+        );
+        discard_pre_press_candidate_pcm(&mut candidate.pcm);
+        let mut session = match begin_embedded_audio_dictation_session(inner).await {
+            Ok(session) => session,
+            Err(err) => {
+                candidate.record_outcome_fact(
+                    candidate_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Rejected,
+                    "coordinator_session_begin_failed",
+                    candidate.pcm.len(),
+                );
+                candidate.record_outcome_fact(
+                    candidate_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Closed,
+                    "coordinator_session_begin_failed",
+                    0,
+                );
+                self.preserve_candidate_fact_ledger(&mut candidate);
+                return Err(err);
+            }
+        };
+        session.attach_pipeline_observation(self.pipeline_observation.clone());
         if !inner
             .recording_lifecycle
             .lock()
             .promote_candidate_to_owner(embedded_session_id, session.session_id)
         {
+            candidate.record_outcome_fact(
+                self.pipeline_observation.as_ref(),
+                crate::observability::CandidateFactKind::Rejected,
+                "coordinator_lifecycle_promotion_rejected",
+                candidate.pcm.len(),
+            );
+            candidate.record_outcome_fact(
+                self.pipeline_observation.as_ref(),
+                crate::observability::CandidateFactKind::Closed,
+                "coordinator_lifecycle_promotion_rejected",
+                0,
+            );
+            self.preserve_candidate_fact_ledger(&mut candidate);
             let _ = inner
                 .recording_lifecycle
                 .lock()
@@ -1719,6 +2848,19 @@ impl EmbeddedStreamingDictation {
             ));
         }
         if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
+            candidate.record_outcome_fact(
+                candidate_observation.as_ref(),
+                crate::observability::CandidateFactKind::Rejected,
+                "coordinator_session_activation_cancelled",
+                candidate.pcm.len(),
+            );
+            candidate.record_outcome_fact(
+                candidate_observation.as_ref(),
+                crate::observability::CandidateFactKind::Closed,
+                "coordinator_session_activation_cancelled",
+                0,
+            );
+            self.preserve_candidate_fact_ledger(&mut candidate);
             let _ = inner
                 .recording_lifecycle
                 .lock()
@@ -1726,6 +2868,11 @@ impl EmbeddedStreamingDictation {
             return Err("物理录音接管会话已被取消".to_string());
         }
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
+        session.source_admission_ledger = Arc::clone(&candidate.source_admission_ledger);
+        session.candidate_id = Some(candidate.candidate_id);
+        session.candidate_fact_ledger = Some(std::mem::take(&mut candidate.fact_ledger));
+        let source_integrity_ledger = Arc::clone(&session.source_admission_ledger);
+        register_embedded_source_integrity_ledger(inner, session.session_id, &source_integrity_ledger);
         self.session = Some(session);
         let session = self
             .session
@@ -1745,6 +2892,7 @@ impl EmbeddedStreamingDictation {
         inner: &Arc<Inner>,
         embedded_session_id: u32,
     ) -> Result<bool, String> {
+        let candidate_observation = self.pipeline_observation.clone();
         // Firmware VoiceActivation means only that a VAD transport window is
         // open. Prefetch identity in parallel for latency, but never let that
         // identity result manufacture phrase evidence or activate by itself.
@@ -1872,6 +3020,8 @@ impl EmbeddedStreamingDictation {
                 incremental_pcm,
                 prior_origin_bytes,
                 rotation_start_bytes,
+                requested_feed_start,
+                incremental_feed_start,
             ) = {
                 let candidate = self
                     .speaker_candidate
@@ -1883,12 +3033,20 @@ impl EmbeddedStreamingDictation {
                     return Ok(false);
                 }
                 let Some(detector) = candidate.wake_detector.take() else {
+                    let rejected_bytes = candidate.pcm.len();
+                    candidate.record_outcome_fact(
+                        candidate_observation.as_ref(),
+                        crate::observability::CandidateFactKind::Rejected,
+                        "wake_phrase_detector_unavailable",
+                        rejected_bytes,
+                    );
                     candidate.kind = BufferedSpeakerCandidateKind::Rejected;
                     candidate.pcm.clear();
                     reject_hidden_automatic_candidate(
                         inner,
                         "wake_phrase_detector_unavailable",
                         embedded_session_id,
+                        HiddenCandidateTransportState::Streaming,
                     );
                     log::warn!(
                             "[wake-phrase] hidden candidate rejected because streaming detector is unavailable embedded_session_id={embedded_session_id}"
@@ -1916,6 +3074,7 @@ impl EmbeddedStreamingDictation {
                 ));
                 let new_pcm = candidate.pcm[feed_start..].to_vec();
                 let incremental_pcm = candidate.pcm[candidate.kws_fed_bytes..].to_vec();
+                let incremental_feed_start = candidate.kws_fed_bytes;
                 candidate.kws_fed_bytes = candidate.pcm.len();
                 (
                     detector,
@@ -1923,25 +3082,46 @@ impl EmbeddedStreamingDictation {
                     incremental_pcm,
                     candidate.kws_stream_origin_bytes,
                     rotation_start_bytes,
+                    feed_start,
+                    incremental_feed_start,
                 )
             };
             let phrase_for_rotation = phrase.clone();
             let wake_task = tauri::async_runtime::spawn_blocking(move || {
                 let started = Instant::now();
-                let (mut detector, stream_origin_bytes, rotated, pcm_to_feed) =
+                let (mut detector, stream_origin_bytes, rotated, pcm_to_feed, actual_feed_start) =
                     if let Some(rotation_start_bytes) = rotation_start_bytes {
                         match crate::wake_phrase::StreamingDetector::new(&phrase_for_rotation) {
-                            Ok(fresh) => (fresh, rotation_start_bytes, true, new_pcm),
+                            Ok(fresh) => (
+                                fresh,
+                                rotation_start_bytes,
+                                true,
+                                new_pcm,
+                                requested_feed_start,
+                            ),
                             Err(err) => {
                                 log::warn!(
                                     "[wake-phrase] rolling detector refresh failed; preserving current stream: {err}"
                                 );
-                                (detector, prior_origin_bytes, false, incremental_pcm)
+                                (
+                                    detector,
+                                    prior_origin_bytes,
+                                    false,
+                                    incremental_pcm,
+                                    incremental_feed_start,
+                                )
                             }
                         }
                     } else {
-                        (detector, prior_origin_bytes, false, new_pcm)
+                        (
+                            detector,
+                            prior_origin_bytes,
+                            false,
+                            new_pcm,
+                            requested_feed_start,
+                        )
                     };
+                let actual_feed_bytes = pcm_to_feed.len();
                 let result = detector.accept_pcm(&pcm_to_feed);
                 (
                     detector,
@@ -1949,13 +3129,43 @@ impl EmbeddedStreamingDictation {
                     started.elapsed().as_millis() as u64,
                     stream_origin_bytes,
                     rotated,
+                    actual_feed_start,
+                    actual_feed_bytes,
                 )
             })
             .await;
-            let (detector, wake_match, kws_step_ms, stream_origin_bytes, rotated) = match wake_task {
+            let (
+                detector,
+                wake_match,
+                kws_step_ms,
+                stream_origin_bytes,
+                rotated,
+                actual_feed_start,
+                actual_feed_bytes,
+            ) = match wake_task {
                 Ok(result) => result,
                 Err(err) => {
                     if let Some(candidate) = self.speaker_candidate.as_mut() {
+                        candidate.record_fact(
+                            candidate_observation.as_ref(),
+                            crate::observability::CandidateFactKind::KwsFeedUnknown,
+                            candidate.current_candidate_range(),
+                            None,
+                            None,
+                            None,
+                            None,
+                            candidate.source_facts_for_range(None),
+                            0,
+                            Some("streaming_kws_task_join_unknown"),
+                        );
+                        candidate.kws_fed_bytes = incremental_feed_start;
+                        let rejected_bytes = candidate.pcm.len();
+                        candidate.record_outcome_fact(
+                            candidate_observation.as_ref(),
+                            crate::observability::CandidateFactKind::Rejected,
+                            "wake_phrase_detector_task_failed",
+                            rejected_bytes,
+                        );
                         candidate.kind = BufferedSpeakerCandidateKind::Rejected;
                         candidate.pcm.clear();
                     }
@@ -1963,6 +3173,7 @@ impl EmbeddedStreamingDictation {
                         inner,
                         "wake_phrase_detector_task_failed",
                         embedded_session_id,
+                        HiddenCandidateTransportState::Streaming,
                     );
                     log::warn!(
                             "[wake-phrase] streaming detector task failed embedded_session_id={embedded_session_id}: {err}"
@@ -1978,6 +3189,34 @@ impl EmbeddedStreamingDictation {
                 candidate.wake_detector = Some(detector);
                 candidate.kws_stream_origin_bytes = stream_origin_bytes;
                 candidate.kws_total_ms = candidate.kws_total_ms.saturating_add(kws_step_ms);
+                let kws_feed_range = actual_feed_start
+                    .checked_add(actual_feed_bytes)
+                    .filter(|end| *end <= candidate.pcm.len())
+                    .and_then(|_| {
+                        candidate_slice_range(
+                            candidate.pcm_base_offset,
+                            actual_feed_start,
+                            actual_feed_bytes,
+                        )
+                    });
+                let kws_feed_bytes = candidate
+                    .pcm
+                    .len()
+                    .checked_sub(actual_feed_start)
+                    .and_then(|available| (actual_feed_bytes <= available).then_some(actual_feed_bytes))
+                    .unwrap_or(0);
+                candidate.record_fact(
+                    candidate_observation.as_ref(),
+                    crate::observability::CandidateFactKind::KwsFed,
+                    candidate.current_candidate_range(),
+                    kws_feed_range,
+                    None,
+                    None,
+                    None,
+                    candidate.source_facts_for_range(kws_feed_range),
+                    kws_feed_bytes,
+                    None,
+                );
                 if rotated {
                     log::info!(
                         "[wake-phrase] rolling detector refreshed embedded_session_id={} origin_pcm_ms={} overlap_ms={}",
@@ -2009,12 +3248,20 @@ impl EmbeddedStreamingDictation {
                 match wake_match {
                     Ok(found) => offset_streaming_wake_match(found, stream_origin_bytes),
                     Err(err) => {
+                        let rejected_bytes = candidate.pcm.len();
+                        candidate.record_outcome_fact(
+                            candidate_observation.as_ref(),
+                            crate::observability::CandidateFactKind::Rejected,
+                            "wake_phrase_detector_failed",
+                            rejected_bytes,
+                        );
                         candidate.kind = BufferedSpeakerCandidateKind::Rejected;
                         candidate.pcm.clear();
                         reject_hidden_automatic_candidate(
                             inner,
                             "wake_phrase_detector_failed",
                             embedded_session_id,
+                            HiddenCandidateTransportState::Streaming,
                         );
                         log::warn!(
                                 "[wake-phrase] streaming detector failed embedded_session_id={embedded_session_id}: {err}"
@@ -2147,6 +3394,16 @@ impl EmbeddedStreamingDictation {
                                 candidate.local_confirmation_task = Some(
                                     spawn_local_wake_confirmation(
                                         inner,
+                                        LocalWakeConfirmationDiagnosticContext {
+                                            embedded_session_id,
+                                            attempt: Some(candidate.local_confirmation_attempts),
+                                            source_origin_bytes: task_origin_bytes,
+                                            branch: if kws_hit.is_some() {
+                                                "streaming-kws"
+                                            } else {
+                                                "streaming-exploratory"
+                                            },
+                                        },
                                         confirmation_pcm,
                                         phrase.clone(),
                                         kws_hit.is_none(),
@@ -2525,21 +3782,6 @@ impl EmbeddedStreamingDictation {
                             waited_ms,
                             explicit_absent_count,
                         ) {
-                            PendingSecondaryDecision::AcceptKeywordModel => {
-                                // Secondary slow/hung before returning evidence: fail-open
-                                // so a broken helper cannot disable voice activation.
-                                phrase_signal =
-                                    denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
-                                log::info!(
-                                    "[wake-phrase] stage2 timeout fail-open KeywordModel embedded_session_id={} waited_ms={} kws_waited_ms={} secondary_attempt_ms={} budget_ms={}",
-                                    embedded_session_id,
-                                    waited_ms,
-                                    kws_waited_ms,
-                                    confirmation_attempt_ms,
-                                    KWS_SECONDARY_CONFIRM_BUDGET_MS
-                                );
-                                Some(kws)
-                            }
                             PendingSecondaryDecision::HoldAfterExplicitAbsent => {
                                 log::info!(
                                     "[wake-phrase] stage2 timeout held after explicit Absent embedded_session_id={} waited_ms={} kws_waited_ms={} secondary_attempt_ms={} budget_ms={} absent_count={}",
@@ -2553,7 +3795,8 @@ impl EmbeddedStreamingDictation {
                                 None
                             }
                             PendingSecondaryDecision::AwaitSecondary => {
-                                // Within budget: wait for stage-2 (do not bare-KWS Accept).
+                                // Wait for actual evidence even beyond the latency
+                                // budget; pending work cannot authorize dictation.
                                 None
                             }
                         }
@@ -2718,6 +3961,13 @@ impl EmbeddedStreamingDictation {
                 &candidate.pcm,
             );
             if let Some(candidate) = self.speaker_candidate.as_mut() {
+                let rejected_bytes = candidate.pcm.len();
+                candidate.record_outcome_fact(
+                    candidate_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Rejected,
+                    "voiceprint_non_match",
+                    rejected_bytes,
+                );
                 candidate.kind = BufferedSpeakerCandidateKind::Rejected;
                 candidate.pcm.clear();
             }
@@ -2725,6 +3975,7 @@ impl EmbeddedStreamingDictation {
                 inner,
                 "voiceprint_non_match",
                 embedded_session_id,
+                HiddenCandidateTransportState::Streaming,
             );
             log::info!(
                 "[wake-phrase] phrase matched but owner verification rejected embedded_session_id={} phrase={} result={:?}",
@@ -2738,10 +3989,15 @@ impl EmbeddedStreamingDictation {
             persist_verified_wake_phrase_calibration(phrase.clone()).await;
         }
 
-        let recording_control_task = tauri::async_runtime::spawn_blocking(|| {
+        let ensure_request_id = next_accepted_wake_capture_request_id();
+        let previous_segment_id = embedded_session_id;
+        let recording_control_task = tauri::async_runtime::spawn_blocking(move || {
             let started = Instant::now();
-            let result =
-                crate::embedded_ble::send_recording_control_activate(Duration::from_secs(2));
+            let result = crate::embedded_ble::send_recording_control_ensure_wake_capture(
+                ensure_request_id,
+                previous_segment_id,
+                Duration::from_secs(2),
+            );
             (result, started.elapsed().as_millis() as u64)
         });
         let mut candidate = self
@@ -2767,7 +4023,24 @@ impl EmbeddedStreamingDictation {
                 wake_match.end_seconds,
                 candidate.pcm.len(),
             );
+        let candidate_pcm_before = candidate.pcm.len();
+        let pcm_base_before = candidate.pcm_base_offset;
         candidate.pcm.drain(..wake_anchor_offset);
+        candidate.pcm_base_offset = candidate.pcm_base_offset.and_then(|base| {
+            u64::try_from(wake_anchor_offset)
+                .ok()
+                .and_then(|offset| base.checked_add(offset))
+        });
+        log_wake_candidate_crop(
+            "live",
+            embedded_session_id,
+            &candidate,
+            &wake_match,
+            candidate_pcm_before,
+            pcm_base_before,
+            post_wake_offset,
+            wake_anchor_offset,
+        );
         let capsule_request_ms = candidate
             .early_capsule_request_ms
             .unwrap_or_else(|| candidate.started_at.elapsed().as_millis() as u64);
@@ -2787,7 +4060,26 @@ impl EmbeddedStreamingDictation {
                 ceiling_ms: 500,
             },
         );
-        let mut session = begin_embedded_audio_dictation_session(inner).await?;
+        let mut session = match begin_embedded_audio_dictation_session(inner).await {
+            Ok(session) => session,
+            Err(err) => {
+                candidate.record_outcome_fact(
+                    candidate_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Rejected,
+                    "coordinator_session_begin_failed",
+                    candidate.pcm.len(),
+                );
+                candidate.record_outcome_fact(
+                    candidate_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Closed,
+                    "coordinator_session_begin_failed",
+                    0,
+                );
+                self.preserve_candidate_fact_ledger(&mut candidate);
+                return Err(err);
+            }
+        };
+        session.attach_pipeline_observation(self.pipeline_observation.clone());
         session.start_local_speaker_tracking(
             local_speaker_seed.0,
             local_speaker_seed.1,
@@ -2799,6 +4091,19 @@ impl EmbeddedStreamingDictation {
             .lock()
             .promote_candidate_to_owner(embedded_session_id, session.session_id)
         {
+            candidate.record_outcome_fact(
+                candidate_observation.as_ref(),
+                crate::observability::CandidateFactKind::Rejected,
+                "coordinator_lifecycle_promotion_rejected",
+                candidate.pcm.len(),
+            );
+            candidate.record_outcome_fact(
+                candidate_observation.as_ref(),
+                crate::observability::CandidateFactKind::Closed,
+                "coordinator_lifecycle_promotion_rejected",
+                0,
+            );
+            self.preserve_candidate_fact_ledger(&mut candidate);
             let _ = inner
                 .recording_lifecycle
                 .lock()
@@ -2811,6 +4116,19 @@ impl EmbeddedStreamingDictation {
             ));
         }
         if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
+            candidate.record_outcome_fact(
+                candidate_observation.as_ref(),
+                crate::observability::CandidateFactKind::Rejected,
+                "coordinator_session_activation_cancelled",
+                candidate.pcm.len(),
+            );
+            candidate.record_outcome_fact(
+                candidate_observation.as_ref(),
+                crate::observability::CandidateFactKind::Closed,
+                "coordinator_session_activation_cancelled",
+                0,
+            );
+            self.preserve_candidate_fact_ledger(&mut candidate);
             let _ = inner
                 .recording_lifecycle
                 .lock()
@@ -2825,9 +4143,23 @@ impl EmbeddedStreamingDictation {
             capsule_audio_ms,
             candidate.early_capsule_session_id.is_some(),
         );
+        // Automatic wake promotion keeps the candidate's live dependency
+        // ledger; finalization must not fall back to the actor's bounded log.
+        session.source_admission_ledger = Arc::clone(&candidate.source_admission_ledger);
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
+        let source_integrity_ledger = Arc::clone(&session.source_admission_ledger);
+        register_embedded_source_integrity_ledger(inner, session.session_id, &source_integrity_ledger);
         self.session = Some(session);
-        // 2026-08-09 12:46:59 激活竞态：ACTIVATE 发出后旧唤醒段可能立即 complete
+        self.accepted_wake_capture_ensure = Some(AcceptedWakeCaptureEnsure {
+            request_id: ensure_request_id,
+            previous_segment_id,
+            requested_at: Instant::now(),
+            deadline_at: Instant::now()
+                + EMBEDDED_ACCEPTED_WAKE_CAPTURE_REPLACEMENT_TIMEOUT,
+            replacement_wait_started_at: None,
+            confirmed_segment_id: None,
+        });
+        // 2026-08-09 12:46:59 激活竞态：ENSURE 发出后旧唤醒段可能立即 complete
         // （仅含唤醒词）；竞态窗口内该段的 STOP 不得 finalize 本会话，正文在激活后
         // 的新设备段里。绑定由 Started/PcmChunk 处理分支完成。
         self.activation_segment_race_guard = Some((embedded_session_id, Instant::now()));
@@ -2836,35 +4168,195 @@ impl EmbeddedStreamingDictation {
             .as_mut()
             .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
         crate::observability::record_embedded_audio_first_packet(session.session_id);
-        for pcm in candidate.pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
-            session.consume_streaming_pcm(inner, pcm, None)?;
+        let destination_session_id = session.session_id.to_string();
+        let destination_stream_id = Some(session.source_stream_id);
+        let mut release_accepted_bytes = 0usize;
+        let mut release_unaccepted_bytes = 0usize;
+        let mut release_coordinates_unknown = false;
+        let mut release_outcome_unknown = false;
+        let mut release_offset = 0usize;
+        while release_offset < candidate.pcm.len() {
+            let release_end = (release_offset + EMBEDDED_AUDIO_FEED_CHUNK_BYTES)
+                .min(candidate.pcm.len());
+            let release_bytes = release_end - release_offset;
+            let candidate_range = candidate_slice_range(
+                candidate.pcm_base_offset,
+                release_offset,
+                release_bytes,
+            );
+            let source_runs = candidate.source_facts_for_range(candidate_range);
+            let release_operation_id = candidate.next_operation_id();
+            candidate.record_fact_with_operation_id(
+                candidate_observation.as_ref(),
+                release_operation_id,
+                crate::observability::CandidateFactKind::ReleaseAttempted,
+                candidate_range,
+                None,
+                None,
+                Some(destination_session_id.clone()),
+                destination_stream_id,
+                source_runs.clone(),
+                release_bytes,
+                None,
+            );
+            let destination_start = session.accepted_pcm_cursor.position();
+            let accepted_bytes_before = session.streamed_pcm_bytes;
+            let release_result = {
+                let pcm = &candidate.pcm[release_offset..release_end];
+                session.consume_streaming_pcm_from_segment(
+                    inner,
+                    pcm,
+                    None,
+                    Some(embedded_session_id),
+                )
+            };
+            let release_source_interval = release_result.as_ref().ok().copied().flatten();
+            let destination_range = destination_start
+                .zip(session.accepted_pcm_cursor.position())
+                .and_then(|(start, end)| {
+                    (end >= start && end - start == release_bytes as u64).then_some(
+                        crate::observability::PcmRange { start, end },
+                    )
+                });
+            let accepted_bytes = session
+                .streamed_pcm_bytes
+                .saturating_sub(accepted_bytes_before);
+            if accepted_bytes > 0 {
+                let source_admission_operation_id =
+                    session.next_source_admission_operation_id();
+                record_candidate_release_source_dependencies(
+                    &candidate,
+                    candidate_range,
+                    destination_range,
+                    release_source_interval,
+                    release_bytes,
+                    accepted_bytes,
+                    SourceAdmissionOperationOwner::Session {
+                        session_id: session.session_id,
+                    },
+                    source_admission_operation_id,
+                    &session.source_admission_ledger,
+                );
+            }
+            match release_result {
+                Ok(_) if accepted_bytes == release_bytes => {
+                    release_accepted_bytes = release_accepted_bytes.saturating_add(accepted_bytes);
+                    release_coordinates_unknown |= destination_range.is_none();
+                    candidate.record_fact_with_operation_id(
+                        candidate_observation.as_ref(),
+                        release_operation_id,
+                        crate::observability::CandidateFactKind::ReleaseAccepted,
+                        candidate_range,
+                        None,
+                        destination_range,
+                        Some(destination_session_id.clone()),
+                        destination_stream_id,
+                        source_runs,
+                        accepted_bytes,
+                        if destination_range.is_some() {
+                            None
+                        } else {
+                            Some("coordinator_acceptance_coordinates_unknown")
+                        },
+                    );
+                }
+                Ok(_) if accepted_bytes > 0 => {
+                    release_accepted_bytes = release_accepted_bytes.saturating_add(accepted_bytes);
+                    release_unaccepted_bytes = release_unaccepted_bytes
+                        .saturating_add(release_bytes.saturating_sub(accepted_bytes));
+                    release_outcome_unknown = true;
+                    candidate.record_fact_with_operation_id(
+                        candidate_observation.as_ref(),
+                        release_operation_id,
+                        crate::observability::CandidateFactKind::ReleaseOutcomeUnknown,
+                        None,
+                        None,
+                        None,
+                        Some(destination_session_id.clone()),
+                        destination_stream_id,
+                        candidate.source_facts_for_range(None),
+                        accepted_bytes,
+                        Some("coordinator_partial_acceptance_range_unknown"),
+                    );
+                }
+                Ok(_) => {
+                    release_unaccepted_bytes =
+                        release_unaccepted_bytes.saturating_add(release_bytes);
+                    candidate.record_fact_with_operation_id(
+                        candidate_observation.as_ref(),
+                        release_operation_id,
+                        crate::observability::CandidateFactKind::ReleaseRejected,
+                        candidate_range,
+                        None,
+                        destination_range,
+                        Some(destination_session_id.clone()),
+                        destination_stream_id,
+                        source_runs,
+                        release_bytes,
+                        Some("coordinator_did_not_accept_release"),
+                    );
+                }
+                Err(err) => {
+                    candidate.record_fact_with_operation_id(
+                        candidate_observation.as_ref(),
+                        release_operation_id,
+                        crate::observability::CandidateFactKind::ReleaseRejected,
+                        candidate_range,
+                        None,
+                        destination_range,
+                        Some(destination_session_id.clone()),
+                        destination_stream_id,
+                        source_runs,
+                        release_bytes,
+                        Some("coordinator_rejected_release"),
+                    );
+                    session.candidate_id = Some(candidate.candidate_id);
+                    session.candidate_fact_ledger = Some(std::mem::take(&mut candidate.fact_ledger));
+                    return Err(err);
+                }
+            }
+            release_offset = release_end;
         }
+        let release_close_reason = if release_outcome_unknown {
+            "release_partial_acceptance_range_unknown"
+        } else if release_unaccepted_bytes > 0 {
+            "release_not_fully_accepted"
+        } else if release_coordinates_unknown {
+            "released_to_coordinator_coordinates_unknown"
+        } else {
+            "released_to_coordinator"
+        };
+        candidate.record_outcome_fact(
+            candidate_observation.as_ref(),
+            crate::observability::CandidateFactKind::Closed,
+            release_close_reason,
+            0,
+        );
+        session.candidate_id = Some(candidate.candidate_id);
+        session.candidate_fact_ledger = Some(std::mem::take(&mut candidate.fact_ledger));
         // Awaiting actor-drained control here deadlocks PCM/VREC:SPEECH; observe it detached.
         let _recording_control_observer = tauri::async_runtime::spawn(async move {
             match recording_control_task.await {
                 Ok((Ok(()), elapsed_ms)) => log::info!(
-                    "[embedded-ble] accepted automatic recording activation completed embedded_session_id={} elapsed_ms={}",
-                    embedded_session_id,
-                    elapsed_ms
+                    "[wake-phrase] accepted wake capture ensure sent request_id={ensure_request_id} previous_segment_id={previous_segment_id} elapsed_ms={elapsed_ms}",
                 ),
                 Ok((Err(err), elapsed_ms)) => log::warn!(
-                    "[embedded-ble] accepted automatic recording activation failed embedded_session_id={} elapsed_ms={}: {}",
-                    embedded_session_id,
-                    elapsed_ms,
-                    err
+                    "[wake-phrase] accepted wake capture ensure failed request_id={ensure_request_id} previous_segment_id={previous_segment_id} elapsed_ms={elapsed_ms}: {err}"
                 ),
                 Err(err) => log::warn!(
-                    "[embedded-ble] accepted automatic recording activation task failed embedded_session_id={embedded_session_id}: {err}"
+                    "[wake-phrase] accepted wake capture ensure task failed request_id={ensure_request_id} previous_segment_id={previous_segment_id}: {err}"
                 ),
             }
         });
         log::info!(
-            "[wake-phrase] live automatic session activated and released embedded_session_id={} phrase={} phrase_signal={:?} wake_end_s={:.3} post_wake_pcm_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} gate_total_ms={} recording_control=detached wake_to_capsule_request_ms={} latency_target_ms=1200 latency_target_pass={} latency_ceiling_ms=1500 latency_ceiling_pass={} phrase_tail_to_capsule_ms={} phrase_tail_target_ms=350 phrase_tail_target_pass={} phrase_tail_ceiling_ms=500 phrase_tail_ceiling_pass={}",
+            "[wake-phrase] live automatic session activated and released embedded_session_id={} phrase={} phrase_signal={:?} wake_end_s={:.3} post_wake_pcm_bytes={} released_accepted_pcm_bytes={} released_unaccepted_pcm_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} gate_total_ms={} recording_control=detached wake_to_capsule_request_ms={} latency_target_ms=1200 latency_target_pass={} latency_ceiling_ms=1500 latency_ceiling_pass={} phrase_tail_to_capsule_ms={} phrase_tail_target_ms=350 phrase_tail_target_pass={} phrase_tail_ceiling_ms=500 phrase_tail_ceiling_pass={}",
             embedded_session_id,
             phrase,
             phrase_signal,
             wake_match.end_seconds,
             post_wake_pcm_bytes,
+            release_accepted_bytes,
+            release_unaccepted_bytes,
             kws_ms,
             local_confirmation_ms,
             voiceprint_ms,

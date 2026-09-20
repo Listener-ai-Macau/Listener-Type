@@ -32,6 +32,30 @@ pub trait AudioConsumer: Send + Sync {
     /// 每次拿到的是若干 Int16 样本拼成的 little-endian 字节序列。
     /// 长度一定是 2 的倍数。
     fn consume_pcm_chunk(&self, pcm: &[u8]);
+
+    /// Evidence-only source-carrying path. The default keeps all existing
+    /// recorder consumers byte-for-byte unchanged.
+    fn consume_pcm_chunk_with_source(
+        &self,
+        pcm: &[u8],
+        observation: Option<Arc<crate::observability::EmbeddedAudioPipelineObservation>>,
+        segment_id: Option<u32>,
+    ) {
+        self.consume_pcm_chunk_with_source_interval(pcm, observation, segment_id, None);
+    }
+
+    /// Explicit source-coordinate variant.  Metadata is carried beside the
+    /// PCM through deferred adapters; legacy consumers keep the old behavior.
+    fn consume_pcm_chunk_with_source_interval(
+        &self,
+        pcm: &[u8],
+        observation: Option<Arc<crate::observability::EmbeddedAudioPipelineObservation>>,
+        segment_id: Option<u32>,
+        source_interval: Option<crate::observability::PcmSourceInterval>,
+    ) {
+        let _ = (observation, segment_id, source_interval);
+        self.consume_pcm_chunk(pcm);
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

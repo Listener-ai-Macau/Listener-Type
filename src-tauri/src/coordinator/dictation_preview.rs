@@ -11,7 +11,10 @@ struct ProductFinalCandidates {
     local_shadow: Option<String>,
     local_shadow_owner_end_aligned: bool,
     target_filter_required: bool,
-    prefer_partial_preview: bool,
+    /// r36：主轨终稿是否为 speaker_filtered 认证封存（说话人过滤已切尾的
+    /// 干净本人全文）。认证稿覆盖分离稿时分离稿必为截断/劣化（r36 吞字
+    /// 形态：主轨 51 字完好 vs 分离稿截断 20 字被误当"排除"放行）。
+    primary_speaker_filtered_certified: bool,
 }
 
 #[derive(Debug)]
@@ -25,6 +28,30 @@ fn nonempty_transcript(candidate: &Option<RawTranscript>) -> bool {
     candidate
         .as_ref()
         .is_some_and(|candidate| !candidate.text.trim().is_empty())
+}
+
+fn spoken_content_units(text: &str) -> usize {
+    text.chars().filter(|ch| ch.is_alphanumeric()).count()
+}
+
+/// needle 的说出字符是否按顺序整体出现在 haystack 里（紧凑子序列）。用于区分
+/// "主终稿只是比分离稿多一段尾巴"（分离轨在做排除工作）与"两轨内容分叉"
+/// （分离稿被提取伪影劣化，r24）。
+fn compact_subsequence_of(needle: &str, haystack: &str) -> bool {
+    let mut haystack = haystack
+        .chars()
+        .filter(|ch| ch.is_alphanumeric())
+        .collect::<std::collections::VecDeque<_>>();
+    for needle_ch in needle.chars().filter(|ch| ch.is_alphanumeric()) {
+        loop {
+            match haystack.pop_front() {
+                Some(haystack_ch) if haystack_ch == needle_ch => break,
+                Some(_) => continue,
+                None => return false,
+            }
+        }
+    }
+    true
 }
 
 /// The only product-boundary text selector. Every upstream result is supplied
@@ -41,6 +68,51 @@ fn arbitrate_product_final_transcript(
         arbitrate_product_final, ProductFinalAuthority, ProductFinalEvidence,
     };
 
+    // r24（2026-09-18，session 999a5b67）：干扰轮里 separated 解码受提取伪影拖累
+    // 严重劣化（24 字/"第二步"，与主终稿内容分叉），却无条件压过第一仲裁已封存
+    // 的正确 52 字 speaker_filtered 终稿——用户判"吞字"。分离轨的存在价值是归属
+    // 排除：当主终稿只是比分离稿**多出一段尾巴**（分离稿是主终稿的紧凑子序列）
+    // 时，分离轨仍在做排除工作，维持分离优先；两轨内容分叉且主终稿说出内容
+    // 覆盖 ≥ 分离稿时，主终稿（标点/数字写法更好，r23）不应被劣化稿覆盖。
+    // r36（2026-09-18 晚）补丁：分离稿劣化还有第二种形态——**截断成主轨前缀**
+    // （主轨 51 字完好 vs 分离稿截断 20 字）。文本层面"前缀"与"排除尾巴后剩
+    // 正文"无法区分，需要主轨的封存认证位：speaker_filtered 认证稿（说话人
+    // 过滤已切尾的干净本人全文）只要覆盖分离稿，分离稿必为丢正文的劣化稿，
+    // 直接降权；无认证（可能是未过滤的带尾原始稿）才退回子序列判别。
+    let mut candidates = candidates;
+    let separated_units = candidates
+        .separated_owner
+        .as_ref()
+        .map(|separated| spoken_content_units(&separated.text));
+    let primary_units = if candidates.provider_primary.text.trim().is_empty() {
+        None
+    } else {
+        Some(spoken_content_units(&candidates.provider_primary.text))
+    };
+    if let (Some(primary), Some(separated)) = (primary_units, separated_units) {
+        let separated_still_excluding = !candidates.primary_speaker_filtered_certified
+            && primary > separated
+            && {
+                let separated_text = candidates
+                    .separated_owner
+                    .as_ref()
+                    .map(|candidate| candidate.text.as_str())
+                    .unwrap_or_default();
+                compact_subsequence_of(separated_text, &candidates.provider_primary.text)
+            };
+        if primary >= separated && !separated_still_excluding {
+            log::info!(
+                "[target-speaker] separated owner final demoted: {} (primary_spoken={primary} separated_spoken={separated}); keeping primary rendering",
+                if candidates.primary_speaker_filtered_certified {
+                    "certified speaker-filtered primary covers truncated/degraded separated decode"
+                } else {
+                    "primary covers diverged separated decode"
+                }
+            );
+            candidates.separated_owner = None;
+        }
+    }
+
     let authority = arbitrate_product_final(ProductFinalEvidence {
         target_filter_required: candidates.target_filter_required,
         separated_owner_available: nonempty_transcript(&candidates.separated_owner),
@@ -48,12 +120,17 @@ fn arbitrate_product_final_transcript(
         retained_audio_replay_available: nonempty_transcript(&candidates.retained_audio_replay),
         debug_override_available: nonempty_transcript(&candidates.debug_override),
         partial_preview_available: nonempty_transcript(&candidates.partial_preview),
-        prefer_partial_preview: candidates.prefer_partial_preview,
     });
-    let preview_for_hotwords = candidates
-        .partial_preview
-        .as_ref()
-        .map(|preview| preview.text.clone());
+
+    // A preview can contribute hotword spelling only when it is the selected
+    // final source. A rejected preview must not influence a provider or owner
+    // candidate through a later normalization pass.
+    let preview_for_hotwords = matches!(
+        authority,
+        ProductFinalAuthority::PartialPreviewRecovery
+    )
+    .then(|| candidates.partial_preview.as_ref().map(|preview| preview.text.clone()))
+    .flatten();
 
     let mut transcript = match authority {
         ProductFinalAuthority::SeparatedOwner => candidates
@@ -93,12 +170,6 @@ fn arbitrate_product_final_transcript(
     }
 
     if let Some(preview) = preview_for_hotwords.as_deref() {
-        // Shown capsule text is the floor even under interference filtering.
-        // Live 4726b57d displayed 92 chars then inserted 63 because WeSep
-        // won and restore was skipped when target_filter_required.
-        transcript.text = restore_monotonic_owner_preview(&transcript.text, preview);
-    }
-    if let Some(preview) = preview_for_hotwords.as_deref() {
         transcript.text = reconcile_final_transcript_with_preview_hotwords(
             &transcript.text,
             preview,
@@ -116,27 +187,46 @@ fn arbitrate_product_final_transcript(
     }
 }
 
+fn current_embedded_audio_final_preview_candidate(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    duration_ms: u64,
+) -> Option<RawTranscript> {
+    // The visible high-water mark can retain a provisional or superseded tail
+    // after speaker filtering corrects the authoritative ledger. It is useful
+    // for display cadence, but is not evidence for insertion or recovery.
+    let preview = inner.embedded_audio_preview.lock().authoritative(session_id);
+    preview.map(|preview| RawTranscript {
+        text: filter_automatic_wake_text(inner, session_id, &preview, false),
+        duration_ms,
+    })
+}
+
+fn invalidate_embedded_audio_authoritative_preview(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    reason: &'static str,
+) -> bool {
+    dispatch_embedded_ble_session_actor_command(
+        inner,
+        EmbeddedBleSessionActorCommand::AsrPartial,
+        Some(session_id),
+        format!("authoritative_preview_invalidated reason={reason}"),
+        |_| {
+            inner
+                .embedded_audio_preview
+                .lock()
+                .invalidate_authoritative(session_id)
+        },
+    )
+}
+
 fn compact_spoken_preview(text: &str) -> String {
     text.chars()
         .filter(|ch| {
             !ch.is_whitespace() && !is_embedded_audio_partial_preview_decorative(*ch)
         })
         .collect()
-}
-
-fn restore_monotonic_owner_preview(final_text: &str, preview: &str) -> String {
-    let final_core = compact_spoken_preview(final_text);
-    let preview_core = compact_spoken_preview(preview);
-    if preview_core.is_empty() {
-        return final_text.to_string();
-    }
-    if final_core.is_empty()
-        || preview_core.chars().count() >= final_core.chars().count()
-    {
-        preview.to_string()
-    } else {
-        final_text.to_string()
-    }
 }
 
 fn reconcile_final_transcript_with_preview_hotwords(
@@ -388,6 +478,10 @@ fn reduce_embedded_audio_authoritative_preview(
 ) -> bool {
     let preview = filter_dictation_preview_text(inner, session_id, &text);
     if preview.is_empty() {
+        // A normal empty provider partial is not an ownership denial and must
+        // not retract a live preview. Explicit ownership invalidation uses
+        // invalidate_embedded_audio_authoritative_preview at the final
+        // arbitration boundary below.
         return false;
     }
     dispatch_embedded_ble_session_actor_command(
@@ -741,6 +835,7 @@ fn arm_automatic_wake_text_guard(
         // installs this guard, so that ACK may legitimately never repeat.
         initial_body_wait_started_at: Some(Instant::now()),
         body_started: false,
+        body_started_at: None,
         stop_requested: false,
     });
 }
@@ -896,10 +991,8 @@ fn automatic_wake_initial_body_wait_snapshot_at(
                 < Duration::from_millis(EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS)
         })
         .unwrap_or(true);
-    // Before the capsule-visible acknowledgement no deadline is armed, so the
-    // wait remains active even if an eager provider preview already found
-    // body text. After acknowledgement, either positive body text or expiry
-    // of the bounded audio/wall deadline releases the endpoint reducer.
+    // Real body releases the wake-only wait immediately. With no body, the
+    // capsule acknowledgement arms the bounded audio/wall deadline.
     (
         !guard.body_started && audio_wait_active && wall_wait_active,
         guard.initial_body_wait_started_at,
@@ -993,10 +1086,32 @@ fn latch_automatic_wake_body_if_filtered(
         .filter(|guard| guard.session_id == session_id && !guard.body_started)
     {
         guard.body_started = true;
+        guard.body_started_at = Some(Instant::now());
         log::info!(
             "[wake-phrase] automatic body started after capsule session_id={session_id}"
         );
     }
+}
+
+/// True when this automatic-wake session's body latch flipped within `within`.
+/// The endpoint dispatch guard uses it to keep a just-started body from being
+/// cut by an inactive deadline that was armed by the wake phrase itself
+/// (r46f: stop proposed 40 ms before the first body preview became visible).
+fn automatic_wake_body_started_recently(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    within: Duration,
+) -> bool {
+    inner
+        .embedded_audio_automatic_wake_guard
+        .lock()
+        .as_ref()
+        .is_some_and(|guard| {
+            guard.session_id == session_id
+                && guard
+                    .body_started_at
+                    .is_some_and(|started_at| started_at.elapsed() < within)
+        })
 }
 
 fn automatic_wake_text_counts_as_body(text: &str) -> bool {
@@ -1049,24 +1164,49 @@ fn is_dictation_filler_word(word: &str) -> bool {
 }
 
 fn collapsed_filler_gap(gap: &str, terminal: bool) -> String {
-    let punctuation = gap
-        .chars()
-        .filter(|ch| !ch.is_whitespace())
-        .collect::<Vec<_>>();
-    if punctuation.is_empty() {
-        return (!terminal).then_some(" ").unwrap_or_default().to_string();
+    let has_sentence_boundary = gap.chars().any(is_filler_sentence_boundary);
+    let mut kept_pause = false;
+    let mut result = String::new();
+    for ch in gap.chars() {
+        if is_filler_pause_separator(ch) {
+            // Deleting a filler joins its two separator runs. A sentence end
+            // wins over a comma; otherwise keep one pause. Do not collapse
+            // quotes, brackets, line breaks, or combinations such as ?! / …….
+            if !has_sentence_boundary && !kept_pause {
+                result.push(ch);
+                kept_pause = true;
+            }
+        } else if !ch.is_whitespace() || matches!(ch, '\n' | '\r') {
+            result.push(ch);
+        }
     }
-    // Keep the punctuation attached to the previous real word. Preferring
-    // 。 over ， swallowed clause commas (开会，呃然后 → 开会。然后).
-    punctuation
-        .first()
-        .copied()
-        .map(|ch| ch.to_string())
-        .unwrap_or_default()
+    if result.is_empty() && !terminal && gap.chars().any(char::is_whitespace) {
+        result.push(' ');
+    }
+    result
+}
+
+fn is_filler_pause_separator(ch: char) -> bool {
+    matches!(ch, ',' | '，' | '、' | ';' | '；' | ':' | '：')
+}
+
+fn is_filler_sentence_boundary(ch: char) -> bool {
+    matches!(ch, '.' | '。' | '?' | '？' | '!' | '！' | '…')
+}
+
+fn leading_filler_gap(gap: &str) -> String {
+    gap.chars().filter(|ch| {
+        !is_filler_pause_separator(*ch)
+            && !is_filler_sentence_boundary(*ch)
+            && (!ch.is_whitespace() || matches!(ch, '\n' | '\r'))
+    }).collect()
 }
 
 fn remove_standalone_dictation_fillers(text: &str) -> String {
     let text = text.trim();
+    if !text.chars().any(|ch| matches!(ch, '嗯' | '呃' | '额' | '唔')) {
+        return text.to_string();
+    }
     let mut output = String::new();
     let mut word = String::new();
     let mut gap = String::new();
@@ -1092,6 +1232,10 @@ fn remove_standalone_dictation_fillers(text: &str) -> String {
             } else {
                 output.push_str(gap);
             }
+        } else if *filler_removed_in_gap {
+            output.push_str(&leading_filler_gap(gap));
+        } else {
+            output.push_str(gap);
         }
         output.push_str(word);
         *have_retained_word = true;
@@ -1196,8 +1340,9 @@ fn filter_dictation_visual_preview_text(
     session_id: SessionId,
     text: &str,
 ) -> String {
-    // Do not call `filter_automatic_wake_text`: a display-only tail must not
-    // latch body_started or otherwise influence the endpoint state machine.
+    // Strip the wake prefix before latching visible body so a provisional body
+    // cannot expire as a wake-only session. Final delivery separately requires
+    // the authoritative preview; this visual path does not supply final text.
     let phrase = inner
         .embedded_audio_automatic_wake_guard
         .lock()

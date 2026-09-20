@@ -199,7 +199,7 @@ pub fn recordings_root() -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// 双重 cap 清理 `recordings/*.wav`：
+/// 双重 cap 清理 `recordings/*.wav`，并连带清理同 session 的 ASR trace sidecar：
 /// - `retention_days > 0` → 把超过 N 天的删掉（沿用 history 的 retention 逻辑）。
 /// - `max_entries == Some(n)` → 按 mtime 倒序保留最新的 n 条（clamp 到 1..=HISTORY_CAP）；
 ///   `None` 时退回 HISTORY_CAP (200) 硬上限，避免无限增长。
@@ -211,6 +211,26 @@ pub fn prune_recordings(retention_days: u32, max_entries: Option<u32>) -> Result
     };
     if !dir.exists() {
         return Ok(());
+    }
+
+    // Reap trace sidecars whose WAV was removed or never completed.
+    for entry in fs::read_dir(&dir)?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("json")
+            && path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(".asr-trace.json"))
+        {
+            let wav = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(|n| n.strip_suffix(".asr-trace.json"))
+                .map(|n| path.with_file_name(format!("{n}.wav")));
+            if wav.as_ref().is_some_and(|p| !p.exists()) {
+                let _ = fs::remove_file(path);
+            }
+        }
     }
 
     // 第一步：按天清理。仅扫 .wav，跟第二步保持一致；metadata 读不到的文件按"过期"处理
@@ -232,6 +252,7 @@ pub fn prune_recordings(retention_days: u32, max_entries: Option<u32>) -> Result
                 if let Err(err) = fs::remove_file(&path) {
                     log::warn!("[recordings] prune (days) remove failed for {path:?}: {err}");
                 }
+                let _ = fs::remove_file(path.with_extension("asr-trace.json"));
             }
         }
     }
@@ -264,6 +285,7 @@ pub fn prune_recordings(retention_days: u32, max_entries: Option<u32>) -> Result
                 path
             );
         }
+        let _ = fs::remove_file(path.with_extension("asr-trace.json"));
     }
     Ok(())
 }
@@ -272,6 +294,10 @@ pub fn prune_recordings(retention_days: u32, max_entries: Option<u32>) -> Result
 /// 决定文件是否被写过）。前端用 `read_audio_recording` IPC 读字节流喂 HTMLAudio。
 pub fn recording_path_for_session(session_id: &str) -> Result<PathBuf> {
     Ok(recordings_root()?.join(format!("{session_id}.wav")))
+}
+
+pub fn asr_trace_path_for_session(session_id: &str) -> Result<PathBuf> {
+    Ok(recordings_root()?.join(format!("{session_id}.asr-trace.json")))
 }
 
 /// Foundry Local 下载与缓存根目录。DLL 和模型都不打进安装包，和 Qwen3-ASR
@@ -1234,11 +1260,13 @@ impl HistoryStore {
                 return;
             }
         };
-        if !path.exists() {
-            return;
+        if path.exists() {
+            if let Err(err) = fs::remove_file(&path) {
+                log::warn!("[history] delete wav failed for {path:?}: {err}");
+            }
         }
-        if let Err(err) = fs::remove_file(&path) {
-            log::warn!("[history] delete wav failed for {path:?}: {err}");
+        if let Ok(trace) = asr_trace_path_for_session(id) {
+            let _ = fs::remove_file(trace);
         }
     }
 
@@ -1258,6 +1286,14 @@ impl HistoryStore {
                 if let Err(err) = fs::remove_file(&path) {
                     log::warn!("[history] clear wav failed for {path:?}: {err}");
                 }
+                let _ = fs::remove_file(path.with_extension("asr-trace.json"));
+            } else if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".asr-trace.json"))
+            {
+                // Clear diagnostic records even when their WAV is already gone.
+                let _ = fs::remove_file(path);
             }
         }
     }
@@ -2626,10 +2662,10 @@ impl CredentialsVault {
 #[cfg(test)]
 mod tests {
     use super::{
-        chunk_json_payload, data_dir, list_vocab_presets, read_preferences,
-        recording_path_for_session, recordings_root, save_vocab_presets,
-        sync_style_pack_preferences, validate_correction_rule_syntax, HistoryStore,
-        KEYRING_CHUNK_MAX_UTF16_UNITS,
+        asr_trace_path_for_session, chunk_json_payload, data_dir, list_vocab_presets,
+        prune_recordings, read_preferences, recording_path_for_session, recordings_root,
+        save_vocab_presets, sync_style_pack_preferences, validate_correction_rule_syntax,
+        HistoryStore, KEYRING_CHUNK_MAX_UTF16_UNITS,
     };
     use crate::types::DictationSession;
     use crate::types::{builtin_style_packs, CustomStylePrompts, VocabPreset, VocabPresetStore};
@@ -2699,6 +2735,44 @@ mod tests {
             r#"{{"id":"{id}","createdAt":"2026-07-26T00:00:00Z","rawTranscript":"r","finalText":"f","mode":"raw","insertStatus":"copiedFallback"}}"#
         ))
         .expect("parse DictationSession")
+    }
+
+    #[test]
+    fn diagnostic_trace_cleanup_follows_recordings_and_removes_orphans() {
+        let _guard = scoped_data_dir();
+        let store = HistoryStore::new().expect("history");
+        for id in ["paired", "orphan"] {
+            store.append(make_session(id)).expect("append");
+            fs::write(asr_trace_path_for_session(id).unwrap(), b"{}").unwrap();
+        }
+        fs::write(recording_path_for_session("paired").unwrap(), b"wav").unwrap();
+        store.delete("paired").unwrap();
+        store.delete("orphan").unwrap();
+        assert!(!asr_trace_path_for_session("paired").unwrap().exists());
+        assert!(!asr_trace_path_for_session("orphan").unwrap().exists());
+
+        for id in ["a", "b", "orphan"] {
+            fs::write(asr_trace_path_for_session(id).unwrap(), b"{}").unwrap();
+        }
+        for id in ["a", "b"] {
+            fs::write(recording_path_for_session(id).unwrap(), b"wav").unwrap();
+        }
+        prune_recordings(0, Some(1)).unwrap();
+        assert!(!asr_trace_path_for_session("orphan").unwrap().exists());
+        for id in ["a", "b"] {
+            assert_eq!(
+                recording_path_for_session(id).unwrap().exists(),
+                asr_trace_path_for_session(id).unwrap().exists()
+            );
+        }
+        let unrelated = recordings_root().unwrap().join("unrelated.json");
+        fs::write(&unrelated, b"{}").unwrap();
+        fs::write(asr_trace_path_for_session("orphan").unwrap(), b"{}").unwrap();
+        store.clear().unwrap();
+        for id in ["a", "b", "orphan"] {
+            assert!(!asr_trace_path_for_session(id).unwrap().exists());
+        }
+        assert!(unrelated.exists());
     }
 
     #[test]

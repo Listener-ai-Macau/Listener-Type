@@ -1,0 +1,14 @@
+Listener Type local speech activity model notice
+
+File:
+  silero_vad.onnx
+  SHA-256: 9E2449E1087496D8D4CABA907F23E0BD3F78D91FA552479BB9C23AC09CBB1FD6
+
+Source:
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
+  https://github.com/snakers4/silero-vad
+
+The Silero VAD model is distributed under the MIT License. The upstream
+license and notices are maintained by the Silero VAD project at the source
+repository above. This file records the model provenance and checksum used by
+Listener Type; it does not modify the upstream license.

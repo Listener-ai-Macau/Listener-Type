@@ -1774,12 +1774,18 @@ async fn request_embedded_ble_recording_start_from_host(
             // speaking into. Passing `None` here made every terminal
             // continuation fall back to the clipboard even though the capsule
             // itself was deliberately shown without activation.
-            SessionPhase::Idle => begin_session_state(
-                &mut state,
-                capture_focus_target(),
-                capture_frontmost_app(),
-            )
-            .ok_or_else(|| "Listener BLE recording start ignored while idle".to_string())?,
+            SessionPhase::Idle => {
+                // r23：HWND 与标题原子成对抓取，自愈路径靠标题识别真实窗口。
+                let (focus_target, focus_title) = capture_focus_target_with_title();
+                let started = begin_session_state(
+                    &mut state,
+                    focus_target,
+                    capture_frontmost_app(),
+                )
+                .ok_or_else(|| "Listener BLE recording start ignored while idle".to_string())?;
+                state.focus_target_title = focus_title;
+                started
+            }
             SessionPhase::Starting | SessionPhase::Listening => state.session_id,
             phase => {
                 return Err(format!(
@@ -1797,6 +1803,11 @@ async fn request_embedded_ble_recording_start_from_host(
     );
     let terminal_wake_continuation =
         dictation::bind_terminal_wake_continuation_session(inner, session_id);
+    // Host hotkey and CLI starts need the same hidden-candidate takeover as
+    // the physical key path. Otherwise TOGGLE promotes on firmware while
+    // Type keeps verifying (and eventually rejects) that manual recording.
+    let promote_hidden_candidate = !terminal_wake_continuation
+        && dictation::note_device_key_dictation_start_intent(inner);
     emit_capsule_for_session(
         inner,
         session_id,
@@ -1809,7 +1820,7 @@ async fn request_embedded_ble_recording_start_from_host(
 
     #[cfg(test)]
     {
-        let _ = terminal_wake_continuation;
+        let _ = (terminal_wake_continuation, promote_hidden_candidate);
         crate::timeline::mark(
             "backend.embedded_ble_session_actor",
             "firmware_start_skipped_test",
@@ -1821,9 +1832,15 @@ async fn request_embedded_ble_recording_start_from_host(
     #[cfg(not(test))]
     {
         let result = async_runtime::spawn_blocking(move || {
-            crate::embedded_ble::send_recording_control_toggle(
-                EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
-            )
+            if promote_hidden_candidate {
+                crate::embedded_ble::send_recording_control_activate(
+                    EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+                )
+            } else {
+                crate::embedded_ble::send_recording_control_toggle(
+                    EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+                )
+            }
         })
         .await
         .map_err(|err| err.to_string())
@@ -1831,6 +1848,9 @@ async fn request_embedded_ble_recording_start_from_host(
 
         match result {
             Ok(()) => {
+                if promote_hidden_candidate {
+                    dictation::request_hidden_automatic_candidate_promotion(inner);
+                }
                 crate::timeline::mark(
                     "backend.embedded_ble_session_actor",
                     "firmware_start_sent",

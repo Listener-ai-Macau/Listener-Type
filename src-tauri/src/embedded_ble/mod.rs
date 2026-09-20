@@ -27,6 +27,16 @@ pub const DIAGNOSTIC_CHUNK_HEADER_BYTES: usize =
 pub struct BleNotificationEvent {
     pub notification: Vec<u8>,
     pub terminal: bool,
+    /// Monotonic identity of the Windows notify capture that delivered this
+    /// value.  It is observation metadata only; packet processing continues
+    /// to use the protocol session id.
+    pub capture_generation: u64,
+    /// The capture collector's immutable notification admission fact.  It is
+    /// evidence only; the actor still performs its own admission.
+    pub capture_admission_fact: Option<crate::embedded_audio::SessionAdmissionFact>,
+    /// Shared witness for an accepted audio revision.  Capture may later mark
+    /// this witness superseded before the actor consumes the queued packet.
+    pub capture_admission_receipt: Option<crate::embedded_audio::SessionAdmissionReceipt>,
 }
 
 pub type BleNotificationHandler<'a> = dyn FnMut(BleNotificationEvent) -> Result<(), String> + 'a;
@@ -532,6 +542,27 @@ pub fn send_recording_control_cancel(timeout: Duration) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 pub fn send_recording_control_activate(timeout: Duration) -> Result<(), String> {
     windows_ble::send_recording_control_activate(timeout)
+}
+
+#[cfg(target_os = "windows")]
+pub fn send_recording_control_ensure_wake_capture(
+    request_id: u32,
+    previous_segment_id: u32,
+    timeout: Duration,
+) -> Result<(), String> {
+    windows_ble::send_recording_control_ensure_wake_capture(
+        request_id,
+        previous_segment_id,
+        timeout,
+    )
+}
+
+#[cfg(target_os = "windows")]
+pub fn send_recording_control_abort_wake_capture(
+    request_id: u32,
+    timeout: Duration,
+) -> Result<(), String> {
+    windows_ble::send_recording_control_abort_wake_capture(request_id, timeout)
 }
 
 #[cfg(target_os = "windows")]
@@ -1170,6 +1201,23 @@ pub fn send_recording_control_cancel(_timeout: Duration) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn send_recording_control_activate(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE recording activation is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_recording_control_ensure_wake_capture(
+    _request_id: u32,
+    _previous_segment_id: u32,
+    _timeout: Duration,
+) -> Result<(), String> {
+    Err("Embedded BLE wake capture ensure is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_recording_control_abort_wake_capture(
+    _request_id: u32,
+    _timeout: Duration,
+) -> Result<(), String> {
+    Err("Embedded BLE wake capture abort is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]

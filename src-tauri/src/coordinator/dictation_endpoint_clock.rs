@@ -7,8 +7,97 @@
 /// settled for several seconds. Arm this clock only for a visible body with a
 /// stable cloud target. Provisional speech cancels it, and a newer target
 /// boundary rearms it, so it cannot race an actively growing owner utterance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EndpointStopPhase {
+    Proposed,
+    Sending,
+    Sent,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct EndpointStopTicket {
+    session_id: SessionId,
+    proposal_id: u64,
+    endpoint_generation: u64,
+    local_vad_revision: u64,
+    activity_epoch: u64,
+    manual_vad_guard: bool,
+}
+
+#[derive(Debug, Default)]
+struct EndpointStopDispatchState {
+    next_proposal_id: u64,
+    ticket: Option<(EndpointStopPhase, EndpointStopTicket)>,
+}
+
+impl EndpointStopDispatchState {
+    fn propose(
+        &mut self,
+        session_id: SessionId,
+        endpoint_generation: u64,
+        local_vad_revision: u64,
+        activity_epoch: u64,
+        manual_vad_guard: bool,
+    ) -> Option<EndpointStopTicket> {
+        if self.ticket.is_some() {
+            return None;
+        }
+        self.next_proposal_id = self.next_proposal_id.wrapping_add(1).max(1);
+        let ticket = EndpointStopTicket {
+            session_id,
+            proposal_id: self.next_proposal_id,
+            endpoint_generation,
+            local_vad_revision,
+            activity_epoch,
+            manual_vad_guard,
+        };
+        self.ticket = Some((EndpointStopPhase::Proposed, ticket));
+        Some(ticket)
+    }
+
+    fn is_current(&self, ticket: EndpointStopTicket) -> bool {
+        self.ticket.is_some_and(|(_, current)| current == ticket)
+    }
+
+    fn begin_sending(&mut self, ticket: EndpointStopTicket) -> bool {
+        if self
+            .ticket
+            .is_some_and(|(phase, current)| phase == EndpointStopPhase::Proposed && current == ticket)
+        {
+            self.ticket = Some((EndpointStopPhase::Sending, ticket));
+            true
+        } else {
+            false
+        }
+    }
+
+    fn cancel_if_current(&mut self, ticket: EndpointStopTicket) -> bool {
+        if self.ticket.is_some_and(|(phase, current)| {
+            phase != EndpointStopPhase::Sent && current == ticket
+        }) {
+            self.ticket = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn mark_sent_if_current(&mut self, ticket: EndpointStopTicket) -> bool {
+        if self
+            .ticket
+            .is_some_and(|(phase, current)| phase == EndpointStopPhase::Sending && current == ticket)
+        {
+            self.ticket = Some((EndpointStopPhase::Sent, ticket));
+            true
+        } else {
+            false
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct SettledTargetEndpointClock {
+    stop_proposed: bool,
     generation: u64,
     armed_target_end_ms: Option<u64>,
     armed_at: Option<Instant>,
@@ -18,6 +107,18 @@ struct SettledTargetEndpointClock {
     /// from the automatic-wake guard's original clock.  Wake-phrase audio and
     /// provider bookkeeping cannot rearm or block this bounded abandonment.
     automatic_no_body_armed: bool,
+    automatic_no_body_initial_audio_ms: u64,
+    automatic_no_body_last_speech_ms: Option<u64>,
+    /// Sticky marker for the whole session: this clock was armed by an
+    /// accepted automatic wake.  `automatic_no_body_armed` above clears when
+    /// the first body text appears; this marker survives that transition so
+    /// body-stage policy (the bounded open-clause continuation) can tell
+    /// automatic wake sessions apart from manual hotkey sessions.
+    automatic_wake_session: bool,
+    /// Wall-clock moment of the last POSITIVE owner-dictation evidence: a
+    /// local qualified/Target watermark advance, visible preview growth, or
+    /// the session's first arm.  See EMBEDDED_OWNER_POSITIVE_EVIDENCE_BUDGET_MS.
+    last_positive_owner_evidence_at: Option<Instant>,
     /// A provisional cloud tail normally cancels the owner endpoint. Preserve
     /// its original deadline out of band so a later sustained-local-other
     /// decision can restore that deadline instead of starting another wait.
@@ -46,11 +147,27 @@ struct SettledTargetEndpointClock {
     /// ordinary terminal-first short commands keep the normal 900 ms clock.
     manual_terminal_bridge_until: Option<Instant>,
     manual_terminal_bridge_rearm_pending: bool,
+    /// Manual body endpointing has a bounded second stage for an open clause.
+    /// The first one-second silence window is only a qualification point; an
+    /// unfinished visible body may keep capture alive until this deadline.
+    continuation_pending_until: Option<Instant>,
+    continuation_pending_anchor_speech_end_ms: Option<u64>,
+    continuation_pending_anchor_canonical_speech_serial: Option<u64>,
+    continuation_cutoff_reached: bool,
     pending_was_seen: bool,
     /// The sole visible-recording stop authority. All callback evidence is
     /// reduced into this controller; no provider or firmware callback owns a
     /// second endpoint timer.
     product_endpoint: crate::speech_decision_kernel::OwnerEndpointController,
+    /// Revision of the sidecar VAD snapshot consumed by the reducer. A new
+    /// VAD state at the same PCM edge is still a new observation.
+    latest_local_vad_revision: Option<u64>,
+    /// `Some` is supplied only for the manual-body local-VAD endpoint path.
+    /// It keeps the bounded continuation policy away from automatic wake and
+    /// enrolled-speaker sessions until those paths have their own evidence.
+    manual_vad_guard: bool,
+    latest_local_vad_evidence: Option<crate::asr::volcengine::LocalSpeechEvidence>,
+    canonical_speech_serial: u64,
     last_visible_body_signature: Option<(bool, usize)>,
     /// Last local speech edge used to renew the firmware endpoint.  Provider
     /// callbacks can repeat the same snapshot; dedupe it so a stale snapshot
@@ -70,6 +187,14 @@ struct SettledTargetEndpointClock {
 const RECENT_STRONG_NON_TARGET_WINDOW_MS: u64 = 900;
 const MANUAL_TERMINAL_BRIDGE_MAX_MS: u64 = 3_000;
 const MANUAL_TERMINAL_BRIDGE_MIN_VISIBLE_CHARS: usize = 20;
+/// Automatic-wake sessions earn the bounded open-clause continuation only
+/// with an established body.  A short finished command (below this many
+/// visible chars) keeps the fast one-second contract; a flowing dictation's
+/// deliberate mid-sentence pause (defect A, 2026-09-19: "…然后现在体验好像没
+/// 有一开" cut mid-word in a quiet room; and the 12:36Z session "你看一下怎
+/// 么弄哦？我快点把…" cut after a rhetorical question) gets the same one
+/// natural pause manual sessions already have.
+const AUTOMATIC_WAKE_CONTINUATION_MIN_VISIBLE_CHARS: usize = 10;
 const ENDPOINT_PROVIDER_CATCH_UP_GRACE_MS: u64 = 300;
 // A 1.2 s speaker window can take longer than the public one-second endpoint
 // when the owner-only separator is using the same inference pool.  Wait for
@@ -96,11 +221,16 @@ fn endpoint_hold_reason(
     {
         return "fresh_owner_tail";
     }
+    if update.local_speaker_tracking_enabled
+        && has_established_owner_uncertain_continuation(update)
+    {
+        return "owner_uncertain_continuation";
+    }
     if latest_visible_body_ends_terminal == Some(false) {
         return "open_clause_tail";
     }
     if !(update.speaker_info_present && update.speaker_id.is_some())
-        && update.local_target_speech_end_ms.is_none()
+        && update.qualified_owner_speech_end_ms.is_none()
     {
         return "owner_identity_not_settled";
     }
@@ -110,6 +240,7 @@ fn endpoint_hold_reason(
 fn product_endpoint_evidence(
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
     authoritative_owner_watermark_ms: Option<u64>,
+    positive_owner_evidence_live: bool,
 ) -> crate::speech_decision_kernel::EndpointEvidence {
     let latest_speech_confirmed_non_target = update
         .local_speech_end_ms
@@ -120,12 +251,23 @@ fn product_endpoint_evidence(
         // collapsed a nearby second speaker masquerade as fresh owner growth.
         owner_watermark_ms: authoritative_owner_watermark_ms,
         provider_coverage_ms: update.provider_audio_duration_ms,
-        pending_provider_text: update.pending_unattributed_speech,
+        // An expired positive-evidence budget downgrades unclassified/cloud
+        // continuation to silence for the stop controller as well: leaving
+        // these bits set let the kernel Hold forever on room-noise edges the
+        // policy gate had already stopped vouching for.
+        pending_provider_text: positive_owner_evidence_live
+            && update.pending_unattributed_speech,
         latest_speech_confirmed_non_target,
-        unresolved_owner_tail: has_unresolved_recent_owner_speech(
-            update,
-            EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
-        ),
+        // Same fusion as `update_allows_endpoint`: an established owner whose
+        // live speech windows stay Uncertain (interference-degraded identity,
+        // installed r10) is still an unresolved owner tail for the stop
+        // controller, otherwise decide_stop fires through a hold the policy
+        // gate just granted.
+        unresolved_owner_tail: positive_owner_evidence_live
+            && (has_unresolved_recent_owner_speech(
+                update,
+                EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+            ) || has_established_owner_uncertain_continuation(update)),
     }
 }
 
@@ -136,7 +278,7 @@ fn update_has_recent_strong_non_target(
         return false;
     };
     if update
-        .local_target_speech_end_ms
+        .qualified_owner_speech_end_ms
         .is_some_and(|target_end_ms| target_end_ms > non_target_end_ms)
     {
         return false;
@@ -148,6 +290,20 @@ fn update_has_recent_strong_non_target(
         .max()
         .unwrap_or(non_target_end_ms);
     latest_audio_ms.saturating_sub(non_target_end_ms) <= RECENT_STRONG_NON_TARGET_WINDOW_MS
+}
+
+/// Once the local owner has been established, a fresh still-speakerless or
+/// provider-pending speech edge whose identity is uncertain is a bounded stop
+/// barrier, not a new owner watermark. The endpoint watermark remains the last
+/// qualified local Target observation. Cloud-attributed growth is excluded: it
+/// is the shape that can merge a room speaker into the owner's old provider
+/// id. Silence is an unchanged speech edge and therefore does not renew this
+/// boundary.
+fn owner_endpoint_boundary_with_uncertain_tail(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    cloud_owner_boundary_ms: Option<u64>,
+) -> Option<u64> {
+    authoritative_owner_endpoint_boundary(update, cloud_owner_boundary_ms)
 }
 
 impl SettledTargetEndpointClock {
@@ -179,10 +335,8 @@ impl SettledTargetEndpointClock {
         observed_at: Instant,
     ) {
         if self.automatic_no_body_armed {
-            // Keep diagnostics current without allowing wake audio, room
-            // energy or provider callbacks to restart the original deadline.
+            self.observe_automatic_no_body_speech(update, observed_at);
             self.latest_update = Some(update.clone());
-            self.latest_update_at = Some(observed_at);
             return;
         }
         self.generation = self.generation.wrapping_add(1);
@@ -190,12 +344,60 @@ impl SettledTargetEndpointClock {
         self.armed_at = Some(started_at);
         self.armed_from_visible_body_fallback = true;
         self.automatic_no_body_armed = true;
+        self.automatic_wake_session = true;
+        if self.last_positive_owner_evidence_at.is_none() {
+            self.note_positive_owner_evidence(started_at);
+        }
+        self.automatic_no_body_initial_audio_ms = update.audio_duration_ms.unwrap_or(0);
+        self.automatic_no_body_last_speech_ms = update.local_speech_end_ms;
         self.latest_update = Some(update.clone());
         self.latest_update_at = Some(started_at);
         self.clear_paused_arm();
         self.pending_was_seen = false;
         self.product_endpoint
             .arm(crate::speech_decision_kernel::EndpointEvidence::default());
+        self.stop_proposed = false;
+        log::info!(
+            "[asr] endpoint transition action=arm source=automatic_no_body reason=accepted_wake_without_body generation={} initial_audio_ms={} local_speech_end_ms={:?} audio_ms={:?} provider_ms={:?}",
+            self.generation,
+            self.automatic_no_body_initial_audio_ms,
+            self.automatic_no_body_last_speech_ms,
+            update.audio_duration_ms,
+            update.provider_audio_duration_ms,
+        );
+    }
+
+    fn observe_automatic_no_body_speech(
+        &mut self,
+        update: &crate::asr::volcengine::TargetSpeakerUpdate,
+        now: Instant,
+    ) {
+        let Some(speech_ms) = update.local_speech_end_ms else { return; };
+        // A cloud first result can take longer than the no-body window. New
+        // microphone speech after the wake boundary must preserve that body
+        // while it is awaiting text. Repeated wake evidence cannot renew it,
+        // and a positively identified other speaker cannot take ownership.
+        if speech_ms <= self.automatic_no_body_initial_audio_ms.saturating_add(600)
+            || self.automatic_no_body_last_speech_ms.is_some_and(|last| speech_ms <= last)
+            || local_speech_confidently_non_target(update, speech_ms)
+        {
+            return;
+        }
+        let armed_at_before = self.armed_at;
+        self.automatic_no_body_last_speech_ms = Some(speech_ms);
+        self.latest_update_at = Some(now);
+        self.armed_at = Some(now);
+        log::info!(
+            "[asr] endpoint transition action=rearm source=automatic_no_body reason=new_post_wake_local_speech generation={} previous_armed_age_ms={:?} audio_ms={:?} provider_ms={:?} local_speech_end_ms={:?} speech_ms={} classification={:?} quality={:?}",
+            self.generation,
+            Self::elapsed_ms(armed_at_before, now),
+            update.audio_duration_ms,
+            update.provider_audio_duration_ms,
+            update.local_speech_end_ms,
+            speech_ms,
+            update.local_speaker_classification_kind,
+            update.local_speaker_signal_quality_sufficient,
+        );
     }
 
     fn leave_automatic_no_body_mode(&mut self) {
@@ -210,6 +412,7 @@ impl SettledTargetEndpointClock {
         self.clear_paused_arm();
         self.pending_was_seen = false;
         self.product_endpoint.reset();
+        self.stop_proposed = false;
     }
 
     fn should_renew_firmware_endpoint_lease(
@@ -217,7 +420,16 @@ impl SettledTargetEndpointClock {
         update: &crate::asr::volcengine::TargetSpeakerUpdate,
         body_started: bool,
     ) -> bool {
-        let owner_speech_ms = update.local_target_speech_end_ms;
+        let unresolved_owner_tail = has_unresolved_recent_owner_speech(
+            update, EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+        );
+        let owner_speech_ms = endpoint_owner_watermark(update);
+        if update.local_speaker_tracking_enabled
+            && update.qualified_owner_speech_end_ms.is_some()
+            && !update.qualified_owner_activity_advanced
+        {
+            return false;
+        }
         if owner_speech_ms.is_some()
             && owner_speech_ms == self.last_firmware_lease_owner_speech_ms
         {
@@ -226,17 +438,13 @@ impl SettledTargetEndpointClock {
         let latest_speech_confirmed_non_target = update
             .local_speech_end_ms
             .is_some_and(|speech_ms| local_speech_confidently_non_target(update, speech_ms));
-        let owner_established = update.target_speech_end_ms.is_some()
-            || update.local_target_speech_end_ms.is_some();
+        let owner_established = endpoint_owner_watermark(update).is_some();
         let evidence = crate::speech_decision_kernel::FirmwareEndpointLeaseEvidence {
             visible_body: body_started,
             owner_established,
             owner_speech_watermark_ms: owner_speech_ms,
             provider_coverage_ms: update.provider_audio_duration_ms,
-            unresolved_owner_tail: has_unresolved_recent_owner_speech(
-                update,
-                EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
-            ),
+            unresolved_owner_tail,
             latest_speech_confirmed_non_target,
         };
         if crate::speech_decision_kernel::decide_firmware_endpoint_lease(evidence)
@@ -254,6 +462,9 @@ impl SettledTargetEndpointClock {
         last_visible_growth_at: Option<Instant>,
         now: Instant,
     ) -> bool {
+        if self.continuation_cutoff_reached {
+            return false;
+        }
         let Some(grown_at) = last_visible_growth_at else {
             return false;
         };
@@ -267,6 +478,204 @@ impl SettledTargetEndpointClock {
             return false;
         }
         self.last_host_hang_lease_at = Some(now);
+        true
+    }
+
+    fn should_keep_firmware_alive_for_continuation(&mut self, now: Instant) -> bool {
+        let Some(deadline) = self.continuation_pending_until else {
+            return false;
+        };
+        if now >= deadline {
+            return false;
+        }
+        if self.last_host_hang_lease_at.is_some_and(|last| {
+            now.saturating_duration_since(last)
+                < Duration::from_millis(EMBEDDED_DANGLING_FIRMWARE_KEEPALIVE_INTERVAL_MS)
+        }) {
+            return false;
+        }
+        self.last_host_hang_lease_at = Some(now);
+        true
+    }
+
+    fn note_local_vad_evidence(
+        &mut self,
+        evidence: crate::asr::volcengine::LocalSpeechEvidence,
+    ) {
+        let previous_state = self.latest_local_vad_evidence.map(|previous| previous.state);
+        if evidence.state == crate::asr::volcengine::LocalSpeechActivityState::Speech
+            && previous_state
+                != Some(crate::asr::volcengine::LocalSpeechActivityState::Speech)
+        {
+            self.canonical_speech_serial = self.canonical_speech_serial.wrapping_add(1);
+        }
+        self.latest_local_vad_evidence = Some(evidence);
+    }
+
+    fn clear_continuation_pending(&mut self) {
+        self.continuation_pending_until = None;
+        self.continuation_pending_anchor_speech_end_ms = None;
+    }
+
+    fn positive_owner_evidence_live(&self, now: Instant) -> bool {
+        self.last_positive_owner_evidence_at.is_some_and(|at| {
+            now.saturating_duration_since(at)
+                < Duration::from_millis(EMBEDDED_OWNER_POSITIVE_EVIDENCE_BUDGET_MS)
+        })
+    }
+
+    fn note_positive_owner_evidence(&mut self, now: Instant) {
+        self.last_positive_owner_evidence_at = Some(now);
+    }
+
+    fn reset_continuation_tracking(&mut self) {
+        self.clear_continuation_pending();
+        self.continuation_pending_anchor_canonical_speech_serial = None;
+        self.continuation_cutoff_reached = false;
+    }
+
+    #[cfg(test)]
+    fn continuation_pending_active(&self, now: Instant) -> bool {
+        self.continuation_pending_until
+            .is_some_and(|deadline| now < deadline)
+    }
+
+    fn maybe_enter_manual_continuation_pending(
+        &mut self,
+        update: &crate::asr::volcengine::TargetSpeakerUpdate,
+        armed_at: Instant,
+        now: Instant,
+    ) -> bool {
+        // Defect A (2026-09-19): an automatic wake's deliberate mid-sentence
+        // thinking pause in a quiet room leaves no acoustic evidence at all —
+        // no Uncertain window, no fresh unclassified speech — so the public
+        // one-second clock fired and cut a flowing dictation mid-word.  Manual
+        // sessions already keep this bounded continuation stage for exactly
+        // that body shape; extend it to automatic wake sessions once the body
+        // is established (>= 10 visible chars keeps short finished commands
+        // on the fast one-second contract).  A terminal mark does NOT end an
+        // automatic session's eligibility (12:36Z session: the rhetorical
+        // "你看一下怎么弄哦？" was punctuated terminal, the 1 s clock cut the
+        // resumed "我快点把…" tail — a conversational ？ invites continuation,
+        // it does not close the dictation).  Manual hotkey sessions keep the
+        // stricter non-terminal-only contract.  Confirmed other-speaker
+        // evidence and the continuous-interference Uncertain holds keep their
+        // own contracts and are not weakened here.  The automatic eligibility
+        // also requires a live positive-evidence budget: a settled preview
+        // whose room noise keeps advancing local speech edges would otherwise
+        // cancel and re-enter this window with a fresh anchor forever (the
+        // "不能自动结束" loop).  A real pause fits — preview growth refreshed
+        // the budget at the last spoken word, and 3 s > the 2.5 s window.
+        let continuation_eligible = self.manual_vad_guard
+            || (self.automatic_wake_session
+                && self.positive_owner_evidence_live(now)
+                && self.open_body_peak_visible_chars
+                    >= AUTOMATIC_WAKE_CONTINUATION_MIN_VISIBLE_CHARS);
+        let body_shape_allows_continuation = if self.manual_vad_guard {
+            self.latest_visible_body_ends_terminal == Some(false)
+        } else {
+            true
+        };
+        if !continuation_eligible || !body_shape_allows_continuation {
+            if self
+                .continuation_pending_anchor_canonical_speech_serial
+                .is_some()
+            {
+                self.continuation_cutoff_reached = true;
+            }
+            self.clear_continuation_pending();
+            return false;
+        }
+        if self.continuation_cutoff_reached {
+            return false;
+        }
+        if self.latest_local_vad_evidence.is_some_and(|evidence| {
+            matches!(
+                evidence.state,
+                crate::asr::volcengine::LocalSpeechActivityState::Speech
+                    | crate::asr::volcengine::LocalSpeechActivityState::Unknown
+            )
+        }) {
+            // The ordinary endpoint guard below still handles live speech and
+            // unknown/lagging analysis. Neither state is a confirmed silence
+            // interval from which a continuation deadline may be created.
+            return false;
+        }
+        if let Some(deadline) = self.continuation_pending_until {
+            if now < deadline {
+                return true;
+            }
+            self.clear_continuation_pending();
+            self.continuation_cutoff_reached = true;
+            return false;
+        }
+        // When the independent VAD is present, its last confirmed speech edge
+        // is the only legal anchor. In particular, PendingSpeech/Unknown may
+        // expose the current capture edge through TargetSpeakerUpdate, but
+        // that edge is not a confirmed new speech interval and must not buy a
+        // fresh 2.5s continuation window.
+        let confirmed_speech_end_ms = match self.latest_local_vad_evidence {
+            Some(evidence) => evidence.last_detected_speech_end_ms,
+            None => {
+                // 2026-09-19 13:42Z (session f564b094): at the 1 s due check
+                // the governing update carried no local speech edge (and in
+                // the stale shape one that trailed the live audio by 4.7 s).
+                // The anchor then had nothing — or an already-expired
+                // deadline — so the cutoff latched and
+                // target_speaker_inactive_1000ms fired mid-word ("…然后那个
+                // ｜绿…"), ending the session early and swallowing the
+                // resumed tail. A missing or long-stale edge must fall back
+                // to the live audio edge: the established visible body and
+                // the live positive-evidence budget are the same evidence
+                // that made this session eligible, and the window stays
+                // bounded by the single 2.5 s continuation budget plus the
+                // cutoff latch. A genuinely later speech edge still cancels
+                // the window through the anchor comparison above.
+                const STALE_LOCAL_EDGE_MAX_LAG_MS: u64 = 2_000;
+                let local_edge_usable = update.local_speech_end_ms.is_some_and(|edge_ms| {
+                    update.audio_duration_ms.is_none_or(|audio_ms| {
+                        audio_ms.saturating_sub(edge_ms) <= STALE_LOCAL_EDGE_MAX_LAG_MS
+                    })
+                });
+                if local_edge_usable {
+                    update.local_speech_end_ms
+                } else {
+                    update.audio_duration_ms
+                }
+            }
+        };
+        let current_audio_ms = update
+            .audio_duration_ms
+            .or(confirmed_speech_end_ms)
+            .unwrap_or_default();
+        let Some(confirmed_speech_end_ms) = confirmed_speech_end_ms else {
+            self.continuation_cutoff_reached = true;
+            return false;
+        };
+        let continuation_end_audio_ms = confirmed_speech_end_ms
+            .saturating_add(EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS);
+        let remaining_ms = continuation_end_audio_ms.saturating_sub(current_audio_ms);
+        if remaining_ms == 0 {
+            self.continuation_cutoff_reached = true;
+            return false;
+        }
+        let deadline = now + Duration::from_millis(remaining_ms);
+        self.continuation_pending_until = Some(deadline);
+        self.continuation_pending_anchor_speech_end_ms = Some(confirmed_speech_end_ms);
+        self.continuation_pending_anchor_canonical_speech_serial =
+            Some(self.canonical_speech_serial);
+        self.continuation_cutoff_reached = false;
+        log::info!(
+            "[asr] endpoint transition action=continuation_pending generation={} deadline_in_ms={} armed_age_ms={} confirmed_speech_end_ms={:?} current_audio_ms={} cutoff_audio_ms={} canonical_speech_serial={} visible_body_ends_terminal={:?}",
+            self.generation,
+            deadline.saturating_duration_since(now).as_millis(),
+            now.saturating_duration_since(armed_at).as_millis(),
+            confirmed_speech_end_ms,
+            current_audio_ms,
+            continuation_end_audio_ms,
+            self.canonical_speech_serial,
+            self.latest_visible_body_ends_terminal,
+        );
         true
     }
 
@@ -286,6 +695,105 @@ impl SettledTargetEndpointClock {
         self.paused_armed_at = None;
     }
 
+    fn elapsed_ms(started_at: Option<Instant>, now: Instant) -> Option<u64> {
+        started_at.map(|started_at| {
+            now.saturating_duration_since(started_at)
+                .as_millis()
+                .min(u64::MAX as u128) as u64
+        })
+    }
+
+    fn log_pending_owner_tail_transition(
+        &self,
+        source: &'static str,
+        update: &crate::asr::volcengine::TargetSpeakerUpdate,
+        body_started: bool,
+        now: Instant,
+        generation_before: u64,
+        armed_at_before: Option<Instant>,
+        armed_target_before: Option<u64>,
+        recent_strong_non_target: bool,
+    ) {
+        log::info!(
+            "[asr] endpoint transition action={} source={} generation_before={} generation_after={} body_started={} armed_before_age_ms={:?} armed_after_age_ms={:?} paused_deadline_age_ms={:?} armed_target_before_ms={:?} paused_target_after_ms={:?} armed_target_after_ms={:?} pending_owner_tail=true recent_strong_non_target={} unresolved_owner_tail=true pending_provider_text={} audio_ms={:?} provider_ms={:?} local_speech_end_ms={:?} qualified_owner_end_ms={:?} qualified_owner_advanced={} target_activity_advanced={} pending_activity_advanced={} classification={:?} quality={:?} observation_end_ms={:?} speaker_info_present={}",
+            if armed_at_before.is_some() {
+                "pause"
+            } else {
+                "hold_unarmed"
+            },
+            source,
+            generation_before,
+            self.generation,
+            body_started,
+            Self::elapsed_ms(armed_at_before, now),
+            Self::elapsed_ms(self.armed_at, now),
+            Self::elapsed_ms(self.paused_armed_at, now),
+            armed_target_before,
+            self.paused_armed_target_end_ms,
+            self.armed_target_end_ms,
+            recent_strong_non_target,
+            update.pending_unattributed_speech,
+            update.audio_duration_ms,
+            update.provider_audio_duration_ms,
+            update.local_speech_end_ms,
+            update.qualified_owner_speech_end_ms,
+            update.qualified_owner_activity_advanced,
+            update.target_activity_advanced,
+            update.pending_activity_advanced,
+            update.local_speaker_classification_kind,
+            update.local_speaker_signal_quality_sufficient,
+            update.local_speaker_observation_end_ms,
+            update.speaker_info_present,
+        );
+    }
+
+    fn log_endpoint_arm_transition(
+        &self,
+        source: &'static str,
+        reason: &'static str,
+        update: &crate::asr::volcengine::TargetSpeakerUpdate,
+        body_started: bool,
+        now: Instant,
+        generation_before: u64,
+        armed_at_before: Option<Instant>,
+        armed_target_before: Option<u64>,
+        paused_armed_at_before: Option<Instant>,
+    ) {
+        log::info!(
+            "[asr] endpoint transition action={} source={} reason={} generation_before={} generation_after={} body_started={} armed_before_age_ms={:?} armed_after_age_ms={:?} paused_before_age_ms={:?} armed_target_before_ms={:?} armed_target_after_ms={:?} pending_was_seen={} pending_provider_text={} audio_ms={:?} provider_ms={:?} local_speech_end_ms={:?} qualified_owner_end_ms={:?} qualified_owner_advanced={} target_activity_advanced={} pending_activity_advanced={} classification={:?} quality={:?} observation_end_ms={:?} speaker_info_present={}",
+            if reason == "restore_paused_deadline" {
+                "restore"
+            } else if armed_at_before.is_some() {
+                "rearm"
+            } else {
+                "arm"
+            },
+            source,
+            reason,
+            generation_before,
+            self.generation,
+            body_started,
+            Self::elapsed_ms(armed_at_before, now),
+            Self::elapsed_ms(self.armed_at, now),
+            Self::elapsed_ms(paused_armed_at_before, now),
+            armed_target_before,
+            self.armed_target_end_ms,
+            self.pending_was_seen,
+            update.pending_unattributed_speech,
+            update.audio_duration_ms,
+            update.provider_audio_duration_ms,
+            update.local_speech_end_ms,
+            update.qualified_owner_speech_end_ms,
+            update.qualified_owner_activity_advanced,
+            update.target_activity_advanced,
+            update.pending_activity_advanced,
+            update.local_speaker_classification_kind,
+            update.local_speaker_signal_quality_sufficient,
+            update.local_speaker_observation_end_ms,
+            update.speaker_info_present,
+        );
+    }
+
     /// Returns a generation token when a new one-second timer must be started.
     fn observe(
         &mut self,
@@ -293,10 +801,23 @@ impl SettledTargetEndpointClock {
         body_started: bool,
         now: Instant,
     ) -> Option<u64> {
+        self.observe_with_local_vad_revision(update, body_started, now, None)
+    }
+
+    fn observe_with_local_vad_revision(
+        &mut self,
+        update: &crate::asr::volcengine::TargetSpeakerUpdate,
+        body_started: bool,
+        now: Instant,
+        local_vad_revision: Option<u64>,
+    ) -> Option<u64> {
+        if local_vad_revision.is_some() {
+            self.manual_vad_guard = true;
+        }
         if self.automatic_no_body_armed {
             if !body_started {
+                self.observe_automatic_no_body_speech(update, now);
                 self.latest_update = Some(update.clone());
-                self.latest_update_at = Some(now);
                 return None;
             }
             // The first accepted body is a real owner-session transition. It
@@ -311,20 +832,108 @@ impl SettledTargetEndpointClock {
         let previous_local_owner_end_ms = self
             .latest_update
             .as_ref()
+            .and_then(|previous| previous.qualified_owner_speech_end_ms);
+        let previous_local_target_end_ms = self
+            .latest_update
+            .as_ref()
             .and_then(|previous| previous.local_target_speech_end_ms);
+        let continuation_activity_rearm = self
+            .continuation_pending_anchor_canonical_speech_serial
+            .is_some_and(|anchor_serial| self.canonical_speech_serial > anchor_serial)
+            // Automatic wake sessions never receive local VAD evidence (that
+            // sidecar feeds the manual path only), so their canonical serial
+            // cannot advance.  A newer local speech edge is the equivalent
+            // "the user actually resumed" signal there: without it the
+            // continuation cutoff would latch after the first pause and every
+            // later mid-sentence pause in the same session would cut at 1 s.
+            // Manual sessions keep requiring the confirmed VAD speech serial
+            // alone — a PendingSpeech edge must not buy a fresh window there.
+            || (self.automatic_wake_session
+                && self
+                    .continuation_pending_anchor_speech_end_ms
+                    .is_some_and(|anchor_ms| {
+                        update
+                            .local_speech_end_ms
+                            .is_some_and(|speech_ms| speech_ms > anchor_ms)
+                    }));
+        if continuation_activity_rearm {
+            log::info!(
+                "[asr] endpoint transition action=cancel_continuation source=canonical_local_vad_speech generation={} anchor_canonical_speech_serial={:?} current_canonical_speech_serial={} current_speech_end_ms={:?}",
+                self.generation,
+                self.continuation_pending_anchor_canonical_speech_serial,
+                self.canonical_speech_serial,
+                update.local_speech_end_ms,
+            );
+            self.reset_continuation_tracking();
+        }
+        // A late provider row can repeat the same local audio snapshot. Its
+        // arrival does not make that old microphone evidence fresh again.
+        let local_vad_revision_changed = local_vad_revision.is_some_and(|revision| {
+            self.latest_local_vad_revision
+                .is_none_or(|previous| revision > previous)
+        });
+        if local_vad_revision_changed {
+            self.latest_local_vad_revision = local_vad_revision;
+        }
+        let local_timeline_changed = local_vad_revision_changed
+            || self.latest_update.as_ref().is_none_or(|previous| {
+                previous.audio_duration_ms != update.audio_duration_ms
+                    || previous.local_speech_end_ms != update.local_speech_end_ms
+            });
         self.latest_update = Some(update.clone());
-        self.latest_update_at = Some(now);
+        if local_timeline_changed {
+            self.latest_update_at = Some(now);
+        }
+        // Positive-evidence bookkeeping comes before every gate below: a local
+        // qualified/Target watermark advance is the voiceprint saying the owner
+        // really spoke (see EMBEDDED_OWNER_POSITIVE_EVIDENCE_BUDGET_MS).
+        let local_owner_activity_advanced = update
+            .qualified_owner_speech_end_ms
+            .zip(previous_local_owner_end_ms)
+            .is_some_and(|(new_end_ms, previous_end_ms)| new_end_ms > previous_end_ms);
+        let local_target_activity_advanced = update
+            .local_target_speech_end_ms
+            .zip(previous_local_target_end_ms)
+            .is_some_and(|(new_end_ms, previous_end_ms)| new_end_ms > previous_end_ms);
+        if local_owner_activity_advanced
+            || local_target_activity_advanced
+            || update.qualified_owner_activity_advanced
+        {
+            self.note_positive_owner_evidence(now);
+        }
+        let positive_evidence_live = self.positive_owner_evidence_live(now);
         let recent_strong_non_target = update_has_recent_strong_non_target(update);
-        let pending_owner_tail = update.pending_unattributed_speech
+        let pending_was_seen_before = self.pending_was_seen;
+        let mut pending_snapshot = update.clone();
+        pending_snapshot.target_speech_end_ms = pending_snapshot.target_speech_end_ms
+            .or(self.armed_target_end_ms).or(self.paused_armed_target_end_ms);
+        let pending_owner_tail = positive_evidence_live
+            && update.pending_unattributed_speech
             && !recent_strong_non_target
             && has_unresolved_recent_owner_speech(
-                &update,
+                &pending_snapshot,
                 EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
             );
         if pending_owner_tail {
+            let generation_before = self.generation;
+            let armed_at_before = self.armed_at;
+            let armed_target_before = self.armed_target_end_ms;
+            let should_log = !pending_was_seen_before || armed_at_before.is_some();
             self.pending_was_seen = true;
-            if self.armed_at.is_some() {
+            if armed_at_before.is_some() {
                 self.pause_arm_for_provisional_tail();
+            }
+            if should_log {
+                self.log_pending_owner_tail_transition(
+                    "observe",
+                    update,
+                    body_started,
+                    now,
+                    generation_before,
+                    armed_at_before,
+                    armed_target_before,
+                    recent_strong_non_target,
+                );
             }
             return None;
         }
@@ -340,37 +949,72 @@ impl SettledTargetEndpointClock {
         // already-due 900 ms timer stopped at 4600 ms -- just 100 ms after the
         // owner had spoken. Rearm on the fused confirmed-owner boundary; raw
         // VAD and NonTarget observations still cannot move this value.
-        let stable_owner_end_ms =
-            authoritative_owner_endpoint_boundary(update, stable_cloud_target_end_ms);
-        // A cloud row may briefly outrun the enrolled local owner clock while
-        // room speech is being merged into the same provider speaker id. Once
-        // the local speech edge exceeds the bounded uncertainty budget,
-        // authoritative_owner_endpoint_boundary deliberately falls back to the
-        // local owner watermark. Treat that downward transition as a real
-        // authority change and re-arm the reducer; otherwise the product
-        // arbiter keeps comparing the new local watermark with the old cloud
-        // watermark and emits arbiter_hold forever.
-        let local_authority_recovered_from_cloud = update
-            .local_target_speech_end_ms
-            .zip(update.local_speech_end_ms)
-            .zip(stable_cloud_target_end_ms)
-            .is_some_and(|((local_owner_ms, local_speech_ms), cloud_ms)| {
-                cloud_ms > local_owner_ms
-                    && local_speech_ms
-                        > local_owner_ms.saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
-                    && stable_owner_end_ms == Some(local_owner_ms)
-            });
-        let local_owner_activity_advanced = update
-            .local_target_speech_end_ms
-            .zip(previous_local_owner_end_ms)
-            .is_some_and(|(new_end_ms, previous_end_ms)| new_end_ms > previous_end_ms);
-        let fresh_owner_activity = update.target_activity_advanced
-            || update.pending_activity_advanced
+        let stable_owner_end_ms = owner_endpoint_boundary_with_uncertain_tail(
+            update,
+            stable_cloud_target_end_ms,
+        );
+        let qualified_owner_activity_advanced = update.qualified_owner_activity_advanced
             || local_owner_activity_advanced;
+        let provider_activity_allowed = !update.local_speaker_tracking_enabled
+            || update.qualified_owner_speech_end_ms.is_none();
+        // Cloud-only activity (target/pending advance with no local
+        // qualified edge) may only re-arm while positive evidence is live:
+        // after the budget expires it is exactly the noise-fed loop that
+        // made auto-end hang (rearm reason=provider_activity_advanced).
+        let fresh_owner_activity = qualified_owner_activity_advanced
+            || local_target_activity_advanced
+            || (positive_evidence_live
+                && provider_activity_allowed
+                && (update.target_activity_advanced || update.pending_activity_advanced));
+        // Installed session be0c3e6e: the verifier established the owner, then
+        // later windows went Uncertain while local speech and the unattributed
+        // preview kept growing with no cloud speaker row and no other-speaker
+        // evidence. That speakerless continuing body must rearm on the new
+        // speech edge instead of letting the stale watermark stop mid-body.
+        // Bounded by the positive-evidence budget like every other
+        // non-attributed continuation signal.
+        let speakerless_continuing_owner_speech = positive_evidence_live
+            && update.local_speaker_tracking_enabled
+            && !update.speaker_info_present
+            && stable_cloud_target_end_ms.is_none()
+            && update.local_speech_end_ms.is_some_and(|speech_ms| {
+                self.armed_target_end_ms.is_none_or(|armed_end_ms| speech_ms > armed_end_ms)
+            });
+        // Restore uses the watermark comparison, not the provider-sourced
+        // `qualified_owner_activity_advanced` flag: a merged cloud row can
+        // re-emit that flag against an unchanged watermark (installed 1284),
+        // and a flag-only update must still restore the paused deadline. A
+        // paused tail followed by genuinely fresh owner speech (settled
+        // re-publication) arms from its own publication time instead.
+        // An expired positive-evidence budget forces the restore: leaving the
+        // clock paused forever on a provisional tail that can no longer be
+        // owner speech is the other half of the "不能自动结束" hang.
+        let restore_paused_owner_deadline = self.paused_armed_at.is_some()
+            && ((self.pending_was_seen
+                && !local_owner_activity_advanced
+                && !local_target_activity_advanced)
+                || !positive_evidence_live);
+        // A qualified-flag rearm replaces an existing armed boundary only when
+        // the new fused boundary IS the local qualified authority and differs
+        // from the armed one (installed 1284: a cloud row merged room speech
+        // into the owner id and re-emitted the flag against an identical
+        // watermark; re-arming the same value would just restart the wall
+        // clock and hang auto-end). A pull-back to the qualified watermark —
+        // for example replacing a stale bridged cloud boundary — is a genuine
+        // authority replacement; flicker in the fresh-target edge alignment
+        // (installed 531) is not.
+        let qualified_flag_replaces_boundary = qualified_owner_activity_advanced
+            && stable_owner_end_ms == qualified_owner_speech_end_ms(update)
+            && self
+                .armed_target_end_ms
+                .is_some_and(|armed_end_ms| stable_owner_end_ms != Some(armed_end_ms));
         let stable_target_should_rearm = stable_owner_end_ms.is_some()
-            && (self.armed_at.is_none()
-                || self.pending_was_seen
-                || (local_authority_recovered_from_cloud && fresh_owner_activity)
+            && ((self.armed_at.is_none() && self.paused_armed_at.is_none())
+                || local_owner_activity_advanced
+                || restore_paused_owner_deadline
+                || local_target_activity_advanced
+                || speakerless_continuing_owner_speech
+                || qualified_flag_replaces_boundary
                 || self
                     .armed_target_end_ms
                     .is_none_or(|armed_end_ms| {
@@ -389,16 +1033,58 @@ impl SettledTargetEndpointClock {
         // preview growth to re-arm here makes auto-end wait forever. This is
         // endpoint-only; it does not discard or rewrite recognized text.
         let should_rearm = body_started
-            && (stable_target_should_rearm || unattributed_visible_body_should_arm)
+            && (stable_target_should_rearm
+                || unattributed_visible_body_should_arm
+                || continuation_activity_rearm)
             && (!recent_strong_non_target || self.armed_at.is_none());
         self.pending_was_seen = false;
         if !should_rearm {
+            if pending_was_seen_before {
+                log::info!(
+                    "[asr] endpoint transition action=noop source=observe reason=pending_tail_cleared_without_rearm generation={} body_started={} recent_strong_non_target={} stable_owner_end_ms={:?} qualified_owner_advanced={} owner_boundary_advanced={} fresh_owner_activity={} armed_present={} paused_present={} audio_ms={:?} provider_ms={:?} local_speech_end_ms={:?} qualified_owner_end_ms={:?} classification={:?}",
+                    self.generation,
+                    body_started,
+                    recent_strong_non_target,
+                    stable_owner_end_ms,
+                    qualified_owner_activity_advanced,
+                    stable_owner_end_ms.is_some_and(|new_end_ms| {
+                        self.armed_target_end_ms
+                            .is_none_or(|armed_end_ms| new_end_ms > armed_end_ms)
+                    }),
+                    fresh_owner_activity,
+                    self.armed_at.is_some(),
+                    self.paused_armed_at.is_some(),
+                    update.audio_duration_ms,
+                    update.provider_audio_duration_ms,
+                    update.local_speech_end_ms,
+                    update.qualified_owner_speech_end_ms,
+                    update.local_speaker_classification_kind,
+                );
+            }
             return None;
         }
 
-        let restore_paused_owner_deadline = recent_strong_non_target
-            && self.armed_at.is_none()
-            && self.paused_armed_at.is_some();
+        let generation_before = self.generation;
+        let armed_at_before = self.armed_at;
+        let armed_target_before = self.armed_target_end_ms;
+        let paused_armed_at_before = self.paused_armed_at;
+        let reason = if restore_paused_owner_deadline {
+            "restore_paused_deadline"
+        } else if local_owner_activity_advanced {
+            "qualified_owner_advanced"
+        } else if local_target_activity_advanced {
+            "local_target_edge_advanced"
+        } else if speakerless_continuing_owner_speech {
+            "speakerless_continuing_speech"
+        } else if qualified_flag_replaces_boundary {
+            "qualified_owner_replaced_boundary"
+        } else if continuation_activity_rearm {
+            "continuation_activity"
+        } else if unattributed_visible_body_should_arm {
+            "visible_body_fallback"
+        } else {
+            "provider_activity_advanced"
+        };
         self.generation = self.generation.wrapping_add(1);
         if restore_paused_owner_deadline {
             self.armed_target_end_ms = self.paused_armed_target_end_ms;
@@ -408,18 +1094,45 @@ impl SettledTargetEndpointClock {
             // Do not require that provisional frame to repeat the cloud id.
             self.armed_from_visible_body_fallback = true;
         } else {
-            self.armed_target_end_ms = stable_owner_end_ms;
+            // The speakerless continuing body (be0c3e6e) has no fused identity
+            // boundary for its new speech; the live speech edge is the only
+            // defensible stop origin.
+            self.armed_target_end_ms = if speakerless_continuing_owner_speech {
+                update.local_speech_end_ms.or(stable_owner_end_ms)
+            } else {
+                stable_owner_end_ms
+            };
             self.armed_at = Some(now);
+            // The session's first arm seeds the positive-evidence budget;
+            // only genuinely positive signals refresh it afterwards.
+            if self.last_positive_owner_evidence_at.is_none() {
+                self.note_positive_owner_evidence(now);
+            }
             // Local Target can rearm the clock before cloud diarization catches
             // up, but local-only visible text still uses the existing guarded
             // visible-body fallback authority.
             self.armed_from_visible_body_fallback = stable_cloud_target_end_ms.is_none();
         }
         self.clear_paused_arm();
+        self.stop_proposed = false;
+        // Arm/reopen only consume the watermark; the evidence flags are
+        // irrelevant here, so pass an unbounded budget bit.
         self.product_endpoint.arm(product_endpoint_evidence(
             update,
             self.armed_target_end_ms,
+            true,
         ));
+        self.log_endpoint_arm_transition(
+            "observe",
+            reason,
+            update,
+            body_started,
+            now,
+            generation_before,
+            armed_at_before,
+            armed_target_before,
+            paused_armed_at_before,
+        );
         Some(self.generation)
     }
 
@@ -452,20 +1165,47 @@ impl SettledTargetEndpointClock {
         }
     }
 
-    fn arm_latest_for_visible_body(&mut self, now: Instant) -> Option<u64> {
+    fn arm_latest_for_visible_body(&mut self, now: Instant, body_started: bool) -> Option<u64> {
+        // A provider callback can carry only the wake phrase (or an
+        // incomplete wake prefix). It must not release the longer automatic
+        // no-body window and re-enter the ordinary body endpoint path.
+        if !body_started {
+            return None;
+        }
         self.leave_automatic_no_body_mode();
         let update = self.latest_update.clone()?;
         let recent_strong_non_target = update_has_recent_strong_non_target(&update);
-        let pending_owner_tail = update.pending_unattributed_speech
+        let pending_was_seen_before = self.pending_was_seen;
+        // Preview growth has already refreshed the budget before this call
+        // (note_visible_body_boundary runs first); a settled preview with an
+        // expired budget must not re-enter the provisional-tail pause loop.
+        let pending_owner_tail = self.positive_owner_evidence_live(now)
+            && update.pending_unattributed_speech
             && !recent_strong_non_target
             && has_unresolved_recent_owner_speech(
                 &update,
                 EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
             );
         if pending_owner_tail {
+            let generation_before = self.generation;
+            let armed_at_before = self.armed_at;
+            let armed_target_before = self.armed_target_end_ms;
+            let should_log = !pending_was_seen_before || armed_at_before.is_some();
             self.pending_was_seen = true;
-            if self.armed_at.is_some() {
+            if armed_at_before.is_some() {
                 self.pause_arm_for_provisional_tail();
+            }
+            if should_log {
+                self.log_pending_owner_tail_transition(
+                    "visible_preview",
+                    &update,
+                    true,
+                    now,
+                    generation_before,
+                    armed_at_before,
+                    armed_target_before,
+                    recent_strong_non_target,
+                );
             }
             return None;
         }
@@ -476,25 +1216,30 @@ impl SettledTargetEndpointClock {
             (update.speaker_info_present && update.speaker_id.is_some())
             .then_some(update.target_speech_end_ms)
             .flatten();
-        let stable_owner_end_ms =
-            authoritative_owner_endpoint_boundary(&update, stable_cloud_target_end_ms);
-        let local_authority_recovered_from_cloud = update
-            .local_target_speech_end_ms
-            .zip(update.local_speech_end_ms)
-            .zip(stable_cloud_target_end_ms)
-            .is_some_and(|((local_owner_ms, local_speech_ms), cloud_ms)| {
-                cloud_ms > local_owner_ms
-                    && local_speech_ms
-                        > local_owner_ms.saturating_add(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
-                    && stable_owner_end_ms == Some(local_owner_ms)
-            });
-        let restore_paused_owner_deadline =
-            recent_strong_non_target && self.paused_armed_at.is_some();
+        let stable_owner_end_ms = owner_endpoint_boundary_with_uncertain_tail(
+            &update,
+            stable_cloud_target_end_ms,
+        );
+        let restore_paused_owner_deadline = self.pending_was_seen
+            && self.paused_armed_at.is_some()
+            && !update.qualified_owner_activity_advanced;
         let owner_boundary_advanced = stable_owner_end_ms.is_some_and(|new_end_ms| {
             self.armed_target_end_ms
                 .is_none_or(|armed_end_ms| new_end_ms > armed_end_ms)
         });
-        let fresh_owner_activity = update.target_activity_advanced || update.pending_activity_advanced;
+        let provider_activity_allowed = !update.local_speaker_tracking_enabled
+            || update.qualified_owner_speech_end_ms.is_none();
+        let fresh_owner_activity = update.qualified_owner_activity_advanced
+            || (provider_activity_allowed
+                && (update.target_activity_advanced || update.pending_activity_advanced));
+        // Preview growth is display evidence only. Once the manual endpoint
+        // has entered its bounded continuation stage, delayed provider text
+        // must not create another silence deadline.
+        if self.continuation_pending_until.is_some() || self.continuation_cutoff_reached {
+            self.manual_terminal_bridge_until = None;
+            self.manual_terminal_bridge_rearm_pending = false;
+            return None;
+        }
         // This method is called from every visible preview callback.  A
         // callback is not itself fresh owner speech: restarting the wall clock
         // here makes a long but already-settled preview wait forever.  Re-arm
@@ -502,12 +1247,24 @@ impl SettledTargetEndpointClock {
         // paused deadline after explicit other-speaker evidence.
         if self.armed_at.is_some()
             && !owner_boundary_advanced
-            && !(local_authority_recovered_from_cloud && fresh_owner_activity)
             && !restore_paused_owner_deadline
             && !self.manual_terminal_bridge_rearm_pending
         {
             return None;
         }
+        let generation_before = self.generation;
+        let armed_at_before = self.armed_at;
+        let armed_target_before = self.armed_target_end_ms;
+        let paused_armed_at_before = self.paused_armed_at;
+        let reason = if restore_paused_owner_deadline {
+            "restore_paused_deadline"
+        } else if update.qualified_owner_activity_advanced || fresh_owner_activity {
+            "owner_activity_advanced"
+        } else if self.manual_terminal_bridge_rearm_pending {
+            "manual_terminal_bridge"
+        } else {
+            "visible_body_fallback"
+        };
         self.generation = self.generation.wrapping_add(1);
         if restore_paused_owner_deadline {
             self.armed_target_end_ms = self.paused_armed_target_end_ms;
@@ -526,15 +1283,35 @@ impl SettledTargetEndpointClock {
         }
         self.clear_paused_arm();
         self.manual_terminal_bridge_rearm_pending = false;
+        self.stop_proposed = false;
+        // See the observe arm site: only the watermark is consumed here.
         self.product_endpoint.arm(product_endpoint_evidence(
             &update,
             self.armed_target_end_ms,
+            true,
         ));
+        self.log_endpoint_arm_transition(
+            "visible_preview",
+            reason,
+            &update,
+            true,
+            now,
+            generation_before,
+            armed_at_before,
+            armed_target_before,
+            paused_armed_at_before,
+        );
         Some(self.generation)
     }
 
     fn is_due(&mut self, now: Instant, timeout_ms: u64) -> bool {
+        if self.stop_proposed {
+            return false;
+        }
         let Some(armed_at) = self.armed_at else {
+            if self.paused_armed_at.is_some() {
+                self.note_due_hold_diagnostic(self.generation, "paused_provisional_tail");
+            }
             return false;
         };
         if now.saturating_duration_since(armed_at) < Duration::from_millis(timeout_ms) {
@@ -545,9 +1322,8 @@ impl SettledTargetEndpointClock {
             return false;
         };
         if self.automatic_no_body_armed {
-            // Three seconds without accepted body means this is a wake-only
-            // session. The wake phrase's own owner tail and provider pending
-            // state are not body evidence and cannot keep the capsule open.
+            // No new post-wake speech for the whole window. Cloud pending
+            // state and repeated wake evidence cannot keep this alive.
             let decision = self.product_endpoint.decide_stop(
                 crate::speech_decision_kernel::EndpointEvidence::default(),
                 now,
@@ -555,6 +1331,11 @@ impl SettledTargetEndpointClock {
             );
             return matches!(decision, crate::speech_decision_kernel::EndpointDecision::Stop);
         }
+        if self.maybe_enter_manual_continuation_pending(&update, armed_at, now) {
+            self.note_due_hold_diagnostic(self.generation, "continuation_pending");
+            return false;
+        }
+        let positive_evidence_live = self.positive_owner_evidence_live(now);
         if !Self::update_allows_endpoint(
             &update,
             self.armed_from_visible_body_fallback,
@@ -562,6 +1343,7 @@ impl SettledTargetEndpointClock {
             self.manual_terminal_bridge_until,
             armed_at,
             now,
+            positive_evidence_live,
         ) {
             self.note_due_hold_diagnostic(
                 self.generation,
@@ -570,7 +1352,11 @@ impl SettledTargetEndpointClock {
             return false;
         }
         let decision = self.product_endpoint.decide_stop(
-            product_endpoint_evidence(&update, self.armed_target_end_ms),
+            product_endpoint_evidence(
+                &update,
+                self.armed_target_end_ms,
+                positive_evidence_live,
+            ),
             now,
             Duration::from_millis(ENDPOINT_PROVIDER_CATCH_UP_GRACE_MS),
         );
@@ -596,9 +1382,16 @@ impl SettledTargetEndpointClock {
         now: Instant,
         timeout_ms: u64,
     ) -> Option<crate::asr::volcengine::TargetSpeakerUpdate> {
-        self.is_due(now, timeout_ms)
-            .then(|| self.latest_update.clone())
-            .flatten()
+        if !self.is_due(now, timeout_ms) {
+            return None;
+        }
+        // The STOP consumer must see the same aged evidence as the reducer.
+        // Returning the raw snapshot resurrected the wake phrase as fresh
+        // speech after a terminal BLE segment and vetoed every due stop.
+        let update = self.latest_for_decision(now, timeout_ms);
+        // Consume the proposal once. A failed BLE STOP explicitly reopens it.
+        self.stop_proposed = true;
+        update
     }
 
     fn latest_due_update_after_owner_analysis(
@@ -625,6 +1418,44 @@ impl SettledTargetEndpointClock {
         decision_snapshot: &crate::asr::volcengine::TargetSpeakerUpdate,
         owner_analysis_pending: bool,
     ) -> Option<crate::asr::volcengine::TargetSpeakerUpdate> {
+        self.reduce_session_policy_with_local_vad_revision(
+            now,
+            policy,
+            decision_snapshot,
+            owner_analysis_pending,
+            None,
+        )
+    }
+
+    fn reduce_session_policy_with_local_vad_revision(
+        &mut self,
+        now: Instant,
+        policy: TargetSpeakerEndpointPolicy,
+        decision_snapshot: &crate::asr::volcengine::TargetSpeakerUpdate,
+        owner_analysis_pending: bool,
+        local_vad_revision: Option<u64>,
+    ) -> Option<crate::asr::volcengine::TargetSpeakerUpdate> {
+        self.manual_vad_guard = local_vad_revision.is_some();
+        // Manual streams may have no diarization id, so local PCM advances
+        // without a target-speaker callback. Always consume a newer capture
+        // snapshot before aging provider evidence. Otherwise a cloud pause
+        // turns still-live microphone speech into artificial silence.
+        let local_capture_advanced = self.latest_update.as_ref().is_some_and(|previous| {
+            decision_snapshot.audio_duration_ms > previous.audio_duration_ms
+                || decision_snapshot.local_speech_end_ms > previous.local_speech_end_ms
+        });
+        let local_vad_revision_changed = local_vad_revision.is_some_and(|revision| {
+            self.latest_local_vad_revision
+                .is_none_or(|previous| revision > previous)
+        });
+        if local_capture_advanced || local_vad_revision_changed {
+            self.observe_with_local_vad_revision(
+                decision_snapshot,
+                policy.body_started,
+                now,
+                local_vad_revision,
+            );
+        }
         if let Some(started_at) = policy.automatic_no_body_started_at {
             self.arm_automatic_no_body_if_needed(decision_snapshot, started_at, now);
         }
@@ -660,32 +1491,56 @@ impl SettledTargetEndpointClock {
     ) -> Option<crate::asr::volcengine::TargetSpeakerUpdate> {
         let mut update = self.latest_update.clone()?;
         let stale = self.latest_update_at.is_some_and(|observed_at| {
-            now.saturating_duration_since(observed_at) >= Duration::from_millis(timeout_ms)
+            now.saturating_duration_since(observed_at) >= Duration::from_millis(
+                timeout_ms.max(EMBEDDED_UNRESOLVED_LOCAL_SPEECH_MAX_HOLD_MS)
+            )
         });
+        // Silence ages from the last observation even before the provider is
+        // stale; a frozen speech timestamp must not remain fresh forever.
+        if let Some(audio_ms) = update.audio_duration_ms.max(update.provider_audio_duration_ms) {
+                let elapsed_ms = self.latest_update_at.map_or(0, |observed_at| {
+                    now.saturating_duration_since(observed_at).as_millis().min(u64::MAX as u128) as u64
+                });
+                update.audio_duration_ms = Some(audio_ms.saturating_add(elapsed_ms));
+        }
         if stale {
             update.pending_unattributed_speech = false;
             update.pending_activity_advanced = false;
-            // No callback means there is no newer owner edge to protect. Use
-            // the last covered audio edge as the bounded stall watermark so a
-            // frozen local tail cannot block the reducer forever.
-            if let Some(audio_ms) = update.audio_duration_ms.or(update.provider_audio_duration_ms)
-            {
-                update.local_speech_end_ms = Some(audio_ms);
-            }
+            update.target_activity_advanced = false;
         }
         Some(update)
     }
 
     fn reopen_after_failed_stop(&mut self) {
+        self.stop_proposed = false;
         if let Some(update) = self.latest_update.as_ref() {
             let evidence = if self.automatic_no_body_armed {
                 crate::speech_decision_kernel::EndpointEvidence::default()
             } else {
-                product_endpoint_evidence(update, self.armed_target_end_ms)
+                // See the observe arm site: only the watermark is consumed.
+                product_endpoint_evidence(update, self.armed_target_end_ms, true)
             };
             self.product_endpoint.reopen_after_failed_stop(evidence);
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EndpointWatchdogStatusSignature {
+    phase: SessionPhase,
+    body_started: bool,
+    preview_present: bool,
+    latest_update_present: bool,
+    armed: bool,
+    paused: bool,
+    generation: u64,
+    stop_proposed: bool,
+    lifecycle: crate::speech_decision_kernel::OwnerEndpointState,
+    latest_audio_ms: Option<u64>,
+    provider_audio_ms: Option<u64>,
+    local_speech_end_ms: Option<u64>,
+    qualified_owner_end_ms: Option<u64>,
+    hold_reason: Option<&'static str>,
 }
 
 /// Session-scoped fallback for callback-order races.
@@ -701,54 +1556,113 @@ fn start_settled_target_endpoint_watchdog(
     inner: &Arc<Inner>,
     session_id: SessionId,
     stop_dispatched: &Arc<AtomicBool>,
+    stop_completed: &Arc<AtomicBool>,
+    stop_state: &Arc<Mutex<EndpointStopDispatchState>>,
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
     asr: &Arc<crate::asr::volcengine::VolcengineStreamingASR>,
 ) {
     let inner = Arc::clone(inner);
     let stop_dispatched = Arc::clone(stop_dispatched);
+    let stop_completed = Arc::clone(stop_completed);
+    let stop_state = Arc::clone(stop_state);
     let endpoint_clock = Arc::clone(endpoint_clock);
     let asr = Arc::clone(asr);
+    let watchdog_started_at = Instant::now();
+    let asr_instance = Arc::as_ptr(&asr) as usize;
+    log::info!(
+        "[asr] endpoint watchdog started session_id={session_id} asr_instance=0x{asr_instance:x}"
+    );
     async_runtime::spawn(async move {
         const POLL_INTERVAL: Duration = Duration::from_millis(50);
+        let mut tick_count = 0_u64;
+        let mut first_tick_logged = false;
+        let mut last_status_logged_at = Instant::now();
+        let mut last_status_signature: Option<EndpointWatchdogStatusSignature> = None;
         loop {
             tokio::time::sleep(POLL_INTERVAL).await;
-            if stop_dispatched.load(Ordering::SeqCst) {
+            tick_count = tick_count.saturating_add(1);
+            if stop_completed.load(Ordering::SeqCst) {
+                log::info!(
+                    "[asr] endpoint watchdog exited session_id={session_id} reason=stop_sent ticks={tick_count} lifetime_ms={}",
+                    watchdog_started_at.elapsed().as_millis(),
+                );
                 return;
             }
-            let session_active = {
+            let (session_active, current_session_id, current_phase, cancelled) = {
                 let state = inner.state.lock();
-                state.session_id == session_id
-                    && !state.cancelled
-                    && matches!(
-                        state.phase,
-                        SessionPhase::Starting | SessionPhase::Listening
-                    )
+                (
+                    state.session_id == session_id
+                        && !state.cancelled
+                        && matches!(
+                            state.phase,
+                            SessionPhase::Starting | SessionPhase::Listening
+                        ),
+                    state.session_id,
+                    state.phase,
+                    state.cancelled,
+                )
             };
             if !session_active {
+                log::info!(
+                    "[asr] endpoint watchdog exited session_id={session_id} reason=session_inactive current_session_id={current_session_id} phase={current_phase:?} cancelled={cancelled} ticks={tick_count} lifetime_ms={}",
+                    watchdog_started_at.elapsed().as_millis(),
+                );
                 return;
             }
+            if !first_tick_logged {
+                first_tick_logged = true;
+                log::info!(
+                    "[asr] endpoint watchdog first tick session_id={session_id} tick={tick_count} elapsed_ms={}",
+                    watchdog_started_at.elapsed().as_millis(),
+                );
+            }
             let preview = current_embedded_audio_endpoint_preview(&inner);
-            let decision_snapshot = asr.endpoint_update_snapshot();
-            let decision_audio_ms = decision_snapshot
+            let raw_decision_snapshot = asr.endpoint_update_snapshot();
+            let decision_audio_ms = raw_decision_snapshot
                 .audio_duration_ms
-                .or(decision_snapshot.provider_audio_duration_ms);
+                .or(raw_decision_snapshot.provider_audio_duration_ms);
             let endpoint_policy = resolve_target_speaker_endpoint_policy(
                 &inner,
                 session_id,
                 preview.as_deref(),
                 decision_audio_ms,
             );
+            let use_manual_vad = manual_endpoint_vad_allowed(
+                &inner,
+                session_id,
+                endpoint_policy,
+                &raw_decision_snapshot,
+            );
+            let local_vad_evidence = use_manual_vad
+                .then(|| asr.local_speech_activity_snapshot());
+            let local_vad_revision = local_vad_evidence.map(|evidence| evidence.revision);
+            let decision_snapshot = if use_manual_vad {
+                // The first VAD rollout is intentionally limited to manual
+                // body sessions. Enrolled-speaker endpointing keeps its
+                // existing owner-identity policy until this evidence has
+                // passed the manual gates.
+                asr.endpoint_update_with_local_speech_evidence_snapshot(
+                    raw_decision_snapshot.clone(),
+                    local_vad_evidence.expect("manual endpoint VAD evidence snapshot"),
+                )
+            } else {
+                raw_decision_snapshot
+            };
             let (update, hold_diagnostic) = {
                 let mut clock = endpoint_clock.lock();
+                if let Some(evidence) = local_vad_evidence {
+                    clock.note_local_vad_evidence(evidence);
+                }
                 // If the provider never opened, keep feeding the reducer from
                 // the local owner clock. This preserves the same single
                 // watchdog decision path while removing generic room-energy
                 // from the only remaining fallback.
                 if asr.audio_delivery_failed() {
-                    clock.observe(
+                    clock.observe_with_local_vad_revision(
                         &decision_snapshot,
                         endpoint_policy.body_started,
                         Instant::now(),
+                        local_vad_revision,
                     );
                 } else if clock.latest_update.is_none()
                     && current_embedded_audio_partial_preview(&inner)
@@ -770,13 +1684,13 @@ fn start_settled_target_endpoint_watchdog(
                 }
                 let now = Instant::now();
                 let owner_analysis_pending = asr.local_speaker_analysis_pending();
-                let update =
-                    clock.reduce_session_policy(
-                        now,
-                        endpoint_policy,
-                        &decision_snapshot,
-                        owner_analysis_pending,
-                    );
+                let update = clock.reduce_session_policy_with_local_vad_revision(
+                    now,
+                    endpoint_policy,
+                    &decision_snapshot,
+                    owner_analysis_pending,
+                    local_vad_revision,
+                );
                 let hold_diagnostic = clock.take_due_hold_diagnostic();
                 (update, hold_diagnostic)
             };
@@ -786,16 +1700,103 @@ fn start_settled_target_endpoint_watchdog(
                     "[asr] target endpoint hold session_id={session_id} generation={generation} reason={reason} lifecycle={lifecycle:?}"
                 );
             }
+            let now = Instant::now();
+            let (
+                status_signature,
+                armed_age_ms,
+                paused_age_ms,
+                latest_update_age_ms,
+                latest_audio_ms,
+                provider_audio_ms,
+                local_speech_end_ms,
+                qualified_owner_end_ms,
+                latest_hold_reason,
+                lifecycle,
+            ) = {
+                let clock = endpoint_clock.lock();
+                let latest_update = clock.latest_update.as_ref();
+                let armed_age_ms = clock
+                    .armed_at
+                    .map(|at| now.saturating_duration_since(at).as_millis());
+                let paused_age_ms = clock
+                    .paused_armed_at
+                    .map(|at| now.saturating_duration_since(at).as_millis());
+                let latest_update_age_ms = clock
+                    .latest_update_at
+                    .map(|at| now.saturating_duration_since(at).as_millis());
+                let latest_audio_ms = latest_update.and_then(|update| update.audio_duration_ms);
+                let provider_audio_ms =
+                    latest_update.and_then(|update| update.provider_audio_duration_ms);
+                let local_speech_end_ms =
+                    latest_update.and_then(|update| update.local_speech_end_ms);
+                let qualified_owner_end_ms =
+                    latest_update.and_then(|update| update.qualified_owner_speech_end_ms);
+                let latest_hold_reason = clock
+                    .last_reported_due_hold_diagnostic
+                    .map(|(_, reason)| reason);
+                let lifecycle = clock.lifecycle();
+                let status_signature = EndpointWatchdogStatusSignature {
+                    phase: current_phase,
+                    body_started: endpoint_policy.body_started,
+                    preview_present: preview.is_some(),
+                    latest_update_present: latest_update.is_some(),
+                    armed: clock.armed_at.is_some(),
+                    paused: clock.paused_armed_at.is_some(),
+                    generation: clock.generation,
+                    stop_proposed: clock.stop_proposed,
+                    lifecycle,
+                    latest_audio_ms,
+                    provider_audio_ms,
+                    local_speech_end_ms,
+                    qualified_owner_end_ms,
+                    hold_reason: latest_hold_reason,
+                };
+                (
+                    status_signature,
+                    armed_age_ms,
+                    paused_age_ms,
+                    latest_update_age_ms,
+                    latest_audio_ms,
+                    provider_audio_ms,
+                    local_speech_end_ms,
+                    qualified_owner_end_ms,
+                    latest_hold_reason,
+                    lifecycle,
+                )
+            };
+            let status_changed = last_status_signature != Some(status_signature);
+            if status_changed || last_status_logged_at.elapsed() >= Duration::from_secs(1) {
+                last_status_logged_at = now;
+                last_status_signature = Some(status_signature);
+                log::info!(
+                    "[asr] endpoint watchdog status session_id={session_id} tick={tick_count} phase={current_phase:?} body_started={} preview_present={} latest_update_present={} armed_age_ms={armed_age_ms:?} paused_age_ms={paused_age_ms:?} latest_update_age_ms={latest_update_age_ms:?} generation={} stop_proposed={} lifecycle={lifecycle:?} hold_reason={latest_hold_reason:?} local_audio_ms={:?} provider_audio_ms={:?} local_speech_end_ms={:?} qualified_owner_end_ms={:?} owner_analysis_pending={}",
+                    endpoint_policy.body_started,
+                    preview.is_some(),
+                    status_signature.latest_update_present,
+                    status_signature.generation,
+                    status_signature.stop_proposed,
+                    latest_audio_ms,
+                    provider_audio_ms,
+                    local_speech_end_ms,
+                    qualified_owner_end_ms,
+                    asr.local_speaker_analysis_pending(),
+                );
+            }
             if update.is_none() && endpoint_policy.body_started {
                 let growth = inner
                     .embedded_audio_preview
                     .lock()
                     .last_visible_growth_at(session_id);
-                let keep_firmware = endpoint_clock.lock().should_keep_firmware_alive_for_host_hang(
-                    endpoint_policy.endpoint_timeout_ms,
-                    growth,
-                    Instant::now(),
-                );
+                let keep_firmware = {
+                    let now = Instant::now();
+                    let mut clock = endpoint_clock.lock();
+                    clock.should_keep_firmware_alive_for_continuation(now)
+                        || clock.should_keep_firmware_alive_for_host_hang(
+                            endpoint_policy.endpoint_timeout_ms,
+                            growth,
+                            now,
+                        )
+                };
                 if keep_firmware {
                     note_embedded_asr_speech_activity(&inner, session_id);
                 }
@@ -805,7 +1806,10 @@ fn start_settled_target_endpoint_watchdog(
                     &inner,
                     session_id,
                     &stop_dispatched,
+                    &stop_completed,
+                    &stop_state,
                     &endpoint_clock,
+                    &asr,
                     update,
                     endpoint_policy,
                 );
@@ -818,7 +1822,11 @@ fn arm_settled_target_endpoint_for_visible_body(
     inner: &Arc<Inner>,
     _session_id: SessionId,
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
+    body_started: bool,
 ) {
+    if !body_started {
+        return;
+    }
     let preview = current_embedded_audio_partial_preview(inner);
     let preview_ends_terminal = preview_ends_with_sentence_terminal(preview.as_deref());
     let preview_chars = preview.as_deref().map_or(0, |text| text.chars().count());
@@ -826,6 +1834,6 @@ fn arm_settled_target_endpoint_for_visible_body(
     {
         let mut clock = endpoint_clock.lock();
         clock.note_visible_body_boundary(preview_ends_terminal, preview_chars, now);
-        clock.arm_latest_for_visible_body(now);
+        clock.arm_latest_for_visible_body(now, body_started);
     }
 }

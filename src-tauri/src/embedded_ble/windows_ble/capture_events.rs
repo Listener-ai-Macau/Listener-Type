@@ -1,6 +1,356 @@
 // BLE capture event loop + active-control helpers (Windows).
 // Included into `windows_ble` via `include!`.
 
+const BLE_INGRESS_DIAGNOSTIC_DIR_ENV: &str = "LISTENER_WAKE_DIAGNOSTIC_DIR";
+const BLE_INGRESS_DIAGNOSTIC_CHANNEL_CAPACITY: usize = 512;
+const BLE_INGRESS_DIAGNOSTIC_MAX_PCM_BYTES: usize = 12 * 16_000 * 2;
+
+enum BleIngressDiagnosticMessage {
+    Received {
+        received_unix_ms: u64,
+        notification: Vec<u8>,
+    },
+    Collector {
+        capture_generation: u64,
+        handled_unix_ms: u64,
+        admission_fact: Option<crate::embedded_audio::SessionAdmissionFact>,
+        notification: Vec<u8>,
+    },
+}
+
+#[derive(Clone)]
+struct BleIngressDiagnosticSink {
+    tx: mpsc::SyncSender<BleIngressDiagnosticMessage>,
+    dropped_count: Arc<AtomicUsize>,
+}
+
+impl BleIngressDiagnosticSink {
+    fn for_capture(capture_id: u64) -> Option<Self> {
+        let directory = std::env::var(BLE_INGRESS_DIAGNOSTIC_DIR_ENV)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)?;
+        if let Err(err) = fs::create_dir_all(&directory) {
+            log::warn!(
+                "[embedded-ble] ingress diagnostic directory unavailable capture_id={capture_id}: {err}"
+            );
+            return None;
+        }
+        let timestamp_ms = ble_ingress_diagnostic_unix_ms();
+        let stem = format!(
+            "ble-ingress-capture-{capture_id}-{}-{timestamp_ms}",
+            std::process::id()
+        );
+        let events_path = directory.join(format!("{stem}-events.jsonl"));
+        let raw_pcm_path = directory.join(format!("{stem}-raw.pcm"));
+        let collector_pcm_path = directory.join(format!("{stem}-collector.pcm"));
+        let (tx, rx) = mpsc::sync_channel(BLE_INGRESS_DIAGNOSTIC_CHANNEL_CAPACITY);
+        let dropped_count = Arc::new(AtomicUsize::new(0));
+        let dropped_count_for_worker = Arc::clone(&dropped_count);
+        let spawn = std::thread::Builder::new()
+            .name(format!("listener-type-ble-ingress-{capture_id}"))
+            .spawn(move || {
+                run_ble_ingress_diagnostic_worker(
+                    capture_id,
+                    events_path,
+                    raw_pcm_path,
+                    collector_pcm_path,
+                    rx,
+                    dropped_count_for_worker,
+                );
+            });
+        if let Err(err) = spawn {
+            log::warn!(
+                "[embedded-ble] ingress diagnostic worker unavailable capture_id={capture_id}: {err}"
+            );
+            return None;
+        }
+        Some(Self { tx, dropped_count })
+    }
+
+    fn record_received(&self, notification: &[u8]) {
+        self.try_send(BleIngressDiagnosticMessage::Received {
+            received_unix_ms: ble_ingress_diagnostic_unix_ms(),
+            notification: notification.to_vec(),
+        });
+    }
+
+    fn record_collector(
+        &self,
+        capture_generation: u64,
+        admission_fact: Option<crate::embedded_audio::SessionAdmissionFact>,
+        notification: &[u8],
+    ) {
+        self.try_send(BleIngressDiagnosticMessage::Collector {
+            capture_generation,
+            handled_unix_ms: ble_ingress_diagnostic_unix_ms(),
+            admission_fact,
+            notification: notification.to_vec(),
+        });
+    }
+
+    fn try_send(&self, message: BleIngressDiagnosticMessage) {
+        if self.tx.try_send(message).is_err() {
+            if self.dropped_count.fetch_add(1, Ordering::Relaxed) == 0 {
+                log::warn!(
+                    "[embedded-ble] ingress diagnostic queue dropped at least one record; audio flow is unaffected"
+                );
+            }
+        }
+    }
+}
+
+fn ble_ingress_diagnostic_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u64::MAX as u128) as u64
+}
+
+fn ble_ingress_admission_fact_json(
+    fact: Option<&crate::embedded_audio::SessionAdmissionFact>,
+) -> serde_json::Value {
+    let Some(fact) = fact else {
+        return serde_json::Value::Null;
+    };
+    serde_json::json!({
+        "collectorInstanceId": fact.collector_instance_id,
+        "resetEpoch": fact.reset_epoch,
+        "notificationId": fact.notification_id,
+        "admissionId": fact.admission_id,
+        "physicalSessionId": fact.physical_session_id,
+        "packetSequence": fact.packet_sequence,
+        "disposition": serde_json::to_value(fact.disposition).unwrap_or(serde_json::Value::Null),
+        "supersedesAdmissionId": fact.supersedes_admission_id,
+        "predecessorUnknown": fact.predecessor_unknown,
+        "afterStopBoundary": fact.after_stop_boundary,
+        "wirePayloadBytes": fact.wire_payload_bytes,
+        "declaredPcmBytes": fact.declared_pcm_bytes,
+        "expandedPcmBytes": fact.expanded_pcm_bytes,
+        "metadataIncomplete": fact.metadata_incomplete,
+    })
+}
+
+fn write_ble_ingress_json_line(
+    writer: &mut std::io::BufWriter<std::fs::File>,
+    value: serde_json::Value,
+) -> bool {
+    if serde_json::to_writer(&mut *writer, &value).is_err()
+        || writer.write_all(b"\n").is_err()
+        || writer.flush().is_err()
+    {
+        return false;
+    }
+    true
+}
+
+fn insert_ble_ingress_pcm_bounded(
+    packets: &mut std::collections::BTreeMap<(u32, u16), Vec<u8>>,
+    stored_bytes: &mut usize,
+    key: (u32, u16),
+    pcm: Vec<u8>,
+) -> bool {
+    let old_bytes = packets.get(&key).map(Vec::len).unwrap_or(0);
+    let Some(next_bytes) = stored_bytes
+        .checked_sub(old_bytes)
+        .and_then(|value| value.checked_add(pcm.len()))
+    else {
+        return false;
+    };
+    if next_bytes > BLE_INGRESS_DIAGNOSTIC_MAX_PCM_BYTES {
+        return false;
+    }
+    packets.insert(key, pcm);
+    *stored_bytes = next_bytes;
+    true
+}
+
+fn write_ble_ingress_pcm_file(
+    path: &std::path::Path,
+    packets: &std::collections::BTreeMap<(u32, u16), Vec<u8>>,
+) -> (usize, String) {
+    let mut pcm = Vec::new();
+    let mut session_id = None;
+    for ((packet_session_id, _packet_sequence), packet_pcm) in packets {
+        session_id.get_or_insert(*packet_session_id);
+        if pcm.len().saturating_add(packet_pcm.len()) > BLE_INGRESS_DIAGNOSTIC_MAX_PCM_BYTES {
+            break;
+        }
+        pcm.extend_from_slice(packet_pcm);
+    }
+    let bytes = pcm.len();
+    let hash = crate::firmware_ota::sha256_hex(&pcm);
+    if let Err(err) = fs::write(path, &pcm) {
+        log::warn!(
+            "[embedded-ble] ingress diagnostic PCM write failed path={} session_id={session_id:?}: {err}",
+            path.display()
+        );
+    }
+    (bytes, hash)
+}
+
+fn run_ble_ingress_diagnostic_worker(
+    capture_id: u64,
+    events_path: PathBuf,
+    raw_pcm_path: PathBuf,
+    collector_pcm_path: PathBuf,
+    rx: mpsc::Receiver<BleIngressDiagnosticMessage>,
+    dropped_count: Arc<AtomicUsize>,
+) {
+    let Ok(events_file) = fs::File::create(&events_path) else {
+        log::warn!(
+            "[embedded-ble] ingress diagnostic events file unavailable capture_id={} path={}",
+            capture_id,
+            events_path.display()
+        );
+        return;
+    };
+    let mut events = std::io::BufWriter::new(events_file);
+    let mut raw_packets = std::collections::BTreeMap::new();
+    let mut raw_stored_bytes = 0usize;
+    let mut collector_packets = std::collections::BTreeMap::new();
+    let mut collector_stored_bytes = 0usize;
+    while let Ok(message) = rx.recv() {
+        match message {
+            BleIngressDiagnosticMessage::Received {
+                received_unix_ms,
+                notification,
+            } => {
+                let raw_hash = crate::firmware_ota::sha256_hex(&notification);
+                // The BLE callback sees the wire packet, which may carry the
+                // lossless Rice flag. Decode it through the same production
+                // normalizer used immediately before collector admission so
+                // the diagnostic compares PCM with the collector's PCM. Keep
+                // the original notification hash/size above as the wire fact.
+                let normalized_notification =
+                    crate::audio_transport_codec::normalize_listener_audio_notification(
+                        &notification,
+                    )
+                    .ok();
+                let parsed = normalized_notification
+                    .as_deref()
+                    .and_then(|normalized| crate::embedded_audio::parse_packet(normalized).ok());
+                let mut session_id = None;
+                let mut packet_sequence = None;
+                let mut packet_type = None;
+                let mut pcm_hash = None;
+                let mut pcm_bytes = 0usize;
+                if let Some(packet) = parsed {
+                    session_id = Some(packet.header.session_id);
+                    packet_sequence = Some(packet.header.packet_sequence);
+                    packet_type = Some(format!("{:?}", packet.header.packet_type));
+                    if packet.header.packet_type == crate::embedded_audio::PacketType::AudioData {
+                        let pcm = packet.expanded_payload_pcm();
+                        pcm_bytes = pcm.len();
+                        pcm_hash = Some(crate::firmware_ota::sha256_hex(&pcm));
+                        let _ = insert_ble_ingress_pcm_bounded(
+                            &mut raw_packets,
+                            &mut raw_stored_bytes,
+                            (packet.header.session_id, packet.header.packet_sequence),
+                            pcm,
+                        );
+                    }
+                }
+                let _ = write_ble_ingress_json_line(
+                    &mut events,
+                    serde_json::json!({
+                        "boundary": "ble_receive",
+                        "captureGeneration": capture_id,
+                        "receivedUnixMs": received_unix_ms,
+                        "notificationBytes": notification.len(),
+                        "notificationSha256": raw_hash,
+                        "packetType": packet_type,
+                        "sessionId": session_id,
+                        "packetSequence": packet_sequence,
+                        "pcmBytes": pcm_bytes,
+                        "pcmSha256": pcm_hash,
+                    }),
+                );
+            }
+            BleIngressDiagnosticMessage::Collector {
+                capture_generation,
+                handled_unix_ms,
+                admission_fact,
+                notification,
+            } => {
+                let normalized_hash = crate::firmware_ota::sha256_hex(&notification);
+                let parsed = crate::embedded_audio::parse_packet(&notification).ok();
+                let (mut session_id, mut packet_sequence, mut packet_type, mut pcm) =
+                    (None, None, None, Vec::new());
+                if let Some(packet) = parsed {
+                    session_id = Some(packet.header.session_id);
+                    packet_sequence = Some(packet.header.packet_sequence);
+                    packet_type = Some(format!("{:?}", packet.header.packet_type));
+                    if packet.header.packet_type == crate::embedded_audio::PacketType::AudioData {
+                        pcm = packet.expanded_payload_pcm();
+                    }
+                }
+                if let (Some(session_id), Some(packet_sequence)) =
+                    (session_id, packet_sequence)
+                {
+                    let accepted = admission_fact.as_ref().is_some_and(|fact| {
+                        matches!(
+                            fact.disposition,
+                            crate::embedded_audio::SessionAdmissionDisposition::New
+                                | crate::embedded_audio::SessionAdmissionDisposition::Replacement
+                        )
+                    });
+                    if accepted && !pcm.is_empty() {
+                        let _ = insert_ble_ingress_pcm_bounded(
+                            &mut collector_packets,
+                            &mut collector_stored_bytes,
+                            (session_id, packet_sequence),
+                            pcm.clone(),
+                        );
+                    }
+                }
+                let _ = write_ble_ingress_json_line(
+                    &mut events,
+                    serde_json::json!({
+                        "boundary": "capture_collector",
+                        "captureGeneration": capture_generation,
+                        "handledUnixMs": handled_unix_ms,
+                        "packetType": packet_type,
+                        "sessionId": session_id,
+                        "packetSequence": packet_sequence,
+                        "normalizedNotificationBytes": notification.len(),
+                        "normalizedNotificationSha256": normalized_hash,
+                        "pcmBytes": pcm.len(),
+                        "pcmSha256": if pcm.is_empty() { None } else { Some(crate::firmware_ota::sha256_hex(&pcm)) },
+                        "admissionFact": ble_ingress_admission_fact_json(admission_fact.as_ref()),
+                    }),
+                );
+            }
+        }
+    }
+    let (raw_bytes, raw_hash) = write_ble_ingress_pcm_file(&raw_pcm_path, &raw_packets);
+    let (collector_bytes, collector_hash) =
+        write_ble_ingress_pcm_file(&collector_pcm_path, &collector_packets);
+    let _ = write_ble_ingress_json_line(
+        &mut events,
+        serde_json::json!({
+            "boundary": "capture_summary",
+            "captureGeneration": capture_id,
+            "rawPcmBytes": raw_bytes,
+            "rawPcmSha256": raw_hash,
+            "collectorPcmBytes": collector_bytes,
+            "collectorPcmSha256": collector_hash,
+            "diagnosticQueueDroppedCount": dropped_count.load(Ordering::Relaxed),
+            "rawPcmPath": raw_pcm_path,
+            "collectorPcmPath": collector_pcm_path,
+        }),
+    );
+    log::info!(
+        "[embedded-ble] ingress diagnostic complete capture_id={} raw_pcm_bytes={} collector_pcm_bytes={} dropped={}",
+        capture_id,
+        raw_bytes,
+        collector_bytes,
+        dropped_count.load(Ordering::Relaxed)
+    );
+}
+
 fn send_audio_control_via_active_capture(
     bytes: &[u8],
     timeout: Duration,
@@ -105,6 +455,83 @@ fn should_ignore_stale_disconnect_status(
     gatt_session_active && (device_connected || active_capture)
 }
 
+/// A transport notification is only an observation that the link delivered a
+/// value. It must not consume the recovery deadline before normalize/collector
+/// acceptance proves current-segment PCM progress.
+fn active_capture_link_recovery_notification_pending(
+    link_recovery_deadline: Option<Instant>,
+) -> bool {
+    link_recovery_deadline.is_some()
+}
+
+fn active_capture_link_recovery_expired(deadline: Option<Instant>, now: Instant) -> bool {
+    deadline.is_some_and(|recovery_deadline| now >= recovery_deadline)
+}
+
+fn take_active_capture_link_recovery_after_valid_pcm(
+    link_recovery_deadline: &mut Option<Instant>,
+    notify_refresh_required_after_link_recovery: &mut bool,
+) -> bool {
+    if link_recovery_deadline.take().is_some() {
+        *notify_refresh_required_after_link_recovery = true;
+        true
+    } else {
+        false
+    }
+}
+
+fn clear_active_capture_link_recovery_wait(
+    link_recovery_deadline: &mut Option<Instant>,
+    link_recovery_reason: &mut Option<String>,
+) -> bool {
+    if link_recovery_deadline.take().is_some() {
+        link_recovery_reason.take();
+        true
+    } else {
+        false
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActiveCaptureRecoveryFact {
+    ParseRejected,
+    NotificationOnly,
+    CurrentSegmentStarted,
+    CurrentSegmentPcm,
+    CurrentSegmentTerminal,
+    IgnoredPacket(crate::embedded_audio::IgnoredPacketReason),
+}
+
+/// Classify what the collector actually established after a transport
+/// notification arrived.  This intentionally does not alter recovery policy:
+/// it separates link-level arrival from current-segment progress for tests and
+/// diagnostic logs.
+fn active_capture_recovery_fact(
+    parse_succeeded: bool,
+    event: Option<&crate::embedded_audio::SessionEvent>,
+) -> ActiveCaptureRecoveryFact {
+    if !parse_succeeded {
+        return ActiveCaptureRecoveryFact::ParseRejected;
+    }
+    match event {
+        Some(crate::embedded_audio::SessionEvent::Started { .. }) => {
+            ActiveCaptureRecoveryFact::CurrentSegmentStarted
+        }
+        Some(crate::embedded_audio::SessionEvent::AudioData { .. }) => {
+            ActiveCaptureRecoveryFact::CurrentSegmentPcm
+        }
+        Some(
+            crate::embedded_audio::SessionEvent::Stopped { .. }
+            | crate::embedded_audio::SessionEvent::Cancelled { .. }
+            | crate::embedded_audio::SessionEvent::Error { .. },
+        ) => ActiveCaptureRecoveryFact::CurrentSegmentTerminal,
+        Some(crate::embedded_audio::SessionEvent::Ignored(reason)) => {
+            ActiveCaptureRecoveryFact::IgnoredPacket(*reason)
+        }
+        None => ActiveCaptureRecoveryFact::NotificationOnly,
+    }
+}
+
 /// Windows can deliver a queued `ConnectionStatusChanged(Disconnected)` callback
 /// while the GATT session is still active and an audio capture is receiving
 /// packets. Treat that callback as advisory for the active capture: a real
@@ -207,6 +634,9 @@ fn capture_notification_events_until_cancelled_impl(
     }
     let capture_guard = BleCaptureGuard::enter(idle_timeout)?;
     let capture_id = capture_guard.session_id();
+    let pipeline_capture = crate::observability::begin_embedded_audio_pipeline_capture(capture_id);
+    let pipeline_observation = pipeline_capture.observation();
+    let ingress_diagnostic = BleIngressDiagnosticSink::for_capture(capture_id);
     if terminal_behavior == CaptureTerminalBehavior::ContinueListening
         && ble_ota_process_mutex_busy()
     {
@@ -230,11 +660,17 @@ fn capture_notification_events_until_cancelled_impl(
     let notification_tx = tx.clone();
     let notification_log_count = Arc::new(AtomicUsize::new(0));
     let notification_log_count_for_handler = Arc::clone(&notification_log_count);
+    let pipeline_observation_for_handler = pipeline_observation.clone();
+    let ingress_diagnostic_for_handler = ingress_diagnostic.clone();
     let handler = TypedEventHandler::<GattCharacteristic, GattValueChangedEventArgs>::new(
         move |_sender, args| {
             if let Some(args) = args {
                 if let Ok(buffer) = args.CharacteristicValue() {
                     if let Ok(bytes) = buffer_to_vec(&buffer) {
+                        pipeline_observation_for_handler.record_raw_notification(bytes.len());
+                        if let Some(diagnostic) = ingress_diagnostic_for_handler.as_ref() {
+                            diagnostic.record_received(&bytes);
+                        }
                         let log_index =
                             notification_log_count_for_handler.fetch_add(1, Ordering::Relaxed);
                         if log_index < CAPTURE_NOTIFICATION_INFO_LOG_LIMIT {
@@ -246,7 +682,8 @@ fn capture_notification_events_until_cancelled_impl(
                                 &bytes[..prefix_len]
                             );
                         }
-                        let _ = notification_tx.send(BleCaptureSignal::Notification(bytes));
+                        let sent = notification_tx.send(BleCaptureSignal::Notification(bytes));
+                        pipeline_observation_for_handler.record_channel_forward(sent.is_ok());
                     }
                 }
             }
@@ -418,9 +855,14 @@ fn capture_notification_events_until_cancelled_impl(
     let mut ec11_recovery_prepare_disconnect_deadline: Option<Instant> = None;
     let mut ec11_recovery_disconnect_deadline: Option<Instant> = None;
     let mut consecutive_type_heartbeat_failures = 0u32;
+    let mut next_pipeline_snapshot_at = Instant::now();
     loop {
         cleanup.drain_audio_control_requests(&control_rx);
         let now = Instant::now();
+        if now >= next_pipeline_snapshot_at {
+            pipeline_observation.snapshot("capture_poll", false);
+            next_pipeline_snapshot_at = now + Duration::from_secs(1);
+        }
         if type_heartbeat_enabled
             && !collector_has_active_recoverable_session(&collector)
             && ble_ota_process_mutex_busy()
@@ -559,7 +1001,7 @@ fn capture_notification_events_until_cancelled_impl(
                 Err(reason)
             };
         }
-        if link_recovery_deadline.is_some_and(|recovery_deadline| now >= recovery_deadline) {
+        if active_capture_link_recovery_expired(link_recovery_deadline, now) {
             let reason = link_recovery_reason
                 .as_deref()
                 .unwrap_or("BLE link recovery timed out");
@@ -656,9 +1098,7 @@ fn capture_notification_events_until_cancelled_impl(
                         Err(reason)
                     };
                 }
-                if link_recovery_deadline
-                    .is_some_and(|recovery_deadline| now >= recovery_deadline)
-                {
+                if active_capture_link_recovery_expired(link_recovery_deadline, now) {
                     let reason = link_recovery_reason
                         .as_deref()
                         .unwrap_or("BLE link recovery timed out");
@@ -678,18 +1118,12 @@ fn capture_notification_events_until_cancelled_impl(
                 ));
             }
         };
-        let notification = match signal {
+        let (notification, link_recovery_notification_pending) = match signal {
             BleCaptureSignal::Notification(notification) => {
-                if link_recovery_deadline.take().is_some() {
-                    notify_refresh_required_after_link_recovery = true;
-                    log::info!(
-                        "[embedded-ble] capture #{capture_id}: link recovered after active-session disconnect; current recording may finish, but this notify/GATT target is quarantined: {}",
-                        link_recovery_reason
-                            .take()
-                            .unwrap_or_else(|| "unknown".to_string())
-                    );
-                }
-                notification
+                (
+                    notification,
+                    active_capture_link_recovery_notification_pending(link_recovery_deadline),
+                )
             }
             BleCaptureSignal::GattSessionInactive(reason) => {
                 log::warn!(
@@ -803,25 +1237,88 @@ fn capture_notification_events_until_cancelled_impl(
                 Some(Instant::now() + EC11_HARDWARE_RECOVERY_DISCONNECT_TIMEOUT);
             continue;
         }
-        let notification = crate::audio_transport_codec::normalize_listener_audio_notification(
+        let raw_notification_bytes = notification.len();
+        let notification = match crate::audio_transport_codec::normalize_listener_audio_notification(
             &notification,
-        )
-        .map_err(|err| {
-            format!(
-                "[embedded-ble] capture #{capture_id}: lossless audio notification rejected: {err}"
-            )
-        })?;
+        ) {
+            Ok(notification) => {
+                pipeline_observation
+                    .record_normalize(raw_notification_bytes, Some(notification.len()));
+                notification
+            }
+            Err(err) => {
+                pipeline_observation.record_normalize(raw_notification_bytes, None);
+                if link_recovery_notification_pending {
+                    log::warn!(
+                        "[embedded-ble] capture #{capture_id}: active-session recovery notification qualification fact=ParseRejected"
+                    );
+                }
+                return Err(format!(
+                    "[embedded-ble] capture #{capture_id}: lossless audio notification rejected: {err}"
+                ));
+            }
+        };
         let terminal = super::is_terminal_notification(&notification);
-        let local_event = collector.handle_notification(&notification).ok();
+        let collector_result = collector.handle_notification(&notification);
+        if collector_result.is_err() {
+            pipeline_observation.record_capture_parse_reject();
+        }
+        if let Some(event) = collector_result.as_ref().ok() {
+            pipeline_observation.record_capture_event(event);
+        }
+        if let Some(diagnostic) = ingress_diagnostic.as_ref() {
+            diagnostic.record_collector(
+                capture_id,
+                collector.last_admission_fact(),
+                &notification,
+            );
+        }
+        let recovery_fact = active_capture_recovery_fact(
+            collector_result.is_ok(),
+            collector_result.as_ref().ok(),
+        );
+        let link_recovered_after_valid_pcm = link_recovery_notification_pending
+            && recovery_fact == ActiveCaptureRecoveryFact::CurrentSegmentPcm
+            && take_active_capture_link_recovery_after_valid_pcm(
+                &mut link_recovery_deadline,
+                &mut notify_refresh_required_after_link_recovery,
+            );
+        if link_recovered_after_valid_pcm {
+            log::info!(
+                "[embedded-ble] capture #{capture_id}: link recovered after active-session disconnect through current-segment PCM; current recording may finish, but this notify/GATT target is quarantined: {}",
+                link_recovery_reason
+                    .take()
+                    .unwrap_or_else(|| "unknown".to_string())
+            );
+        } else if link_recovery_notification_pending {
+            log::warn!(
+                "[embedded-ble] capture #{capture_id}: active-session recovery notification qualification fact={recovery_fact:?}"
+            );
+        }
+        let local_event = collector_result.ok();
+        let capture_admission_fact = collector.last_admission_fact();
+        let capture_admission_receipt = collector.last_admission_receipt();
         on_event(crate::embedded_ble::BleNotificationEvent {
             notification,
             terminal,
+            capture_generation: capture_id,
+            capture_admission_fact,
+            capture_admission_receipt,
         })?;
         if matches!(
             local_event,
             Some(crate::embedded_audio::SessionEvent::Cancelled { .. })
                 | Some(crate::embedded_audio::SessionEvent::Error { .. })
         ) {
+            let recovery_wait_ended_at_terminal = clear_active_capture_link_recovery_wait(
+                &mut link_recovery_deadline,
+                &mut link_recovery_reason,
+            );
+            if recovery_wait_ended_at_terminal {
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: active-session recovery wait ended at cancel/error terminal boundary; no audio recovery was claimed"
+                );
+            }
             if terminal_behavior == CaptureTerminalBehavior::ContinueListening {
                 if should_refresh_notify_after_link_recovery(
                     notify_refresh_required_after_link_recovery,
@@ -848,6 +1345,15 @@ fn capture_notification_events_until_cancelled_impl(
             local_event,
             Some(crate::embedded_audio::SessionEvent::Stopped { .. })
         ) {
+            let recovery_wait_ended_at_terminal = clear_active_capture_link_recovery_wait(
+                &mut link_recovery_deadline,
+                &mut link_recovery_reason,
+            );
+            if recovery_wait_ended_at_terminal {
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: active-session recovery wait ended at STOP boundary; stop-drain owns the remaining tail"
+                );
+            }
             stop_drain_deadline = Some(Instant::now() + super::STOP_DRAIN_TIMEOUT);
         }
         if collector.has_successful_complete_session() {

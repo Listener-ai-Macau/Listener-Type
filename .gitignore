@@ -31,3 +31,8 @@ ref/
 **/target/
 src-tauri/target-idf-free/
 src-tauri/gen/
+# MSVC build artifacts (windows-ime native IME DLL)
+windows-ime/obj/
+windows-ime/x64/
+# root-level ad-hoc build logs
+/work_build_*.log

@@ -45,6 +45,9 @@ pub(crate) struct SessionState {
     /// 该 session 是否已经领取过自动提交；完成回调即使重入也只能发送一次。
     pub(crate) post_dictation_key_claimed: bool,
     pub(crate) focus_target: Option<usize>,
+    /// 与 focus_target 同一瞬间抓到的目标窗口标题。r23 自愈：存值 HWND 死亡时
+    /// 按它匹配当前前台，识别用户的真实上屏窗口。
+    pub(crate) focus_target_title: Option<String>,
     /// 每次 begin_session 生成新的 UUID session id。
     /// recorder error monitor 持有 captured id，处理时若与当前不等说明
     /// 是上一 session 的迟到错误，必须 drop，不要 abort 当前 active session。
@@ -64,6 +67,7 @@ impl Default for SessionState {
             user_initiated_stop: false,
             post_dictation_key_claimed: false,
             focus_target: None,
+            focus_target_title: None,
             session_id: initial_session_id(),
             front_app: None,
         }
@@ -320,6 +324,7 @@ pub(crate) fn apply_dictation_event(
                 SessionPhase::Starting | SessionPhase::Listening | SessionPhase::Processing => {
                     state.cancelled = true;
                     state.focus_target = None;
+                    state.focus_target_title = None;
                     // Owner 2026-07-28 post-OTA: leaving Processing on cancel raced with
                     // empty AsrFinal (ignored while cancelled) and stuck phase=Processing
                     // forever → EC11 dictation showed "session already running" and
@@ -448,6 +453,7 @@ pub(crate) fn apply_dictation_event(
             }
             state.phase = SessionPhase::Idle;
             state.focus_target = None;
+            state.focus_target_title = None;
             DictationTransition::Applied {
                 session_id: Some(session_id),
                 snapshot: Some(dictation_snapshot(state, DictationUiState::Idle)),

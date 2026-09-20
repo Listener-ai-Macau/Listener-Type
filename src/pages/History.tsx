@@ -359,6 +359,8 @@ export function History() {
                     ? t('history.inserted')
                     : item.insertStatus === 'pasteSent'
                       ? t('history.pasteSent')
+                    : item.insertStatus === 'submittedUnconfirmed'
+                      ? t('history.submittedUnconfirmed')
                     : item.insertStatus === 'copiedFallback'
                       ? t('history.copiedFallback', { shortcut: os === 'mac' ? '⌘V' : 'Ctrl+V' })
                       : t('history.insertFailed')

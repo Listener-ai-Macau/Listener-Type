@@ -60,11 +60,10 @@ export function shouldRetainCapsulePreview(options: {
 }): boolean {
   if (!options.currentMessage) return false;
   if (!PREVIEW_RETAIN_STATES.has(options.state)) return false;
-  if (
-    options.sessionId
-    && options.messageSessionId
-    && options.sessionId !== options.messageSessionId
-  ) {
+  // Idle/dismissal clears message ownership while leaving the old text in
+  // React state for the exit animation. That unowned text is not a preview
+  // of the next recording, even when its startup message is suppressed.
+  if (options.sessionId && options.sessionId !== options.messageSessionId) {
     return false;
   }
   return true;

@@ -130,14 +130,45 @@ pub(super) fn schedule_capsule_idle(
 
 #[cfg(target_os = "windows")]
 pub(super) fn capture_focus_target() -> Option<usize> {
+    capture_focus_target_with_title().0
+}
+
+/// r23（2026-09-18，session 921fe510）：会话开始存下的 HWND 在 delivery 时已死
+/// （"original Windows insertion target is no longer a valid window"），但操作员
+/// 弹窗整轮存活且始终前台——抓取瞬间夹了个短命中间窗口。HWND 与其标题必须
+/// 原子成对抓取；delivery 侧的按标题自愈（resolve_insertion_window）用这对值。
+#[cfg(target_os = "windows")]
+pub(super) fn capture_focus_target_with_title() -> (Option<usize>, Option<String>) {
     use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
     let foreground = unsafe { GetForegroundWindow() };
     if foreground.0.is_null() {
-        None
-    } else {
-        Some(foreground.0 as usize)
+        return (None, None);
     }
+    let title = window_title(foreground);
+    log::info!(
+        "[coord] insertion focus target captured hwnd={:?} title={title:?}",
+        foreground.0
+    );
+    (Some(foreground.0 as usize), Some(title))
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(super) fn capture_focus_target_with_title() -> (Option<usize>, Option<String>) {
+    (capture_focus_target(), None)
+}
+
+#[cfg(target_os = "windows")]
+fn window_title(hwnd: windows::Win32::Foundation::HWND) -> String {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowTextLengthW, GetWindowTextW};
+
+    let len = unsafe { GetWindowTextLengthW(hwnd) };
+    if len <= 0 {
+        return String::new();
+    }
+    let mut buf = vec![0u16; (len + 1) as usize];
+    let copied = unsafe { GetWindowTextW(hwnd, &mut buf) };
+    String::from_utf16_lossy(&buf[..copied.max(0) as usize])
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -231,27 +262,81 @@ pub(super) fn capture_frontmost_app() -> Option<String> {
     None
 }
 
+/// r23 自愈核心：给出本次插入应使用的窗口。存值还活着→存值；存值已死→若当前
+/// 前台仍带着会话开始时抓到的标题（front_app），它就是用户的真实上屏目标，返回
+/// 重抓的 HWND；标题对不上→None（绝不让 runner 终端之类的窗口意外成为目标）。
 #[cfg(target_os = "windows")]
-pub(super) fn restore_focus_target_if_possible(target: Option<usize>) -> bool {
+pub(super) fn resolve_insertion_window(
+    target: Option<usize>,
+    expected_title: Option<&str>,
+) -> Option<usize> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsWindow};
+
+    let raw_target = target?;
+    let hwnd = HWND(raw_target as *mut std::ffi::c_void);
+    if hwnd.0.is_null() {
+        return None;
+    }
+    if unsafe { IsWindow(hwnd).as_bool() } {
+        return Some(raw_target);
+    }
+    log::warn!(
+        "[coord] original Windows insertion target is no longer a valid window hwnd={raw_target:?}"
+    );
+    let expected = expected_title.map(str::trim).filter(|t| !t.is_empty())?;
+    let foreground = unsafe { GetForegroundWindow() };
+    if foreground.0.is_null() {
+        return None;
+    }
+    let title = window_title(foreground);
+    if title.trim() != expected {
+        log::warn!(
+            "[coord] foreground title {title:?} does not match session-start title {expected:?}; refusing recapture"
+        );
+        return None;
+    }
+    log::info!(
+        "[coord] recaptured insertion target by title match after original hwnd died hwnd={:?} title={title:?}",
+        foreground.0
+    );
+    Some(foreground.0 as usize)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(super) fn resolve_insertion_window(
+    target: Option<usize>,
+    _expected_title: Option<&str>,
+) -> Option<usize> {
+    target
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn restore_focus_target_if_possible(
+    target: Option<usize>,
+    expected_title: Option<&str>,
+) -> bool {
     use std::ffi::c_void;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
     use windows::Win32::UI::WindowsAndMessaging::{
-        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindow,
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic,
         SetForegroundWindow, ShowWindow, SW_RESTORE,
     };
 
-    let Some(raw_target) = target else {
+    if target.is_none() {
         log::warn!("[coord] no original Windows insertion target captured");
         return false;
-    };
-    let hwnd = HWND(raw_target as *mut c_void);
-    if hwnd.0.is_null() {
-        return false;
     }
-    if !unsafe { IsWindow(hwnd).as_bool() } {
-        log::warn!("[coord] original Windows insertion target is no longer a valid window");
+    // r23（2026-09-18，session 921fe510）：存值可能死于短命中间窗口；按标题
+    // 自愈到真实输入窗口（见 resolve_insertion_window）。恢复与后续 IME 目标
+    // 推导必须用同一个有效窗口。
+    let Some(effective_target) = resolve_insertion_window(target, expected_title) else {
+        return false;
+    };
+    let hwnd = HWND(effective_target as *mut c_void);
+    if hwnd.0.is_null() {
         return false;
     }
 
@@ -299,7 +384,10 @@ pub(super) fn restore_focus_target_if_possible(target: Option<usize>) -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub(super) fn restore_focus_target_if_possible(_target: Option<usize>) -> bool {
+pub(super) fn restore_focus_target_if_possible(
+    _target: Option<usize>,
+    _expected_title: Option<&str>,
+) -> bool {
     true
 }
 
@@ -310,19 +398,38 @@ pub(super) fn windows_hwnd_is_present(hwnd: windows::Win32::Foundation::HWND) ->
 
 #[cfg(target_os = "windows")]
 pub(super) fn capture_ime_submit_target() -> Option<ImeSubmitTarget> {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, GUITHREADINFO,
-    };
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
     let foreground = unsafe { GetForegroundWindow() };
     if !windows_hwnd_is_present(foreground) {
         return None;
     }
+    capture_ime_submit_target_for_window(Some(foreground.0 as usize))
+}
 
-    let mut foreground_process_id = 0;
-    let foreground_thread_id =
-        unsafe { GetWindowThreadProcessId(foreground, Some(&mut foreground_process_id)) };
-    if foreground_thread_id == 0 {
+/// Derive the IME submit target from a session-bound root window. The old
+/// implementation read the *current* foreground window at finalization, so a
+/// helper process, terminal, or review dialog that briefly took focus could
+/// silently become the recipient. Keeping this conversion rooted in the
+/// saved HWND makes the target immutable for the session.
+#[cfg(target_os = "windows")]
+pub(super) fn capture_ime_submit_target_for_window(
+    root_target: Option<usize>,
+) -> Option<ImeSubmitTarget> {
+    use std::ffi::c_void;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetGUIThreadInfo, GetWindowThreadProcessId, GUITHREADINFO,
+    };
+
+    let root = HWND(root_target? as *mut c_void);
+    if !windows_hwnd_is_present(root) {
+        return None;
+    }
+
+    let mut root_process_id = 0;
+    let root_thread_id = unsafe { GetWindowThreadProcessId(root, Some(&mut root_process_id)) };
+    if root_process_id == 0 || root_thread_id == 0 {
         return None;
     }
 
@@ -330,16 +437,16 @@ pub(super) fn capture_ime_submit_target() -> Option<ImeSubmitTarget> {
         cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
         ..Default::default()
     };
-    let target_window = if unsafe { GetGUIThreadInfo(foreground_thread_id, &mut gui_info).is_ok() }
+    let focused = if unsafe { GetGUIThreadInfo(root_thread_id, &mut gui_info).is_ok() }
         && windows_hwnd_is_present(gui_info.hwndFocus)
     {
         gui_info.hwndFocus
     } else {
-        foreground
+        root
     };
 
     let mut process_id = 0;
-    let thread_id = unsafe { GetWindowThreadProcessId(target_window, Some(&mut process_id)) };
+    let thread_id = unsafe { GetWindowThreadProcessId(focused, Some(&mut process_id)) };
     if process_id == 0 || thread_id == 0 {
         return None;
     }
@@ -383,6 +490,27 @@ pub(super) fn show_capsule_window_no_activate<R: tauri::Runtime>(
         )
     };
     unsafe { IsWindowVisible(hwnd).as_bool() }
+}
+
+/// Record the Windows foreground owner around capsule window operations.
+/// Showing the capsule is deliberately non-activating, but the API result
+/// alone does not prove that the previous insertion target stayed foreground.
+/// This is an observation-only probe for the delivery boundary; it never
+/// attempts to reclaim focus.
+fn record_capsule_focus_probe(stage: &str, seq: u64, session_id: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        log::info!(
+            "[capsule-focus] stage={stage} seq={seq} session_id={session_id} foreground_hwnd={:?} foreground_title={:?}",
+            capture_focus_target(),
+            capture_frontmost_app(),
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (stage, seq, session_id);
+    }
 }
 
 // macOS / Linux 上不走 no-activate 路径：胶囊由 emit_capsule 的 fallback
@@ -561,10 +689,22 @@ pub(super) fn apply_capsule_window_request<R: tauri::Runtime>(
         );
         return;
     };
+    let should_probe_focus = show_capsule && visible;
+    if should_probe_focus {
+        record_capsule_focus_probe("before_prepare", seq, &session_id_for_log);
+    }
     crate::prepare_capsule_window_for_overlay(&window);
+    if should_probe_focus {
+        record_capsule_focus_probe("after_prepare", seq, &session_id_for_log);
+    }
     maybe_position_capsule_bottom_center(inner, app, &window, translation);
+    if should_probe_focus {
+        record_capsule_focus_probe("after_position", seq, &session_id_for_log);
+    }
     if show_capsule && visible {
+        record_capsule_focus_probe("before_show", seq, &session_id_for_log);
         let shown_no_activate = show_capsule_window_no_activate(app, &window);
+        record_capsule_focus_probe("after_show", seq, &session_id_for_log);
         crate::timeline::mark(
             "backend.capsule",
             "show_request",
@@ -671,6 +811,10 @@ pub(super) fn emit_capsule_with_session(
         inserted_chars,
         translation,
     };
+    // Keep one authoritative display snapshot so a hidden/recreated capsule
+    // WebView can catch up after its event listener is re-established. This is
+    // presentation state only; replay never calls a dictation or insertion API.
+    *inner.capsule_latest_payload.lock() = Some(payload.clone());
 
     let should_trace_emit = {
         let mut throttle = inner.capsule_ui_throttle.lock();
@@ -831,7 +975,10 @@ impl CapsuleUiThrottleState {
                 if let Some(last) = self.last_frontend_request.as_ref() {
                     if last.session_id == request.session_id
                         && matches!(last.state, CapsuleState::Recording)
-                        && last.message.as_ref().is_some_and(|message| !message.is_empty())
+                        && last
+                            .message
+                            .as_ref()
+                            .is_some_and(|message| !message.is_empty())
                     {
                         return false;
                     }
@@ -969,8 +1116,15 @@ pub(super) struct DeferredAsrBridge {
 
 pub(super) struct DeferredAsrState {
     target: Option<Arc<dyn crate::asr::AudioConsumer>>,
-    pending_audio: Vec<u8>,
+    pending_audio: Vec<DeferredAsrChunk>,
     attaching: bool,
+}
+
+struct DeferredAsrChunk {
+    pcm: Vec<u8>,
+    observation: Option<Arc<crate::observability::EmbeddedAudioPipelineObservation>>,
+    segment_id: Option<u32>,
+    source_interval: Option<crate::observability::PcmSourceInterval>,
 }
 
 impl DeferredAsrBridge {
@@ -989,13 +1143,11 @@ impl DeferredAsrBridge {
         {
             let mut state = self.state.lock();
             state.attaching = true;
-            // Keep only the last 300 ms of preroll. Overlap-rearm can dump ~2 s
-            // at once; flushing that stalls Volcengine and the capsule stays empty.
-            const MAX_DEFERRED_BYTES: usize = 16_000 * 2 * 3 / 10;
-            if state.pending_audio.len() > MAX_DEFERRED_BYTES {
-                let skip = state.pending_audio.len() - MAX_DEFERRED_BYTES;
-                state.pending_audio.drain(..skip);
-            }
+            // Preserve the complete prefix while the provider connects. The
+            // old 300 ms cap deleted 2.3 s in installed session 81b6dd3f and
+            // permanently shifted provider timestamps behind local speaker
+            // evidence. The provider's FIFO worker already accepts bursts;
+            // truncation here loses words and strands endpoint catch-up.
         }
 
         loop {
@@ -1008,30 +1160,71 @@ impl DeferredAsrBridge {
                 }
                 std::mem::take(&mut state.pending_audio)
             };
-            flushed_bytes += pending.len();
-            target.consume_pcm_chunk(&pending);
+            for pending in pending {
+                flushed_bytes += pending.pcm.len();
+                target.consume_pcm_chunk_with_source_interval(
+                    &pending.pcm,
+                    pending.observation,
+                    pending.segment_id,
+                    pending.source_interval,
+                );
+            }
         }
     }
 }
 
 impl crate::recorder::AudioConsumer for DeferredAsrBridge {
     fn consume_pcm_chunk(&self, pcm: &[u8]) {
+        self.consume_pcm_chunk_with_source(pcm, None, None);
+    }
+
+    fn consume_pcm_chunk_with_source(
+        &self,
+        pcm: &[u8],
+        observation: Option<Arc<crate::observability::EmbeddedAudioPipelineObservation>>,
+        segment_id: Option<u32>,
+    ) {
+        self.consume_pcm_chunk_with_source_interval(pcm, observation, segment_id, None);
+    }
+
+    fn consume_pcm_chunk_with_source_interval(
+        &self,
+        pcm: &[u8],
+        observation: Option<Arc<crate::observability::EmbeddedAudioPipelineObservation>>,
+        segment_id: Option<u32>,
+        source_interval: Option<crate::observability::PcmSourceInterval>,
+    ) {
         let target = {
             let mut state = self.state.lock();
             if state.attaching {
-                state.pending_audio.extend_from_slice(pcm);
+                state.pending_audio.push(DeferredAsrChunk {
+                    pcm: pcm.to_vec(),
+                    observation: observation.clone(),
+                    segment_id,
+                    source_interval,
+                });
                 return;
             }
             if let Some(target) = state.target.as_ref() {
                 Some(Arc::clone(target))
             } else {
-                state.pending_audio.extend_from_slice(pcm);
+                state.pending_audio.push(DeferredAsrChunk {
+                    pcm: pcm.to_vec(),
+                    observation: observation.clone(),
+                    segment_id,
+                    source_interval,
+                });
                 None
             }
         };
 
         if let Some(target) = target {
-            target.consume_pcm_chunk(pcm);
+            target.consume_pcm_chunk_with_source_interval(
+                pcm,
+                observation,
+                segment_id,
+                source_interval,
+            );
         }
     }
 }

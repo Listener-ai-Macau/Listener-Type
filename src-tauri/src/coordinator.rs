@@ -7,6 +7,7 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, VecDeque};
+use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -67,6 +68,7 @@ mod dictation;
 mod qa;
 mod recording_gate;
 mod resources;
+mod source_integrity;
 mod support;
 
 const EMBEDDED_BLE_RETRY_FAST_DELAY: Duration = Duration::from_millis(200);
@@ -142,7 +144,8 @@ use support::{
 // Re-export helpers so sibling modules / tests (`use super::*`) keep working.
 #[allow(unused_imports)]
 use support::{
-    capture_focus_target, capture_frontmost_app, emit_capsule, emit_capsule_for_session,
+    capture_focus_target, capture_focus_target_with_title, capture_frontmost_app, emit_capsule,
+    emit_capsule_for_session,
     emit_capsule_with_session, enabled_phrases, listening_session_has_no_current_asr,
     local_qwen_transcribe_timeout, publish_dictation_capsule, publish_dictation_transition,
     restore_focus_target_if_possible, schedule_capsule_idle, startup_race_status_for_starting,
@@ -154,7 +157,8 @@ use support::{
 #[cfg(target_os = "windows")]
 #[allow(unused_imports)]
 use support::{
-    capture_ime_submit_target, foundry_audio_transcribe_timeout_duration, windows_hwnd_is_present,
+    capture_ime_submit_target, capture_ime_submit_target_for_window,
+    foundry_audio_transcribe_timeout_duration, resolve_insertion_window, windows_hwnd_is_present,
 };
 // Tests still need these symbols in the parent namespace.
 #[allow(unused_imports)]
@@ -254,6 +258,12 @@ struct AutomaticWakeGuard {
     /// that may stop advancing.
     initial_body_wait_started_at: Option<Instant>,
     body_started: bool,
+    /// Wall-clock moment the body latch first flipped true. r46f: the user's
+    /// natural post-wake pause (~1.6 s) let the wake-phrase-armed 1 s inactive
+    /// deadline fire 40 ms before the first body preview landed; the dispatch
+    /// guard uses this timestamp to give a just-started body its contract
+    /// window instead of inheriting the wake-era deadline.
+    body_started_at: Option<Instant>,
     /// Stop boundary is latched before ASR finalization. Late provider text
     /// must not retroactively start a wake-only body.
     stop_requested: bool,
@@ -263,15 +273,6 @@ struct ProviderProgressGuard {
     session_id: SessionId,
     provider_audio_ms: u64,
     last_advanced_at: Instant,
-}
-
-struct TerminalWakeContinuation {
-    session_id: Option<SessionId>,
-    wake_pcm: Vec<u8>,
-    wake_end_seconds: f32,
-    wake_phrase: String,
-    enrolled_owner_matched: bool,
-    expires_at: Instant,
 }
 
 struct Inner {
@@ -319,7 +320,8 @@ struct Inner {
     embedded_audio_provider_progress_guard: Mutex<Option<ProviderProgressGuard>>,
     /// One verified terminal wake may start a fresh body-only firmware capture
     /// when the VAD segment ended before it contained usable post-wake audio.
-    embedded_audio_terminal_wake_continuation: Mutex<Option<TerminalWakeContinuation>>,
+    embedded_audio_terminal_wake_continuation:
+        Mutex<Option<dictation::TerminalWakeContinuation>>,
     /// 最近一次用于录音胶囊的嵌入式 BLE PCM 电平。ASR partial preview 到达时沿用它，
     /// 避免文字刷新把音量动画刷成 0。
     embedded_audio_last_capsule_level: Mutex<f32>,
@@ -329,9 +331,6 @@ struct Inner {
     /// When stop→Transcribing feedback latches, record session + Instant so the
     /// completion path can log stop_to_done_ms for UX latency observability.
     dictation_stop_feedback_at: Mutex<Option<(SessionId, Instant)>>,
-    /// Owner-quiet auto-end should type the last capsule preview instead of
-    /// waiting for a later cloud final that can rewrite or swallow it.
-    auto_end_commit_preview_session: Mutex<Option<SessionId>>,
     /// Listener BLE 输入源的后台订阅代次。设置变化时递增，旧监听循环会自然退出。
     embedded_ble_listener_generation: AtomicU64,
     /// Firmware OTA 正在独占 BLE data plane。期间不要自动重启后台音频监听，避免抢占
@@ -452,6 +451,10 @@ struct Inner {
     /// Monotonic capsule payload sequence. The frontend rejects older snapshots
     /// so delayed UI events cannot overwrite newer terminal states.
     capsule_sequence: AtomicU64,
+    /// Latest capsule payload for a lifecycle-safe frontend replay. The capsule
+    /// WebView can be hidden/recreated independently of the main window; replay
+    /// is display-only and never re-enters dictation or insertion.
+    capsule_latest_payload: Mutex<Option<CapsulePayload>>,
     /// QA 用的 ASR 句柄（始终是 Volcengine 流式）。
     qa_asr: Mutex<Option<Arc<VolcengineStreamingASR>>>,
     /// QA 用的 Recorder 句柄。
@@ -467,11 +470,398 @@ struct Inner {
     shutdown: AtomicBool,
 }
 
+const DICTATION_RUNTIME_SNAPSHOT_SCHEMA: &str = "listener.dictation_runtime_snapshot.v1";
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DictationRuntimeSnapshot {
+    pub schema: &'static str,
+    pub request_id: u32,
+    pub phase: &'static str,
+    pub session_id: Option<SessionId>,
+    pub pending_stop: bool,
+    pub cancelled: bool,
+}
+
+fn dictation_runtime_snapshot_from_state(
+    request_id: u32,
+    state: &SessionState,
+) -> DictationRuntimeSnapshot {
+    let phase = match state.phase {
+        SessionPhase::Idle => "idle",
+        SessionPhase::Starting => "starting",
+        SessionPhase::Listening => "listening",
+        SessionPhase::Processing => "processing",
+        SessionPhase::Inserting => "inserting",
+    };
+    DictationRuntimeSnapshot {
+        schema: DICTATION_RUNTIME_SNAPSHOT_SCHEMA,
+        request_id,
+        phase,
+        session_id: (!state.session_id.is_nil()).then_some(state.session_id),
+        pending_stop: state.pending_stop,
+        cancelled: state.cancelled,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DeliveryRoute {
+    Tsf,
+    Unicode,
+    Paste,
+    CopyOnly,
+    Streaming,
+    Direct,
+    Failed,
+}
+
+impl DeliveryRoute {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Tsf => "tsf",
+            Self::Unicode => "unicode",
+            Self::Paste => "paste",
+            Self::CopyOnly => "copy_only",
+            Self::Streaming => "streaming",
+            Self::Direct => "direct",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DeliveryPersistenceOutcome {
+    Saved,
+    Failed,
+}
+
+impl DeliveryPersistenceOutcome {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Saved => "saved",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// The immutable request handed to one external input submission attempt.
+/// `delivery_id` is allocated before the attempt starts and is carried through
+/// the production submission and history closeout without becoming lifecycle
+/// state or part of the persisted/IPC schema.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DeliveryRequest {
+    pub(super) session_id: SessionId,
+    pub(super) delivery_id: String,
+    pub(super) text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DeliverySubmission {
+    pub(super) status: InsertStatus,
+    pub(super) target_confirmed: bool,
+    pub(super) route: DeliveryRoute,
+    pub(super) submitted_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DeliveryExternalOperation {
+    OriginalTarget,
+    ForegroundFallback,
+    CopyOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DeliveryExternalResult {
+    pub(super) status: InsertStatus,
+    pub(super) target_confirmed: bool,
+    pub(super) route: DeliveryRoute,
+    pub(super) submitted_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct DeliveryDispatchPolicy {
+    pub(super) already_streamed: bool,
+    pub(super) wayland_session: bool,
+    pub(super) allow_clipboard_fallback: bool,
+    pub(super) focus_ready_for_paste: bool,
+    pub(super) allow_foreground_insert_fallback: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DeliveryDispatchChoice {
+    External(DeliveryExternalOperation),
+    Immediate(DeliverySubmission),
+}
+
+fn choose_delivery_dispatch(
+    policy: DeliveryDispatchPolicy,
+    streamed_submitted_text: Option<String>,
+) -> DeliveryDispatchChoice {
+    if policy.already_streamed {
+        return DeliveryDispatchChoice::Immediate(DeliverySubmission {
+            // Streaming only proves that synthetic events were emitted. It
+            // has no receiver acknowledgement, so do not persist the same
+            // success state as a confirmed TSF commit.
+            status: InsertStatus::SubmittedUnconfirmed,
+            target_confirmed: false,
+            route: DeliveryRoute::Streaming,
+            submitted_text: streamed_submitted_text,
+        });
+    }
+    if policy.wayland_session {
+        return if policy.allow_clipboard_fallback {
+            DeliveryDispatchChoice::External(DeliveryExternalOperation::CopyOnly)
+        } else {
+            DeliveryDispatchChoice::Immediate(DeliverySubmission {
+                status: InsertStatus::Failed,
+                target_confirmed: false,
+                route: DeliveryRoute::Failed,
+                submitted_text: None,
+            })
+        };
+    }
+    if policy.focus_ready_for_paste {
+        DeliveryDispatchChoice::External(DeliveryExternalOperation::OriginalTarget)
+    } else if policy.allow_foreground_insert_fallback {
+        DeliveryDispatchChoice::External(DeliveryExternalOperation::ForegroundFallback)
+    } else if policy.allow_clipboard_fallback {
+        DeliveryDispatchChoice::External(DeliveryExternalOperation::CopyOnly)
+    } else {
+        DeliveryDispatchChoice::Immediate(DeliverySubmission {
+            status: InsertStatus::Failed,
+            target_confirmed: false,
+            route: DeliveryRoute::Failed,
+            submitted_text: None,
+        })
+    }
+}
+
+fn map_delivery_external_result(
+    operation: DeliveryExternalOperation,
+    result: DeliveryExternalResult,
+) -> DeliverySubmission {
+    let status = if result.status == InsertStatus::Inserted
+        && (result.route != DeliveryRoute::Tsf
+            || !matches!(operation, DeliveryExternalOperation::OriginalTarget))
+    {
+        // KEYEVENTF_UNICODE and explicit foreground fallback report only that
+        // Windows accepted the input event. There is no receiver ack proving
+        // that the intended control rendered it.
+        InsertStatus::SubmittedUnconfirmed
+    } else {
+        result.status
+    };
+    let target_confirmed = matches!(operation, DeliveryExternalOperation::OriginalTarget)
+        && result.route == DeliveryRoute::Tsf
+        && status == InsertStatus::Inserted
+        && result.target_confirmed;
+    let submitted_text = if matches!(operation, DeliveryExternalOperation::CopyOnly) {
+        None
+    } else {
+        result.submitted_text
+    };
+    DeliverySubmission {
+        status,
+        target_confirmed,
+        route: if matches!(operation, DeliveryExternalOperation::CopyOnly) {
+            DeliveryRoute::CopyOnly
+        } else {
+            result.route
+        },
+        submitted_text,
+    }
+}
+
+/// Stable, privacy-preserving payload comparison for delivery evidence.
+/// FNV-1a is applied to an explicit presence byte followed by the exact UTF-8
+/// bytes, so `None` and `Some("")` cannot collide by construction.
+pub(super) fn delivery_payload_digest(text: Option<&str>) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    let presence = if text.is_some() { 0x01_u8 } else { 0x00_u8 };
+    hash ^= presence as u64;
+    hash = hash.wrapping_mul(0x100000001b3_u64);
+    if let Some(text) = text {
+        for byte in text.as_bytes() {
+            hash ^= *byte as u64;
+            hash = hash.wrapping_mul(0x100000001b3_u64);
+        }
+    }
+    format!("{hash:016x}")
+}
+
+pub(super) fn delivery_payload_bytes(text: Option<&str>) -> Option<usize> {
+    text.map(str::len)
+}
+
+/// Run the production's one-shot external submission closure exactly once.
+/// The closure is the only replaceable boundary in offline tests; the request
+/// and all closeout data use this same production path.
+pub(super) async fn execute_delivery_submission<F, Fut>(
+    request: DeliveryRequest,
+    submit: F,
+) -> DeliverySubmission
+where
+    F: FnOnce(DeliveryRequest) -> Fut,
+    Fut: Future<Output = DeliverySubmission>,
+{
+    log::info!(
+        "[delivery] dispatch begin session_id={} delivery_id={} text_bytes={} text_digest={}",
+        request.session_id,
+        request.delivery_id,
+        request.text.len(),
+        delivery_payload_digest(Some(&request.text))
+    );
+    let submission = submit(request.clone()).await;
+    log::info!(
+        "[delivery] dispatch end session_id={} delivery_id={} route={} status={:?} target_confirmed={} submitted_bytes={:?} submitted_digest={}",
+        request.session_id,
+        request.delivery_id,
+        submission.route.label(),
+        submission.status,
+        submission.target_confirmed,
+        delivery_payload_bytes(submission.submitted_text.as_deref()),
+        delivery_payload_digest(submission.submitted_text.as_deref())
+    );
+    submission
+}
+
+/// Choose the production delivery branch, invoke only the selected external
+/// system operation, and normalize its result before closeout. Tests replace
+/// only `submit`; branch choice and target-confirmation mapping stay shared
+/// with production.
+pub(super) async fn dispatch_delivery_request<F, Fut>(
+    request: DeliveryRequest,
+    policy: DeliveryDispatchPolicy,
+    streamed_submitted_text: Option<String>,
+    submit: F,
+) -> DeliverySubmission
+where
+    F: FnOnce(DeliveryExternalOperation, DeliveryRequest) -> Fut,
+    Fut: Future<Output = DeliveryExternalResult>,
+{
+    let choice = choose_delivery_dispatch(policy, streamed_submitted_text);
+    execute_delivery_submission(request, |request| async move {
+        match choice {
+            DeliveryDispatchChoice::External(operation) => {
+                let result = submit(operation, request.clone()).await;
+                map_delivery_external_result(operation, result)
+            }
+            DeliveryDispatchChoice::Immediate(submission) => submission,
+        }
+    })
+    .await
+}
+
+/// Immutable, internal evidence for one final delivery. This deliberately is
+/// not a new lifecycle state and is not part of the persisted/IPC schema.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DeliveryFact {
+    pub(super) session_id: SessionId,
+    pub(super) delivery_id: String,
+    /// Text that the pipeline intended to deliver after the configured
+    /// polish/translation fallback was resolved.
+    pub(super) intended_text: String,
+    /// Text actually submitted to an input mechanism. `None` means this
+    /// delivery was copy-only or no input mechanism accepted a payload.
+    pub(super) submitted_text: Option<String>,
+    pub(super) route: DeliveryRoute,
+    pub(super) status: InsertStatus,
+    /// Only TSF commit (or an equivalent future explicit target acknowledgement)
+    /// may set this true. SendInput/paste/streaming remain unconfirmed.
+    pub(super) target_confirmed: bool,
+    pub(super) persistence: DeliveryPersistenceOutcome,
+    pub(super) intended_bytes: usize,
+    pub(super) intended_digest: String,
+    pub(super) submitted_bytes: Option<usize>,
+    pub(super) submitted_digest: String,
+}
+
+pub(super) fn record_delivery_fact<F>(
+    session_id: SessionId,
+    delivery_id: String,
+    intended_text: String,
+    submitted_text: Option<String>,
+    route: DeliveryRoute,
+    status: InsertStatus,
+    target_confirmed: bool,
+    persist_history: F,
+) -> DeliveryFact
+where
+    F: FnOnce() -> Result<(), String>,
+{
+    let intended_bytes = intended_text.len();
+    let intended_digest = delivery_payload_digest(Some(&intended_text));
+    let submitted_bytes = delivery_payload_bytes(submitted_text.as_deref());
+    let submitted_digest = delivery_payload_digest(submitted_text.as_deref());
+    let persistence = match persist_history() {
+        Ok(()) => DeliveryPersistenceOutcome::Saved,
+        Err(error) => {
+            log::error!("[delivery] history append failed: {error}");
+            DeliveryPersistenceOutcome::Failed
+        }
+    };
+    let fact = DeliveryFact {
+        session_id,
+        delivery_id,
+        intended_text,
+        submitted_text,
+        route,
+        status,
+        target_confirmed,
+        persistence,
+        intended_bytes,
+        intended_digest,
+        submitted_bytes,
+        submitted_digest,
+    };
+    log::info!(
+        "[delivery] fact session_id={} delivery_id={} route={} status={:?} target_confirmed={} persistence={} intended_bytes={} intended_digest={} submitted_bytes={:?} submitted_digest={}",
+        fact.session_id,
+        fact.delivery_id,
+        fact.route.label(),
+        fact.status,
+        fact.target_confirmed,
+        fact.persistence.label(),
+        fact.intended_bytes,
+        fact.intended_digest,
+        fact.submitted_bytes,
+        fact.submitted_digest,
+    );
+    fact
+}
+
+/// Close one production delivery with the already-used request ID and the
+/// actual submission result. The history sink is invoked once and never
+/// retried here; callers retain their established side-effect ordering and
+/// pass the same session object they would have persisted before O3.
+pub(super) fn finalize_delivery_fact<F>(
+    request: DeliveryRequest,
+    intended_text: String,
+    submission: DeliverySubmission,
+    persist_history: F,
+) -> DeliveryFact
+where
+    F: FnOnce() -> Result<(), String>,
+{
+    record_delivery_fact(
+        request.session_id,
+        request.delivery_id,
+        intended_text,
+        submission.submitted_text,
+        submission.route,
+        submission.status,
+        submission.target_confirmed,
+        persist_history,
+    )
+}
+
 #[cfg(target_os = "windows")]
 pub(super) struct WindowsInsertionResult {
     pub(super) status: InsertStatus,
     /// Only a successful TSF submit confirms that the original target accepted the text.
     pub(super) target_confirmed: bool,
+    pub(super) route: DeliveryRoute,
+    pub(super) submitted_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -573,11 +963,19 @@ impl EmbeddedBleSessionActorRecord {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct EmbeddedBleSessionActorState {
     next_seq: u64,
     history: VecDeque<EmbeddedBleSessionActorRecord>,
     pcm_capsule_trace: EmbeddedBlePcmCapsuleTraceState,
+    /// The live source-integrity ledger for the logical product session owned
+    /// by this actor.  Keep the Arc here so endpoint tasks that finish a
+    /// rotated wake-only segment inspect the exact same evidence context as
+    /// the actor's normal STOP path.
+    source_integrity_ledger: Option<(
+        SessionId,
+        Arc<std::sync::Mutex<crate::coordinator::dictation::SourceAdmissionDependencyLedger>>,
+    )>,
     /// Product session whose pre-activation physical segment has ended while
     /// the actor is waiting for an optional post-activation segment.  The
     /// endpoint stop path consumes this hand-off only after firmware STOP and
@@ -712,7 +1110,6 @@ impl Coordinator {
                     embedded_audio_last_capsule_level: Mutex::new(0.0),
                     embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                     dictation_stop_feedback_at: Mutex::new(None),
-                    auto_end_commit_preview_session: Mutex::new(None),
                     embedded_ble_listener_generation: AtomicU64::new(0),
                     embedded_ble_ota_active: AtomicBool::new(false),
                     embedded_ble_listener_cancel: Mutex::new(None),
@@ -757,6 +1154,7 @@ impl Coordinator {
                     capsule_layout: Mutex::new(None),
                     capsule_ui_throttle: Mutex::new(CapsuleUiThrottleState::default()),
                     capsule_sequence: AtomicU64::new(0),
+                    capsule_latest_payload: Mutex::new(None),
                     qa_asr: Mutex::new(None),
                     qa_recorder: Mutex::new(None),
                     qa_stream_cancelled: Arc::new(AtomicBool::new(false)),
@@ -801,7 +1199,6 @@ impl Coordinator {
                 embedded_audio_last_capsule_level: Mutex::new(0.0),
                 embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                 dictation_stop_feedback_at: Mutex::new(None),
-                auto_end_commit_preview_session: Mutex::new(None),
                 embedded_ble_listener_generation: AtomicU64::new(0),
                 embedded_ble_ota_active: AtomicBool::new(false),
                 embedded_ble_listener_cancel: Mutex::new(None),
@@ -844,6 +1241,7 @@ impl Coordinator {
                 capsule_layout: Mutex::new(None),
                 capsule_ui_throttle: Mutex::new(CapsuleUiThrottleState::default()),
                 capsule_sequence: AtomicU64::new(0),
+                capsule_latest_payload: Mutex::new(None),
                 qa_asr: Mutex::new(None),
                 qa_recorder: Mutex::new(None),
                 qa_stream_cancelled: Arc::new(AtomicBool::new(false)),
@@ -2002,6 +2400,21 @@ impl Coordinator {
         self.inner.state.lock().phase
     }
 
+    /// Read-only coordinator snapshot for diagnostics and trigger preflight.
+    /// The state lock is released before the DTO crosses the command boundary.
+    pub fn dictation_runtime_snapshot(&self, request_id: u32) -> DictationRuntimeSnapshot {
+        let state = self.inner.state.lock();
+        dictation_runtime_snapshot_from_state(request_id, &state)
+    }
+
+    /// Return the latest display-only capsule payload. The capsule WebView may
+    /// be hidden or recreated while the coordinator continues running; callers
+    /// use this only to restore the visible UI state, never to restart a
+    /// recording or replay an insertion.
+    pub fn capsule_latest_payload(&self) -> Option<CapsulePayload> {
+        self.inner.capsule_latest_payload.lock().clone()
+    }
+
     /// CLI 入口的 QA toggle：直接复用 modifier-only QA 热键边沿的处理函数。
     /// 与 `handle_qa_hotkey_pressed` 同语义 — Idle → 开浮窗 / Recording → 收尾 /
     /// Processing → 忽略。Wayland 下没有 modifier-only / global-hotkey 监听，CLI
@@ -2453,10 +2866,10 @@ fn restore_prepared_windows_ime_session(_inner: &Arc<Inner>, _session_id: Sessio
 async fn insert_with_windows_ime_first(
     inner: &Arc<Inner>,
     session_id: SessionId,
+    delivery_id: &str,
     polished: &str,
     restore_clipboard: bool,
     allow_non_tsf_insertion_fallback: bool,
-    allow_clipboard_fallback: bool,
     paste_shortcut: PasteShortcut,
     ime_target: Option<ImeSubmitTarget>,
 ) -> WindowsInsertionResult {
@@ -2470,18 +2883,14 @@ async fn insert_with_windows_ime_first(
             allow_non_tsf_insertion_fallback,
             InsertStatus::Failed,
         ) {
-            return insert_via_non_tsf_fallback(
-                inner,
-                polished,
-                restore_clipboard,
-                allow_clipboard_fallback,
-                paste_shortcut,
-            );
+            return insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut);
         }
         log::warn!("[windows-ime] non-TSF insertion fallback is disabled; failing insert");
         return WindowsInsertionResult {
             status: InsertStatus::Failed,
             target_confirmed: false,
+            route: DeliveryRoute::Failed,
+            submitted_text: None,
         };
     };
 
@@ -2502,22 +2911,31 @@ async fn insert_with_windows_ime_first(
             log::info!("[windows-ime] TSF activated on insert-time retry");
             retried
         } else {
+            if !should_try_non_tsf_insertion_fallback(
+                allow_non_tsf_insertion_fallback,
+                InsertStatus::Failed,
+            ) {
+                inner.windows_ime.restore_session(retried);
+                log::warn!(
+                    "[windows-ime] TSF retry unavailable; non-TSF insertion fallback is disabled"
+                );
+                return WindowsInsertionResult {
+                    status: InsertStatus::Failed,
+                    target_confirmed: false,
+                    route: DeliveryRoute::Failed,
+                    submitted_text: None,
+                };
+            }
             log::info!(
                 "[windows-ime] TSF still not activated at insert; using non-TSF insert path immediately"
             );
             inner.windows_ime.restore_session(retried);
-            return insert_via_non_tsf_fallback(
-                inner,
-                polished,
-                restore_clipboard,
-                allow_clipboard_fallback,
-                paste_shortcut,
-            );
+            return insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut);
         }
     };
 
     let request = crate::windows_ime_ipc::ImeSubmitRequest {
-        session_id: Uuid::new_v4().to_string(),
+        session_id: delivery_id.to_string(),
         text: polished.to_string(),
         created_at: Utc::now().to_rfc3339(),
         target: ime_target,
@@ -2526,19 +2944,24 @@ async fn insert_with_windows_ime_first(
     let ime_status = match inner.windows_ime.submit_prepared(&prepared, request).await {
         Ok(status) => status,
         Err(error) if error.is_session_not_active() => {
-            // session not active：录音起点 prepare_session 就没激活 Listener Type profile。
-            // 目标窗口仍是用户原 IME，会拦截 SendInput 的 Unicode 事件（insert_via_non_tsf_fallback
-            // 里 SendInput 假阳性返回 Inserted，实际没打字，永远到不了 clipboard 分支）。
-            // 剪贴板里此时已有原文，直接 Ctrl+V 走目标窗口 paste handler 绕开 IME。
+            // session not active：录音起点 prepare_session 就没激活 Listener Type profile，
+            // 目标窗口仍是用户原 IME。insert_via_non_tsf_fallback 因此 paste-first：
+            // Ctrl+V 走目标窗口自己的 paste handler 绕开 IME（Unicode SendInput 会被
+            // 组态中的 CJK IME 吞掉且假阳性报 Inserted）。
             log::warn!("[windows-ime] TSF submit failed: {error}");
             inner.windows_ime.restore_session(prepared);
-            return insert_via_non_tsf_fallback(
-                inner,
-                polished,
-                restore_clipboard,
-                allow_clipboard_fallback,
-                paste_shortcut,
-            );
+            if !should_try_non_tsf_insertion_fallback(
+                allow_non_tsf_insertion_fallback,
+                InsertStatus::Failed,
+            ) {
+                return WindowsInsertionResult {
+                    status: InsertStatus::Failed,
+                    target_confirmed: false,
+                    route: DeliveryRoute::Failed,
+                    submitted_text: None,
+                };
+            }
+            return insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut);
         }
         Err(error) => {
             log::warn!("[windows-ime] TSF submit failed: {error}");
@@ -2551,20 +2974,18 @@ async fn insert_with_windows_ime_first(
         WindowsInsertionResult {
             status: ime_status,
             target_confirmed: true,
+            route: DeliveryRoute::Tsf,
+            submitted_text: Some(polished.to_string()),
         }
     } else if should_try_non_tsf_insertion_fallback(allow_non_tsf_insertion_fallback, ime_status) {
-        insert_via_non_tsf_fallback(
-            inner,
-            polished,
-            restore_clipboard,
-            allow_clipboard_fallback,
-            paste_shortcut,
-        )
+        insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut)
     } else {
         log::warn!("[windows-ime] TSF did not insert; non-TSF insertion fallback is disabled");
         WindowsInsertionResult {
             status: InsertStatus::Failed,
             target_confirmed: false,
+            route: DeliveryRoute::Tsf,
+            submitted_text: Some(polished.to_string()),
         }
     }
 }
@@ -2582,56 +3003,74 @@ fn insert_via_non_tsf_fallback(
     inner: &Arc<Inner>,
     polished: &str,
     restore_clipboard: bool,
-    allow_clipboard_fallback: bool,
     paste_shortcut: PasteShortcut,
 ) -> WindowsInsertionResult {
-    // Default MSI does not ship ListenerTypeIme.dll (optional TSF). Prefer
-    // IME-safe Unicode SendInput (en-US layout armor) so stop→Done lands as
-    // Inserted without clipboard paste flash. CJK IME used to swallow bare
-    // Unicode; layout armoring + clipboard fallback keeps reliability.
+    // 2026-09-19: paste first. The target window still runs the user's CJK
+    // IME, and in composition states that IME swallows Unicode SendInput
+    // events while SendInput still reports them injected — a false-positive
+    // Inserted that loses the text and never reaches a second path (the
+    // daily-use delivery log showed every route=unicode session ending
+    // SubmittedUnconfirmed). A real Ctrl+V keystroke (enigo sends the scan
+    // code, not VK_PACKET) goes through the target's own paste handler and is
+    // IME-immune, and PasteSent is an honest completion state (green end
+    // light) instead of SubmittedUnconfirmed (yellow warning). The clipboard
+    // is only a transport here: restore_clipboard puts the user's original
+    // content back (empty → cleared, image → put back) unless they asked to
+    // retain the dictated text. Content the restore path cannot write back
+    // (copied files etc.) is never borrowed: that dictation uses keystrokes.
+    // IME-safe Unicode keystrokes stay as the second path for paste-hostile
+    // targets.
+    let paste_status = if crate::insertion::clipboard_transport_is_reversible() {
+        inner
+            .inserter
+            .insert_via_clipboard_fallback(polished, restore_clipboard, paste_shortcut)
+    } else {
+        log::info!(
+            "[windows-ime] clipboard holds content the restore path cannot write back; keeping it intact and using Unicode keystrokes chars={}",
+            polished.chars().count()
+        );
+        InsertStatus::Failed
+    };
+    if paste_status == InsertStatus::PasteSent || paste_status == InsertStatus::Inserted {
+        log::info!(
+            "[windows-ime] non-TSF clipboard paste submitted status={paste_status:?} chars={}",
+            polished.chars().count()
+        );
+        return WindowsInsertionResult {
+            status: paste_status,
+            target_confirmed: false,
+            route: DeliveryRoute::Paste,
+            submitted_text: Some(polished.to_string()),
+        };
+    }
+    log::info!(
+        "[windows-ime] non-TSF clipboard paste not clean status={paste_status:?}; falling back to IME-safe Unicode input chars={}",
+        polished.chars().count()
+    );
     let unicode_status = inner
         .inserter
         .insert_via_unicode_keystrokes_ime_safe(polished);
     if unicode_status == InsertStatus::Inserted {
         log::info!(
-            "[windows-ime] non-TSF IME-safe Unicode insert status=Inserted chars={}",
+            "[windows-ime] non-TSF IME-safe Unicode input submitted without receiver confirmation chars={}",
             polished.chars().count()
         );
         return WindowsInsertionResult {
-            status: InsertStatus::Inserted,
+            status: InsertStatus::SubmittedUnconfirmed,
             target_confirmed: false,
+            route: DeliveryRoute::Unicode,
+            submitted_text: Some(polished.to_string()),
         };
     }
-    log::info!(
-        "[windows-ime] non-TSF IME-safe Unicode insert not clean status={unicode_status:?}; trying clipboard fallback chars={}",
+    log::warn!(
+        "[windows-ime] non-TSF insert failed paste={paste_status:?} unicode={unicode_status:?} chars={}",
         polished.chars().count()
     );
-    if allow_clipboard_fallback {
-        let status = inner.inserter.insert_via_clipboard_fallback(
-            polished,
-            restore_clipboard,
-            paste_shortcut,
-        );
-        if status == InsertStatus::PasteSent || status == InsertStatus::Inserted {
-            log::info!(
-                "[windows-ime] non-TSF clipboard paste path status={status:?} chars={}",
-                polished.chars().count()
-            );
-            return WindowsInsertionResult {
-                status,
-                target_confirmed: false,
-            };
-        }
-        WindowsInsertionResult {
-            status,
-            target_confirmed: false,
-        }
-    } else {
-        log::warn!("[windows-ime] clipboard fallback disabled by final clipboard preference");
-        WindowsInsertionResult {
-            status: InsertStatus::Failed,
-            target_confirmed: false,
-        }
+    WindowsInsertionResult {
+        status: unicode_status,
+        target_confirmed: false,
+        route: DeliveryRoute::Unicode,
+        submitted_text: None,
     }
 }
 

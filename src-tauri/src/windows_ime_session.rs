@@ -197,6 +197,22 @@ impl WindowsImeSessionController {
     }
 
     pub fn restore_session(&self, prepared: PreparedWindowsImeSession) {
+        self.restore_session_profile(prepared);
+
+        // Session over: take Listener Type back out of the user's input
+        // switcher. Activation enabled it transiently because TSF refuses to
+        // instantiate a disabled TIP inside foreground apps (2026-09-18:
+        // hidden-at-activate produced "no Listener Type IME client is ready"
+        // and every insert degraded to the unconfirmed unicode route).
+        if let Err(error) = self
+            .profile_manager
+            .hide_listener_type_profile_from_input_switcher()
+        {
+            log::debug!("[windows-ime] hide profile after session failed: {error}");
+        }
+    }
+
+    fn restore_session_profile(&self, prepared: PreparedWindowsImeSession) {
         let should_restore = match self.profile_manager.is_listener_type_profile_active() {
             Ok(listener_type_active) => restore_decision(
                 prepared.saved_profile.as_ref(),

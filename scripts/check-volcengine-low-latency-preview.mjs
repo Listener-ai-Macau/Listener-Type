@@ -19,10 +19,7 @@ function readExpandedIncludes(path, stack = []) {
 }
 
 const dictationRoot = join(root, "src-tauri", "src", "coordinator");
-const dictation = [
-  readExpandedIncludes(join(dictationRoot, "dictation.rs")),
-  readFileSync(join(dictationRoot, "dictation_tests.rs"), "utf8"),
-].join("\n");
+const dictation = readExpandedIncludes(join(dictationRoot, "dictation.rs"));
 
 function fail(message) {
   throw new Error(message);
@@ -150,8 +147,8 @@ for (const token of [
 }
 const provisionalPreview = section(
   volcengine,
-  "if !has_final\n            && pending_unattributed_speech",
-  "let prefer_final_optimistic = has_final",
+  "fn display_only_provisional_preview_candidate(",
+  "fn provider_has_locally_excluded_later_utterance(",
   "Display-only provisional preview path",
 );
 requireExcludes(
@@ -164,6 +161,8 @@ requireExcludes(
   "last_partial_text =",
   "Display-only provisional preview path",
 );
+requireExcludes(provisionalPreview, "commit_session_transcript", "Display-only preview must not commit text");
+requireIncludes(volcengine, "self.emit_visual_partial_transcript(&preview);", "Display-only callback routing");
 
 const opener = section(
   dictation,
@@ -241,26 +240,28 @@ for (const token of [
 const finalSupplement = section(
   dictation,
   "fn update_embedded_audio_partial_preview_from_final_supplement",
-  "fn provider_preview_change",
+  "fn embedded_audio_partial_preview_stability_key",
   "Final supplement handoff",
 );
 for (const token of [
   "crate::asr::volcengine::FinalIntermediateTranscript",
   "let authoritative_two_pass = update.authoritative_two_pass;",
-  "provider_preview_change(slot.as_deref(), &preview)",
+  "reduce_embedded_audio_authoritative_preview(",
+  "crate::observability::PreviewSource::FinalSupplement",
 ]) {
   requireIncludes(finalSupplement, token, "Final supplement handoff");
 }
 
 const providerPreviewPolicy = section(
   dictation,
-  "fn provider_preview_change",
-  "fn stabilize_embedded_audio_partial_preview",
+  "fn reduce_embedded_audio_authoritative_preview",
+  "fn update_embedded_audio_visual_preview",
   "Provider preview replacement policy",
 );
 for (const token of [
-  "current.is_some_and(|value| value.trim() == candidate)",
-  "Some(candidate.to_string())",
+  "inner.embedded_audio_preview.lock().observe_authoritative(",
+  "reduction.visible_update",
+  "reduction.authoritative_changed",
 ]) {
   requireIncludes(providerPreviewPolicy, token, "Provider preview replacement policy");
 }
