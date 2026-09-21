@@ -38,6 +38,13 @@ const TARGET_AUDIO_CHUNK_BYTES: usize = 3_200;
 const BYTES_PER_MS: f64 = 32.0;
 const HOTWORD_CAP: usize = 80;
 const FINAL_RESULT_TIMEOUT: Duration = Duration::from_secs(12);
+// 2026-09-21 跟手优化（stable-ledger early seal）：停说→上屏原本 = 端点耐心窗
+// + 云端 two-pass 终稿往返。端点 STOP 本身证明最后一条账本变更之后全是静音
+// （inactive 1s + 续说窗都无正向证据），所以账本在停止时刻已是"完整终稿"：
+// 给真实终稿一个短先手，没到就从稳定账本直接封存，省掉 two-pass 往返。
+// 仅干净会话启用（无隔离冻结、无非目标窗）；干扰会话仍等完整终稿走归属仲裁。
+const EARLY_SEAL_FINAL_HEAD_START: Duration = Duration::from_millis(350);
+const EARLY_SEAL_MIN_LEDGER_STABLE: Duration = Duration::from_millis(1_500);
 // Physical separation is a fallback for ambiguous overlap, not a reason to
 // hold an already-visible transcript for another twelve seconds. On the
 // shipping CPU the separator can lag real time by several seconds per chunk;
@@ -661,6 +668,9 @@ struct SyncState {
     /// 火山流式响应会反复发送同一 utterance 起点的修订文本。用时间戳合并这些片段，
     /// 避免把同一段尾巴当作新内容追加，导致胶囊预览和最终插入重复膨胀。
     best_transcript_segments: Vec<TranscriptSegment>,
+    /// When `best_transcript_text` last changed. Repeated identical cloud
+    /// revisions must not refresh it: stability is the early-seal contract.
+    best_transcript_committed_at: Option<Instant>,
     best_untimed_window: String,
     /// Speaker attribution lags behind the provider's streaming text. Keep a
     /// display-only merge here so the capsule can advance without promoting
@@ -2453,6 +2463,9 @@ fn commit_session_transcript_if_stronger(
     if spoken_content_len(&text) < spoken_content_len(&state.best_transcript_text) {
         return;
     }
+    if state.best_transcript_text != text {
+        state.best_transcript_committed_at = Some(Instant::now());
+    }
     state.best_transcript_text = text.clone();
     state.best_transcript_segments = segments;
     state.last_partial_text = text;
@@ -3404,6 +3417,9 @@ fn freeze_owner_isolation_at_filtered_result(state: &mut SyncState, filtered_res
     // A provisional preview may already contain the other person's words while
     // diarization was pending. Replace every committed/display ledger with the
     // filtered owner text so protocol-final fallback cannot restore that tail.
+    if state.best_transcript_text != candidate.text {
+        state.best_transcript_committed_at = Some(Instant::now());
+    }
     state.best_transcript_text = candidate.text.clone();
     state.best_transcript_segments = candidate.timed_segments.clone();
     state.best_untimed_window.clear();
@@ -6111,6 +6127,7 @@ impl VolcengineStreamingASR {
             st.finishing = false;
             st.last_partial_text.clear();
             st.best_transcript_text.clear();
+            st.best_transcript_committed_at = None;
             st.best_transcript_segments.clear();
             st.best_untimed_window.clear();
             st.optimistic_preview_text.clear();
@@ -6566,24 +6583,99 @@ impl VolcengineStreamingASR {
         match tokio::time::timeout(timeout, &mut rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(VolcengineASRError::NoFinalResult),
-            Err(_) => {
-                if let Some((sent_audio_ms, transcript_end_ms)) = self.final_partial_coverage_gap()
-                {
-                    log::error!(
-                        "[asr] final transcript coverage incomplete after full provider timeout: sent_audio_ms={sent_audio_ms} transcript_end_ms={transcript_end_ms}"
+            Err(_) => Err(self.provider_final_wait_timeout(timeout)),
+        }
+    }
+
+    fn provider_final_wait_timeout(&self, waited: Duration) -> VolcengineASRError {
+        if let Some((sent_audio_ms, transcript_end_ms)) = self.final_partial_coverage_gap() {
+            log::error!(
+                "[asr] final transcript coverage incomplete after full provider timeout: sent_audio_ms={sent_audio_ms} transcript_end_ms={transcript_end_ms}"
+            );
+            self.cancel();
+            return VolcengineASRError::FinalResultCoverageIncomplete {
+                sent_audio_ms,
+                transcript_end_ms,
+            };
+        }
+        log::error!(
+            "[asr] provider final result timed out after {} ms",
+            waited.as_millis()
+        );
+        self.cancel();
+        VolcengineASRError::FinalResultTimeout
+    }
+
+    /// Session-ledger snapshot eligible to stand in for the provider final:
+    /// the stream is finishing, the ledger is non-empty, attribution never
+    /// froze an isolation ceiling and never saw a non-target window, and the
+    /// text has been byte-stable for at least `min_stable`.
+    fn stable_ledger_final_snapshot(&self, min_stable: Duration) -> Option<RawTranscript> {
+        let st = self.state.lock();
+        if !st.finishing || st.owner_isolation_frozen || st.local_non_target_speech_end_ms.is_some()
+        {
+            return None;
+        }
+        let committed_at = st.best_transcript_committed_at?;
+        if st.best_transcript_text.trim().is_empty() {
+            return None;
+        }
+        if committed_at.elapsed() < min_stable {
+            return None;
+        }
+        let duration_ms = st
+            .best_transcript_segments
+            .iter()
+            .filter_map(|segment| segment.end_ms)
+            .max()
+            .and_then(|end_ms| u64::try_from(end_ms).ok())
+            .unwrap_or_else(|| (st.bytes_sent as f64 / BYTES_PER_MS) as u64);
+        Some(RawTranscript {
+            text: st.best_transcript_text.clone(),
+            duration_ms,
+        })
+    }
+
+    /// await_final_result + stability early-seal (2026-09-21 跟手优化).
+    ///
+    /// In clean sessions the endpoint's own inactivity budget (1s inactive +
+    /// the continuation window) proves everything after the last ledger change
+    /// is silence, so the stable ledger is already a complete final. Give the
+    /// provider final `EARLY_SEAL_FINAL_HEAD_START` to win the race (identical
+    /// behaviour when the final is prompt), then seal from the ledger and
+    /// cancel the stream instead of waiting out the two-pass round trip.
+    /// When the ledger is not eligible the call degrades to the normal wait.
+    pub async fn await_final_result_with_early_seal(
+        &self,
+    ) -> Result<RawTranscript, VolcengineASRError> {
+        let rx = self.final_rx.lock().take();
+        let Some(mut rx) = rx else {
+            return Err(VolcengineASRError::NoFinalResult);
+        };
+        tokio::select! {
+            biased;
+            result = &mut rx => match result {
+                Ok(result) => result,
+                Err(_) => Err(VolcengineASRError::NoFinalResult),
+            },
+            _ = tokio::time::sleep(EARLY_SEAL_FINAL_HEAD_START) => {
+                if let Some(snapshot) = self.stable_ledger_final_snapshot(EARLY_SEAL_MIN_LEDGER_STABLE) {
+                    log::info!(
+                        "[asr] early-sealed final from stable session ledger chars={} stable_budget_ms={}",
+                        snapshot.text.chars().count(),
+                        EARLY_SEAL_MIN_LEDGER_STABLE.as_millis()
                     );
                     self.cancel();
-                    return Err(VolcengineASRError::FinalResultCoverageIncomplete {
-                        sent_audio_ms,
-                        transcript_end_ms,
-                    });
+                    return Ok(snapshot);
                 }
-                log::error!(
-                    "[asr] provider final result timed out after {} ms",
-                    timeout.as_millis()
-                );
-                self.cancel();
-                Err(VolcengineASRError::FinalResultTimeout)
+                // Ledger not stable enough (fresh revision, interference
+                // evidence, or empty) — the real final is the only authority.
+                let remaining = FINAL_RESULT_TIMEOUT.saturating_sub(EARLY_SEAL_FINAL_HEAD_START);
+                match tokio::time::timeout(remaining, &mut rx).await {
+                    Ok(Ok(result)) => result,
+                    Ok(Err(_)) => Err(VolcengineASRError::NoFinalResult),
+                    Err(_) => Err(self.provider_final_wait_timeout(remaining)),
+                }
             }
         }
     }
@@ -7600,6 +7692,9 @@ impl VolcengineStreamingASR {
             }
             let changed = !merged.is_empty() && state.last_partial_text != merged;
             if !merged.is_empty() {
+                if state.best_transcript_text != merged {
+                    state.best_transcript_committed_at = Some(Instant::now());
+                }
                 state.best_transcript_text = merged.clone();
                 state.best_transcript_segments = segments;
                 state.last_partial_text = merged.clone();
@@ -8222,6 +8317,118 @@ mod tests {
     use super::*;
 
     #[test]
+    fn stable_ledger_snapshot_requires_finishing_stable_clean_ledger() {
+        let mut asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: String::new(),
+                access_token: String::new(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        // Not finishing / empty ledger → ineligible.
+        assert!(asr
+            .stable_ledger_final_snapshot(Duration::from_millis(1))
+            .is_none());
+        {
+            let mut st = asr.state.lock();
+            st.finishing = true;
+            st.best_transcript_text = "开始录音，所以说刚才是什么问题？".into();
+            st.best_transcript_committed_at = Some(
+                Instant::now()
+                    .checked_sub(Duration::from_secs(2))
+                    .expect("clock"),
+            );
+        }
+        let snapshot = asr
+            .stable_ledger_final_snapshot(EARLY_SEAL_MIN_LEDGER_STABLE)
+            .expect("stable clean finishing ledger is sealable");
+        assert_eq!(snapshot.text, "开始录音，所以说刚才是什么问题？");
+        // Fresh revision inside the stability budget → ineligible.
+        {
+            let mut st = asr.state.lock();
+            st.best_transcript_committed_at = Some(Instant::now());
+        }
+        assert!(asr
+            .stable_ledger_final_snapshot(EARLY_SEAL_MIN_LEDGER_STABLE)
+            .is_none());
+        // Non-target evidence (interference session) → ineligible even when stable.
+        {
+            let mut st = asr.state.lock();
+            st.best_transcript_committed_at = Some(
+                Instant::now()
+                    .checked_sub(Duration::from_secs(2))
+                    .expect("clock"),
+            );
+            st.local_non_target_speech_end_ms = Some(4_000);
+        }
+        assert!(asr
+            .stable_ledger_final_snapshot(EARLY_SEAL_MIN_LEDGER_STABLE)
+            .is_none());
+        // Frozen isolation ceiling → ineligible.
+        {
+            let mut st = asr.state.lock();
+            st.local_non_target_speech_end_ms = None;
+            st.owner_isolation_frozen = true;
+        }
+        assert!(asr
+            .stable_ledger_final_snapshot(EARLY_SEAL_MIN_LEDGER_STABLE)
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn early_seal_prefers_a_prompt_real_final_and_falls_back_to_the_ledger() {
+        let mut asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: String::new(),
+                access_token: String::new(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        // Prompt real final wins the race (biased select polls the oneshot first).
+        let (final_tx, final_rx) = tokio::sync::oneshot::channel();
+        *asr.final_rx.lock() = Some(final_rx);
+        final_tx
+            .send(Ok(RawTranscript {
+                text: "真实终稿".into(),
+                duration_ms: 1_800,
+            }))
+            .expect("pre-delivered final");
+        let result = asr.await_final_result_with_early_seal().await;
+        assert_eq!(result.expect("real final").text, "真实终稿");
+
+        // No final ever arrives; the stable ledger seals after the head start.
+        let mut asr2 = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: String::new(),
+                access_token: String::new(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr2.install_test_final_wait_barrier_with_provider_result(Err(
+            VolcengineASRError::NoFinalResult,
+        ));
+        {
+            let mut st = asr2.state.lock();
+            st.finishing = true;
+            st.best_transcript_text = "开始录音，说完即封。".into();
+            st.best_transcript_committed_at = Some(
+                Instant::now()
+                    .checked_sub(Duration::from_secs(3))
+                    .expect("clock"),
+            );
+        }
+        let started = Instant::now();
+        let sealed = asr2.await_final_result_with_early_seal().await;
+        assert_eq!(
+            sealed.expect("stable ledger seals").text,
+            "开始录音，说完即封。"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
     fn diagnostic_trace_is_opt_in_bounded_and_unicode_safe() {
         let mut asr = VolcengineStreamingASR::new(
             VolcengineCredentials {

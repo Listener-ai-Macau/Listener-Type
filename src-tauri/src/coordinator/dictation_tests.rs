@@ -11035,7 +11035,8 @@ fn hidden_candidate_rejection_has_no_processing_led_command() {
         .find("dictation_transcribing_processing_start")
         .expect("processing LED should start with the transcribing phase");
     let final_result_wait = body
-        .find("asr.await_final_result()")
+        .find("asr.await_final_result_with_early_seal()")
+        .or_else(|| body.find("asr.await_final_result()"))
         .expect("streaming ASR should await its final result");
 
     assert!(processing_start < final_result_wait);

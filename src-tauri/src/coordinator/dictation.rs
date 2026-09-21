@@ -3013,16 +3013,21 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                         // The separator itself has processed capture audio in the
                         // background, so ambiguous overlap still gets its bounded
                         // chance immediately afterwards.
-                        let primary =
-                            match tokio::time::timeout(timeout_duration, asr.await_final_result())
-                                .await
-                            {
-                                Ok(result) => result.map_err(|error| (error, false)),
-                                Err(_) => Err((
-                                    crate::asr::volcengine::VolcengineASRError::FinalResultTimeout,
-                                    true,
-                                )),
-                            };
+                        // 2026-09-21 跟手：early-seal —— 干净会话端点 STOP 时账本
+                        // 已稳定整个耐心窗，稳定账本即完整终稿；真实终稿 350ms
+                        // 内没到就地封存（干扰会话在 ASR 内部自动退回完整等待）。
+                        let primary = match tokio::time::timeout(
+                            timeout_duration,
+                            asr.await_final_result_with_early_seal(),
+                        )
+                        .await
+                        {
+                            Ok(result) => result.map_err(|error| (error, false)),
+                            Err(_) => Err((
+                                crate::asr::volcengine::VolcengineASRError::FinalResultTimeout,
+                                true,
+                            )),
+                        };
                         let target_result = if primary.is_ok() {
                             asr.await_target_speaker_final().await
                         } else {
@@ -3036,7 +3041,13 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             let primary = match send_result {
                 Ok(()) => {
                     // 添加全局超时保护：防止 await_final_result() 永远挂起
-                    match tokio::time::timeout(timeout_duration, asr.await_final_result()).await {
+                    // （2026-09-21 跟手：同 early-seal 语义，见上方分支注释）
+                    match tokio::time::timeout(
+                        timeout_duration,
+                        asr.await_final_result_with_early_seal(),
+                    )
+                    .await
+                    {
                         Ok(result) => result.map_err(|error| (error, false)),
                         Err(_) => Err((
                             crate::asr::volcengine::VolcengineASRError::FinalResultTimeout,
