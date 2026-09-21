@@ -83,11 +83,13 @@ const EMBEDDED_BLE_CONTROL_STOP_SIGNAL_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_C
 const WAKE_DIAGNOSTIC_DIR_ENV: &str = "LISTENER_WAKE_DIAGNOSTIC_DIR";
 // 2026-09-20: 128 per-process stage2 captures exhausted within one active
 // debugging day (live incident 2274297663 hit index 127), blinding exactly the
-// evenings that need forensics. Diagnostics-only caps; no product behavior.
-const WAKE_DIAGNOSTIC_MAX_CANDIDATES: usize = 512;
+// evenings that need forensics. 2026-09-21: 512 still died in ~3h of heavy
+// morning use (index 511 at 09:41, the 10:12-10:16 wake incidents had no WAV
+// forensics at all). Diagnostics-only caps; no product behavior.
+const WAKE_DIAGNOSTIC_MAX_CANDIDATES: usize = 2048;
 const WAKE_DIAGNOSTIC_MAX_PCM_BYTES: usize = 12 * 16_000 * 2;
-const WAKE_DIAGNOSTIC_RETENTION_MAX_FILES: usize = 512;
-const WAKE_DIAGNOSTIC_RETENTION_MAX_BYTES: u64 = 128 * 1024 * 1024;
+const WAKE_DIAGNOSTIC_RETENTION_MAX_FILES: usize = 2048;
+const WAKE_DIAGNOSTIC_RETENTION_MAX_BYTES: u64 = 512 * 1024 * 1024;
 const WAKE_DIAGNOSTIC_RETENTION_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const POST_DICTATION_KEY_DELAY: Duration = Duration::from_millis(60);
 const EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT: Duration = Duration::from_millis(300);

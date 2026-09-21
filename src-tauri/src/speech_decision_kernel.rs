@@ -1365,6 +1365,10 @@ pub(crate) struct OpenNearPhraseWakeEvidence {
     pub(crate) best_distance: usize,
     pub(crate) transcript_chars: usize,
     pub(crate) phrase_chars: usize,
+    /// Terminal (final) evaluation of the candidate window. Only then may a
+    /// phrase-only transcript activate: mid-window, absence of body text is
+    /// not decisive because the body may still arrive inside this window.
+    pub(crate) terminal_window: bool,
 }
 
 /// 2026-09-20 08:37:58 (session 2274297156): the owner's accented "开始录音"
@@ -1377,14 +1381,28 @@ pub(crate) struct OpenNearPhraseWakeEvidence {
 /// bounded phonetic distance, body text, and a voiceprint floor at the
 /// non-owner boundary. Media near-misses of the same distance ("开始上课")
 /// read 0.01-0.11 and stay out.
+///
+/// 2026-09-21 10:16 (sessions 2274299279/2274299280): the bare-phrase gap.
+/// The user says only the accented/clipped wake phrase and stops to wait for
+/// the capsule: no body text can ever satisfy the body requirement inside
+/// that window, so the terminal evaluation rejected it after the full window
+/// lifetime and the capsule only appeared when the repeat's fresh window
+/// accepted ("准备再说一遍的时候它弹出来了"). At the TERMINAL evaluation no
+/// further audio can add body text, so a phrase-only transcript that still
+/// heard almost the whole phrase (>= phrase_chars - 1 units, with the same
+/// head alignment and distance bounds) may activate under the same
+/// voiceprint floor. Mid-window calls keep requiring body text.
 pub(crate) const fn open_near_phrase_wake_can_activate(
     evidence: OpenNearPhraseWakeEvidence,
 ) -> bool {
+    let body_text = evidence.transcript_chars > evidence.phrase_chars;
+    let phrase_only_terminal = evidence.terminal_window
+        && evidence.transcript_chars + 1 >= evidence.phrase_chars;
     evidence.best_distance > 0
         && evidence.best_distance <= OPEN_NEAR_PHRASE_MAX_DISTANCE
         && evidence.task_origin_bytes == 0
         && evidence.best_window_start == 0
-        && evidence.transcript_chars > evidence.phrase_chars
+        && (body_text || phrase_only_terminal)
         && match evidence.voiceprint_score {
             Some(score) => score >= OPEN_NEAR_PHRASE_MIN_VOICEPRINT_SCORE,
             None => false,
@@ -2548,6 +2566,7 @@ mod tests {
             best_distance: 2,
             transcript_chars: 21,
             phrase_chars: 4,
+            terminal_window: true,
         };
         assert!(open_near_phrase_wake_can_activate(accented_owner));
         // Media shares the phonetic shape ("开始上课…") but reads below the
@@ -2574,12 +2593,72 @@ mod tests {
             ..accented_owner
         }));
         assert!(!open_near_phrase_wake_can_activate(Evidence {
-            transcript_chars: 4,
+            best_distance: 3,
             ..accented_owner
+        }));
+        // Mid-window, a phrase-only transcript still needs body text — the
+        // body may yet arrive inside the open window.
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            transcript_chars: 4,
+            terminal_window: false,
+            ..accented_owner
+        }));
+    }
+
+    #[test]
+    fn terminal_open_near_phrase_accepts_bare_accented_wake_without_body() {
+        use OpenNearPhraseWakeEvidence as Evidence;
+        // Sessions 2274299279/2274299280 (2026-09-21 10:16): the user said
+        // only the accented wake phrase and stopped to wait for the capsule.
+        // The phrase-only transcript could never satisfy the body requirement
+        // inside that window, the terminal evaluation rejected it after the
+        // full window lifetime, and the capsule only appeared when the repeat
+        // opened a fresh window ("准备再说一遍的时候它弹出来了"). At terminal
+        // the window is closed, so hearing almost the whole phrase head-
+        // aligned under the same voiceprint floor may activate directly.
+        let bare_accented_owner = Evidence {
+            voiceprint_score: Some(0.27),
+            task_origin_bytes: 0,
+            best_window_start: 0,
+            best_distance: 2,
+            transcript_chars: 4,
+            phrase_chars: 4,
+            terminal_window: true,
+        };
+        assert!(open_near_phrase_wake_can_activate(bare_accented_owner));
+        // A clipped head that still left phrase_chars - 1 units is the same
+        // story; losing two units of a four-unit phrase is not a wake.
+        assert!(open_near_phrase_wake_can_activate(Evidence {
+            transcript_chars: 3,
+            ..bare_accented_owner
+        }));
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            transcript_chars: 2,
+            ..bare_accented_owner
+        }));
+        // The bystander guard does not depend on the body: media-bare near
+        // misses stay below the floor and fail closed.
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            voiceprint_score: Some(0.11),
+            ..bare_accented_owner
+        }));
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            voiceprint_score: None,
+            ..bare_accented_owner
+        }));
+        // Alignment and distance bounds apply identically.
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            best_window_start: 2,
+            ..bare_accented_owner
         }));
         assert!(!open_near_phrase_wake_can_activate(Evidence {
             best_distance: 3,
-            ..accented_owner
+            ..bare_accented_owner
+        }));
+        // An exact match never routes through this tier.
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            best_distance: 0,
+            ..bare_accented_owner
         }));
     }
 

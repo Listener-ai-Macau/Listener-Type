@@ -1347,7 +1347,7 @@ fn wake_diagnostic_cleanup_caps_matching_files_and_keeps_unrelated_files() {
         std::process::id()
     ));
     std::fs::create_dir_all(&directory).expect("create retention fixture");
-    for index in 0..514 {
+    for index in 0..2050 {
         std::fs::write(
             directory.join(format!("wake-candidate-{index:03}.wav")),
             [index as u8],
@@ -1370,8 +1370,9 @@ fn wake_diagnostic_cleanup_caps_matching_files_and_keeps_unrelated_files() {
         .count();
     // 2026-09-20: caps raised 128→512 — the per-process budget exhausted
     // mid-day on live incident 2274297663, blinding forensics when needed.
+    // 2026-09-21: 512 died in ~3h (index 511 at 09:41) — raised to 2048.
     assert_eq!(removed, 2);
-    assert_eq!(remaining_wavs, 512);
+    assert_eq!(remaining_wavs, 2048);
     assert!(unrelated.exists());
 
     std::fs::remove_dir_all(&directory).expect("remove retention fixture");
@@ -11819,8 +11820,7 @@ fn terminal_open_near_recovery_matches_session_2274297156_gated_by_voiceprint_fl
         4,
         0,
     ));
-    // Buried near-miss, tail confirm window, no body text, and distance 3
-    // all stay out.
+    // Buried near-miss, tail confirm window, and distance 3 all stay out.
     let buried = super::LocalWakeConfirmation {
         phonetic_best_window_start: 2,
         ..accented_owner_wake
@@ -11837,13 +11837,29 @@ fn terminal_open_near_recovery_matches_session_2274297156_gated_by_voiceprint_fl
         4,
         80_000 * 32,
     ));
+    // Sessions 2274299279/2274299280 (2026-09-21 10:16): a bare accented
+    // phrase with no body used to be a guaranteed terminal reject — the body
+    // requirement was unsatisfiable inside a closed window and the capsule
+    // only appeared when the user's repeat opened a fresh window. At terminal
+    // the phrase-only transcript hearing the whole phrase may accept under
+    // the same floor; losing two of four units stays out.
     let no_body = super::LocalWakeConfirmation {
         transcript_chars: 4,
         ..accented_owner_wake
     };
-    assert!(!super::open_terminal_local_near_can_accept(
+    assert!(super::open_terminal_local_near_can_accept(
         &drifted_owner_voice,
         &no_body,
+        4,
+        0,
+    ));
+    let clipped_no_body = super::LocalWakeConfirmation {
+        transcript_chars: 2,
+        ..accented_owner_wake
+    };
+    assert!(!super::open_terminal_local_near_can_accept(
+        &drifted_owner_voice,
+        &clipped_no_body,
         4,
         0,
     ));
