@@ -101,7 +101,12 @@ pub struct VolcengineCredentials {
 
 impl VolcengineCredentials {
     pub fn default_resource_id() -> &'static str {
-        "volc.seedasr.sauc.duration"
+        // 2026-09-21: the gateway now rejects "volc.seedasr.sauc.duration" at
+        // handshake for every caller (HTTP 400 "resourceId ... is not allowed",
+        // verified with garbage credentials). "volc.bigasr.sauc.duration" is the
+        // accepted id for the Doubao Seed-ASR streaming 2.0 hour pack and serves
+        // the same /api/v3/sauc/bigmodel endpoint.
+        "volc.bigasr.sauc.duration"
     }
 }
 
@@ -8601,10 +8606,10 @@ mod tests {
     }
 
     #[test]
-    fn default_resource_id_uses_seed_asr_2_hourly_quota() {
+    fn default_resource_id_uses_gateway_accepted_bigasr_hourly_quota() {
         assert_eq!(
             VolcengineCredentials::default_resource_id(),
-            "volc.seedasr.sauc.duration"
+            "volc.bigasr.sauc.duration"
         );
     }
 
