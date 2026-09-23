@@ -710,6 +710,12 @@ struct SyncState {
     /// 词时间戳，但 `audio_info.duration` 仍覆盖整段音频；收尾时应优先采用这项
     /// 传输级覆盖证据，避免把已返回的完整文本误判为截断。
     last_server_audio_duration_ms: Option<u64>,
+    /// send_last_frame 时刻的云端覆盖水位（2026-09-23 18:49 会话 5ac70fc7
+    /// 实锤：用户停顿 ~2.6s 后在 3s 窗口内续说，端点竞速输了照常 STOP，但
+    /// 尾音经 drain 通路继续上云，终稿 58 字完整含续说——却被 STOP 天花板
+    /// 砍回 45 字）。终稿覆盖显著超过此水位 = 尾巴有新捕获音频背书（真实
+    /// 续说），而非两遍幻听；owner_preview_safety_ceiling 据此豁免。
+    stop_boundary_server_audio_ms: Option<u64>,
     /// 上行黑洞探测（2026-09-22 16:08 实锤：真直连也会被网络间歇吞包，TUN/Clash
     /// 均已排除，软件只能自愈）。最近一次收到 FullServerResponse 的时刻；配合
     /// `bytes_sent_since_response` 判定"本端持续发包、云端长时间零应答"——云端
@@ -1878,6 +1884,11 @@ fn should_preserve_longer_owner_preview(
         && spoken_content_len(candidate) < spoken_content_len(&state.last_emitted_preview_text)
 }
 
+// POST-STOP 尾巴豁免的最小新音频量（2026-09-23 5ac70fc7）：真实续说会让
+// 终稿覆盖超出 STOP 水位数秒（该会话 +4.5s）；而两遍精修/幻听不产生新
+// 音频，drain 兜底最多带出 ~1s 排队帧。1.5s 把两者分开。
+const POST_STOP_OWNER_TAIL_MIN_NEW_AUDIO_MS: u64 = 1_500;
+
 /// Once the host has sent the stop boundary, the capsule's last owner-safe
 /// preview is the only text the user has actually seen.  Volcengine's
 /// authoritative two-pass frame can still arrive later and append an
@@ -1886,6 +1897,12 @@ fn should_preserve_longer_owner_preview(
 /// exactly how room speech/recognition hallucinations leak into the user's
 /// text.  Keep punctuation-only corrections, but never admit new spoken
 /// content after the boundary unless a separately extracted owner track exists.
+///
+/// 2026-09-23 续接豁免（5ac70fc7 实锤）：用户在 3s 窗口内续说、端点竞速
+/// 输了照常 STOP——尾音经 drain 上云，owner 过滤终稿完整含尾巴（58/45
+/// 字）。这种"晚到的增长"有新捕获音频背书（终稿覆盖显著超过 STOP 水
+/// 位），与无新音频的两遍幻听本质不同：保留尾巴，交付层（pause-early
+/// 余量/锚点）负责只贴增量。
 fn owner_preview_safety_ceiling(state: &SyncState, merged: &str) -> Option<String> {
     if !state.finishing
         || !state.local_speaker_tracking_enabled
@@ -1895,6 +1912,28 @@ fn owner_preview_safety_ceiling(state: &SyncState, merged: &str) -> Option<Strin
         || state.distinct_speaker_target_final_text.is_some()
     {
         return None;
+    }
+    // 豁免：终稿云端覆盖比 STOP 水位多出真实新音频 → 增长是抓到的语音
+    // 而不是幻听，不砍。无水位（旧会话路径/直发终稿）不豁免，维持保守。
+    if let Some(boundary_ms) = state.stop_boundary_server_audio_ms {
+        let covered_ms = state
+            .last_server_audio_duration_ms
+            .into_iter()
+            .chain(state.local_audio_duration_ms)
+            .max();
+        if covered_ms.is_some_and(|now| {
+            now.saturating_sub(boundary_ms) >= POST_STOP_OWNER_TAIL_MIN_NEW_AUDIO_MS
+        }) {
+            log::info!(
+                "[asr] post-stop owner tail backed by {}ms of newly covered audio; keeping late tail preview_chars={} final_chars={}",
+                covered_ms
+                    .map(|now| now.saturating_sub(boundary_ms))
+                    .unwrap_or(0),
+                state.last_emitted_preview_text.chars().count(),
+                merged.chars().count()
+            );
+            return None;
+        }
     }
     let normalize_spoken = |text: &str| {
         text.chars()
@@ -6163,6 +6202,7 @@ impl VolcengineStreamingASR {
             st.last_emitted_preview_text.clear();
             st.last_emitted_visual_preview_text.clear();
             st.last_server_audio_duration_ms = None;
+            st.stop_boundary_server_audio_ms = None;
             st.last_server_response_at = None;
             st.bytes_sent_since_response = 0;
             st.target_speaker_id = None;
@@ -6444,7 +6484,11 @@ impl VolcengineStreamingASR {
     async fn send_last_frame_once(&self) -> Result<(), VolcengineASRError> {
         // Seal immediately so a proactive endpoint finalization cannot race
         // later firmware-drain PCM into the stream after its negative frame.
-        self.state.lock().finishing = true;
+        {
+            let mut state = self.state.lock();
+            state.finishing = true;
+            state.stop_boundary_server_audio_ms = state.last_server_audio_duration_ms;
+        }
         let delivery_ready_started = Instant::now();
         self.await_audio_delivery_ready(FINAL_FRAME_SEND_BUDGET)
             .await?;
@@ -11243,6 +11287,60 @@ mod tests {
             owner_preview_safety_ceiling(&state, "开始录音。主人正文到这里。旁人插入的字。"),
             Some("开始录音。主人正文到这里。".into())
         );
+    }
+
+    /// 2026-09-23 18:49 会话 5ac70fc7：用户停顿 ~2.6s 后在 3s 窗口内续说，
+    /// 端点竞速输了照常 STOP，尾音经 drain 上云，owner 过滤终稿 58 字完整
+    /// 含尾巴——旧天花板砍回 45 字把续说全吞。终稿覆盖比 STOP 水位多出
+    /// 真实新音频（+4.5s）时必须豁免；无新音频（两遍精修/幻听，覆盖只差
+    /// drain 兜底）不豁免。
+    #[test]
+    fn post_stop_owner_tail_backed_by_new_audio_is_not_capped() {
+        let state = SyncState {
+            finishing: true,
+            local_speaker_tracking_enabled: true,
+            last_emitted_preview_text: "开始录音。主人正文到这里。".into(),
+            stop_boundary_server_audio_ms: Some(10_500),
+            last_server_audio_duration_ms: Some(13_500),
+            ..SyncState::default()
+        };
+        assert!(owner_preview_safety_ceiling(
+            &state,
+            "开始录音。主人正文到这里。然后我现在短暂停顿，继续说话。"
+        )
+        .is_none());
+
+        // 覆盖只差 drain 兜底（<1.5s）＝无新音频，维持砍尾。
+        let drain_only = SyncState {
+            finishing: true,
+            local_speaker_tracking_enabled: true,
+            last_emitted_preview_text: "开始录音。主人正文到这里。".into(),
+            stop_boundary_server_audio_ms: Some(10_500),
+            last_server_audio_duration_ms: Some(11_200),
+            ..SyncState::default()
+        };
+        assert_eq!(
+            owner_preview_safety_ceiling(
+                &drain_only,
+                "开始录音。主人正文到这里。然后我现在短暂停顿，继续说话。"
+            ),
+            Some("开始录音。主人正文到这里。".into())
+        );
+
+        // 无水位（直发终稿路径）维持保守砍尾。
+        let no_watermark = SyncState {
+            finishing: true,
+            local_speaker_tracking_enabled: true,
+            last_emitted_preview_text: "开始录音。主人正文到这里。".into(),
+            stop_boundary_server_audio_ms: None,
+            last_server_audio_duration_ms: Some(13_500),
+            ..SyncState::default()
+        };
+        assert!(owner_preview_safety_ceiling(
+            &no_watermark,
+            "开始录音。主人正文到这里。然后我现在短暂停顿，继续说话。"
+        )
+        .is_some());
     }
 
     #[test]
