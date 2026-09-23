@@ -1568,41 +1568,60 @@ fn pause_early_mismatch_recovery_tail(final_text: &str, delivered_key: &str) -> 
     if delivered_key.is_empty() {
         return None;
     }
+    let delivered_content_chars = delivered_key.chars().count();
     let mut seen_key = String::new();
+    let mut divergence_offset: Option<usize> = None;
+    let mut lcp_chars = 0usize;
+    let mut content_index = 0usize;
+    // 终稿内容第 delivered_content_chars 个字符的字节偏移：增长尾从这里切齐。
+    let mut growth_offset: Option<usize> = None;
     for (offset, ch) in final_text.char_indices() {
         if is_embedded_audio_partial_preview_decorative(ch) {
             continue;
         }
+        if growth_offset.is_none() && content_index == delivered_content_chars {
+            growth_offset = Some(offset);
+        }
         for lower in ch.to_lowercase() {
             seen_key.push(lower);
         }
-        if !delivered_key.starts_with(seen_key.as_str()) {
-            // 分界落在把 key 推离已交付前缀的这个字上。
-            // 2026-09-23 13:33 panic 实锤（"…必须要报用内置浏览器看蓝湖"）：
-            // 字节级 LCP 会在共享 UTF-8 前缀的同音字内部切分（报 E6 8A A5 /
-            // 抱 E6 8A B1 共享前两字节），delivered_key[lcp..] 直接 panic 成
-            // "内部错误"。按整字符推进并累加该字符的字节长，切点必落边界。
-            let mut lcp_bytes = 0usize;
-            for (seen, delivered) in seen_key.chars().zip(delivered_key.chars()) {
-                if seen != delivered {
-                    break;
-                }
-                lcp_bytes += seen.len_utf8();
-            }
-            if lcp_bytes * 2 < delivered_key.len() {
-                return None;
-            }
-            // 2026-09-22 21:5x 用户实锤"出来两次":改写落在已交付区间内部时,
-            // 旧文本已在屏上收不回,补新尾巴=新旧并存重复(58 字已交付+15 字
-            // 改写尾)。只有分界贴着交付末尾(云端只改写了最后 ≤2 个字符,
-            // 标点/同音边界级)才允许补尾;深改写维持"早期文本保留,尾巴丢弃"
-            // (宁少不重复,H 族)。
-            let rewritten_tail_chars = delivered_key[lcp_bytes..].chars().count();
-            if rewritten_tail_chars > 2 {
-                return None;
-            }
-            return Some(final_text[offset..].to_string());
+        if divergence_offset.is_none() && !delivered_key.starts_with(seen_key.as_str()) {
+            divergence_offset = Some(offset);
+        } else if divergence_offset.is_none() {
+            lcp_chars += 1;
         }
+        content_index += 1;
+    }
+    let Some(divergence_offset) = divergence_offset else {
+        return None;
+    };
+    // 2026-09-23 13:33 panic 实锤（"…必须要报用内置浏览器看蓝湖"）：
+    // 字节级 LCP 会在共享 UTF-8 前缀的同音字内部切分（报 E6 8A A5 /
+    // 抱 E6 8A B1 共享前两字节），delivered_key[lcp..] 直接 panic 成
+    // "内部错误"。按整字符推进，切点必落字符边界。
+    let lcp_bytes: usize = delivered_key
+        .chars()
+        .take(lcp_chars)
+        .map(char::len_utf8)
+        .sum();
+    if lcp_bytes * 2 < delivered_key.len() {
+        return None;
+    }
+    let rewritten_tail_chars = delivered_content_chars - lcp_chars;
+    if rewritten_tail_chars <= 2 {
+        // 2026-09-22 21:5x 用户实锤"出来两次"后改版契约:改写只允许在交付
+        // 末尾 ≤2 字(标点/同音边界级)时从分界补尾。
+        return Some(final_text[divergence_offset..].to_string());
+    }
+    // 2026-09-23 14:31/14:32 连续实锤:云端两遍精修润色了中段一个字,旧契约
+    // 把 2-16 字的纯新增尾巴一起丢掉——违反优先级锁第 3 条(不吞你的字)。
+    // 增长尾分支:相似度 ≥80%(LCP 覆盖已交付五分之四)且终稿内容更长时,
+    // 从已交付长度处切齐补尾。严格只追加交付长度之后的内容,物理上不可能
+    // 重复上屏;"出来两次"型深改写重述(LCP 低)仍被挡在门外。
+    if content_index > delivered_content_chars
+        && lcp_chars * 5 >= delivered_content_chars * 4
+    {
+        return growth_offset.map(|offset| final_text[offset..].to_string());
     }
     None
 }

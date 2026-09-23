@@ -14800,3 +14800,28 @@ fn pause_early_mismatch_recovery_tail_survives_shared_utf8_prefix_divergence() {
         Some("抱。".to_string())
     );
 }
+
+#[test]
+fn pause_early_mismatch_recovery_tail_appends_growth_tail_on_late_polish() {
+    use super::pause_early_mismatch_recovery_tail;
+    let key = |text: &str| super::embedded_audio_partial_preview_stability_key(text);
+
+    // 2026-09-23 14:31/14:32 连续实锤:云端两遍精修润色了中段一个字(分界
+    // 距交付末尾 3 字,>2 字边界),旧契约把纯新增的尾巴整段丢弃。相似度
+    // ≥80% 且终稿更长时,必须从已交付长度处切齐补尾——严格只追加交付
+    // 长度之后的内容,不可能重复上屏。
+    let delivered = "今天测试一下停顿落屏然后我们继续说说看吧"; // 20 字,分界在"说说"→"说些"(index 17)
+    let polished = "今天测试一下停顿落屏然后我们继续说些看吧还有别的";
+    assert_eq!(
+        pause_early_mismatch_recovery_tail(polished, &key(delivered)),
+        Some("还有别的".to_string())
+    );
+
+    // 深改写重述("出来两次"型,LCP 低)即使终稿更长也不补——新旧并存重复
+    // 比丢尾更伤,维持 None。
+    let restated = "今天测试一下现在是完全不同的另一句话内容更长了";
+    assert_eq!(
+        pause_early_mismatch_recovery_tail(restated, &key(delivered)),
+        None
+    );
+}
