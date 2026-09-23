@@ -1318,7 +1318,10 @@ pub(crate) const fn repeated_owner_near_phrase_wake_can_activate(
 /// EnrolledNonMatch+phrase→Accept 开放策略同族（转写命中同样不查声纹），
 /// 把同等待遇扩展给「持续近音」。误触面：旁人需跨 ≥4 个滚动窗持续发出
 /// distance≤2 近音；自然语音落 3+（2026-09-20 0/43 复盘：34/43 正确
-/// 拒识全在远处）。回退 LISTENER_DISABLE_SUSTAINED_NEAR_PHRASE_RESCUE=1。
+/// 拒识全在远处）。2026-09-23 15:37 实战首开即误报（剧集音频同窗滚动重听
+/// 4 秒累计 5 票,确认并非独立证据;声纹 0.133 落在媒体带与本人带之间的灰区）
+/// ——装机默认关闭,开启 LISTENER_ENABLE_SUSTAINED_NEAR_PHRASE_RESCUE=1;
+/// 重设计须加"不同 window_start 独立确认 + owner 地板 0.15"并先过离线矩阵。
 pub(crate) const OWNER_NEAR_PHRASE_RESCUE_CONFIRMATIONS: u8 = 4;
 
 pub(crate) const fn sustained_near_phrase_wake_can_activate(confirmations: u8) -> bool {

@@ -1604,6 +1604,13 @@ fn pause_early_mismatch_recovery_tail(final_text: &str, delivered_key: &str) -> 
         .take(lcp_chars)
         .map(char::len_utf8)
         .sum();
+    // 微增长(≤3 字)无条件补,且先于半程卫兵:2026-09-23 15:29 实锤
+    // delivered=23/final=24,深改写把 1 字新增吞掉——1-3 字的尾巴不可能
+    // 是整段重述,且严格只追加交付长度之后的内容,物理上不可能重复。
+    let growth_chars = content_index.saturating_sub(delivered_content_chars);
+    if growth_chars > 0 && growth_chars <= 3 {
+        return growth_offset.map(|offset| seam_deduped_growth_tail(final_text, offset, delivered_key));
+    }
     if lcp_bytes * 2 < delivered_key.len() {
         return None;
     }
@@ -1622,9 +1629,35 @@ fn pause_early_mismatch_recovery_tail(final_text: &str, delivered_key: &str) -> 
     if content_index > delivered_content_chars
         && rewritten_tail_chars <= usize::max(8, delivered_content_chars / 3)
     {
-        return growth_offset.map(|offset| final_text[offset..].to_string());
+        return growth_offset.map(|offset| seam_deduped_growth_tail(final_text, offset, delivered_key));
     }
     None
+}
+
+/// 增长尾接缝去重(2026-09-23 15:4x 测试实锤):改写区变长或重排时,按索引
+/// 切出的尾巴开头可能复述已交付的结尾(尾部"别的呀"叠在屏上"…别的"后面
+/// 成"别的别的呀")。尾巴前 ≤2 字若与已交付 key 的结尾逐字相同则剥掉,
+/// 剥空则放弃——宁少不重复。
+fn seam_deduped_growth_tail(final_text: &str, offset: usize, delivered_key: &str) -> String {
+    let tail: Vec<char> = final_text[offset..].chars().collect();
+    let key: Vec<char> = delivered_key.chars().collect();
+    for strip in (1..=2usize).rev() {
+        if tail.len() <= strip || key.len() < strip {
+            continue;
+        }
+        let overlaps = (0..strip).all(|i| {
+            tail[i]
+                .to_lowercase()
+                .eq(key[key.len() - strip + i].to_lowercase())
+        });
+        if overlaps {
+            let remainder: String = tail[strip..].iter().collect();
+            if !remainder.trim_matches(|ch: char| is_embedded_audio_partial_preview_decorative(ch)).is_empty() {
+                return remainder;
+            }
+        }
+    }
+    final_text[offset..].to_string()
 }
 
 fn pause_early_delivery_session_state(

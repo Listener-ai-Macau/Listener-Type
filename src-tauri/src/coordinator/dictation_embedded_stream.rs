@@ -2204,16 +2204,20 @@ impl EmbeddedStreamingDictation {
                 );
             }
             if wake_match.is_none()
-                && std::env::var("LISTENER_DISABLE_SUSTAINED_NEAR_PHRASE_RESCUE")
+                && std::env::var("LISTENER_ENABLE_SUSTAINED_NEAR_PHRASE_RESCUE")
                     .as_deref()
-                    != Ok("1")
+                    == Ok("1")
                 && crate::speech_decision_kernel::sustained_near_phrase_wake_can_activate(
                     candidate.owner_near_phrase_confirmations,
                 )
             {
-                // 声纹失明兜底（kernel 注释里有干扰实测数字）：近音
-                // distance≤2 持续累计满 4 个滚动窗即视为唤醒意图，不再
-                // 要求 owner 分。与转写命中的开放接受同族；接受后下方
+                // 声纹失明兜底——2026-09-23 15:37 实战首开即误报后默认关闭
+                // (opt-in)：剧集音频 4 秒内在同一 window_start 滚动重听累计
+                // 5 票(distance=2),确认数不是独立证据;声纹 0.133 落在媒体带
+                // (0.01-0.11)与本人带(0.2+)之间的灰区。重设计要求:确认须来自
+                // 不同 window_start + owner 地板 0.15,并先对 diag-tks-20260923
+                // 的误报 WAV 与上午真样本跑离线矩阵。开启=
+                // LISTENER_ENABLE_SUSTAINED_NEAR_PHRASE_RESCUE=1。接受后下方
                 // !enrolled_owner_matched 分支仍会尝试分离升级归属。
                 phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
                 wake_match = Some(crate::wake_phrase::Match {

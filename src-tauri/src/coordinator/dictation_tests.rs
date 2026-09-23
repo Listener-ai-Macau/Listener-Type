@@ -12456,8 +12456,8 @@ fn sustained_near_phrase_rescue_is_wired_with_rollback_and_extraction_upgrade() 
         .find("sustained_near_phrase_wake_can_activate")
         .expect("terminal gate must consult the sustained near-phrase rescue");
     let rollback = stream
-        .find("LISTENER_DISABLE_SUSTAINED_NEAR_PHRASE_RESCUE")
-        .expect("rescue must ship with an env rollback switch");
+        .find("LISTENER_ENABLE_SUSTAINED_NEAR_PHRASE_RESCUE")
+        .expect("rescue must be opt-in after the 2026-09-23 15:37 drama-audio false wake");
     let extraction = stream
         .find("let mut owner_verified_by_extraction = false;")
         .expect("extraction upgrade block anchor must exist");
@@ -14784,13 +14784,13 @@ fn pause_early_mismatch_recovery_tail_survives_shared_utf8_prefix_divergence() {
     let key = |text: &str| super::embedded_audio_partial_preview_stability_key(text);
 
     // 2026-09-23 13:33 panic 实锤（"内部错误"）：报(E6 8A A5)/抱(E6 8A B1)
-    // 共享前两字节，字节级 LCP 把切点落在字符内部 → slice panic。分界在
-    // 交付区间深处(>2 字)时必须返回 None 而不是 panic。
+    // 共享前两字节，字节级 LCP 把切点落在字符内部 → slice panic。修复后
+    // 不但不 panic,深改写(区 9>8)叠加微增长(3 字)还走微增长通道补尾。
     let delivered = "为什么没有呢应该有的呀就是你必须要报用内置浏览器看蓝湖";
     let deep_final = "为什么没有呢应该有的呀就是你必须要抱用内置浏览器看蓝湖的链接";
     assert_eq!(
         pause_early_mismatch_recovery_tail(deep_final, &key(delivered)),
-        None
+        Some("的链接".to_string())
     );
 
     // 同族字对落在交付末尾(≤2 字,同音边界级)时照常补尾,不 panic。
@@ -14827,9 +14827,18 @@ fn pause_early_mismatch_recovery_tail_appends_growth_tail_on_late_polish() {
         Some("对吧".to_string())
     );
 
-    // 深改写重述("出来两次"型,改写区超限)即使终稿更长也不补——新旧并存
-    // 重复比丢尾更伤,维持 None。
-    let restated = "今天测试一下现在是完全不同的另一句话内容更长了";
+    // 微增长(≤3 字)无条件补:2026-09-23 15:29 实锤 23→24 深改写吞 1 字。
+    // 改写区可以任意深,1-3 字的尾巴不可能是重述。
+    let micro_delivered = "今天测试一下停顿落屏然后我们继续说说看吧还有别的"; // 24 字
+    let micro_polished = "今天测试一下停顿落屏另外我们后来继续说说看吧还有别的呀"; // 分界在第 10 字(改写区 14>8),增长 3 字
+    assert_eq!(
+        pause_early_mismatch_recovery_tail(micro_polished, &key(micro_delivered)),
+        Some("呀".to_string())
+    );
+
+    // 深改写重述("出来两次"型:改写区超限且增长 >3 字)即使终稿更长也不补
+    // ——新旧并存重复比丢尾更伤,维持 None。增长 ≤3 字的走微增长通道。
+    let restated = "今天测试一下现在是完全不同的另一句话内容更长了呀真的";
     assert_eq!(
         pause_early_mismatch_recovery_tail(restated, &key(delivered)),
         None
