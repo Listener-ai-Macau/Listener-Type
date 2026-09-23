@@ -185,6 +185,23 @@ async fn connect_ws_with_network_policy(
 > {
     let endpoint = request.uri().to_string();
     let mode = proxy_config.effective_mode(&endpoint);
+    // 2026-09-22 45000081 根治：直连名单里的国内 ASR 供应商（火山语音）在
+    // System 模式下会搭系统代理——本地代理（Clash 等）黑洞长连 WSS 时，
+    // 云端 8 秒收不到包就杀会话（实测 2026-09-22 每 1-2 小时 1 单，
+    // ~15-20% 会话：预览全死 + 断流重放兜底一次性蹦全文）。这些端点在
+    // 国内本就不需要代理；显式 Custom 仍然尊重，System 视同 Direct。
+    let mode = match mode {
+        EffectiveProxyMode::System
+            if crate::polish::provider_default_proxy_is_direct(proxy_config.provider_id()) =>
+        {
+            log::info!(
+                "[network] domestic ASR provider bypasses system proxy provider={} (direct-default list)",
+                proxy_config.provider_id()
+            );
+            EffectiveProxyMode::Direct
+        }
+        mode => mode,
+    };
     let proxy_url = match mode {
         EffectiveProxyMode::Direct => None,
         EffectiveProxyMode::Custom => proxy_config.custom_proxy_url().map(str::to_owned),
@@ -693,6 +710,14 @@ struct SyncState {
     /// 词时间戳，但 `audio_info.duration` 仍覆盖整段音频；收尾时应优先采用这项
     /// 传输级覆盖证据，避免把已返回的完整文本误判为截断。
     last_server_audio_duration_ms: Option<u64>,
+    /// 上行黑洞探测（2026-09-22 16:08 实锤：真直连也会被网络间歇吞包，TUN/Clash
+    /// 均已排除，软件只能自愈）。最近一次收到 FullServerResponse 的时刻；配合
+    /// `bytes_sent_since_response` 判定"本端持续发包、云端长时间零应答"——云端
+    /// 自己的 8 秒无包超时（45000081）要干等，本端 4.5 秒即可判死提前掐线，
+    /// 保留音频重放的死胶囊窗口从 ~12s 砍到 ~7s。
+    last_server_response_at: Option<Instant>,
+    /// 最近一次服务端应答之后累计入队的音频字节数（与 `bytes_sent` 同口径）。
+    bytes_sent_since_response: usize,
     target_speaker_id: Option<String>,
     target_speech_end_ms: Option<u64>,
     /// Stable end of the physical wake row. Unlike `target_speech_end_ms`,
@@ -1146,12 +1171,14 @@ fn display_only_provisional_preview_candidate(
     provider_result: &Value,
     _pending_unattributed_speech: bool,
 ) -> Option<String> {
-    if state.local_preview_exclusion_seen
-        || state.local_owner_handoff_suspected
-        || local_owner_continuity(state) == LocalOwnerContinuity::Other
-        || provider_has_locally_excluded_later_utterance(state, provider_result)
-        || provider_has_pending_speaker_change(state, provider_result)
-    {
+    // 2026-09-22 15:2x 用户拍板（干扰实测 56eadf8a/5e767040：云端 6 帧胶囊只
+    // 亮 1 帧，用户以为死机二次按停→取消吞掉已仲裁终稿）：预览默认假设有干
+    // 扰。本通道 display-only，不影响终稿仲裁/端点时钟/插入——身份不确定不
+    // 再压黑胶囊，归属判定继续由终稿侧执行。仅当本地稳定判定"当前说话人非
+    // 主人"（防抖后的 NonTarget 连续性且无任何主人侧稳定证据）时 withhold。
+    let foreign_dominant = state.local_speaker_tracking_enabled
+        && local_owner_continuity(state) == LocalOwnerContinuity::Other;
+    if foreign_dominant {
         return None;
     }
     // Live 2026-09-11 02:21: capsule empty ~8 s because this helper required
@@ -6136,6 +6163,8 @@ impl VolcengineStreamingASR {
             st.last_emitted_preview_text.clear();
             st.last_emitted_visual_preview_text.clear();
             st.last_server_audio_duration_ms = None;
+            st.last_server_response_at = None;
+            st.bytes_sent_since_response = 0;
             st.target_speaker_id = None;
             st.target_speech_end_ms = None;
             st.wake_target_speech_end_ms = None;
@@ -6472,6 +6501,7 @@ impl VolcengineStreamingASR {
             {
                 let mut st = self.state.lock();
                 st.bytes_sent += len;
+                st.bytes_sent_since_response += len;
                 st.frames_sent += 1;
             }
             record_asr_queued_for_source_shares(
@@ -6587,6 +6617,37 @@ impl VolcengineStreamingASR {
         }
     }
 
+    /// 2026-09-22 arbitration floor predicate (see the call-site comment for
+    /// the live case): a wake-accepted tracked session whose provider stream
+    /// transcribed a substantial body must not end with only the local
+    /// filter's wake remnant. Env kill-switch LISTENER_DISABLE_ARBITRATION_FLOOR=1
+    /// restores the strict filter path.
+    fn arbitration_floor_should_override(
+        authority: &crate::speech_decision_kernel::FinalTranscriptAuthority,
+        tracking_enabled: bool,
+        provider_chars: usize,
+        filtered_chars: usize,
+        ledger_chars: usize,
+        optimistic_chars: usize,
+    ) -> bool {
+        if std::env::var("LISTENER_DISABLE_ARBITRATION_FLOOR").as_deref() == Ok("1") {
+            return false;
+        }
+        tracking_enabled
+            && matches!(
+                authority,
+                crate::speech_decision_kernel::FinalTranscriptAuthority::SpeakerFiltered
+            )
+            && provider_chars >= 20
+            && filtered_chars <= 6
+            // Last resort only: when the session ledger or the optimistic
+            // preview kept substantial owner-confirmed text, those recovery
+            // paths are better than the raw provider stream (see
+            // protocol_final_preserves_continuously_confirmed_owner_preview).
+            && ledger_chars <= 6
+            && optimistic_chars <= 6
+    }
+
     fn provider_final_wait_timeout(&self, waited: Duration) -> VolcengineASRError {
         if let Some((sent_audio_ms, transcript_end_ms)) = self.final_partial_coverage_gap() {
             log::error!(
@@ -6634,6 +6695,82 @@ impl VolcengineStreamingASR {
             text: st.best_transcript_text.clone(),
             duration_ms,
         })
+    }
+
+    /// Pause-early-delivery ledger snapshot (2026-09-22 跟手①).
+    ///
+    /// Cleanliness contract: no owner-isolation ceiling ever froze (hard
+    /// multi-speaker evidence), the ledger is non-empty and byte-stable for
+    /// `min_stable`. Unlike the early-seal snapshot this deliberately does
+    /// NOT require `finishing` and does NOT hard-fail on
+    /// `local_non_target_speech_end_ms`: in a quiet room the owner's own
+    /// voice regularly classifies into the sub-owner band (K 行实测 0.30 带),
+    /// so that bit fires on the user themself and starves the whole
+    /// mechanism (14:32 实锤：5.6 秒安静窗一次没触发). The ledger text is
+    /// already attribution-filtered upstream, and the final arbitration at
+    /// STOP keeps full authority to revise — the coordinator's
+    /// remainder/mismatch logic handles that revision.
+    pub fn pause_early_delivery_ledger_snapshot(
+        &self,
+        min_stable: Duration,
+    ) -> Option<RawTranscript> {
+        let st = self.state.lock();
+        if st.owner_isolation_frozen {
+            return None;
+        }
+        let committed_at = st.best_transcript_committed_at?;
+        if st.best_transcript_text.trim().is_empty() {
+            return None;
+        }
+        if committed_at.elapsed() < min_stable {
+            return None;
+        }
+        let duration_ms = st
+            .best_transcript_segments
+            .iter()
+            .filter_map(|segment| segment.end_ms)
+            .max()
+            .and_then(|end_ms| u64::try_from(end_ms).ok())
+            .unwrap_or_else(|| (st.bytes_sent as f64 / BYTES_PER_MS) as u64);
+        Some(RawTranscript {
+            text: st.best_transcript_text.clone(),
+            duration_ms,
+        })
+    }
+
+    /// Persistent pause-early blocker reason for gate diagnostics. `None`
+    /// means no persistent blocker (empty/immature ledgers resolve on their
+    /// own as the session progresses and are not worth a log line).
+    pub fn pause_early_delivery_persistent_block_reason(&self) -> Option<&'static str> {
+        let st = self.state.lock();
+        if st.owner_isolation_frozen {
+            return Some("owner_isolation_frozen");
+        }
+        None
+    }
+
+    /// 2026-09-23 tkg 后诊断:停顿落屏全静默(用户三题验收全不通过,19s 会话
+    /// 零次触发)但现有代码只在"持久阻断"时记日志,未成熟账本的静默 None 无迹
+    /// 可查。给端点看门狗第一拍一锤定音的全量门状态。一次性,不刷屏。
+    pub fn pause_early_delivery_gate_diag(&self) -> (bool, Option<u128>, usize) {
+        let st = self.state.lock();
+        (
+            st.owner_isolation_frozen,
+            st.best_transcript_committed_at
+                .map(|at| at.elapsed().as_millis()),
+            st.best_transcript_text.chars().count(),
+        )
+    }
+
+    /// Cleanliness read for the final-side pause-early mismatch recovery:
+    /// true when the session never froze an isolation ceiling and never saw
+    /// local non-target speech — a final rewrite in such a clean session is
+    /// a cloud revision, and the rewritten tail is safe to append. Under
+    /// interference the rewrite may re-attribute foreign speech, so the
+    /// delivered owner-verified prefix stays and the tail is dropped.
+    pub fn pause_early_final_clean_session(&self) -> bool {
+        let st = self.state.lock();
+        !st.owner_isolation_frozen && st.local_non_target_speech_end_ms.is_none()
     }
 
     /// await_final_result + stability early-seal (2026-09-21 跟手优化).
@@ -6731,6 +6868,70 @@ impl VolcengineStreamingASR {
         self.signal_error_silently(VolcengineASRError::NoFinalResult);
     }
 
+    /// 上行黑洞快速判死（2026-09-22 16:08 直连复实锤后新增）：本端持续在发
+    /// 音频、但 ≥4.5s 没收到任何服务端应答帧。流式期间云端对在收的音频 ~1s
+    /// 内必有应答（静音期同文重发），停应答=包没到云端——云端的 8 秒无包超时
+    /// （45000081）要干等到死，这里提前 ~3.5s 掐线，走与错误帧完全相同的
+    /// 兜底路径（账本有货交账本，否则报错→保留音频重放）。由 coordinator
+    /// 端点看门狗在 Listening 且 body_started 后每拍调用。
+    pub fn abort_if_uplink_stalled(&self) -> bool {
+        const UPLINK_STALL_SILENCE: Duration = Duration::from_millis(4_500);
+        const UPLINK_STALL_MIN_SENT_BYTES: usize = 48_000; // ~1.5s @ 16kHz/16bit
+        let (connected, stalled, sent_bytes, silence_ms) = {
+            let st = self.state.lock();
+            // 2026-09-22 17:2x 修正（09:23:08 实锤 45000081 又抢跑）：连接后云端
+            // 全聋的形态一个应答帧都没有，"至少见过一次应答"的前置门恰好放走
+            // 它。从未应答时改用会话起点做时钟——预冲音频必含唤醒词语音，
+            // 健康链路 ~1-2s 内必有首个应答；开流 ≥4.5s 仍零应答且已发出
+            // ≥1.5s 音频 = 上行黑洞。曾有应答的会话仍以最近应答为钟。
+            let (stalled, silence_ms) = match st.last_server_response_at {
+                Some(at) => {
+                    let elapsed = at.elapsed();
+                    (elapsed >= UPLINK_STALL_SILENCE, elapsed.as_millis())
+                }
+                None => match st.start {
+                    Some(start) => {
+                        let elapsed = start.elapsed();
+                        (elapsed >= UPLINK_STALL_SILENCE, elapsed.as_millis())
+                    }
+                    // 没有时钟基准（测试构造/未开流）不判死。
+                    None => (false, 0),
+                },
+            };
+            (
+                st.is_connected,
+                stalled,
+                st.bytes_sent_since_response,
+                silence_ms,
+            )
+        };
+        if !connected || !stalled || sent_bytes < UPLINK_STALL_MIN_SENT_BYTES {
+            return false;
+        }
+        log::warn!(
+            "[asr] uplink stall detected: no server response for {silence_ms}ms while {sent_bytes} bytes kept flowing — aborting stream for fast recovery (cloud 45000081 would fire at 8s)"
+        );
+        // 网络定位数据（2026-09-22 用户拍板）：黑洞掐线时探测火山端点+对照站，
+        // 判读行进 decisions.log，积累几天即可回答"哪一跳在吞"。
+        crate::net_health::log_network_health_probe_async("uplink_stall_abort");
+        // 与 cancel() 同款异步关写端：读循环见 EOF 退出，发送 worker 在下一次
+        // 发送失败/通道关闭时自然终止。
+        let runtime = self.state.lock().runtime.clone();
+        if let Some(runtime) = runtime {
+            let writer = Arc::clone(&self.writer);
+            runtime.spawn(async move {
+                if let Some(mut w) = writer.lock().await.take() {
+                    let _ = w.close().await;
+                }
+            });
+        }
+        // 与 45000081 错误帧同一出口：账本兜底或报错，均许可保留音频重放。
+        self.fallback_to_partial_or_error(VolcengineASRError::ConnectionFailed(
+            "uplink stall: audio kept flowing but server went silent".into(),
+        ));
+        true
+    }
+
     // ---- internals ----
 
     fn build_first_frame_payload(&self, connect_id: &str) -> Value {
@@ -6799,6 +7000,8 @@ impl VolcengineStreamingASR {
                 code,
                 body.chars().take(200).collect::<String>()
             );
+            // 断流类错误帧（45000081 等）顺带探测网络分层，定位数据。
+            crate::net_health::log_network_health_probe_async("provider_error_frame");
             self.fallback_to_partial_or_error(classify_provider_error(code, &body));
             self.state.lock().is_connected = false;
             *self.audio_tx.lock() = None;
@@ -6811,6 +7014,10 @@ impl VolcengineStreamingASR {
         {
             let mut st = self.state.lock();
             st.response_frames_seen += 1;
+            // 任何服务端应答（含静音期的同文重发帧）都证明上行链路活着；
+            // 上行黑洞探测的时钟以此为基准重新起算。
+            st.last_server_response_at = Some(Instant::now());
+            st.bytes_sent_since_response = 0;
         }
 
         let payload_for_log = std::str::from_utf8(&parsed.payload)
@@ -7502,7 +7709,54 @@ impl VolcengineStreamingASR {
                 ),
             );
         }
-        let selected_result = match final_authority {
+        // 2026-09-22 arbitration floor: in a wake-accepted (tracked) session the
+        // provider stream follows the wake speaker, and when it transcribed a
+        // substantial body the session must not be delivered empty just because
+        // the local voiceprint filter — amid room interference — kept only the
+        // wake phrase. Live case 7f3955c2 (2026-09-22 10:08): provider 86 chars,
+        // filtered 4 ("开始录音。") -> "没有识别到语音" after 18 s of dictation.
+        // Deliver the provider text instead. Kill-switch env for rollout.
+        let arbitration_floor_applied = Self::arbitration_floor_should_override(
+            &final_authority,
+            self.state.lock().local_speaker_tracking_enabled,
+            result
+                .get("text")
+                .and_then(Value::as_str)
+                .map_or(0, spoken_content_len),
+            speaker_filtered_result
+                .result
+                .get("text")
+                .and_then(Value::as_str)
+                .map_or(0, spoken_content_len),
+            session_ledger_candidate
+                .as_ref()
+                .map_or(0, |(text, _)| spoken_content_len(text)),
+            speaker_filtered_result
+                .optimistic_result
+                .get("text")
+                .and_then(Value::as_str)
+                .map_or(0, spoken_content_len),
+        );
+        if arbitration_floor_applied {
+            log::info!(
+                "[asr] arbitration floor applied: provider body kept={} local filter kept only wake remnant; delivering provider text (explicit_non_owner_tail={})",
+                result
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map_or(0, spoken_content_len),
+                explicit_non_owner_tail
+            );
+            self.record_diagnostic_trace(
+                trace_frame,
+                true,
+                "arbitration_floor",
+                "delivered=provider reason=wake_remnant_only",
+            );
+        }
+        let selected_result = if arbitration_floor_applied {
+            Some(result)
+        } else {
+            match final_authority {
             crate::speech_decision_kernel::FinalTranscriptAuthority::ProviderRawRecovery
             | crate::speech_decision_kernel::FinalTranscriptAuthority::ProviderOwnerRecovery => {
                 Some(result)
@@ -7513,6 +7767,7 @@ impl VolcengineStreamingASR {
             }
             crate::speech_decision_kernel::FinalTranscriptAuthority::SpeakerFiltered => {
                 Some(&speaker_filtered_result.result)
+            }
             }
         };
         let mut candidate = if matches!(
@@ -8099,6 +8354,7 @@ impl AudioConsumer for VolcengineStreamingASR {
                 let seq = st.next_sequence;
                 st.next_sequence += 1;
                 st.bytes_sent += chunk.len();
+                st.bytes_sent_since_response += chunk.len();
                 st.frames_sent += 1;
                 let shares = drain_audio_source_runs(&mut st.pending_audio_sources, chunk.len());
                 st.pending_audio_destination_start = frame_destination_range
@@ -8374,6 +8630,74 @@ mod tests {
         assert!(asr
             .stable_ledger_final_snapshot(EARLY_SEAL_MIN_LEDGER_STABLE)
             .is_none());
+    }
+
+    #[test]
+    fn arbitration_floor_overrides_only_wake_remnant_filtered_finals() {
+        use crate::speech_decision_kernel::FinalTranscriptAuthority as Authority;
+        // Live shape (7f3955c2, 2026-09-22 10:08): 86-char provider body cut to
+        // the 4-char wake remnant by room interference -> floor delivers provider.
+        assert!(VolcengineStreamingASR::arbitration_floor_should_override(
+            &Authority::SpeakerFiltered,
+            true,
+            86,
+            4,
+            4,
+            4
+        ));
+        // A substantial filtered winner keeps the strict arbitration.
+        assert!(!VolcengineStreamingASR::arbitration_floor_should_override(
+            &Authority::SpeakerFiltered,
+            true,
+            60,
+            42,
+            60,
+            60
+        ));
+        // Substantial owner-confirmed ledger/optimistic text routes to those
+        // recovery paths instead of the raw provider stream.
+        assert!(!VolcengineStreamingASR::arbitration_floor_should_override(
+            &Authority::SpeakerFiltered,
+            true,
+            86,
+            4,
+            42,
+            4
+        ));
+        assert!(!VolcengineStreamingASR::arbitration_floor_should_override(
+            &Authority::SpeakerFiltered,
+            true,
+            86,
+            4,
+            4,
+            42
+        ));
+        // Short command bodies are not floor material.
+        assert!(!VolcengineStreamingASR::arbitration_floor_should_override(
+            &Authority::SpeakerFiltered,
+            true,
+            8,
+            4,
+            4,
+            4
+        ));
+        // Other authorities and untracked (non-wake) sessions stay untouched.
+        assert!(!VolcengineStreamingASR::arbitration_floor_should_override(
+            &Authority::OptimisticOwnerRecovery,
+            true,
+            86,
+            4,
+            4,
+            4
+        ));
+        assert!(!VolcengineStreamingASR::arbitration_floor_should_override(
+            &Authority::SpeakerFiltered,
+            false,
+            86,
+            4,
+            4,
+            4
+        ));
     }
 
     #[tokio::test]
@@ -8839,6 +9163,113 @@ mod tests {
         asr.cancel();
 
         assert!(events.lock().is_empty());
+    }
+
+    fn uplink_stall_test_asr() -> VolcengineStreamingASR {
+        VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn uplink_stall_aborts_stream_and_signals_replayable_error() {
+        let asr = uplink_stall_test_asr();
+        let events = Arc::new(ParkingMutex::new(Vec::new()));
+        let events_for_callback = Arc::clone(&events);
+        asr.set_streaming_event_callback(Some(Arc::new(move |event| {
+            events_for_callback.lock().push(event);
+        })));
+        {
+            let mut st = asr.state.lock();
+            st.is_connected = true;
+            st.response_frames_seen = 1;
+            st.last_server_response_at = Some(
+                Instant::now()
+                    .checked_sub(Duration::from_millis(5_200))
+                    .unwrap(),
+            );
+            st.bytes_sent_since_response = 60_000;
+        }
+
+        assert!(asr.abort_if_uplink_stalled());
+        {
+            let st = asr.state.lock();
+            assert!(!st.is_connected, "stall abort must close the transport");
+        }
+        let stalled_error = events
+            .lock()
+            .iter()
+            .any(|event| matches!(event, VolcengineStreamingEvent::Error(err) if err.to_string().contains("uplink stall")));
+        assert!(
+            stalled_error,
+            "stall abort must surface a provider error that permits full-audio replay"
+        );
+
+        // 已掐线后不得重复触发。
+        assert!(!asr.abort_if_uplink_stalled());
+
+        // 2026-09-22 09:23 形态：连接后云端全聋——零应答帧，以会话起点为钟。
+        let deaf = uplink_stall_test_asr();
+        {
+            let mut st = deaf.state.lock();
+            st.is_connected = true;
+            st.response_frames_seen = 0;
+            st.last_server_response_at = None;
+            st.start = Some(
+                Instant::now()
+                    .checked_sub(Duration::from_millis(6_200))
+                    .unwrap(),
+            );
+            st.bytes_sent_since_response = 96_000;
+        }
+        assert!(
+            deaf.abort_if_uplink_stalled(),
+            "never-responded session past the silence budget must abort (cloud 45000081 would fire at 8s)"
+        );
+        assert!(!deaf.state.lock().is_connected);
+    }
+
+    #[test]
+    fn uplink_stall_ignores_fresh_responses_and_thin_sent_audio() {
+        let asr = uplink_stall_test_asr();
+        {
+            let mut st = asr.state.lock();
+            st.is_connected = true;
+            st.response_frames_seen = 1;
+            st.last_server_response_at = Some(Instant::now());
+            st.bytes_sent_since_response = 60_000;
+        }
+        assert!(!asr.abort_if_uplink_stalled(), "fresh response = healthy");
+
+        let stalled_since = Instant::now()
+            .checked_sub(Duration::from_millis(6_000))
+            .unwrap();
+        {
+            let mut st = asr.state.lock();
+            st.last_server_response_at = Some(stalled_since);
+            st.bytes_sent_since_response = 12_000;
+        }
+        assert!(
+            !asr.abort_if_uplink_stalled(),
+            "thin uplink (<1.5s audio since response) must not abort: silence pauses legitimately stall responses"
+        );
+
+        {
+            let mut st = asr.state.lock();
+            st.bytes_sent_since_response = 60_000;
+            st.response_frames_seen = 0;
+            st.last_server_response_at = None;
+            st.start = None;
+        }
+        assert!(
+            !asr.abort_if_uplink_stalled(),
+            "no clock basis (no response, no session start) must not abort"
+        );
     }
 
     #[test]
@@ -10200,7 +10631,14 @@ mod tests {
                 )
             };
             assert!(asr.handle_frame(&response(Flags::None)));
-            assert!(visible.lock().iter().all(|text| !text.contains(tail)));
+            // 2026-09-22 拍板：预览默认假设有干扰。身份不确定（Uncertain 带）
+            // 的尾巴允许进 display-only 胶囊，不再压黑；归属仍由终稿仲裁执行
+            // （下方 LastPacket 断言保持 owner-only）。
+            assert!(
+                visible.lock().iter().any(|text| text.contains(tail)),
+                "identity-uncertain tail must stay visible in preview: {:?}",
+                visible.lock()
+            );
             let (tx, mut rx) = oneshot::channel();
             asr.state.lock().final_tx = Some(tx);
             assert!(!asr.handle_frame(&response(Flags::LastPacket)));
@@ -10213,7 +10651,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_identity_change_waits_without_retracting_or_permanently_excluding_text() {
+    fn pending_identity_change_previews_and_is_not_a_permanent_exclusion() {
         use crate::speaker_verification::SessionSpeakerClassification::{Target, Uncertain};
         for (wake, body, tail) in [
             ("开始录音", "请检查今天的工作安排。", "背景里的另一句话"),
@@ -10240,10 +10678,13 @@ mod tests {
                 ..SyncState::default()
             };
             assert!(provider_has_pending_speaker_change(&state, &provider));
-            assert!(
-                display_only_provisional_preview_candidate(&mut state, &provider, true).is_none()
+            // 2026-09-22 拍板：身份待定不再压黑 display-only 预览（归属只在终稿
+            // 仲裁执行）；该函数仍不得产生"永久排除"副作用。
+            assert_eq!(
+                display_only_provisional_preview_candidate(&mut state, &provider, true),
+                Some(format!("{owner}{tail}"))
             );
-            assert_eq!(state.last_emitted_visual_preview_text, owner);
+            assert!(state.last_emitted_visual_preview_text.contains(tail));
             assert!(
                 !state.local_preview_exclusion_seen,
                 "waiting is not a final exclusion verdict"
@@ -10267,9 +10708,12 @@ mod tests {
                 stable_target: true,
             });
             assert!(!provider_has_pending_speaker_change(&state, &provider));
+            // 主人证据回归后预览不回缩（第二次调用因"无新增"去重返回 None，
+            // 已显示的完整文本保持原样）。
             assert!(
-                display_only_provisional_preview_candidate(&mut state, &provider, true).is_some()
+                display_only_provisional_preview_candidate(&mut state, &provider, true).is_none()
             );
+            assert!(state.last_emitted_visual_preview_text.contains(tail));
         }
     }
 
@@ -10407,9 +10851,11 @@ mod tests {
                 )
             };
             assert!(asr.handle_frame(&response(&result, Flags::None)));
+            // 2026-09-22 拍板：身份待定的尾巴在 visual 通道照样显示；终稿仲裁
+            // （下方 LastPacket 断言）才是归属判定点。
             assert!(
-                visible.lock().iter().all(|text| !text.contains(tail)),
-                "no preview callback may bypass the pending identity hold: {:?}",
+                visible.lock().iter().any(|text| text.contains(tail)),
+                "identity-uncertain tail must stay visible in preview: {:?}",
                 visible.lock()
             );
             assert!(!asr.state.lock().local_preview_exclusion_seen);
@@ -10620,7 +11066,7 @@ mod tests {
     }
 
     #[test]
-    fn physical_foreign_provisional_row_stops_growing_before_diarization_is_final() {
+    fn physical_foreign_provisional_row_previews_but_final_keeps_filtered_owner() {
         use crate::speaker_verification::SessionSpeakerClassification::{Target, Uncertain};
         let owner = "你帮我看一下，现在感觉好像是越来越差了。";
         let visible = format!("{owner}旁边");
@@ -10665,10 +11111,16 @@ mod tests {
         assert!(provider_has_locally_excluded_later_utterance(
             &state, &provider
         ));
-        assert!(display_only_provisional_preview_candidate(&mut state, &provider, true).is_none());
+        // 2026-09-22 拍板：Uncertain 带（0.245-0.281）不再是压黑证据——预览照常
+        // 增长；旁人尾巴由终稿仲裁切除（下方 final 断言保持 owner-only）。
+        let full_preview = format!("{owner}旁边的人正在讨论今晚吃什么");
         assert_eq!(
-            state.last_emitted_visual_preview_text, visible,
-            "never retract already displayed text"
+            display_only_provisional_preview_candidate(&mut state, &provider, true),
+            Some(full_preview.clone())
+        );
+        assert_eq!(
+            state.last_emitted_visual_preview_text, full_preview,
+            "preview grows with the provisional foreign row"
         );
 
         let asr = VolcengineStreamingASR::new(

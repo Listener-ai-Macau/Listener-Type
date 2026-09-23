@@ -2203,6 +2203,31 @@ impl EmbeddedStreamingDictation {
                     LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS
                 );
             }
+            if wake_match.is_none()
+                && std::env::var("LISTENER_DISABLE_SUSTAINED_NEAR_PHRASE_RESCUE")
+                    .as_deref()
+                    != Ok("1")
+                && crate::speech_decision_kernel::sustained_near_phrase_wake_can_activate(
+                    candidate.owner_near_phrase_confirmations,
+                )
+            {
+                // 声纹失明兜底（kernel 注释里有干扰实测数字）：近音
+                // distance≤2 持续累计满 4 个滚动窗即视为唤醒意图，不再
+                // 要求 owner 分。与转写命中的开放接受同族；接受后下方
+                // !enrolled_owner_matched 分支仍会尝试分离升级归属。
+                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                wake_match = Some(crate::wake_phrase::Match {
+                    start_seconds: None,
+                    end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
+                    matched_keyword: None,
+                });
+                log::info!(
+                    "[wake-phrase] sustained near-phrase wake rescued (owner-blind) embedded_session_id={} confirmations={} owner_score={:.6}",
+                    embedded_session_id,
+                    candidate.owner_near_phrase_confirmations,
+                    verification.as_ref().map(|result| result.score).unwrap_or_default()
+                );
+            }
             let mut owner_verified_by_extraction = false;
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             if wake_match.is_none()
@@ -3335,6 +3360,7 @@ impl EmbeddedStreamingDictation {
                         candidate.local_confirmation_attempts = 0;
                         candidate.local_confirmation_last_snapshot_bytes = 0;
                         candidate.local_confirmation_prefix_retry.reset_window();
+                        candidate.local_near_retry = LocalNearRetryState::default();
                         log::info!(
                             "[wake-phrase] local confirmation window advanced embedded_session_id={} origin_pcm_ms={} overlap_ms={}",
                             embedded_session_id,
@@ -3451,10 +3477,15 @@ impl EmbeddedStreamingDictation {
                                 candidate.local_confirmation_attempts,
                                 new_audio_since_last,
                             );
+                            // 2026-09-22 跟手③:音近证据在窗 → ~250ms 新音频就跟一拍
+                            // stage2,不等稀疏梯子的下一档(最坏 3.0→5.0 隔 2s)。
+                            let near_retry =
+                                candidate.local_near_retry.should_fire(new_audio_since_last);
                             if ladder_snapshot.is_some()
                                 || kws_immediate
                                 || kws_retry
                                 || prefix_retry
+                                || near_retry
                             {
                                 if ladder_snapshot.is_some() {
                                     candidate.local_confirmation_attempts += 1;
@@ -3464,6 +3495,16 @@ impl EmbeddedStreamingDictation {
                                     .note_started(prefix_retry);
                                 if kws_immediate || kws_retry {
                                     candidate.kws_prompted_local_confirm = true;
+                                }
+                                if near_retry {
+                                    candidate.local_near_retry.note_fired();
+                                    log::info!(
+                                        "[wake-phrase] near-phrase dense retry fired embedded_session_id={} fires={}/{} new_audio_ms={}",
+                                        embedded_session_id,
+                                        candidate.local_near_retry.fires,
+                                        LOCAL_NEAR_RETRY_MAX_FIRES,
+                                        new_audio_since_last / 32
+                                    );
                                 }
                                 let snapshot_pcm_ms = candidate.pcm.len() / 32;
                                 let threshold_pcm_ms = ladder_snapshot
@@ -3508,7 +3549,7 @@ impl EmbeddedStreamingDictation {
                                     ),
                                 );
                                 log::info!(
-                                        "[wake-phrase] stage2 local confirm started embedded_session_id={} attempt={} threshold_pcm_ms={} snapshot_pcm_ms={} window_origin_pcm_ms={} window_pcm_ms={} kws_hit={} kws_immediate={} kws_retry={} prefix_retry={}",
+                                        "[wake-phrase] stage2 local confirm started embedded_session_id={} attempt={} threshold_pcm_ms={} snapshot_pcm_ms={} window_origin_pcm_ms={} window_pcm_ms={} kws_hit={} kws_immediate={} kws_retry={} prefix_retry={} near_retry={}",
                                         embedded_session_id,
                                         candidate.local_confirmation_attempts,
                                         threshold_pcm_ms,
@@ -3518,7 +3559,8 @@ impl EmbeddedStreamingDictation {
                                         kws_hit.is_some(),
                                         kws_immediate,
                                         kws_retry,
-                                        prefix_retry
+                                        prefix_retry,
+                                        near_retry
                                     );
                             }
                         }
@@ -3544,6 +3586,15 @@ impl EmbeddedStreamingDictation {
                         completed_task
                     {
                         let task_result = task.await;
+                        // 跟手③:在飞标记先捕获后清除——matched/提升/错误等所有
+                        // 出口都不能残留 true,否则后续梯子 Absent 被错误豁免预算。
+                        let near_retry_in_flight = self
+                            .speaker_candidate
+                            .as_ref()
+                            .is_some_and(|candidate| candidate.local_near_retry.in_flight);
+                        if let Some(candidate) = self.speaker_candidate.as_mut() {
+                            candidate.local_near_retry.in_flight = false;
+                        }
                         let current_window_origin_bytes = self
                             .speaker_candidate
                             .as_ref()
@@ -3735,8 +3786,19 @@ impl EmbeddedStreamingDictation {
                                             task_origin_bytes,
                                             task_has_keyword_model_hit,
                                             embedded_session_id,
+                                            near_retry_in_flight,
                                         )
                                     };
+                                    // 跟手③:预算记账之后,按本次音近证据决定是否继续
+                                    // 250ms 跟拍(在飞标记已在完成侧顶部清除)。
+                                    if let Some(candidate) = self.speaker_candidate.as_mut() {
+                                        note_local_near_retry(
+                                            candidate,
+                                            &result,
+                                            phrase_chars,
+                                            embedded_session_id,
+                                        );
+                                    }
                                     if !absent.prefix_retry && !task_has_keyword_model_hit {
                                         let pcm_ms = self
                                             .speaker_candidate

@@ -312,6 +312,14 @@ struct Inner {
     /// provisional evidence remain distinguishable inside the reducer, but
     /// callbacks cannot mutate independent ledgers or cross session identity.
     embedded_audio_preview: Mutex<crate::speech_decision_kernel::RecordingPreviewController>,
+    /// 组字流式(2026-09-22 讯飞式逐字上屏)的会话状态机与驱动命令口。
+    /// phase=Disabled 时全部路径 no-op,行为与粘贴版完全一致。
+    streaming_composition: Mutex<dictation::StreamingCompositionState>,
+    /// Pause-early-delivery bookkeeping (2026-09-22 跟手①): text already
+    /// inserted into the target mid-session at a stable sentence-terminal
+    /// pause, so the final delivery only inserts the remainder. Keyed by
+    /// stability key so cloud punctuation revisions cannot double-insert.
+    embedded_audio_pause_early_delivery: Mutex<dictation::PauseEarlyDeliveryLedger>,
     /// Session-scoped activation-prefix and initial-body guard. Manual sessions
     /// never arm this guard.
     embedded_audio_automatic_wake_guard: Mutex<Option<AutomaticWakeGuard>>,
@@ -1104,6 +1112,8 @@ impl Coordinator {
                     embedded_audio_stats: Mutex::new(None),
                     embedded_audio_final_result: Mutex::new(None),
                     embedded_audio_preview: Mutex::new(Default::default()),
+                    embedded_audio_pause_early_delivery: Mutex::new(Default::default()),
+                    streaming_composition: Mutex::new(Default::default()),
                     embedded_audio_automatic_wake_guard: Mutex::new(None),
                     embedded_audio_provider_progress_guard: Mutex::new(None),
                     embedded_audio_terminal_wake_continuation: Mutex::new(None),
@@ -1193,6 +1203,8 @@ impl Coordinator {
                 embedded_audio_stats: Mutex::new(None),
                 embedded_audio_final_result: Mutex::new(None),
                 embedded_audio_preview: Mutex::new(Default::default()),
+                embedded_audio_pause_early_delivery: Mutex::new(Default::default()),
+                streaming_composition: Mutex::new(Default::default()),
                 embedded_audio_automatic_wake_guard: Mutex::new(None),
                 embedded_audio_provider_progress_guard: Mutex::new(None),
                 embedded_audio_terminal_wake_continuation: Mutex::new(None),

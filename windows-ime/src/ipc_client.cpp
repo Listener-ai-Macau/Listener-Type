@@ -446,8 +446,7 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
   SubmitMessage message;
   if (!ParseSubmitMessage(line, &message) || !message.has_type ||
       !message.has_protocol_version || !message.has_session_id ||
-      !message.has_text || message.protocol_version != 1 ||
-      message.type != L"submitText") {
+      !message.has_text || message.protocol_version != 1) {
     WriteResult(pipe, message.session_id, L"failed", L"protocolError");
     return;
   }
@@ -457,8 +456,27 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
     return;
   }
 
-  const HRESULT hr =
-      service_->SubmitTextFromPipe(message.session_id, message.text);
+  // 组字流式(2026-09-22):streamUpdate=原地替换组字内容;streamCommit=终稿
+  // 落定;streamCancel=清空。submitText=既有一次性插入,行为不变。
+  ListenerTypeCompositionOp op;
+  if (message.type == L"submitText") {
+    op = ListenerTypeCompositionOp::kInsertOnce;
+  } else if (message.type == L"streamUpdate") {
+    op = ListenerTypeCompositionOp::kStreamUpdate;
+  } else if (message.type == L"streamCommit") {
+    op = ListenerTypeCompositionOp::kStreamCommit;
+  } else if (message.type == L"streamCancel") {
+    op = ListenerTypeCompositionOp::kStreamCancel;
+  } else {
+    WriteResult(pipe, message.session_id, L"failed", L"protocolError");
+    return;
+  }
+
+  const HRESULT hr = op == ListenerTypeCompositionOp::kInsertOnce
+                         ? service_->SubmitTextFromPipe(message.session_id,
+                                                        message.text)
+                         : service_->StreamCompositionFromPipe(
+                               message.session_id, message.text, op);
   if (SUCCEEDED(hr)) {
     WriteResult(pipe, message.session_id, L"committed", nullptr);
   } else {

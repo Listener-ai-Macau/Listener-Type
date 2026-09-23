@@ -2015,6 +2015,9 @@ struct BufferedSpeakerCandidate {
     local_confirmation_task_has_keyword_model_hit: bool,
     #[cfg(target_os = "windows")]
     local_confirmation_prefix_retry: LocalConfirmationPrefixRetryState,
+    /// 2026-09-22 跟手③:音近证据加密重试状态(见 dictation_wake_prefix_retry.rs)。
+    #[cfg(target_os = "windows")]
+    local_near_retry: LocalNearRetryState,
     local_confirmation_attempts: usize,
     local_confirmation_last_snapshot_bytes: usize,
     /// First KWS hit schedules an immediate local confirm instead of waiting for
@@ -2813,13 +2816,16 @@ const TARGET_WAKE_EXTRACTION_PREFETCHED_WAIT_MS: u64 = 2_200;
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 const TARGET_WAKE_EXTRACTION_LAZY_TERMINAL_WAIT_MS: u64 = 3_200;
 /* A negotiated firmware pre-roll burst can deliver several seconds of already
- * captured audio in under one second. Starting the heavyweight exploratory
- * local ASR at the ordinary 0.8 s PCM rung contends with BLE/KWS four times
- * while that finite backlog drains. Let KWS consume the burst first; if it
- * remains silent, one full-context local confirmation starts at 2.4 s PCM.
- * Real-time/raw transport never meets the >2x condition and keeps the bounded
- * 0.8/1.8/2.0 s ladder unchanged. */
-const FAST_PREROLL_LOCAL_CONFIRM_DEFER_UNTIL_MS: usize = 2_400;
+ * captured audio in under one second. Starting exploratory local ASR while
+ * that backlog drains steals the single-flight helper from the KWS burst
+ * consumer. But 2.4 s was too late: 2026-09-22 21:2x-21:5x 实测 (用户"胶囊
+ * 还是慢", kws_hit=false 的唤醒走探索路径) 第一拍全被推迟到 2.4s PCM——
+ * 词 1.5-2.3s 说完时 stage2 还没看过一眼;且第一拍之后各档本就背靠背连发
+ * (间隔≈推理耗时), 档距不是瓶颈, 开场这一刀才是。1.2s PCM ≈ 2x 回放下
+ * 0.6s 墙钟, 只占一拍 26-440ms 推理, 与 KWS 撞车的代价(≤200ms 排队)远小
+ * 于探索路径整场晚 1.2s。Real-time/raw transport never meets the >2x
+ * condition and keeps the bounded 0.8/1.8/2.0 s ladder unchanged. */
+const FAST_PREROLL_LOCAL_CONFIRM_DEFER_UNTIL_MS: usize = 1_200;
 // The isolated Paraformer helper is deliberately single-flight. Installed
 // sessions 569/578/583 showed that the old 1.4 s exploratory pass occupied it
 // for 168-186 ms while the complete phrase arrived, pushing the useful 1.6 s

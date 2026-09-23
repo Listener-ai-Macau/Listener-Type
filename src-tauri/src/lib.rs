@@ -33,6 +33,7 @@ mod hotkey;
 mod insertion;
 mod llm_gemini;
 mod marketplace_backend;
+mod net_health;
 mod observability;
 mod permissions;
 mod persistence;
@@ -764,6 +765,7 @@ pub fn run() {
                     .on_menu_event(move |app, event| match event.id.as_ref() {
                         "quit" => request_app_quit(app),
                         "dark-mode" => handle_dark_mode_toggle(app),
+                        "acceptance" => show_acceptance_window(app),
                         id => {
                             if handle_style_tray_menu_event(app, id) {
                                 return;
@@ -790,6 +792,10 @@ pub fn run() {
                     })
                     .build(app)?;
                 start_tray_microphone_watcher(app.handle().clone());
+                // 网络状态灯（2026-09-23 用户拍板"没网要让人一眼知道"）：常驻
+                // 裸 TCP 探测（火山/对照站，不耗额度），托盘图标变灯——正常=原
+                // 图标不动，识别服务不可达=橙灯，全断=红灯；tooltip 始终带文字。
+                start_network_health_light(app.handle().clone());
             } else {
                 log::warn!("[startup] default window icon missing; tray icon disabled");
             }
@@ -1191,6 +1197,7 @@ fn build_tray_menu<M: Manager<tauri::Wry>>(
     let dark_mode = CheckMenuItemBuilder::with_id("dark-mode", "深色模式")
         .checked(coordinator.prefs().get().dark_mode)
         .build(app)?;
+    let acceptance = MenuItemBuilder::with_id("acceptance", "验收清单…").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "退出 Listener Type").build(app)?;
     let mut builder = MenuBuilder::new(app);
     let style_menu = if tray_style_menu_enabled() {
@@ -1206,6 +1213,7 @@ fn build_tray_menu<M: Manager<tauri::Wry>>(
             &dark_mode,
             &input_source_menu.submenu,
             &microphone_menu.submenu,
+            &acceptance,
             &quit,
         ])
         .build()?;
@@ -1321,6 +1329,144 @@ pub(crate) fn refresh_tray_microphone_menu(app: &AppHandle) -> tauri::Result<()>
     let state = app.state::<commands::TrayMicrophoneMenuState>();
     *state.lock() = tray_menu.microphone_items;
     Ok(())
+}
+
+/// 网络状态灯（2026-09-23 用户拍板"没网要让人一眼知道"）：常驻裸 TCP
+/// 探测（火山/对照站，不耗额度），两个呈现面——胶囊上方橙/红"网络不佳/
+/// 无网络"徽章（用户录音时盯的就是胶囊）+ 托盘图标变色（录音之外看
+/// 角落，但 Windows 11 常把托盘折叠进 ^，只当辅助）。正常态恢复原样。
+///
+/// tkl 教训：探测子线程的 getaddrinfo 有不归路径，收集必须带上界，否则
+/// 灯线程被 join 拖死、永不复绿（见 net_health.rs）；托盘 Shell 调用一律
+/// 回主线程。每次巡检都记心跳行——只记变化的话，"灯死"和"持续断网"
+/// 在日志里长得一模一样（2026-09-23 上午误判根源）。
+fn start_network_health_light<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    let default_icon = app
+        .default_window_icon()
+        .map(|icon| tauri::image::Image::new_owned(icon.rgba().to_vec(), icon.width(), icon.height()));
+    std::thread::Builder::new()
+        .name("net-health-light".to_string())
+        .spawn(move || {
+            // 胶囊徽章数据源：分级变化即发；每次巡检也重发一遍，漏掉一次
+            // 事件的后端→webview 通路下一分钟自愈。
+            let emit_state = |class: crate::net_health::NetworkHealthClass| {
+                let _ = app.emit(
+                    "net-health:changed",
+                    serde_json::json!({
+                        "class": class.label(),
+                        "badge": class.short_label(),
+                    }),
+                );
+            };
+            let update_light = |class: crate::net_health::NetworkHealthClass| {
+                emit_state(class);
+                use crate::net_health::NetworkHealthClass;
+                let tooltip = match class {
+                    NetworkHealthClass::AllGood => "Listener Type · 网络正常",
+                    NetworkHealthClass::AsrUnreachable
+                    | NetworkHealthClass::GeneralUnreachable => {
+                        "Listener Type · 网络不佳（识别服务不可达）"
+                    }
+                    NetworkHealthClass::AllBad => "Listener Type · 无网络（请检查网络连接）",
+                };
+                let icon = match class {
+                    NetworkHealthClass::AllGood => default_icon.clone(),
+                    NetworkHealthClass::AsrUnreachable
+                    | NetworkHealthClass::GeneralUnreachable => Some(network_light_icon(0xE8, 0x8B, 0x1E)),
+                    NetworkHealthClass::AllBad => Some(network_light_icon(0xD2, 0x4A, 0x3A)),
+                };
+                // 托盘的 Shell 调用不在灯线程直接做——非属主线程上有罕见
+                // 阻塞路径，卡住即灯死。统一回主线程执行。
+                let app_for_tray = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    let Some(tray) = app_for_tray.tray_by_id("main-tray") else {
+                        return;
+                    };
+                    let _ = tray.set_tooltip(Some(tooltip));
+                    if let Some(icon) = icon {
+                        if let Err(err) = tray.set_icon(Some(icon)) {
+                            log::warn!("[net-health] tray light icon set failed: {err}");
+                        }
+                    }
+                });
+            };
+            let mut next_probe = std::time::Instant::now();
+            // 键盘灯重发节拍：固件 status_led 告警窗 6s 自动过期，5s 重发维持。
+            let mut next_device_warn = std::time::Instant::now();
+            loop {
+                if std::time::Instant::now() >= next_probe {
+                    let mut snapshot = crate::net_health::probe_network_health();
+                    if snapshot.classify() != crate::net_health::NetworkHealthClass::AllGood {
+                        // 单次失败不翻脸（2026-09-23 用户拍板"不要一直闪"）：
+                        // 微断/瞬时抖动 2s 后复核一次，两次都坏才点亮灯。
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                        let recheck = crate::net_health::probe_network_health();
+                        if recheck.classify() == crate::net_health::NetworkHealthClass::AllGood {
+                            snapshot = recheck;
+                        }
+                    }
+                    crate::net_health::record_network_health_class(snapshot.classify());
+                    log::info!("{} reason=ambient", snapshot.log_line());
+                    emit_state(snapshot.classify());
+                    next_probe = std::time::Instant::now() + std::time::Duration::from_secs(60);
+                }
+                if crate::net_health::take_network_health_change_pending() {
+                    if let Some(class) = crate::net_health::latest_network_health_class() {
+                        update_light(class);
+                    }
+                }
+                // 键盘灯（2026-09-23 用户拍板主灯放键盘上）：网络掉级期间向
+                // Listener 设备重发 PROCESSING:WARN → 固件 status_led 告警。
+                // BLE 是本地无线电，公网黑洞期间照常可达；恢复 AllGood 后
+                // 停发，≤6s 灯自然回常态。设备未连接时快速失败，不阻塞巡检。
+                let net_bad = crate::net_health::latest_network_health_class().map_or(
+                    false,
+                    |class| class != crate::net_health::NetworkHealthClass::AllGood,
+                );
+                if net_bad && std::time::Instant::now() >= next_device_warn {
+                    let send_started = std::time::Instant::now();
+                    match crate::embedded_ble::send_recording_processing_warning(
+                        std::time::Duration::from_secs(2),
+                    ) {
+                        Ok(()) => log::info!(
+                            "[net-health] device warn light sent elapsed_ms={}",
+                            send_started.elapsed().as_millis()
+                        ),
+                        Err(err) => {
+                            log::info!("[net-health] device warn light unavailable: {err}")
+                        }
+                    }
+                    next_device_warn = std::time::Instant::now()
+                        + std::time::Duration::from_secs(5);
+                }
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+        })
+        .expect("spawn net-health-light");
+}
+
+/// 32×32 纯色圆角方块（托盘"灯"）。RGBA8，四角透明。
+fn network_light_icon(red: u8, green: u8, blue: u8) -> tauri::image::Image<'static> {
+    const SIZE: u32 = 32;
+    const RADIUS: i32 = 8;
+    let mut rgba = Vec::with_capacity((SIZE * SIZE * 4) as usize);
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let corner_x = (x as i32).min((SIZE - 1 - x) as i32);
+            let corner_y = (y as i32).min((SIZE - 1 - y) as i32);
+            let rounded = corner_x >= RADIUS
+                || corner_y >= RADIUS
+                || (corner_x - RADIUS) * (corner_x - RADIUS)
+                    + (corner_y - RADIUS) * (corner_y - RADIUS)
+                    <= RADIUS * RADIUS;
+            if rounded {
+                rgba.extend_from_slice(&[red, green, blue, 0xFF]);
+            } else {
+                rgba.extend_from_slice(&[0, 0, 0, 0]);
+            }
+        }
+    }
+    tauri::image::Image::new_owned(rgba, SIZE, SIZE)
 }
 
 fn microphone_device_signature() -> Option<Vec<(String, bool)>> {
@@ -1721,6 +1867,20 @@ pub fn log_dir_path() -> std::path::PathBuf {
             }
         }
         std::env::temp_dir().join(app_profile_dir_name())
+    }
+}
+
+/// 验收清单弹窗(2026-09-22 起的分轮人工验收):托盘菜单「验收清单…」。
+/// always-on-top 小窗,场景勾完一键复制结果发回开发侧。窗口本体在
+/// tauri.conf.json 声明(默认隐藏),这里只负责显示与聚焦。
+fn show_acceptance_window<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("acceptance") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        log::info!("[acceptance] window shown");
+    } else {
+        log::warn!("[acceptance] window missing from config");
     }
 }
 

@@ -1801,6 +1801,7 @@ fn start_settled_target_endpoint_watchdog(
                     note_embedded_asr_speech_activity(&inner, session_id);
                 }
             }
+            let stop_update_present = update.is_some();
             if let Some(update) = update {
                 handle_target_speaker_endpoint_stop(
                     &inner,
@@ -1813,6 +1814,20 @@ fn start_settled_target_endpoint_watchdog(
                     update,
                     endpoint_policy,
                 );
+            }
+            // 上行黑洞快速判死（16:08 直连实锤；09:23 二次实锤后不再要求
+            // body_started——黑洞会话永远等不来第一帧预览，正文闩锁不会翻，
+            // 恰好漏掉全聋形态）：先于云端 8s 超时掐线，立即触发保留音频重放。
+            if !stop_update_present && !stop_dispatched.load(Ordering::SeqCst) {
+                asr.abort_if_uplink_stalled();
+                // 2026-09-22 跟手①：无 STOP 待决时的句末稳定评估。稳定前缀当场
+                // 上屏，终稿只插余量；任何失败静默回退现行为。
+                if endpoint_policy.body_started {
+                    // 跟手②组字流式:先喂增量(update),再评估停顿落定(commit),
+                    // 同一拍内顺序保证 commit 前组字内容最新。
+                    streaming_composition_update_tick(&inner, session_id, &asr).await;
+                    pause_early_delivery_tick(&inner, session_id, &asr).await;
+                }
             }
         }
     });

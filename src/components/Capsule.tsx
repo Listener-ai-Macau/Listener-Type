@@ -246,6 +246,8 @@ interface PillProps {
   stopRequested?: boolean;
   stopAcknowledged?: boolean;
   recordingBarsActive?: boolean;
+  netBadge?: string | null;
+  netBadgeTone?: 'warn' | 'bad';
   onCancel: () => void;
   onConfirm: () => void;
   onDismiss: () => void;
@@ -260,6 +262,8 @@ function Pill({
   stopRequested = false,
   stopAcknowledged = false,
   recordingBarsActive = false,
+  netBadge = null,
+  netBadgeTone = 'warn',
   onCancel,
   onConfirm,
   onDismiss,
@@ -388,7 +392,12 @@ function Pill({
         ? renderProcessingCenter(message || t('capsule.thinking'), Boolean(message))
         : message && !recordingBarsActive
           ? renderRecordingPreview(message)
-          : <AudioBars level={level} />;
+          : netBadge
+            // 网络掉级且暂无预览正文：中央直接显示"网络不佳/无网络"
+            // （2026-09-23 用户拍板：胶囊里显示网络不佳就好）。有正文时
+            // 保留正文，徽章在上方提示。
+            ? <CenterText os={os} kind="error" text={netBadge} color={netBadgeTone === 'bad' ? 'var(--ol-err)' : '#B25E09'} />
+            : <AudioBars level={level} />;
       break;
     case 'transcribing':
     case 'polishing': {
@@ -496,6 +505,11 @@ export function Capsule() {
   const [level, setLevel] = useState<number>(isTauri ? 0 : 0.6);
   const [message, setMessage] = useState<string | undefined>(DEV_CAPSULE_PREVIEW_MESSAGE);
   const [translation, setTranslation] = useState<boolean>(false);
+  // 网络状态徽章（2026-09-23）：后端 net-health 分级非 all_good 时在胶囊
+  // 上方挂一枚橙/红小徽章。录音时用户盯的就是胶囊，断网要让他一眼看到；
+  // 托盘图标变色只当辅助（Windows 11 常把托盘折叠进 ^ 隐藏区）。
+  const [netBadge, setNetBadge] = useState<string | null>(null);
+  const [netBadgeTone, setNetBadgeTone] = useState<'warn' | 'bad'>('warn');
   // `leaving` 与 `lastVisibleState` 协同实现「退出动画」：
   // - 当 state 从非 idle 变成 idle 时，不立即卸载，而是把 leaving 置为 true 并保留
   //   最后一帧的可见 state（lastVisibleState），让胶囊用 capsule-out 动画收缩淡出。
@@ -772,6 +786,32 @@ export function Capsule() {
     };
   }, []);
 
+  // 网络状态徽章数据源：灯线程每次分级变化 + 每次巡检（60s）都重发，
+  // 这里幂等收敛——all_good 隐藏徽章，其余按分级上色。
+  useEffect(() => {
+    if (!isTauri) return;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    (async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      const handle = await listen<{ class: string; badge: string }>('net-health:changed', event => {
+        const cls = event.payload.class;
+        if (cls === 'all_good' || !event.payload.badge) {
+          setNetBadge(null);
+          return;
+        }
+        setNetBadge(event.payload.badge);
+        setNetBadgeTone(cls === 'all_bad' ? 'bad' : 'warn');
+      });
+      if (cancelled) handle();
+      else unlisten = handle;
+    })();
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
+
   // Stop feedback: common voice UIs acknowledge the stop action immediately by
   // switching from waveform/recording to a processing affordance before final text.
   useEffect(() => {
@@ -937,6 +977,47 @@ export function Capsule() {
         willChange: 'transform, opacity',
       }}
     >
+      {/* 网络状态徽章：断网/识别不可达时挂在胶囊上方（"正在翻译"徽章
+          再往上叠一层，两者同现不重叠）。圆点呼吸闪烁表示持续状态。 */}
+      {netBadge && (
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            bottom: os === 'win'
+              ? `${hostMetrics.bottomInset + metrics.height + hostMetrics.badgeGap + (translation ? 26 : 0)}px`
+              : `calc(50% + 21px + 8px + ${(translation ? 26 : 0)}px)`,
+            transform: 'translateX(-50%)',
+            pointerEvents: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '3px 10px',
+            borderRadius: 999,
+            fontSize: 10.5,
+            fontWeight: 600,
+            color: netBadgeTone === 'bad' ? '#8C2F23' : '#8A5410',
+            background: netBadgeTone === 'bad'
+              ? 'rgba(255, 226, 218, 0.92)'
+              : 'rgba(255, 231, 195, 0.92)',
+            border: `0.5px solid ${netBadgeTone === 'bad' ? 'rgba(210, 74, 58, 0.4)' : 'rgba(232, 139, 30, 0.4)'}`,
+            boxShadow: '0 4px 12px -4px rgba(120, 70, 20, 0.28), 0 0 0 0.5px rgba(0,0,0,0.04)',
+            letterSpacing: 0,
+            whiteSpace: 'nowrap',
+            animation: 'cap-state-enter 220ms var(--ol-motion-soft) both',
+          }}
+        >
+          <span
+            style={{
+              width: 5,
+              height: 5,
+              borderRadius: 999,
+              background: netBadgeTone === 'bad' ? '#D24A3A' : '#E88B1E',
+            }}
+          />
+          {netBadge}
+        </div>
+      )}
       {/* "正在翻译" 徽章 — 嵌套两层：
           外层只负责"绝对定位 + 水平居中（translateX(-50%)）"，不参与动画；
           内层只负责"垂直位移 + 渐变透明度"——这样不会跟 translateX(-50%) 冲突，
@@ -988,6 +1069,8 @@ export function Capsule() {
         state={renderedState}
         level={leaving ? 0 : level}
         message={message}
+        netBadge={netBadge}
+        netBadgeTone={netBadgeTone}
         stopRequested={!leaving && renderedState === 'recording' && stopRequested}
         stopAcknowledged={!leaving && shouldShowStopAcknowledgement(renderedState, stopAcknowledged)}
         recordingBarsActive={!leaving && renderedState === 'recording' && recordingBarsActive}

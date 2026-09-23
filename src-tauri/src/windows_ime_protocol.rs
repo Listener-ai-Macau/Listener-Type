@@ -56,6 +56,27 @@ pub enum ImePipeMessage {
         text: String,
         created_at: String,
     },
+    /// 组字流式(2026-09-22 讯飞式):原地替换目标窗口里的下划线组字内容。
+    StreamUpdate {
+        protocol_version: u32,
+        session_id: String,
+        text: String,
+        created_at: String,
+    },
+    /// 组字内容替换为终稿并落定(EndComposition)。空组字时 DLL 退化一次性插入。
+    StreamCommit {
+        protocol_version: u32,
+        session_id: String,
+        text: String,
+        created_at: String,
+    },
+    /// 清空组字(文档不留字)。text 恒为空串(DLL 协议要求字段存在)。
+    StreamCancel {
+        protocol_version: u32,
+        session_id: String,
+        text: String,
+        created_at: String,
+    },
     SubmitResult {
         protocol_version: u32,
         session_id: String,
@@ -125,6 +146,44 @@ mod tests {
 
         let decoded = decode_message(json.trim_end()).expect("decode");
         assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn stream_messages_roundtrip_as_camel_case_json() {
+        for (message, type_tag) in [
+            (
+                ImePipeMessage::StreamUpdate {
+                    protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
+                    session_id: "s".to_string(),
+                    text: "临时组字".to_string(),
+                    created_at: "2026-09-22T00:00:00Z".to_string(),
+                },
+                "streamUpdate",
+            ),
+            (
+                ImePipeMessage::StreamCommit {
+                    protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
+                    session_id: "s".to_string(),
+                    text: "终稿".to_string(),
+                    created_at: "2026-09-22T00:00:00Z".to_string(),
+                },
+                "streamCommit",
+            ),
+            (
+                ImePipeMessage::StreamCancel {
+                    protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
+                    session_id: "s".to_string(),
+                    text: String::new(),
+                    created_at: "2026-09-22T00:00:00Z".to_string(),
+                },
+                "streamCancel",
+            ),
+        ] {
+            let json = encode_message(&message).expect("encode");
+            assert!(json.contains(&format!("\"{type_tag}\"")), "{json}");
+            let decoded = decode_message(json.trim_end()).expect("decode");
+            assert_eq!(decoded, message);
+        }
     }
 
     #[test]

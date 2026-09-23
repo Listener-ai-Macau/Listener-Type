@@ -6623,10 +6623,10 @@ fn host_started_wake_guard_survives_embedded_session_begin() {
     } else {
         mode_timeout
     };
-    assert_eq!(no_body_timeout, 3_000);
+    assert_eq!(no_body_timeout, 8_000);
     assert_eq!(
         super::target_speaker_inactive_stop_reason(no_body_timeout),
-        "target_speaker_inactive_no_body_3000ms"
+        "target_speaker_inactive_no_body_8000ms"
     );
 }
 
@@ -6656,10 +6656,10 @@ fn automatic_wake_no_body_uses_longer_endpoint_timeout() {
     } else {
         mode_timeout
     };
-    assert_eq!(no_body_timeout, 3_000);
+    assert_eq!(no_body_timeout, 8_000);
     assert_eq!(
         super::target_speaker_inactive_stop_reason(no_body_timeout),
-        "target_speaker_inactive_no_body_3000ms"
+        "target_speaker_inactive_no_body_8000ms"
     );
 
     // Wake-only target clock at 1332ms is not yet due at +1000 under no-body
@@ -6746,8 +6746,8 @@ fn automatic_wake_phrase_only_preview_does_not_latch_body_or_snappy_endpoint() {
         Some(2_500),
     );
     assert!(!policy.body_started);
-    assert_eq!(policy.endpoint_timeout_ms, 3_000);
-    assert_eq!(policy.stop_reason, "target_speaker_inactive_no_body_3000ms");
+    assert_eq!(policy.endpoint_timeout_ms, 8_000);
+    assert_eq!(policy.stop_reason, "target_speaker_inactive_no_body_8000ms");
 
     assert_eq!(
         filter_automatic_wake_text(
@@ -6789,9 +6789,9 @@ fn automatic_wake_target_speaker_endpoint_uses_one_policy_snapshot_for_decision_
     assert!(!policy.body_started);
     assert!(policy.initial_body_wait_active);
     assert!(policy.automatic_no_body_started_at.is_some());
-    assert_eq!(policy.endpoint_timeout_ms, 3_000);
-    assert_eq!(policy.wall_clock_timeout_ms, 2_900);
-    assert_eq!(policy.stop_reason, "target_speaker_inactive_no_body_3000ms");
+    assert_eq!(policy.endpoint_timeout_ms, 8_000);
+    assert_eq!(policy.wall_clock_timeout_ms, 7_900);
+    assert_eq!(policy.stop_reason, "target_speaker_inactive_no_body_8000ms");
 
     let callback_source = include_str!("dictation_volcengine_callbacks.rs");
     let watchdog_source = include_str!("dictation_endpoint_clock.rs");
@@ -6839,7 +6839,7 @@ fn automatic_wake_target_speaker_endpoint_no_body_uses_original_guard_clock() {
         automatic_no_body_started_at: Some(started),
         endpoint_timeout_ms: 3_000,
         wall_clock_timeout_ms: 2_900,
-        stop_reason: "target_speaker_inactive_no_body_3000ms",
+        stop_reason: "target_speaker_inactive_no_body_8000ms",
     };
     let mut clock = super::SettledTargetEndpointClock::default();
 
@@ -6917,7 +6917,7 @@ fn automatic_wake_waits_for_new_body_audio_before_cloud_first_text() {
         automatic_no_body_started_at: Some(started),
         endpoint_timeout_ms: 3_000,
         wall_clock_timeout_ms: 2_900,
-        stop_reason: "target_speaker_inactive_no_body_3000ms",
+        stop_reason: "target_speaker_inactive_no_body_8000ms",
     };
     let mut clock = super::SettledTargetEndpointClock::default();
     assert!(clock
@@ -6988,7 +6988,7 @@ fn automatic_wake_target_speaker_endpoint_body_replaces_no_body_deadline() {
         automatic_no_body_started_at: Some(started),
         endpoint_timeout_ms: 3_000,
         wall_clock_timeout_ms: 2_900,
-        stop_reason: "target_speaker_inactive_no_body_3000ms",
+        stop_reason: "target_speaker_inactive_no_body_8000ms",
     };
     let mut clock = super::SettledTargetEndpointClock::default();
     assert!(clock
@@ -7455,13 +7455,13 @@ fn automatic_wake_target_speaker_endpoint_body_wait_has_bounded_wall_clock_escap
         &coordinator.inner,
         session_id,
         Some(1_200),
-        started_at + Duration::from_millis(2_999),
+        started_at + Duration::from_millis(7_999),
     ));
     assert!(!super::automatic_wake_initial_body_wait_active_at(
         &coordinator.inner,
         session_id,
         Some(1_200),
-        started_at + Duration::from_millis(3_000),
+        started_at + Duration::from_millis(8_000),
     ));
 }
 
@@ -7529,7 +7529,7 @@ fn automatic_wake_target_speaker_endpoint_missing_capsule_ack_is_bounded() {
         &coordinator.inner,
         session_id,
         Some(1_200),
-        started_at + Duration::from_millis(3_000),
+        started_at + Duration::from_millis(8_000),
     ));
 }
 
@@ -7743,16 +7743,16 @@ fn automatic_wake_starts_initial_body_wait_at_visible_capsule_ack() {
         Some(1_200)
     ));
     acknowledge_automatic_wake_capsule_visible(&coordinator.inner, no_body_session_id);
-    // Deadline = capsule_audio 1200 + body wait 3000 = 4200.
+    // Deadline = capsule_audio 1200 + body wait 8000 = 9200.
     assert!(automatic_wake_initial_body_wait_active(
         &coordinator.inner,
         no_body_session_id,
-        Some(4_199)
+        Some(9_199)
     ));
     assert!(!automatic_wake_initial_body_wait_active(
         &coordinator.inner,
         no_body_session_id,
-        Some(4_200)
+        Some(9_200)
     ));
 
     let manual_session_id = new_session_id();
@@ -7857,20 +7857,23 @@ fn fast_preroll_defers_only_the_first_exploratory_local_confirmation() {
             Duration::from_millis(100),
         )
     );
+    // 2026-09-22 tke:首看 defer 2.4s→1.2s(kws_hit=false 唤醒走探测路径,
+    // 首看被 defer 到 2.4s PCM 才是胶囊慢的真瓶颈;后续档位本来就背靠背)。
+    // elapsed=500ms 与 ≥2x 快放期一致(谓词还要求 elapsed*2 < pcm_ms)。
     assert!(
         super::should_defer_exploratory_local_confirmation_for_fast_preroll(
             false,
             0,
-            2_399 * 32,
-            Duration::from_millis(900),
+            1_199 * 32,
+            Duration::from_millis(500),
         )
     );
     assert!(
         !super::should_defer_exploratory_local_confirmation_for_fast_preroll(
             false,
             0,
-            2_400 * 32,
-            Duration::from_millis(900),
+            1_200 * 32,
+            Duration::from_millis(500),
         )
     );
     assert!(
@@ -10566,6 +10569,74 @@ fn local_confirmation_ladder_does_not_block_the_complete_phrase_window() {
     assert!(!snapshots.contains(&1_600));
 }
 
+/// 2026-09-22 跟手③:音近证据加密重试的状态机——武装/节奏/预算三道门。
+#[cfg(target_os = "windows")]
+#[test]
+fn near_retry_dense_cadence_requires_arm_new_audio_and_budget() {
+    let mut state = super::LocalNearRetryState::default();
+    // 未武装(安静无证据)不跟拍——梯子节奏原样。
+    assert!(!state.should_fire(super::LOCAL_NEAR_RETRY_NEW_AUDIO_BYTES));
+    state.pending = true;
+    // 武装后也要等够 ~250ms 新音频。
+    assert!(!state.should_fire(super::LOCAL_NEAR_RETRY_NEW_AUDIO_BYTES - 1));
+    assert!(state.should_fire(super::LOCAL_NEAR_RETRY_NEW_AUDIO_BYTES));
+    // 触发即消耗武装、计数、标记在飞(完成侧读后清除)。
+    state.note_fired();
+    assert!(!state.pending);
+    assert!(state.in_flight);
+    assert_eq!(state.fires, 1);
+    // 预算耗尽后即使重新武装也不再跟。
+    state.pending = true;
+    state.fires = super::LOCAL_NEAR_RETRY_MAX_FIRES;
+    assert!(!state.should_fire(super::LOCAL_NEAR_RETRY_NEW_AUDIO_BYTES));
+}
+
+/// 音近加密重试只认"近满长+距离≤1"的证据:半截短语/无关键内容不武装。
+#[cfg(target_os = "windows")]
+#[test]
+fn near_retry_arms_only_on_full_length_near_evidence() {
+    let near = super::LocalWakeConfirmation {
+        matched: false,
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
+        transcript_chars: 4,
+        phonetic_prefix_units: 3,
+        phonetic_best_distance: 1,
+        phonetic_best_window_start: 0,
+        inference_ms: 120,
+        snapshot_pcm_ms: 1_600,
+        recovered_keyword_end_seconds: None,
+    };
+    assert!(super::local_near_retry_should_arm(&near, 5, 0));
+
+    // 半截短语(长度不足)不武装——0.8s 窗口只听到"开始"时保持梯子节奏。
+    let partial = super::LocalWakeConfirmation {
+        transcript_chars: 2,
+        ..near
+    };
+    assert!(!super::local_near_retry_should_arm(&partial, 5, 0));
+
+    // 距离太远(≥2)不武装。
+    let far = super::LocalWakeConfirmation {
+        phonetic_best_distance: 2,
+        ..near
+    };
+    assert!(!super::local_near_retry_should_arm(&far, 5, 0));
+
+    // 已匹配的不武装(接受路径自会处理)。
+    let matched = super::LocalWakeConfirmation {
+        matched: true,
+        ..near
+    };
+    assert!(!super::local_near_retry_should_arm(&matched, 5, 0));
+
+    // 预算耗尽不武装。
+    assert!(!super::local_near_retry_should_arm(
+        &near,
+        5,
+        super::LOCAL_NEAR_RETRY_MAX_FIRES
+    ));
+}
+
 #[cfg(target_os = "windows")]
 #[test]
 fn target_speaker_endpoint_strong_start_prefix_gets_one_non_authoritative_latency_followup() {
@@ -12367,6 +12438,40 @@ fn windows_volcengine_session_refreshes_external_credential_updates_before_readi
     assert!(
         refresh < first_read,
         "the external vault refresh must happen before any cached Volcengine field is read"
+    );
+}
+
+#[test]
+fn sustained_near_phrase_rescue_is_wired_with_rollback_and_extraction_upgrade() {
+    // 2026-09-23 干扰吞唤醒修复：声纹失明时由持续近音确认兜底。
+    // 三件事缺一不可：kernel 判定、env 回退、放在分离升级块之前
+    // （救援放行的会话仍要进 !enrolled_owner_matched 分支尝试归属升级）。
+    let stream = include_str!("dictation_embedded_stream.rs");
+    let kernel = include_str!("../speech_decision_kernel.rs");
+    assert!(
+        kernel.contains("fn sustained_near_phrase_wake_can_activate"),
+        "kernel must own the sustained near-phrase rescue predicate"
+    );
+    let rescue = stream
+        .find("sustained_near_phrase_wake_can_activate")
+        .expect("terminal gate must consult the sustained near-phrase rescue");
+    let rollback = stream
+        .find("LISTENER_DISABLE_SUSTAINED_NEAR_PHRASE_RESCUE")
+        .expect("rescue must ship with an env rollback switch");
+    let extraction = stream
+        .find("let mut owner_verified_by_extraction = false;")
+        .expect("extraction upgrade block anchor must exist");
+    assert!(
+        rollback < rescue,
+        "rollback switch must gate the rescue predicate call"
+    );
+    assert!(
+        rescue < extraction,
+        "rescue must run before the extraction block so rescued sessions still get attribution upgrade"
+    );
+    assert!(
+        stream.contains("sustained near-phrase wake rescued (owner-blind)"),
+        "rescue must log its own judgment line for decisions-watcher"
     );
 }
 
@@ -14592,4 +14697,82 @@ async fn r46f_expired_ensure_keeps_session_with_live_body_text() {
         streaming.session.is_some(),
         "the product session survives to its normal endpoint"
     );
+}
+
+#[test]
+fn pause_early_final_remainder_splits_on_stability_key_prefix() {
+    use super::pause_early_final_remainder;
+    let key = |text: &str| super::embedded_audio_partial_preview_stability_key(text);
+
+    // Growth: only the tail needs the second insertion.
+    let delivered = "现在是什么问题？你帮我看一下。";
+    let final_text = "现在是什么问题？你帮我看一下。然后你要不要搞一个什么测试窗口？";
+    let remainder =
+        pause_early_final_remainder(final_text, &key(delivered)).expect("prefix covers final");
+    assert_eq!(remainder, "然后你要不要搞一个什么测试窗口？");
+
+    // Cloud punctuation revision inside the prefix must not block the split.
+    let delivered_revised = "现在是什么问题，你帮我看一下。";
+    let remainder = pause_early_final_remainder(final_text, &key(delivered_revised))
+        .expect("punctuation-insensitive prefix still matches");
+    assert_eq!(remainder, "然后你要不要搞一个什么测试窗口？");
+
+    // Exact coverage (including a punctuation-only tail) inserts nothing.
+    let final_same = "现在是什么问题？你帮我看一下。";
+    assert_eq!(
+        pause_early_final_remainder(final_same, &key(delivered)),
+        Some(String::new())
+    );
+    let final_punct_tail = "现在是什么问题？你帮我看一下！";
+    assert_eq!(
+        pause_early_final_remainder(final_punct_tail, &key(delivered)),
+        Some(String::new()),
+        "a punctuation-only final tail is already covered"
+    );
+
+    // Cloud rewrote or shrank the delivered prefix: no safe remainder.
+    let rewritten = "现在是什么毛病？你帮我看一下。然后呢。";
+    assert_eq!(pause_early_final_remainder(rewritten, &key(delivered)), None);
+    let shrunken = "现在是什么问题？";
+    assert_eq!(pause_early_final_remainder(shrunken, &key(delivered)), None);
+
+    // Empty delivered key means no early delivery: everything remains.
+    assert_eq!(
+        pause_early_final_remainder(final_text, ""),
+        Some(final_text.trim().to_string())
+    );
+}
+
+#[test]
+fn pause_early_mismatch_recovery_tail_recovers_clean_rewrites() {
+    use super::pause_early_mismatch_recovery_tail;
+    let key = |text: &str| super::embedded_audio_partial_preview_stability_key(text);
+
+    // 2026-09-22 21:5x 用户实锤"出来两次"后改版契约:改写只允许在交付
+    // 末尾 ≤2 字(标点/同音边界级)时补尾;分界深入交付区间的改写不补——
+    // 旧文本已在屏上收不回,补新尾=新旧并存重复(宁少不重复,H 族)。
+    let delivered = "今天测试一下停顿录屏";
+    let boundary = "今天测试一下停顿落屏。然后补一句。";
+    let tail = pause_early_mismatch_recovery_tail(boundary, &key(delivered))
+        .expect("boundary rewrite recovers tail");
+    assert_eq!(tail, "落屏。然后补一句。");
+
+    // 深改写(分界后交付区还有 6 字旧内容)→ 放弃补尾。
+    let deep = "今天测试一下停顿录屏开始点它";
+    let deep_final = "今天测试一下停顿落屏，开始点它。然后补一句。";
+    assert_eq!(
+        pause_early_mismatch_recovery_tail(deep_final, &key(deep)),
+        None
+    );
+
+    // 改写太剧烈（LCP 不足一半）→ 放弃，宁少勿乱。
+    let heavy = "完全不同的另一句话了。";
+    assert_eq!(pause_early_mismatch_recovery_tail(heavy, &key(deep)), None);
+
+    // 终稿比已交付短 → 放弃。
+    let shrunken = "今天测试一下。";
+    assert_eq!(pause_early_mismatch_recovery_tail(shrunken, &key(deep)), None);
+
+    // 空交付 key → 放弃（正常路径处理）。
+    assert_eq!(pause_early_mismatch_recovery_tail(boundary, ""), None);
 }

@@ -51,6 +51,86 @@ const LOCAL_CONFIRMATION_PREFIX_RETRY_NEW_AUDIO_BYTES: usize =
 // latency path and makes a near-match wait for the ordinary 1.8 s rung.
 const LOCAL_CONFIRMATION_PREFIX_RETRY_AFTER_ATTEMPTS: usize = 1;
 
+// ───────── 2026-09-22 跟手③:音近证据加密重试(唤醒胶囊提速) ─────────
+// 探索梯子 0.8/1.8/2.0/2.4/3.0/5.0s 的档距在音近证据出现后太稀(最坏
+// 3.0→5.0 隔 2s),说完词要等下一档才能被看见。近证据在窗时改 ~250ms 新音
+// 频跟一次 stage2(推理 26-190ms 单飞,便宜);安静无证据维持稀疏梯子。
+// 只动调度节奏:接受阈值/Absent 预算语义/live-owner 提升门全部原样;重试
+// 的 Absent 与 prefix_retry 同款豁免预算,fires 有上限防无界跟拍。
+#[cfg(target_os = "windows")]
+const LOCAL_NEAR_RETRY_NEW_AUDIO_MS: usize = 250;
+#[cfg(target_os = "windows")]
+const LOCAL_NEAR_RETRY_NEW_AUDIO_BYTES: usize = LOCAL_NEAR_RETRY_NEW_AUDIO_MS * 32;
+#[cfg(target_os = "windows")]
+const LOCAL_NEAR_RETRY_MAX_FIRES: u8 = 8;
+
+/// pending=完成侧看到音近证据后武装;fires=本窗已跟拍次数(上限 LOCAL_NEAR_
+/// RETRY_MAX_FIRES);in_flight=当前在跑的任务是加密重试(Absent 预算豁免用,
+/// 完成侧读后清零)。窗口轮转整体重置。
+#[cfg(target_os = "windows")]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct LocalNearRetryState {
+    pending: bool,
+    fires: u8,
+    in_flight: bool,
+}
+
+#[cfg(target_os = "windows")]
+impl LocalNearRetryState {
+    fn should_fire(&self, new_audio_bytes: usize) -> bool {
+        self.pending
+            && self.fires < LOCAL_NEAR_RETRY_MAX_FIRES
+            && new_audio_bytes >= LOCAL_NEAR_RETRY_NEW_AUDIO_BYTES
+    }
+
+    fn note_fired(&mut self) {
+        self.pending = false;
+        self.fires = self.fires.saturating_add(1);
+        self.in_flight = true;
+    }
+}
+
+/// 音近证据(近满长+距离≤1)出现且跟拍预算未爆 → 继续跟。
+#[cfg(target_os = "windows")]
+fn local_near_retry_should_arm(
+    confirmation: &LocalWakeConfirmation,
+    phrase_chars: usize,
+    fires: u8,
+) -> bool {
+    !confirmation.matched
+        && phonetic_near_phrase_evidence(confirmation, phrase_chars)
+        && fires < LOCAL_NEAR_RETRY_MAX_FIRES
+}
+
+/// 完成侧武装:按本次 Absent 的音近证据决定是否继续 250ms 跟拍。在飞标记
+/// 已在完成侧顶部统一清除,这里只管是否继续跟。必须在
+/// record_local_confirmation_absent 之后调用。
+#[cfg(target_os = "windows")]
+fn note_local_near_retry(
+    candidate: &mut BufferedSpeakerCandidate,
+    confirmation: &LocalWakeConfirmation,
+    phrase_chars: usize,
+    embedded_session_id: u32,
+) {
+    if !candidate.local_near_retry.pending
+        && local_near_retry_should_arm(
+            confirmation,
+            phrase_chars,
+            candidate.local_near_retry.fires,
+        )
+    {
+        candidate.local_near_retry.pending = true;
+        log::info!(
+            "[wake-phrase] near-phrase dense retry armed embedded_session_id={} fires={}/{} distance={} transcript_chars={}",
+            embedded_session_id,
+            candidate.local_near_retry.fires,
+            LOCAL_NEAR_RETRY_MAX_FIRES,
+            confirmation.phonetic_best_distance,
+            confirmation.transcript_chars
+        );
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn should_defer_exploratory_local_confirmation_for_fast_preroll(
     keyword_model_hit: bool,
@@ -125,6 +205,7 @@ struct LocalConfirmationAbsentOutcome {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(clippy::too_many_arguments)]
 fn record_local_confirmation_absent(
     candidate: &mut BufferedSpeakerCandidate,
     confirmation: &LocalWakeConfirmation,
@@ -132,8 +213,12 @@ fn record_local_confirmation_absent(
     task_origin_bytes: usize,
     task_has_keyword_model_hit: bool,
     embedded_session_id: u32,
+    near_retry_in_flight: bool,
 ) -> LocalConfirmationAbsentOutcome {
-    let prefix_retry = candidate.local_confirmation_prefix_retry.task_is_retry;
+    // prefix_retry 与音近加密重试(2026-09-22 跟手③)同款豁免:密集跟拍的
+    // Absent 是节奏证据不是否决证据,不烧 LOCAL_ONLY_EXPLORATORY_ABSENT_LIMIT。
+    let prefix_retry =
+        candidate.local_confirmation_prefix_retry.task_is_retry || near_retry_in_flight;
     let phonetic_near = phonetic_near_phrase_evidence(confirmation, phrase_chars);
     let authoritative_full_absent = completed_secondary_absent_is_authoritative(
         confirmation.phrase_relation,

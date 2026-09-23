@@ -230,6 +230,8 @@ impl EmbeddedStreamingDictation {
                 local_confirmation_task_has_keyword_model_hit: false,
                 #[cfg(target_os = "windows")]
                 local_confirmation_prefix_retry: LocalConfirmationPrefixRetryState::default(),
+                #[cfg(target_os = "windows")]
+                local_near_retry: LocalNearRetryState::default(),
                 local_confirmation_attempts: 0,
                 local_confirmation_last_snapshot_bytes: 0,
                 kws_prompted_local_confirm: false,

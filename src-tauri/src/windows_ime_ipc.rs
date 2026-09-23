@@ -107,6 +107,15 @@ pub struct ImeSubmitRequest {
     pub target: Option<ImeSubmitTarget>,
 }
 
+/// 组字流式操作(2026-09-22 讯飞式):Update=原地替换组字;Commit=终稿落定;
+/// Cancel=清空。会话边界由调用方保证:新会话首个 Update 前必发 Cancel。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImeStreamOp {
+    Update,
+    Commit,
+    Cancel,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImeSubmitTarget {
     pub process_id: u32,
@@ -157,6 +166,26 @@ impl WindowsImeIpcServer {
             ))
         }
     }
+
+    pub async fn submit_stream_op(
+        &self,
+        op: ImeStreamOp,
+        request: ImeSubmitRequest,
+    ) -> WindowsImeIpcResult<ImeSubmitStatus> {
+        #[cfg(target_os = "windows")]
+        {
+            let _ = self;
+            submit_stream_op_to_platform(op, request).await
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (self, op, request);
+            Err(WindowsImeIpcError::Unavailable(
+                "Listener Type IME IPC is only available on Windows".to_string(),
+            ))
+        }
+    }
 }
 
 impl Default for WindowsImeIpcServer {
@@ -170,6 +199,14 @@ async fn submit_text_to_platform(
     request: ImeSubmitRequest,
 ) -> WindowsImeIpcResult<ImeSubmitStatus> {
     windows_pipe::submit_text_over_pipe(request).await
+}
+
+#[cfg(target_os = "windows")]
+async fn submit_stream_op_to_platform(
+    op: ImeStreamOp,
+    request: ImeSubmitRequest,
+) -> WindowsImeIpcResult<ImeSubmitStatus> {
+    windows_pipe::submit_stream_op_over_pipe(op, request).await
 }
 
 #[cfg(target_os = "windows")]
@@ -197,18 +234,72 @@ mod windows_pipe {
     pub async fn submit_text_over_pipe(
         request: ImeSubmitRequest,
     ) -> WindowsImeIpcResult<crate::windows_ime_protocol::ImeSubmitStatus> {
-        let target = request.target.ok_or(WindowsImeIpcError::NoReadyClient)?;
-        let mut pending = PendingImeSubmit::new(request.session_id.clone());
+        let ImeSubmitRequest {
+            session_id,
+            text,
+            created_at,
+            target,
+        } = request;
+        let message = ImePipeMessage::SubmitText {
+            protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
+            session_id,
+            text,
+            created_at,
+        };
+        submit_message_over_pipe(message, target).await
+    }
+
+    pub async fn submit_stream_op_over_pipe(
+        op: super::ImeStreamOp,
+        request: ImeSubmitRequest,
+    ) -> WindowsImeIpcResult<crate::windows_ime_protocol::ImeSubmitStatus> {
+        let ImeSubmitRequest {
+            session_id,
+            text,
+            created_at,
+            target,
+        } = request;
+        let message = match op {
+            super::ImeStreamOp::Update => ImePipeMessage::StreamUpdate {
+                protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
+                session_id,
+                text,
+                created_at,
+            },
+            super::ImeStreamOp::Commit => ImePipeMessage::StreamCommit {
+                protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
+                session_id,
+                text,
+                created_at,
+            },
+            // DLL 协议要求 text 字段存在;cancel 恒发空串。
+            super::ImeStreamOp::Cancel => ImePipeMessage::StreamCancel {
+                protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
+                session_id,
+                text: String::new(),
+                created_at,
+            },
+        };
+        submit_message_over_pipe(message, target).await
+    }
+
+    async fn submit_message_over_pipe(
+        message: ImePipeMessage,
+        target: Option<super::ImeSubmitTarget>,
+    ) -> WindowsImeIpcResult<crate::windows_ime_protocol::ImeSubmitStatus> {
+        let request_session_id = match &message {
+            ImePipeMessage::SubmitText { session_id, .. }
+            | ImePipeMessage::StreamUpdate { session_id, .. }
+            | ImePipeMessage::StreamCommit { session_id, .. }
+            | ImePipeMessage::StreamCancel { session_id, .. } => session_id.clone(),
+            _ => return Err(WindowsImeIpcError::Protocol("not a submit message".into())),
+        };
+        let target = target.ok_or(WindowsImeIpcError::NoReadyClient)?;
+        let mut pending = PendingImeSubmit::new(request_session_id);
         let (pipe_name, pipe) = open_pipe_with_retry(target).await?;
         let (read_half, mut write_half) = tokio::io::split(pipe);
         let mut reader = BufReader::new(read_half);
 
-        let message = ImePipeMessage::SubmitText {
-            protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
-            session_id: request.session_id,
-            text: request.text,
-            created_at: request.created_at,
-        };
         let line = encode_message(&message)
             .map_err(|error| WindowsImeIpcError::Protocol(error.to_string()))?;
 

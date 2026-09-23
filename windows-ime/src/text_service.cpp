@@ -17,6 +17,7 @@ constexpr UINT kSubmitTextTimeoutMs = 3000;
 struct SubmitTextRequest {
   const std::wstring* session_id = nullptr;
   const std::wstring* text = nullptr;
+  ListenerTypeCompositionOp op = ListenerTypeCompositionOp::kInsertOnce;
   std::shared_ptr<ListenerTypeAsyncEditState> async_completion;
   bool wait_for_async_completion = false;
   HRESULT result = E_UNEXPECTED;
@@ -120,6 +121,7 @@ STDMETHODIMP ListenerTypeTextService::ActivateEx(ITfThreadMgr* thread_mgr,
 STDMETHODIMP ListenerTypeTextService::Deactivate() {
   StopIpcServer();
   DestroyMessageWindow();
+  DropActiveComposition();
 
   if (thread_mgr_ != nullptr) {
     thread_mgr_->Release();
@@ -134,8 +136,23 @@ STDMETHODIMP ListenerTypeTextService::Deactivate() {
 HRESULT ListenerTypeTextService::SubmitTextFromPipe(
     const std::wstring& session_id,
     const std::wstring& text) {
+  return SubmitEditOnOwnerThread(session_id, text,
+                                 ListenerTypeCompositionOp::kInsertOnce);
+}
+
+HRESULT ListenerTypeTextService::StreamCompositionFromPipe(
+    const std::wstring& session_id,
+    const std::wstring& text,
+    ListenerTypeCompositionOp op) {
+  return SubmitEditOnOwnerThread(session_id, text, op);
+}
+
+HRESULT ListenerTypeTextService::SubmitEditOnOwnerThread(
+    const std::wstring& session_id,
+    const std::wstring& text,
+    ListenerTypeCompositionOp op) {
   if (GetCurrentThreadId() == owner_thread_id_) {
-    return CommitTextOnOwnerThread(session_id, text, nullptr, nullptr);
+    return CommitTextOnOwnerThread(session_id, text, op, nullptr, nullptr);
   }
 
   if (message_window_ == nullptr) {
@@ -145,6 +162,7 @@ HRESULT ListenerTypeTextService::SubmitTextFromPipe(
   SubmitTextRequest request;
   request.session_id = &session_id;
   request.text = &text;
+  request.op = op;
   DWORD_PTR message_result = 0;
   const LRESULT sent = SendMessageTimeoutW(
       message_window_, kSubmitTextMessage, 0,
@@ -160,6 +178,15 @@ HRESULT ListenerTypeTextService::SubmitTextFromPipe(
   }
 
   return request.result;
+}
+
+void ListenerTypeTextService::DropActiveComposition() {
+  if (active_composition_ != nullptr) {
+    // Deactivate 清场:没有 edit cookie 可用,只释放引用,残留的下划线文本
+    // 由 TSF 在 context 销毁时回收。
+    active_composition_->Release();
+    active_composition_ = nullptr;
+  }
 }
 
 HRESULT ListenerTypeTextService::StartIpcServer() {
@@ -208,6 +235,7 @@ void ListenerTypeTextService::DestroyMessageWindow() {
 HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
     const std::wstring& session_id,
     const std::wstring& text,
+    ListenerTypeCompositionOp op,
     std::shared_ptr<ListenerTypeAsyncEditState>* async_completion,
     bool* wait_for_async_completion) {
   UNREFERENCED_PARAMETER(session_id);
@@ -236,7 +264,11 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
     return E_FAIL;
   }
 
-  auto* session = new (std::nothrow) ListenerTypeEditSession(context, text);
+  // 组字操作与组字指针只对非一次性路径生效;一次性插入保持原行为。
+  ITfComposition** composition_slot =
+      op == ListenerTypeCompositionOp::kInsertOnce ? nullptr : &active_composition_;
+  auto* session = new (std::nothrow) ListenerTypeEditSession(
+      context, text, op, composition_slot);
   if (session == nullptr) {
     context->Release();
     return E_OUTOFMEMORY;
@@ -274,8 +306,8 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
                                   : ERROR_INVALID_HANDLE);
   }
 
-  auto* async_session =
-      new (std::nothrow) ListenerTypeEditSession(context, text, completion);
+  auto* async_session = new (std::nothrow) ListenerTypeEditSession(
+      context, text, op, composition_slot, completion);
   if (async_session == nullptr) {
     context->Release();
     return E_OUTOFMEMORY;
@@ -323,8 +355,8 @@ LRESULT CALLBACK ListenerTypeTextService::MessageWindowProc(HWND window,
     }
 
     request->result = service->CommitTextOnOwnerThread(
-        *request->session_id, *request->text, &request->async_completion,
-        &request->wait_for_async_completion);
+        *request->session_id, *request->text, request->op,
+        &request->async_completion, &request->wait_for_async_completion);
     return 1;
   }
 

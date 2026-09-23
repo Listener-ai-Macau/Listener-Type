@@ -66,6 +66,23 @@
         "visible": false,
         "center": false,
         "acceptFirstMouse": true
+      },
+      {
+        "label": "acceptance",
+        "url": "index.html?window=acceptance",
+        "title": "Listener Type 验收",
+        "width": 460,
+        "height": 660,
+        "decorations": true,
+        "transparent": false,
+        "shadow": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": false,
+        "resizable": true,
+        "focus": false,
+        "visible": false,
+        "center": true,
+        "acceptFirstMouse": true
       }
     ],
     "security": {

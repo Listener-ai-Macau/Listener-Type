@@ -1481,3 +1481,371 @@ pub(super) fn request_embedded_audio_stop_feedback(
         current_embedded_audio_visual_preview(inner),
     )
 }
+
+// ───────────────── pause-early-delivery (2026-09-22 跟手①) ─────────────────
+// 设计卡：work/pause-early-delivery-design-20260922.md。句末标点 + 账本稳定
+// ≥ 耐心窗 → 稳定前缀当场走插入通道上屏；会话不结束，端点契约原样保留；
+// 终稿只插余量（stability-key 前缀比对；云端改写前缀 → 跳过第二次插入，
+// 宁可少不可重——H 族教训）。回退开关 LISTENER_DISABLE_PAUSE_EARLY_DELIVERY=1。
+
+const PAUSE_EARLY_DELIVERY_MIN_STABLE: Duration =
+    Duration::from_millis(1_000);
+
+/// Session-scoped bookkeeping of text already inserted mid-session.
+#[derive(Default)]
+pub(super) struct PauseEarlyDeliveryLedger {
+    pub(super) session_id: Option<SessionId>,
+    /// Exact display text already on screen for this session.
+    pub(super) delivered_display: String,
+    /// stability key（去标点小写）of `delivered_display`.
+    pub(super) delivered_key: String,
+    /// 一次性门诊断：同一会话同一原因只记一行，防止看门狗 20/s 刷屏。
+    pub(super) gate_blocked_logged: Option<(SessionId, &'static str)>,
+    /// 2026-09-23 tkg 后诊断:tick 首达行(证明看门狗路径活着+当时门状态)。
+    pub(super) tick_diag_logged: Option<SessionId>,
+    /// 诊断:快照首次合格(此后若仍无交付,问题在显示门/焦点/粘贴下游)。
+    pub(super) qualified_diag_logged: Option<SessionId>,
+    /// 诊断:三条件看似全满足却拿不到快照=快照侧还有隐藏门,一锤定音。
+    pub(super) contradictory_diag_logged: Option<SessionId>,
+}
+
+/// 停顿落屏被门挡下时的判读行（每会话每原因至多一次）。
+fn pause_early_note_gate_blocked(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    reason: &'static str,
+) {
+    let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+    if ledger.gate_blocked_logged == Some((session_id, reason)) {
+        return;
+    }
+    ledger.gate_blocked_logged = Some((session_id, reason));
+    log::info!(
+        "[coord] pause-early-delivery gate blocked session_id={session_id} reason={reason}"
+    );
+}
+
+/// 终稿尚未上屏的余量。`Some("")` = 前缀已覆盖全部内容；`None` = 云端改写/
+/// 收缩了已交付前缀（余量不可安全切分，调用方须跳过第二次插入）。
+/// 与 `embedded_audio_partial_preview_stability_key` 同口径逐字推进。
+fn pause_early_final_remainder(final_text: &str, delivered_key: &str) -> Option<String> {
+    if delivered_key.is_empty() {
+        return Some(final_text.trim().to_string());
+    }
+    let mut seen_key = String::new();
+    for (offset, ch) in final_text.char_indices() {
+        if seen_key == delivered_key {
+            // The delivered display already printed its terminal punctuation;
+            // skip decorative separators at the split so they cannot print twice.
+            return Some(
+                final_text[offset..]
+                    .trim_start_matches(is_embedded_audio_partial_preview_decorative)
+                    .to_string(),
+            );
+        }
+        if is_embedded_audio_partial_preview_decorative(ch) {
+            continue;
+        }
+        for lower in ch.to_lowercase() {
+            seen_key.push(lower);
+        }
+        if !delivered_key.starts_with(seen_key.as_str()) {
+            return None;
+        }
+    }
+    if seen_key == delivered_key {
+        Some(String::new())
+    } else {
+        None
+    }
+}
+
+/// 干净会话里云端改写了已交付前缀时的内容保全（2026-09-22 15:1x，0e9b79fc
+/// 实锤 30 字落屏后终稿改写、16 字尾巴被丢）：按最长公共前缀定位分界，
+/// 返回终稿在分界之后的尾巴（含被改写的字）。LCP 不足已交付一半时放弃
+/// （改写太剧烈，接缝读不通，宁少勿乱）。终稿比已交付短时同样放弃。
+fn pause_early_mismatch_recovery_tail(final_text: &str, delivered_key: &str) -> Option<String> {
+    if delivered_key.is_empty() {
+        return None;
+    }
+    let mut seen_key = String::new();
+    for (offset, ch) in final_text.char_indices() {
+        if is_embedded_audio_partial_preview_decorative(ch) {
+            continue;
+        }
+        for lower in ch.to_lowercase() {
+            seen_key.push(lower);
+        }
+        if !delivered_key.starts_with(seen_key.as_str()) {
+            // 分界落在把 key 推离已交付前缀的这个字上。
+            let lcp_bytes = seen_key
+                .bytes()
+                .zip(delivered_key.bytes())
+                .take_while(|(seen, delivered)| seen == delivered)
+                .count();
+            if lcp_bytes * 2 < delivered_key.len() {
+                return None;
+            }
+            // 2026-09-22 21:5x 用户实锤"出来两次":改写落在已交付区间内部时,
+            // 旧文本已在屏上收不回,补新尾巴=新旧并存重复(58 字已交付+15 字
+            // 改写尾)。只有分界贴着交付末尾(云端只改写了最后 ≤2 个字符,
+            // 标点/同音边界级)才允许补尾;深改写维持"早期文本保留,尾巴丢弃"
+            // (宁少不重复,H 族)。
+            let rewritten_tail_chars = delivered_key[lcp_bytes..].chars().count();
+            if rewritten_tail_chars > 2 {
+                return None;
+            }
+            return Some(final_text[offset..].to_string());
+        }
+    }
+    None
+}
+
+fn pause_early_delivery_session_state(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) -> (String, String) {
+    let ledger = inner.embedded_audio_pause_early_delivery.lock();
+    if ledger.session_id.as_ref() == Some(&session_id) {
+        (
+            ledger.delivered_display.clone(),
+            ledger.delivered_key.clone(),
+        )
+    } else {
+        (String::new(), String::new())
+    }
+}
+
+fn pause_early_delivery_reserve(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    delivered_display: String,
+    delivered_key: String,
+) {
+    let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+    ledger.session_id = Some(session_id);
+    ledger.delivered_display = delivered_display;
+    ledger.delivered_key = delivered_key;
+}
+
+fn pause_early_delivery_rollback(inner: &Arc<Inner>, session_id: SessionId) {
+    let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+    if ledger.session_id.as_ref() == Some(&session_id) {
+        *ledger = PauseEarlyDeliveryLedger::default();
+    }
+}
+
+/// 终稿路径取走本会话的已交付前缀（display, key），取走即清零。
+pub(super) fn take_pause_early_delivery(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) -> Option<(String, String)> {
+    let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+    if ledger.session_id.as_ref() == Some(&session_id) && !ledger.delivered_key.is_empty() {
+        let taken = Some((
+            ledger.delivered_display.clone(),
+            ledger.delivered_key.clone(),
+        ));
+        *ledger = PauseEarlyDeliveryLedger::default();
+        return taken;
+    }
+    None
+}
+
+/// pause-early 与组字流式共用的显示变换链(2026-09-22 切片3 设计卡铁律:
+/// 两条路径必须逐字同款,stability-key 记账才连续)。门失败返回 None。
+/// 2026-09-22 14:2x 实测修正沿袭:流式尾句不带句末标点(云端终稿才补),
+/// 不设句末标点门——账本稳定窗本身即"这句说完了"的充分证据,stability
+/// key 对标点免疫,终稿补的句号不会双插。
+fn pause_early_display_text(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    raw_text: &str,
+) -> Option<String> {
+    let text = filter_automatic_wake_text(inner, session_id, raw_text, false);
+    let prefs = inner.prefs.get();
+    let text = if prefs.remove_filler_words {
+        remove_standalone_dictation_fillers(&text)
+    } else {
+        text
+    };
+    let translation_active = inner.translation_modifier_seen.load(Ordering::SeqCst)
+        && !prefs.translation_target_language.trim().is_empty();
+    let force_raw_output = std::env::var("LISTENER_TYPE_FORCE_RAW_OUTPUT")
+        .map(|value| value == "1")
+        .unwrap_or(false);
+    let pack = if force_raw_output {
+        crate::types::builtin_style_pack_for_mode(PolishMode::Raw)
+    } else {
+        match inner.style_packs.get_or_default_active(&prefs.active_style_pack_id) {
+            Ok(pack) => pack,
+            Err(_) => {
+                pause_early_note_gate_blocked(inner, session_id, "style_pack_unavailable");
+                return None;
+            }
+        }
+    };
+    let raw_uses_llm = !force_raw_output
+        && pack.base_mode == PolishMode::Raw
+        && super::raw_style_pack_uses_llm(&pack);
+    if translation_active || pack.base_mode != PolishMode::Raw || raw_uses_llm {
+        pause_early_note_gate_blocked(inner, session_id, "polish_or_translation_active");
+        return None;
+    }
+    let text = apply_chinese_script_preference(&text, prefs.chinese_script_preference);
+    let correction_rules = inner.correction_rules.list().unwrap_or_default();
+    let text = apply_correction_rules(&text, &correction_rules);
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+/// Watchdog 每拍评估（无 STOP 待决时）。条件全满足才动作：
+/// 干净会话（ASR 账本卫兵：无冻结/无非主人窗）+ 账本稳定 ≥1s +
+/// Raw 一次性路径（翻译/LLM 会整体改写，前缀会被孤立）+ 有新增内容 +
+/// 原焦点目标可恢复。组字流式活着时改走 stream_commit 落定(不碰焦点,
+/// 组字锚在目标进程);任何失败静默回退到现行为(终稿一次性交付)。
+async fn pause_early_delivery_tick(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    asr: &Arc<crate::asr::volcengine::VolcengineStreamingASR>,
+) {
+    if std::env::var("LISTENER_DISABLE_PAUSE_EARLY_DELIVERY").as_deref() == Ok("1") {
+        return;
+    }
+    {
+        let state = inner.state.lock();
+        if state.session_id != session_id
+            || state.cancelled
+            || state.phase != SessionPhase::Listening
+        {
+            return;
+        }
+    }
+    // 2026-09-23 tkg 后诊断:第一拍全量门状态。这行不出现=看门狗路径没跑到
+    // (endpoint_policy.body_started 假/循环没进);出现但 frozen=true=归属冻结;
+    // ledger_chars 一直 0=账本没进字;stable_ms 一直小于耐心窗=partial 抖动。
+    {
+        let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+        if ledger.tick_diag_logged.as_ref() != Some(&session_id) {
+            ledger.tick_diag_logged = Some(session_id);
+            let (frozen, stable_ms, ledger_chars) = asr.pause_early_delivery_gate_diag();
+            log::info!(
+                "[coord] pause-early tick first reached session_id={session_id} frozen={frozen} stable_ms={stable_ms:?} ledger_chars={ledger_chars}"
+            );
+        }
+    }
+    let Some(snapshot) = asr.pause_early_delivery_ledger_snapshot(PAUSE_EARLY_DELIVERY_MIN_STABLE)
+    else {
+        if let Some(reason) = asr.pause_early_delivery_persistent_block_reason() {
+            pause_early_note_gate_blocked(inner, session_id, reason);
+        }
+        // 诊断(一次性):三条件看似全满足却拿不到快照 → 快照侧有隐藏门。
+        let (frozen, stable_ms, ledger_chars) = asr.pause_early_delivery_gate_diag();
+        if !frozen
+            && ledger_chars >= 10
+            && stable_ms.is_some_and(|ms| ms >= PAUSE_EARLY_DELIVERY_MIN_STABLE.as_millis())
+        {
+            let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+            if ledger.contradictory_diag_logged.as_ref() != Some(&session_id) {
+                ledger.contradictory_diag_logged = Some(session_id);
+                log::warn!(
+                    "[coord] pause-early contradictory gate session_id={session_id} frozen={frozen} stable_ms={stable_ms:?} ledger_chars={ledger_chars} — snapshot refused despite qualifying"
+                );
+            }
+        }
+        return;
+    };
+    {
+        let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+        if ledger.qualified_diag_logged.as_ref() != Some(&session_id) {
+            ledger.qualified_diag_logged = Some(session_id);
+            log::info!(
+                "[coord] pause-early snapshot qualified session_id={session_id} chars={}",
+                snapshot.text.chars().count()
+            );
+        }
+    }
+    // 显示侧变换必须镜像终稿 Raw 路径，前缀才能与终稿逐字可比（标点差由
+    // stability key 容忍）。组字流式(切片3)与这里共用同一条链。
+    let Some(text) = pause_early_display_text(inner, session_id, &snapshot.text) else {
+        return;
+    };
+    let prefs = inner.prefs.get();
+    let key = embedded_audio_partial_preview_stability_key(&text);
+    let (delivered_display, delivered_key) =
+        pause_early_delivery_session_state(inner, session_id);
+    if !key.starts_with(&delivered_key) || key.len() == delivered_key.len() {
+        return;
+    }
+    let Some(delta) = pause_early_final_remainder(&text, &delivered_key) else {
+        return;
+    };
+    if delta.is_empty() {
+        return;
+    }
+    // 组字流式活着 → 落定走 stream_commit(组字锚在目标进程,不需要焦点
+    // 恢复;账本先记后 commit,失败回滚——次序与粘贴路径同款)。失败时驱动
+    // 已降级清组字,下一拍以空账本走粘贴分支补上。
+    if streaming_composition_active(inner, session_id) {
+        streaming_composition_commit_stable(inner, session_id, &delta, &delivered_display, &key)
+            .await;
+        return;
+    }
+    // 组字降级且清场也失败:文档里可能有残留组字,粘贴会重复,宁停手。
+    if streaming_composition_contaminated(inner, session_id) {
+        log::warn!(
+            "[coord] pause-early-delivery skipped: streaming composition contaminated session_id={session_id}"
+        );
+        return;
+    }
+    let (focus_target, focus_target_title) = {
+        let state = inner.state.lock();
+        (state.focus_target, state.focus_target_title.clone())
+    };
+    if !restore_focus_target_if_possible(focus_target, focus_target_title.as_deref()) {
+        log::info!(
+            "[coord] pause-early-delivery skipped: focus target unavailable session_id={session_id}"
+        );
+        return;
+    }
+    // 先记账再粘贴：并发触发的终稿交付会按在途前缀计算余量；粘贴失败回滚。
+    let new_display = format!("{delivered_display}{delta}");
+    pause_early_delivery_reserve(inner, session_id, new_display, key.clone());
+    // 2026-09-23 tki:中途粘贴不恢复剪贴板。750ms 恢复窗口追不上忙碌目标
+    // (VS Code/Chromium 渲染器)的粘贴派发——08:39 实锤:第 1 段 22 字正确,
+    // 第 2/3 段粘出的是用户 08:22 复制的旧报告×2(账本记 14+14 字已交付,
+    // 落屏的却是恢复后的旧剪贴板)。会话内剪贴板暂存听写增量无碍;终稿
+    // 交付仍按用户偏好恢复,那才是剪贴板所有权归还的正当时机。
+    let restore_clipboard = false;
+    let result = insert_via_non_tsf_fallback(
+        inner,
+        &delta,
+        restore_clipboard,
+        prefs.paste_shortcut,
+    );
+    let inserted = matches!(
+        result.status,
+        InsertStatus::PasteSent | InsertStatus::Inserted | InsertStatus::SubmittedUnconfirmed
+    );
+    if !inserted {
+        pause_early_delivery_rollback(inner, session_id);
+        log::warn!(
+            "[coord] pause-early-delivery paste failed status={:?} chars={} — final will deliver in full",
+            result.status,
+            delta.chars().count()
+        );
+        return;
+    }
+    log::info!(
+        "[coord] pause-early-delivery prefix_chars={} total_delivered_chars={} min_stable_ms={} route={:?} status={:?}",
+        delta.chars().count(),
+        delivered_display.chars().count() + delta.chars().count(),
+        PAUSE_EARLY_DELIVERY_MIN_STABLE.as_millis(),
+        result.route,
+        result.status
+    );
+}

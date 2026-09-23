@@ -112,7 +112,7 @@ const EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS: u64 = 900;
 // clock with empty body → "没有识别到语音". Initial body wait is only 700ms, so
 // 1.0s snappy endpoint after that treats "thinking after wake" as done. Keep
 // 1.0s once body text exists; before body, require a longer abandon silence.
-const EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS: u64 = 3_000;
+const EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS: u64 = 8_000;
 // Total budget for endpoint-continuation evidence that is not POSITIVELY
 // owner-attributed.  Positive evidence = local qualified/Target watermark
 // advance or visible preview growth.  Cloud target activity and unclassified
@@ -154,7 +154,7 @@ include!("dictation_local_speech_activity.rs");
 
 fn target_speaker_inactive_stop_reason(timeout_ms: u64) -> &'static str {
     if timeout_ms >= EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS {
-        "target_speaker_inactive_no_body_3000ms"
+        "target_speaker_inactive_no_body_8000ms"
     } else if timeout_ms >= EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS {
         "target_speaker_inactive_2500ms"
     } else {
@@ -162,10 +162,12 @@ fn target_speaker_inactive_stop_reason(timeout_ms: u64) -> &'static str {
     }
 }
 // The wake phrase is a complete activation command: after the capsule becomes
-// visible, give the owner a full three seconds to begin the body. The first
-// non-empty body preview ends this wait immediately, after which the exact
-// 1000 ms owner-inactivity endpoint remains unchanged.
-const EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS: u64 = 3_000;
+// visible, give the owner a full eight seconds to begin the body (2026-09-22
+// 16:47 实锤：用户说完唤醒词想词 13s，3s 宽限把胶囊掐死，体验成"唤醒不行"；
+// 对齐 Siri 的想词宽限）。The first non-empty body preview ends this wait
+// immediately, after which the exact 1000 ms owner-inactivity endpoint
+// remains unchanged.
+const EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS: u64 = 8_000;
 const EMBEDDED_TERMINAL_WAKE_CONTINUATION_TTL: Duration = Duration::from_secs(6);
 const EMBEDDED_ACCEPTED_WAKE_CAPTURE_REPLACEMENT_TIMEOUT: Duration = Duration::from_secs(3);
 // Firmware uses the high bit of SessionStartOrigin to carry the low 15 bits
@@ -1453,6 +1455,7 @@ fn current_embedded_audio_endpoint_preview(inner: &Arc<Inner>) -> Option<String>
 }
 
 include!("dictation_preview.rs");
+include!("dictation_streaming_composition.rs");
 
 async fn request_embedded_ble_recording_stop_from_host_for_endpoint(
     inner: &Arc<Inner>,
@@ -1849,6 +1852,9 @@ async fn begin_embedded_audio_dictation_session(
         let mut slots = inner.prepared_windows_ime_session.lock();
         store_prepared_windows_ime_session(&mut slots, current_session_id, prepared);
     }
+    // 组字流式(2026-09-22 切片3):TSF 就绪+目标可解析时起驱动,说话期间
+    // 逐字组字;任何不满足静默保持粘贴行为。回退 LISTENER_DISABLE_STREAMING_COMPOSITION=1。
+    begin_streaming_composition_session(inner, current_session_id).await;
     inner
         .translation_modifier_seen
         .store(false, Ordering::SeqCst);
@@ -2992,6 +2998,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // automatic sessions, committing the preview here used to cancel the
     // provider before its final correction and skip owner-only arbitration.
     // Both manual and automatic completion must settle the same ASR path.
+    // 2026-09-22 跟手①：终稿侧改写恢复只认干净会话；标志在终稿落定后读
+    // （干扰冻结多发生在 STOP 与终稿之间）。
+    let mut pause_early_final_clean = false;
     let raw = match asr {
         ActiveAsr::Volcengine(asr) => {
             debug_assert!(uses_global_timeout);
@@ -3057,9 +3066,21 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                 }
                 Err(error) => Err((error, false)),
             };
+            // 干净标志在终稿落定后读：见上方 pause_early_final_clean 注释。
+            pause_early_final_clean = asr.pause_early_final_clean_session();
             let primary_result = match primary {
                 Ok(result) => result,
                 Err((primary_error, _)) if primary_error.permits_full_audio_replay() => {
+                    // 网络报错灯（2026-09-22 用户拍板）：断流恢复期间胶囊不再装死，
+                    // 明示"网络波动"；同时发射一次分层探测（火山/对照站）供定位。
+                    // 2026-09-23 提到 source-integrity 门之前：门静默收线时胶囊也
+                    // 得有说法（09:52 实锤：黑洞+干扰下门先收，胶囊装死到用户按停）。
+                    crate::net_health::log_network_health_probe_async("primary_stream_failed");
+                    emit_embedded_audio_transcribing_if_active(
+                        inner,
+                        current_session_id,
+                        Some("网络波动，正在恢复…请稍等勿按停".to_string()),
+                    );
                     if source_integrity_must_stop(
                         inner,
                         current_session_id,
@@ -3080,10 +3101,34 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                             log::error!(
                                 "[coord] Volcengine retained-audio replay failed after primary error ({primary_error}): {recovery_error}"
                             );
+                            // 重放也失败时做一次分层探测：网络全坏 → 报"网络不佳"；
+                            // 网络正常 → 维持原"识别恢复失败"（问题在别处）。
+                            let failure_message = tokio::time::timeout(
+                                Duration::from_millis(2_500),
+                                tokio::task::spawn_blocking(
+                                    crate::net_health::probe_network_health,
+                                ),
+                            )
+                            .await
+                            .ok()
+                            .and_then(|joined| joined.ok())
+                            .map(|snapshot| {
+                                log::warn!("{} reason=replay_failed", snapshot.log_line());
+                                match snapshot.classify() {
+                                    crate::net_health::NetworkHealthClass::AllGood => {
+                                        format!("识别恢复失败: {recovery_error}")
+                                    }
+                                    class => format!(
+                                        "{}，本次识别未能恢复",
+                                        class.user_message()
+                                    ),
+                                }
+                            })
+                            .unwrap_or_else(|| format!("识别恢复失败: {recovery_error}"));
                             finish_dictation_pipeline_error(
                                 inner,
                                 current_session_id,
-                                format!("识别恢复失败: {recovery_error}"),
+                                failure_message,
                             );
                             return Err(recovery_error.to_string());
                         }
@@ -3930,6 +3975,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             "[coord] cancel detected before insert — discarding output (chars={})",
             polished.chars().count()
         );
+        // 丢弃输出:组字里已流出来的预览一并清掉,文档不留半截。
+        end_streaming_composition_session(inner, current_session_id, true);
         restore_prepared_windows_ime_session(inner, current_session_id);
         return Ok(());
     }
@@ -3954,123 +4001,261 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             .map(|value| value == "1")
             .unwrap_or(false);
     let paste_shortcut = prefs.paste_shortcut;
+    // Pause-early-delivery（2026-09-22 跟手①）：句末稳定停顿可能已把稳定
+    // 前缀当场上屏。按 stability key 对齐终稿只派发余量；云端改写/收缩了
+    // 已交付前缀时跳过第二次插入（宁可少不可重——H 族），早期文本保留在屏。
+    let pause_early_delivered = take_pause_early_delivery(inner, current_session_id);
+    let pause_early_outcome = pause_early_delivered.as_ref().map(|(display, key)| {
+        let remainder = pause_early_final_remainder(&polished, key);
+        // 改写=云端修订：按 LCP 补回尾巴保内容（0e9b79fc 丢 16 字的教训）。
+        // 2026-09-22 16:47 修正：不再限定干净会话——polished 已过归属仲裁
+        // （旁人内容在上游已切），补的尾巴与不走停顿落屏时的终稿同文；
+        // 干扰会话维持丢弃只会吞你自己的字（08:47:14 交付 56/57 字实锤）。
+        let recovery = if remainder.is_none() {
+            pause_early_mismatch_recovery_tail(&polished, key)
+        } else {
+            None
+        };
+        (display, remainder, recovery)
+    });
+    let (insert_text, skip_dispatch) = match pause_early_outcome.as_ref() {
+        Some((_, Some(remainder), _)) if remainder.is_empty() => (polished.clone(), true),
+        Some((_, Some(remainder), _)) => (remainder.clone(), false),
+        Some((_, None, Some(recovery))) if !recovery.is_empty() => (recovery.clone(), false),
+        Some(_) => (polished.clone(), true),
+        None => (polished.clone(), false),
+    };
+    // 组字流式终局(2026-09-22 切片3):composition 活着 → 余量/恢复尾
+    // stream_commit 落定(整段已覆盖传空串清残留;改写无恢复 → cancel 清组字,
+    // 今日"早期文本保留,尾巴丢弃"语义)。失败则驱动已降级清场,落回常规
+    // 派发。None = 本会话组字未启用/已结束,走原路径。
+    let streaming_finalized = if streaming_composition_active(inner, current_session_id) {
+        let op_text: Option<String> = match pause_early_outcome.as_ref() {
+            Some((_, Some(remainder), _)) if remainder.is_empty() => Some(String::new()),
+            Some((_, Some(remainder), _)) => Some(remainder.clone()),
+            Some((_, None, Some(recovery))) if !recovery.is_empty() => Some(recovery.clone()),
+            Some(_) => None,
+            None => Some(polished.clone()),
+        };
+        let finalized = match op_text.as_deref() {
+            Some(text) => streaming_composition_finalize(inner, current_session_id, text).await,
+            None => {
+                streaming_composition_finalize_cancel(inner, current_session_id).await
+            }
+        };
+        if !finalized {
+            log::warn!(
+                "[coord] streaming-composition finalize degraded session_id={current_session_id}; falling back to regular dispatch"
+            );
+        }
+        Some(finalized)
+    } else {
+        None
+    };
     // 流式键入和非 TSF 输入只能证明事件已发出。自动提交要求 TSF 确认原目标接受文本。
     let delivery_request = DeliveryRequest {
         session_id: current_session_id,
         delivery_id: delivery_id.clone(),
-        text: polished.clone(),
+        text: insert_text.clone(),
     };
     // async move 闭包需要自己的标题副本；外层 3998 的调用还要用原值。
     let focus_title_for_send = focus_target_title.clone();
-    let delivery_submission = dispatch_delivery_request(
-        delivery_request.clone(),
-        DeliveryDispatchPolicy {
-            already_streamed,
-            wayland_session,
-            allow_clipboard_fallback,
-            focus_ready_for_paste,
-            allow_foreground_insert_fallback,
-        },
-        pre_submitted_text.take(),
-        |operation, request| async move {
-            let delivery_id = request.delivery_id;
-            let polished = request.text;
-            match operation {
-                DeliveryExternalOperation::CopyOnly => DeliveryExternalResult {
-                    status: inner.inserter.copy_fallback(&polished),
-                    target_confirmed: false,
-                    route: DeliveryRoute::CopyOnly,
-                    submitted_text: None,
-                },
-                DeliveryExternalOperation::OriginalTarget
-                | DeliveryExternalOperation::ForegroundFallback => {
-                    #[cfg(target_os = "windows")]
-                    {
-                        // Re-validate immediately before the only external
-                        // input operation. The earlier policy snapshot can be
-                        // stale because polishing/finalization is async; do
-                        // not let the current foreground (for example a
-                        // terminal used by a runner) become an accidental
-                        // delivery target.
-                        if matches!(operation, DeliveryExternalOperation::OriginalTarget)
-                            && !restore_focus_target_if_possible(
-                                focus_target,
-                                focus_title_for_send.as_deref(),
-                            )
+    // 组字污染态(降级且清场也失败):文档可能有残留组字,任何粘贴都会重复,
+    // 终稿宁可少交付也不双写(H 族教训)。
+    let streaming_contaminated = streaming_finalized != Some(true)
+        && streaming_composition_contaminated(inner, current_session_id);
+    let delivery_submission = if streaming_finalized == Some(true) {
+        log::info!(
+            "[coord] streaming-composition finalized session_id={current_session_id} chars={} route=streaming",
+            insert_text.chars().count()
+        );
+        DeliverySubmission {
+            status: InsertStatus::Inserted,
+            target_confirmed: true,
+            route: DeliveryRoute::Streaming,
+            submitted_text: pause_early_delivered
+                .as_ref()
+                .map(|(display, _)| format!("{display}{insert_text}"))
+                .or_else(|| Some(insert_text.clone())),
+        }
+    } else if streaming_contaminated {
+        log::warn!(
+            "[coord] streaming-composition contaminated at final — dispatch skipped to avoid duplication (delivered_chars={} final_chars={})",
+            pause_early_outcome
+                .as_ref()
+                .map(|(display, _, _)| display.chars().count())
+                .unwrap_or(0),
+            polished.chars().count()
+        );
+        DeliverySubmission {
+            status: InsertStatus::PasteSent,
+            target_confirmed: false,
+            route: DeliveryRoute::Paste,
+            submitted_text: pause_early_delivered
+                .as_ref()
+                .map(|(display, _)| display.clone()),
+        }
+    } else if skip_dispatch {
+        if pause_early_outcome
+            .as_ref()
+            .is_some_and(|(_, remainder, _)| remainder.is_some())
+        {
+            log::info!(
+                "[coord] pause-early-delivery final: prefix already covered full text chars={}",
+                polished.chars().count()
+            );
+        } else {
+            log::warn!(
+                "[coord] pause-early-delivery final skipped: cloud rewrote delivered prefix (delivered_chars={} final_chars={} clean={}) — early text stays, tail dropped",
+                pause_early_outcome
+                    .as_ref()
+                    .map(|(display, _, _)| display.chars().count())
+                    .unwrap_or(0),
+                polished.chars().count(),
+                pause_early_final_clean,
+            );
+        }
+        DeliverySubmission {
+            status: InsertStatus::PasteSent,
+            target_confirmed: false,
+            route: DeliveryRoute::Paste,
+            submitted_text: pause_early_delivered
+                .as_ref()
+                .map(|(display, _)| display.clone()),
+        }
+    } else {
+        if pause_early_outcome.is_some() {
+            if pause_early_outcome
+                .as_ref()
+                .is_some_and(|(_, remainder, recovery)| remainder.is_none() && recovery.is_some())
+            {
+                log::info!(
+                    "[coord] pause-early-delivery final mismatch recovered via lcp tail chars={} of final {}",
+                    insert_text.chars().count(),
+                    polished.chars().count()
+                );
+            } else {
+                log::info!(
+                    "[coord] pause-early-delivery final remainder chars={} of total {}",
+                    insert_text.chars().count(),
+                    polished.chars().count()
+                );
+            }
+        }
+        dispatch_delivery_request(
+            delivery_request.clone(),
+            DeliveryDispatchPolicy {
+                already_streamed,
+                wayland_session,
+                allow_clipboard_fallback,
+                focus_ready_for_paste,
+                allow_foreground_insert_fallback,
+            },
+            pre_submitted_text.take(),
+            |operation, request| async move {
+                let delivery_id = request.delivery_id;
+                let polished = request.text;
+                match operation {
+                    DeliveryExternalOperation::CopyOnly => DeliveryExternalResult {
+                        status: inner.inserter.copy_fallback(&polished),
+                        target_confirmed: false,
+                        route: DeliveryRoute::CopyOnly,
+                        submitted_text: None,
+                    },
+                    DeliveryExternalOperation::OriginalTarget
+                    | DeliveryExternalOperation::ForegroundFallback => {
+                        #[cfg(target_os = "windows")]
                         {
-                            log::warn!(
-                                "[delivery] original target could not be restored at send time; refusing foreground insertion session_id={} focus_target={focus_target:?}",
+                            // Re-validate immediately before the only external
+                            // input operation. The earlier policy snapshot can be
+                            // stale because polishing/finalization is async; do
+                            // not let the current foreground (for example a
+                            // terminal used by a runner) become an accidental
+                            // delivery target.
+                            if matches!(operation, DeliveryExternalOperation::OriginalTarget)
+                                && !restore_focus_target_if_possible(
+                                    focus_target,
+                                    focus_title_for_send.as_deref(),
+                                )
+                            {
+                                log::warn!(
+                                    "[delivery] original target could not be restored at send time; refusing foreground insertion session_id={} focus_target={focus_target:?}",
+                                    current_session_id
+                                );
+                                return DeliveryExternalResult {
+                                    status: InsertStatus::Failed,
+                                    target_confirmed: false,
+                                    route: DeliveryRoute::Failed,
+                                    submitted_text: None,
+                                };
+                            }
+                            let ime_target = if matches!(
+                                operation,
+                                DeliveryExternalOperation::OriginalTarget
+                            ) {
+                                // r23 自愈：存值 HWND 可能已死，与焦点恢复共用按标题
+                                // 重解出的有效窗口，否则 TSF 目标推导拿死句柄返回 None。
+                                capture_ime_submit_target_for_window(resolve_insertion_window(
+                                    focus_target,
+                                    focus_title_for_send.as_deref(),
+                                ))
+                            } else {
+                                capture_ime_submit_target()
+                            };
+                            log::info!(
+                                "[delivery] target snapshot used session_id={} operation={operation:?} focus_target={focus_target:?} ime_target={ime_target:?}",
                                 current_session_id
                             );
-                            return DeliveryExternalResult {
-                                status: InsertStatus::Failed,
-                                target_confirmed: false,
-                                route: DeliveryRoute::Failed,
-                                submitted_text: None,
-                            };
+                            let result = insert_with_windows_ime_first(
+                                inner,
+                                current_session_id,
+                                &delivery_id,
+                                &polished,
+                                restore_clipboard,
+                                allow_non_tsf_insertion_fallback,
+                                paste_shortcut,
+                                ime_target,
+                            )
+                            .await;
+                            DeliveryExternalResult {
+                                status: result.status,
+                                target_confirmed: result.target_confirmed,
+                                route: result.route,
+                                submitted_text: result.submitted_text,
+                            }
                         }
-                        let ime_target = if matches!(
-                            operation,
-                            DeliveryExternalOperation::OriginalTarget
-                        ) {
-                            // r23 自愈：存值 HWND 可能已死，与焦点恢复共用按标题
-                            // 重解出的有效窗口，否则 TSF 目标推导拿死句柄返回 None。
-                            capture_ime_submit_target_for_window(resolve_insertion_window(
-                                focus_target,
-                                focus_title_for_send.as_deref(),
-                            ))
-                        } else {
-                            capture_ime_submit_target()
-                        };
-                        log::info!(
-                            "[delivery] target snapshot used session_id={} operation={operation:?} focus_target={focus_target:?} ime_target={ime_target:?}",
-                            current_session_id
-                        );
-                        let result = insert_with_windows_ime_first(
-                            inner,
-                            current_session_id,
-                            &delivery_id,
-                            &polished,
-                            restore_clipboard,
-                            allow_non_tsf_insertion_fallback,
-                            paste_shortcut,
-                            ime_target,
-                        )
-                        .await;
-                        DeliveryExternalResult {
-                            status: result.status,
-                            target_confirmed: result.target_confirmed,
-                            route: result.route,
-                            submitted_text: result.submitted_text,
-                        }
-                    }
-                    #[cfg(not(target_os = "windows"))]
-                    {
-                        let status = if allow_clipboard_fallback {
-                            inner
-                                .inserter
-                                .insert(&polished, restore_clipboard, paste_shortcut)
-                        } else {
-                            InsertStatus::Failed
-                        };
-                        DeliveryExternalResult {
-                            status,
-                            target_confirmed: false,
-                            route: if cfg!(target_os = "macos") {
-                                DeliveryRoute::Direct
+                        #[cfg(not(target_os = "windows"))]
+                        {
+                            let status = if allow_clipboard_fallback {
+                                inner
+                                    .inserter
+                                    .insert(&polished, restore_clipboard, paste_shortcut)
                             } else {
-                                DeliveryRoute::Paste
-                            },
-                            submitted_text: Some(polished),
+                                InsertStatus::Failed
+                            };
+                            DeliveryExternalResult {
+                                status,
+                                target_confirmed: false,
+                                route: if cfg!(target_os = "macos") {
+                                    DeliveryRoute::Direct
+                                } else {
+                                    DeliveryRoute::Paste
+                                },
+                                submitted_text: Some(polished),
+                            }
                         }
                     }
                 }
-            }
-        },
-    )
-    .await;
+            },
+        )
+        .await
+    };
     let status = delivery_submission.status;
     let original_target_confirmed = delivery_submission.target_confirmed;
+    // 组字流式收尾:终局 commit/cancel 已做,这里只退驱动(幂等)。
+    if streaming_finalized.is_some() {
+        end_streaming_composition_session(inner, current_session_id, false);
+    }
     restore_prepared_windows_ime_session(inner, current_session_id);
 
     let (clipboard_retention_satisfied, clipboard_result) = if retain_plain_dictation {

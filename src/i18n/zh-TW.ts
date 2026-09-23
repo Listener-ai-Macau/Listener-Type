@@ -33,7 +33,7 @@ export const zhTW: typeof zhCN = {
     thinking: 'thinking',
     cancelled: '已取消',
     error: '出錯了',
-    inserted: '已上屏',
+    inserted: '已完成',
     translating: '正在翻譯',
   },
   qa: {

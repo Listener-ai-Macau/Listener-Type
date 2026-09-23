@@ -1311,6 +1311,20 @@ pub(crate) const fn repeated_owner_near_phrase_wake_can_activate(
     owner_matched && owner_score >= 0.42 && confirmations >= 2
 }
 
+/// 2026-09-23 干扰实机（24 判 5 过 19 吞）：重干扰混音让声纹整体失明——
+/// 本人近音窗 0.04-0.30，媒体/旁人窗 0.01-0.11，两分布重叠，owner 门分不开。
+/// 此路径把「近音持续确认」本身当唤醒意图：distance≤2 证据在滚动窗口
+/// 累计满 RESCUE_CONFIRMATIONS 即放行，即使声纹 non-match——与冻结的
+/// EnrolledNonMatch+phrase→Accept 开放策略同族（转写命中同样不查声纹），
+/// 把同等待遇扩展给「持续近音」。误触面：旁人需跨 ≥4 个滚动窗持续发出
+/// distance≤2 近音；自然语音落 3+（2026-09-20 0/43 复盘：34/43 正确
+/// 拒识全在远处）。回退 LISTENER_DISABLE_SUSTAINED_NEAR_PHRASE_RESCUE=1。
+pub(crate) const OWNER_NEAR_PHRASE_RESCUE_CONFIRMATIONS: u8 = 4;
+
+pub(crate) const fn sustained_near_phrase_wake_can_activate(confirmations: u8) -> bool {
+    confirmations >= OWNER_NEAR_PHRASE_RESCUE_CONFIRMATIONS
+}
+
 pub(crate) const OPEN_NEAR_PHRASE_MAX_DISTANCE: usize = 2;
 /// Same non-owner floor as the open-near tier: media-only windows read
 /// 0.01-0.11 against the enrolled bank, the owner (even mixed/drifted) 0.2+.
@@ -1444,6 +1458,19 @@ pub(crate) const fn live_owner_near_wake_can_attempt(evidence: LiveOwnerNearWake
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sustained_near_phrase_rescue_fires_only_on_persistent_confirmations() {
+        // 2026-09-23 干扰实机：被吞样本 confirmations=4 ——门槛必须放它过；
+        // 3 次（偶发近音）不放。owner 分不进签名：该路径就是在声纹
+        // 失明时兜底的，任何 owner 条件都会把它变回死路。
+        assert!(!sustained_near_phrase_wake_can_activate(0));
+        assert!(!sustained_near_phrase_wake_can_activate(1));
+        assert!(!sustained_near_phrase_wake_can_activate(3));
+        assert!(sustained_near_phrase_wake_can_activate(4));
+        assert!(sustained_near_phrase_wake_can_activate(7));
+        assert_eq!(OWNER_NEAR_PHRASE_RESCUE_CONFIRMATIONS, 4);
+    }
 
     #[test]
     fn target_speaker_endpoint_preview_reducer_rejects_stale_sessions_and_cross_source_duplicates()

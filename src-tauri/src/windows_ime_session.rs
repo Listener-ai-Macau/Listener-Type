@@ -1,5 +1,5 @@
 use crate::types::InsertStatus;
-use crate::windows_ime_ipc::{ImeSubmitRequest, WindowsImeIpcServer};
+use crate::windows_ime_ipc::{ImeStreamOp, ImeSubmitRequest, WindowsImeIpcServer};
 use crate::windows_ime_profile::{
     restore_decision, ImeProfileSnapshot, ProfileRestoreDecision, WindowsImeProfileManager,
 };
@@ -46,7 +46,9 @@ pub fn should_fallback_after_ime_result(status: ImeSubmitStatus) -> bool {
     !matches!(status, ImeSubmitStatus::Committed)
 }
 
-#[derive(Debug)]
+/// Clone 仅供组字流式驱动持有"激活成功"事实的副本(2026-09-22 切片3);
+/// 终稿插入仍从 slot take 原件,restore 语义不受影响。
+#[derive(Debug, Clone)]
 pub struct PreparedWindowsImeSession {
     saved_profile: Option<ImeProfileSnapshot>,
     listener_type_activated: bool,
@@ -173,6 +175,43 @@ impl WindowsImeSessionController {
     }
 
     pub async fn submit_prepared(
+        &self,
+        prepared: &PreparedWindowsImeSession,
+        request: ImeSubmitRequest,
+    ) -> Result<InsertStatus, WindowsImeSessionError> {
+        self.submit_message_prepared(prepared, request).await
+    }
+
+    /// 组字流式(2026-09-22 讯飞式):三个操作共用 prepared session 闸门与
+    /// 回退语义。Cancel 允许在 session 不活跃时静默成功(清场是尽力而为)。
+    pub async fn stream_prepared(
+        &self,
+        prepared: &PreparedWindowsImeSession,
+        op: ImeStreamOp,
+        request: ImeSubmitRequest,
+    ) -> Result<InsertStatus, WindowsImeSessionError> {
+        if !prepared.is_ready_for_tsf_submit() {
+            if op == ImeStreamOp::Cancel {
+                return Ok(InsertStatus::Inserted);
+            }
+            return Err(WindowsImeSessionError::Ipc(
+                "Listener Type IME session is not active".to_string(),
+            ));
+        }
+        let status = self
+            .ipc
+            .submit_stream_op(op, request)
+            .await
+            .map_err(|error| WindowsImeSessionError::Ipc(error.to_string()))?;
+        if should_fallback_after_ime_result(status) {
+            log::warn!(
+                "[windows-ime] TSF stream op {op:?} returned {status:?}; caller should degrade"
+            );
+        }
+        Ok(map_ime_status_to_insert_status(status))
+    }
+
+    async fn submit_message_prepared(
         &self,
         prepared: &PreparedWindowsImeSession,
         request: ImeSubmitRequest,
