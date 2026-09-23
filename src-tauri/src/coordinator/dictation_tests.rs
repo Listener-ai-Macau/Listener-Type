@@ -12296,6 +12296,67 @@ fn completed_local_confirmation_does_not_run_redundant_boundary_kws() {
     );
 }
 
+/// 2026-09-23 17:30 会话 569：活窗词 1.52s 说完，0.8/1.8/2.0s 三档 stage2
+/// 全被上一隐藏窗 terminal-inflight 梯子占住单飞 helper，第一拍拖到 3.1s。
+/// 让位契约三件套必须同时在场：terminal 窗口边界检查饿死计数、活窗分支
+/// 才放宽 busy 预算、guard 只在 streaming-* 分支挂计数。
+#[test]
+fn terminal_ladder_yields_to_starving_live_stage2_confirmation() {
+    let source = include_str!("dictation_wake_polish.rs");
+
+    let terminal_start = source
+        .find("async fn confirm_terminal_local_windows(")
+        .expect("terminal window ladder");
+    let terminal_body = &source[terminal_start..];
+    let terminal_end = terminal_body
+        .find("\nfn spawn_local_wake_confirmation(")
+        .unwrap_or(terminal_body.len());
+    let terminal_body = &terminal_body[..terminal_end];
+    assert!(
+        terminal_body.contains("WAKE_LIVE_STAGE2_STARVING.load"),
+        "the terminal ladder must check the live starvation counter at each window boundary"
+    );
+    assert!(
+        terminal_body.contains("TERMINAL_CONFIRM_YIELD_TO_LIVE_MS"),
+        "the yield must be bounded so a leaked counter cannot starve terminal decisions"
+    );
+
+    let confirm_start = source
+        .find("fn run_local_wake_confirmation_once(")
+        .expect("single confirmation entry");
+    let confirm_body = &source[confirm_start..];
+    let confirm_end = confirm_body
+        .find("\nfn spawn_local_wake_confirmation(")
+        .unwrap_or(confirm_body.len());
+    let confirm_body = &confirm_body[..confirm_end];
+    assert!(
+        confirm_body.contains("let is_live_stream_branch = context.branch.starts_with(\"streaming-\")"),
+        "starvation counting must be scoped to live streaming branches"
+    );
+    assert!(
+        confirm_body.contains("LiveStage2StarvingGuard::arm()"),
+        "a busy-rejected live confirm must arm the RAII starvation guard"
+    );
+    assert!(
+        confirm_body.contains("TERMINAL_CONFIRM_YIELD_TO_LIVE_MS.max(LOCAL_WAKE_HELPER_BUSY_RETRY_BUDGET_MS)"),
+        "the live busy budget must cover the handover window so yielding can actually hand over"
+    );
+
+    // 计数器自身：arm 抬升、drop 归零（任何提前 return 都不卡高位）。
+    let before = super::WAKE_LIVE_STAGE2_STARVING.load(std::sync::atomic::Ordering::Relaxed);
+    {
+        let _guard = super::LiveStage2StarvingGuard::arm();
+        assert_eq!(
+            super::WAKE_LIVE_STAGE2_STARVING.load(std::sync::atomic::Ordering::Relaxed),
+            before + 1
+        );
+    }
+    assert_eq!(
+        super::WAKE_LIVE_STAGE2_STARVING.load(std::sync::atomic::Ordering::Relaxed),
+        before
+    );
+}
+
 #[test]
 fn device_processing_max_visible_timeout_stops_without_done() {
     // Long ASR/polish: max-visible must only clear purple AI. PROCESSING:DONE is the

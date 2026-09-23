@@ -12,6 +12,38 @@ const LOCAL_SPEAKER_CLASSIFY_STEP_MS: u64 = 400;
 // decisions or lets stale ambient candidates consume the helper forever.
 const LOCAL_WAKE_HELPER_BUSY_RETRY_BUDGET_MS: u64 = 360;
 const LOCAL_WAKE_HELPER_BUSY_RETRY_INTERVAL_MS: u64 = 40;
+// 活窗 stage2 饿死计数器（2026-09-23 17:30 会话 569 实锤：词 1.52s 说完，
+// 活窗 0.8/1.8/2.0s 三档全被上一隐藏窗 terminal-inflight 梯子占住单飞
+// helper，第一拍拖到 3.1s PCM，胶囊慢 ~1.4s——环境只要有轻人声，每个 6s
+// 隐藏窗都会烧完整终端梯子，轮转后死窗的收尾推理正好挡住活窗的词）。
+// 活窗（streaming-* 分支）提交在 busy 重试期间 +1，拿到 helper 或放弃后
+// 归零；terminal 梯子在窗口边界见 >0 时让位等它先过。进程级 static 与
+// 单飞 helper 一一对应，不经 Inner 传递。
+static WAKE_LIVE_STAGE2_STARVING: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+/// terminal 梯子单个窗口边界的让位上限：活窗一次确认 0.2-1s 加一拍 400ms
+/// 重试的节奏，2s 足够放行；计数器异常不归零（任务泄漏）时也不把终端
+/// 判定无限饿死——超时照常发下一窗。
+const TERMINAL_CONFIRM_YIELD_TO_LIVE_MS: u64 = 2_000;
+
+/// RAII：活窗提交从首次 busy 起计饿，作用域结束（拿到 helper / 放弃 /
+/// 出错）自动归零，任何提前 return 都不会把计数器卡在高位。
+struct LiveStage2StarvingGuard {
+    _private: (),
+}
+
+impl LiveStage2StarvingGuard {
+    fn arm() -> Self {
+        WAKE_LIVE_STAGE2_STARVING.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self { _private: () }
+    }
+}
+
+impl Drop for LiveStage2StarvingGuard {
+    fn drop(&mut self) {
+        WAKE_LIVE_STAGE2_STARVING.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
 
 /// Diagnostic-only byte coordinate. It is deliberately independent from the
 /// business counters used for PCM accounting. Once a range cannot be formed,
@@ -3362,14 +3394,39 @@ fn run_local_wake_confirmation_once(
         pcm.len() / 32,
         boosted.len() / 32,
     );
+    // 活窗分支在 busy 重试期间挂饿死计数：terminal 梯子看到会让位（见
+    // confirm_terminal_local_windows）。terminal 分支自己不计数——它就是
+    // 常见的占有人，计了会自我等待。让位要能交接：terminal 当前格推理
+    // ≤1s 就结束、随后停在窗口边界等计数归零，活窗的 busy 耐心必须覆盖
+    // 这个交接窗（360ms 等不到），放宽到与让位上限同宽的 2s；terminal
+    // 分支维持 360ms 短预算，不会被反向下游堵死。
+    let is_live_stream_branch = context.branch.starts_with("streaming-");
     let busy_deadline = Instant::now()
-        + Duration::from_millis(LOCAL_WAKE_HELPER_BUSY_RETRY_BUDGET_MS);
+        + Duration::from_millis(if is_live_stream_branch {
+            TERMINAL_CONFIRM_YIELD_TO_LIVE_MS.max(LOCAL_WAKE_HELPER_BUSY_RETRY_BUDGET_MS)
+        } else {
+            LOCAL_WAKE_HELPER_BUSY_RETRY_BUDGET_MS
+        });
+    let mut live_starving: Option<LiveStage2StarvingGuard> = None;
     let result = loop {
         match crate::asr::local::wake_helper::confirm(&boosted, phrase, Duration::from_secs(4)) {
             Err(err)
                 if crate::asr::local::wake_helper::is_busy_error(&err)
                     && Instant::now() < busy_deadline =>
             {
+                if is_live_stream_branch && live_starving.is_none() {
+                    log::info!(
+                        "[wake-phrase] live stage2 confirm starving on busy helper embedded_session_id={} branch={} attempt={} phase={}",
+                        context.embedded_session_id,
+                        context.branch,
+                        context
+                            .attempt
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "terminal".to_string()),
+                        phase,
+                    );
+                    live_starving = Some(LiveStage2StarvingGuard::arm());
+                }
                 std::thread::sleep(Duration::from_millis(
                     LOCAL_WAKE_HELPER_BUSY_RETRY_INTERVAL_MS,
                 ));
@@ -3378,6 +3435,7 @@ fn run_local_wake_confirmation_once(
         }
     }
     .map_err(|err| format!("local wake confirmation failed: {err}"))?;
+    drop(live_starving);
     log::info!(
         "[wake-phrase] stage2 helper result embedded_session_id={} attempt={} branch={} phase={} request_id={} matched={} phrase_relation={:?} transcript_chars={} phonetic_prefix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={} transcript={:?}",
         context.embedded_session_id,
@@ -3495,6 +3553,30 @@ async fn confirm_terminal_local_windows(
 ) -> Option<(LocalWakeConfirmation, usize)> {
     let mut last = None;
     for (confirm_pcm, origin) in terminal_local_confirmation_windows(pcm) {
+        // 窗口边界让位（2026-09-23 569 实锤）：有活窗 stage2 正被 busy 拒绝
+        // 饿着时，死窗的下一格推理等它先过——本窗已在轮出路上，晚一格
+        // 只影响本来就慢的迟到激活，而活窗等的是用户眼前的胶囊。让位
+        // 只延迟不丢弃：超时（计数器异常）后照常发下一窗，seam 捕获能
+        // 力不受损。
+        let yield_started = Instant::now();
+        let mut yielded_logged = false;
+        while WAKE_LIVE_STAGE2_STARVING.load(std::sync::atomic::Ordering::Relaxed) > 0
+            && yield_started.elapsed().as_millis()
+                < TERMINAL_CONFIRM_YIELD_TO_LIVE_MS as u128
+        {
+            if !yielded_logged {
+                yielded_logged = true;
+                log::info!(
+                    "[wake-phrase] terminal ladder yields to starving live stage2 embedded_session_id={} window_origin_pcm_ms={}",
+                    embedded_session_id,
+                    origin / 32
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(
+                LOCAL_WAKE_HELPER_BUSY_RETRY_INTERVAL_MS,
+            ))
+            .await;
+        }
         match spawn_local_wake_confirmation(
             inner,
             LocalWakeConfirmationDiagnosticContext {
