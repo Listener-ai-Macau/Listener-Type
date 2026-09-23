@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Settings } from "./pages/Settings";
-import AcceptancePanel from "./pages/AcceptancePanel";
 import { HotkeySettingsProvider } from "./state/HotkeySettingsContext";
 import i18n from "./i18n"; // 副作用：触发 i18next init
 import "./styles/tokens.css";
@@ -36,7 +35,6 @@ const params = new URLSearchParams(window.location.search);
 const windowKind = params.get("window");
 const isCapsule = windowKind === "capsule";
 const isQa = windowKind === "qa";
-const isAcceptance = windowKind === "acceptance";
 const isLocalAsrVisual =
   import.meta.env.DEV && params.get("visual") === "local-asr";
 const isSettingsShortcutsVisual =
@@ -82,8 +80,6 @@ const renderApp = (reason: string) => {
               <Settings embedded initialSection="device" />
             </div>
           </HotkeySettingsProvider>
-        ) : isAcceptance ? (
-          <AcceptancePanel />
         ) : (
           <App isCapsule={isCapsule} isQa={isQa} />
         )}

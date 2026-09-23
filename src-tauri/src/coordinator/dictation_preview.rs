@@ -1615,11 +1615,12 @@ fn pause_early_mismatch_recovery_tail(final_text: &str, delivered_key: &str) -> 
     }
     // 2026-09-23 14:31/14:32 连续实锤:云端两遍精修润色了中段一个字,旧契约
     // 把 2-16 字的纯新增尾巴一起丢掉——违反优先级锁第 3 条(不吞你的字)。
-    // 增长尾分支:相似度 ≥80%(LCP 覆盖已交付五分之四)且终稿内容更长时,
-    // 从已交付长度处切齐补尾。严格只追加交付长度之后的内容,物理上不可能
-    // 重复上屏;"出来两次"型深改写重述(LCP 低)仍被挡在门外。
+    // 增长尾分支:终稿内容更长且改写区(已交付-LCP)在 max(8 字, 已交付/3)
+    // 以内时,从已交付长度处切齐补尾。严格只追加交付长度之后的内容,物理
+    // 上不可能重复上屏;绝对差值口径让长句(105 字会话改写 22 字)也能补,
+    // 而"出来两次"型整段重述(58 字改写 28 字)仍被挡在门外。
     if content_index > delivered_content_chars
-        && lcp_chars * 5 >= delivered_content_chars * 4
+        && rewritten_tail_chars <= usize::max(8, delivered_content_chars / 3)
     {
         return growth_offset.map(|offset| final_text[offset..].to_string());
     }

@@ -14757,12 +14757,13 @@ fn pause_early_mismatch_recovery_tail_recovers_clean_rewrites() {
         .expect("boundary rewrite recovers tail");
     assert_eq!(tail, "落屏。然后补一句。");
 
-    // 深改写(分界后交付区还有 6 字旧内容)→ 放弃补尾。
+    // 中段改写(分界后交付区还有 6 字旧内容)但终稿带增长尾 → 2026-09-23
+    // 增长尾契约:max(8, 交付/3) 差值内从已交付长度处补尾,屏上旧字不动。
     let deep = "今天测试一下停顿录屏开始点它";
     let deep_final = "今天测试一下停顿落屏，开始点它。然后补一句。";
     assert_eq!(
         pause_early_mismatch_recovery_tail(deep_final, &key(deep)),
-        None
+        Some("然后补一句。".to_string())
     );
 
     // 改写太剧烈（LCP 不足一半）→ 放弃，宁少勿乱。
@@ -14807,9 +14808,9 @@ fn pause_early_mismatch_recovery_tail_appends_growth_tail_on_late_polish() {
     let key = |text: &str| super::embedded_audio_partial_preview_stability_key(text);
 
     // 2026-09-23 14:31/14:32 连续实锤:云端两遍精修润色了中段一个字(分界
-    // 距交付末尾 3 字,>2 字边界),旧契约把纯新增的尾巴整段丢弃。相似度
-    // ≥80% 且终稿更长时,必须从已交付长度处切齐补尾——严格只追加交付
-    // 长度之后的内容,不可能重复上屏。
+    // 距交付末尾 3 字,>2 字边界),旧契约把纯新增的尾巴整段丢弃。改写区在
+    // max(8, 交付/3) 以内且终稿更长时,必须从已交付长度处切齐补尾——严格
+    // 只追加交付长度之后的内容,不可能重复上屏。
     let delivered = "今天测试一下停顿落屏然后我们继续说说看吧"; // 20 字,分界在"说说"→"说些"(index 17)
     let polished = "今天测试一下停顿落屏然后我们继续说些看吧还有别的";
     assert_eq!(
@@ -14817,8 +14818,17 @@ fn pause_early_mismatch_recovery_tail_appends_growth_tail_on_late_polish() {
         Some("还有别的".to_string())
     );
 
-    // 深改写重述("出来两次"型,LCP 低)即使终稿更长也不补——新旧并存重复
-    // 比丢尾更伤,维持 None。
+    // 长句(105 字实锤同型):绝对差值口径让 30 字会话里第 22 字的精修
+    // (改写区 8 = max(8, 30/3))也能补上增长尾。
+    let long_delivered = "今天测试一下停顿落屏然后我们继续说说看吧还有别的办法可以试试看呢"; // 30 字
+    let long_polished = "今天测试一下停顿落屏然后我们继续说说看吧还有特的办法可以试试看呢对吧";
+    assert_eq!(
+        pause_early_mismatch_recovery_tail(long_polished, &key(long_delivered)),
+        Some("对吧".to_string())
+    );
+
+    // 深改写重述("出来两次"型,改写区超限)即使终稿更长也不补——新旧并存
+    // 重复比丢尾更伤,维持 None。
     let restated = "今天测试一下现在是完全不同的另一句话内容更长了";
     assert_eq!(
         pause_early_mismatch_recovery_tail(restated, &key(delivered)),
