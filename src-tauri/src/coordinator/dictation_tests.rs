@@ -14932,3 +14932,36 @@ fn pause_early_rollback_on_first_paste_returns_to_empty_ledger() {
     assert!(take_pause_early_delivery(inner, session_id).is_none());
     assert!(!pause_early_ever_delivered(inner, session_id));
 }
+
+#[test]
+fn pause_early_tail_beyond_delivered_anchor_recovers_tail_when_lengths_distort() {
+    use super::pause_early_tail_beyond_delivered_anchor;
+    let key = |text: &str| super::embedded_audio_partial_preview_stability_key(text);
+
+    // 2026-09-23 17:31 d37e3562 吞尾实锤：流式中间态膨胀（的了/呢/点点）
+    // 让前缀早期分叉、长度域不可比，但锚区"慢了你看一下是为"两域一致，
+    // 锚后的"什么？然后我现在继续说话。"从未上屏——必须补。
+    let delivered = "现在是你在盯着监控看的了是吧然后呢感觉这个唤醒有一点点慢了你看一下是为";
+    let final_text =
+        "现在是你在盯着监控看的是吧？然后感觉这个唤醒是有点慢了，你看一下是为什么？然后我现在继续说话。";
+    assert_eq!(
+        pause_early_tail_beyond_delivered_anchor(final_text, &key(delivered)),
+        Some("什么？然后我现在继续说话。".to_string()),
+    );
+
+    // 锚点落在终稿末尾（锚后无新内容）＝已交付覆盖到头，无尾可补。
+    let covered = "现在是什么问题你帮我看一下";
+    let final_covered = "现在是什么问题？你帮我看一下。";
+    assert_eq!(
+        pause_early_tail_beyond_delivered_anchor(final_covered, &key(covered)),
+        None,
+    );
+
+    // 锚串在终稿中不存在（结尾区域被两遍改写）→ 维持跳过。
+    let diverged_tail = "开头一致但是结尾甲乙丙丁戊己";
+    let final_diverged = "开头一致但是结尾被彻底重写了另一份内容。";
+    assert_eq!(
+        pause_early_tail_beyond_delivered_anchor(final_diverged, &key(diverged_tail)),
+        None,
+    );
+}

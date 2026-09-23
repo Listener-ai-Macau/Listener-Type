@@ -4024,13 +4024,19 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     let pause_early_sticky = pause_early_ever_delivered(inner, current_session_id);
     let pause_early_delivered = take_pause_early_delivery(inner, current_session_id);
     let pause_early_outcome = pause_early_delivered.as_ref().map(|(display, key)| {
-        let remainder = pause_early_final_remainder(&polished, key);
+        // 2026-09-23 17:31 d37e3562 吞尾实锤：润色压缩+流式中间态膨胀让
+        // polished 域的前缀/LCP 全部失真，原始终稿域先对账（同域可比），
+        // 仍不可切时用交付末尾锚点从原始终稿补未上屏的尾巴。
+        let remainder = pause_early_final_remainder(&polished, key)
+            .or_else(|| pause_early_final_remainder(&raw.text, key));
         // 改写=云端修订：按 LCP 补回尾巴保内容（0e9b79fc 丢 16 字的教训）。
         // 2026-09-22 16:47 修正：不再限定干净会话——polished 已过归属仲裁
         // （旁人内容在上游已切），补的尾巴与不走停顿落屏时的终稿同文；
         // 干扰会话维持丢弃只会吞你自己的字（08:47:14 交付 56/57 字实锤）。
         let recovery = if remainder.is_none() {
             pause_early_mismatch_recovery_tail(&polished, key)
+                .or_else(|| pause_early_mismatch_recovery_tail(&raw.text, key))
+                .or_else(|| pause_early_tail_beyond_delivered_anchor(&raw.text, key))
         } else {
             None
         };

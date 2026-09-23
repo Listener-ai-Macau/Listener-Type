@@ -1670,6 +1670,92 @@ fn seam_deduped_growth_tail(final_text: &str, offset: usize, delivered_key: &str
     final_text[offset..].to_string()
 }
 
+/// 2026-09-23 17:31 d37e3562 实锤"吞尾部"：原始终稿(54字含唤醒词)完整
+/// 含尾"然后我现在继续说话"，但已交付是流式中间态(58字，含临时膨胀)，
+/// 润色终稿又压到 47 字——长度比较与 LCP 在两个失真域里全部判"改写，
+/// 跳过"，唯一没上屏的真尾巴被丢。长度不可比时改用内容锚点：取已交付
+/// 末尾锚串在原始终稿归一化内容里的最后一次出现，锚后还有内容即未
+/// 交付尾巴。锚串从 8 字起，找不到降 4 字（太长经不起两遍精修，太短
+/// 易假锚）。锚点必须落在已交付覆盖范围内（假锚会把已交付内容再贴
+/// 一遍）；找不到锚或锚后为空 → None，维持跳过（宁少勿重）。
+fn pause_early_tail_beyond_delivered_anchor(
+    final_text: &str,
+    delivered_key: &str,
+) -> Option<String> {
+    if delivered_key.is_empty() {
+        return None;
+    }
+    let delivered_chars: Vec<char> = delivered_key.chars().collect();
+    // 原始终稿的归一化内容串 + 每个内容字符在原文的字节偏移（切尾巴用）。
+    let mut norm: Vec<char> = Vec::new();
+    let mut offsets: Vec<usize> = Vec::new();
+    for (offset, ch) in final_text.char_indices() {
+        if is_embedded_audio_partial_preview_decorative(ch) {
+            continue;
+        }
+        for lower in ch.to_lowercase() {
+            norm.push(lower);
+            offsets.push(offset);
+        }
+    }
+    // 前置卫兵：交付与终稿必须共享开头（同源识别的正常形态）。深度改写
+    // （前缀从第一个字就分叉）时任何锚点命中都是巧合，补了必重贴。
+    let shared_prefix = delivered_chars
+        .iter()
+        .zip(norm.iter())
+        .take_while(|(delivered, sealed)| delivered == sealed)
+        .count();
+    if shared_prefix < 2 {
+        return None;
+    }
+    for &anchor_len in &[8usize, 4] {
+        if delivered_chars.len() < anchor_len || norm.len() < anchor_len {
+            continue;
+        }
+        let anchor: &[char] = &delivered_chars[delivered_chars.len() - anchor_len..];
+        // 最后一次出现：取最晚锚点让尾巴最小，重复上屏风险最低。
+        let mut head: isize = norm.len() as isize - anchor_len as isize;
+        let mut anchor_at: Option<usize> = None;
+        while head >= 0 {
+            let start = head as usize;
+            if norm[start..start + anchor_len] == *anchor {
+                anchor_at = Some(start);
+                break;
+            }
+            head -= 1;
+        }
+        let Some(start) = anchor_at else {
+            continue;
+        };
+        let after = start + anchor_len;
+        // 锚后无新内容 = 已交付覆盖到终稿末尾，无尾可补（也排除末尾重复）。
+        if after >= norm.len() {
+            continue;
+        }
+        // 假锚卫兵：锚点末尾必须仍在已交付覆盖范围内（允许 2 字归一化
+        // 损耗）。落在覆盖范围外的早锚意味着前文重复短语，补了必重贴。
+        if after > delivered_chars.len() + 2 {
+            continue;
+        }
+        let tail = final_text[offsets[after]..]
+            .trim_start_matches(is_embedded_audio_partial_preview_decorative)
+            .to_string();
+        if !tail
+            .trim_matches(|ch: char| is_embedded_audio_partial_preview_decorative(ch))
+            .is_empty()
+        {
+            log::info!(
+                "[coord] pause-early anchor tail recovered delivered_chars={} final_chars={} tail_chars={}",
+                delivered_chars.len(),
+                norm.len(),
+                tail.chars().count()
+            );
+            return Some(tail);
+        }
+    }
+    None
+}
+
 fn pause_early_delivery_session_state(
     inner: &Arc<Inner>,
     session_id: SessionId,
