@@ -95,19 +95,27 @@ const POST_DICTATION_KEY_DELAY: Duration = Duration::from_millis(60);
 const EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT: Duration = Duration::from_millis(300);
 const EMBEDDED_ASR_SPEECH_ACTIVITY_MAX_QUEUE_AGE: Duration = Duration::from_millis(600);
 // Owner dictation endpoint. Once body speech has started, every preview shape
-// uses the established 1.0s inactivity contract. Do not make completion depend
+// uses the established inactivity contract. Do not make completion depend
 // on optimistic punctuation, body length, or an uncertain voiceprint vote: the
 // installed 1.0.5 ladder (1.5/2.0/2.5s) made the same spoken ending complete at
 // different speeds. Only the wake/target speaker's latest speech refreshes this
 // clock, so other people talking still cannot lengthen auto-end.
-const EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS: u64 = 1_000;
+// 2026-09-23 15:48 续接掐断实锤 + 用户拍板 3s：停顿落屏(tjs)+early-seal(tjp)
+// 上线后，文字在停顿稳定窗即落屏，会话关停速度不影响上屏跟手——1.0s 老契约
+// "防完成变慢"的理由失效，而 1s 关停把 2-4s 思考停顿的续接整段掐死
+// (target_speaker_inactive 1s 后本人续说被当新候选拒掉)。用户明确要求
+// "窗口改到 3 秒，3 秒内可以续上，反正上屏很快不用硬等"——放宽到 3.0s；
+// 固件 1s 静默兜底由 should_keep_firmware_alive_for_host_hang 跟随本常量
+// 自动续租。
+const EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS: u64 = 3_000;
 // A settled-text timer shares the async runtime with BLE and ASR callbacks.
-// Arm it slightly before the public one-second endpoint so ordinary Windows
-// scheduling jitter still dispatches at about 1.0 s (live 577 measured
+// Arm it slightly before the public endpoint so ordinary Windows scheduling
+// jitter still dispatches at about the public deadline (live 577 measured
 // 1,141 ms from a nominal 1,000 ms timer; live 578 lost the race to firmware).
-// The stop reason and provider/audio-clock policy remain the one-second
-// contract; only this wall-clock wake-up receives the scheduling allowance.
-const EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS: u64 = 900;
+// The stop reason and provider/audio-clock policy remain the endpoint
+// contract; only this wall-clock wake-up receives the scheduling allowance
+// (see EMBEDDED_SETTLED_TARGET_SCHEDULING_ALLOWANCE_MS, derived below).
+const EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS: u64 = 2_900;
 // Installed session 72519330: wake capsule → ~1.2s host auto-end on the wake
 // clock with empty body → "没有识别到语音". Initial body wait is only 700ms, so
 // 1.0s snappy endpoint after that treats "thinking after wake" as done. Keep
@@ -124,9 +132,12 @@ const EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS: u64 = 8_000;
 // to the live edge, classification=None, 3 of 5 sessions needed a manual
 // stop).  Once this budget expires, unclassified/cloud evidence stops
 // re-arming and holding the endpoint; the next positive evidence re-opens it
-// immediately.  3 s deliberately exceeds the 2.5 s open-clause continuation
-// window so a deliberate mid-sentence pause still survives.
-const EMBEDDED_OWNER_POSITIVE_EVIDENCE_BUDGET_MS: u64 = 3_000;
+// immediately.  The budget deliberately exceeds the open-clause continuation
+// window (3.5 s since the 2026-09-23 3 s endpoint contract) so a deliberate
+// mid-sentence pause still survives — a budget that expires first would
+// cancel the continuation hold and fire the endpoint early (open-clause test
+// caught exactly this ordering when both moved to the 3 s scale).
+const EMBEDDED_OWNER_POSITIVE_EVIDENCE_BUDGET_MS: u64 = 4_000;
 const EMBEDDED_PROVIDER_STALL_FALLBACK_LAG_MS: u64 = 500;
 // 500ms confirmed stalls still mid-cut live speech when the cloud clock freezes
 // for one network blip. Require a full second of no provider coverage growth
@@ -153,20 +164,24 @@ include!("dictation_endpoint_policy.rs");
 include!("dictation_local_speech_activity.rs");
 
 fn target_speaker_inactive_stop_reason(timeout_ms: u64) -> &'static str {
+    // Tier boundaries must stay ordered: no-body > dangling continuation >
+    // ordinary endpoint. With the ordinary endpoint at 3.0 s and the dangling
+    // tier above it, comparing against the ordinary constant keeps each label
+    // exact instead of letting the >= chain swallow the higher tier.
     if timeout_ms >= EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS {
         "target_speaker_inactive_no_body_8000ms"
-    } else if timeout_ms >= EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS {
-        "target_speaker_inactive_2500ms"
+    } else if timeout_ms > EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS {
+        "target_speaker_inactive_3500ms"
     } else {
-        "target_speaker_inactive_1000ms"
+        "target_speaker_inactive_3000ms"
     }
 }
 // The wake phrase is a complete activation command: after the capsule becomes
 // visible, give the owner a full eight seconds to begin the body (2026-09-22
 // 16:47 实锤：用户说完唤醒词想词 13s，3s 宽限把胶囊掐死，体验成"唤醒不行"；
 // 对齐 Siri 的想词宽限）。The first non-empty body preview ends this wait
-// immediately, after which the exact 1000 ms owner-inactivity endpoint
-// remains unchanged.
+// immediately, after which the 3000 ms owner-inactivity endpoint
+// (EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS) applies.
 const EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS: u64 = 8_000;
 const EMBEDDED_TERMINAL_WAKE_CONTINUATION_TTL: Duration = Duration::from_secs(6);
 const EMBEDDED_ACCEPTED_WAKE_CAPTURE_REPLACEMENT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -4004,6 +4019,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // Pause-early-delivery（2026-09-22 跟手①）：句末稳定停顿可能已把稳定
     // 前缀当场上屏。按 stability key 对齐终稿只派发余量；云端改写/收缩了
     // 已交付前缀时跳过第二次插入（宁可少不可重——H 族），早期文本保留在屏。
+    // 粘滞底线在 take 之前读：本会话只要上屏过早期文本，就算可对账前缀
+    // 丢失也绝不允许终稿整段重贴（2026-09-23 用户实锤"一毛一样粘贴两次"）。
+    let pause_early_sticky = pause_early_ever_delivered(inner, current_session_id);
     let pause_early_delivered = take_pause_early_delivery(inner, current_session_id);
     let pause_early_outcome = pause_early_delivered.as_ref().map(|(display, key)| {
         let remainder = pause_early_final_remainder(&polished, key);
@@ -4023,6 +4041,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         Some((_, Some(remainder), _)) => (remainder.clone(), false),
         Some((_, None, Some(recovery))) if !recovery.is_empty() => (recovery.clone(), false),
         Some(_) => (polished.clone(), true),
+        // 账本空但本会话确实上屏过早期文本：取消终稿整段粘贴，早期文本
+        // 保留在屏（用户拍板"完成那次可以取消"——双写比少交付更糟）。
+        None if pause_early_sticky => (polished.clone(), true),
         None => (polished.clone(), false),
     };
     // 组字流式终局(2026-09-22 切片3):composition 活着 → 余量/恢复尾
@@ -4035,6 +4056,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             Some((_, Some(remainder), _)) => Some(remainder.clone()),
             Some((_, None, Some(recovery))) if !recovery.is_empty() => Some(recovery.clone()),
             Some(_) => None,
+            // 组字路由同样受粘滞底线约束：账本丢失但早期文本已 commit 到
+            // 组字 → 取消 commit（清组字残留），绝不整段重写。
+            None if pause_early_sticky => None,
             None => Some(polished.clone()),
         };
         let finalized = match op_text.as_deref() {
@@ -4096,7 +4120,12 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                 .map(|(display, _)| display.clone()),
         }
     } else if skip_dispatch {
-        if pause_early_outcome
+        if pause_early_outcome.is_none() && pause_early_sticky {
+            log::warn!(
+                "[coord] pause-early-delivery final full-paste cancelled: ledger lost but early text is on screen (final_chars={}) — early text stays",
+                polished.chars().count()
+            );
+        } else if pause_early_outcome
             .as_ref()
             .is_some_and(|(_, remainder, _)| remainder.is_some())
         {

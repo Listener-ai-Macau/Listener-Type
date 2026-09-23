@@ -1,13 +1,26 @@
 // A short, explicit continuation word is different from an ordinary complete
 // utterance. Give “然后/但是/另外/所以…” one natural thinking pause without
 // slowing every recording. The host keeps firmware's fixed one-second silence
-// fallback alive only inside this bounded window.
-const EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS: u64 = 2_500;
+// fallback alive only inside this bounded window. 2026-09-23: raised in step
+// with the ordinary endpoint 1.0s→3.0s (user-approved continuation window) so
+// the connector tier keeps its "one extra thinking pause" margin over the
+// base contract.
+const EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS: u64 = 3_500;
 const EMBEDDED_SETTLED_TARGET_SCHEDULING_ALLOWANCE_MS: u64 =
     EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS - EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS;
 // Leave room for the BLE command's 300ms acknowledgement timeout before the
 // firmware's 1.0s fallback. The old 800ms interval had a 1.1s worst case.
 const EMBEDDED_DANGLING_FIRMWARE_KEEPALIVE_INTERVAL_MS: u64 = 600;
+// How recent the authoritative owner boundary must be for visible preview
+// growth to count as live owner speech (firmware keepalive refresh). This is
+// a stale-revision bound tied to the ~400 ms verifier cadence, not the
+// endpoint contract: a provider two-pass boundary that lands this long after
+// the owner went quiet is bookkeeping, not speech. 2026-09-23: pinned here
+// when EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS widened 1.0s→3.0s — stretching
+// this window with it would let a revision 2.9 s past the owner refresh the
+// firmware lease and extend recording past the 3 s endpoint the user asked
+// for, so the two constants are deliberately decoupled.
+const EMBEDDED_PREVIEW_GROWTH_OWNER_RECENCY_MS: u64 = 1_000;
 
 fn preview_ends_with_sentence_terminal(preview: Option<&str>) -> bool {
     let Some(text) = preview.map(str::trim).filter(|s| !s.is_empty()) else {
@@ -105,7 +118,7 @@ fn authoritative_preview_growth_has_recent_owner_speech(
     latest_audio_ms
         .zip(owner_edge_ms)
         .is_some_and(|(audio_ms, speech_ms)| {
-            audio_ms.saturating_sub(speech_ms) < EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+            audio_ms.saturating_sub(speech_ms) < EMBEDDED_PREVIEW_GROWTH_OWNER_RECENCY_MS
                 && (!update.local_speaker_tracking_enabled
                     || !local_speech_confidently_non_target(update, speech_ms))
         })

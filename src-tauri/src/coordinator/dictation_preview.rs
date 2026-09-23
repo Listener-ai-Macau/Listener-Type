@@ -1499,6 +1499,16 @@ pub(super) struct PauseEarlyDeliveryLedger {
     pub(super) delivered_display: String,
     /// stability key（去标点小写）of `delivered_display`.
     pub(super) delivered_key: String,
+    /// The state before the newest unconfirmed reserve. Rollback restores
+    /// this instead of wiping the ledger: a failed mid-session paste must not
+    /// make the final dispatch forget (and re-paste) text that is already on
+    /// screen — 2026-09-23 用户实锤"一毛一样粘贴两次"。
+    pub(super) unconfirmed_prior: Option<(String, String)>,
+    /// Sticky proof this session delivered early text at least once. Never
+    /// cleared by rollback; the final dispatch uses it as a hard floor — when
+    /// set, a full-text re-paste is cancelled even if the reconcilable prefix
+    /// was lost (宁可少不可重——H 族).
+    pub(super) ever_delivered_session: Option<SessionId>,
     /// 一次性门诊断：同一会话同一原因只记一行，防止看门狗 20/s 刷屏。
     pub(super) gate_blocked_logged: Option<(SessionId, &'static str)>,
     /// 2026-09-23 tkg 后诊断:tick 首达行(证明看门狗路径活着+当时门状态)。
@@ -1682,19 +1692,55 @@ fn pause_early_delivery_reserve(
     delivered_key: String,
 ) {
     let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+    // 单一漏斗日志：粘贴路径的成败行会在毫秒级跟进来；若出现 reserve 行却
+    // 没有后继 success/fail 行 = 粘贴调用中断（2026-09-23 47452640 幻影
+    // +40 字取证缺口——账本 72 字但全天只有 32 字粘贴成功行）。
+    log::info!(
+        "[coord] pause-early reserve session_id={session_id} total_display_chars={} key_chars={}",
+        delivered_display.chars().count(),
+        delivered_key.chars().count()
+    );
+    ledger.unconfirmed_prior = Some((
+        std::mem::take(&mut ledger.delivered_display),
+        std::mem::take(&mut ledger.delivered_key),
+    ));
     ledger.session_id = Some(session_id);
     ledger.delivered_display = delivered_display;
     ledger.delivered_key = delivered_key;
 }
 
-fn pause_early_delivery_rollback(inner: &Arc<Inner>, session_id: SessionId) {
+/// The newest reserved paste succeeded on screen: the ledger prefix is now
+/// confirmed and the sticky floor latches.
+fn pause_early_delivery_confirm(inner: &Arc<Inner>, session_id: SessionId) {
     let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
     if ledger.session_id.as_ref() == Some(&session_id) {
-        *ledger = PauseEarlyDeliveryLedger::default();
+        ledger.unconfirmed_prior = None;
+        ledger.ever_delivered_session = Some(session_id);
     }
 }
 
-/// 终稿路径取走本会话的已交付前缀（display, key），取走即清零。
+fn pause_early_delivery_rollback(inner: &Arc<Inner>, session_id: SessionId) {
+    let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+    if ledger.session_id.as_ref() != Some(&session_id) {
+        return;
+    }
+    // 只回滚这一次未确认的交付，恢复到上一个已确认前缀；已上屏的早期文本
+    // 绝不从账本里消失（整段抹掉会让终稿全文重贴 = 双粘贴）。首贴失败时
+    // prior 为空串 → 前缀归零，终稿全文交付，行为与旧版一致。
+    if let Some((prior_display, prior_key)) = ledger.unconfirmed_prior.take() {
+        ledger.delivered_display = prior_display;
+        ledger.delivered_key = prior_key;
+    }
+}
+
+/// 本会话是否确实上屏过停顿落屏文本（跨回滚粘滞）。终稿交付的硬底线。
+pub(super) fn pause_early_ever_delivered(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    let ledger = inner.embedded_audio_pause_early_delivery.lock();
+    ledger.ever_delivered_session.as_ref() == Some(&session_id)
+}
+
+/// 终稿路径取走本会话的已交付前缀（display, key），取走即清零。粘滞底线
+/// （曾上屏）是历史事实，跨 take 保留——终稿侧即使先 take 后查询也不翻转。
 pub(super) fn take_pause_early_delivery(
     inner: &Arc<Inner>,
     session_id: SessionId,
@@ -1705,7 +1751,9 @@ pub(super) fn take_pause_early_delivery(
             ledger.delivered_display.clone(),
             ledger.delivered_key.clone(),
         ));
+        let ever = ledger.ever_delivered_session;
         *ledger = PauseEarlyDeliveryLedger::default();
+        ledger.ever_delivered_session = ever;
         return taken;
     }
     None
@@ -1893,12 +1941,13 @@ async fn pause_early_delivery_tick(
     if !inserted {
         pause_early_delivery_rollback(inner, session_id);
         log::warn!(
-            "[coord] pause-early-delivery paste failed status={:?} chars={} — final will deliver in full",
+            "[coord] pause-early-delivery paste failed status={:?} chars={} — final will deliver the remainder",
             result.status,
             delta.chars().count()
         );
         return;
     }
+    pause_early_delivery_confirm(inner, session_id);
     log::info!(
         "[coord] pause-early-delivery prefix_chars={} total_delivered_chars={} min_stable_ms={} route={:?} status={:?}",
         delta.chars().count(),

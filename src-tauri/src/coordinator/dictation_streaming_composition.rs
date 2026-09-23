@@ -270,6 +270,8 @@ async fn streaming_composition_commit_stable(
         pause_early_delivery_rollback(inner, session_id);
         return false;
     }
+    // TSF reply 确认文本已落屏:确认账本前缀 + 粘滞底线（见 preview 侧同款）。
+    pause_early_delivery_confirm(inner, session_id);
     let state = inner.streaming_composition.lock();
     log::info!(
         "[coord] streaming-composition commit prefix_chars={} total_delivered_chars={} min_stable_ms={} updates={} commits={}",
