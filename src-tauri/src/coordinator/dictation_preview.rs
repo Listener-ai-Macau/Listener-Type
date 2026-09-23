@@ -1578,11 +1578,17 @@ fn pause_early_mismatch_recovery_tail(final_text: &str, delivered_key: &str) -> 
         }
         if !delivered_key.starts_with(seen_key.as_str()) {
             // 分界落在把 key 推离已交付前缀的这个字上。
-            let lcp_bytes = seen_key
-                .bytes()
-                .zip(delivered_key.bytes())
-                .take_while(|(seen, delivered)| seen == delivered)
-                .count();
+            // 2026-09-23 13:33 panic 实锤（"…必须要报用内置浏览器看蓝湖"）：
+            // 字节级 LCP 会在共享 UTF-8 前缀的同音字内部切分（报 E6 8A A5 /
+            // 抱 E6 8A B1 共享前两字节），delivered_key[lcp..] 直接 panic 成
+            // "内部错误"。按整字符推进并累加该字符的字节长，切点必落边界。
+            let mut lcp_bytes = 0usize;
+            for (seen, delivered) in seen_key.chars().zip(delivered_key.chars()) {
+                if seen != delivered {
+                    break;
+                }
+                lcp_bytes += seen.len_utf8();
+            }
             if lcp_bytes * 2 < delivered_key.len() {
                 return None;
             }

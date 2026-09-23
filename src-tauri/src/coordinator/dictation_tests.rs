@@ -14776,3 +14776,27 @@ fn pause_early_mismatch_recovery_tail_recovers_clean_rewrites() {
     // 空交付 key → 放弃（正常路径处理）。
     assert_eq!(pause_early_mismatch_recovery_tail(boundary, ""), None);
 }
+
+#[test]
+fn pause_early_mismatch_recovery_tail_survives_shared_utf8_prefix_divergence() {
+    use super::pause_early_mismatch_recovery_tail;
+    let key = |text: &str| super::embedded_audio_partial_preview_stability_key(text);
+
+    // 2026-09-23 13:33 panic 实锤（"内部错误"）：报(E6 8A A5)/抱(E6 8A B1)
+    // 共享前两字节，字节级 LCP 把切点落在字符内部 → slice panic。分界在
+    // 交付区间深处(>2 字)时必须返回 None 而不是 panic。
+    let delivered = "为什么没有呢应该有的呀就是你必须要报用内置浏览器看蓝湖";
+    let deep_final = "为什么没有呢应该有的呀就是你必须要抱用内置浏览器看蓝湖的链接";
+    assert_eq!(
+        pause_early_mismatch_recovery_tail(deep_final, &key(delivered)),
+        None
+    );
+
+    // 同族字对落在交付末尾(≤2 字,同音边界级)时照常补尾,不 panic。
+    let boundary_delivered = "今天测试一下停顿报";
+    let boundary_final = "今天测试一下停顿抱。";
+    assert_eq!(
+        pause_early_mismatch_recovery_tail(boundary_final, &key(boundary_delivered)),
+        Some("抱。".to_string())
+    );
+}
