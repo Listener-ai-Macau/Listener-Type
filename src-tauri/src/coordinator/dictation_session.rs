@@ -5,12 +5,36 @@
 // seconds. Final text retention is useful, but it must not hold the visible
 // dictation completion path after text has already been inserted.
 const FINAL_CLIPBOARD_RETENTION_FOREGROUND_BUDGET: Duration = Duration::from_millis(100);
+// A PasteSent result means only that Ctrl+V was injected. The target may read
+// the clipboard later, so replacing a one-character final remainder with the
+// full transcript can paste the whole transcript a second time. There is no
+// reliable target acknowledgement on this route, so the clipboard remains the
+// transport until the user or another app changes it.
+
+fn unconfirmed_paste_uses_clipboard(
+    status: InsertStatus,
+    route: DeliveryRoute,
+    early_paste_seen: bool,
+    dispatched_text: &str,
+    final_text: &str,
+) -> bool {
+    status == InsertStatus::PasteSent
+        && route == DeliveryRoute::Paste
+        && (early_paste_seen || dispatched_text != final_text)
+}
 
 async fn retain_final_clipboard_with_foreground_budget(
     inner: &Arc<Inner>,
     session_id: SessionId,
     text: &str,
+    unconfirmed_paste_uses_clipboard: bool,
 ) -> (bool, &'static str) {
+    if unconfirmed_paste_uses_clipboard {
+        log::info!(
+            "[coord] final clipboard retention skipped: streamed paste awaiting target consumption session_id={session_id}"
+        );
+        return (false, "transport_held");
+    }
     let inner = Arc::clone(inner);
     let text = text.to_string();
     let chars = text.chars().count();

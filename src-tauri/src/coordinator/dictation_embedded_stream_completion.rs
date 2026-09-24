@@ -287,6 +287,36 @@ impl EmbeddedStreamingDictation {
         }
         if let Some(mut session) = self.session.take() {
             self.preserve_session_candidate_fact_ledger(&mut session);
+            // A user can cancel after pause-early delivery has already pasted
+            // text. Preserve the same provider timeline as a completed session
+            // so a visible duplicate can be traced back to its ASR window.
+            if record_embedded_audio_for_debug_enabled(inner) {
+                if let Some(pcm) = session.archive_pcm.as_deref() {
+                    let _ = archive_embedded_audio_if_enabled(inner, session.session_id, pcm);
+                }
+                if let Some(asr) = session.volcengine_asr.as_ref() {
+                    if let Ok(path) = crate::persistence::asr_trace_path_for_session(
+                        &session.session_id.to_string(),
+                    ) {
+                        let payload = serde_json::json!({
+                            "sessionId": session.session_id.to_string(),
+                            "cancelled": true,
+                            "finalCoordinatorTextAvailable": false,
+                            "finalizationSucceeded": false,
+                            "streamedPcmBytes": session.streamed_pcm_bytes,
+                            "normalizedPcmBytes": session.normalized_pcm_bytes,
+                            "archivePcmBytes": session.archive_pcm.as_ref().map_or(0, Vec::len),
+                            "audioDelivery": asr.diagnostic_audio_delivery(),
+                            "trace": asr.take_diagnostic_trace(),
+                        });
+                        if let Ok(bytes) = serde_json::to_vec(&payload) {
+                            if let Err(err) = std::fs::write(path, bytes) {
+                                log::warn!("[coord] cancelled ASR diagnostic archive failed: {err}");
+                            }
+                        }
+                    }
+                }
+            }
             cancel_asr_for_session(inner, session.session_id);
             restore_prepared_windows_ime_session(inner, session.session_id);
         }

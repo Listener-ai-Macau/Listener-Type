@@ -11179,9 +11179,54 @@ fn final_clipboard_retention_cannot_hold_capsule_completion_for_seconds() {
         .map(|offset| start + offset)
         .expect("session lifecycle should follow clipboard retention helper");
     let body = &source[start..end];
+    assert!(
+        body.find("return (false, \"transport_held\")")
+            .expect("partial paste must hold the transport clipboard")
+            < body.find("spawn_blocking").expect("retention task should exist"),
+        "unconfirmed partial paste must keep its clipboard payload before any retention task starts"
+    );
     assert!(body.contains("spawn_blocking"));
     assert!(body.contains("tokio::time::timeout"));
     assert!(body.contains("(false, \"pending\")"));
+}
+
+#[test]
+fn partial_paste_keeps_transport_clipboard_until_target_can_read_it() {
+    use super::unconfirmed_paste_uses_clipboard;
+    use crate::coordinator::DeliveryRoute;
+    assert!(
+        unconfirmed_paste_uses_clipboard(
+            InsertStatus::PasteSent,
+            DeliveryRoute::Paste,
+            true,
+            "。",
+            "已经提前输出的整句话。",
+        ),
+    );
+    assert!(
+        unconfirmed_paste_uses_clipboard(
+            InsertStatus::PasteSent,
+            DeliveryRoute::Paste,
+            true,
+            "整句话",
+            "整句话",
+        ),
+        "a prior streamed paste is still unconfirmed even if final dispatch is skipped"
+    );
+    assert!(!unconfirmed_paste_uses_clipboard(
+            InsertStatus::PasteSent,
+            DeliveryRoute::Paste,
+            false,
+            "整句话",
+            "整句话",
+        ));
+    assert!(!unconfirmed_paste_uses_clipboard(
+            InsertStatus::Inserted,
+            DeliveryRoute::Tsf,
+            true,
+            "。",
+            "整句话。",
+        ));
 }
 
 #[test]

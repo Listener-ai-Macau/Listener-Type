@@ -55,6 +55,26 @@ pub(super) fn merge_streaming_candidate_with_untimed_window(
             return (current_window, candidate.timed_segments, String::new());
         }
     }
+    // Once timed rows exist, the optimized provider can still send a full
+    // cumulative growth row. In session dc9deee9 frame 33 the provider grew
+    // the existing opening with "然后呢？做完以后", but the rolling-window
+    // merge appended that ending twice and pause-early paste made it visible.
+    // A complete spoken prefix proves this row already covers the ledger.
+    if candidate.authoritative_cumulative && !previous_text.trim().is_empty() {
+        let previous_spoken = compact_segment_text(previous_text);
+        let current_spoken = compact_segment_text(&current_window);
+        if previous_spoken.chars().count() >= 8
+            && current_spoken.chars().count() > previous_spoken.chars().count()
+            && current_spoken.starts_with(&previous_spoken)
+        {
+            let segments = if candidate.timed_segments.is_empty() {
+                previous_segments.to_vec()
+            } else {
+                candidate.timed_segments
+            };
+            return (current_window, segments, String::new());
+        }
+    }
     // Optimized-bidirectional streaming can spend most of a long utterance in
     // untimed rolling windows, then publish its first word-timed two-pass
     // result for the whole session. That response replaces the provisional
@@ -1249,6 +1269,31 @@ mod tests {
             timed_segments: Vec::new(),
             authoritative_cumulative: false,
         }
+    }
+
+    #[test]
+    fn cumulative_growth_after_timed_opening_replaces_instead_of_repeating_tail() {
+        let previous = "开始录音。如果没有这种东西的话，就要做成规划。";
+        let current = "开始录音。如果没有这种东西的话，就要做成规划。然后呢？做完以后";
+        let opening = TranscriptSegment {
+            start_ms: 0,
+            end_ms: Some(10_000),
+            text: previous.into(),
+        };
+        let growth = TranscriptSegment {
+            start_ms: 10_000,
+            end_ms: Some(13_000),
+            text: "然后呢？做完以后".into(),
+        };
+        let (merged, segments, _) = merge_streaming_candidate_with_untimed_window(
+            previous,
+            &[opening.clone()],
+            "然后呢？",
+            timed(current, vec![opening, growth]),
+        );
+        assert_eq!(merged, current);
+        assert_eq!(merged.matches("然后呢").count(), 1);
+        assert_eq!(segments.len(), 2);
     }
 
     fn timed(text: &str, segments: Vec<TranscriptSegment>) -> TranscriptCandidate {
