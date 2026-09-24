@@ -2205,7 +2205,28 @@ async fn pause_early_delivery_tick(
     let anchored = exact_delta.is_none();
     let Some(delta) = exact_delta
         .or_else(|| pause_early_anchored_continuation(&text, &delivered_display, &delivered_key))
+        // Provider revisions can change the last words of an already pasted
+        // clause, so an exact eight-character seam disappears even though the
+        // new owner-ledger prefix has kept growing. Reuse the bounded edit
+        // alignment used at finalization, on the stable owner snapshot only.
+        // Its internal-growth and large-rewrite guards still prevent a replay.
+        .or_else(|| pause_early_aligned_growth_tail(&text, &delivered_key))
     else {
+        let current_key = embedded_audio_partial_preview_stability_key(&text);
+        let shared = delivered_key
+            .chars()
+            .zip(current_key.chars())
+            .take_while(|(left, right)| left == right)
+            .count();
+        let first_block = inner.embedded_audio_pause_early_delivery.lock().gate_blocked_logged
+            != Some((session_id, "delivered_prefix_revised_unaligned"));
+        if first_block {
+            log::info!(
+                "[coord] pause-early alignment unavailable session_id={session_id} delivered_key_chars={} snapshot_key_chars={} shared_prefix_chars={shared}",
+                delivered_key.chars().count(),
+                current_key.chars().count(),
+            );
+        }
         pause_early_note_gate_blocked(inner, session_id, "delivered_prefix_revised_unaligned");
         return;
     };

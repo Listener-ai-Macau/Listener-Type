@@ -14999,6 +14999,25 @@ fn pause_early_live_continuation_survives_a_rewritten_opening_with_unique_seam()
 }
 
 #[test]
+fn pause_early_live_continuation_survives_a_rewritten_paste_seam() {
+    use super::{
+        embedded_audio_partial_preview_stability_key as key,
+        pause_early_aligned_growth_tail, pause_early_anchored_continuation,
+        pause_early_final_remainder,
+    };
+
+    let delivered = "然后你是验收的话问题都是一直在修对吧？就不是说验收到问题就不修。";
+    let revised = "然后你是验收的话问题都是一直在修对吧？就不是说验收到问题就不休。然后这个是怎么样？是治本的修法吗？";
+    assert_eq!(pause_early_final_remainder(revised, delivered, &key(delivered)), None);
+    assert_eq!(pause_early_anchored_continuation(revised, delivered, &key(delivered)), None);
+    assert_eq!(
+        pause_early_aligned_growth_tail(revised, &key(delivered)),
+        Some("然后这个是怎么样？是治本的修法吗？".to_string()),
+        "a stable owner continuation must not wait for the automatic stop when a minor seam revision removes the exact anchor"
+    );
+}
+
+#[test]
 fn pause_early_mismatch_recovery_tail_recovers_clean_rewrites() {
     use super::pause_early_mismatch_recovery_tail;
     let key = |text: &str| super::embedded_audio_partial_preview_stability_key(text);
