@@ -32,6 +32,7 @@ mod imp {
         pub phrase_relation: crate::wake_phrase::LocalPhraseRelation,
         pub transcript_chars: usize,
         pub phonetic_prefix_units: usize,
+        pub phonetic_suffix_units: usize,
         pub phonetic_best_distance: usize,
         pub phonetic_best_window_start: usize,
         pub inference_ms: u64,
@@ -72,6 +73,7 @@ mod imp {
             phrase_relation: crate::wake_phrase::LocalPhraseRelation,
             transcript_chars: usize,
             phonetic_prefix_units: usize,
+            phonetic_suffix_units: usize,
             phonetic_best_distance: usize,
             phonetic_best_window_start: usize,
             inference_ms: u64,
@@ -268,6 +270,7 @@ mod imp {
                     phrase_relation,
                     transcript_chars,
                     phonetic_prefix_units,
+                    phonetic_suffix_units,
                     phonetic_best_distance,
                     phonetic_best_window_start,
                     inference_ms,
@@ -283,6 +286,7 @@ mod imp {
                             phrase_relation,
                             transcript_chars,
                             phonetic_prefix_units,
+                            phonetic_suffix_units,
                             phonetic_best_distance,
                             phonetic_best_window_start,
                             inference_ms,
@@ -431,6 +435,7 @@ mod imp {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct RedactedPhraseDiagnostics {
         prefix_units: usize,
+        suffix_units: usize,
         best_distance: usize,
         best_window_start: usize,
     }
@@ -472,6 +477,7 @@ mod imp {
         if expected.is_empty() {
             return RedactedPhraseDiagnostics {
                 prefix_units,
+                suffix_units: 0,
                 best_distance: 0,
                 best_window_start: 0,
             };
@@ -479,6 +485,7 @@ mod imp {
         if actual.is_empty() {
             return RedactedPhraseDiagnostics {
                 prefix_units,
+                suffix_units: 0,
                 best_distance: expected.len(),
                 best_window_start: 0,
             };
@@ -486,6 +493,7 @@ mod imp {
 
         let mut best_distance = unit_edit_distance(&actual, &expected);
         let mut best_window_start = 0usize;
+        let mut best_window_len = actual.len();
         let min_window_len = expected.len().saturating_sub(1).max(1);
         let max_window_len = expected.len().saturating_add(1).min(actual.len());
         for window_len in min_window_len..=max_window_len {
@@ -497,11 +505,19 @@ mod imp {
                 {
                     best_distance = distance;
                     best_window_start = window_start;
+                    best_window_len = window_len;
                 }
             }
         }
+        let suffix_units = actual[best_window_start..best_window_start + best_window_len]
+            .iter()
+            .rev()
+            .zip(expected.iter().rev())
+            .take_while(|(actual, expected)| actual == expected)
+            .count();
         RedactedPhraseDiagnostics {
             prefix_units,
+            suffix_units,
             best_distance,
             best_window_start,
         }
@@ -625,6 +641,7 @@ mod imp {
                                 phrase_relation: evidence.phrase_relation,
                                 transcript_chars: evidence.transcript_chars,
                                 phonetic_prefix_units: evidence.diagnostics.prefix_units,
+                                phonetic_suffix_units: evidence.diagnostics.suffix_units,
                                 phonetic_best_distance: evidence.diagnostics.best_distance,
                                 phonetic_best_window_start: evidence.diagnostics.best_window_start,
                                 inference_ms: started.elapsed().as_millis() as u64,
@@ -638,6 +655,7 @@ mod imp {
                             phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
                             transcript_chars: 0,
                             phonetic_prefix_units: 0,
+                            phonetic_suffix_units: 0,
                             phonetic_best_distance: 0,
                             phonetic_best_window_start: 0,
                             inference_ms: started.elapsed().as_millis() as u64,
@@ -711,6 +729,7 @@ mod imp {
                 phrase_relation: crate::wake_phrase::LocalPhraseRelation::ExactStart,
                 transcript_chars: 4,
                 phonetic_prefix_units: 4,
+                phonetic_suffix_units: 4,
                 phonetic_best_distance: 0,
                 phonetic_best_window_start: 0,
                 inference_ms: 123,
@@ -747,6 +766,7 @@ mod imp {
         #[test]
         fn redacted_phrase_metrics_locate_crops_near_homophones_and_leading_speech() {
             let exact = redacted_phrase_diagnostics("开始录音", "开始录音");
+            assert_eq!(exact.suffix_units, 4);
             assert_eq!(
                 (
                     exact.prefix_units,
@@ -769,6 +789,33 @@ mod imp {
             let near = redacted_phrase_diagnostics("开始录像", "开始录音");
             assert_eq!(near.prefix_units, 3);
             assert_eq!(near.best_distance, 1);
+            assert_eq!(near.suffix_units, 0);
+        }
+
+        #[test]
+        fn unrelated_shared_wake_opening_has_no_matching_phrase_tail() {
+            let false_wake = redacted_phrase_diagnostics(
+                "开始谈好不就行了吗好像你说结婚有黄金也给黄金给你",
+                "开始录音",
+            );
+            assert_eq!(false_wake.prefix_units, 2);
+            assert_eq!(false_wake.best_distance, 2);
+            assert_eq!(false_wake.best_window_start, 0);
+            assert_eq!(false_wake.suffix_units, 0);
+
+            let second_false_wake = redacted_phrase_diagnostics(
+                "开始呢请大家一步至大会堂进行信运",
+                "开始录音",
+            );
+            assert_eq!(second_false_wake.prefix_units, 2);
+            assert_eq!(second_false_wake.best_distance, 2);
+            assert_eq!(second_false_wake.best_window_start, 0);
+            assert_eq!(second_false_wake.suffix_units, 0);
+
+            let accented_wake = redacted_phrase_diagnostics("开su音那你看一下", "开始录音");
+            assert_eq!(accented_wake.prefix_units, 1);
+            assert_eq!(accented_wake.best_distance, 2);
+            assert_eq!(accented_wake.suffix_units, 1);
         }
 
         #[test]
@@ -1416,6 +1463,7 @@ pub struct WakeHelperResult {
     pub phrase_relation: crate::wake_phrase::LocalPhraseRelation,
     pub transcript_chars: usize,
     pub phonetic_prefix_units: usize,
+    pub phonetic_suffix_units: usize,
     pub phonetic_best_distance: usize,
     pub phonetic_best_window_start: usize,
     pub inference_ms: u64,

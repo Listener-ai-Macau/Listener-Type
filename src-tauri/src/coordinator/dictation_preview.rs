@@ -1490,12 +1490,55 @@ pub(super) fn request_embedded_audio_stop_feedback(
 
 const PAUSE_EARLY_DELIVERY_MIN_STABLE: Duration =
     Duration::from_millis(1_000);
+// When ASR omits punctuation, wait until both the owner ledger and the
+// capsule's live text stop growing. Local VAD frequently follows background
+// noise even through a human pause, so its speech edge alone is not a safe
+// clause boundary on this device.
+const PAUSE_EARLY_UNPUNCTUATED_QUIET: Duration = Duration::from_millis(800);
 // A one-character stable prefix is still often a provider placeholder. In
 // installed 1.0.6 session 3e8ab1c5 it was pasted, then the provider rewrote
 // the opening and final reconciliation could not safely retract it. Keep such
 // fragments in the reversible capsule; paste only a useful stable clause.
 const PAUSE_EARLY_FIRST_CHUNK_MIN_CONTENT_CHARS: usize = 6;
 const PAUSE_EARLY_NEXT_CHUNK_MIN_CONTENT_CHARS: usize = 3;
+
+/// Paste only a stable, punctuated clause. The capsule continues showing the
+/// reversible live preview while this segment is still being spoken. Taking
+/// the last boundary batches provider revisions into one insertion instead
+/// of pasting every three newly stable characters.
+fn pause_early_complete_clause(delta: &str) -> Option<&str> {
+    let mut boundary = None;
+    let mut previous = None;
+    for (offset, ch) in delta.char_indices() {
+        let next = delta[offset + ch.len_utf8()..].chars().next();
+        let numeric_separator = matches!(ch, '.' | ',')
+            && previous.is_some_and(|prev: char| prev.is_ascii_digit())
+            && next.is_some_and(|following| following.is_ascii_digit());
+        if !numeric_separator
+            && matches!(ch, '，' | ',' | '。' | '.' | '！' | '!' | '？' | '?' | '；' | ';')
+        {
+            boundary = Some(offset + ch.len_utf8());
+        }
+        previous = Some(ch);
+    }
+    let mut end = boundary?;
+    for ch in delta[end..].chars() {
+        if matches!(ch, '”' | '’' | '"' | '\'' | '）' | ')' | '】' | ']') {
+            end += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    Some(&delta[..end])
+}
+
+fn pause_early_segment(delta: &str, quiet_boundary: bool) -> Option<&str> {
+    if quiet_boundary {
+        Some(delta)
+    } else {
+        pause_early_complete_clause(delta)
+    }
+}
 
 fn pause_early_chunk_ready(delivered_key: &str, delta: &str) -> bool {
     let count = embedded_audio_partial_preview_stability_key(delta)
@@ -2052,9 +2095,8 @@ pub(super) fn take_pause_early_delivery(
 
 /// pause-early 与组字流式共用的显示变换链(2026-09-22 切片3 设计卡铁律:
 /// 两条路径必须逐字同款,stability-key 记账才连续)。门失败返回 None。
-/// 2026-09-22 14:2x 实测修正沿袭:流式尾句不带句末标点(云端终稿才补),
-/// 不设句末标点门——账本稳定窗本身即"这句说完了"的充分证据,stability
-/// key 对标点免疫,终稿补的句号不会双插。
+/// 胶囊预览继续跟随未落定文本；目标应用的中途粘贴只在稳定账本出现标点
+/// 边界时提交整段。终稿仍交付不带标点的余量，避免云端只在终稿补标点时吞尾。
 fn automatic_wake_has_unstripped_lead_in(raw_text: &str, phrase: &str) -> bool {
     raw_text
         .find(phrase)
@@ -2233,7 +2275,16 @@ async fn pause_early_delivery_tick(
     if delta.is_empty() {
         return;
     }
-    if !pause_early_chunk_ready(&delivered_key, &delta) {
+    let ledger_quiet = asr.pause_early_delivery_gate_diag().1
+        .is_some_and(|ms| ms >= PAUSE_EARLY_DELIVERY_MIN_STABLE.as_millis());
+    let preview_quiet = inner.embedded_audio_preview.lock()
+        .last_visible_growth_at(session_id)
+        .is_some_and(|at| at.elapsed() >= PAUSE_EARLY_UNPUNCTUATED_QUIET);
+    let quiet_boundary = snapshot_chars == full_ledger_chars && ledger_quiet && preview_quiet;
+    let Some(delta) = pause_early_segment(&delta, quiet_boundary) else {
+        return;
+    };
+    if !pause_early_chunk_ready(&delivered_key, delta) {
         return;
     }
     let new_display = format!("{delivered_display}{delta}");
@@ -2251,7 +2302,7 @@ async fn pause_early_delivery_tick(
     // 恢复;账本先记后 commit,失败回滚——次序与粘贴路径同款)。失败时驱动
     // 已降级清组字,下一拍以空账本走粘贴分支补上。
     if streaming_composition_active(inner, session_id) {
-        streaming_composition_commit_stable(inner, session_id, &delta, &delivered_display, &new_key)
+        streaming_composition_commit_stable(inner, session_id, delta, &delivered_display, &new_key)
             .await;
         return;
     }
@@ -2282,7 +2333,7 @@ async fn pause_early_delivery_tick(
     let restore_clipboard = false;
     let result = insert_via_non_tsf_fallback(
         inner,
-        &delta,
+        delta,
         restore_clipboard,
         prefs.paste_shortcut,
     );

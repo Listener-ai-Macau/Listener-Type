@@ -8015,6 +8015,7 @@ fn rolling_local_confirmation_discards_only_stale_exploratory_tasks() {
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::ExactStart,
         transcript_chars: 4,
         phonetic_prefix_units: 4,
+        phonetic_suffix_units: 0,
         phonetic_best_distance: 0,
         phonetic_best_window_start: 0,
         inference_ms: 200,
@@ -10639,6 +10640,7 @@ fn near_retry_arms_only_on_full_length_near_evidence() {
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
         transcript_chars: 4,
         phonetic_prefix_units: 3,
+        phonetic_suffix_units: 0,
         phonetic_best_distance: 1,
         phonetic_best_window_start: 0,
         inference_ms: 120,
@@ -10684,6 +10686,7 @@ fn target_speaker_endpoint_strong_start_prefix_gets_one_non_authoritative_latenc
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
         transcript_chars: 2,
         phonetic_prefix_units: 2,
+        phonetic_suffix_units: 0,
         phonetic_best_distance: 2,
         phonetic_best_window_start: 0,
         inference_ms: 150,
@@ -10694,6 +10697,7 @@ fn target_speaker_endpoint_strong_start_prefix_gets_one_non_authoritative_latenc
 
     let unrelated = super::LocalWakeConfirmation {
         phonetic_prefix_units: 0,
+        phonetic_suffix_units: 0,
         phonetic_best_distance: 4,
         ..partial
     };
@@ -10737,6 +10741,7 @@ fn bounded_rolling_owner_near_match_reaches_voiceprint_gate_without_swallowing_b
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
         transcript_chars: 7,
         phonetic_prefix_units: 3,
+        phonetic_suffix_units: 0,
         phonetic_best_distance: 1,
         phonetic_best_window_start: 0,
         inference_ms: 314,
@@ -11776,6 +11781,7 @@ fn phonetic_near_match_requires_independent_kws_and_never_wakes_alone() {
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
         transcript_chars: 3,
         phonetic_prefix_units: 0,
+        phonetic_suffix_units: 0,
         phonetic_best_distance: 1,
         phonetic_best_window_start: 0,
         inference_ms: 100,
@@ -11813,6 +11819,7 @@ fn phonetic_near_match_requires_independent_kws_and_never_wakes_alone() {
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::ExactStart,
         transcript_chars: 4,
         phonetic_prefix_units: 4,
+        phonetic_suffix_units: 0,
         phonetic_best_distance: 0,
         phonetic_best_window_start: 0,
         inference_ms: 100,
@@ -11856,6 +11863,7 @@ fn terminal_owner_local_near_recovery_matches_installed_session_501_without_broa
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
         transcript_chars: 15,
         phonetic_prefix_units: 3,
+        phonetic_suffix_units: 0,
         phonetic_best_distance: 1,
         phonetic_best_window_start: 0,
         inference_ms: 872,
@@ -11893,6 +11901,7 @@ fn terminal_owner_local_near_recovery_matches_installed_session_501_without_broa
     ));
     let two_units_wrong = super::LocalWakeConfirmation {
         phonetic_prefix_units: 2,
+        phonetic_suffix_units: 0,
         phonetic_best_distance: 2,
         ..installed_session_501
     };
@@ -11928,6 +11937,7 @@ fn terminal_open_near_recovery_matches_session_2274297156_gated_by_voiceprint_fl
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
         transcript_chars: 21,
         phonetic_prefix_units: 1,
+        phonetic_suffix_units: 1,
         phonetic_best_distance: 2,
         phonetic_best_window_start: 0,
         inference_ms: 640,
@@ -12015,6 +12025,7 @@ fn terminal_open_near_recovery_matches_session_2274297156_gated_by_voiceprint_fl
     let unrelated_short_sentence = super::LocalWakeConfirmation {
         transcript_chars: 5,
         phonetic_prefix_units: 0,
+        phonetic_suffix_units: 0,
         ..accented_owner_wake
     };
     assert!(!super::open_terminal_local_near_can_accept(
@@ -12056,18 +12067,20 @@ fn repeated_start_aligned_half_phrase_requires_enrolled_owner_for_overlap_recove
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::Absent,
         transcript_chars: 5,
         phonetic_prefix_units: 2,
+        phonetic_suffix_units: 0,
         phonetic_best_distance: 2,
         phonetic_best_window_start: 0,
         inference_ms: 205,
         snapshot_pcm_ms: 2_439,
         recovered_keyword_end_seconds: None,
     };
-    assert!(super::overlap_degraded_owner_phrase_evidence(
+    assert!(!super::overlap_degraded_owner_phrase_evidence(
         &overlap, 4, 0,
     ));
     let installed_session_1282_suffix_crop = super::LocalWakeConfirmation {
         transcript_chars: 11,
         phonetic_prefix_units: 0,
+        phonetic_suffix_units: 2,
         phonetic_best_distance: 2,
         phonetic_best_window_start: 0,
         snapshot_pcm_ms: 4_700,
@@ -12219,6 +12232,7 @@ fn exact_phrase_only_local_confirmation_refines_late_keyword_boundary() {
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::ExactStart,
         transcript_chars: 4,
         phonetic_prefix_units: 4,
+        phonetic_suffix_units: 0,
         phonetic_best_distance: 0,
         phonetic_best_window_start: 0,
         inference_ms: 100,
@@ -12323,6 +12337,7 @@ fn local_only_start_phrase_has_a_bounded_nonzero_audio_endpoint() {
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::ExactStart,
         transcript_chars: 9,
         phonetic_prefix_units: 4,
+        phonetic_suffix_units: 0,
         phonetic_best_distance: 0,
         phonetic_best_window_start: 0,
         inference_ms: 100,
@@ -14929,13 +14944,36 @@ fn pause_early_final_remainder_splits_on_stability_key_prefix() {
 
 #[test]
 fn pause_early_delivery_waits_for_a_clause_instead_of_pasting_provider_placeholders() {
-    use super::pause_early_chunk_ready;
+    use super::{pause_early_chunk_ready, pause_early_complete_clause, pause_early_segment};
 
     assert!(!pause_early_chunk_ready("", "哎"));
     assert!(!pause_early_chunk_ready("", "Her."));
+    assert_eq!(pause_early_segment("然后你要确认", false), None);
+    assert_eq!(pause_early_segment("然后你要确认", true), Some("然后你要确认"));
     assert!(pause_early_chunk_ready("", "然后你要确认"));
+    assert!(pause_early_chunk_ready("", "然后你要确认，"));
     assert!(!pause_early_chunk_ready("然后你要确认", "的"));
-    assert!(pause_early_chunk_ready("然后你要确认", "规划器"));
+    assert!(pause_early_chunk_ready("然后你要确认", "规划器。"));
+    assert_eq!(
+        pause_early_segment("第一句，第二句没有标点", true),
+        Some("第一句，第二句没有标点")
+    );
+    assert_eq!(
+        pause_early_segment("第一句，第二句没有标点", false),
+        Some("第一句，")
+    );
+    assert_eq!(
+        pause_early_complete_clause("然后现在这个。后半句还没说完"),
+        Some("然后现在这个。")
+    );
+    assert_eq!(
+        pause_early_complete_clause("第一句，第二句。第三句未完"),
+        Some("第一句，第二句。")
+    );
+    assert_eq!(pause_early_complete_clause("他说：\"可以吗？\"然后"), Some("他说：\"可以吗？\""));
+    assert_eq!(pause_early_complete_clause("金额1.06元，后半句"), Some("金额1.06元，"));
+    assert_eq!(pause_early_complete_clause("金额1.06"), None);
+    assert_eq!(pause_early_complete_clause("尚未形成句子"), None);
 }
 
 #[test]

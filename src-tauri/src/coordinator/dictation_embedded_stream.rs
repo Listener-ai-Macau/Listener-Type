@@ -2004,11 +2004,12 @@ impl EmbeddedStreamingDictation {
                                             {
                                                     phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
                                                     log::info!(
-                                                        "[wake-phrase] terminal open near-phrase wake accepted (voiceprint floor) embedded_session_id={} prefix_units={} distance={} window_start={} transcript_chars={} owner_score={:.6}",
+                                                        "[wake-phrase] terminal open near-phrase wake accepted (voiceprint floor) embedded_session_id={} prefix_units={} distance={} window_start={} suffix_units={} transcript_chars={} owner_score={:.6}",
                                                         embedded_session_id,
                                                         result.phonetic_prefix_units,
                                                         result.phonetic_best_distance,
                                                         result.phonetic_best_window_start,
+                                                        result.phonetic_suffix_units,
                                                         result.transcript_chars,
                                                         verification.as_ref().map(|result| result.score).unwrap_or_default()
                                                     );
@@ -2023,6 +2024,8 @@ impl EmbeddedStreamingDictation {
                                                         result.phrase_relation == crate::wake_phrase::LocalPhraseRelation::Absent,
                                                         result.phonetic_best_distance,
                                                         result.phonetic_best_window_start,
+                                                        result.phonetic_prefix_units,
+                                                        result.phonetic_suffix_units,
                                                         result.transcript_chars,
                                                         phrase.chars().count(),
                                                     )
@@ -3699,6 +3702,8 @@ impl EmbeddedStreamingDictation {
                                         result.phrase_relation == crate::wake_phrase::LocalPhraseRelation::Absent,
                                         result.phonetic_best_distance,
                                         result.phonetic_best_window_start,
+                                        result.phonetic_prefix_units,
+                                        result.phonetic_suffix_units,
                                         result.transcript_chars,
                                         phrase_chars,
                                     )

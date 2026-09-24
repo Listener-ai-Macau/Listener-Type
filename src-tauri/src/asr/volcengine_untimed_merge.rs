@@ -55,6 +55,22 @@ pub(super) fn merge_streaming_candidate_with_untimed_window(
             return (current_window, candidate.timed_segments, String::new());
         }
     }
+    // A provisional untimed tail can reach the ledger before diarization
+    // publishes the same words as a timed, session-wide row. At that handoff
+    // the text may be *equal* to the ledger, not longer. Appending the timed
+    // row then duplicates the entire new clause (live session b141e32a,
+    // frames 14-16). Session-start timing plus complete spoken-prefix
+    // coverage identifies a cumulative revision; a genuinely later repeated
+    // utterance has a later start and continues through the append path.
+    if authoritative_timed_revision_starts_near_session_start(previous_text, &candidate)
+        && !previous_text.trim().is_empty()
+    {
+        let previous_spoken = compact_segment_text(previous_text);
+        let current_spoken = compact_segment_text(&current_window);
+        if current_spoken.starts_with(&previous_spoken) {
+            return (current_window, candidate.timed_segments, String::new());
+        }
+    }
     // Once timed rows exist, the optimized provider can still send a full
     // cumulative growth row. In session dc9deee9 frame 33 the provider grew
     // the existing opening with "然后呢？做完以后", but the rolling-window
@@ -1294,6 +1310,52 @@ mod tests {
         assert_eq!(merged, current);
         assert_eq!(merged.matches("然后呢").count(), 1);
         assert_eq!(segments.len(), 2);
+    }
+
+    #[test]
+    fn timed_handoff_of_equal_provisional_tail_does_not_repeat_clause() {
+        let opening = "开始录音，就是机器的话，你就做出来让我现场安装就好。";
+        let first_tail = "然后你看一下";
+        let ledger = format!("{opening}{first_tail}");
+        let opening_segment = TranscriptSegment {
+            start_ms: 0,
+            end_ms: Some(3_000),
+            text: opening.into(),
+        };
+        let tail_segment = TranscriptSegment {
+            start_ms: 3_000,
+            end_ms: Some(4_500),
+            text: first_tail.into(),
+        };
+        let (merged, segments, window) = merge_streaming_candidate_with_untimed_window(
+            &ledger,
+            &[opening_segment.clone()],
+            first_tail,
+            timed(&ledger, vec![opening_segment.clone(), tail_segment]),
+        );
+        assert_eq!(merged, ledger);
+        assert_eq!(merged.matches(first_tail).count(), 1);
+        assert_eq!(segments.len(), 2);
+
+        let grown = format!("{ledger}你做出来需要我帮忙的东西");
+        let (merged, _, _) = merge_streaming_candidate_with_untimed_window(
+            &merged,
+            &segments,
+            &window,
+            timed(
+                &grown,
+                vec![
+                    opening_segment,
+                    TranscriptSegment {
+                        start_ms: 3_000,
+                        end_ms: Some(6_000),
+                        text: grown.strip_prefix(opening).unwrap().into(),
+                    },
+                ],
+            ),
+        );
+        assert_eq!(merged, grown);
+        assert_eq!(merged.matches(first_tail).count(), 1);
     }
 
     fn timed(text: &str, segments: Vec<TranscriptSegment>) -> TranscriptCandidate {

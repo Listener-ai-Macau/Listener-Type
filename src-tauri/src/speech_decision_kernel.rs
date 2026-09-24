@@ -1255,6 +1255,8 @@ pub(crate) struct OwnerOverlapPhraseEvidence {
     pub(crate) task_origin_bytes: usize,
     pub(crate) best_window_start: usize,
     pub(crate) best_distance: usize,
+    pub(crate) prefix_units: usize,
+    pub(crate) suffix_units: usize,
     pub(crate) transcript_chars: usize,
     pub(crate) phrase_chars: usize,
 }
@@ -1275,6 +1277,9 @@ pub(crate) const fn owner_overlap_degraded_phrase_evidence(
         && evidence.task_origin_bytes == 0
         && evidence.best_window_start == 0
         && evidence.best_distance <= maximum_distance
+        && (evidence.best_distance < 2
+            || evidence.suffix_units >= 1
+            || evidence.prefix_units >= evidence.phrase_chars.saturating_sub(1))
         && evidence.transcript_chars >= evidence.phrase_chars.saturating_add(1)
 }
 
@@ -1306,11 +1311,16 @@ pub(crate) const fn owner_near_phrase_evidence_can_accumulate(
     phrase_absent: bool,
     best_distance: usize,
     best_window_start: usize,
+    prefix_units: usize,
+    suffix_units: usize,
     transcript_chars: usize,
     phrase_chars: usize,
 ) -> bool {
     phrase_absent
-        && (best_distance <= 1 || (best_distance == 2 && best_window_start == 0))
+        && (best_distance <= 1
+            || (best_distance == 2
+                && best_window_start == 0
+                && (suffix_units >= 1 || prefix_units >= phrase_chars.saturating_sub(1))))
         && transcript_chars > phrase_chars
 }
 
@@ -1397,6 +1407,9 @@ pub(crate) struct OpenNearPhraseWakeEvidence {
     /// head-aligned unrelated short sentence can otherwise pass the loose
     /// voiceprint floor at terminal (installed 2026-09-23 22:19).
     pub(crate) prefix_units: usize,
+    /// Independent evidence that the local transcript also reached the end
+    /// of the wake phrase. A shared opening such as "开始谈…" is insufficient.
+    pub(crate) suffix_units: usize,
     pub(crate) transcript_chars: usize,
     pub(crate) phrase_chars: usize,
     /// Terminal (final) evaluation of the candidate window. Only then may a
@@ -1434,7 +1447,8 @@ pub(crate) const fn open_near_phrase_wake_can_activate(
         && evidence.transcript_chars + 1 >= evidence.phrase_chars;
     evidence.best_distance > 0
         && evidence.best_distance <= OPEN_NEAR_PHRASE_MAX_DISTANCE
-        && (evidence.best_distance < 2 || evidence.prefix_units >= 1)
+        && (evidence.best_distance < 2
+            || (evidence.prefix_units >= 1 && evidence.suffix_units >= 1))
         && evidence.task_origin_bytes == 0
         && evidence.best_window_start == 0
         && (body_text || phrase_only_terminal)
@@ -2548,6 +2562,8 @@ mod tests {
             task_origin_bytes: 0,
             best_window_start: 0,
             best_distance: 2,
+            prefix_units: 0,
+            suffix_units: 2,
             transcript_chars: 11,
             phrase_chars: 4,
         };
@@ -2569,13 +2585,16 @@ mod tests {
     fn repeated_owner_near_phrase_excludes_buried_two_unit_neighbour() {
         // False wake 2356876213: four overlapping windows saw distance 2 at
         // window start 4 in ordinary speech, despite a valid owner voiceprint.
-        assert!(!owner_near_phrase_evidence_can_accumulate(true, 2, 4, 12, 4));
+        assert!(!owner_near_phrase_evidence_can_accumulate(true, 2, 4, 0, 0, 12, 4));
         // A two-unit error at the beginning remains eligible for suffix crop.
-        assert!(owner_near_phrase_evidence_can_accumulate(true, 2, 0, 12, 4));
+        assert!(owner_near_phrase_evidence_can_accumulate(true, 2, 0, 0, 2, 12, 4));
+        // The installed false wake only retained "开始"; repeated rolling
+        // windows must not launder the missing "录音" into phrase evidence.
+        assert!(!owner_near_phrase_evidence_can_accumulate(true, 2, 0, 2, 0, 24, 4));
         // A stronger one-unit match may still follow firmware pre-roll.
-        assert!(owner_near_phrase_evidence_can_accumulate(true, 1, 4, 12, 4));
-        assert!(!owner_near_phrase_evidence_can_accumulate(false, 1, 0, 12, 4));
-        assert!(!owner_near_phrase_evidence_can_accumulate(true, 1, 0, 4, 4));
+        assert!(owner_near_phrase_evidence_can_accumulate(true, 1, 4, 0, 0, 12, 4));
+        assert!(!owner_near_phrase_evidence_can_accumulate(false, 1, 0, 0, 0, 12, 4));
+        assert!(!owner_near_phrase_evidence_can_accumulate(true, 1, 0, 0, 0, 4, 4));
     }
 
     #[test]
@@ -2626,11 +2645,29 @@ mod tests {
             best_window_start: 0,
             best_distance: 2,
             prefix_units: 1,
+            suffix_units: 1,
             transcript_chars: 21,
             phrase_chars: 4,
             terminal_window: true,
         };
         assert!(open_near_phrase_wake_can_activate(accented_owner));
+        // 2026-09-24 15:49: ordinary "开始谈…" shared the first two
+        // syllables, but had neither "录" nor "音". A 0.278732 owner score
+        // cannot turn that incomplete phrase into an activation.
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            voiceprint_score: Some(0.278732),
+            prefix_units: 2,
+            suffix_units: 0,
+            transcript_chars: 24,
+            ..accented_owner
+        }));
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            voiceprint_score: Some(0.261434),
+            prefix_units: 2,
+            suffix_units: 0,
+            transcript_chars: 16,
+            ..accented_owner
+        }));
         // Media shares the phonetic shape ("开始上课…") but reads below the
         // non-owner floor; the verifier being unavailable fails closed.
         assert!(!open_near_phrase_wake_can_activate(Evidence {
@@ -2684,6 +2721,7 @@ mod tests {
             best_window_start: 0,
             best_distance: 2,
             prefix_units: 1,
+            suffix_units: 1,
             transcript_chars: 4,
             phrase_chars: 4,
             terminal_window: true,
@@ -2741,6 +2779,8 @@ mod tests {
             task_origin_bytes: 0,
             best_window_start: 0,
             best_distance: 4,
+            prefix_units: 0,
+            suffix_units: 0,
             transcript_chars: 9,
             phrase_chars: 4,
         };

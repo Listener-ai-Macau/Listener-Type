@@ -134,6 +134,8 @@ pub fn run_enrolled_wake_recovery_diagnostic(
                 task_origin_bytes: 0,
                 best_window_start: raw_confirmation.phonetic_best_window_start,
                 best_distance: raw_confirmation.phonetic_best_distance,
+                prefix_units: raw_confirmation.phonetic_prefix_units,
+                suffix_units: raw_confirmation.phonetic_suffix_units,
                 transcript_chars: raw_confirmation.transcript_chars,
                 phrase_chars: wake_phrase.chars().count(),
             },

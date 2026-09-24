@@ -2779,6 +2779,7 @@ struct LocalWakeConfirmation {
     phrase_relation: crate::wake_phrase::LocalPhraseRelation,
     transcript_chars: usize,
     phonetic_prefix_units: usize,
+    phonetic_suffix_units: usize,
     phonetic_best_distance: usize,
     phonetic_best_window_start: usize,
     inference_ms: u64,
@@ -3437,7 +3438,7 @@ fn run_local_wake_confirmation_once(
     .map_err(|err| format!("local wake confirmation failed: {err}"))?;
     drop(live_starving);
     log::info!(
-        "[wake-phrase] stage2 helper result embedded_session_id={} attempt={} branch={} phase={} request_id={} matched={} phrase_relation={:?} transcript_chars={} phonetic_prefix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={} transcript={:?}",
+        "[wake-phrase] stage2 helper result embedded_session_id={} attempt={} branch={} phase={} request_id={} matched={} phrase_relation={:?} transcript_chars={} phonetic_prefix_units={} phonetic_suffix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={} transcript={:?}",
         context.embedded_session_id,
         context
             .attempt
@@ -3450,6 +3451,7 @@ fn run_local_wake_confirmation_once(
         result.phrase_relation,
         result.transcript_chars,
         result.phonetic_prefix_units,
+        result.phonetic_suffix_units,
         result.phonetic_best_distance,
         result.phonetic_best_window_start,
         result.inference_ms,
@@ -3468,6 +3470,7 @@ fn run_local_wake_confirmation_once(
         phrase_relation: result.phrase_relation,
         transcript_chars: result.transcript_chars,
         phonetic_prefix_units: result.phonetic_prefix_units,
+        phonetic_suffix_units: result.phonetic_suffix_units,
         phonetic_best_distance: result.phonetic_best_distance,
         phonetic_best_window_start: result.phonetic_best_window_start,
         inference_ms: result.inference_ms,
