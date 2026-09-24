@@ -3320,6 +3320,68 @@ fn local_evidence_allows_utterance(
     target_votes > 0 && target_votes > non_target_votes
 }
 
+/// The provider leaves a continuing utterance without an end timestamp until
+/// its two-pass seal. The ordinary whole-utterance verifier cannot inspect
+/// that open row, so a brief stable foreign row can leave all subsequent
+/// owner words visual-only for many seconds. Admit an open row belonging to
+/// the already anchored cloud owner only after fresh, repeated local Target
+/// windows following its start. A local NonTarget or overlap with a sealed
+/// foreign row still vetoes the provisional text.
+fn local_evidence_allows_open_owner_utterance(
+    utterance: &Value,
+    target_speaker_id: &str,
+    utterances: &[Value],
+    evidence: &[LocalSpeakerEvidence],
+) -> bool {
+    if utterance_is_stable(utterance)
+        || utterance_speaker_id(utterance).as_deref() != Some(target_speaker_id)
+    {
+        return false;
+    }
+    let Some(start_ms) = utterance_start_ms(utterance) else {
+        return false;
+    };
+    let Some(latest_ms) = evidence.last().map(|sample| sample.audio_end_ms) else {
+        return false;
+    };
+    if latest_ms < start_ms.saturating_add(LOCAL_SPEAKER_WINDOW_MS) {
+        return false;
+    }
+    if utterances.iter().any(|row| {
+        utterance_is_stable(row)
+            && utterance_speaker_id(row)
+                .as_deref()
+                .is_some_and(|speaker| speaker != target_speaker_id)
+            && utterance_end_ms(row).is_some_and(|end_ms| end_ms > start_ms)
+    }) {
+        return false;
+    }
+    let mut target_votes = 0;
+    let mut latest_target_ms = None;
+    for sample in evidence {
+        let center_ms = sample
+            .audio_end_ms
+            .saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+        if center_ms < start_ms {
+            continue;
+        }
+        match sample.classification {
+            crate::speaker_verification::SessionSpeakerClassification::Target { .. }
+                if sample.stable_target =>
+            {
+                target_votes += 1;
+                latest_target_ms = Some(sample.audio_end_ms);
+            }
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. } => {
+                return false;
+            }
+            _ => {}
+        }
+    }
+    target_votes >= 2
+        && latest_target_ms.is_some_and(|at| latest_ms.saturating_sub(at) <= LOCAL_SPEAKER_WINDOW_MS)
+}
+
 /// Cloud diarization remains the baseline owner signal while an overlapping
 /// local verifier window still has the debounced owner identity. Individual
 /// NonTarget samples can be noisy (the verifier deliberately keeps
@@ -4126,6 +4188,14 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
                 return true;
             }
             local_evidence_allows_utterance(utterance, local_speaker_evidence, wake_speaker_phrase)
+                || target_speaker_id.as_deref().is_some_and(|target| {
+                    local_evidence_allows_open_owner_utterance(
+                        utterance,
+                        target,
+                        &utterances,
+                        local_speaker_evidence,
+                    )
+                })
         })
         .cloned()
         .collect::<Vec<_>>();
@@ -14933,6 +15003,65 @@ mod tests {
             None,
             Some(17_100),
         ));
+    }
+
+    #[test]
+    fn open_owner_row_after_short_foreign_row_can_stream_with_fresh_voiceprint_evidence() {
+        let owner = "开始录音。已确认第一段。";
+        let foreign = "旁人一句";
+        let continuation = "继续说自己的正文";
+        let result = json!({
+            "text": format!("{owner}{foreign}{continuation}"),
+            "utterances": [
+                {"additions": {"speaker_id": "0"}, "definite": true,
+                 "start_time": 0, "end_time": 5_000, "text": owner},
+                {"additions": {"speaker_id": "1"}, "definite": true,
+                 "start_time": 5_200, "end_time": 6_000, "text": foreign},
+                {"additions": {"speaker_id": "0"}, "definite": false,
+                 "start_time": 6_100, "text": continuation}
+            ]
+        });
+        let sample = |audio_end_ms, classification| LocalSpeakerEvidence {
+            audio_end_ms,
+            classification,
+            stable_target: true,
+        };
+        let target = |score| crate::speaker_verification::SessionSpeakerClassification::Target { score };
+        let uncertain = |score| crate::speaker_verification::SessionSpeakerClassification::Uncertain { score };
+        let mut evidence = vec![
+            sample(1_800, target(0.48)),
+            sample(2_200, target(0.49)),
+            sample(6_400, uncertain(0.33)),
+            sample(7_400, target(0.44)),
+            sample(7_800, target(0.46)),
+        ];
+        let filter = |evidence: &[LocalSpeakerEvidence]| {
+            filter_result_to_target_speaker_with_local_evidence_and_anchor(
+                &result,
+                &mut Some("0".into()),
+                true,
+                evidence,
+                Some("开始录音"),
+                Some(1_000),
+                false,
+                false,
+                None,
+                None,
+            )
+        };
+        let admitted = filter(&evidence);
+        assert_eq!(admitted.result["text"], owner);
+        assert_eq!(admitted.optimistic_result["text"], format!("{owner}{continuation}"));
+        assert!(!admitted.optimistic_result["text"].as_str().unwrap().contains(foreign));
+
+        evidence.pop();
+        assert_eq!(filter(&evidence).optimistic_result["text"], owner);
+        evidence.push(sample(7_800, target(0.46)));
+        evidence.push(sample(
+            8_200,
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.10 },
+        ));
+        assert_eq!(filter(&evidence).optimistic_result["text"], owner);
     }
 
     #[test]

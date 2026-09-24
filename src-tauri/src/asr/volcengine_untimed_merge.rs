@@ -91,6 +91,18 @@ pub(super) fn merge_streaming_candidate_with_untimed_window(
             return (current_window, segments, String::new());
         }
     }
+    // A two-pass cumulative row can correct one word in the old prefix while
+    // growing it. Exact prefix matching then fails and the rolling-window path
+    // appends the already-covered new clause a second time. Compare the old
+    // ledger against the same-length head of this session-start revision;
+    // timing establishes identity, while a small edit distance permits the
+    // provider's spelling correction without hiding a real later utterance.
+    if candidate.authoritative_cumulative
+        && authoritative_timed_revision_starts_near_session_start(previous_text, &candidate)
+        && candidate_covers_growing_ledger_with_small_correction(previous_text, &current_window)
+    {
+        return (current_window, candidate.timed_segments, String::new());
+    }
     // Optimized-bidirectional streaming can spend most of a long utterance in
     // untimed rolling windows, then publish its first word-timed two-pass
     // result for the whole session. That response replaces the provisional
@@ -606,6 +618,22 @@ fn merge_timed_continuation_segments(
 
 fn compact_segment_text(text: &str) -> String {
     text.chars().filter(|ch| ch.is_alphanumeric()).collect()
+}
+
+fn candidate_covers_growing_ledger_with_small_correction(
+    previous_text: &str,
+    candidate_text: &str,
+) -> bool {
+    const MAX_PREFIX_EDIT_PERCENT: usize = 10;
+    let previous = compact_segment_text(previous_text);
+    let current = compact_segment_text(candidate_text);
+    let previous_len = previous.chars().count();
+    if previous_len < 12 || current.chars().count() <= previous_len {
+        return false;
+    }
+    let current_head = current.chars().take(previous_len).collect::<String>();
+    let edits = char_edit_distance(&previous, &current_head);
+    edits <= 2 || edits.saturating_mul(100) <= previous_len * MAX_PREFIX_EDIT_PERCENT
 }
 
 fn same_spoken_content(previous: &str, current: &str) -> bool {
@@ -1284,6 +1312,47 @@ mod tests {
             text: text.into(),
             timed_segments: Vec::new(),
             authoritative_cumulative: false,
+        }
+    }
+
+    #[test]
+    fn corrected_cumulative_growth_keeps_one_copy_of_the_active_clause() {
+        // Installed session 5e6056fa, frames 16-19: the provider corrected
+        // "他感觉" to "它，我感觉" and extended the same session-start row.
+        // The old exact-prefix branch missed that one-word correction and
+        // appended "这个我想说的话" twice before the early paste.
+        let previous = "开始录音。然后还有些问题，就是他感觉有时候高有时候低。这个";
+        let revisions = [
+            "开始录音。然后还有些问题，就是它，我感觉有时候高有时候低。这个我",
+            "开始录音。然后还有些问题，就是它，我感觉有时候高有时候低。这个我想说",
+            "开始录音。然后还有些问题，就是它，我感觉有时候高有时候低。这个我想说的话",
+        ];
+        let mut ledger = previous.to_string();
+        let mut segments = vec![TranscriptSegment {
+            start_ms: 100,
+            end_ms: Some(4_900),
+            text: previous.into(),
+        }];
+        let mut window = previous.to_string();
+        for (index, revision) in revisions.iter().enumerate() {
+            let candidate = TranscriptCandidate {
+                text: (*revision).into(),
+                timed_segments: vec![TranscriptSegment {
+                    start_ms: 100,
+                    end_ms: Some(5_600 + index as i64 * 500),
+                    text: (*revision).into(),
+                }],
+                authoritative_cumulative: true,
+            };
+            (ledger, segments, window) = merge_streaming_candidate_with_untimed_window(
+                &ledger,
+                &segments,
+                &window,
+                candidate,
+            );
+            assert_eq!(ledger, *revision);
+            assert_eq!(ledger.matches("这个我想说的话").count(), usize::from(index == 2));
+            assert_eq!(segments.len(), 1);
         }
     }
 
