@@ -3114,6 +3114,56 @@ fn proactive_stop_accumulates_trailing_silence_only_after_body_started() {
 }
 
 #[test]
+fn silent_vad_does_not_rearm_owner_clock_from_raw_room_energy() {
+    use crate::asr::volcengine::{LocalSpeechActivityState, LocalSpeechEvidence};
+
+    let evidence = LocalSpeechEvidence {
+        analyzed_through_ms: 13_600,
+        analyzed_through_samples: 13_600 * 16,
+        last_detected_speech_end_ms: Some(13_300),
+        state: LocalSpeechActivityState::NonSpeech,
+        ..Default::default()
+    };
+    assert!(!super::embedded_vad_supported_speech(
+        true,
+        evidence,
+        13_600 * 16,
+    ));
+    assert!(!super::embedded_vad_supported_speech(
+        true,
+        evidence,
+        (13_600 * 16) + 511,
+    ));
+    // A worker that has fallen behind cannot assert silence for newer audio.
+    assert!(super::embedded_vad_supported_speech(
+        true,
+        evidence,
+        (13_600 * 16) + 512,
+    ));
+
+    let resumed = LocalSpeechEvidence {
+        analyzed_through_ms: 14_400,
+        analyzed_through_samples: 14_400 * 16,
+        last_detected_speech_end_ms: Some(14_400),
+        state: LocalSpeechActivityState::Speech,
+        ..evidence
+    };
+    assert!(super::embedded_vad_supported_speech(
+        false,
+        resumed,
+        14_400 * 16,
+    ));
+    assert!(super::embedded_vad_supported_speech(
+        true,
+        LocalSpeechEvidence {
+            state: LocalSpeechActivityState::PendingSpeech,
+            ..resumed
+        },
+        14_400 * 16,
+    ));
+}
+
+#[test]
 fn failed_asr_uses_only_the_bounded_local_silence_fallback() {
     assert_eq!(
         super::proactive_stop_silence_threshold_ms(true),

@@ -2641,6 +2641,28 @@ fn embedded_streaming_chunk_has_speech_energy(rms: f64, peak: u16) -> bool {
             && peak >= EMBEDDED_AUDIO_STREAMING_QUIET_SPEECH_PEAK)
 }
 
+/// Use the same current speech evidence for the owner clock and speaker
+/// sampler. A voiceprint score answers who a voiced window resembles; it does
+/// not establish that the newest PCM contains speech. If the VAD has not
+/// analyzed this chunk yet, retain the raw-energy hold until it catches up.
+fn embedded_vad_supported_speech(
+    raw_energy: bool,
+    evidence: crate::asr::volcengine::LocalSpeechEvidence,
+    audio_end_samples: u64,
+) -> bool {
+    use crate::asr::volcengine::LocalSpeechActivityState;
+
+    let analysis_is_current = evidence.state != LocalSpeechActivityState::Unknown
+        && audio_end_samples.saturating_sub(evidence.analyzed_through_samples) < 512;
+    if !analysis_is_current {
+        return raw_energy;
+    }
+    matches!(
+        evidence.state,
+        LocalSpeechActivityState::Speech | LocalSpeechActivityState::PendingSpeech
+    )
+}
+
 fn embedded_pcm_streaming_agc_signal_level(pcm: &[u8]) -> (f64, u16) {
     let mut magnitudes: Vec<u16> = pcm
         .chunks_exact(2)

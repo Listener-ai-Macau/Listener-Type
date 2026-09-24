@@ -1052,19 +1052,26 @@ impl EmbeddedAudioDictationSession {
                 .get_or_insert(source_pcm_offset_ms);
         }
         let audio_end_ms = source_pcm_offset_ms.saturating_add(chunk_ms);
+        let local_speech_evidence = self.local_speech_activity.submit(
+            source_pcm_offset_samples,
+            audio_end_samples,
+            pcm,
+        );
+        let has_vad_supported_speech = embedded_vad_supported_speech(
+            has_speech_energy,
+            local_speech_evidence,
+            audio_end_samples,
+        );
         if let Some(asr) = self.volcengine_asr.as_ref() {
-            // Keep the legacy raw energy edge for diagnostics and existing
-            // speaker evidence. The endpoint watchdog gets an independent VAD
-            // overlay below; it must not globally replace this field because
-            // wake/identity code still uses the raw capture clock.
+            // Raw energy is retained in gain_stats for diagnostics. Identity
+            // and endpoint activity must share the VAD's speech decision:
+            // room noise can have energy and even score as Target when a
+            // rolling speaker window contains the owner's earlier speech.
             asr.note_local_audio_activity_samples(
                 audio_end_ms,
                 audio_end_samples,
-                has_speech_energy,
+                has_vad_supported_speech,
             );
-            let local_speech_evidence =
-                self.local_speech_activity
-                    .submit(source_pcm_offset_samples, audio_end_samples, pcm);
             asr.note_local_speech_activity(local_speech_evidence);
         }
         let stable_target_end_ms = self
@@ -1075,7 +1082,7 @@ impl EmbeddedAudioDictationSession {
             tracker.observe(
                 pcm,
                 source_pcm_offset_ms.saturating_add(chunk_ms),
-                has_speech_energy,
+                has_vad_supported_speech,
                 stable_target_end_ms,
             )
         });
@@ -1112,8 +1119,7 @@ impl EmbeddedAudioDictationSession {
         // caller can request a host-initiated device stop early. Leading silence
         // (before the user speaks the dictation body) and post-stop tails never
         // count toward the threshold.
-        let (signal_rms, signal_peak) = embedded_pcm_streaming_agc_signal_level(pcm);
-        if embedded_streaming_chunk_has_speech_energy(signal_rms, signal_peak) {
+        if has_vad_supported_speech {
             self.proactive_stop_body_started = true;
             self.proactive_stop_silence_ms = 0;
         } else if self.proactive_stop_body_started {
