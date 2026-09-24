@@ -1854,6 +1854,27 @@ fn automatic_wake_guard_hides_partial_prefix_and_bounded_tail() {
         super::strip_automatic_activation_prefix("开始录", "开始录音", true),
         ""
     );
+    // Live a374db12: the stream heard the accepted wake as "还是录音？"
+    // before the two-pass final corrected it to "开始录音". Both spellings
+    // must leave the same body so an early paste remains reconcilable.
+    assert_eq!(
+        super::strip_automatic_activation_prefix("还是录音？就是正文继续", "开始录音", true),
+        "就是正文继续"
+    );
+    assert_eq!(
+        super::strip_automatic_activation_prefix("开始录音就是正文继续", "开始录音", false),
+        "就是正文继续"
+    );
+    assert_eq!(
+        super::strip_automatic_activation_prefix("还是录音就是正文继续", "开始录音", true),
+        "还是录音就是正文继续",
+        "an unbounded near phrase may be actual body speech"
+    );
+    assert_eq!(
+        super::strip_automatic_activation_prefix("开始收音？正文继续", "开始录音", true),
+        "开始收音？正文继续",
+        "a later word difference must not erase ordinary body speech"
+    );
     assert_eq!(
         super::strip_automatic_activation_prefix("录音，正文开始。", "开始录音", false),
         "正文开始。"

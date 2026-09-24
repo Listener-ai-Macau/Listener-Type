@@ -710,6 +710,50 @@ fn strip_bounded_activation_suffix(text: &str, phrase: &[char]) -> Option<String
     None
 }
 
+/// The live provider may use a different first character for a wake phrase
+/// that the local KWS and owner gate already accepted. Strip that bounded
+/// cloud spelling only when the remaining phrase still matches and the next
+/// character closes the phrase. The final two-pass result can then revise the
+/// spelling without changing the body prefix already delivered to the app.
+fn strip_bounded_near_activation_prefix(text: &str, phrase: &[char]) -> Option<String> {
+    if phrase.len() < 4 {
+        return None;
+    }
+    let mut chars = text.char_indices();
+    let mut mismatches = 0;
+    let mut consumed_end = 0;
+    for (position, expected) in phrase.iter().enumerate() {
+        let (index, actual) = chars.next()?;
+        if is_embedded_audio_partial_preview_decorative(actual) {
+            return None;
+        }
+        if !wake_phrase_character_matches(actual, *expected) {
+            if position != 0 {
+                return None;
+            }
+            mismatches += 1;
+            if mismatches > 1 {
+                return None;
+            }
+        }
+        consumed_end = index + actual.len_utf8();
+    }
+    if mismatches != 1
+        || !text[consumed_end..]
+            .chars()
+            .next()
+            .is_some_and(is_embedded_audio_partial_preview_decorative)
+    {
+        return None;
+    }
+    Some(
+        text[consumed_end..]
+            .trim_start_matches(is_embedded_audio_partial_preview_decorative)
+            .trim()
+            .to_string(),
+    )
+}
+
 fn strip_automatic_activation_prefix(text: &str, phrase: &str, partial: bool) -> String {
     let text = text.trim();
     let phrase = phrase
@@ -774,7 +818,8 @@ fn strip_automatic_activation_prefix(text: &str, phrase: &str, partial: bool) ->
             return keep_body_if_strip_emptied(
                 text,
                 phrase.len(),
-                strip_activation_after_short_lead_in(activation_candidate, &phrase)
+                strip_bounded_near_activation_prefix(activation_candidate, &phrase)
+                    .or_else(|| strip_activation_after_short_lead_in(activation_candidate, &phrase))
                     .or_else(|| strip_bounded_activation_suffix(activation_candidate, &phrase))
                     .unwrap_or_else(|| text.to_string()),
             );
