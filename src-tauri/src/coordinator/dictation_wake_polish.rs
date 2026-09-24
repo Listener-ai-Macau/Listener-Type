@@ -2074,9 +2074,9 @@ struct BufferedSpeakerCandidate {
     /// of them with the independent enrolled voiceprint. A rolling window also
     /// has one bounded owner-gated near-match path with body text.
     local_owner_overlap_near_confirmations: u8,
-    /// Independent near-phrase observations retained for terminal recovery.
-    /// Interference can shift the phrase inside a rolling window, so this
-    /// ledger is intentionally not limited to start-aligned matches.
+    /// Near-phrase observations retained for terminal recovery. Rolling ASR
+    /// windows may overlap, so these confirmations are correlated. A two-unit
+    /// phonetic neighbour counts only at the start of a search window.
     owner_near_phrase_confirmations: u8,
     /// Terminal local ASR heard real speech but the phrase was fully masked
     /// (distance >= 3) — the extraction recovery exists for exactly this

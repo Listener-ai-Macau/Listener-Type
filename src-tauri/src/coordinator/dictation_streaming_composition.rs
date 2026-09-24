@@ -5,7 +5,7 @@
 // (云端改字免费修订);停顿稳定(pause-early 同一道 1s 门)→ stream_commit
 // 落定并写入同一本 pause-early 账本;终稿只 commit 余量/LCP 尾,整段已覆盖
 // commit("") 清残留,改写无恢复 cancel 清组字。任何管道失败当拍降级回粘贴
-// 路径(今日行为);回退开关 LISTENER_DISABLE_STREAMING_COMPOSITION=1。
+// 路径;回退开关 LISTENER_DISABLE_STREAMING_COMPOSITION=1。
 
 const STREAMING_COMPOSITION_MIN_UPDATE_INTERVAL: Duration = Duration::from_millis(200);
 const STREAMING_COMPOSITION_COMMIT_REPLY_TIMEOUT: Duration = Duration::from_millis(1_500);
@@ -56,14 +56,11 @@ enum StreamingCompositionCommand {
 }
 
 fn streaming_composition_disabled_by_env() -> bool {
-    // 2026-09-22 21:5x 用户拍板(二次确认,与 09-21 拍板一致):"一段一段出来
-    // 就行,不用逐字逐句,要确认了再出来"。组字流式默认关闭,转为显式开启:
-    // LISTENER_ENABLE_STREAMING_COMPOSITION=1。停顿落屏(pause-early)是正式
-    // 交付路径。代码与判读行保留,供以后 opt-in 验证。
-    if std::env::var("LISTENER_ENABLE_STREAMING_COMPOSITION").as_deref() == Ok("1") {
-        return std::env::var("LISTENER_DISABLE_STREAMING_COMPOSITION").as_deref() == Ok("1");
-    }
-    true
+    // Keep confirmed, in-session segment delivery as the default. TSF
+    // composition can be enabled explicitly for a target with a working IME
+    // client pipe; profile activation alone does not prove that pipe exists.
+    std::env::var("LISTENER_ENABLE_STREAMING_COMPOSITION").as_deref() != Ok("1")
+        || std::env::var("LISTENER_DISABLE_STREAMING_COMPOSITION").as_deref() == Ok("1")
 }
 
 fn streaming_composition_active(inner: &Arc<Inner>, session_id: SessionId) -> bool {
@@ -210,12 +207,12 @@ async fn streaming_composition_update_tick(
         return;
     };
     let key = embedded_audio_partial_preview_stability_key(&display);
-    let (_, delivered_key) = pause_early_delivery_session_state(inner, session_id);
+    let (delivered_display, delivered_key) = pause_early_delivery_session_state(inner, session_id);
     if !key.starts_with(&delivered_key) {
         // 已 commit 前缀被改写:组字不动,交给终稿的 cancel/恢复语义。
         return;
     }
-    let Some(delta) = pause_early_final_remainder(&display, &delivered_key) else {
+    let Some(delta) = pause_early_final_remainder(&display, &delivered_display, &delivered_key) else {
         return;
     };
     let delta_key = embedded_audio_partial_preview_stability_key(&delta);

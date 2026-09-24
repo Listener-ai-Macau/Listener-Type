@@ -83,7 +83,10 @@ const WEBSOCKET_CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
 const PROXY_CONNECT_HEADER_LIMIT: usize = 16 * 1024;
 const FINAL_FRAME_SEND_BUDGET: Duration = Duration::from_millis(1_800);
 const FINAL_AUDIO_DRAIN_MIN_BUDGET: Duration = Duration::from_millis(800);
-const FINAL_AUDIO_DRAIN_MAX_BUDGET: Duration = Duration::from_secs(8);
+// A full-audio replay queues its captured frames at once. An eight-second cap
+// rejected a 67-second recording with 192 frames still in the FIFO even while
+// the socket was delivering audio. Bound the wait by queued audio duration.
+const FINAL_AUDIO_DRAIN_MAX_BUDGET: Duration = Duration::from_secs(45);
 const AUDIO_FRAME_DURATION_MS: u64 = 100;
 static NEXT_VOLCENGINE_ASR_STREAM_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -688,6 +691,9 @@ struct SyncState {
     /// When `best_transcript_text` last changed. Repeated identical cloud
     /// revisions must not refresh it: stability is the early-seal contract.
     best_transcript_committed_at: Option<Instant>,
+    /// Recent owner-ledger revisions for rolling prefix stability. A growing
+    /// tail must not reset the age of an unchanged earlier clause.
+    pause_early_recent_revisions: VecDeque<(Instant, String)>,
     best_untimed_window: String,
     /// Speaker attribution lags behind the provider's streaming text. Keep a
     /// display-only merge here so the capsule can advance without promoting
@@ -716,14 +722,12 @@ struct SyncState {
     /// 砍回 45 字）。终稿覆盖显著超过此水位 = 尾巴有新捕获音频背书（真实
     /// 续说），而非两遍幻听；owner_preview_safety_ceiling 据此豁免。
     stop_boundary_server_audio_ms: Option<u64>,
-    /// 上行黑洞探测（2026-09-22 16:08 实锤：真直连也会被网络间歇吞包，TUN/Clash
-    /// 均已排除，软件只能自愈）。最近一次收到 FullServerResponse 的时刻；配合
-    /// `bytes_sent_since_response` 判定"本端持续发包、云端长时间零应答"——云端
-    /// 自己的 8 秒无包超时（45000081）要干等，本端 4.5 秒即可判死提前掐线，
-    /// 保留音频重放的死胶囊窗口从 ~12s 砍到 ~7s。
+    /// Most recent server response. This is an abort clock only until the
+    /// first response; later gaps are observed but cannot prove a dead socket.
     last_server_response_at: Option<Instant>,
     /// 最近一次服务端应答之后累计入队的音频字节数（与 `bytes_sent` 同口径）。
     bytes_sent_since_response: usize,
+    post_response_gap_logged: bool,
     target_speaker_id: Option<String>,
     target_speech_end_ms: Option<u64>,
     /// Stable end of the physical wake row. Unlike `target_speech_end_ms`,
@@ -1135,8 +1139,19 @@ fn local_owner_continuity(state: &SyncState) -> LocalOwnerContinuity {
     if !state.local_speaker_tracking_enabled {
         return LocalOwnerContinuity::Untracked;
     }
+    // The sustained non-target watermark is historical endpoint evidence.
+    // After a quiet gap it must not keep the live preview closed once a fresh,
+    // quality-checked owner window has passed that boundary. The current
+    // NonTarget classification and an active absence run still close the gate.
+    let sustained_other_is_current = state
+        .local_sustained_non_target_speech_end_ms
+        .is_some_and(|other_end_ms| {
+            state
+                .qualified_owner_speech_end_ms
+                .is_none_or(|owner_end_ms| owner_end_ms <= other_end_ms)
+        });
     if state.local_owner_absence_run_confirmed
-        || state.local_sustained_non_target_speech_end_ms.is_some()
+        || sustained_other_is_current
         || matches!(
             state.local_speaker_classification.as_ref(),
             Some(crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. })
@@ -1903,7 +1918,11 @@ const POST_STOP_OWNER_TAIL_MIN_NEW_AUDIO_MS: u64 = 1_500;
 /// 字）。这种"晚到的增长"有新捕获音频背书（终稿覆盖显著超过 STOP 水
 /// 位），与无新音频的两遍幻听本质不同：保留尾巴，交付层（pause-early
 /// 余量/锚点）负责只贴增量。
-fn owner_preview_safety_ceiling(state: &SyncState, merged: &str) -> Option<String> {
+fn owner_preview_safety_ceiling(
+    state: &SyncState,
+    merged: &str,
+    explicit_non_owner_tail: bool,
+) -> Option<String> {
     if !state.finishing
         || !state.local_speaker_tracking_enabled
         || state.last_emitted_preview_text.trim().is_empty()
@@ -1941,19 +1960,55 @@ fn owner_preview_safety_ceiling(state: &SyncState, merged: &str) -> Option<Strin
             .collect::<String>()
     };
     let preview = state.last_emitted_preview_text.trim();
-    let normalized_preview = normalize_spoken(preview);
+    // The first provisional token can be a foreign fragment before the real
+    // wake phrase (installed 1.0.6 session 6c62818a: "Her." before "开始录音").
+    // It is not an owner boundary and must not consume the corrected final's
+    // character allowance.
+    let aligned_preview = state
+        .wake_speaker_phrase
+        .as_deref()
+        .and_then(|phrase| {
+            let offset = preview.find(phrase)?;
+            merged.starts_with(phrase).then_some(&preview[offset..])
+        })
+        .unwrap_or(preview);
+    let normalized_preview = normalize_spoken(aligned_preview);
     let normalized_merged = normalize_spoken(merged);
     if normalized_preview.is_empty() || normalized_merged == normalized_preview {
         // Same spoken content with different punctuation is a legitimate final
         // correction and should not be thrown away.
         return None;
     }
+    if !normalized_merged.starts_with(&normalized_preview) && !explicit_non_owner_tail {
+        // A two-pass correction changed the earlier words. Length alone is
+        // not proof of a late foreign append; replacing the authoritative
+        // final with the stale preview loses corrections and punctuation.
+        return None;
+    }
+    let content_limit = normalized_preview.chars().count();
+    let mut content_seen = 0usize;
+    let mut boundary = merged.len();
+    for (offset, ch) in merged.char_indices() {
+        if ch.is_alphanumeric() {
+            if content_seen == content_limit {
+                boundary = offset;
+                break;
+            }
+            content_seen += 1;
+        }
+    }
+    if content_seen < content_limit || boundary == merged.len() {
+        return None;
+    }
+    let corrected_owner_prefix = merged[..boundary].trim_end().to_string();
     log::warn!(
-        "[asr] post-stop final exceeded owner preview; capping late spoken tail preview_chars={} final_chars={}",
+        "[asr] post-stop final exceeded owner preview; capping corrected final to owner content preview_chars={} final_chars={} kept_chars={} explicit_non_owner={}",
         preview.chars().count(),
-        merged.chars().count()
+        merged.chars().count(),
+        corrected_owner_prefix.chars().count(),
+        explicit_non_owner_tail,
     );
-    Some(preview.to_string())
+    Some(corrected_owner_prefix)
 }
 
 fn final_wake_only_provider_gap_is_owner_safe(
@@ -2535,6 +2590,50 @@ fn commit_session_transcript_if_stronger(
     state.best_transcript_text = text.clone();
     state.best_transcript_segments = segments;
     state.last_partial_text = text;
+}
+
+fn rolling_stable_transcript_prefix(
+    revisions: &mut VecDeque<(Instant, String)>,
+    current: &str,
+    changed_at: Instant,
+    now: Instant,
+    min_stable: Duration,
+) -> Option<String> {
+    if current.trim().is_empty() {
+        revisions.clear();
+        return None;
+    }
+    if revisions
+        .back()
+        .is_none_or(|(at, text)| *at != changed_at || text != current)
+    {
+        revisions.push_back((changed_at, current.to_string()));
+    }
+    let cutoff = now.checked_sub(min_stable)?;
+    // Keep the newest revision before the cutoff plus every later revision.
+    // All of them must agree on the prefix before it can leave the app.
+    while revisions.len() > 1 && revisions.get(1).is_some_and(|(at, _)| *at <= cutoff) {
+        revisions.pop_front();
+    }
+    while revisions.len() > 64 {
+        revisions.pop_front();
+    }
+    if revisions.front().is_none_or(|(at, _)| *at > cutoff) {
+        return None;
+    }
+    let mut stable = revisions.front()?.1.clone();
+    for (_, revision) in revisions.iter().skip(1) {
+        stable = stable
+            .chars()
+            .zip(revision.chars())
+            .take_while(|(left, right)| left == right)
+            .map(|(ch, _)| ch)
+            .collect();
+        if stable.is_empty() {
+            return None;
+        }
+    }
+    Some(stable)
 }
 
 fn provider_raw_fallback_allowed(state: &SyncState) -> bool {
@@ -3414,6 +3513,52 @@ fn local_evidence_contrastive_owner_continuation(
         && best_score >= room_non_owner_baseline + CONTRASTIVE_CONTINUATION_MARGIN
 }
 
+/// A phrase-only wake can miss the enrolled bank even though the subsequent
+/// body has already produced repeated positive owner matches. Permit the
+/// same-cloud-speaker continuation to use those body matches as its anchor.
+/// Keep this stricter than a bank-verified wake: a merely Uncertain first
+/// clause must not license a later room speaker with a reused cloud id.
+fn locally_verified_body_anchor_for_continuation(
+    evidence: &[LocalSpeakerEvidence],
+    continuation_start_ms: u64,
+    continuation_end_ms: u64,
+) -> bool {
+    const MIN_ANCHOR_SEPARATION_MS: u64 = 400;
+    const MIN_CONTINUATION_SCORE: f32 = 0.30;
+    const MIN_ANCHOR_RATIO: f32 = 0.70;
+    let anchors = evidence
+        .iter()
+        .filter(|sample| {
+            sample.audio_end_ms < continuation_start_ms
+                && sample.stable_target
+                && matches!(
+                    sample.classification,
+                    crate::speaker_verification::SessionSpeakerClassification::Target { .. }
+                )
+        })
+        .collect::<Vec<_>>();
+    if anchors.len() < 2
+        || anchors.last().unwrap().audio_end_ms.saturating_sub(anchors[0].audio_end_ms)
+            < MIN_ANCHOR_SEPARATION_MS
+    {
+        return false;
+    }
+    let anchor_score = anchors
+        .iter()
+        .map(|sample| sample.classification.score())
+        .fold(0.0f32, f32::max);
+    let continuation_score = evidence
+        .iter()
+        .filter(|sample| {
+            let center = sample.audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+            center >= continuation_start_ms && center <= continuation_end_ms
+        })
+        .map(|sample| sample.classification.score())
+        .fold(0.0f32, f32::max);
+    continuation_score >= MIN_CONTINUATION_SCORE
+        && continuation_score >= anchor_score * MIN_ANCHOR_RATIO
+}
+
 /// Clamp a growing transcript to the frozen owner ceiling when multi-speaker
 /// isolation is active (stable identity left the wake speaker).
 fn clamp_to_owner_isolation_ceiling(
@@ -3456,6 +3601,7 @@ fn freeze_owner_isolation_ledger(state: &mut SyncState) {
     state.owner_isolation_ceiling_text = text;
     state.owner_isolation_ceiling_segments = segments;
     state.owner_isolation_frozen = true;
+    state.pause_early_recent_revisions.clear();
     log::info!(
         "[asr] owner isolation freeze ceiling_chars={} best_chars={} optimistic_chars={}",
         state.owner_isolation_ceiling_text.chars().count(),
@@ -3479,6 +3625,7 @@ fn freeze_owner_isolation_at_filtered_result(state: &mut SyncState, filtered_res
     state.owner_isolation_ceiling_text = candidate.text.clone();
     state.owner_isolation_ceiling_segments = candidate.timed_segments.clone();
     state.owner_isolation_frozen = true;
+    state.pause_early_recent_revisions.clear();
 
     // A provisional preview may already contain the other person's words while
     // diarization was pending. Replace every committed/display ledger with the
@@ -3593,6 +3740,7 @@ fn utterance_belongs_to_verified_target(
     local_speaker_profile_adaptive: bool,
     confirmed_non_target_speech_end_ms: Option<u64>,
 ) -> bool {
+    let cloud_id_matches = utterance_speaker_id(utterance).as_deref() == Some(target_speaker_id);
     let baseline_belongs = utterance_belongs_to_target(
         utterance,
         target_speaker_id,
@@ -3621,7 +3769,16 @@ fn utterance_belongs_to_verified_target(
     // the session's own interference cluster; see
     // local_evidence_contrastive_owner_continuation for the bystander-safety
     // contract.
-    let contrastive_continuation_belongs = wake_owner_verified
+    let contrastive_continuation_belongs = (wake_owner_verified
+        || (cloud_id_matches
+            && matches!(
+                (utterance_start_ms(utterance), utterance_end_ms(utterance)),
+                (Some(start_ms), Some(end_ms)) if locally_verified_body_anchor_for_continuation(
+                    local_speaker_evidence,
+                    start_ms,
+                    end_ms,
+                )
+            )))
         && matches!(
             (utterance_start_ms(utterance), utterance_end_ms(utterance)),
             (Some(start_ms), Some(end_ms)) if start_ms
@@ -5067,6 +5224,20 @@ impl VolcengineStreamingASR {
         self.retained_pcm.lock().clone()
     }
 
+    /// The replay deadline includes its queued-audio drain, connection and
+    /// provider-final waits. A fixed 15-second coordinator timeout can expire
+    /// before a healthy socket sends a longer recording's queued frames.
+    pub fn full_audio_replay_timeout(&self) -> Duration {
+        let pcm_bytes = self.retained_pcm.lock().len();
+        let frame_bytes = AUDIO_FRAME_DURATION_MS as usize * BYTES_PER_MS as usize;
+        let queued_frames = pcm_bytes.div_ceil(frame_bytes);
+        final_audio_drain_budget(queued_frames)
+            + WEBSOCKET_CONNECT_TIMEOUT
+            + FINAL_RESULT_TIMEOUT
+            + FINAL_FRAME_SEND_BUDGET
+            + Duration::from_secs(5)
+    }
+
     pub fn diagnostic_audio_delivery(&self) -> Option<Value> {
         if !self.diagnostic_trace_enabled {
             return None;
@@ -5717,11 +5888,13 @@ impl VolcengineStreamingASR {
                 );
             }
             // Endpoint clock is owner-only.
-            // - Target（确信，≥0.55）：本人身份成立时才刷新。
-            // - Uncertain（含 0.42–0.55 弱 Target 带）：不刷新也不冻结。
-            //   2026-08-09 12:47:04：第二个人 0.426–0.58 的窗持续刷新时钟导致
-            //   永不结束；本人说话中途变轻的覆盖由预览增长刷新兜底
-            //   （refresh_local_target_from_owner_preview_activity）。
+            // - Target（确信，≥0.40，2026-09-23 矩阵重校）：本人身份成立时才
+            //   刷新。0.55 旧线是 TTS 银行时代校准——本人锚点档案实测 0.42–0.59，
+            //   旧线让本人永远 Uncertain（71f64ac1 冻结永不解除的根因）。
+            // - Uncertain（0.20–0.40）：不刷新也不冻结。旧世界 0.426–0.58 的
+            //   "第二个人"是 pre-2026-09-18 银行测量（anchor-era 旁人 <=0.11，
+            //   2026-09-23 真实旁人 <=0.28）；本人说话中途变轻的覆盖由预览增长
+            //   刷新兜底（refresh_local_target_from_owner_preview_activity）。
             // - NonTarget: do NOT refresh. Confident other-speaker windows must not
             //   lengthen auto-end while hysteresis still lags the true switch.
             // Growing Target-filtered ASR preview also refreshes the clock via
@@ -6194,6 +6367,7 @@ impl VolcengineStreamingASR {
             st.last_partial_text.clear();
             st.best_transcript_text.clear();
             st.best_transcript_committed_at = None;
+            st.pause_early_recent_revisions.clear();
             st.best_transcript_segments.clear();
             st.best_untimed_window.clear();
             st.optimistic_preview_text.clear();
@@ -6205,6 +6379,7 @@ impl VolcengineStreamingASR {
             st.stop_boundary_server_audio_ms = None;
             st.last_server_response_at = None;
             st.bytes_sent_since_response = 0;
+            st.post_response_gap_logged = false;
             st.target_speaker_id = None;
             st.target_speech_end_ms = None;
             st.wake_target_speech_end_ms = None;
@@ -6386,28 +6561,50 @@ impl VolcengineStreamingASR {
         let weak_self = Arc::downgrade(self);
         tokio::spawn(async move {
             let mut read = read;
-            while let Some(msg) = read.next().await {
+            loop {
+                let msg = read.next().await;
                 let Some(this) = weak_self.upgrade() else {
                     break;
                 };
                 match msg {
-                    Ok(Message::Binary(data)) => {
+                    Some(Ok(Message::Binary(data))) => {
                         if !this.handle_frame(&data) {
                             break;
                         }
                     }
-                    Ok(Message::Close(_)) => {
+                    Some(Ok(Message::Close(frame))) => {
+                        if !this.state.lock().is_connected {
+                            break;
+                        }
+                        log::warn!(
+                            "[asr] receive loop received close frame without final code={}",
+                            frame.as_ref().map(|frame| u16::from(frame.code)).unwrap_or(0)
+                        );
                         // 服务端没发 final 就关连接 → 用最近一次 partial 兜底，不丢已识别的文字。
                         this.fallback_to_partial_or_error(VolcengineASRError::NoFinalResult);
                         break;
                     }
-                    Ok(_) => { /* ignore text/ping/pong */ }
-                    Err(e) => {
+                    Some(Ok(_)) => { /* ignore text/ping/pong */ }
+                    Some(Err(e)) => {
+                        if !this.state.lock().is_connected {
+                            break;
+                        }
                         log::error!("[asr] receive loop error: {}", e);
                         // 网络中断同样回退到 partial，让用户至少拿到已经识别的部分。
                         this.fallback_to_partial_or_error(VolcengineASRError::ConnectionFailed(
                             e.to_string(),
                         ));
+                        break;
+                    }
+                    None => {
+                        if this.state.lock().is_connected {
+                            log::warn!("[asr] receive loop ended without final frame");
+                            this.fallback_to_partial_or_error(
+                                VolcengineASRError::ConnectionFailed(
+                                    "provider receive stream ended without final frame".into(),
+                                ),
+                            );
+                        }
                         break;
                     }
                 }
@@ -6421,10 +6618,59 @@ impl VolcengineStreamingASR {
     }
 
     pub async fn send_last_frame(&self) -> Result<(), VolcengineASRError> {
-        self.final_frame_result
+        let result = self.final_frame_result
             .get_or_init(|| self.send_last_frame_once())
             .await
-            .clone()
+            .clone();
+        // A stalled socket has already sealed its owner ledger and resolved
+        // final_rx. Sending a negative frame to that closed socket necessarily
+        // fails. If the ledger covers the last locally confirmed owner speech,
+        // let the coordinator consume that result instead of replaying the
+        // entire recording and allowing a second diarization pass to erase a
+        // continuation that was already recognized and delivered live.
+        if result.is_err() && self.stalled_ledger_covers_owner_speech() {
+            log::info!("[asr] stalled stream final uses owner-covered session ledger; replay skipped");
+            return Ok(());
+        }
+        result
+    }
+
+    fn stalled_ledger_covers_owner_speech(&self) -> bool {
+        let st = self.state.lock();
+        if !matches!(
+            &st.audio_delivery_readiness,
+            AudioDeliveryReadiness::Failed(VolcengineASRError::ConnectionFailed(reason))
+                if reason.starts_with("uplink stall:")
+        ) || st.is_connected
+            || st.final_tx.is_some()
+            || st.owner_isolation_frozen
+            || st.best_transcript_text.trim().is_empty()
+            || st.best_transcript_committed_at.is_none_or(|at| at.elapsed() < Duration::from_secs(1))
+        {
+            return false;
+        }
+        let Some(transcript_end_ms) = st.best_transcript_segments
+            .iter()
+            .filter_map(|segment| segment.end_ms)
+            .max()
+            .and_then(|end_ms| u64::try_from(end_ms).ok())
+        else {
+            return false;
+        };
+        let Some(owner_end_ms) = st.qualified_owner_speech_end_ms
+            .into_iter()
+            .chain(st.local_target_speech_end_ms)
+            .max()
+        else {
+            return false;
+        };
+        let foreign_after_owner = st.local_non_target_speech_end_ms
+            .into_iter()
+            .chain(st.local_sustained_non_target_speech_end_ms)
+            .any(|end_ms| end_ms > owner_end_ms);
+        !foreign_after_owner
+            && owner_end_ms <= transcript_end_ms.saturating_add(500)
+            && st.last_server_audio_duration_ms.is_some_and(|server_ms| server_ms >= owner_end_ms)
     }
 
     #[cfg(test)]
@@ -6743,9 +6989,11 @@ impl VolcengineStreamingASR {
 
     /// Pause-early-delivery ledger snapshot (2026-09-22 跟手①).
     ///
-    /// Cleanliness contract: no owner-isolation ceiling ever froze (hard
-    /// multi-speaker evidence), the ledger is non-empty and byte-stable for
-    /// `min_stable`. Unlike the early-seal snapshot this deliberately does
+    /// Cleanliness contract: no owner-isolation ceiling is frozen (hard
+    /// multi-speaker evidence), and an owner-ledger prefix has remained
+    /// unchanged across all revisions for `min_stable`. Later words can keep
+    /// growing without restarting that prefix's timer. Unlike the early-seal
+    /// snapshot this deliberately does
     /// NOT require `finishing` and does NOT hard-fail on
     /// `local_non_target_speech_end_ms`: in a quiet room the owner's own
     /// voice regularly classifies into the sub-owner band (K 行实测 0.30 带),
@@ -6758,7 +7006,7 @@ impl VolcengineStreamingASR {
         &self,
         min_stable: Duration,
     ) -> Option<RawTranscript> {
-        let st = self.state.lock();
+        let mut st = self.state.lock();
         if st.owner_isolation_frozen {
             return None;
         }
@@ -6766,7 +7014,25 @@ impl VolcengineStreamingASR {
         if st.best_transcript_text.trim().is_empty() {
             return None;
         }
-        if committed_at.elapsed() < min_stable {
+        let current = st.best_transcript_text.clone();
+        let stable_prefix = rolling_stable_transcript_prefix(
+            &mut st.pause_early_recent_revisions,
+            &current,
+            committed_at,
+            Instant::now(),
+            min_stable,
+        )?;
+        if stable_prefix.len() < current.len()
+            && st.local_speaker_tracking_enabled
+            && (st.local_owner_handoff_suspected
+                || !matches!(
+                    local_owner_continuity(&st),
+                    LocalOwnerContinuity::Confirmed | LocalOwnerContinuity::Compatible
+                ))
+        {
+            // The rolling path is earlier than the old whole-ledger pause
+            // path. It needs current owner evidence, not merely an old owner
+            // prefix that survived a possible speaker handoff.
             return None;
         }
         let duration_ms = st
@@ -6777,7 +7043,7 @@ impl VolcengineStreamingASR {
             .and_then(|end_ms| u64::try_from(end_ms).ok())
             .unwrap_or_else(|| (st.bytes_sent as f64 / BYTES_PER_MS) as u64);
         Some(RawTranscript {
-            text: st.best_transcript_text.clone(),
+            text: stable_prefix,
             duration_ms,
         })
     }
@@ -6912,22 +7178,18 @@ impl VolcengineStreamingASR {
         self.signal_error_silently(VolcengineASRError::NoFinalResult);
     }
 
-    /// 上行黑洞快速判死（2026-09-22 16:08 直连复实锤后新增）：本端持续在发
-    /// 音频、但 ≥4.5s 没收到任何服务端应答帧。流式期间云端对在收的音频 ~1s
-    /// 内必有应答（静音期同文重发），停应答=包没到云端——云端的 8 秒无包超时
-    /// （45000081）要干等到死，这里提前 ~3.5s 掐线，走与错误帧完全相同的
-    /// 兜底路径（账本有货交账本，否则报错→保留音频重放）。由 coordinator
-    /// 端点看门狗在 Listening 且 body_started 后每拍调用。
+    /// Detect an initial uplink blackhole before the provider's own timeout.
+    /// Once any response has arrived, later result silence is ambiguous: the
+    /// provider can keep receiving audio without emitting new transcript rows.
+    /// Aborting that healthy socket loses all later speech until STOP replay.
     pub fn abort_if_uplink_stalled(&self) -> bool {
         const UPLINK_STALL_SILENCE: Duration = Duration::from_millis(4_500);
         const UPLINK_STALL_MIN_SENT_BYTES: usize = 48_000; // ~1.5s @ 16kHz/16bit
-        let (connected, stalled, sent_bytes, silence_ms) = {
-            let st = self.state.lock();
-            // 2026-09-22 17:2x 修正（09:23:08 实锤 45000081 又抢跑）：连接后云端
-            // 全聋的形态一个应答帧都没有，"至少见过一次应答"的前置门恰好放走
-            // 它。从未应答时改用会话起点做时钟——预冲音频必含唤醒词语音，
-            // 健康链路 ~1-2s 内必有首个应答；开流 ≥4.5s 仍零应答且已发出
-            // ≥1.5s 音频 = 上行黑洞。曾有应答的会话仍以最近应答为钟。
+        let (connected, response_frames_seen, stalled, sent_bytes, silence_ms, post_response_gap) = {
+            let mut st = self.state.lock();
+            // The session start remains the clock when no response exists.
+            // Keep the last-response clock for diagnostics; the gate below
+            // excludes streams that have already produced a response.
             let (stalled, silence_ms) = match st.last_server_response_at {
                 Some(at) => {
                     let elapsed = at.elapsed();
@@ -6942,18 +7204,37 @@ impl VolcengineStreamingASR {
                     None => (false, 0),
                 },
             };
+            let post_response_gap = st.is_connected
+                && st.response_frames_seen > 0
+                && stalled
+                && st.bytes_sent_since_response >= UPLINK_STALL_MIN_SENT_BYTES
+                && !st.post_response_gap_logged;
+            if post_response_gap {
+                st.post_response_gap_logged = true;
+            }
             (
                 st.is_connected,
+                st.response_frames_seen,
                 stalled,
                 st.bytes_sent_since_response,
                 silence_ms,
+                post_response_gap,
             )
         };
-        if !connected || !stalled || sent_bytes < UPLINK_STALL_MIN_SENT_BYTES {
+        if post_response_gap {
+            log::info!(
+                "[asr] post-response result gap observed silence_ms={silence_ms} sent_bytes={sent_bytes}; keeping socket open"
+            );
+        }
+        if !connected
+            || response_frames_seen > 0
+            || !stalled
+            || sent_bytes < UPLINK_STALL_MIN_SENT_BYTES
+        {
             return false;
         }
         log::warn!(
-            "[asr] uplink stall detected: no server response for {silence_ms}ms while {sent_bytes} bytes kept flowing — aborting stream for fast recovery (cloud 45000081 would fire at 8s)"
+            "[asr] uplink stall detected: no initial server response silence_ms={silence_ms} sent_bytes={sent_bytes} — aborting stream for fast recovery (cloud 45000081 would fire at 8s)"
         );
         // 网络定位数据（2026-09-22 用户拍板）：黑洞掐线时探测火山端点+对照站，
         // 判读行进 decisions.log，积累几天即可回答"哪一跳在吞"。
@@ -7062,6 +7343,7 @@ impl VolcengineStreamingASR {
             // 上行黑洞探测的时钟以此为基准重新起算。
             st.last_server_response_at = Some(Instant::now());
             st.bytes_sent_since_response = 0;
+            st.post_response_gap_logged = false;
         }
 
         let payload_for_log = std::str::from_utf8(&parsed.payload)
@@ -7846,7 +8128,11 @@ impl VolcengineStreamingASR {
         let mut stop_ceiling_applied = false;
         if has_final {
             let state = self.state.lock();
-            if let Some(ceiling) = owner_preview_safety_ceiling(&state, &candidate.text) {
+            if let Some(ceiling) = owner_preview_safety_ceiling(
+                &state,
+                &candidate.text,
+                explicit_non_owner_tail,
+            ) {
                 stop_ceiling_applied = true;
                 candidate.text = ceiling;
                 // The preview is display text rather than a timed provider
@@ -8242,7 +8528,10 @@ impl VolcengineStreamingASR {
                     duration_ms,
                 });
             }
-            Some(_) => self.signal_error(err),
+            Some(_) => {
+                log::warn!("[asr] stream ended without a qualified transcript: {err}");
+                self.signal_error(err);
+            }
             None => log::warn!("[asr] duplicate terminal error delivery suppressed"),
         }
         self.mark_audio_delivery_failed(delivery_error);
@@ -8615,6 +8904,122 @@ fn hotword_context(entries: &[DictionaryHotword]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pause_early_rolling_prefix_advances_while_later_words_keep_arriving() {
+        let t0 = Instant::now();
+        let age = Duration::from_millis(1_000);
+        let mut revisions = VecDeque::new();
+        let first = "开始录音今天讨论";
+        let second = "开始录音今天讨论语音输入";
+        let third = "开始录音今天讨论语音输入的速度";
+        assert_eq!(
+            rolling_stable_transcript_prefix(
+                &mut revisions,
+                first,
+                t0,
+                t0 + Duration::from_millis(500),
+                age,
+            ),
+            None
+        );
+        assert_eq!(
+            rolling_stable_transcript_prefix(
+                &mut revisions,
+                second,
+                t0 + Duration::from_millis(600),
+                t0 + Duration::from_millis(600),
+                age,
+            ),
+            None
+        );
+        assert_eq!(
+            rolling_stable_transcript_prefix(
+                &mut revisions,
+                third,
+                t0 + Duration::from_millis(1_100),
+                t0 + Duration::from_millis(1_100),
+                age,
+            )
+            .as_deref(),
+            Some(first),
+            "the first clause is stable even though the full transcript changed"
+        );
+        assert_eq!(
+            rolling_stable_transcript_prefix(
+                &mut revisions,
+                "开始录音今天讨论语音输入的速度和准确率",
+                t0 + Duration::from_millis(1_600),
+                t0 + Duration::from_millis(1_600),
+                age,
+            )
+            .as_deref(),
+            Some(second),
+            "the next clause becomes eligible without a whole-sentence pause"
+        );
+        assert_eq!(
+            rolling_stable_transcript_prefix(
+                &mut revisions,
+                "开始录音今天谈论语音输入的速度和准确率",
+                t0 + Duration::from_millis(1_800),
+                t0 + Duration::from_millis(1_800),
+                age,
+            )
+            .as_deref(),
+            Some("开始录音今天"),
+            "a cloud correction must shrink the uncommitted stable prefix"
+        );
+        assert_eq!(
+            rolling_stable_transcript_prefix(
+                &mut revisions,
+                "",
+                t0 + Duration::from_millis(1_900),
+                t0 + Duration::from_millis(1_900),
+                age,
+            ),
+            None
+        );
+        assert!(revisions.is_empty());
+    }
+
+    #[test]
+    fn pause_early_rolling_snapshot_requires_current_owner_after_a_speaker_dip() {
+        use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Target};
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        let now = Instant::now();
+        let first = "开始录音今天讨论语音输入";
+        let growing = "开始录音今天讨论语音输入的速度和准确率";
+        {
+            let mut state = asr.state.lock();
+            state.best_transcript_text = growing.into();
+            state.best_transcript_committed_at = Some(now);
+            state.pause_early_recent_revisions.push_back((
+                now - Duration::from_secs(2),
+                first.into(),
+            ));
+            state.local_speaker_tracking_enabled = true;
+            state.local_wake_owner_verified = true;
+            state.local_speaker_stable_target = true;
+            state.local_target_confirmed = true;
+            state.local_speaker_classification = Some(NonTarget { score: 0.04 });
+        }
+        assert!(asr
+            .pause_early_delivery_ledger_snapshot(Duration::from_secs(1))
+            .is_none());
+        asr.state.lock().local_speaker_classification = Some(Target { score: 0.48 });
+        assert_eq!(
+            asr.pause_early_delivery_ledger_snapshot(Duration::from_secs(1))
+                .map(|snapshot| snapshot.text),
+            Some(first.into())
+        );
+    }
 
     #[test]
     fn stable_ledger_snapshot_requires_finishing_stable_clean_ledger() {
@@ -9221,7 +9626,7 @@ mod tests {
     }
 
     #[test]
-    fn uplink_stall_aborts_stream_and_signals_replayable_error() {
+    fn uplink_stall_aborts_never_responding_stream_and_signals_replayable_error() {
         let asr = uplink_stall_test_asr();
         let events = Arc::new(ParkingMutex::new(Vec::new()));
         let events_for_callback = Arc::clone(&events);
@@ -9231,12 +9636,8 @@ mod tests {
         {
             let mut st = asr.state.lock();
             st.is_connected = true;
-            st.response_frames_seen = 1;
-            st.last_server_response_at = Some(
-                Instant::now()
-                    .checked_sub(Duration::from_millis(5_200))
-                    .unwrap(),
-            );
+            st.response_frames_seen = 0;
+            st.start = Some(Instant::now().checked_sub(Duration::from_millis(5_200)).unwrap());
             st.bytes_sent_since_response = 60_000;
         }
 
@@ -9290,12 +9691,28 @@ mod tests {
         }
         assert!(!asr.abort_if_uplink_stalled(), "fresh response = healthy");
 
+        // A healthy socket may receive audio through a pause without any
+        // changed ASR result. It must stay open for the resumed clause.
+        {
+            let mut st = asr.state.lock();
+            st.last_server_response_at = Some(
+                Instant::now().checked_sub(Duration::from_millis(5_200)).unwrap(),
+            );
+        }
+        assert!(
+            !asr.abort_if_uplink_stalled(),
+            "prior response prevents a result-silence false abort"
+        );
+        assert!(asr.state.lock().post_response_gap_logged);
+
         let stalled_since = Instant::now()
             .checked_sub(Duration::from_millis(6_000))
             .unwrap();
         {
             let mut st = asr.state.lock();
-            st.last_server_response_at = Some(stalled_since);
+            st.response_frames_seen = 0;
+            st.last_server_response_at = None;
+            st.start = Some(stalled_since);
             st.bytes_sent_since_response = 12_000;
         }
         assert!(
@@ -11110,6 +11527,45 @@ mod tests {
     }
 
     #[test]
+    fn owner_resuming_after_pause_reopens_visual_preview_past_old_other_boundary() {
+        use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Target};
+
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_wake_owner_verified: true,
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            local_speaker_classification: Some(NonTarget { score: 0.05 }),
+            local_sustained_non_target_speech_end_ms: Some(11_400),
+            qualified_owner_speech_end_ms: Some(9_000),
+            last_emitted_preview_text: "开始录音停顿前的句子".into(),
+            last_emitted_visual_preview_text: "开始录音停顿前的句子".into(),
+            ..SyncState::default()
+        };
+        let provider = json!({"text": "开始录音停顿前的句子，继续说话后的新内容"});
+        assert_eq!(local_owner_continuity(&state), LocalOwnerContinuity::Other);
+        assert!(display_only_provisional_preview_candidate(&mut state, &provider, true).is_none());
+
+        // A new qualified owner sample after the quiet gap may restore the
+        // display, while the historical non-target boundary remains available
+        // to endpointing and final speaker arbitration.
+        state.local_owner_absence_run_confirmed = false;
+        state.local_speaker_classification = Some(Target { score: 0.45 });
+        state.qualified_owner_speech_end_ms = Some(12_500);
+        assert_eq!(local_owner_continuity(&state), LocalOwnerContinuity::Confirmed);
+        assert_eq!(
+            display_only_provisional_preview_candidate(&mut state, &provider, true),
+            provider["text"].as_str().map(str::to_string)
+        );
+        assert_eq!(state.local_sustained_non_target_speech_end_ms, Some(11_400));
+
+        // A later explicit non-owner sample closes the visual channel again.
+        state.local_speaker_classification = Some(NonTarget { score: 0.04 });
+        let foreign = json!({"text": "开始录音停顿前的句子，继续说话后的新内容，旁人说话"});
+        assert!(display_only_provisional_preview_candidate(&mut state, &foreign, true).is_none());
+    }
+
+    #[test]
     fn physical_foreign_provisional_row_previews_but_final_keeps_filtered_owner() {
         use crate::speaker_verification::SessionSpeakerClassification::{Target, Uncertain};
         let owner = "你帮我看一下，现在感觉好像是越来越差了。";
@@ -11284,7 +11740,7 @@ mod tests {
             ..SyncState::default()
         };
         assert_eq!(
-            owner_preview_safety_ceiling(&state, "开始录音。主人正文到这里。旁人插入的字。"),
+            owner_preview_safety_ceiling(&state, "开始录音。主人正文到这里。旁人插入的字。", true),
             Some("开始录音。主人正文到这里。".into())
         );
     }
@@ -11306,7 +11762,8 @@ mod tests {
         };
         assert!(owner_preview_safety_ceiling(
             &state,
-            "开始录音。主人正文到这里。然后我现在短暂停顿，继续说话。"
+            "开始录音。主人正文到这里。然后我现在短暂停顿，继续说话。",
+            true,
         )
         .is_none());
 
@@ -11322,7 +11779,8 @@ mod tests {
         assert_eq!(
             owner_preview_safety_ceiling(
                 &drain_only,
-                "开始录音。主人正文到这里。然后我现在短暂停顿，继续说话。"
+                "开始录音。主人正文到这里。然后我现在短暂停顿，继续说话。",
+                true,
             ),
             Some("开始录音。主人正文到这里。".into())
         );
@@ -11338,7 +11796,8 @@ mod tests {
         };
         assert!(owner_preview_safety_ceiling(
             &no_watermark,
-            "开始录音。主人正文到这里。然后我现在短暂停顿，继续说话。"
+            "开始录音。主人正文到这里。然后我现在短暂停顿，继续说话。",
+            true,
         )
         .is_some());
     }
@@ -11351,7 +11810,32 @@ mod tests {
             last_emitted_preview_text: "开始录音主人正文".into(),
             ..SyncState::default()
         };
-        assert!(owner_preview_safety_ceiling(&state, "开始录音，主人正文。").is_none());
+        assert!(owner_preview_safety_ceiling(&state, "开始录音，主人正文。", false).is_none());
+    }
+
+    #[test]
+    fn final_owner_correction_replaces_foreign_provisional_lead_in_without_losing_punctuation() {
+        let state = SyncState {
+            finishing: true,
+            local_speaker_tracking_enabled: true,
+            wake_speaker_phrase: Some("开始录音".into()),
+            last_emitted_preview_text: "Her.开始录音，然后确认规划器都能递归吧".into(),
+            ..SyncState::default()
+        };
+        assert_eq!(
+            owner_preview_safety_ceiling(
+                &state,
+                "开始录音，然后确认规划器都能递归吧？Express products.",
+                true,
+            ),
+            Some("开始录音，然后确认规划器都能递归吧？".into()),
+        );
+        assert!(owner_preview_safety_ceiling(
+            &state,
+            "开始录音，然后检查规划器都能递归吧？再补一句。",
+            false,
+        )
+        .is_none());
     }
 
     #[test]
@@ -11840,6 +12324,72 @@ mod tests {
             ),
             "the contrast requires the verified wake owner"
         );
+    }
+
+    #[test]
+    fn phrase_only_wake_with_verified_body_keeps_same_speaker_post_pause_tail() {
+        use crate::speaker_verification::SessionSpeakerClassification::{Target, Uncertain};
+        // Installed c61bda72: the wake bank missed, but two body windows
+        // positively matched the enrolled owner. The provider marked the
+        // owner's resumed clause with the same speaker id after a brief
+        // speaker-0 interruption. The old wake-only contrast gate dropped it.
+        let mut evidence = vec![
+            LocalSpeakerEvidence {
+                audio_end_ms: 4_000,
+                classification: Target { score: 0.458 },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 7_500,
+                classification: Target { score: 0.446 },
+                stable_target: true,
+            },
+        ];
+        evidence.extend([12_800, 13_200, 14_400, 16_000, 18_000, 19_600]
+            .into_iter()
+            .map(|audio_end_ms| LocalSpeakerEvidence {
+                audio_end_ms,
+                classification: Uncertain { score: 0.365 },
+                stable_target: true,
+            }));
+        let resumed_owner = json!({
+            "additions": { "speaker_id": "1", "source": "two_pass" },
+            "definite": true,
+            "start_time": 11_920,
+            "end_time": 20_212,
+            "text": "就是识别是像最像的，不是要两个人的声纹，没有声纹分离吗？"
+        });
+        assert!(utterance_belongs_to_verified_target(
+            &resumed_owner, "1", true, &evidence, Some("开始录音"),
+            Some(11_280), false, false, false, None,
+        ));
+        let other_speaker = json!({
+            "additions": { "speaker_id": "0", "source": "two_pass" },
+            "definite": true,
+            "start_time": 11_320,
+            "end_time": 11_920,
+            "text": "小爱同学。"
+        });
+        assert!(!utterance_belongs_to_verified_target(
+            &other_speaker, "1", true, &evidence, Some("开始录音"),
+            Some(11_280), false, false, false, None,
+        ));
+        let weak_continuation = json!({
+            "additions": { "speaker_id": "1", "source": "two_pass" },
+            "definite": true,
+            "start_time": 21_000,
+            "end_time": 24_000,
+            "text": "其他人的声音"
+        });
+        evidence.extend([21_800, 22_400, 23_000].into_iter().map(|audio_end_ms| LocalSpeakerEvidence {
+            audio_end_ms,
+            classification: Uncertain { score: 0.27 },
+            stable_target: true,
+        }));
+        assert!(!utterance_belongs_to_verified_target(
+            &weak_continuation, "1", true, &evidence, Some("开始录音"),
+            Some(11_280), false, false, false, None,
+        ));
     }
 
     #[test]
@@ -15669,7 +16219,8 @@ mod tests {
     fn uncertain_band_does_not_refresh_owner_endpoint_clock() {
         // F3 fixture（2026-08-09 12:47:04 弱 Target 序列 0.426–0.58）：置信
         // 余量带判 Uncertain 后不刷新本人端点时钟、也不冻结稳定身份；只有
-        // 确信 Target 恢复刷新。
+        // 确信 Target 恢复刷新。2026-09-23 重校后 0.42+ 已是确信 Target——
+        // 该序列在新世界里走 Target 路径（见 owner_body_band_lifts_freeze）。
         let asr = VolcengineStreamingASR::new(
             VolcengineCredentials {
                 app_id: "app".into(),
@@ -15701,6 +16252,45 @@ mod tests {
         asr.note_local_speaker_classification(3_600, Classification::Target { score: 0.58 });
         assert_eq!(asr.state.lock().local_target_speech_end_ms, Some(3_600));
         assert!(asr.state.lock().local_speaker_stable_target);
+    }
+
+    /// 2026-09-23 71f64ac1 实锤的行为级回归：旁人插话触发 owner_isolation
+    /// 冻结后，本人恢复说话（对"TTS 银行+当会话唤醒锚点"档案实测得分
+    /// 0.42–0.54，重校后为确信 Target）必须解除冻结。旧线 0.55 下这些窗
+    /// 全是 Uncertain → 冻结永不解除 → 续说落屏被 gate blocked
+    /// (owner_isolation_frozen) 挡死 + 终稿尾巴丢弃。
+    #[test]
+    fn owner_body_band_lifts_freeze_after_recalibration() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        {
+            let mut state = asr.state.lock();
+            state.local_speaker_stable_target = true;
+            state.local_target_confirmed = true;
+            // 旁人持续 NonTarget 后的冻结态（当晚 12:03:02 gate blocked 的前态）。
+            state.owner_isolation_frozen = true;
+            state.owner_isolation_ceiling_text = "已上屏的前缀".into();
+        }
+        use crate::speaker_verification::SessionSpeakerClassification as Classification;
+        // 本人恢复说话：0.43/0.47（71f64ac1 重放序列）——重校后是 Target。
+        // LOCAL_SPEAKER_SWITCH_CONFIRMATIONS=2 个连续 Target 窗即可解冻。
+        asr.note_local_speaker_classification(4_000, Classification::Target { score: 0.43 });
+        asr.note_local_speaker_classification(4_400, Classification::Target { score: 0.47 });
+        {
+            let state = asr.state.lock();
+            assert!(
+                !state.owner_isolation_frozen,
+                "owner resuming in the 0.42-0.54 body band must lift the isolation freeze"
+            );
+            assert!(state.owner_isolation_ceiling_text.is_empty());
+        }
     }
 
     #[test]
@@ -16323,7 +16913,23 @@ mod tests {
         assert_eq!(final_audio_drain_budget(0), FINAL_AUDIO_DRAIN_MIN_BUDGET);
         assert_eq!(final_audio_drain_budget(3), FINAL_AUDIO_DRAIN_MIN_BUDGET);
         assert_eq!(final_audio_drain_budget(27), Duration::from_millis(2_700));
-        assert_eq!(final_audio_drain_budget(200), FINAL_AUDIO_DRAIN_MAX_BUDGET);
+        assert_eq!(final_audio_drain_budget(200), Duration::from_secs(20));
+        assert_eq!(final_audio_drain_budget(500), FINAL_AUDIO_DRAIN_MAX_BUDGET);
+    }
+
+    #[test]
+    fn full_audio_replay_timeout_covers_the_long_recording_drain() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        // The live failure queued 2,149,120 bytes (67.2 seconds of audio).
+        asr.retained_pcm.lock().resize(2_149_120, 0);
+        assert!(asr.full_audio_replay_timeout() > Duration::from_secs(60));
     }
 
     #[tokio::test]
@@ -17376,6 +17982,78 @@ mod tests {
         let state = asr.state.lock();
         assert!(state.pending_audio.is_empty());
         assert_eq!(state.frames_sent, 0);
+    }
+
+    #[test]
+    fn stalled_stream_uses_ledger_only_when_it_covers_the_last_owner_speech() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        {
+            let mut st = asr.state.lock();
+            st.audio_delivery_readiness = AudioDeliveryReadiness::Failed(
+                VolcengineASRError::ConnectionFailed("uplink stall: server went silent".into()),
+            );
+            st.best_transcript_text = "停顿以后继续说的完整句子。".into();
+            st.best_transcript_committed_at = Some(Instant::now() - Duration::from_secs(2));
+            st.best_transcript_segments = vec![TranscriptSegment {
+                start_ms: 0,
+                end_ms: Some(29_200),
+                text: st.best_transcript_text.clone(),
+            }];
+            st.qualified_owner_speech_end_ms = Some(26_600);
+            st.local_target_speech_end_ms = Some(26_600);
+            st.local_non_target_speech_end_ms = Some(12_600);
+            st.last_server_audio_duration_ms = Some(29_800);
+        }
+        assert!(asr.stalled_ledger_covers_owner_speech());
+        asr.state.lock().local_target_speech_end_ms = Some(31_000);
+        assert!(!asr.stalled_ledger_covers_owner_speech(), "new speech after cloud coverage still requires replay");
+        asr.state.lock().local_target_speech_end_ms = Some(26_600);
+        asr.state.lock().local_non_target_speech_end_ms = Some(30_000);
+        assert!(!asr.stalled_ledger_covers_owner_speech(), "a later foreign speaker still requires arbitration");
+    }
+
+    #[tokio::test]
+    async fn stalled_stream_finishes_from_the_existing_ledger_without_replay() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut st = asr.state.lock();
+            st.final_tx = Some(tx);
+            st.best_transcript_text = "停顿后我继续说了，最后一句也在。".into();
+            st.best_transcript_committed_at = Some(Instant::now() - Duration::from_secs(2));
+            st.best_transcript_segments = vec![TranscriptSegment {
+                start_ms: 0,
+                end_ms: Some(29_200),
+                text: st.best_transcript_text.clone(),
+            }];
+            st.qualified_owner_speech_end_ms = Some(26_600);
+            st.local_target_speech_end_ms = Some(26_600);
+            st.local_non_target_speech_end_ms = Some(12_600);
+            st.last_server_audio_duration_ms = Some(29_800);
+        }
+        *asr.final_rx.lock() = Some(rx);
+        asr.fallback_to_partial_or_error(VolcengineASRError::ConnectionFailed(
+            "uplink stall: audio kept flowing but server went silent".into(),
+        ));
+        assert!(asr.send_last_frame().await.is_ok());
+        assert_eq!(
+            asr.await_final_result_with_early_seal().await.unwrap().text,
+            "停顿后我继续说了，最后一句也在。"
+        );
     }
 
     #[tokio::test]

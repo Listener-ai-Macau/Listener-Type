@@ -231,10 +231,12 @@ requireIncludes(
   "Recording capsule partial preview must reuse the latest audio level",
 );
 for (const token of [
-  "fn provider_preview_change",
-  "current.is_some_and(|value| value.trim() == candidate)",
-  "provider_preview_change(slot.as_deref(), &preview)",
-  "provider_preview_change_keeps_authoritative_early_rewrite_visible",
+  "fn reduce_embedded_audio_authoritative_preview",
+  ".observe_authoritative(",
+  "reduction.visible_update.is_some_and(|visible|",
+  "fn update_embedded_audio_visual_preview",
+  ".observe_provisional(session_id, &preview)",
+  "product_final_provisional_only_preview_is_never_a_final_candidate",
 ]) {
   requireIncludes(
     dictation,
@@ -255,7 +257,7 @@ for (const token of [
   "fn consume_ready_streaming_pcm_blocks",
   "EMBEDDED_AUDIO_FEED_CHUNK_BYTES",
   "fn flush_streaming_pcm",
-  "self.consumer.consume_pcm_chunk(&asr_pcm);",
+  "self.consume_prepared_streaming_pcm(pcm_block, &block_source_runs);",
 ]) {
   requireIncludes(
     streamingPcm,

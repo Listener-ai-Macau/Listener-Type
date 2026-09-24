@@ -40,7 +40,7 @@ pub(super) fn enabled_phrases(inner: &Arc<Inner>) -> Vec<String> {
 /// 终止态（Done / Cancelled / Error）后延迟 N ms 把胶囊改回 Idle，让浮窗自动消失。
 /// 硬件 BLE 听写日常成功路径：字已上屏，只留极短完成反馈。
 /// 1050ms 会让 owner 体感「结尾拖」——收尾合同看的是停说→上屏，不是胶囊挂多久。
-pub(super) const CAPSULE_SUCCESS_HIDE_DELAY_MS: u64 = 380;
+pub(super) const CAPSULE_SUCCESS_HIDE_DELAY_MS: u64 = 250;
 pub(super) const CAPSULE_AUTO_HIDE_DELAY_MS: u64 = 0;
 pub(super) const CAPSULE_ACTIONABLE_ERROR_HIDE_DELAY_MS: u64 = 6_000;
 pub(super) const CAPSULE_EMPTY_TRANSCRIPT_HIDE_DELAY_MS: u64 = 1_500;

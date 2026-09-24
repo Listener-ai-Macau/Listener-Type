@@ -134,7 +134,7 @@ function CompletionMark({ label }: { label: string }) {
         color: 'var(--ol-blue)',
         background: 'color-mix(in srgb, var(--ol-blue-soft) 74%, rgba(255,255,255,.72))',
         boxShadow: '0 0 0 0.5px rgba(101, 123, 112, 0.16) inset, 0 6px 14px -10px rgba(101, 123, 112, 0.42)',
-        animation: 'cap-complete-chip 280ms var(--ol-motion-soft) both',
+        animation: 'cap-complete-chip 180ms var(--ol-motion-soft) both',
       }}
     >
       <span
@@ -161,7 +161,7 @@ function CompletionMark({ label }: { label: string }) {
             style={{
               strokeDasharray: 11,
               strokeDashoffset: 11,
-              animation: 'cap-complete-check 200ms 40ms var(--ol-motion-soft) forwards',
+              animation: 'cap-complete-check 140ms 20ms var(--ol-motion-soft) forwards',
             }}
           />
         </svg>
@@ -177,7 +177,7 @@ function CompletionMark({ label }: { label: string }) {
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           color: '#171714',
-          animation: 'cap-complete-label 200ms 60ms var(--ol-motion-soft) both',
+          animation: 'cap-complete-label 140ms 30ms var(--ol-motion-soft) both',
         }}
       >
         {label}
@@ -245,7 +245,6 @@ interface PillProps {
   message?: string;
   stopRequested?: boolean;
   stopAcknowledged?: boolean;
-  recordingBarsActive?: boolean;
   netBadge?: string | null;
   netBadgeTone?: 'warn' | 'bad';
   onCancel: () => void;
@@ -261,7 +260,6 @@ function Pill({
   message,
   stopRequested = false,
   stopAcknowledged = false,
-  recordingBarsActive = false,
   netBadge = null,
   netBadgeTone = 'warn',
   onCancel,
@@ -390,7 +388,7 @@ function Pill({
     case 'recording':
       center = stopPending
         ? renderProcessingCenter(message || t('capsule.thinking'), Boolean(message))
-        : message && !recordingBarsActive
+        : message
           ? renderRecordingPreview(message)
           : netBadge
             // 网络掉级且暂无预览正文：中央直接显示"网络不佳/无网络"
@@ -538,7 +536,6 @@ export function Capsule() {
   const [stopAcknowledged, setStopAcknowledged] = useState<boolean>(false);
   // 录音开始先显示音波：预览文本现在一秒内就会到，但 owner 验收过的视觉合同是
   // 「先音波、有正文再上字」，给音波一个短暂节拍再切换。
-  const [recordingBarsActive, setRecordingBarsActive] = useState<boolean>(false);
   // Windows 端 host 在翻译模式从 84 长到 118；macOS / Linux 上 capsuleLayout 已固定 42 忽略此参数。
   const hostMetrics = getCapsuleHostMetrics(os, translation);
 
@@ -834,16 +831,6 @@ export function Capsule() {
   }, [state]);
 
   useEffect(() => {
-    if (state !== 'recording') {
-      setRecordingBarsActive(false);
-      return undefined;
-    }
-    setRecordingBarsActive(true);
-    const timer = window.setTimeout(() => setRecordingBarsActive(false), 900);
-    return () => window.clearTimeout(timer);
-  }, [state]);
-
-  useEffect(() => {
     clearErrorAutoDismiss();
     if (state !== 'error') {
       return undefined;
@@ -1073,7 +1060,6 @@ export function Capsule() {
         netBadgeTone={netBadgeTone}
         stopRequested={!leaving && renderedState === 'recording' && stopRequested}
         stopAcknowledged={!leaving && shouldShowStopAcknowledgement(renderedState, stopAcknowledged)}
-        recordingBarsActive={!leaving && renderedState === 'recording' && recordingBarsActive}
         onCancel={onCancel}
         onConfirm={onConfirm}
         onDismiss={onDismiss}

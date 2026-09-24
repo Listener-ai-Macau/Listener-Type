@@ -170,12 +170,13 @@ pub fn send_recording_control_toggle(timeout: Duration) -> Result<(), String> {
 }
 
 pub fn send_recording_control_cancel(timeout: Duration) -> Result<(), String> {
-    send_recording_control_command(
-        b"VREC:CANCEL\n",
-        timeout,
-        "audio control cancel",
-        ActiveControlTransientFallback::TryFreshGatt,
-    )
+    // The user has already asked to leave this recording. A fresh GATT open
+    // can retry for tens of seconds when the BLE link is stalled, keeping the
+    // coordinator in Listening and the ASR socket alive after the capsule has
+    // hidden. The active capture owns the correct device/session; if its
+    // control channel cannot send promptly, let local cancellation finish.
+    send_audio_control_via_active_capture(b"VREC:CANCEL\n", timeout, "audio control cancel")
+        .unwrap_or_else(|| Err("active BLE capture unavailable for cancel".to_string()))
 }
 
 pub fn send_recording_control_activate(timeout: Duration) -> Result<(), String> {

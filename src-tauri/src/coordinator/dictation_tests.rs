@@ -1833,6 +1833,22 @@ fn automatic_wake_guard_removes_only_the_activation_prefix() {
 }
 
 #[test]
+fn automatic_wake_does_not_early_paste_a_long_unstripped_pre_wake_lead_in() {
+    assert!(super::automatic_wake_has_unstripped_lead_in(
+        "小爱同学。然后现在好像开始录音，正文继续。",
+        "开始录音",
+    ));
+    assert!(!super::automatic_wake_has_unstripped_lead_in(
+        "开始录音，正文继续。",
+        "开始录音",
+    ));
+    assert!(!super::automatic_wake_has_unstripped_lead_in(
+        "好，开始录音，正文继续。",
+        "开始录音",
+    ));
+}
+
+#[test]
 fn automatic_wake_guard_hides_partial_prefix_and_bounded_tail() {
     assert_eq!(
         super::strip_automatic_activation_prefix("开始录", "开始录音", true),
@@ -7418,7 +7434,7 @@ fn target_speaker_endpoint_has_one_atomic_final_transcript_arbiter() {
         .nth(1)
         .expect("provider must assemble one terminal candidate");
     let safety_ceiling = final_candidate_block
-        .find("owner_preview_safety_ceiling(&state, &candidate.text)")
+        .find("owner_preview_safety_ceiling(")
         .expect("stop-boundary safety ceiling must normalize the candidate");
     let content_seal = final_candidate_block
         .find("let arbitrated_final_content_len")
@@ -11948,6 +11964,23 @@ fn terminal_open_near_recovery_matches_session_2274297156_gated_by_voiceprint_fl
         4,
         0,
     ));
+    // Installed 2026-09-23 22:19: an unrelated five-character sentence had
+    // distance 2 and zero matching wake-prefix units. The low owner floor
+    // alone must not promote it into a wake.
+    let unrelated_short_sentence = super::LocalWakeConfirmation {
+        transcript_chars: 5,
+        phonetic_prefix_units: 0,
+        ..accented_owner_wake
+    };
+    assert!(!super::open_terminal_local_near_can_accept(
+        &Ok(crate::speaker_verification::VerificationResult {
+            score: 0.2186,
+            ..drifted_owner_voice.clone().unwrap()
+        }),
+        &unrelated_short_sentence,
+        4,
+        0,
+    ));
     let clipped_no_body = super::LocalWakeConfirmation {
         transcript_chars: 2,
         ..accented_owner_wake
@@ -14794,38 +14827,129 @@ fn pause_early_final_remainder_splits_on_stability_key_prefix() {
     let delivered = "现在是什么问题？你帮我看一下。";
     let final_text = "现在是什么问题？你帮我看一下。然后你要不要搞一个什么测试窗口？";
     let remainder =
-        pause_early_final_remainder(final_text, &key(delivered)).expect("prefix covers final");
+        pause_early_final_remainder(final_text, delivered, &key(delivered)).expect("prefix covers final");
     assert_eq!(remainder, "然后你要不要搞一个什么测试窗口？");
+
+    // A punctuation mark that arrived after a word-only paste belongs to the
+    // still-undelivered boundary. It must survive the stability-key split.
+    assert_eq!(
+        pause_early_final_remainder("你好，继续说。", "你好", &key("你好")),
+        Some("，继续说。".to_string())
+    );
+    assert_eq!(
+        pause_early_final_remainder("你好。", "你好", &key("你好")),
+        Some("。".to_string())
+    );
+    assert_eq!(
+        pause_early_final_remainder("你好，继续说。", "你好，", &key("你好，")),
+        Some("继续说。".to_string())
+    );
+    assert_eq!(
+        pause_early_final_remainder("你好，“继续说”。", "你好，", &key("你好，")),
+        Some("“继续说”。".to_string()),
+        "deduplicating a comma must keep the next opening quote"
+    );
 
     // Cloud punctuation revision inside the prefix must not block the split.
     let delivered_revised = "现在是什么问题，你帮我看一下。";
-    let remainder = pause_early_final_remainder(final_text, &key(delivered_revised))
+    let remainder = pause_early_final_remainder(final_text, delivered_revised, &key(delivered_revised))
         .expect("punctuation-insensitive prefix still matches");
     assert_eq!(remainder, "然后你要不要搞一个什么测试窗口？");
 
     // Exact coverage (including a punctuation-only tail) inserts nothing.
     let final_same = "现在是什么问题？你帮我看一下。";
     assert_eq!(
-        pause_early_final_remainder(final_same, &key(delivered)),
+        pause_early_final_remainder(final_same, delivered, &key(delivered)),
         Some(String::new())
     );
     let final_punct_tail = "现在是什么问题？你帮我看一下！";
     assert_eq!(
-        pause_early_final_remainder(final_punct_tail, &key(delivered)),
+        pause_early_final_remainder(final_punct_tail, delivered, &key(delivered)),
         Some(String::new()),
         "a punctuation-only final tail is already covered"
     );
 
     // Cloud rewrote or shrank the delivered prefix: no safe remainder.
     let rewritten = "现在是什么毛病？你帮我看一下。然后呢。";
-    assert_eq!(pause_early_final_remainder(rewritten, &key(delivered)), None);
+    assert_eq!(pause_early_final_remainder(rewritten, delivered, &key(delivered)), None);
     let shrunken = "现在是什么问题？";
-    assert_eq!(pause_early_final_remainder(shrunken, &key(delivered)), None);
+    assert_eq!(pause_early_final_remainder(shrunken, delivered, &key(delivered)), None);
 
     // Empty delivered key means no early delivery: everything remains.
     assert_eq!(
-        pause_early_final_remainder(final_text, ""),
+        pause_early_final_remainder(final_text, "", ""),
         Some(final_text.trim().to_string())
+    );
+}
+
+#[test]
+fn pause_early_delivery_waits_for_a_clause_instead_of_pasting_provider_placeholders() {
+    use super::pause_early_chunk_ready;
+
+    assert!(!pause_early_chunk_ready("", "哎"));
+    assert!(!pause_early_chunk_ready("", "Her."));
+    assert!(pause_early_chunk_ready("", "然后你要确认"));
+    assert!(!pause_early_chunk_ready("然后你要确认", "的"));
+    assert!(pause_early_chunk_ready("然后你要确认", "规划器"));
+}
+
+#[test]
+fn pause_early_live_continuation_survives_an_earlier_cloud_word_revision() {
+    use super::{
+        embedded_audio_partial_preview_stability_key as key,
+        pause_early_anchored_continuation, pause_early_final_remainder,
+    };
+
+    let first_paste = "今天我们讨论新的语音输入体验";
+    let second_snapshot = "今天我们来讨论新的语音输入体验，接下来继续说明实时预览";
+    assert_eq!(pause_early_final_remainder(second_snapshot, first_paste, &key(first_paste)), None);
+    let second_paste = pause_early_anchored_continuation(second_snapshot, first_paste, &key(first_paste))
+        .expect("the unchanged end of the first paste anchors the new words");
+    assert_eq!(second_paste, "，接下来继续说明实时预览");
+
+    // Subsequent checks compare against the text actually pasted, not the
+    // provider's revised first sentence. This permits a third live segment.
+    let displayed = format!("{first_paste}{second_paste}");
+    let third_snapshot = "今天我们来讨论新的语音输入体验，接下来继续说明实时预览，然后还有第三段";
+    assert_eq!(pause_early_final_remainder(third_snapshot, &displayed, &key(&displayed)), None);
+    assert_eq!(
+        pause_early_anchored_continuation(third_snapshot, &displayed, &key(&displayed)),
+        Some("，然后还有第三段".to_string())
+    );
+
+    assert_eq!(
+        pause_early_anchored_continuation(
+            "今天我们来讨论不同的产品设计，接下来继续说明实时预览",
+            first_paste,
+            &key(first_paste),
+        ),
+        None,
+        "a rewritten paste boundary must wait for final reconciliation"
+    );
+}
+
+#[test]
+fn pause_early_live_continuation_survives_a_rewritten_opening_with_unique_seam() {
+    use super::{embedded_audio_partial_preview_stability_key as key, pause_early_anchored_continuation};
+
+    let delivered = "那句话规划器这个其实拆到这个原料也很快吧然后主要是规划的速度是还是挺快的";
+    let revised = "去化规化器这个其实拆到这个原料也很快吧然后主要是规化的速度是还是挺快的然后你就不用对就是反正各中间件";
+    assert_eq!(
+        pause_early_anchored_continuation(revised, delivered, &key(delivered)),
+        Some("然后你就不用对就是反正各中间件".into()),
+        "a unique seam beside the paste boundary must keep live text moving"
+    );
+
+    let ambiguous_delivered = "完全不同开头甲乙丙丁戊己庚辛";
+    let repeated = "另一种开头甲乙丙丁戊己庚辛后面甲乙丙丁戊己庚辛更多";
+    assert_eq!(
+        pause_early_anchored_continuation(
+            repeated,
+            ambiguous_delivered,
+            &key(ambiguous_delivered)
+        ),
+        None,
+        "a repeated seam cannot safely place the continuation"
     );
 }
 
@@ -15024,5 +15148,77 @@ fn pause_early_tail_beyond_delivered_anchor_recovers_tail_when_lengths_distort()
     assert_eq!(
         pause_early_tail_beyond_delivered_anchor(final_diverged, &key(diverged_tail)),
         None,
+    );
+}
+
+#[test]
+fn pause_early_unique_long_seam_survives_a_rewritten_opening() {
+    use super::pause_early_tail_beyond_delivered_anchor;
+    let key = |text: &str| super::embedded_audio_partial_preview_stability_key(text);
+
+    // Fresh 1.0.6 session 67577453: two-pass ASR changed the opening from
+    // the first character but retained the clause ending next to the paste
+    // boundary. The earlier opening-only guard dropped the entire next clause.
+    let delivered = "那句话规划器这个其实拆到这个原料也很快吧然后主要是规划的速度是还是挺快的";
+    let final_text = "去化规化器这个其实拆到这个原料也很快吧然后主要是规化的速度是还是挺快的然后你就不用对就是反正各中间件";
+    assert_eq!(
+        pause_early_tail_beyond_delivered_anchor(final_text, &key(delivered)),
+        Some("然后你就不用对就是反正各中间件".into()),
+    );
+
+    // A repeated seam cannot prove which occurrence was already on screen.
+    let ambiguous = "完全不同开头甲乙丙丁甲乙丙丁";
+    let repeated = "另一种开头甲乙丙丁甲乙丙丁后面甲乙丙丁甲乙丙丁更多";
+    assert_eq!(
+        pause_early_tail_beyond_delivered_anchor(repeated, &key(ambiguous)),
+        None,
+    );
+}
+
+#[test]
+fn pause_early_alignment_recovers_continuation_after_middle_and_boundary_revisions() {
+    use super::{
+        pause_early_aligned_growth_tail, pause_early_final_remainder,
+        pause_early_mismatch_recovery_tail, pause_early_tail_beyond_delivered_anchor,
+    };
+    let key = |text: &str| super::embedded_audio_partial_preview_stability_key(text);
+    // A live preview misheard one word in the middle and its last word. The
+    // final has a genuine new sentence, but neither an exact prefix nor an
+    // exact terminal anchor survives. Re-pasting the whole final duplicates
+    // the early delivery; dropping it loses the continuation.
+    let delivered = "现在请检查设备状况我想确认它已经连接然后呢";
+    let final_text = "现在请检查设备状态我想确认它已经连接然后我继续说明下一步的具体安排";
+    let delivered_key = key(delivered);
+    assert_eq!(pause_early_final_remainder(final_text, delivered, &delivered_key), None);
+    assert_eq!(pause_early_mismatch_recovery_tail(final_text, &delivered_key), None);
+    assert_eq!(pause_early_tail_beyond_delivered_anchor(final_text, &delivered_key), None);
+    assert_eq!(
+        pause_early_aligned_growth_tail(final_text, &delivered_key),
+        Some("继续说明下一步的具体安排".to_string())
+    );
+}
+
+#[test]
+fn pause_early_alignment_rejects_ambiguous_rewrites_and_internal_growth() {
+    use super::pause_early_aligned_growth_tail;
+    let key = |text: &str| super::embedded_audio_partial_preview_stability_key(text);
+    let delivered = "今天测试一下停顿落屏然后我们继续说说看吧";
+    let unrelated = "今天测试现在有不同的事情要讲而且后面还有很多新的内容需要补充";
+    assert_eq!(pause_early_aligned_growth_tail(unrelated, &key(delivered)), None);
+
+    // Extra words inserted inside the already delivered text are a cloud
+    // revision, not evidence of a new tail.
+    let delivered = "现在我们看一下这个流程然后继续下一步";
+    let internal_growth = "现在我们看一下这个复杂而详细的流程然后继续下一步";
+    assert_eq!(
+        pause_early_aligned_growth_tail(internal_growth, &key(delivered)),
+        None
+    );
+    let long_delivered = "现在我们看一下这个流程然后继续下一步接着验证整个设备状态是否正常";
+    let long_internal_growth =
+        "现在我们看一下这个复杂流程然后继续下一步接着验证整个设备状态是否正常";
+    assert_eq!(
+        pause_early_aligned_growth_tail(long_internal_growth, &key(long_delivered)),
+        None
     );
 }

@@ -38,6 +38,23 @@ pub(super) fn merge_streaming_candidate_with_untimed_window(
     candidate: TranscriptCandidate,
 ) -> (String, Vec<TranscriptSegment>, String) {
     let current_window = candidate.text.trim().to_string();
+    // The first word-timed row may cover the same opening audio that an
+    // untimed preview already put in the ledger. A sentence-ending mark on
+    // that preview must not make the growing cumulative row look like a new
+    // utterance. The 2026-09-24 device trace grew 18 -> 19 characters here
+    // but the merge produced 37, repeating the entire opening sentence.
+    if previous_segments.is_empty()
+        && authoritative_timed_revision_starts_near_session_start(previous_text, &candidate)
+        && !previous_text.trim().is_empty()
+    {
+        let previous_spoken = compact_segment_text(previous_text);
+        let current_spoken = compact_segment_text(&current_window);
+        if current_spoken.len() > previous_spoken.len()
+            && current_spoken.starts_with(&previous_spoken)
+        {
+            return (current_window, candidate.timed_segments, String::new());
+        }
+    }
     // Optimized-bidirectional streaming can spend most of a long utterance in
     // untimed rolling windows, then publish its first word-timed two-pass
     // result for the whole session. That response replaces the provisional
@@ -1092,6 +1109,30 @@ fn is_probable_growing_cumulative_revision(previous: &str, current: &str) -> boo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_timed_cumulative_growth_replaces_punctuated_untimed_opening() {
+        let opening = "是因为你起床早了，以前你是8、7点。";
+        let growth = "是因为你起床早了，以前你是8、7点，是";
+        let candidate = TranscriptCandidate {
+            text: growth.into(),
+            timed_segments: vec![TranscriptSegment {
+                start_ms: 0,
+                end_ms: Some(2_100),
+                text: growth.into(),
+            }],
+            authoritative_cumulative: false,
+        };
+        for window in [opening, ""] {
+            let (merged, _, _) = merge_streaming_candidate_with_untimed_window(
+                opening,
+                &[],
+                window,
+                candidate.clone(),
+            );
+            assert_eq!(merged, growth, "first timed row must replace its own untimed opening");
+        }
+    }
 
     #[test]
     fn corrected_owner_prefix_does_not_append_the_superseded_streaming_branch() {

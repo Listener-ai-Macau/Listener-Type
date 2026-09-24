@@ -106,10 +106,9 @@ impl WindowsImeSessionController {
     pub fn prepare_session(&self) -> PreparedWindowsImeSession {
         #[cfg(target_os = "windows")]
         {
-            // Default product MSI intentionally does not register
-            // ListenerTypeIme.dll. Skipping ActivateProfile retries saves
-            // ~100ms of doomed COM calls every session and routes insert
-            // straight to the IME-safe Unicode path.
+            // NSIS and damaged MSI installations may have no registered TSF
+            // profile. Skip doomed ActivateProfile retries in those cases and
+            // route insertion to the non-TSF fallback.
             let ime_status = crate::windows_ime_profile::get_windows_ime_status();
             if !ime_status.using_tsf_backend {
                 log::info!(

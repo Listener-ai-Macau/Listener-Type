@@ -2019,11 +2019,13 @@ impl EmbeddedStreamingDictation {
                                                     })
                                             }
                                             Some((result, _)) => {
-                                                    if result.phrase_relation
-                                                        == crate::wake_phrase::LocalPhraseRelation::Absent
-                                                        && result.phonetic_best_distance <= 2
-                                                        && result.transcript_chars
-                                                            > phrase.chars().count()
+                                                    if crate::speech_decision_kernel::owner_near_phrase_evidence_can_accumulate(
+                                                        result.phrase_relation == crate::wake_phrase::LocalPhraseRelation::Absent,
+                                                        result.phonetic_best_distance,
+                                                        result.phonetic_best_window_start,
+                                                        result.transcript_chars,
+                                                        phrase.chars().count(),
+                                                    )
                                                     {
                                                         candidate.owner_near_phrase_confirmations =
                                                             candidate
@@ -3693,10 +3695,13 @@ impl EmbeddedStreamingDictation {
                                     })
                                 } else if !result.matched {
                                     let phrase_chars = phrase.chars().count();
-                                    if result.phrase_relation
-                                            == crate::wake_phrase::LocalPhraseRelation::Absent
-                                        && result.phonetic_best_distance <= 2
-                                        && result.transcript_chars > phrase_chars
+                                    if crate::speech_decision_kernel::owner_near_phrase_evidence_can_accumulate(
+                                        result.phrase_relation == crate::wake_phrase::LocalPhraseRelation::Absent,
+                                        result.phonetic_best_distance,
+                                        result.phonetic_best_window_start,
+                                        result.transcript_chars,
+                                        phrase_chars,
+                                    )
                                     {
                                         if let Some(candidate) = self.speaker_candidate.as_mut() {
                                             candidate.owner_near_phrase_confirmations = candidate

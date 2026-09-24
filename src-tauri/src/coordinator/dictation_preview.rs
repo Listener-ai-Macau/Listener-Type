@@ -1483,13 +1483,30 @@ pub(super) fn request_embedded_audio_stop_feedback(
 }
 
 // ───────────────── pause-early-delivery (2026-09-22 跟手①) ─────────────────
-// 设计卡：work/pause-early-delivery-design-20260922.md。句末标点 + 账本稳定
+// 设计卡：work/pause-early-delivery-design-20260922.md。主人账本前缀稳定
 // ≥ 耐心窗 → 稳定前缀当场走插入通道上屏；会话不结束，端点契约原样保留；
 // 终稿只插余量（stability-key 前缀比对；云端改写前缀 → 跳过第二次插入，
 // 宁可少不可重——H 族教训）。回退开关 LISTENER_DISABLE_PAUSE_EARLY_DELIVERY=1。
 
 const PAUSE_EARLY_DELIVERY_MIN_STABLE: Duration =
     Duration::from_millis(1_000);
+// A one-character stable prefix is still often a provider placeholder. In
+// installed 1.0.6 session 3e8ab1c5 it was pasted, then the provider rewrote
+// the opening and final reconciliation could not safely retract it. Keep such
+// fragments in the reversible capsule; paste only a useful stable clause.
+const PAUSE_EARLY_FIRST_CHUNK_MIN_CONTENT_CHARS: usize = 6;
+const PAUSE_EARLY_NEXT_CHUNK_MIN_CONTENT_CHARS: usize = 3;
+
+fn pause_early_chunk_ready(delivered_key: &str, delta: &str) -> bool {
+    let count = embedded_audio_partial_preview_stability_key(delta)
+        .chars()
+        .count();
+    count >= if delivered_key.is_empty() {
+        PAUSE_EARLY_FIRST_CHUNK_MIN_CONTENT_CHARS
+    } else {
+        PAUSE_EARLY_NEXT_CHUNK_MIN_CONTENT_CHARS
+    }
+}
 
 /// Session-scoped bookkeeping of text already inserted mid-session.
 #[derive(Default)]
@@ -1538,20 +1555,39 @@ fn pause_early_note_gate_blocked(
 /// 终稿尚未上屏的余量。`Some("")` = 前缀已覆盖全部内容；`None` = 云端改写/
 /// 收缩了已交付前缀（余量不可安全切分，调用方须跳过第二次插入）。
 /// 与 `embedded_audio_partial_preview_stability_key` 同口径逐字推进。
-fn pause_early_final_remainder(final_text: &str, delivered_key: &str) -> Option<String> {
+fn pause_early_boundary_tail<'a>(tail: &'a str, delivered_display: &str) -> &'a str {
+    let tail = tail.trim_start();
+    let previous = delivered_display.trim_end().chars().next_back();
+    let next = tail.chars().next();
+    if previous.is_some_and(pause_early_is_boundary_separator)
+        && next.is_some_and(pause_early_is_boundary_separator)
+    {
+        // An append cannot replace the separator already on screen. Consume
+        // only that one revised separator; keep a following quote or bracket.
+        return tail[next.expect("checked above").len_utf8()..].trim_start();
+    }
+    tail
+}
+
+fn pause_early_is_boundary_separator(ch: char) -> bool {
+    matches!(
+        ch,
+        '，' | '。' | '、' | '；' | '：' | '？' | '！' | ',' | '.' | ';' | ':' | '?' | '!'
+    )
+}
+
+fn pause_early_final_remainder(
+    final_text: &str,
+    delivered_display: &str,
+    delivered_key: &str,
+) -> Option<String> {
     if delivered_key.is_empty() {
         return Some(final_text.trim().to_string());
     }
     let mut seen_key = String::new();
     for (offset, ch) in final_text.char_indices() {
         if seen_key == delivered_key {
-            // The delivered display already printed its terminal punctuation;
-            // skip decorative separators at the split so they cannot print twice.
-            return Some(
-                final_text[offset..]
-                    .trim_start_matches(is_embedded_audio_partial_preview_decorative)
-                    .to_string(),
-            );
+            return Some(pause_early_boundary_tail(&final_text[offset..], delivered_display).to_string());
         }
         if is_embedded_audio_partial_preview_decorative(ch) {
             continue;
@@ -1568,6 +1604,80 @@ fn pause_early_final_remainder(final_text: &str, delivered_key: &str) -> Option<
     } else {
         None
     }
+}
+
+/// A live provider revision may correct words inside an already pasted
+/// segment. Continue delivering only when the end of that segment still has
+/// one unambiguous position near its old boundary. This is stricter than the
+/// final recovery path: an uncertain live boundary can wait for finalization.
+fn pause_early_anchored_continuation(
+    text: &str,
+    delivered_display: &str,
+    delivered_key: &str,
+) -> Option<String> {
+    let delivered: Vec<char> = delivered_key.chars().collect();
+    if delivered.len() < 8 {
+        return None;
+    }
+    let mut content = Vec::new();
+    let mut offsets = Vec::new();
+    for (offset, ch) in text.char_indices() {
+        if is_embedded_audio_partial_preview_decorative(ch) {
+            continue;
+        }
+        for lower in ch.to_lowercase() {
+            content.push(lower);
+            offsets.push(offset);
+        }
+    }
+    if content.len() <= delivered.len() {
+        return None;
+    }
+    let shared_prefix = delivered
+        .iter()
+        .zip(&content)
+        .take_while(|(a, b)| a == b)
+        .count();
+    let anchor = &delivered[delivered.len() - 8..];
+    // A two-pass provider revision can correct the opening from its first
+    // character while retaining a unique seam beside the paste boundary.
+    // Requiring an unchanged opening stopped live delivery for the rest of
+    // session 67577453. With no shared opening, use a wider but unique seam.
+    let tolerance = if shared_prefix < 2 { 4 } else { 2 };
+    let boundary_low = delivered.len().saturating_sub(tolerance);
+    let boundary_high = delivered.len() + tolerance;
+    let mut matched_boundary = None;
+    let mut anchor_occurrences = 0;
+    for start in 0..=content.len() - anchor.len() {
+        let after = start + anchor.len();
+        if content[start..after] != *anchor {
+            continue;
+        }
+        anchor_occurrences += 1;
+        if after < boundary_low || after > boundary_high {
+            continue;
+        }
+        if matched_boundary.replace(after).is_some() {
+            // A repeated suffix close to the paste boundary cannot establish
+            // which occurrence is already on screen.
+            return None;
+        }
+    }
+    if shared_prefix < 2 && anchor_occurrences != 1 {
+        return None;
+    }
+    let after = matched_boundary?;
+    if after >= content.len() {
+        return None;
+    }
+    let boundary = offsets[after - 1]
+        + text[offsets[after - 1]..]
+            .chars()
+            .next()
+            .expect("content offset points at a character")
+            .len_utf8();
+    let tail = pause_early_boundary_tail(&text[boundary..], delivered_display).to_string();
+    (!embedded_audio_partial_preview_stability_key(&tail).is_empty()).then_some(tail)
 }
 
 /// 干净会话里云端改写了已交付前缀时的内容保全（2026-09-22 15:1x，0e9b79fc
@@ -1698,17 +1808,21 @@ fn pause_early_tail_beyond_delivered_anchor(
             offsets.push(offset);
         }
     }
-    // 前置卫兵：交付与终稿必须共享开头（同源识别的正常形态）。深度改写
-    // （前缀从第一个字就分叉）时任何锚点命中都是巧合，补了必重贴。
+    // A two-pass correction can rewrite the opening from its first character
+    // while leaving an eight-character seam intact near the delivered end.
+    // Session 67577453 lost 56 owner characters because the old opening-only
+    // guard rejected that unique seam. A four-character seam still requires
+    // an unchanged opening; an eight-character seam must be unique and near
+    // the already delivered boundary.
     let shared_prefix = delivered_chars
         .iter()
         .zip(norm.iter())
         .take_while(|(delivered, sealed)| delivered == sealed)
         .count();
-    if shared_prefix < 2 {
-        return None;
-    }
     for &anchor_len in &[8usize, 4] {
+        if shared_prefix < 2 && anchor_len < 8 {
+            continue;
+        }
         if delivered_chars.len() < anchor_len || norm.len() < anchor_len {
             continue;
         }
@@ -1716,11 +1830,14 @@ fn pause_early_tail_beyond_delivered_anchor(
         // 最后一次出现：取最晚锚点让尾巴最小，重复上屏风险最低。
         let mut head: isize = norm.len() as isize - anchor_len as isize;
         let mut anchor_at: Option<usize> = None;
+        let mut matches = 0usize;
         while head >= 0 {
             let start = head as usize;
             if norm[start..start + anchor_len] == *anchor {
-                anchor_at = Some(start);
-                break;
+                matches += 1;
+                if anchor_at.is_none() {
+                    anchor_at = Some(start);
+                }
             }
             head -= 1;
         }
@@ -1728,6 +1845,11 @@ fn pause_early_tail_beyond_delivered_anchor(
             continue;
         };
         let after = start + anchor_len;
+        if shared_prefix < 2
+            && (matches != 1 || after.abs_diff(delivered_chars.len()) > 4)
+        {
+            continue;
+        }
         // 锚后无新内容 = 已交付覆盖到终稿末尾，无尾可补（也排除末尾重复）。
         if after >= norm.len() {
             continue;
@@ -1754,6 +1876,89 @@ fn pause_early_tail_beyond_delivered_anchor(
         }
     }
     None
+}
+
+/// Recover a genuinely new tail when cloud ASR changed both the middle and the
+/// last few characters of an early paste. Exact suffix anchors cannot locate
+/// the boundary in that case. Align the delivered content with a prefix of the
+/// final content, allowing a small number of recognition edits, then append
+/// only content after that boundary. A large rewrite remains ambiguous and is
+/// left to the existing no-duplicate fallback.
+fn pause_early_aligned_growth_tail(final_text: &str, delivered_key: &str) -> Option<String> {
+    let delivered: Vec<char> = delivered_key.chars().collect();
+    let len = delivered.len();
+    if len < 8 || len > 512 {
+        return None;
+    }
+    let mut final_content = Vec::new();
+    let mut offsets = Vec::new();
+    for (offset, ch) in final_text.char_indices() {
+        if is_embedded_audio_partial_preview_decorative(ch) {
+            continue;
+        }
+        for lower in ch.to_lowercase() {
+            final_content.push(lower);
+            offsets.push(offset);
+        }
+    }
+    // The existing micro-growth path handles 1-3 new characters. This path
+    // needs substantial growth to distinguish a continuation from a rewrite.
+    if final_content.len() < len + 4
+        || delivered
+            .iter()
+            .zip(&final_content)
+            .take_while(|(left, right)| left == right)
+            .count()
+            < 2
+    {
+        return None;
+    }
+    // If the final still ends with the delivered ending, the extra content
+    // may be an insertion inside the already pasted text. There is no proof of
+    // a continuation after the paste boundary.
+    if delivered
+        .iter()
+        .rev()
+        .zip(final_content.iter().rev())
+        .take_while(|(left, right)| left == right)
+        .take(4)
+        .count()
+        == 4
+    {
+        return None;
+    }
+    let max_edits = (len / 5).clamp(2, 12);
+    let max_prefix = final_content.len().min(len + max_edits);
+    let mut previous: Vec<usize> = (0..=max_prefix).collect();
+    let mut current = vec![0; max_prefix + 1];
+    for (index, expected) in delivered.iter().enumerate() {
+        current[0] = index + 1;
+        for prefix in 1..=max_prefix {
+            current[prefix] = (previous[prefix] + 1)
+                .min(current[prefix - 1] + 1)
+                .min(previous[prefix - 1] + usize::from(*expected != final_content[prefix - 1]));
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+    let mut best: Option<(usize, usize)> = None;
+    for prefix in len.saturating_sub(max_edits)..=max_prefix {
+        if final_content.len() - prefix < 4 || previous[prefix] > max_edits {
+            continue;
+        }
+        if best.is_none_or(|(cost, boundary)| {
+            previous[prefix] < cost || (previous[prefix] == cost && prefix > boundary)
+        }) {
+            best = Some((previous[prefix], prefix));
+        }
+    }
+    let (_, boundary) = best?;
+    let tail = final_text[offsets[boundary]..]
+        .trim_start_matches(is_embedded_audio_partial_preview_decorative)
+        .to_string();
+    (!tail
+        .trim_matches(|ch: char| is_embedded_audio_partial_preview_decorative(ch))
+        .is_empty())
+    .then_some(tail)
 }
 
 fn pause_early_delivery_session_state(
@@ -1850,11 +2055,35 @@ pub(super) fn take_pause_early_delivery(
 /// 2026-09-22 14:2x 实测修正沿袭:流式尾句不带句末标点(云端终稿才补),
 /// 不设句末标点门——账本稳定窗本身即"这句说完了"的充分证据,stability
 /// key 对标点免疫,终稿补的句号不会双插。
+fn automatic_wake_has_unstripped_lead_in(raw_text: &str, phrase: &str) -> bool {
+    raw_text
+        .find(phrase)
+        .is_some_and(|offset| raw_text[..offset].chars().filter(|ch| ch.is_alphanumeric()).count() > 2)
+}
+
 fn pause_early_display_text(
     inner: &Arc<Inner>,
     session_id: SessionId,
     raw_text: &str,
 ) -> Option<String> {
+    // The phrase detector can open a session even when the provider's early
+    // text begins with another speaker and places the real wake phrase later.
+    // Keep that text in the reversible capsule preview, but do not paste the
+    // ambiguous pre-wake prefix into the target app. The speaker-filtered
+    // final can then discard the foreign row without leaving it on screen.
+    let wake_phrase = inner
+        .embedded_audio_automatic_wake_guard
+        .lock()
+        .as_ref()
+        .filter(|guard| guard.session_id == session_id)
+        .map(|guard| guard.phrase.clone());
+    if wake_phrase
+        .as_deref()
+        .is_some_and(|phrase| automatic_wake_has_unstripped_lead_in(raw_text, phrase))
+    {
+        pause_early_note_gate_blocked(inner, session_id, "unstripped_pre_wake_lead_in");
+        return None;
+    }
     let text = filter_automatic_wake_text(inner, session_id, raw_text, false);
     let prefs = inner.prefs.get();
     let text = if prefs.remove_filler_words {
@@ -1897,7 +2126,7 @@ fn pause_early_display_text(
 }
 
 /// Watchdog 每拍评估（无 STOP 待决时）。条件全满足才动作：
-/// 干净会话（ASR 账本卫兵：无冻结/无非主人窗）+ 账本稳定 ≥1s +
+/// 干净会话（ASR 账本卫兵：无冻结）+ 账本前缀稳定 ≥1s +
 /// Raw 一次性路径（翻译/LLM 会整体改写，前缀会被孤立）+ 有新增内容 +
 /// 原焦点目标可恢复。组字流式活着时改走 stream_commit 落定(不碰焦点,
 /// 组字锚在目标进程);任何失败静默回退到现行为(终稿一次性交付)。
@@ -1952,6 +2181,8 @@ async fn pause_early_delivery_tick(
         }
         return;
     };
+    let snapshot_chars = snapshot.text.chars().count();
+    let full_ledger_chars = asr.pause_early_delivery_gate_diag().2;
     {
         let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
         if ledger.qualified_diag_logged.as_ref() != Some(&session_id) {
@@ -1968,23 +2199,38 @@ async fn pause_early_delivery_tick(
         return;
     };
     let prefs = inner.prefs.get();
-    let key = embedded_audio_partial_preview_stability_key(&text);
     let (delivered_display, delivered_key) =
         pause_early_delivery_session_state(inner, session_id);
-    if !key.starts_with(&delivered_key) || key.len() == delivered_key.len() {
-        return;
-    }
-    let Some(delta) = pause_early_final_remainder(&text, &delivered_key) else {
+    let exact_delta = pause_early_final_remainder(&text, &delivered_display, &delivered_key);
+    let anchored = exact_delta.is_none();
+    let Some(delta) = exact_delta
+        .or_else(|| pause_early_anchored_continuation(&text, &delivered_display, &delivered_key))
+    else {
+        pause_early_note_gate_blocked(inner, session_id, "delivered_prefix_revised_unaligned");
         return;
     };
     if delta.is_empty() {
         return;
     }
+    if !pause_early_chunk_ready(&delivered_key, &delta) {
+        return;
+    }
+    let new_display = format!("{delivered_display}{delta}");
+    // The key must describe what was actually pasted. The provider's revised
+    // full prefix may differ from that text, even when its suffix aligns.
+    let new_key = embedded_audio_partial_preview_stability_key(&new_display);
+    if anchored {
+        log::info!(
+            "[coord] pause-early anchored continuation session_id={session_id} prefix_chars={} total_delivered_chars={}",
+            delta.chars().count(),
+            new_display.chars().count()
+        );
+    }
     // 组字流式活着 → 落定走 stream_commit(组字锚在目标进程,不需要焦点
     // 恢复;账本先记后 commit,失败回滚——次序与粘贴路径同款)。失败时驱动
     // 已降级清组字,下一拍以空账本走粘贴分支补上。
     if streaming_composition_active(inner, session_id) {
-        streaming_composition_commit_stable(inner, session_id, &delta, &delivered_display, &key)
+        streaming_composition_commit_stable(inner, session_id, &delta, &delivered_display, &new_key)
             .await;
         return;
     }
@@ -2006,8 +2252,7 @@ async fn pause_early_delivery_tick(
         return;
     }
     // 先记账再粘贴：并发触发的终稿交付会按在途前缀计算余量；粘贴失败回滚。
-    let new_display = format!("{delivered_display}{delta}");
-    pause_early_delivery_reserve(inner, session_id, new_display, key.clone());
+    pause_early_delivery_reserve(inner, session_id, new_display, new_key);
     // 2026-09-23 tki:中途粘贴不恢复剪贴板。750ms 恢复窗口追不上忙碌目标
     // (VS Code/Chromium 渲染器)的粘贴派发——08:39 实锤:第 1 段 22 字正确,
     // 第 2/3 段粘出的是用户 08:22 复制的旧报告×2(账本记 14+14 字已交付,
@@ -2035,7 +2280,7 @@ async fn pause_early_delivery_tick(
     }
     pause_early_delivery_confirm(inner, session_id);
     log::info!(
-        "[coord] pause-early-delivery prefix_chars={} total_delivered_chars={} min_stable_ms={} route={:?} status={:?}",
+        "[coord] pause-early-delivery prefix_chars={} total_delivered_chars={} snapshot_chars={snapshot_chars} ledger_chars={full_ledger_chars} min_stable_ms={} route={:?} status={:?}",
         delta.chars().count(),
         delivered_display.chars().count() + delta.chars().count(),
         PAUSE_EARLY_DELIVERY_MIN_STABLE.as_millis(),

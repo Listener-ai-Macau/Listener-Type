@@ -181,8 +181,10 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator/dictation_embedded_submit.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_endpoint_clock.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_endpoint_policy.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_local_speech_activity.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_preview.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_session.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_streaming_composition.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_target_speaker_update.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_volcengine_callbacks.rs` | Core app | Build and targeted tests |
@@ -198,6 +200,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator/qa.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/recording_gate.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/resources.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/source_integrity.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/support.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator_state.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator_tests.rs` | Core app | Build and targeted tests |
@@ -225,6 +228,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/llm_gemini.rs` | Polish providers | Rust unit tests, provider smoke |
 | `src-tauri/src/main.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/marketplace_backend.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/net_health.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/observability.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/permissions.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/persistence.rs` | Local data and style packs | Rust unit tests, local import/export smoke |

@@ -824,7 +824,7 @@ try {
   }
 
   $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
-  Write-Host "[info] Default Windows package does not bundle or register the optional TSF IME."
+  Write-Host "[info] MSI bundles and registers the TSF IME from resources/windows-ime."
   if ($UseSccache.IsPresent -and -not (Test-Command "sccache")) {
     throw "-UseSccache was set, but sccache is not installed or not on PATH."
   }

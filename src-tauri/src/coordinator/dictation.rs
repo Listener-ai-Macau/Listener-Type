@@ -1867,8 +1867,8 @@ async fn begin_embedded_audio_dictation_session(
         let mut slots = inner.prepared_windows_ime_session.lock();
         store_prepared_windows_ime_session(&mut slots, current_session_id, prepared);
     }
-    // 组字流式(2026-09-22 切片3):TSF 就绪+目标可解析时起驱动,说话期间
-    // 逐字组字;任何不满足静默保持粘贴行为。回退 LISTENER_DISABLE_STREAMING_COMPOSITION=1。
+    // Optional TSF composition is only started when explicitly enabled. The
+    // default is confirmed segment delivery while the capsule keeps listening.
     begin_streaming_composition_session(inner, current_session_id).await;
     inner
         .translation_modifier_seen
@@ -3107,8 +3107,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                     log::warn!(
                         "[coord] Volcengine primary stream failed; attempting one retained-audio replay: {primary_error}"
                     );
+                    let replay_timeout = asr.full_audio_replay_timeout();
                     asr.cancel();
-                    match tokio::time::timeout(timeout_duration, asr.replay_retained_audio_once())
+                    match tokio::time::timeout(replay_timeout, asr.replay_retained_audio_once())
                         .await
                     {
                         Ok(Ok(result)) => result,
@@ -3149,8 +3150,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                         }
                         Err(_) => {
                             log::error!(
-                                "[coord] Volcengine retained-audio replay timed out after {} seconds (primary_error={primary_error})",
-                                COORDINATOR_GLOBAL_TIMEOUT_SECS
+                                "[coord] Volcengine retained-audio replay timed out after {} ms (primary_error={primary_error})",
+                                replay_timeout.as_millis()
                             );
                             finish_dictation_timeout(
                                 inner,
@@ -4027,8 +4028,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         // 2026-09-23 17:31 d37e3562 吞尾实锤：润色压缩+流式中间态膨胀让
         // polished 域的前缀/LCP 全部失真，原始终稿域先对账（同域可比），
         // 仍不可切时用交付末尾锚点从原始终稿补未上屏的尾巴。
-        let remainder = pause_early_final_remainder(&polished, key)
-            .or_else(|| pause_early_final_remainder(&raw.text, key));
+        let remainder = pause_early_final_remainder(&polished, display, key)
+            .or_else(|| pause_early_final_remainder(&raw.text, display, key));
         // 改写=云端修订：按 LCP 补回尾巴保内容（0e9b79fc 丢 16 字的教训）。
         // 2026-09-22 16:47 修正：不再限定干净会话——polished 已过归属仲裁
         // （旁人内容在上游已切），补的尾巴与不走停顿落屏时的终稿同文；
@@ -4036,7 +4037,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         let recovery = if remainder.is_none() {
             pause_early_mismatch_recovery_tail(&polished, key)
                 .or_else(|| pause_early_mismatch_recovery_tail(&raw.text, key))
+                .or_else(|| pause_early_tail_beyond_delivered_anchor(&polished, key))
                 .or_else(|| pause_early_tail_beyond_delivered_anchor(&raw.text, key))
+                .or_else(|| pause_early_aligned_growth_tail(&polished, key))
         } else {
             None
         };
@@ -4165,7 +4168,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                 .is_some_and(|(_, remainder, recovery)| remainder.is_none() && recovery.is_some())
             {
                 log::info!(
-                    "[coord] pause-early-delivery final mismatch recovered via lcp tail chars={} of final {}",
+                    "[coord] pause-early-delivery final mismatch recovered tail chars={} of final {}",
                     insert_text.chars().count(),
                     polished.chars().count()
                 );
@@ -4620,9 +4623,7 @@ fn request_embedded_ble_firmware_cancel_on_active_recording(
         );
         // Send before local capture teardown; once cancel closes notify, the active
         // capture control queue is gone and a queued firmware cancel can time out.
-        match crate::embedded_ble::send_recording_control_cancel(
-            EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
-        ) {
+        match crate::embedded_ble::send_recording_control_cancel(Duration::from_millis(700)) {
             Ok(()) => {
                 crate::timeline::mark(
                     "backend.embedded_ble_session_actor",

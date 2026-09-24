@@ -51,6 +51,7 @@ fn open_terminal_local_near_can_accept(
             task_origin_bytes,
             best_window_start: confirmation.phonetic_best_window_start,
             best_distance: confirmation.phonetic_best_distance,
+            prefix_units: confirmation.phonetic_prefix_units,
             transcript_chars: confirmation.transcript_chars,
             phrase_chars,
             terminal_window: true,

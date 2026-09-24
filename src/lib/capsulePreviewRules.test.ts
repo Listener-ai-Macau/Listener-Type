@@ -134,7 +134,7 @@ assertOk(
 
 {
   const current = '这是已有的预览文字';
-  const target = `${current}现在一次补回八个新字`;
+  const target = `${current}现在一次补回很多很多很多新字`;
   const frames = buildPreviewRevealFrames(current, target);
   assertOk(frames.length > 1, 'large pure append should be visually smoothed');
   assertOk(
@@ -165,11 +165,12 @@ assertEqual(
 
 {
   const frames = buildPreviewRevealFrames('预览', '预览文字流');
-  assertEqual(frames.length, 3, 'three-character provider bursts should still reveal progressively');
-  const intervalMs = previewRevealIntervalMs(frames.length);
-  assertOk(intervalMs >= 16, 'reveal interval must remain visible for at least one frame');
+  assertEqual(frames.length, 1, 'routine three-character provider updates should appear immediately');
+  const largeFrames = buildPreviewRevealFrames('预览', '预览一次性补回很多很多很多新字');
+  const intervalMs = previewRevealIntervalMs(largeFrames.length);
+  assertOk(intervalMs >= 8, 'large-burst reveal must stay visible');
   assertOk(
-    intervalMs * (frames.length - 1) <= PREVIEW_BURST_REVEAL.maxCatchUpMs,
+    intervalMs * (largeFrames.length - 1) <= PREVIEW_BURST_REVEAL.maxCatchUpMs,
     'reveal must catch up within the bounded latency budget',
   );
 }

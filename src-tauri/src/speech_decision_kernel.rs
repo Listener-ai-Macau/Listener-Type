@@ -1299,10 +1299,23 @@ pub(crate) const fn terminal_owner_overlap_wake_can_activate(
     source_owner_compatible && owner_score >= 0.40 && confirmations >= 1
 }
 
-/// When overlap prevents an exact phrase match, two independent near-phrase
-/// confirmations plus a full enrolled-owner match are sufficient to release
-/// the wake. This is stricter than a single noisy guess and avoids requiring
-/// three start-aligned windows that may no longer contain the phrase.
+/// Keep the looser two-unit phonetic rescue near the start of a search window.
+/// Repeated overlapping ASR windows are correlated, so a two-unit neighbour
+/// buried in ordinary speech cannot become wake evidence by repetition alone.
+pub(crate) const fn owner_near_phrase_evidence_can_accumulate(
+    phrase_absent: bool,
+    best_distance: usize,
+    best_window_start: usize,
+    transcript_chars: usize,
+    phrase_chars: usize,
+) -> bool {
+    phrase_absent
+        && (best_distance <= 1 || (best_distance == 2 && best_window_start == 0))
+        && transcript_chars > phrase_chars
+}
+
+/// Two eligible near-phrase observations plus a full enrolled-owner match can
+/// release the wake. The observations may overlap and are not independent.
 pub(crate) const fn repeated_owner_near_phrase_wake_can_activate(
     owner_matched: bool,
     owner_score: f32,
@@ -1380,6 +1393,10 @@ pub(crate) struct OpenNearPhraseWakeEvidence {
     pub(crate) task_origin_bytes: usize,
     pub(crate) best_window_start: usize,
     pub(crate) best_distance: usize,
+    /// A two-unit neighbour needs at least the opening wake syllable. A
+    /// head-aligned unrelated short sentence can otherwise pass the loose
+    /// voiceprint floor at terminal (installed 2026-09-23 22:19).
+    pub(crate) prefix_units: usize,
     pub(crate) transcript_chars: usize,
     pub(crate) phrase_chars: usize,
     /// Terminal (final) evaluation of the candidate window. Only then may a
@@ -1417,6 +1434,7 @@ pub(crate) const fn open_near_phrase_wake_can_activate(
         && evidence.transcript_chars + 1 >= evidence.phrase_chars;
     evidence.best_distance > 0
         && evidence.best_distance <= OPEN_NEAR_PHRASE_MAX_DISTANCE
+        && (evidence.best_distance < 2 || evidence.prefix_units >= 1)
         && evidence.task_origin_bytes == 0
         && evidence.best_window_start == 0
         && (body_text || phrase_only_terminal)
@@ -2548,6 +2566,19 @@ mod tests {
     }
 
     #[test]
+    fn repeated_owner_near_phrase_excludes_buried_two_unit_neighbour() {
+        // False wake 2356876213: four overlapping windows saw distance 2 at
+        // window start 4 in ordinary speech, despite a valid owner voiceprint.
+        assert!(!owner_near_phrase_evidence_can_accumulate(true, 2, 4, 12, 4));
+        // A two-unit error at the beginning remains eligible for suffix crop.
+        assert!(owner_near_phrase_evidence_can_accumulate(true, 2, 0, 12, 4));
+        // A stronger one-unit match may still follow firmware pre-roll.
+        assert!(owner_near_phrase_evidence_can_accumulate(true, 1, 4, 12, 4));
+        assert!(!owner_near_phrase_evidence_can_accumulate(false, 1, 0, 12, 4));
+        assert!(!owner_near_phrase_evidence_can_accumulate(true, 1, 0, 4, 4));
+    }
+
+    #[test]
     fn masked_owner_phrase_recovery_starts_only_for_owner_shaped_garbage() {
         use MaskedOwnerPhraseRecoveryEvidence as Evidence;
         // Session 2274297707 (2026-09-20 18:08): interference masked the wake
@@ -2594,6 +2625,7 @@ mod tests {
             task_origin_bytes: 0,
             best_window_start: 0,
             best_distance: 2,
+            prefix_units: 1,
             transcript_chars: 21,
             phrase_chars: 4,
             terminal_window: true,
@@ -2651,11 +2683,20 @@ mod tests {
             task_origin_bytes: 0,
             best_window_start: 0,
             best_distance: 2,
+            prefix_units: 1,
             transcript_chars: 4,
             phrase_chars: 4,
             terminal_window: true,
         };
         assert!(open_near_phrase_wake_can_activate(bare_accented_owner));
+        // A terminal five-character near-neighbour with zero matching wake
+        // prefix caused a false wake despite owner score 0.2186.
+        assert!(!open_near_phrase_wake_can_activate(Evidence {
+            voiceprint_score: Some(0.2186),
+            prefix_units: 0,
+            transcript_chars: 5,
+            ..bare_accented_owner
+        }));
         // A clipped head that still left phrase_chars - 1 units is the same
         // story; losing two units of a four-unit phrase is not a wake.
         assert!(open_near_phrase_wake_can_activate(Evidence {

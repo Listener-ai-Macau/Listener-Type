@@ -1,10 +1,9 @@
 # Windows IME
 
-Listener Type keeps a native TSF text service for optional Windows insertion
-testing. Default 3.5/OOBE Windows installers do not bundle or register this
-text service, so they should not add `Listener Type Voice Input` to the system
-input method list. They may run cleanup hooks that unregister an older Listener
-Type TSF service if a previous package installed one.
+Listener Type uses a native TSF text service for Windows insertion. The current
+MSI bundles the x64 and x86 DLLs as resources, clears stale registration, and
+registers them during installation. It unregisters them on removal. The NSIS
+installer still uses legacy cleanup hooks and does not register TSF.
 
 ## Identity
 
@@ -21,7 +20,8 @@ Type TSF service if a previous package installed one.
 - Native TSF service: `windows-ime/src/text_service.cpp`, `windows-ime/src/registry.cpp`, `windows-ime/src/ipc_client.cpp`.
 - GUID definitions: `windows-ime/src/guids.h`, `src-tauri/src/windows_ime_profile.rs`.
 - Backend bridge: `src-tauri/src/windows_ime.rs`, `src-tauri/src/windows_ime_profile.rs`.
-- Legacy cleanup hooks used by the default installer: `src-tauri/nsis/listener-type-ime-cleanup-hooks.nsh`, `src-tauri/wix/listener-type-ime-cleanup.wxs`.
+- Legacy cleanup hooks used by NSIS: `src-tauri/nsis/listener-type-ime-cleanup-hooks.nsh`.
+- MSI cleanup and registration: `src-tauri/wix/listener-type-ime-cleanup.wxs`.
 - Optional TSF packaging hooks: `src-tauri/nsis/listener-type-ime-hooks.nsh`, `src-tauri/wix/listener-type-ime.wxs`.
 - Smoke scripts: `scripts/windows-ime-install-smoke.ps1`, `scripts/windows-real-asr-insertion-smoke.ps1`.
 
@@ -32,7 +32,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib windows_ime_profile
 node scripts/windows-package-msvc.test.mjs
 ```
 
-For manual TSF validation, register the IME explicitly with
-`scripts/windows-ime-register.ps1`, run the insertion smoke, then unregister it
-with `scripts/windows-ime-unregister.ps1`. Do not use the default product
-installer as proof that TSF was registered.
+For manual TSF validation, run the insertion smoke against the installed MSI.
+For standalone IME development, register with `scripts/windows-ime-register.ps1`
+and unregister with `scripts/windows-ime-unregister.ps1` afterward. An MSI file
+by itself does not prove that registration succeeded on a particular machine.

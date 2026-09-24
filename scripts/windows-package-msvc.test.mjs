@@ -166,8 +166,8 @@ assert.match(ciWorkflow, /WixTools\*\\light\.exe/, "CI MSI repair should discove
 
 assert.equal(tauriConfig.bundle.windows.nsis.installMode, "perMachine", "Windows installer remains a machine-wide product install");
 assert.equal(tauriConfig.bundle.windows.nsis.installerHooks, "nsis/listener-type-ime-cleanup-hooks.nsh", "default NSIS may only clean up legacy TSF IME registration");
-assert.deepEqual(tauriConfig.bundle.windows.wix.fragmentPaths, ["wix/listener-type-ime-cleanup.wxs"], "default MSI may only include legacy TSF cleanup actions");
-assert.deepEqual(tauriConfig.bundle.windows.wix.componentRefs, ["LegacyListenerTypeImeRegistryCleanupComponent"], "default MSI may only include the legacy TSF registry cleanup component");
+assert.deepEqual(tauriConfig.bundle.windows.wix.fragmentPaths, ["wix/listener-type-ime-cleanup.wxs"], "default MSI should include the TSF registration fragment");
+assert.deepEqual(tauriConfig.bundle.windows.wix.componentRefs, ["LegacyListenerTypeImeRegistryCleanupComponent"], "default MSI should clear stale TSF registry keys before registering the bundled DLLs");
 assert.match(viteConfig, /base:\s*["']\.\/["']/, "Tauri production builds must use relative asset URLs");
 assert.doesNotMatch(distIndex, /\b(?:src|href)="\/assets\//, "built dist/index.html must not reference absolute /assets URLs");
 assert.match(distIndex, /\b(?:src|href)="\.\/assets\//, "built dist/index.html should reference relative ./assets URLs");
@@ -187,7 +187,7 @@ assert.match(persistence, /const PREFERENCES_FILE: &str = "preferences\.json"/, 
 assert.match(persistence, /target_os = "windows"[\s\S]*std::env::var\("APPDATA"\)[\s\S]*join\(app_profile_dir_name\(\)\)/, "Windows preferences must live under %APPDATA%\\Listener Type, independent of the installed exe");
 assert.doesNotMatch(script, /preferences\.json/i, "MSI packaging and install validation must not rewrite the user preferences file");
 assert.doesNotMatch(script, /APPDATA[\s\S]{0,240}Remove-Item|Remove-Item[\s\S]{0,240}APPDATA/i, "MSI packaging and install validation must not delete or clean the user AppData settings directory");
-assert.doesNotMatch(ciWorkflow, /windows-ime-install-smoke\.ps1/, "release CI must not expect default installers to register a TSF IME");
+assert.doesNotMatch(ciWorkflow, /windows-ime-install-smoke\.ps1/, "release CI does not run the interactive TSF install smoke");
 assert.match(ciWorkflow, /node scripts\/windows-package-msvc\.test\.mjs/, "release CI should run the static packaging guard");
 
 assert.match(imeBuild, /\[string\]\$OutputDirectory/, "standalone IME build should support a package-specific output directory");
@@ -225,12 +225,15 @@ assert.match(wixFragment, /Component Id="ListenerTypeImeDllX86Component"/, "opti
 assert.match(wixFragment, /regsvr32\.exe/, "optional IME WiX fragment should still register and unregister the TSF DLL when deliberately wired in");
 assert.match(nsisHook, /NSIS_HOOK_POSTINSTALL/, "optional IME NSIS hook should still support TSF DLL registration when deliberately wired in");
 assert.match(nsisHook, /NSIS_HOOK_PREUNINSTALL/, "optional IME NSIS hook should still support TSF DLL unregistration when deliberately wired in");
-assert.match(wixCleanupFragment, /UnregisterLegacyListenerTypeImeX64OnInstall/, "default MSI should unregister a previously installed x64 TSF IME");
-assert.match(wixCleanupFragment, /UnregisterLegacyListenerTypeImeX86OnInstall/, "default MSI should unregister a previously installed x86 TSF IME");
-assert.match(wixCleanupFragment, /LegacyListenerTypeImeRegistryCleanupComponent/, "default MSI should include a registry cleanup component");
+assert.match(wixCleanupFragment, /RegisterListenerTypeImeX64OnInstall/, "default MSI should register the bundled x64 TSF IME");
+assert.match(wixCleanupFragment, /RegisterListenerTypeImeX86OnInstall/, "default MSI should register the bundled x86 TSF IME");
+assert.match(wixCleanupFragment, /UnregisterListenerTypeImeX64OnRemove/, "default MSI should unregister the x64 TSF IME on removal");
+assert.match(wixCleanupFragment, /UnregisterListenerTypeImeX86OnRemove/, "default MSI should unregister the x86 TSF IME on removal");
+assert.match(wixCleanupFragment, /LegacyListenerTypeImeRegistryCleanupComponent/, "default MSI should include a stale-registration cleanup component");
 assert.match(wixCleanupFragment, /RemoveRegistryKey Root="HKLM" Key="Software\\Microsoft\\CTF\\TIP\\\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767\}"/, "default MSI should remove the legacy TSF TIP key");
-assert.doesNotMatch(wixCleanupFragment, /Component Id="ListenerTypeImeDll/, "default MSI cleanup fragment must not install IME DLL components");
-assert.doesNotMatch(wixCleanupFragment, /RegisterListenerTypeImeX64/, "default MSI cleanup fragment must not register the TSF IME");
+assert.doesNotMatch(wixCleanupFragment, /Component Id="ListenerTypeImeDll/, "TSF DLLs are bundled as Tauri resources rather than WiX components");
+assert.match(wixCleanupFragment, /\[INSTALLDIR\]resources\\windows-ime\\x64\\ListenerTypeIme\.dll/, "MSI registration must point to the installed x64 resource");
+assert.match(wixCleanupFragment, /\[INSTALLDIR\]resources\\windows-ime\\x86\\ListenerTypeIme\.dll/, "MSI registration must point to the installed x86 resource");
 assert.match(nsisCleanupHook, /LISTENER_TYPE_LEGACY_IME_UNREGISTER_X64/, "default NSIS hook should unregister a previously installed x64 TSF IME");
 assert.match(nsisCleanupHook, /LISTENER_TYPE_LEGACY_IME_REMOVE_REGISTRY/, "default NSIS hook should remove stale TSF registry keys");
 assert.match(nsisCleanupHook, /LISTENER_TYPE_LEGACY_IME_REMOVE_FILES/, "default NSIS hook should remove stale bundled IME DLLs");

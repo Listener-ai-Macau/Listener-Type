@@ -415,11 +415,17 @@ pub(crate) fn adaptive_bank_should_refresh(bank: &[Vec<f32>], candidate: &[f32])
         })
 }
 
-// 会话分段分类阈值。2026-08-09 的第二个人得分可达 0.426–0.58；而
-// 2026-08-14 installed session 1947 中，已经通过主人唤醒校验的同一说话人
-// 正文连续得到 0.307–0.337。中间分数只能作为 Uncertain，不能冻结并截断
-// 正文。仅 <=0.20 的强差异作为 NonTarget；>=0.55 才是确信 Target。
-const SESSION_SPEAKER_CONFIDENT_TARGET_MIN_SCORE: f32 = 0.55;
+// 会话分段分类阈值。2026-09-23 71f64ac1 矩阵重校（ef_session_score_bands_
+// matrix，12 会话真实 WAV + 当晚干扰实测）：本人的连续说话声对"档案=
+// 3 条 TTS 银行 + 1 条当会话唤醒锚点"的 max-cosine 活在 0.42–0.59，跨会话
+// 峰值 0.36–0.55——0.55 的确信线本人几乎永远够不着（当晚本人全程
+// Uncertain → owner_isolation 冻结在旁人插话后永不解除，解冻要求连续
+// Target 窗）。旧线防的 0.426–0.58"第二个人"是 pre-2026-09-18 TTS 银行
+// 时代的测量（volcengine.rs 注释 anchor-era 实测旁人 <=0.11，当晚真实
+// 旁人 <=0.28）。线收到 0.40：本人带 0.42+ 全覆盖，旁人余量 0.12，
+// NonTarget 线 0.20 不动。中间分仍作 Uncertain，绝不因 Uncertain 冻结
+// 截断正文。
+const SESSION_SPEAKER_CONFIDENT_TARGET_MIN_SCORE: f32 = 0.40;
 const SESSION_SPEAKER_NON_TARGET_MAX_SCORE: f32 = 0.20;
 
 fn session_speaker_classification_for_score(score: f32) -> SessionSpeakerClassification {
@@ -2361,6 +2367,131 @@ mod platform {
             SESSION_SPEAKER_MAX_EMBEDDINGS, SESSION_SPEAKER_NON_TARGET_MAX_SCORE,
         };
 
+        /// Offline matrix: read a canonical 16 kHz mono s16le WAV (the diag
+        /// writer and recordings both emit this shape).
+        #[cfg(target_os = "windows")]
+        fn read_pcm16_wav(path: &str) -> Vec<u8> {
+            let bytes = std::fs::read(path).expect("wav readable");
+            let data_at = bytes
+                .windows(4)
+                .position(|w| w == b"data")
+                .expect("data chunk");
+            let len = u32::from_le_bytes([
+                bytes[data_at + 4],
+                bytes[data_at + 5],
+                bytes[data_at + 6],
+                bytes[data_at + 7],
+            ]) as usize;
+            bytes[data_at + 8..data_at + 8 + len].to_vec()
+        }
+
+        /// 2026-09-23 71f64ac1 复现器（终端唤醒 + 干扰环境 → 全程
+        /// ConfirmedOther → 冻结/吞尾）。用当晚真实 WAV 重放:唤醒窗档案
+        /// (end=5.938s, enrolled) 对会话正文的 1.2s 滚动窗评分序列。
+        /// 加 --all-sessions 参数不可行,所以第二个测试扫当天全部会话 WAV
+        /// 出分带直方图(校准自信线用)。
+        /// Set LISTENER_FORENSIC_WAKE_WAV and LISTENER_FORENSIC_BODY_WAV to
+        /// local fixture paths, then run with --ignored --nocapture.
+        #[cfg(target_os = "windows")]
+        #[test]
+        #[ignore = "forensics tool: needs the 2026-09-23 field WAVs on disk"]
+        fn ef_session_71f64ac1_replay() {
+            let wake_path = std::env::var("LISTENER_FORENSIC_WAKE_WAV")
+                .expect("set LISTENER_FORENSIC_WAKE_WAV to the accepted wake WAV");
+            let body_path = std::env::var("LISTENER_FORENSIC_BODY_WAV")
+                .expect("set LISTENER_FORENSIC_BODY_WAV to the session WAV");
+            let wake_pcm = read_pcm16_wav(&wake_path);
+            let body_pcm = read_pcm16_wav(&body_path);
+            let profile = session_profile_from_wake(&wake_pcm, 5.938, "开始录音", true)
+                .expect("profile from wake window");
+            const WINDOW_MS: usize = 1_200;
+            const STEP_MS: usize = 400;
+            let mut cursor_ms = 1_000usize;
+            println!("body_pcm_ms={}", body_pcm.len() / 32);
+            while cursor_ms <= body_pcm.len() / 32 {
+                let start = cursor_ms.saturating_sub(WINDOW_MS) * 32;
+                let slice = &body_pcm[start..(cursor_ms) * 32];
+                let observation = observe_session_speaker(&profile, slice).expect("observe");
+                println!(
+                    "t={:>5}ms score={:.4} real_speech_ms={} quality={} classification={:?}",
+                    cursor_ms,
+                    observation.classification.score(),
+                    observation.real_speech_ms,
+                    observation.signal_quality_sufficient,
+                    observation.classification
+                );
+                cursor_ms += STEP_MS;
+            }
+        }
+
+        /// 阈值矩阵:指定唤醒档案 对 本地会话正文的分带统计。
+        /// 只统计 quality=true(≥1s 真语音)窗,分带:<0.20 / 0.20-0.40 /
+        /// 0.40-0.55 / ≥0.55。校准 SESSION_SPEAKER_CONFIDENT_TARGET_MIN_SCORE
+        /// 的依据输出。
+        #[cfg(target_os = "windows")]
+        #[test]
+        #[ignore = "forensics tool: needs the 2026-09-23 field WAVs on disk"]
+        fn ef_session_score_bands_matrix() {
+            let wake_path = std::env::var("LISTENER_FORENSIC_WAKE_WAV")
+                .expect("set LISTENER_FORENSIC_WAKE_WAV to the accepted wake WAV");
+            let wake_pcm = read_pcm16_wav(&wake_path);
+            let profile = session_profile_from_wake(&wake_pcm, 5.938, "开始录音", true)
+                .expect("profile from wake window");
+            let dir_path = std::env::var("LISTENER_FORENSIC_RECORDINGS_DIR")
+                .expect("set LISTENER_FORENSIC_RECORDINGS_DIR to the recordings directory");
+            let dir = std::path::Path::new(&dir_path);
+            let mut names: Vec<_> = std::fs::read_dir(dir)
+                .expect("recordings dir")
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .filter(|path| path.extension().is_some_and(|ext| ext == "wav"))
+                .collect();
+            names.sort_by_key(|path| std::fs::metadata(path).ok().and_then(|m| m.modified().ok()));
+            for path in names.iter().rev().take(12) {
+                let body_pcm = read_pcm16_wav(path.to_string_lossy().as_ref());
+                const WINDOW_MS: usize = 1_200;
+                const STEP_MS: usize = 400;
+                let mut cursor_ms = 1_000usize;
+                let (mut low, mut mid, mut high, mut top) = (0u32, 0u32, 0u32, 0u32);
+                let mut min_quality = f32::MAX;
+                let mut max_quality = f32::MIN;
+                let mut quality_windows = 0u32;
+                while cursor_ms <= body_pcm.len() / 32 {
+                    let start = cursor_ms.saturating_sub(WINDOW_MS) * 32;
+                    let slice = &body_pcm[start..(cursor_ms) * 32];
+                    if let Ok(observation) = observe_session_speaker(&profile, slice) {
+                        let score = observation.classification.score();
+                        if observation.signal_quality_sufficient {
+                            quality_windows += 1;
+                            min_quality = min_quality.min(score);
+                            max_quality = max_quality.max(score);
+                            if score < 0.20 {
+                                low += 1;
+                            } else if score < 0.40 {
+                                mid += 1;
+                            } else if score < 0.55 {
+                                high += 1;
+                            } else {
+                                top += 1;
+                            }
+                        }
+                    }
+                    cursor_ms += STEP_MS;
+                }
+                println!(
+                    "{:?} quality_windows={} range=[{:.3},{:.3}] bands(<.20/.20-.40/.40-.55/>=.55)={}/{}/{}/{}",
+                    path.file_name().map(|n| n.to_string_lossy().to_string()),
+                    quality_windows,
+                    min_quality,
+                    max_quality,
+                    low,
+                    mid,
+                    high,
+                    top
+                );
+            }
+        }
+
         #[test]
         fn guided_enrollment_step_boundaries_match_the_three_visible_prompts() {
             assert_eq!(enrollment_step_for_elapsed_ms(0), 0);
@@ -3782,6 +3913,38 @@ mod tests {
         ));
     }
 
+    /// 2026-09-23 重校（71f64ac1 矩阵）：本人的连续说话声对档案
+    /// （TTS 银行 + 当会话唤醒锚点）实测 0.42–0.59。旧线 0.55 让本人
+    /// 全程 Uncertain → owner_isolation 冻结在旁人插话后永不解除。
+    /// 新线 0.40 下本人带必须是 Target；旁人带（当晚实测 <=0.28）
+    /// 仍不得越线。
+    #[test]
+    fn session_speaker_owner_body_band_is_target_after_recalibration() {
+        // 71f64ac1 真实重放序列（quality=true 窗）。
+        for score in [0.434_754_2, 0.456_008_52, 0.507_647_45, 0.511_233_87, 0.541_903_14] {
+            assert!(matches!(
+                session_speaker_classification_for_signal(score, 1_200, 2_000.0),
+                SessionSpeakerClassification::Target { .. }
+            ));
+        }
+        // 当晚真实旁人序列上限。
+        for score in [0.283_097_42, 0.199_755_15] {
+            assert!(!matches!(
+                session_speaker_classification_for_signal(score, 1_200, 2_000.0),
+                SessionSpeakerClassification::Target { .. }
+            ));
+        }
+        // 线边界：0.40 恰好确信，0.399 仍 Uncertain。
+        assert!(matches!(
+            session_speaker_classification_for_score(0.40),
+            SessionSpeakerClassification::Target { .. }
+        ));
+        assert!(matches!(
+            session_speaker_classification_for_score(0.399),
+            SessionSpeakerClassification::Uncertain { .. }
+        ));
+    }
+
     #[test]
     fn adaptive_bank_refresh_keeps_anchor_and_skips_represented_exemplars() {
         let anchor = vec![1.0, 0.0, 0.0, 0.0];
@@ -3826,16 +3989,19 @@ mod tests {
 
     #[test]
     fn weak_target_band_is_uncertain_not_target() {
-        // F3 fixture（2026-08-09 12:47:04）：第二个人的声音得分 0.426–0.58。
-        // [0.42, 0.55) 弱 Target 带必须判 Uncertain（不刷新端点时钟、不冻结），
-        // ≥0.55 才是确信 Target。
+        // 2026-09-23 重校（71f64ac1 矩阵 + ef_session_score_bands_matrix）：
+        // [0.42, 0.55) 现在是本人的正文带（对"TTS 银行+当会话唤醒锚点"
+        // 档案实测 0.42–0.59，旧线 0.55 让本人全程 Uncertain、冻结永不
+        // 解除）→ 必须判 Target。F3 fixture（2026-08-09 第二个人 0.426–0.58）
+        // 是 pre-2026-09-18 TTS 银行时代的测量——anchor-era 旁人 <=0.11，
+        // 2026-09-23 真实旁人 <=0.28。Uncertain 带相应收窄到 (0.20, 0.40)。
         for score in [0.42, 0.426, 0.47, 0.50, 0.54] {
             assert!(
                 matches!(
                     session_speaker_classification_for_score(score),
-                    SessionSpeakerClassification::Uncertain { .. }
+                    SessionSpeakerClassification::Target { .. }
                 ),
-                "score {score} must be Uncertain (weak-target band)"
+                "score {score} must be Target (owner body band, 2026-09-23 recalibration)"
             );
         }
         for score in [0.55, 0.58, 0.72] {
@@ -3848,11 +4014,16 @@ mod tests {
             );
         }
         assert!(matches!(
-            session_speaker_classification_for_score(0.41),
+            session_speaker_classification_for_score(0.399),
             SessionSpeakerClassification::Uncertain { .. }
         ));
         assert!(matches!(
             session_speaker_classification_for_score(0.34),
+            SessionSpeakerClassification::Uncertain { .. }
+        ));
+        // 旁人带上限（当晚实测 0.283）仍必须 Uncertain。
+        assert!(matches!(
+            session_speaker_classification_for_score(0.283),
             SessionSpeakerClassification::Uncertain { .. }
         ));
     }

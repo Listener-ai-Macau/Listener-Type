@@ -58,18 +58,18 @@ export const PREVIEW_BURST_REVEAL = {
   // One/two-character provider updates are already visually incremental. Do
   // not add a second client-side queue to them; it made normal streaming feel
   // one beat behind even though the backend event had arrived.
-  minimumAppendChars: 3,
-  maxFrames: 8,
+  minimumAppendChars: 12,
+  maxFrames: 6,
   // Preserve a readable reveal for genuinely large provider bursts, but catch
   // the authoritative target within roughly five display frames.
-  maxCatchUpMs: 80,
+  maxCatchUpMs: 48,
 } as const;
 
 /** Space reveal frames across the existing catch-up budget instead of
  * consuming them at display refresh rate, which still looks like one burst. */
 export function previewRevealIntervalMs(frameCount: number): number {
   if (frameCount <= 1) return 0;
-  return Math.max(16, Math.floor(PREVIEW_BURST_REVEAL.maxCatchUpMs / frameCount));
+  return Math.max(8, Math.floor(PREVIEW_BURST_REVEAL.maxCatchUpMs / frameCount));
 }
 
 /** The wake capsule is visible immediately; only its geometry settles. */
@@ -116,8 +116,8 @@ export function buildPreviewRevealFrames(current: string, target: string): strin
  * The preview text stays visible through transcribing/polishing so the user sees
  * continuity. Done state replaces it with a compact success mark; actionable
  * fallback messages may still show text.
- * After Done, the normal success path lingers ~380ms (schedule_capsule_idle) then
- * fades to Idle with EXIT_ANIM_MS = 120ms. Text is already on-screen; this is
+ * After Done, the normal success path lingers ~250ms (schedule_capsule_idle) then
+ * fades to Idle with EXIT_ANIM_MS = 90ms. Text is already on-screen; this is
  * only a brief visual close (owner: 结尾拖 was the old 1050ms hang).
  */
 export const PREVIEW_FINAL_TRANSITION = {
@@ -128,9 +128,9 @@ export const PREVIEW_FINAL_TRANSITION = {
   /** Terminal state where preview is replaced by completion feedback. */
   finalState: 'done' as const,
   /** How long the normal success done toast stays visible before idle (ms). */
-  lingerMs: 380,
+  lingerMs: 250,
   /** Exit animation duration (ms). */
-  exitAnimMs: 120,
+  exitAnimMs: 90,
 };
 
 export type StopFeedbackCapsuleState =
