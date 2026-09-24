@@ -7822,8 +7822,15 @@ impl VolcengineStreamingASR {
                 } else {
                     &speaker_filtered_result.optimistic_result
                 });
-            let optimistic_preview = {
+            let (optimistic_preview, inflated_merge_inputs) = {
                 let mut state = self.state.lock();
+                let merge_inputs = self.diagnostic_trace_enabled.then(|| {
+                    (
+                        state.optimistic_preview_text.clone(),
+                        state.optimistic_untimed_window.clone(),
+                        optimistic_candidate.text.clone(),
+                    )
+                });
                 let (mut merged, segments, untimed_window) =
                     merge_optimistic_cumulative_view(
                         &state.optimistic_preview_text,
@@ -7833,6 +7840,19 @@ impl VolcengineStreamingASR {
                         excluded_tail_provider_coverage.as_ref(),
                     );
                 merged = trim_repeated_short_streaming_tail(&merged);
+                // A rolling owner window may legitimately exceed the current
+                // provider packet. Preserve the exact inputs only when that
+                // happens, so a duplicated live tail can be reproduced from
+                // the private per-session trace instead of guessing which
+                // window or speaker-filtered candidate the merger received.
+                let provider_text = result
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let inflated_merge_inputs = (spoken_content_len(provider_text) >= 16
+                    && spoken_content_len(&merged) > spoken_content_len(provider_text))
+                    .then_some(merge_inputs)
+                    .flatten();
                 let owner_preview_allowed = local_speaker_allows_optimistic_preview(&state);
                 let should_emit = owner_preview_allowed
                     && !is_unstable_initial_partial(&state.last_emitted_preview_text, &merged)
@@ -7863,14 +7883,30 @@ impl VolcengineStreamingASR {
                     } else {
                         refresh_local_target_from_owner_preview_activity(&mut state)
                     };
-                if should_emit {
+                let emitted = if should_emit {
                     state.last_emitted_preview_text = merged.clone();
                     state.partial_updates_seen += 1;
                     Some((merged, preview_holds_endpoint))
                 } else {
                     None
-                }
+                };
+                (emitted, inflated_merge_inputs)
             };
+            if let Some((previous, window, candidate)) = inflated_merge_inputs {
+                self.record_diagnostic_trace(
+                    trace_frame,
+                    false,
+                    "optimistic_merge_previous",
+                    &previous,
+                );
+                self.record_diagnostic_trace(trace_frame, false, "optimistic_merge_window", &window);
+                self.record_diagnostic_trace(
+                    trace_frame,
+                    false,
+                    "optimistic_merge_candidate",
+                    &candidate,
+                );
+            }
             if let Some((preview, preview_holds_endpoint)) = optimistic_preview {
                 if owner_safe_provider_split_preview {
                     log::info!(
