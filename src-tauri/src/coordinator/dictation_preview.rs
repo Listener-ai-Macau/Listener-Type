@@ -1698,6 +1698,13 @@ fn pause_early_final_remainder(
     }
 }
 
+/// A suffix append is safe only when the final text preserves every character
+/// already pasted into the target, including punctuation. Stability keys are
+/// deliberately looser for preview alignment, so they cannot answer this.
+fn pause_early_final_revises_delivered_text(final_text: &str, delivered_display: &str) -> bool {
+    !delivered_display.is_empty() && !final_text.starts_with(delivered_display)
+}
+
 /// A live provider revision may correct words inside an already pasted
 /// segment. Continue delivering only when the end of that segment still has
 /// one unambiguous position near its old boundary. This is stricter than the

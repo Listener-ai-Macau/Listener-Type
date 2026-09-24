@@ -3394,6 +3394,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite",
+ "unicode-segmentation",
  "url",
  "uuid",
  "window-vibrancy 0.7.1",

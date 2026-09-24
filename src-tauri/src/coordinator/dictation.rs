@@ -4110,7 +4110,58 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // 终稿宁可少交付也不双写(H 族教训)。
     let streaming_contaminated = streaming_finalized != Some(true)
         && streaming_composition_contaminated(inner, current_session_id);
-    let delivery_submission = if streaming_finalized == Some(true) {
+    // A stable clause can be pasted before the provider's two-pass result.
+    // If that result revises any already pasted character, a suffix-only
+    // reconciliation leaves the mistake in the document. The insertion layer
+    // may replace it only after reading back the exact session-owned suffix
+    // from the original foreground target. Verification failure preserves the
+    // existing no-duplicate fallback below.
+    #[cfg(target_os = "windows")]
+    let corrected_early_paste = if pause_early_paste
+        && streaming_finalized.is_none()
+        && !streaming_contaminated
+        && focus_ready_for_paste
+    {
+        pause_early_delivered.as_ref().and_then(|(display, _)| {
+            if !pause_early_final_revises_delivered_text(&polished, display) {
+                return None;
+            }
+            let target = resolve_insertion_window(focus_target, focus_target_title.as_deref())?;
+            match inner.inserter.replace_verified_suffix(
+                display,
+                &polished,
+                target,
+                restore_clipboard,
+                paste_shortcut,
+            ) {
+                Ok(status) => {
+                    log::info!(
+                        "[coord] pause-early final corrected verified suffix session_id={current_session_id} delivered_chars={} final_chars={} status={status:?}",
+                        display.chars().count(), polished.chars().count()
+                    );
+                    Some(DeliverySubmission {
+                        status,
+                        target_confirmed: false,
+                        route: DeliveryRoute::Paste,
+                        submitted_text: Some(polished.clone()),
+                    })
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[coord] pause-early final correction declined session_id={current_session_id}: {err}"
+                    );
+                    None
+                }
+            }
+        })
+    } else {
+        None
+    };
+    #[cfg(not(target_os = "windows"))]
+    let corrected_early_paste: Option<DeliverySubmission> = None;
+    let delivery_submission = if let Some(submission) = corrected_early_paste {
+        submission
+    } else if streaming_finalized == Some(true) {
         log::info!(
             "[coord] streaming-composition finalized session_id={current_session_id} chars={} route=streaming",
             insert_text.chars().count()

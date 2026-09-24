@@ -127,6 +127,134 @@ impl TextInserter {
             InsertStatus::Failed
         }
     }
+
+    /// Correct a provisional paste only when the target itself confirms that
+    /// the text immediately before the caret is exactly this session's paste.
+    /// A final ASR rewrite must never blindly backspace into user content.
+    #[cfg(target_os = "windows")]
+    pub fn replace_verified_suffix(
+        &self,
+        expected: &str,
+        replacement: &str,
+        target_hwnd: usize,
+        restore_clipboard_after_paste: bool,
+        paste_shortcut: PasteShortcut,
+    ) -> Result<InsertStatus, String> {
+        use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+        use unicode_segmentation::UnicodeSegmentation;
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+
+        let count = expected.graphemes(true).count();
+        if count == 0 || count > 160 || replacement.is_empty() {
+            return Err("provisional suffix is outside the verified correction bounds".into());
+        }
+        if !clipboard_transport_is_reversible() {
+            return Err("clipboard cannot be restored after verification".into());
+        }
+        let same_target = || unsafe { GetForegroundWindow().0 as usize == target_hwnd };
+        if !same_target() {
+            return Err("session target is no longer foreground".into());
+        }
+        let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+        let previous = snapshot_clipboard(&mut clipboard);
+        let marker = format!("listener-selection-{}", uuid::Uuid::new_v4());
+        clipboard.set_text(marker.clone()).map_err(|e| e.to_string())?;
+
+        let mut keyboard = Enigo::new(&Settings::default()).map_err(|e| {
+            restore_clipboard_snapshot(&mut clipboard, &previous);
+            e.to_string()
+        })?;
+        let selection_result = (|| -> Result<(), String> {
+            keyboard.key(Key::Shift, Direction::Press).map_err(|e| e.to_string())?;
+            for _ in 0..count {
+                if !same_target() {
+                    return Err("session target changed during suffix selection".into());
+                }
+                keyboard.key(Key::LeftArrow, Direction::Click).map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        })();
+        let release_result = keyboard.key(Key::Shift, Direction::Release).map_err(|e| e.to_string());
+        if let Err(err) = selection_result.and(release_result) {
+            if same_target() {
+                let _ = keyboard.key(Key::RightArrow, Direction::Click);
+            }
+            restore_clipboard_snapshot(&mut clipboard, &previous);
+            return Err(format!("could not select provisional suffix: {err}"));
+        }
+        let copy_result = (|| -> Result<(), String> {
+            if !same_target() {
+                return Err("session target changed before suffix verification".into());
+            }
+            keyboard.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
+            let copied = keyboard.key(Key::Unicode('c'), Direction::Click).map_err(|e| e.to_string());
+            let released = keyboard.key(Key::Control, Direction::Release).map_err(|e| e.to_string());
+            copied.and(released)
+        })();
+        let observed = if copy_result.is_ok() {
+            // Clipboard updates can lag the synthetic Ctrl+C in Chromium hosts.
+            let mut value = marker.clone();
+            for _ in 0..15 {
+                value = clipboard.get_text().unwrap_or_default();
+                if value != marker { break; }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            value
+        } else {
+            String::new()
+        };
+        if copy_result.is_err() || observed != expected || !same_target() {
+            if same_target() {
+                let _ = keyboard.key(Key::RightArrow, Direction::Click);
+            }
+            restore_clipboard_snapshot(&mut clipboard, &previous);
+            return Err(format!(
+                "selected text did not match provisional suffix (expected_chars={} observed_chars={})",
+                expected.chars().count(), observed.chars().count()
+            ));
+        }
+        clipboard.set_text(replacement.to_string()).map_err(|e| {
+            if same_target() {
+                let _ = keyboard.key(Key::RightArrow, Direction::Click);
+            }
+            restore_clipboard_snapshot(&mut clipboard, &previous);
+            e.to_string()
+        })?;
+        if !same_target() {
+            restore_clipboard_snapshot(&mut clipboard, &previous);
+            return Err("session target changed before corrected paste".into());
+        }
+        // Keep the selection through paste: the host replaces exactly the
+        // text that Ctrl+C returned. No Delete or Backspace is sent.
+        if let Err(err) = simulate_paste(paste_shortcut) {
+            // A shortcut can fail while releasing its modifier, after the host
+            // has already handled Ctrl+V. Never trigger a second full paste.
+            log::warn!("[insertion] verified correction paste unconfirmed: {err}");
+            if same_target() {
+                let _ = keyboard.key(Key::RightArrow, Direction::Click);
+            }
+            return Ok(InsertStatus::SubmittedUnconfirmed);
+        }
+        if restore_clipboard_after_paste {
+            schedule_clipboard_restore(ClipboardRestorePlan {
+                inserted_text: replacement.to_string(),
+                previous,
+            });
+        }
+        Ok(InsertStatus::PasteSent)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn restore_clipboard_snapshot(clipboard: &mut arboard::Clipboard, snapshot: &ClipboardSnapshot) {
+    let result = match snapshot {
+        ClipboardSnapshot::Text(text) => clipboard.set_text(text.clone()),
+        ClipboardSnapshot::Image(image) => clipboard.set_image(image.clone()),
+        ClipboardSnapshot::Absent => clipboard.clear(),
+    };
+    if let Err(err) = result {
+        log::warn!("[insertion] failed to restore clipboard after suffix verification: {err}");
+    }
 }
 
 #[cfg(target_os = "macos")]

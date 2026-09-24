@@ -15148,6 +15148,19 @@ fn pause_early_final_remainder_splits_on_stability_key_prefix() {
 }
 
 #[test]
+fn final_asr_revision_of_pasted_word_requires_verified_replacement() {
+    use super::{pause_early_final_remainder, pause_early_final_revises_delivered_text};
+    let delivered = "你不用一直轮询，检查到自动判刑再去查。";
+    let final_text = "你不用一直轮询，检查到自动唤醒再去查。";
+    let key = super::embedded_audio_partial_preview_stability_key(delivered);
+
+    assert_eq!(pause_early_final_remainder(final_text, delivered, &key), None);
+    assert!(pause_early_final_revises_delivered_text(final_text, delivered));
+    assert!(pause_early_final_revises_delivered_text("你好！", "你好。"));
+    assert!(!pause_early_final_revises_delivered_text("你好，继续。", "你好，"));
+}
+
+#[test]
 fn pause_early_delivery_waits_for_a_clause_instead_of_pasting_provider_placeholders() {
     use super::{pause_early_chunk_ready, pause_early_complete_clause, pause_early_segment};
 
