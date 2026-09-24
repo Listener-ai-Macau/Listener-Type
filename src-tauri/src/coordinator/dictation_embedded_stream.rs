@@ -3114,6 +3114,12 @@ impl EmbeddedStreamingDictation {
                 pending => pending,
             }
         };
+        // The terminal path already accepts two repeated near-phrase readings
+        // with an enrolled owner match. When KWS independently saw the phrase,
+        // offer that same decision while the buffer is still live instead of
+        // waiting for the firmware segment to end. The actual owner score is
+        // checked below before this candidate can activate a session.
+        let mut live_repeated_owner_near = false;
         let (
             wake_match,
             phrase_signal,
@@ -3773,6 +3779,23 @@ impl EmbeddedStreamingDictation {
                                             end_seconds: wake_end_seconds,
                                             matched_keyword: None,
                                         })
+                                    } else if self.speaker_candidate.as_ref().is_some_and(|candidate| {
+                                        crate::speech_decision_kernel::live_repeated_owner_near_phrase_can_verify(
+                                            task_has_keyword_model_hit && kws_hit.is_some(),
+                                            crate::speaker_verification::is_enrolled_for_phrase(&phrase),
+                                            owner_verification_window_ready(candidate.pcm.len(), true),
+                                            candidate.owner_near_phrase_confirmations,
+                                        )
+                                    })
+                                    {
+                                        live_repeated_owner_near = true;
+                                        phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                                        log::info!(
+                                            "[wake-phrase] live repeated owner near-phrase offered to voiceprint gate embedded_session_id={} confirmations={}",
+                                            embedded_session_id,
+                                            self.speaker_candidate.as_ref().map(|candidate| candidate.owner_near_phrase_confirmations).unwrap_or_default(),
+                                        );
+                                        kws_hit.clone()
                                     } else {
                                     let absent = {
                                         let candidate = self
@@ -4055,6 +4078,30 @@ impl EmbeddedStreamingDictation {
         let total_ms = kws_ms
             .saturating_add(local_confirmation_ms)
             .saturating_add(voiceprint_ms);
+        if live_repeated_owner_near {
+            let accepted = verification.as_ref().is_ok_and(|result| {
+                crate::speech_decision_kernel::repeated_owner_near_phrase_wake_can_activate(
+                    result.enrolled_owner_matched(),
+                    result.score,
+                    candidate.owner_near_phrase_confirmations,
+                )
+            });
+            if !accepted {
+                log::info!(
+                    "[wake-phrase] live repeated owner near-phrase held by voiceprint embedded_session_id={} confirmations={} score={:.6}",
+                    embedded_session_id,
+                    candidate.owner_near_phrase_confirmations,
+                    verification.as_ref().map(|result| result.score).unwrap_or_default(),
+                );
+                return Ok(false);
+            }
+            log::info!(
+                "[wake-phrase] live repeated owner near-phrase verified embedded_session_id={} confirmations={} score={:.6}",
+                embedded_session_id,
+                candidate.owner_near_phrase_confirmations,
+                verification.as_ref().map(|result| result.score).unwrap_or_default(),
+            );
+        }
         let (owner_gate, arbitration) = arbitrate_candidate_wake(
             candidate,
             phrase_signal,

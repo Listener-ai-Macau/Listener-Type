@@ -1334,6 +1334,18 @@ pub(crate) const fn repeated_owner_near_phrase_wake_can_activate(
     owner_matched && owner_score >= 0.42 && confirmations >= 2
 }
 
+/// A live near-phrase recovery needs independent KWS evidence before asking
+/// the enrolled-owner verifier. The terminal path may use the same owner
+/// predicate without KWS because it has the full completed audio window.
+pub(crate) const fn live_repeated_owner_near_phrase_can_verify(
+    kws_hit: bool,
+    phrase_enrolled: bool,
+    owner_window_ready: bool,
+    confirmations: u8,
+) -> bool {
+    kws_hit && phrase_enrolled && owner_window_ready && confirmations >= 2
+}
+
 /// 2026-09-23 干扰实机（24 判 5 过 19 吞）：重干扰混音让声纹整体失明——
 /// 本人近音窗 0.04-0.30，媒体/旁人窗 0.01-0.11，两分布重叠，owner 门分不开。
 /// 此路径把「近音持续确认」本身当唤醒意图：distance≤2 证据在滚动窗口
@@ -2579,6 +2591,17 @@ mod tests {
             true, 0.419, 2
         ));
         assert!(!repeated_owner_near_phrase_wake_can_activate(true, 0.8, 1));
+    }
+
+    #[test]
+    fn live_near_phrase_requires_kws_owner_window_and_repeated_evidence() {
+        assert!(live_repeated_owner_near_phrase_can_verify(true, true, true, 2));
+        assert!(!live_repeated_owner_near_phrase_can_verify(false, true, true, 4));
+        assert!(!live_repeated_owner_near_phrase_can_verify(true, false, true, 4));
+        assert!(!live_repeated_owner_near_phrase_can_verify(true, true, false, 4));
+        assert!(!live_repeated_owner_near_phrase_can_verify(true, true, true, 1));
+        assert!(repeated_owner_near_phrase_wake_can_activate(true, 0.515, 2));
+        assert!(!repeated_owner_near_phrase_wake_can_activate(false, 0.8, 4));
     }
 
     #[test]
