@@ -3302,8 +3302,8 @@ pub(crate) fn capsule_window_off_all_monitors<R: tauri::Runtime>(
     )
 }
 
-/// 把 capsule 窗口移到目标显示器底部居中，与 Swift `CapsuleWindowController.repositionToBottomCenter` 同效。
-/// 留 80pt 给 macOS Dock；Windows 任务栏一般在底部 48pt 以内，整体也合适。
+/// 把 capsule 窗口移到目标显示器的默认位置。Windows 靠右下角并抬高以避开任务栏；
+/// macOS 保持底部居中，与 Swift `CapsuleWindowController.repositionToBottomCenter` 同效。
 pub(crate) fn position_capsule_bottom_center<R: tauri::Runtime>(
     app: &AppHandle<R>,
     window: &tauri::WebviewWindow<R>,
@@ -3357,8 +3357,15 @@ fn capsule_bottom_center_position(
 ) -> (f64, f64) {
     let logical_w = monitor_width as f64 / scale;
     let logical_h = monitor_height as f64 / scale;
+    #[cfg(target_os = "windows")]
+    let local_x = (logical_w - bounds.width - 24.0).max(0.0);
+    #[cfg(not(target_os = "windows"))]
     let local_x = ((logical_w - bounds.width) / 2.0).max(0.0);
-    let local_y = (logical_h - visual_height - 80.0 - bounds.bottom_inset).max(0.0);
+    #[cfg(target_os = "windows")]
+    let bottom_margin = 96.0;
+    #[cfg(not(target_os = "windows"))]
+    let bottom_margin = 80.0;
+    let local_y = (logical_h - visual_height - bottom_margin - bounds.bottom_inset).max(0.0);
 
     // Tauri monitor origins are physical desktop coordinates. Convert the origin too,
     // then add the local anchor so secondary and negative-positioned displays stay valid.
@@ -3818,7 +3825,7 @@ mod tests {
     }
 
     #[test]
-    fn capsule_bottom_center_position_keeps_negative_monitor_origin() {
+    fn capsule_default_position_keeps_negative_monitor_origin() {
         let (x, y) = capsule_bottom_center_position(
             -1920,
             0,
@@ -3829,11 +3836,14 @@ mod tests {
             capsule_visual_height(false),
         );
 
-        assert_eq!((x, y), (-1112.0, 936.0));
+        #[cfg(target_os = "windows")]
+        assert_eq!((x, y), (-328.0, 920.0));
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!((x, y), (-1070.0, 904.0));
     }
 
     #[test]
-    fn capsule_bottom_center_position_scales_monitor_origin_with_dpi() {
+    fn capsule_default_position_scales_monitor_origin_with_dpi() {
         let (x, y) = capsule_bottom_center_position(
             2880,
             -1440,
@@ -3844,11 +3854,14 @@ mod tests {
             capsule_visual_height(false),
         );
 
-        assert_eq!((x, y), (2728.0, -24.0));
+        #[cfg(target_os = "windows")]
+        assert_eq!((x, y), (3512.0, -40.0));
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!((x, y), (2770.0, -56.0));
     }
 
     #[test]
-    fn capsule_bottom_center_physical_position_keeps_desktop_coordinates() {
+    fn capsule_default_physical_position_keeps_desktop_coordinates() {
         let bounds = CapsuleWindowBounds {
             width: 304.0,
             height: 84.0,
@@ -3857,6 +3870,9 @@ mod tests {
         let position =
             capsule_bottom_center_physical_position(2880, -1440, 2880, 1620, 1.5, bounds, 52.0);
 
+        #[cfg(target_os = "windows")]
+        assert_eq!(position, (5268, -60));
+        #[cfg(not(target_os = "windows"))]
         assert_eq!(position, (4092, -36));
     }
 

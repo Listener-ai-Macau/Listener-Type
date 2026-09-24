@@ -565,7 +565,7 @@ impl SettledTargetEndpointClock {
         // whose room noise keeps advancing local speech edges would otherwise
         // cancel and re-enter this window with a fresh anchor forever (the
         // "不能自动结束" loop).  A real pause fits — preview growth refreshed
-        // the budget at the last spoken word, and 3 s > the 2.5 s window.
+        // the budget at the last spoken word, and the window is at most 3 s.
         let continuation_eligible = self.manual_vad_guard
             || (self.automatic_wake_session
                 && self.positive_owner_evidence_live(now)
@@ -613,34 +613,35 @@ impl SettledTargetEndpointClock {
         // is the only legal anchor. In particular, PendingSpeech/Unknown may
         // expose the current capture edge through TargetSpeakerUpdate, but
         // that edge is not a confirmed new speech interval and must not buy a
-        // fresh 2.5s continuation window.
-        let confirmed_speech_end_ms = match self.latest_local_vad_evidence {
-            Some(evidence) => evidence.last_detected_speech_end_ms,
-            None => {
-                // 2026-09-19 13:42Z (session f564b094): at the 1 s due check
-                // the governing update carried no local speech edge (and in
-                // the stale shape one that trailed the live audio by 4.7 s).
-                // The anchor then had nothing — or an already-expired
-                // deadline — so the cutoff latched and
-                // target_speaker_inactive_1000ms fired mid-word ("…然后那个
-                // ｜绿…"), ending the session early and swallowing the
-                // resumed tail. A missing or long-stale edge must fall back
-                // to the live audio edge: the established visible body and
-                // the live positive-evidence budget are the same evidence
-                // that made this session eligible, and the window stays
-                // bounded by the single 2.5 s continuation budget plus the
-                // cutoff latch. A genuinely later speech edge still cancels
-                // the window through the anchor comparison above.
-                const STALE_LOCAL_EDGE_MAX_LAG_MS: u64 = 2_000;
-                let local_edge_usable = update.local_speech_end_ms.is_some_and(|edge_ms| {
-                    update.audio_duration_ms.is_none_or(|audio_ms| {
-                        audio_ms.saturating_sub(edge_ms) <= STALE_LOCAL_EDGE_MAX_LAG_MS
-                    })
-                });
-                if local_edge_usable {
-                    update.local_speech_end_ms
-                } else {
-                    update.audio_duration_ms
+        // fresh 3 s continuation window.
+        let confirmed_speech_end_ms = if self.automatic_wake_session
+            && update.local_speaker_tracking_enabled
+        {
+            // A bystander's raw VAD edge is not the user's continuation.
+            // The owner-specific edge is the only legal deadline anchor when
+            // the automatic session has local speaker tracking.
+            update
+                .local_target_speech_end_ms
+                .or(update.qualified_owner_speech_end_ms)
+        } else {
+            match self.latest_local_vad_evidence {
+                Some(evidence) => evidence.last_detected_speech_end_ms,
+                None => {
+                    // 2026-09-19 13:42Z (session f564b094): a missing or
+                    // long-stale edge used to latch the cutoff and swallow
+                    // the owner's resumed tail. For manual/no-tracker turns,
+                    // use the live audio edge inside this bounded window.
+                    const STALE_LOCAL_EDGE_MAX_LAG_MS: u64 = 2_000;
+                    let local_edge_usable = update.local_speech_end_ms.is_some_and(|edge_ms| {
+                        update.audio_duration_ms.is_none_or(|audio_ms| {
+                            audio_ms.saturating_sub(edge_ms) <= STALE_LOCAL_EDGE_MAX_LAG_MS
+                        })
+                    });
+                    if local_edge_usable {
+                        update.local_speech_end_ms
+                    } else {
+                        update.audio_duration_ms
+                    }
                 }
             }
         };
@@ -654,7 +655,18 @@ impl SettledTargetEndpointClock {
         };
         let continuation_end_audio_ms = confirmed_speech_end_ms
             .saturating_add(EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS);
-        let remaining_ms = continuation_end_audio_ms.saturating_sub(current_audio_ms);
+        let mut remaining_ms = continuation_end_audio_ms.saturating_sub(current_audio_ms);
+        if self.automatic_wake_session {
+            // The public three seconds start at the last owner arm, not when a
+            // delayed provider/VAD callback happens to enter this stage.
+            remaining_ms = remaining_ms.min(
+                EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS.saturating_sub(
+                    now.saturating_duration_since(armed_at)
+                        .as_millis()
+                        .min(u64::MAX as u128) as u64,
+                ),
+            );
+        }
         if remaining_ms == 0 {
             self.continuation_cutoff_reached = true;
             return false;
@@ -840,21 +852,19 @@ impl SettledTargetEndpointClock {
         let continuation_activity_rearm = self
             .continuation_pending_anchor_canonical_speech_serial
             .is_some_and(|anchor_serial| self.canonical_speech_serial > anchor_serial)
-            // Automatic wake sessions never receive local VAD evidence (that
-            // sidecar feeds the manual path only), so their canonical serial
-            // cannot advance.  A newer local speech edge is the equivalent
-            // "the user actually resumed" signal there: without it the
-            // continuation cutoff would latch after the first pause and every
-            // later mid-sentence pause in the same session would cut at 1 s.
-            // Manual sessions keep requiring the confirmed VAD speech serial
-            // alone — a PendingSpeech edge must not buy a fresh window there.
+            // Automatic wake sessions have no manual VAD sidecar. With local
+            // tracking, only a newer owner-specific edge can restart the
+            // deadline; another person's raw speech must not do so.
             || (self.automatic_wake_session
                 && self
                     .continuation_pending_anchor_speech_end_ms
                     .is_some_and(|anchor_ms| {
-                        update
-                            .local_speech_end_ms
-                            .is_some_and(|speech_ms| speech_ms > anchor_ms)
+                        let current_speech_end_ms = if update.local_speaker_tracking_enabled {
+                            update.local_target_speech_end_ms
+                        } else {
+                            update.local_speech_end_ms
+                        };
+                        current_speech_end_ms.is_some_and(|speech_ms| speech_ms > anchor_ms)
                     }));
         if continuation_activity_rearm {
             log::info!(

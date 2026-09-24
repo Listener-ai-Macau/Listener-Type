@@ -3284,14 +3284,14 @@ fn manual_open_clause_uses_bounded_continuation_stage() {
     assert!(clock
         .due_update(
             generation,
-            started + std::time::Duration::from_millis(3_499),
+            started + std::time::Duration::from_millis(2_999),
             1_000,
         )
         .is_none(), "the continuation stage is bounded but not yet expired");
     assert!(clock
         .due_update(
             generation,
-            started + std::time::Duration::from_millis(3_500),
+            started + std::time::Duration::from_millis(3_000),
             1_000,
         )
         .is_some(), "the fixed total continuation cutoff must still stop");
@@ -3349,7 +3349,7 @@ fn automatic_wake_rhetorical_question_pause_keeps_continuation() {
         clock
             .due_update(
                 generation,
-                started + std::time::Duration::from_millis(3_500),
+                started + std::time::Duration::from_millis(3_000),
                 1_000,
             )
             .is_some(),
@@ -3367,8 +3367,8 @@ fn automatic_wake_dangling_pause_survives_missing_or_stale_local_edge() {
     // had nothing — or an already-expired deadline — so the cutoff latched
     // and `target_speaker_inactive_1000ms` fired while the user was saying
     // the next word ("绿…"), ending the session early and swallowing it.
-    // A missing or long-stale local edge must fall back to the live audio
-    // edge, not deny the pause window the established body earned.
+    // A missing or long-stale local edge falls back to the live audio edge,
+    // while the total window remains three seconds from the owner arm.
     for (label, due_local_speech_end_ms) in [("missing", None), ("stale", Some(1_200))] {
         let started = std::time::Instant::now();
         let growing_update = crate::asr::volcengine::TargetSpeakerUpdate {
@@ -3425,7 +3425,7 @@ fn automatic_wake_dangling_pause_survives_missing_or_stale_local_edge() {
             clock
                 .due_update(
                     generation,
-                    started + std::time::Duration::from_millis(4_499),
+                    started + std::time::Duration::from_millis(2_999),
                     1_000,
                 )
                 .is_none(),
@@ -3435,7 +3435,7 @@ fn automatic_wake_dangling_pause_survives_missing_or_stale_local_edge() {
             clock
                 .due_update(
                     generation,
-                    started + std::time::Duration::from_millis(4_500),
+                    started + std::time::Duration::from_millis(3_000),
                     1_000,
                 )
                 .is_some(),
@@ -3490,14 +3490,14 @@ fn automatic_wake_open_clause_gets_bounded_continuation() {
     assert!(clock
         .due_update(
             generation,
-            started + std::time::Duration::from_millis(3_499),
+            started + std::time::Duration::from_millis(2_999),
             1_000,
         )
         .is_none(), "the continuation stage is bounded but not yet expired");
     assert!(clock
         .due_update(
             generation,
-            started + std::time::Duration::from_millis(3_500),
+            started + std::time::Duration::from_millis(3_000),
             1_000,
         )
         .is_some(), "the fixed total continuation cutoff must still stop");
@@ -3611,6 +3611,62 @@ fn automatic_wake_continuation_rearms_after_owner_resumes() {
         !clock.continuation_cutoff_reached,
         "resume clears the cutoff latch so the next pause earns a fresh window"
     );
+}
+
+#[test]
+fn tracked_bystander_speech_cannot_restart_the_three_second_continuation() {
+    let started = std::time::Instant::now();
+    let owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: None,
+        target_speech_end_ms: None,
+        provider_audio_duration_ms: None,
+        audio_duration_ms: Some(0),
+        local_speech_end_ms: Some(0),
+        qualified_owner_speech_end_ms: Some(0),
+        qualified_owner_activity_advanced: false,
+        local_speaker_classification_kind: Some(
+            crate::asr::volcengine::LocalSpeakerClassificationKind::Target,
+        ),
+        local_speaker_signal_quality_sufficient: Some(true),
+        local_speaker_observation_end_ms: Some(0),
+        local_target_speech_end_ms: Some(0),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: None,
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: false,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.automatic_wake_session = true;
+    clock.note_visible_body_boundary(false, 24, started);
+    clock.observe(&owner, true, started).expect("owner arms endpoint");
+    assert!(clock
+        .latest_due_update(started + std::time::Duration::from_millis(1_000), 1_000)
+        .is_none());
+
+    let bystander = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(1_400),
+        local_speech_end_ms: Some(1_400),
+        local_non_target_speech_end_ms: Some(1_400),
+        local_speaker_classification_kind: Some(
+            crate::asr::volcengine::LocalSpeakerClassificationKind::NonTarget,
+        ),
+        local_speaker_observation_end_ms: Some(1_400),
+        ..owner
+    };
+    clock.observe(
+        &bystander,
+        true,
+        started + std::time::Duration::from_millis(1_500),
+    );
+    assert!(clock.continuation_pending_active(
+        started + std::time::Duration::from_millis(1_500)
+    ));
+    assert!(clock
+        .latest_due_update(started + std::time::Duration::from_millis(3_000), 1_000)
+        .is_some(), "room speech must not buy a second three-second window");
 }
 
 #[test]

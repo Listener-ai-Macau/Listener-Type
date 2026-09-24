@@ -9,6 +9,44 @@ use super::volcengine_transcript::{
     TranscriptCandidate, TranscriptSegment,
 };
 
+/// The optimistic speaker view contains the settled opening plus its current
+/// provisional tail. Its cumulative growth supersedes the older view; passing
+/// it to the rolling-window merger can append the same clause twice.
+pub(super) fn merge_optimistic_cumulative_view(
+    previous_text: &str,
+    previous_segments: &[TranscriptSegment],
+    previous_untimed_window: &str,
+    candidate: TranscriptCandidate,
+    provider_coverage: Option<&TranscriptCandidate>,
+) -> (String, Vec<TranscriptSegment>, String) {
+    let previous = compact_segment_text(previous_text);
+    let current = compact_segment_text(&candidate.text);
+    if previous.chars().count() >= 8
+        && current.chars().count() > previous.chars().count()
+        && current.starts_with(&previous)
+    {
+        let old_start = previous_segments.iter().map(|segment| segment.start_ms).min();
+        let new_start = candidate.timed_segments.iter().map(|segment| segment.start_ms).min();
+        // Speaker filtering may omit the settled opening's timed row.
+        let segments = if old_start.zip(new_start)
+            .is_some_and(|(old, new)| new > old + 150)
+        {
+            previous_segments.to_vec()
+        } else {
+            candidate.timed_segments
+        };
+        let text = candidate.text;
+        return (text.clone(), segments, text);
+    }
+    merge_filtered_streaming_candidate_with_untimed_window(
+        previous_text,
+        previous_segments,
+        previous_untimed_window,
+        candidate,
+        provider_coverage,
+    )
+}
+
 pub(super) fn merge_filtered_streaming_candidate_with_untimed_window(
     previous_text: &str,
     previous_segments: &[TranscriptSegment],
@@ -1173,6 +1211,39 @@ fn is_probable_growing_cumulative_revision(previous: &str, current: &str) -> boo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optimistic_cumulative_provider_growth_replaces_instead_of_repeating_clause() {
+        let opening = "录音，所以什么意思？然后。";
+        let settled = TranscriptSegment {
+            start_ms: 0,
+            end_ms: Some(4_102),
+            text: opening.into(),
+        };
+        let first = TranscriptCandidate {
+            text: format!("{opening}开始"),
+            timed_segments: vec![TranscriptSegment {
+                start_ms: 4_102,
+                end_ms: None,
+                text: "开始".into(),
+            }],
+            authoritative_cumulative: false,
+        };
+        let (preview, segments, window) = merge_optimistic_cumulative_view(
+            opening, &[settled.clone()], opening, first, None,
+        );
+        assert_eq!(preview, format!("{opening}开始"));
+        assert_eq!(segments, vec![settled]);
+        let second = TranscriptCandidate {
+            text: format!("{opening}开始录音，什么意思？"),
+            timed_segments: vec![],
+            authoritative_cumulative: false,
+        };
+        let (preview, _, _) = merge_optimistic_cumulative_view(
+            &preview, &segments, &window, second, None,
+        );
+        assert_eq!(preview, format!("{opening}开始录音，什么意思？"));
+    }
 
     #[test]
     fn first_timed_cumulative_growth_replaces_punctuated_untimed_opening() {

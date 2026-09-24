@@ -654,7 +654,9 @@ use super::volcengine_transcript::{
     trim_repeated_short_final_tail, trim_repeated_short_streaming_tail, TranscriptCandidate,
     TranscriptSegment,
 };
-use super::volcengine_untimed_merge::merge_filtered_streaming_candidate_with_untimed_window;
+use super::volcengine_untimed_merge::{
+    merge_filtered_streaming_candidate_with_untimed_window, merge_optimistic_cumulative_view,
+};
 
 /// Sync state shared across the receive loop, the public API, and the
 /// audio-consumer fast path.
@@ -1138,16 +1140,26 @@ fn local_owner_continuity(state: &SyncState) -> LocalOwnerContinuity {
     if !state.local_speaker_tracking_enabled {
         return LocalOwnerContinuity::Untracked;
     }
-    // The sustained non-target watermark is historical endpoint evidence.
-    // After a quiet gap it must not keep the live preview closed once a fresh,
-    // quality-checked owner window has passed that boundary. The current
-    // NonTarget classification and an active absence run still close the gate.
+    // The sustained non-target watermark is historical endpoint evidence, not
+    // a permanent current-speaker verdict. A later Uncertain window above the
+    // owner-absence band ends the confirmed absence run even if it is below
+    // the stronger Target threshold (0c67f852: 0.306..0.34 after two low
+    // windows). Requiring a new qualified Target here held the growing cloud
+    // transcript for almost ten seconds. Keep the watermark for arbitration,
+    // while the active absence run and current NonTarget still close this gate.
     let sustained_other_is_current = state
         .local_sustained_non_target_speech_end_ms
         .is_some_and(|other_end_ms| {
             state
                 .qualified_owner_speech_end_ms
                 .is_none_or(|owner_end_ms| owner_end_ms <= other_end_ms)
+                && state
+                    .local_speaker_classification
+                    .as_ref()
+                    .is_none_or(|classification| {
+                        classification.score()
+                            <= LOCAL_ENDPOINT_OWNER_ABSENCE_CONTINUATION_MAX_SCORE
+                    })
         });
     if state.local_owner_absence_run_confirmed
         || sustained_other_is_current
@@ -7813,7 +7825,7 @@ impl VolcengineStreamingASR {
             let optimistic_preview = {
                 let mut state = self.state.lock();
                 let (mut merged, segments, untimed_window) =
-                    merge_filtered_streaming_candidate_with_untimed_window(
+                    merge_optimistic_cumulative_view(
                         &state.optimistic_preview_text,
                         &state.optimistic_preview_segments,
                         &state.optimistic_untimed_window,
@@ -11604,6 +11616,39 @@ mod tests {
         state.local_speaker_classification = Some(NonTarget { score: 0.04 });
         let foreign = json!({"text": "开始录音停顿前的句子，继续说话后的新内容，旁人说话"});
         assert!(display_only_provisional_preview_candidate(&mut state, &foreign, true).is_none());
+    }
+
+    #[test]
+    fn historical_owner_absence_does_not_freeze_a_recovered_uncertain_continuation() {
+        use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Uncertain};
+
+        // 0c67f852: two low windows confirmed owner absence at 7.5 s. The
+        // subsequent 0.306..0.34 windows cleared that run, but the historical
+        // watermark was kept for final arbitration and accidentally kept the
+        // live preview and insertion gate closed until cloud two-pass sealing.
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            local_sustained_non_target_speech_end_ms: Some(7_500),
+            qualified_owner_speech_end_ms: Some(1_900),
+            local_owner_absence_run_confirmed: false,
+            local_speaker_classification: Some(Uncertain { score: 0.34 }),
+            last_emitted_preview_text: "开始录音，我感觉".into(),
+            ..SyncState::default()
+        };
+        assert_eq!(local_owner_continuity(&state), LocalOwnerContinuity::Compatible);
+        assert!(local_speaker_allows_optimistic_preview(&state));
+        let provider = json!({"text": "开始录音，我感觉有时候会卡"});
+        assert!(display_only_provisional_preview_candidate(&mut state, &provider, true).is_some());
+        assert_eq!(state.local_sustained_non_target_speech_end_ms, Some(7_500));
+
+        // A new low-score window or an explicit NonTarget re-closes the gate.
+        state.local_speaker_classification = Some(Uncertain { score: 0.28 });
+        assert_eq!(local_owner_continuity(&state), LocalOwnerContinuity::Other);
+        state.local_speaker_classification = Some(NonTarget { score: 0.17 });
+        assert_eq!(local_owner_continuity(&state), LocalOwnerContinuity::Other);
+        assert!(!local_speaker_allows_optimistic_preview(&state));
     }
 
     #[test]

@@ -133,7 +133,7 @@ const EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS: u64 = 8_000;
 // stop).  Once this budget expires, unclassified/cloud evidence stops
 // re-arming and holding the endpoint; the next positive evidence re-opens it
 // immediately.  The budget deliberately exceeds the open-clause continuation
-// window (3.5 s since the 2026-09-23 3 s endpoint contract) so a deliberate
+// window (3 s under the unified endpoint contract) so a deliberate
 // mid-sentence pause still survives — a budget that expires first would
 // cancel the continuation hold and fire the endpoint early (open-clause test
 // caught exactly this ordering when both moved to the 3 s scale).
@@ -164,14 +164,10 @@ include!("dictation_endpoint_policy.rs");
 include!("dictation_local_speech_activity.rs");
 
 fn target_speaker_inactive_stop_reason(timeout_ms: u64) -> &'static str {
-    // Tier boundaries must stay ordered: no-body > dangling continuation >
-    // ordinary endpoint. With the ordinary endpoint at 3.0 s and the dangling
-    // tier above it, comparing against the ordinary constant keeps each label
-    // exact instead of letting the >= chain swallow the higher tier.
+    // The established-body and connector continuation tiers share the same
+    // 3 s stop reason. Only the no-body wake wait has a longer timeout.
     if timeout_ms >= EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS {
         "target_speaker_inactive_no_body_8000ms"
-    } else if timeout_ms > EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS {
-        "target_speaker_inactive_3500ms"
     } else {
         "target_speaker_inactive_3000ms"
     }

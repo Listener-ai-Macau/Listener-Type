@@ -1,11 +1,7 @@
-// A short, explicit continuation word is different from an ordinary complete
-// utterance. Give “然后/但是/另外/所以…” one natural thinking pause without
-// slowing every recording. The host keeps firmware's fixed one-second silence
-// fallback alive only inside this bounded window. 2026-09-23: raised in step
-// with the ordinary endpoint 1.0s→3.0s (user-approved continuation window) so
-// the connector tier keeps its "one extra thinking pause" margin over the
-// base contract.
-const EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS: u64 = 3_500;
+// Every established body gets the same 3 s continuation window. An apparent
+// connector word must not buy an additional half second; only fresh owner
+// speech restarts this window.
+const EMBEDDED_DANGLING_CONTINUATION_END_TIMEOUT_MS: u64 = 3_000;
 const EMBEDDED_SETTLED_TARGET_SCHEDULING_ALLOWANCE_MS: u64 =
     EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS - EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS;
 // Leave room for the BLE command's 300ms acknowledgement timeout before the
