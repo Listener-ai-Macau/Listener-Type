@@ -265,18 +265,27 @@ fn result_text_has_bounded_terminal_suffix_echo(result_text: &str, utterance_tex
         return false;
     };
     let suffix = suffix.trim();
-    let suffix_len = suffix.chars().count();
+    let compact_suffix = compact_transcript_for_duplicate_check(suffix);
+    let suffix_len = compact_suffix.chars().count();
     if !(MIN_SUFFIX_CHARS..=MAX_SUFFIX_CHARS).contains(&suffix_len)
-        || suffix.chars().any(|ch| !is_cjk_unified_ideograph(ch))
-        || !result_text
-            .chars()
-            .next_back()
-            .is_some_and(is_sentence_terminal_punctuation)
+        || !compact_suffix.chars().all(is_cjk_unified_ideograph)
     {
         return false;
     }
 
-    compact_transcript_for_duplicate_check(result_text).contains(suffix)
+    // The utterance list can retain a short streaming row after result.text
+    // has already incorporated it. Exact suffix identity is enough even while
+    // the provider has not punctuated the sentence yet (installed session e5:
+    // result "...哦，有人", utterances "...哦，有人哦，有人"). Do not require a
+    // terminal mark here: that let the echo enter the live paste ledger.
+    if result_text.ends_with(suffix) {
+        return true;
+    }
+    result_text
+        .chars()
+        .next_back()
+        .is_some_and(is_sentence_terminal_punctuation)
+        && compact_transcript_for_duplicate_check(result_text).contains(&compact_suffix)
 }
 
 fn choose_revision_text(candidate_text: &str, merged_text: &str) -> String {
@@ -1727,6 +1736,24 @@ mod tests {
         let duplicated = format!("{final_text}{duplicate_tail}");
 
         assert_eq!(choose_transcript_text(final_text, &duplicated), final_text);
+    }
+
+    #[test]
+    fn choose_transcript_text_prefers_provider_cumulative_over_short_utterance_echo() {
+        let provider = "开始录音，那你看一下继续吧。如果没什么问题的话，那你就看一下有没有什么东西要需要继续修的。哦，有人";
+        let repeated_utterances = format!("{provider}哦，有人");
+        assert_eq!(choose_transcript_text(provider, &repeated_utterances), provider);
+    }
+
+    #[test]
+    fn choose_transcript_text_keeps_new_or_provider_confirmed_repetition() {
+        let provider = "我刚刚说了有人";
+        assert_eq!(
+            choose_transcript_text(provider, "我刚刚说了有人继续说话"),
+            "我刚刚说了有人继续说话"
+        );
+        let repeated = "我刚刚说了有人有人";
+        assert_eq!(choose_transcript_text(repeated, repeated), repeated);
     }
 
     #[test]
