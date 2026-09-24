@@ -716,6 +716,36 @@ mod pipeline_observation_tests {
     }
 
     #[test]
+    fn live_chunk_completion_does_not_emit_a_full_final_snapshot() {
+        let guard = begin_embedded_audio_pipeline_capture(117);
+        let observation = guard.observation();
+        let snapshots = Arc::new(Mutex::new(Vec::<String>::new()));
+        let snapshots_for_sink = Arc::clone(&snapshots);
+        observation.set_snapshot_sink_for_test(Arc::new(move |payload| {
+            snapshots_for_sink.lock().push(payload);
+        }));
+
+        observation.record_asr_queued_for_segment(Some(64), 3_200);
+        observation.record_asr_send_completed_for_segment(Some(64), 3_200);
+        assert!(!snapshots
+            .lock()
+            .iter()
+            .any(|payload| payload.contains("\"reason\":\"asr_delivery_settled\"")));
+
+        observation.record_asr_queued_for_segment(Some(64), 3_200);
+        drop(guard);
+        observation.record_asr_send_completed_for_segment(Some(64), 3_200);
+        assert_eq!(
+            snapshots
+                .lock()
+                .iter()
+                .filter(|payload| payload.contains("\"reason\":\"asr_delivery_settled\""))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn segment_counters_keep_two_physical_segments_separate() {
         let observation = EmbeddedAudioPipelineObservation::new(106);
         observation.record_capture_event(&crate::embedded_audio::SessionEvent::Started {
@@ -1635,6 +1665,7 @@ struct PipelineObservationState {
     started_at: Instant,
     snapshot_seq: u64,
     last_snapshot_at: Option<Instant>,
+    capture_ended: bool,
     coordinator_session_id: Option<String>,
     embedded_session_id: Option<u32>,
     counters: PipelineCounters,
@@ -1686,6 +1717,7 @@ impl EmbeddedAudioPipelineObservation {
                 started_at: Instant::now(),
                 snapshot_seq: 0,
                 last_snapshot_at: None,
+                capture_ended: false,
                 coordinator_session_id: None,
                 embedded_session_id: None,
                 counters: PipelineCounters::default(),
@@ -2374,11 +2406,11 @@ impl EmbeddedAudioPipelineObservation {
                     counters.asr_pending_pcm_bytes.saturating_sub(bytes);
             }
         });
-        if shares
-            .iter()
-            .filter_map(|(segment_id, _)| *segment_id)
-            .any(|segment_id| self.segment_delivery_is_settled(segment_id))
-        {
+        let mut settled = false;
+        for segment_id in shares.iter().filter_map(|(segment_id, _)| *segment_id) {
+            settled |= self.claim_final_delivery_snapshot(segment_id);
+        }
+        if settled {
             self.snapshot("asr_delivery_settled", true);
         }
     }
@@ -2436,12 +2468,16 @@ impl EmbeddedAudioPipelineObservation {
         self.snapshot("asr_send_failed", true);
     }
 
-    fn segment_delivery_is_settled(&self, segment_id: u32) -> bool {
-        self.state
-            .lock()
+    fn claim_final_delivery_snapshot(&self, segment_id: u32) -> bool {
+        let mut state = self.state.lock();
+        let ready = state
             .segment_counters
             .get(&segment_id)
-            .is_some_and(segment_delivery_settled)
+            .is_some_and(|counters| {
+                segment_delivery_settled(counters)
+                    && (state.capture_ended || segment_counters_settled(counters))
+            });
+        ready && state.segment_final_snapshot_emitted.insert(segment_id)
     }
 
     pub(crate) fn record_asr_queue_rejected(&self, bytes: usize) {
@@ -2623,6 +2659,43 @@ impl EmbeddedAudioPipelineObservation {
 
     pub(crate) fn snapshot(&self, reason: &'static str, force: bool) {
         let now = Instant::now();
+        // Poll snapshots run on the live audio path. Serializing every bounded
+        // evidence ledger once per second grows to tens of KB per poll; retain
+        // the full ledger for terminal/error snapshots and test sinks instead.
+        if !force && self.snapshot_sink.lock().is_none() {
+            let summary = {
+                let mut state = self.state.lock();
+                if state
+                    .last_snapshot_at
+                    .is_some_and(|last| now.duration_since(last) < Duration::from_secs(1))
+                {
+                    return;
+                }
+                state.last_snapshot_at = Some(now);
+                state.snapshot_seq = state.snapshot_seq.saturating_add(1);
+                PipelineSummarySnapshot {
+                    event: "embedded_audio_pipeline_snapshot",
+                    detail: "summary",
+                    reason,
+                    capture_generation: self.capture_generation,
+                    coordinator_session_id: state.coordinator_session_id.clone(),
+                    embedded_session_id: state.embedded_session_id,
+                    snapshot_seq: state.snapshot_seq,
+                    monotonic_ms: now.duration_since(state.started_at).as_millis() as u64,
+                    counters: state.counters,
+                    segment_counters: state.segment_counters.clone(),
+                    segment_ledger_incomplete: state.segment_ledger_incomplete,
+                    interval_ledger_incomplete: state.interval_ledger_incomplete,
+                    asr_destination_facts_incomplete: state.asr_destination_facts_incomplete,
+                    pcm_stage_facts_incomplete: state.pcm_stage_ledger.capacity_drops().4,
+                }
+            };
+            match serde_json::to_string(&summary) {
+                Ok(payload) => log::info!("[obs-audio-pipeline] {payload}"),
+                Err(_) => log::warn!("[obs-audio-pipeline] summary serialization failed"),
+            }
+            return;
+        }
         let snapshot = {
             let mut state = self.state.lock();
             if !force
@@ -2822,6 +2895,24 @@ impl EmbeddedAudioPipelineObservation {
 }
 
 #[derive(Serialize)]
+struct PipelineSummarySnapshot {
+    event: &'static str,
+    detail: &'static str,
+    reason: &'static str,
+    capture_generation: u64,
+    coordinator_session_id: Option<String>,
+    embedded_session_id: Option<u32>,
+    snapshot_seq: u64,
+    monotonic_ms: u64,
+    counters: PipelineCounters,
+    segment_counters: BTreeMap<u32, PipelineCounters>,
+    segment_ledger_incomplete: bool,
+    interval_ledger_incomplete: bool,
+    asr_destination_facts_incomplete: bool,
+    pcm_stage_facts_incomplete: bool,
+}
+
+#[derive(Serialize)]
 struct PipelineSnapshot {
     event: &'static str,
     reason: &'static str,
@@ -2879,6 +2970,7 @@ impl EmbeddedAudioPipelineCaptureGuard {
 
 impl Drop for EmbeddedAudioPipelineCaptureGuard {
     fn drop(&mut self) {
+        self.observation.state.lock().capture_ended = true;
         self.observation.snapshot("capture_end", true);
         if let Some(registry) = PIPELINE_OBSERVATIONS.get() {
             let mut registry = registry.lock();
