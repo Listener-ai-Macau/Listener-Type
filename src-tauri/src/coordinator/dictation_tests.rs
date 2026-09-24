@@ -6948,6 +6948,88 @@ fn automatic_wake_target_speaker_endpoint_uses_one_policy_snapshot_for_decision_
 }
 
 #[test]
+fn automatic_endpoint_does_not_stop_during_a_new_owner_compatible_vad_onset() {
+    // Installed session 651ad979: PendingSpeech began 258 ms before the
+    // three-second owner deadline, but automatic STOP ignored the VAD and
+    // preceded canonical Speech by 90 ms. This is a STOP veto, not a new
+    // owner watermark; an explicit recent NonTarget must still be stoppable.
+    use crate::asr::volcengine::{
+        LocalSpeechActivityState, LocalSpeechEvidence, TargetSpeakerUpdate,
+    };
+    let started = std::time::Instant::now();
+    let update = TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(23_672),
+        provider_audio_duration_ms: Some(24_400),
+        audio_duration_ms: Some(27_500),
+        local_speech_end_ms: Some(27_500),
+        qualified_owner_speech_end_ms: Some(24_200),
+        qualified_owner_activity_advanced: false,
+        local_speaker_classification_kind: None,
+        local_speaker_signal_quality_sufficient: None,
+        local_speaker_observation_end_ms: Some(27_400),
+        local_target_speech_end_ms: Some(24_200),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(23_672),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let pending = LocalSpeechEvidence {
+        analyzed_through_ms: 27_400,
+        pending_speech_start_ms: Some(27_264),
+        activity_epoch: 4,
+        revision: 10,
+        state: LocalSpeechActivityState::PendingSpeech,
+        ..Default::default()
+    };
+    assert!(super::automatic_vad_candidate_holds_stop(pending, &update, true));
+    assert!(!super::automatic_vad_candidate_holds_stop(pending, &update, false));
+
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.automatic_wake_session = true;
+    clock.armed_at = Some(started);
+    clock.armed_target_end_ms = Some(24_200);
+    clock.last_positive_owner_evidence_at = Some(started);
+    clock.latest_update = Some(update.clone());
+    clock.latest_update_at = Some(started + std::time::Duration::from_millis(2_900));
+    clock.product_endpoint.arm(super::product_endpoint_evidence(
+        &update,
+        clock.armed_target_end_ms,
+        true,
+    ));
+    clock.note_local_vad_evidence(pending);
+    assert!(clock
+        .latest_due_update(started + std::time::Duration::from_millis(2_950), 2_900)
+        .is_none());
+    assert_eq!(
+        clock.take_due_hold_diagnostic(),
+        Some((0, "automatic_vad_speech_pending")),
+    );
+    assert!(!clock.positive_owner_evidence_live(
+        started + std::time::Duration::from_millis(4_000)
+    ));
+
+    let foreign = TargetSpeakerUpdate {
+        local_non_target_speech_end_ms: Some(27_450),
+        ..update.clone()
+    };
+    assert!(!super::automatic_vad_candidate_holds_stop(pending, &foreign, true));
+    let quiet = LocalSpeechEvidence {
+        state: LocalSpeechActivityState::NonSpeech,
+        ..pending
+    };
+    assert!(!super::automatic_vad_candidate_holds_stop(quiet, &update, true));
+    let lagging = LocalSpeechEvidence {
+        analyzed_through_ms: 27_000,
+        ..pending
+    };
+    assert!(!super::automatic_vad_candidate_holds_stop(lagging, &update, true));
+}
+
+#[test]
 fn automatic_wake_target_speaker_endpoint_no_body_uses_original_guard_clock() {
     // Live session 2898 accepted the owner wake and showed Recording, then
     // the pre-activation BLE segment rotated before any body arrived. With no

@@ -167,6 +167,29 @@ impl EndpointStopAdmission {
             return false;
         }
         if !self.ticket.manual_vad_guard {
+            let automatic_body_with_recent_owner = {
+                let clock = self.endpoint_clock.lock();
+                clock.automatic_wake_session
+                    && !clock.automatic_no_body_armed
+                    && clock.positive_owner_evidence_live(Instant::now())
+            };
+            if automatic_body_with_recent_owner {
+                let evidence = self.asr.local_speech_activity_snapshot();
+                let update = self.asr.endpoint_update_snapshot();
+                if automatic_vad_candidate_holds_stop(evidence, &update, true) {
+                    log::info!(
+                        "[asr] automatic endpoint STOP admission revoked by live VAD session_id={} proposal_id={} generation={} vad_state={:?} vad_epoch={} analyzed_through_ms={} captured_audio_ms={:?}",
+                        self.ticket.session_id,
+                        self.ticket.proposal_id,
+                        self.ticket.endpoint_generation,
+                        evidence.state,
+                        evidence.activity_epoch,
+                        evidence.analyzed_through_ms,
+                        update.audio_duration_ms,
+                    );
+                    return false;
+                }
+            }
             return true;
         }
 

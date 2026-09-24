@@ -185,6 +185,10 @@ struct SettledTargetEndpointClock {
 }
 
 const RECENT_STRONG_NON_TARGET_WINDOW_MS: u64 = 900;
+// A new local VAD onset can arrive just before the owner inactivity deadline.
+// Automatic sessions use it only to veto STOP while the audio is live; it is
+// never an owner watermark or a fresh three-second lease.
+const AUTOMATIC_STOP_VAD_MAX_LAG_MS: u64 = 250;
 const MANUAL_TERMINAL_BRIDGE_MAX_MS: u64 = 3_000;
 const MANUAL_TERMINAL_BRIDGE_MIN_VISIBLE_CHARS: usize = 20;
 /// Automatic-wake sessions earn the bounded open-clause continuation only
@@ -290,6 +294,25 @@ fn update_has_recent_strong_non_target(
         .max()
         .unwrap_or(non_target_end_ms);
     latest_audio_ms.saturating_sub(non_target_end_ms) <= RECENT_STRONG_NON_TARGET_WINDOW_MS
+}
+
+fn automatic_vad_candidate_holds_stop(
+    evidence: crate::asr::volcengine::LocalSpeechEvidence,
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    recent_owner_evidence: bool,
+) -> bool {
+    use crate::asr::volcengine::LocalSpeechActivityState;
+    let speech_candidate = matches!(
+        evidence.state,
+        LocalSpeechActivityState::PendingSpeech | LocalSpeechActivityState::Speech
+    );
+    if !speech_candidate || !recent_owner_evidence || update_has_recent_strong_non_target(update) {
+        return false;
+    }
+    let captured_ms = update.audio_duration_ms.unwrap_or_default();
+    evidence.revision > 0
+        && captured_ms.saturating_sub(evidence.analyzed_through_ms)
+            <= AUTOMATIC_STOP_VAD_MAX_LAG_MS
 }
 
 /// Once the local owner has been established, a fresh still-speakerless or
@@ -849,12 +872,13 @@ impl SettledTargetEndpointClock {
             .latest_update
             .as_ref()
             .and_then(|previous| previous.local_target_speech_end_ms);
-        let continuation_activity_rearm = self
-            .continuation_pending_anchor_canonical_speech_serial
-            .is_some_and(|anchor_serial| self.canonical_speech_serial > anchor_serial)
-            // Automatic wake sessions have no manual VAD sidecar. With local
-            // tracking, only a newer owner-specific edge can restart the
-            // deadline; another person's raw speech must not do so.
+        let continuation_activity_rearm = (self.manual_vad_guard
+            && self
+                .continuation_pending_anchor_canonical_speech_serial
+                .is_some_and(|anchor_serial| self.canonical_speech_serial > anchor_serial))
+            // Automatic wake sessions observe VAD only as a STOP veto. With
+            // local tracking, only a newer owner-specific edge can restart
+            // the deadline; another person's raw speech must not do so.
             || (self.automatic_wake_session
                 && self
                     .continuation_pending_anchor_speech_end_ms
@@ -1341,6 +1365,21 @@ impl SettledTargetEndpointClock {
             );
             return matches!(decision, crate::speech_decision_kernel::EndpointDecision::Stop);
         }
+        if self.automatic_wake_session
+            && !self.manual_vad_guard
+            && self
+                .latest_local_vad_evidence
+                .is_some_and(|evidence| {
+                    automatic_vad_candidate_holds_stop(
+                        evidence,
+                        &update,
+                        self.positive_owner_evidence_live(now),
+                    )
+                })
+        {
+            self.note_due_hold_diagnostic(self.generation, "automatic_vad_speech_pending");
+            return false;
+        }
         if self.maybe_enter_manual_continuation_pending(&update, armed_at, now) {
             self.note_due_hold_diagnostic(self.generation, "continuation_pending");
             return false;
@@ -1643,26 +1682,22 @@ fn start_settled_target_endpoint_watchdog(
                 endpoint_policy,
                 &raw_decision_snapshot,
             );
-            let local_vad_evidence = use_manual_vad
-                .then(|| asr.local_speech_activity_snapshot());
-            let local_vad_revision = local_vad_evidence.map(|evidence| evidence.revision);
+            let local_vad_evidence = asr.local_speech_activity_snapshot();
+            let local_vad_revision = use_manual_vad.then_some(local_vad_evidence.revision);
             let decision_snapshot = if use_manual_vad {
-                // The first VAD rollout is intentionally limited to manual
-                // body sessions. Enrolled-speaker endpointing keeps its
-                // existing owner-identity policy until this evidence has
-                // passed the manual gates.
+                // Manual sessions use VAD as endpoint evidence. Automatic
+                // sessions observe it only as a bounded STOP veto and retain
+                // their owner-identity clock.
                 asr.endpoint_update_with_local_speech_evidence_snapshot(
                     raw_decision_snapshot.clone(),
-                    local_vad_evidence.expect("manual endpoint VAD evidence snapshot"),
+                    local_vad_evidence,
                 )
             } else {
                 raw_decision_snapshot
             };
             let (update, hold_diagnostic) = {
                 let mut clock = endpoint_clock.lock();
-                if let Some(evidence) = local_vad_evidence {
-                    clock.note_local_vad_evidence(evidence);
-                }
+                clock.note_local_vad_evidence(local_vad_evidence);
                 // If the provider never opened, keep feeding the reducer from
                 // the local owner clock. This preserves the same single
                 // watchdog decision path while removing generic room-energy
