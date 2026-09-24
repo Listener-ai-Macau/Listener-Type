@@ -4215,6 +4215,41 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
         .iter()
         .filter_map(|utterance| utterance.get("text").and_then(Value::as_str))
         .collect::<String>();
+    // A two-pass row can already contain the live tail while an overlapping
+    // stream row still repeats that same tail. Joining the rows then makes the
+    // optimistic text longer than the provider's cumulative result and can
+    // paste the repeated words before the final correction arrives. Use the
+    // provider's complete wording when the only extra row text is an exact
+    // repeat of its own ending; do not collapse a genuinely new utterance.
+    let overlapping_last_row = optimistic_utterances
+        .split_last()
+        .and_then(|(last, previous)| {
+            utterance_start_ms(last).zip(previous.iter().filter_map(utterance_end_ms).max())
+        })
+        .is_some_and(|(start, previous_end)| start < previous_end);
+    let optimistic_utterance_text = if !target_text.is_empty()
+        && !stable_other_speaker_present
+        && overlapping_last_row
+        && raw_text.starts_with(&target_text)
+        && optimistic_utterance_text
+            .strip_prefix(raw_text)
+            .is_some_and(|extra| {
+                extra.chars().count() >= 2
+                    && raw_text.ends_with(extra)
+                    && optimistic_utterances.last().and_then(|row| row.get("text"))
+                        .and_then(Value::as_str)
+                        == Some(extra)
+            })
+    {
+        log::info!(
+            "[asr] reconciled overlapping stream row with provider cumulative text provider_chars={} joined_chars={}",
+            raw_text.chars().count(),
+            optimistic_utterance_text.chars().count()
+        );
+        raw_text.to_string()
+    } else {
+        optimistic_utterance_text
+    };
     // Local NonTarget samples (even before debounce flips stable_target) must
     // freeze optimistic growth at the Target-filtered text so room speech cannot
     // inflate the session ledger during the switch confirmation window.
@@ -10657,6 +10692,75 @@ mod tests {
         assert_eq!(
             filtered.optimistic_result["text"],
             "这个东西现在能不能弄？然后帮我看一下"
+        );
+    }
+
+    #[test]
+    fn overlapping_stream_row_does_not_duplicate_provider_cumulative_tail() {
+        // Live session f9b0b93d: the two-pass row already contained the
+        // stream row's final words. Concatenating both rows produced a longer
+        // optimistic preview than result.text and pasted the words twice.
+        let result = json!({
+            "text": "开始录音，现在继续检查效率至上",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 100,
+                    "end_time": 3300,
+                    "text": "开始录音，现在继续检查效率至上"
+                },
+                {
+                    "additions": { "source": "stream" },
+                    "definite": false,
+                    "start_time": 2800,
+                    "end_time": 3400,
+                    "text": "效率至上"
+                }
+            ]
+        });
+        let mut target = Some("0".to_string());
+        let filtered = filter_result_to_target_speaker(&result, &mut target);
+        assert_eq!(
+            filtered.optimistic_result["text"],
+            "开始录音，现在继续检查效率至上"
+        );
+
+        // If those words were actually spoken twice, result.text contains
+        // both occurrences and the filter must preserve both.
+        let repeated = json!({
+            "text": "开始录音，现在继续检查效率至上效率至上",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 100,
+                    "end_time": 3300,
+                    "text": "开始录音，现在继续检查效率至上"
+                },
+                {
+                    "additions": { "source": "stream" },
+                    "definite": false,
+                    "start_time": 3400,
+                    "end_time": 4000,
+                    "text": "效率至上"
+                }
+            ]
+        });
+        let filtered = filter_result_to_target_speaker(&repeated, &mut target);
+        assert_eq!(
+            filtered.optimistic_result["text"],
+            "开始录音，现在继续检查效率至上效率至上"
+        );
+
+        // A later distinct row must remain visible even if the cumulative
+        // result.text has not yet caught up with its second occurrence.
+        let mut delayed_raw = repeated;
+        delayed_raw["text"] = json!("开始录音，现在继续检查效率至上");
+        let filtered = filter_result_to_target_speaker(&delayed_raw, &mut target);
+        assert_eq!(
+            filtered.optimistic_result["text"],
+            "开始录音，现在继续检查效率至上效率至上"
         );
     }
 
