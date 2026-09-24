@@ -1569,6 +1569,10 @@ pub(super) struct PauseEarlyDeliveryLedger {
     /// set, a full-text re-paste is cancelled even if the reconcilable prefix
     /// was lost (宁可少不可重——H 族).
     pub(super) ever_delivered_session: Option<SessionId>,
+    /// A submitted early chunk used the clipboard paste transport. The final
+    /// remainder must continue on that route instead of waiting for a TSF
+    /// client that did not deliver this session's preceding chunks.
+    pub(super) paste_delivered_session: Option<SessionId>,
     /// 一次性门诊断：同一会话同一原因只记一行，防止看门狗 20/s 刷屏。
     pub(super) gate_blocked_logged: Option<(SessionId, &'static str)>,
     /// 2026-09-23 tkg 后诊断:tick 首达行(证明看门狗路径活着+当时门状态)。
@@ -2073,6 +2077,10 @@ pub(super) fn pause_early_ever_delivered(inner: &Arc<Inner>, session_id: Session
     ledger.ever_delivered_session.as_ref() == Some(&session_id)
 }
 
+pub(super) fn pause_early_paste_delivered(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    inner.embedded_audio_pause_early_delivery.lock().paste_delivered_session == Some(session_id)
+}
+
 /// 终稿路径取走本会话的已交付前缀（display, key），取走即清零。粘滞底线
 /// （曾上屏）是历史事实，跨 take 保留——终稿侧即使先 take 后查询也不翻转。
 pub(super) fn take_pause_early_delivery(
@@ -2351,6 +2359,9 @@ async fn pause_early_delivery_tick(
         return;
     }
     pause_early_delivery_confirm(inner, session_id);
+    if result.route == DeliveryRoute::Paste {
+        inner.embedded_audio_pause_early_delivery.lock().paste_delivered_session = Some(session_id);
+    }
     log::info!(
         "[coord] pause-early-delivery prefix_chars={} total_delivered_chars={} snapshot_chars={snapshot_chars} ledger_chars={full_ledger_chars} min_stable_ms={} route={:?} status={:?}",
         delta.chars().count(),

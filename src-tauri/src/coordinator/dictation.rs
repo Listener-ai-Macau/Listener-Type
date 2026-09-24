@@ -4023,6 +4023,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // 粘滞底线在 take 之前读：本会话只要上屏过早期文本，就算可对账前缀
     // 丢失也绝不允许终稿整段重贴（2026-09-23 用户实锤"一毛一样粘贴两次"）。
     let pause_early_sticky = pause_early_ever_delivered(inner, current_session_id);
+    let pause_early_paste = pause_early_paste_delivered(inner, current_session_id);
     let pause_early_delivered = take_pause_early_delivery(inner, current_session_id);
     let pause_early_outcome = pause_early_delivered.as_ref().map(|(display, key)| {
         // 2026-09-23 17:31 d37e3562 吞尾实锤：润色压缩+流式中间态膨胀让
@@ -4253,6 +4254,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                                 allow_non_tsf_insertion_fallback,
                                 paste_shortcut,
                                 ime_target,
+                                pause_early_paste,
                             )
                             .await;
                             DeliveryExternalResult {

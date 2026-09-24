@@ -2884,6 +2884,7 @@ async fn insert_with_windows_ime_first(
     allow_non_tsf_insertion_fallback: bool,
     paste_shortcut: PasteShortcut,
     ime_target: Option<ImeSubmitTarget>,
+    continue_paste_route: bool,
 ) -> WindowsInsertionResult {
     let prepared = {
         let mut slot = inner.prepared_windows_ime_session.lock();
@@ -2905,6 +2906,15 @@ async fn insert_with_windows_ime_first(
             submitted_text: None,
         };
     };
+
+    if continue_paste_route && allow_non_tsf_insertion_fallback {
+        log::info!(
+            "[windows-ime] final remainder continues submitted pause-early paste route session_id={session_id} chars={}",
+            polished.chars().count()
+        );
+        inner.windows_ime.restore_session(prepared);
+        return insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut);
+    }
 
     // Recording-start activate often fails (0x80004005) while many windows
     // fight the TIP. Before abandoning TSF, re-prepare once at insert time —
