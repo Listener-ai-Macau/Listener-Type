@@ -3043,18 +3043,12 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             let (primary, target_result) =
                 match send_result {
                     Ok(()) => {
-                        // r35（2026-09-18 晚）：用户在同干扰源 A/B 下判 tih
-                        // "吞字/没有以前好用"（tig 四连绿 vs tih 三轮断在中
-                        // 停）。延迟优化机制上只动停说后，无法解释端点提前，
-                        // 但按 A/B 证据先撤回串行行为；待端点取证
-                        // （fusion_state=ConfirmedOther 中停掐断）定位真因后
-                        // 再评估重新引入 begin_target_speaker_final_early()。
-                        // Settle the low-latency provider first. Its final speaker
-                        // boundary can prove that a later local NonTarget tail was
-                        // already excluded, avoiding a redundant separator wait.
-                        // The separator itself has processed capture audio in the
-                        // background, so ambiguous overlap still gets its bounded
-                        // chance immediately afterwards.
+                        // The device's trailing PCM is drained before send_last_frame
+                        // returns. Close the independent separator input now so its
+                        // last chunk and secondary ASR final can run while the primary
+                        // provider settles. Keep the actual owner/foreign arbitration
+                        // after the primary final, where its speaker boundary exists.
+                        asr.begin_target_speaker_final_early();
                         // 2026-09-21 跟手：early-seal —— 干净会话端点 STOP 时账本
                         // 已稳定整个耐心窗，稳定账本即完整终稿；真实终稿 350ms
                         // 内没到就地封存（干扰会话在 ASR 内部自动退回完整等待）。

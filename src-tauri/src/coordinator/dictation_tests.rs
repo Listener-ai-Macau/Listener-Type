@@ -6571,10 +6571,6 @@ fn target_speaker_endpoint_terminal_wake_continuation_captures_original_windows_
     assert!(!body.contains("begin_session_state(&mut state, None"));
 }
 
-// r35（2026-09-18 晚）撤回分离轨并行启动（wiring 测试随之移除）：同干扰源
-// A/B 下用户判 tih 吞字，按判定恢复 tig 串行行为；真因（ConfirmedOther 中停
-// 掐断）定位后随 begin_target_speaker_final_early 一并评估回归。
-
 #[test]
 fn target_speaker_endpoint_holds_after_one_transient_local_mismatch() {
     // Installed session 6ef0d4b8 reproduced this exact shape: cloud

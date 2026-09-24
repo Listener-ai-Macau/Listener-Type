@@ -5007,13 +5007,30 @@ impl VolcengineStreamingASR {
     }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-    /// r29 延迟优化：在停说边界（主轨 send_last_frame 之后、等待主轨终稿之前）
-    /// 调用。把分离流的 finish 提前启动，与主轨终稿等待并行；之后
-    /// await_target_speaker_final 会 join 这个任务而不是串行重跑。
-    /// r35 撤回：同干扰源 A/B（tig 四连绿 vs tih 三轮中停掐断）后按用户判定
-    /// 恢复串行；真因（fusion_state=ConfirmedOther 中停）定位后再评估回归。
-    #[allow(dead_code)]
+    /// Start the independent separator final after all trailing device PCM
+    /// has been delivered, overlapping its tail inference with the primary
+    /// provider final. The primary final still decides whether to use it.
     pub fn begin_target_speaker_final_early(&self) {
+        // A clean session does not need its final separator chunk. Do not
+        // compete with the primary provider unless capture has already shown
+        // owner/foreign ambiguity. Evidence discovered in the trailing chunk
+        // still takes the normal serial path after the primary final.
+        let evidence_seen = {
+            let state = self.state.lock();
+            state.local_sustained_non_target_speech_end_ms.is_some()
+                || degraded_owner_tail_suggests_interference_with_quality(
+                    &state.local_speaker_evidence,
+                    &state.local_unreliable_speaker_evidence_end_ms,
+                )
+        };
+        let physical_overlap = self
+            .target_speaker_stream
+            .lock()
+            .as_ref()
+            .is_some_and(|stream| stream.interference_detected());
+        if !evidence_seen && !physical_overlap {
+            return;
+        }
         let stream = self.target_speaker_stream.lock().take();
         let Some(stream) = stream else {
             return;
@@ -5023,6 +5040,9 @@ impl VolcengineStreamingASR {
                 let stream = Arc::clone(&stream);
                 async move { stream.finish().await }
             });
+        log::info!(
+            "[target-speaker] parallel final started after primary audio drain physical_overlap={physical_overlap} local_interference={evidence_seen}"
+        );
         let mut slot = self.target_speaker_final_task.lock();
         if let Some((_, previous)) = slot.replace((stream, task)) {
             previous.abort();
@@ -5073,6 +5093,9 @@ impl VolcengineStreamingASR {
             degraded_owner_tail_seen,
         ) {
             stream.cancel();
+            if let Some(task) = early_task.as_ref() {
+                task.abort();
+            }
             log::info!(
                 "[target-speaker] no explicit non-owner identity evidence; preserving low-latency certified primary final physical_overlap={physical_interference_detected}"
             );
@@ -5086,6 +5109,9 @@ impl VolcengineStreamingASR {
             )
         {
             stream.cancel();
+            if let Some(task) = early_task.as_ref() {
+                task.abort();
+            }
             log::info!(
                 "[target-speaker] provider final ended before the confirmed non-target tail; skipping redundant owner-only wait provider_owner_end_ms={provider_owner_end_ms:?} local_non_target_end_ms={local_non_target_end_ms:?}"
             );
@@ -5099,8 +5125,9 @@ impl VolcengineStreamingASR {
             sustained_non_target_seen,
             degraded_owner_tail_seen
         );
+        let mut early_task = early_task;
         let finish_fut = async {
-            match early_task {
+            match early_task.as_mut() {
                 Some(task) => task
                     .await
                     .map_err(|err| format!("target-speaker early finish join failed: {err}"))
@@ -5161,6 +5188,9 @@ impl VolcengineStreamingASR {
             }
             Err(_) => {
                 stream.cancel();
+                if let Some(task) = early_task.as_ref() {
+                    task.abort();
+                }
                 Err("target-speaker owner-only stream timed out".to_string())
             }
         }
@@ -7195,6 +7225,11 @@ impl VolcengineStreamingASR {
         #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
         if let Some(stream) = self.target_speaker_stream.lock().take() {
             stream.cancel();
+        }
+        #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+        if let Some((stream, task)) = self.target_speaker_final_task.lock().take() {
+            stream.cancel();
+            task.abort();
         }
         let (runtime, pending_audio) = {
             // Do not remove queued source entries here. The worker owns the
