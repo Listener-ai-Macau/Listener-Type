@@ -1304,11 +1304,22 @@ fn provider_has_locally_excluded_later_utterance(state: &SyncState, result: &Val
         let Some(start_ms) = utterance_start_ms(utterance) else {
             return false;
         };
+        // A different cloud speaker, or a provisional row with no speaker id,
+        // can corroborate a sustained local mismatch. The same stable cloud
+        // speaker cannot: post-pause owner speech produces the same low scores.
+        let provider_indicates_other = match utterance_speaker_id(utterance) {
+            Some(speaker) => state
+                .target_speaker_id
+                .as_deref()
+                .is_some_and(|target| speaker != target),
+            None => !utterance_is_stable(utterance),
+        };
+        if !provider_indicates_other {
+            return false;
+        }
         // Physical 7ba9b684: the new speaker's streaming row had no speaker id
-        // for seven seconds. Waiting for definitive diarization displayed all
-        // of it before the final filter could act. Use the existing three-low-
-        // window exclusion at the preview boundary too, only after a separate
-        // body row actually demonstrated positive local owner recognition.
+        // for seven seconds. A provisional suspicion can protect preview
+        // arbitration; final destructive exclusion still needs cloud support.
         let established_body_before = utterances[..index].iter().any(|previous| {
             let (Some(previous_start), Some(previous_end)) =
                 (utterance_start_ms(previous), utterance_end_ms(previous))
@@ -1337,30 +1348,35 @@ fn provider_has_locally_excluded_later_utterance(state: &SyncState, result: &Val
         if !established_body_before {
             return false;
         }
-        if local_evidence_confirms_owner_absence(utterance, &state.local_speaker_evidence, phrase) {
-            return true;
-        }
-        // Short provider rows can end before even one full speaker window.
-        // A *stable different cloud speaker* permits one bounded identity
-        // window of look-ahead, never arbitrary later room noise. Keep the
-        // existing three-low-window rule and positive-owner veto unchanged.
-        let stable_foreign = utterance_is_stable(utterance)
-            && utterance_speaker_id(utterance)
-                .zip(state.target_speaker_id.clone())
-                .is_some_and(|(speaker, target)| speaker != target);
         let Some(end_ms) = utterance_end_ms(utterance) else {
             return false;
         };
-        if !stable_foreign || end_ms.saturating_sub(start_ms) >= LOCAL_SPEAKER_WINDOW_MS {
-            return false;
+        // A short stable foreign row may seal before the 1.2 s verifier
+        // window arrives. Give it only one window of look-ahead.
+        let evidence_end_ms = if utterance_is_stable(utterance)
+            && end_ms.saturating_sub(start_ms) < LOCAL_SPEAKER_WINDOW_MS
+        {
+            end_ms.saturating_add(LOCAL_SPEAKER_WINDOW_MS)
+        } else {
+            end_ms
+        };
+        let mut low_votes = 0u32;
+        for sample in &state.local_speaker_evidence {
+            let center_ms = sample.audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+            if center_ms < start_ms || center_ms > evidence_end_ms {
+                continue;
+            }
+            if matches!(
+                sample.classification,
+                crate::speaker_verification::SessionSpeakerClassification::Target { .. }
+            ) {
+                return false;
+            }
+            if !sample.stable_target || sample.classification.score() <= LOCAL_OWNER_ABSENCE_MAX_SCORE {
+                low_votes += 1;
+            }
         }
-        let mut identity_window = utterance.clone();
-        identity_window["end_time"] = json!(end_ms.saturating_add(LOCAL_SPEAKER_WINDOW_MS));
-        local_evidence_confirms_owner_absence(
-            &identity_window,
-            &state.local_speaker_evidence,
-            phrase,
-        )
+        low_votes >= LOCAL_OWNER_ABSENCE_CONFIRMATIONS
     })
 }
 
@@ -2938,13 +2954,11 @@ fn recover_locally_supported_owner_prefix(
     filtered.response_local_body_alias_present = true;
 }
 
-/// A provider cluster id is not a durable person id. When a final response
-/// starts a new stable utterance with the same cluster immediately after the
-/// owner row, require the new row to retain owner voice evidence. Two extreme
-/// mismatch windows near that row's boundaries, no high-confidence owner
-/// window, and an independently degraded tail are enough to reject the row.
-/// This keeps a single noisy cross-phrase dip non-destructive while handling
-/// the common "owner finishes, room speaker continues" shape.
+/// A provider cluster id is not a durable person id. A low similarity score
+/// alone is not a durable person change either: the owner's own resumed speech
+/// can score very low after a pause. Only remove a same-cluster row after the
+/// local identity tracker has actually confirmed a departure. The degraded
+/// tail signal can corroborate that decision, but cannot make it on its own.
 fn degraded_same_cluster_foreign_tail_start(
     rows: &[Value],
     target_speaker_id: Option<&str>,
@@ -2954,8 +2968,6 @@ fn degraded_same_cluster_foreign_tail_start(
     degraded_owner_tail: bool,
 ) -> Option<usize> {
     const BOUNDARY_SLACK_MS: u64 = 250;
-    const MIN_EXTREME_MISMATCH_WINDOWS: usize = 2;
-    const HIGH_CONFIDENCE_OWNER_SCORE: f32 = 0.75;
     let target = target_speaker_id?;
     if !wake_owner_verified || local_speaker_profile_adaptive || !degraded_owner_tail {
         return None;
@@ -2987,22 +2999,7 @@ fn degraded_same_cluster_foreign_tail_start(
             center_ms >= start_ms.saturating_sub(BOUNDARY_SLACK_MS)
                 && center_ms <= end_ms.saturating_add(BOUNDARY_SLACK_MS)
         });
-        let mut extreme_mismatch_windows = 0usize;
-        let mut high_confidence_owner_seen = false;
-        for sample in overlapping {
-            let score = sample.classification.score();
-            if score <= LOCAL_ENDPOINT_STRONG_NON_TARGET_MAX_SCORE {
-                extreme_mismatch_windows += 1;
-            }
-            if matches!(
-                sample.classification,
-                crate::speaker_verification::SessionSpeakerClassification::Target { .. }
-            ) && score >= HIGH_CONFIDENCE_OWNER_SCORE
-            {
-                high_confidence_owner_seen = true;
-            }
-        }
-        if extreme_mismatch_windows >= MIN_EXTREME_MISMATCH_WINDOWS && !high_confidence_owner_seen {
+        if overlapping.into_iter().any(|sample| !sample.stable_target) {
             return Some(index);
         }
     }
@@ -3349,58 +3346,20 @@ fn local_evidence_confirms_owner_absence(
 fn local_evidence_confirms_owner_absence_with_verified_wake(
     utterance: &Value,
     evidence: &[LocalSpeakerEvidence],
-    wake_speaker_phrase: Option<&str>,
-    wake_owner_verified: bool,
-    local_speaker_profile_adaptive: bool,
-    confirmed_non_target_speech_end_ms: Option<u64>,
+    _wake_speaker_phrase: Option<&str>,
+    _wake_owner_verified: bool,
+    _local_speaker_profile_adaptive: bool,
+    _confirmed_non_target_speech_end_ms: Option<u64>,
 ) -> bool {
     let Some(end_ms) = utterance_end_ms(utterance) else {
         return false;
     };
     let start_ms = utterance_start_ms(utterance).unwrap_or(end_ms);
-    let normalized_wake_phrase = wake_speaker_phrase
-        .unwrap_or_default()
-        .chars()
-        .filter(|ch| ch.is_alphanumeric())
-        .collect::<String>();
-    let wake_anchored_utterance =
-        utterance_contains_normalized_phrase(utterance, &normalized_wake_phrase);
-    // Low-score Uncertain windows are only meaningful owner-absence evidence
-    // after this session's body tracker has demonstrated that it can positively
-    // recognize the owner at least once. Otherwise an enrollment/acoustic
-    // mismatch can leave every post-wake window Uncertain while the debounced
-    // identity still belongs to the verified wake speaker. Treating that
-    // never-calibrated run as a speaker switch destructively removed complete
-    // owner dictation in installed sessions 1 and 27 (the provider retained 56
-    // and 31 chars respectively, while filtering kept only the wake/tail).
-    //
-    // A real debounced identity departure remains fail-closed below regardless
-    // of whether a Target window was observed, and explicit Target-confirmed
-    // sessions retain the strict same-cloud-cluster isolation rule.
-    let session_has_stable_target = evidence.iter().any(|sample| {
-        sample.stable_target
-            && matches!(
-                sample.classification,
-                crate::speaker_verification::SessionSpeakerClassification::Target { .. }
-            )
-    });
-    // The wake gate is already a positive persisted-owner observation, but it
-    // must not by itself delete later text: cross-phrase scores can be low for
-    // the real owner.  Promote it to owner-absence authority only when the
-    // enrolled (non-adaptive) body verifier also produced two consecutive
-    // <=0.20 NonTarget windows inside this exact provider utterance.  Three
-    // overlapping <=0.30 samples below then form the independent duration
-    // check. This recovers the installed failure where another person reused
-    // cloud speaker 0 without requiring a lucky positive body-window first.
-    let confirmed_non_target_overlaps_utterance = wake_owner_verified
-        && !local_speaker_profile_adaptive
-        && confirmed_non_target_speech_end_ms.is_some_and(|audio_end_ms| {
-            let sample_center_ms = audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
-            sample_center_ms >= start_ms && sample_center_ms <= end_ms
-        });
-    let mut overlap_count = 0u32;
-    let mut target_votes = 0u32;
-    let mut owner_absence_votes = 0u32;
+    // Same-speaker provider rows are kept through uncertain local windows.
+    // A score dip after a pause is not enough to erase recognized owner text.
+    // In installed session 350774d8 every provider row was speaker 0 and the
+    // local identity remained stable, yet this former low-score vote deleted
+    // most of the body and froze streaming after 140 characters were pasted.
     for sample in evidence {
         let sample_center_ms = sample
             .audio_end_ms
@@ -3408,35 +3367,11 @@ fn local_evidence_confirms_owner_absence_with_verified_wake(
         if sample_center_ms < start_ms || sample_center_ms > end_ms {
             continue;
         }
-        overlap_count += 1;
         if !sample.stable_target {
             return true;
         }
-        if matches!(
-            sample.classification,
-            crate::speaker_verification::SessionSpeakerClassification::Target { .. }
-        ) {
-            target_votes += 1;
-        }
-        if sample.classification.score() <= LOCAL_OWNER_ABSENCE_MAX_SCORE {
-            owner_absence_votes += 1;
-        }
     }
-    // Volcengine sometimes seals one long two-pass utterance containing both
-    // the confirmed wake and every clause after a natural pause. In that shape,
-    // a run of low-score `Uncertain` windows is not a separate speaker boundary:
-    // the tracker still owns the identity (`stable_target=true`). Rejecting the
-    // whole wake-anchored utterance deleted the owner's post-pause tail in
-    // installed session 52. A real debounced identity departure still returns
-    // above, while separate later utterances retain the strict owner-absence
-    // rule used for same-cloud-cluster multi-speaker isolation.
-    if wake_anchored_utterance {
-        return false;
-    }
-    (session_has_stable_target || confirmed_non_target_overlaps_utterance)
-        && overlap_count > 0
-        && target_votes == 0
-        && owner_absence_votes >= LOCAL_OWNER_ABSENCE_CONFIRMATIONS
+    false
 }
 
 /// Contrastive continuation acceptance for the owner's own later sentences
@@ -3760,6 +3695,13 @@ fn utterance_belongs_to_verified_target(
                 .collect::<String>();
             utterance_contains_normalized_phrase(utterance, &normalized_phrase)
         });
+    // A time-aligned local sample is helpful, but not guaranteed for every
+    // sealed cloud row. Once the wake owner is verified, a stable row in that
+    // same cloud track remains the best available main-body candidate unless
+    // the local identity actually departed. Otherwise sampling gaps after a
+    // pause silently remove entire recognized sentences.
+    let verified_same_cluster_continuation_belongs =
+        wake_owner_verified && cloud_id_matches && utterance_is_stable(utterance);
     // Media-time contrastive continuation (e57053aa family, 2026-09-19): the
     // owner's resumed sentence after a thinking pause carries only
     // media-mixed Uncertain windows (0.26-0.44 vs the session target), so both
@@ -3789,7 +3731,11 @@ fn utterance_belongs_to_verified_target(
                     end_ms,
                 )
         );
-    if !baseline_belongs && !verified_wake_anchor_belongs && !contrastive_continuation_belongs {
+    if !baseline_belongs
+        && !verified_wake_anchor_belongs
+        && !verified_same_cluster_continuation_belongs
+        && !contrastive_continuation_belongs
+    {
         return false;
     }
     // Cloud can reuse the owner's speaker id for the next real person. The
@@ -3991,7 +3937,20 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
     // with that same alias are independently checked against local evidence.
     // Never persist the alias, so an ordinary later speaker-id change cannot
     // silently replace the wake anchor in following provider responses.
-    let immediate_body_speaker_id = if wake_owner_verified && local_speaker_tracking_enabled {
+    let bounded_wake_row_present = wake_speaker_phrase.is_some_and(|phrase| {
+        let normalized_phrase = phrase
+            .chars()
+            .filter(|ch| ch.is_alphanumeric())
+            .collect::<String>();
+        utterances.iter().any(|utterance| {
+            utterance_speaker_id(utterance).as_deref() == target_speaker_id.as_deref()
+                && utterance_is_bounded_wake_phrase(utterance, &normalized_phrase)
+        })
+    });
+    let immediate_body_speaker_id = if wake_owner_verified
+        && local_speaker_tracking_enabled
+        && bounded_wake_row_present
+    {
         target_speaker_id.as_deref().and_then(|target| {
             let wake_end_ms = wake_speaker_end_ms?;
             utterances
@@ -12386,7 +12345,7 @@ mod tests {
             classification: Uncertain { score: 0.27 },
             stable_target: true,
         }));
-        assert!(!utterance_belongs_to_verified_target(
+        assert!(utterance_belongs_to_verified_target(
             &weak_continuation, "1", true, &evidence, Some("开始录音"),
             Some(11_280), false, false, false, None,
         ));
@@ -12662,10 +12621,10 @@ mod tests {
     }
 
     #[test]
-    fn same_cloud_speaker_id_excludes_later_utterance_with_sustained_owner_absence() {
-        // Installed session d96a8653: Volcengine emitted two stable utterances
-        // but reused speaker 0 for both people. The second utterance had no
-        // local Target window and a sustained 0.17..0.30 owner-absence run.
+    fn same_cloud_speaker_id_keeps_later_utterance_when_identity_is_stable() {
+        // Scores alone cannot distinguish this older bystander recording from
+        // an owner's cross-phrase dip. Preserve the recognized main body while
+        // the debounced identity still says owner.
         let result = json!({
             "text": "开始录音。主人正文。旁人的话不能放进去。",
             "utterances": [
@@ -12727,17 +12686,86 @@ mod tests {
             Some("开始录音"),
         );
         assert_eq!(target.as_deref(), Some("0"));
-        assert_eq!(filtered.result["text"], "开始录音。主人正文。");
-        assert!(filtered.stable_non_target_utterance_present);
+        assert_eq!(filtered.result["text"], result["text"]);
+        assert!(!filtered.stable_non_target_utterance_present);
     }
 
     #[test]
-    fn verified_wake_excludes_same_cloud_other_without_lucky_body_target() {
-        // Field regression: the persisted owner passed the wake gate, but the
-        // first body windows never reached Target. A later real person reused
-        // cloud speaker 0 and produced a sustained very-low enrolled score.
-        // The accepted wake must provide identity authority for this session;
-        // requiring a separate lucky body Target lets the other person leak.
+    fn owner_resuming_after_four_pauses_keeps_every_same_speaker_row() {
+        // Installed session 350774d8: six stable cloud rows all had speaker 0.
+        // The local owner identity never departed; some post-pause windows
+        // scored 0.03 while later windows positively recognized the owner.
+        // The old per-row low-score rule froze the ledger at 37 characters.
+        let spans = [
+            (280, 10_082, "开始录音。第一段正文。"),
+            (12_662, 17_962, "停顿后第二段。"),
+            (19_662, 24_091, "第三段。"),
+            (25_922, 31_172, "第四段。"),
+            (33_751, 46_362, "第五段还在继续说话。"),
+            (50_282, 54_801, "最后一段不能吞。"),
+        ];
+        let utterances = spans
+            .iter()
+            .map(|(start, end, text)| {
+                json!({
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": start,
+                    "end_time": end,
+                    "text": text,
+                })
+            })
+            .collect::<Vec<_>>();
+        let body = spans.iter().map(|(_, _, text)| *text).collect::<String>();
+        let result = json!({ "text": body, "utterances": utterances });
+        let evidence = [
+            (2_000, 0.5000, true),
+            (14_500, 0.4200, true),
+            // The third provider row has no overlapping local sample.
+            (28_000, 0.4100, true),
+            (35_000, 0.4600, true),
+            (38_000, 0.4069, true),
+            (38_800, 0.1297, false),
+            (39_600, 0.4046, true),
+            (41_600, 0.4090, true),
+            (48_800, 0.0310, false),
+            (49_200, 0.0270, false),
+            (51_200, 0.4300, true),
+            (52_000, 0.5200, true),
+        ]
+        .into_iter()
+        .map(|(audio_end_ms, score, target)| LocalSpeakerEvidence {
+            audio_end_ms,
+            classification: if target {
+                crate::speaker_verification::SessionSpeakerClassification::Target { score }
+            } else {
+                crate::speaker_verification::SessionSpeakerClassification::Uncertain { score }
+            },
+            stable_target: true,
+        })
+        .collect::<Vec<_>>();
+        let mut target = None;
+        let filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &result,
+            &mut target,
+            true,
+            &evidence,
+            Some("开始录音"),
+            None,
+            true,
+            false,
+            Some(49_200),
+            None,
+        );
+        assert_eq!(target.as_deref(), Some("0"));
+        assert_eq!(filtered.result["text"], result["text"]);
+        assert!(!filtered.stable_non_target_utterance_present);
+    }
+
+    #[test]
+    fn verified_wake_does_not_delete_same_cloud_body_on_low_scores_alone() {
+        // A verified wake anchors the owner, but low scores in later phrases
+        // cannot independently prove that another person took over.
         let result = json!({
             "text": "开始录音。主人第一句。旁人的话不能放进去。",
             "utterances": [
@@ -12797,8 +12825,8 @@ mod tests {
             None,
         );
         assert_eq!(target.as_deref(), Some("0"));
-        assert_eq!(filtered.result["text"], "开始录音。主人第一句。");
-        assert!(filtered.stable_non_target_utterance_present);
+        assert_eq!(filtered.result["text"], result["text"]);
+        assert!(!filtered.stable_non_target_utterance_present);
 
         let mut adaptive_target = None;
         let adaptive = filter_result_to_target_speaker_with_local_evidence_and_anchor(
@@ -13349,7 +13377,7 @@ mod tests {
     }
 
     #[test]
-    fn protocol_final_cannot_restore_same_cluster_other_speaker_tail() {
+    fn protocol_final_preserves_same_cluster_body_without_identity_departure() {
         let asr = VolcengineStreamingASR::new(
             VolcengineCredentials {
                 app_id: "app".into(),
@@ -13414,8 +13442,8 @@ mod tests {
             .try_recv()
             .expect("same-cluster final should resolve")
             .expect("owner text should remain non-empty");
-        assert_eq!(transcript.text, "开始录音。主人正文。");
-        assert!(asr.state.lock().owner_isolation_frozen);
+        assert_eq!(transcript.text, "开始录音。主人正文。旁人的话不能放进去。");
+        assert!(!asr.state.lock().owner_isolation_frozen);
     }
 
     #[test]
@@ -15766,7 +15794,7 @@ mod tests {
     }
 
     #[test]
-    fn degraded_tail_rejects_a_new_same_cluster_row_with_repeated_extreme_mismatch() {
+    fn degraded_tail_requires_confirmed_identity_departure() {
         let rows = vec![
             json!({
                 "additions": { "speaker_id": "0", "source": "two_pass" },
@@ -15807,7 +15835,7 @@ mod tests {
                 false,
                 true,
             ),
-            Some(1),
+            None,
         );
         assert_eq!(
             degraded_same_cluster_foreign_tail_start(
@@ -15840,6 +15868,25 @@ mod tests {
             ),
             None,
             "a high-confidence owner window keeps the later sentence",
+        );
+        let mut departed = strong_owner;
+        departed.push(LocalSpeakerEvidence {
+            audio_end_ms: 25_000,
+            classification: crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                score: 0.06,
+            },
+            stable_target: false,
+        });
+        assert_eq!(
+            degraded_same_cluster_foreign_tail_start(
+                &rows,
+                Some("0"),
+                &departed,
+                true,
+                false,
+                true,
+            ),
+            Some(1),
         );
     }
 
