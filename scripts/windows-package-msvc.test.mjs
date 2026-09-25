@@ -103,8 +103,8 @@ assert.match(script, /\[switch\]\$SkipDesktopShortcut/, "script should support o
 assert.match(script, /\[switch\]\$UseSccache/, "script should support opt-in sccache acceleration");
 assert.ok(
   script.indexOf('if ($UseSccache.IsPresent -and -not (Test-Command "sccache"))')
-    < script.indexOf('Write-Host "[info] Install validation requested; stopping installed Listener Type before the long MSI build"'),
-  'missing sccache must fail before install validation stops the user-facing app',
+    < script.lastIndexOf('Stop-RunningReleaseApp'),
+  'missing sccache must fail before packaging stops a running release build',
 );
 assert.match(script, /\[switch\]\$IncrementalReleaseBuild/, "script should support opt-in local incremental release builds");
 assert.match(script, /\[switch\]\$InstallMsi/, "script should support installing the freshly built MSI");
@@ -144,7 +144,7 @@ assert.match(script, /CommonDesktopDirectory/, "desktop shortcut refresh must re
 assert.match(script, /Removed duplicate user desktop shortcut/, "desktop shortcut refresh must clean up its duplicate user-desktop link after an MSI update");
 assert.match(script, /\$isScriptManagedDuplicate/, "desktop shortcut cleanup must only remove the link created by this packaging script");
 assert.match(script, /-LaunchInstalledApp requires -InstallMsi/, "launching the app must require a freshly installed MSI in validation");
-assert.match(script, /Install validation requested; stopping installed Listener Type before the long MSI build[\s\S]*Stop-InstalledListenerType[\s\S]*Stop-RunningReleaseApp[\s\S]*Invoke-MsvcBuild/, "install validation must stop the Program Files app before the long MSI build so users do not keep interacting with a stale or stuck exe");
+assert.match(script, /if \(\$ReuseExistingExe\.IsPresent\) \{\s*Test-ReusableReleaseExe\s*\}\s*Stop-RunningReleaseApp[\s\S]*Invoke-MsvcBuild[\s\S]*Repair-TauriMsiBundle[\s\S]*Copy-WindowsArtifacts[\s\S]*Install-LatestMsi/, "reuse validation must precede shutdown and the installed app must keep running through build and MSI packaging");
 assert.match(script, /Stop-InstalledListenerType[\s\S]*msiexec\.exe[\s\S]*Assert-InstalledPayloadMatchesRelease/, "MSI update must stop the installed app, install with msiexec, and verify the Program Files payload hash");
 assert.match(script, /--local-wake-helper[\s\S]*Leaving Listener Type local wake helper to exit with its parent/, "MSI shutdown must not relaunch --quit for the helper after the GUI parent exits");
 assert.match(script, /Assert-InstalledPayloadMatchesRelease[\s\S]*TimeoutSeconds[\s\S]*Start-Sleep -Milliseconds 250/, "MSI validation must wait for the Program Files payload hash to settle after install");

@@ -828,14 +828,11 @@ try {
   if ($UseSccache.IsPresent -and -not (Test-Command "sccache")) {
     throw "-UseSccache was set, but sccache is not installed or not on PATH."
   }
-  if ($InstallMsi.IsPresent -or $LaunchInstalledApp.IsPresent) {
-    Write-Host "[info] Install validation requested; stopping installed Listener Type before the long MSI build"
-    Stop-InstalledListenerType
-  }
-  Stop-RunningReleaseApp
   if ($ReuseExistingExe.IsPresent) {
     Test-ReusableReleaseExe
-  } else {
+  }
+  Stop-RunningReleaseApp
+  if (-not $ReuseExistingExe.IsPresent) {
     Invoke-MsvcBuild -VsDevCmd $vsDevCmd -CargoBin $cargoBin
   }
   Repair-TauriMsiBundle
