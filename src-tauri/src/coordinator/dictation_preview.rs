@@ -2236,6 +2236,7 @@ async fn pause_early_delivery_tick(
     inner: &Arc<Inner>,
     session_id: SessionId,
     asr: &Arc<crate::asr::volcengine::VolcengineStreamingASR>,
+    endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
 ) {
     if std::env::var("LISTENER_DISABLE_PAUSE_EARLY_DELIVERY").as_deref() == Ok("1") {
         return;
@@ -2362,7 +2363,7 @@ async fn pause_early_delivery_tick(
     // 恢复;账本先记后 commit,失败回滚——次序与粘贴路径同款)。失败时驱动
     // 已降级清组字,下一拍以空账本走粘贴分支补上。
     if streaming_composition_active(inner, session_id) {
-        streaming_composition_commit_stable(inner, session_id, delta, &delivered_display, &new_key)
+        streaming_composition_commit_stable(inner, session_id, delta, &delivered_display, &new_key, endpoint_clock)
             .await;
         return;
     }
@@ -2411,6 +2412,7 @@ async fn pause_early_delivery_tick(
         return;
     }
     pause_early_delivery_confirm(inner, session_id);
+    endpoint_clock.lock().note_body_delivery(Instant::now());
     if result.route == DeliveryRoute::Paste {
         inner.embedded_audio_pause_early_delivery.lock().paste_delivered_session = Some(session_id);
     }

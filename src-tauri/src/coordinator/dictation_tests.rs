@@ -4381,6 +4381,125 @@ fn settled_target_wall_clock_rearms_on_fresh_local_owner_boundary() {
         .is_some());
 }
 
+#[test]
+fn delivered_body_starts_one_three_second_window_and_late_preview_does_not_restart_it() {
+    use std::time::{Duration, Instant};
+
+    let started = Instant::now();
+    let owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(3_000),
+        provider_audio_duration_ms: Some(3_500),
+        audio_duration_ms: Some(3_600),
+        local_speech_end_ms: Some(3_000),
+        qualified_owner_speech_end_ms: Some(3_000),
+        qualified_owner_activity_advanced: true,
+        local_speaker_classification_kind: Some(crate::asr::volcengine::LocalSpeakerClassificationKind::Target),
+        local_speaker_signal_quality_sufficient: Some(true),
+        local_speaker_observation_end_ms: Some(3_000),
+        local_target_speech_end_ms: Some(3_000),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(3_000),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.automatic_wake_session = true;
+    clock.note_visible_body_boundary(false, 40, started);
+    let generation = clock.observe(&owner, true, started).expect("owner arms clock");
+    let delivered_at = started + Duration::from_millis(500);
+    clock.note_body_delivery(delivered_at);
+    let late_preview_at = started + Duration::from_millis(1_000);
+    // b72c67ea: a two-pass row published after paste inflated local_target
+    // to the current capture edge while the qualified owner edge stayed old.
+    let delayed_row = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(4_100),
+        provider_audio_duration_ms: Some(4_100),
+        local_target_speech_end_ms: Some(4_100),
+        qualified_owner_activity_advanced: false,
+        target_activity_advanced: true,
+        ..owner
+    };
+    assert_eq!(clock.observe(&delayed_row, true, late_preview_at), None);
+    clock.note_visible_body_boundary(true, 42, late_preview_at);
+    assert_eq!(clock.arm_latest_for_visible_body(late_preview_at, true), None);
+    assert_eq!(clock.armed_at, Some(started));
+    assert!(clock
+        .due_update(generation, delivered_at + Duration::from_millis(2_999), 2_900)
+        .is_none());
+    assert!(clock
+        .due_update(generation, delivered_at + Duration::from_millis(3_000), 2_900)
+        .is_some());
+}
+
+#[test]
+fn delivered_body_window_renews_for_owner_speech_but_not_a_bystander() {
+    use std::time::{Duration, Instant};
+
+    let started = Instant::now();
+    let owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(3_000),
+        provider_audio_duration_ms: Some(3_500),
+        audio_duration_ms: Some(3_600),
+        local_speech_end_ms: Some(3_000),
+        qualified_owner_speech_end_ms: Some(3_000),
+        qualified_owner_activity_advanced: true,
+        local_speaker_classification_kind: Some(crate::asr::volcengine::LocalSpeakerClassificationKind::Target),
+        local_speaker_signal_quality_sufficient: Some(true),
+        local_speaker_observation_end_ms: Some(3_000),
+        local_target_speech_end_ms: Some(3_000),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(3_000),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let make_clock = || {
+        let mut clock = super::SettledTargetEndpointClock::default();
+        clock.automatic_wake_session = true;
+        clock.note_visible_body_boundary(true, 40, started);
+        clock.observe(&owner, true, started).expect("owner arms clock");
+        clock.note_body_delivery(started + Duration::from_millis(500));
+        clock
+    };
+
+    let mut bystander_clock = make_clock();
+    let bystander = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(4_300),
+        local_speech_end_ms: Some(4_200),
+        local_non_target_speech_end_ms: Some(4_200),
+        local_speaker_classification_kind: Some(crate::asr::volcengine::LocalSpeakerClassificationKind::NonTarget),
+        local_speaker_observation_end_ms: Some(4_200),
+        qualified_owner_activity_advanced: false,
+        target_activity_advanced: false,
+        ..owner.clone()
+    };
+    assert_eq!(bystander_clock.observe(&bystander, true, started + Duration::from_millis(1_000)), None);
+    assert_eq!(bystander_clock.armed_at, Some(started));
+
+    let mut continuing_clock = make_clock();
+    let continuing_owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(4_300),
+        local_speech_end_ms: Some(4_200),
+        qualified_owner_speech_end_ms: Some(4_200),
+        local_target_speech_end_ms: Some(4_200),
+        local_speaker_observation_end_ms: Some(4_200),
+        qualified_owner_activity_advanced: true,
+        target_activity_advanced: false,
+        ..owner
+    };
+    assert!(continuing_clock
+        .observe(&continuing_owner, true, started + Duration::from_millis(1_000))
+        .is_some());
+    assert_eq!(continuing_clock.armed_at, Some(started + Duration::from_millis(1_000)));
+}
+
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 #[test]
 fn heavy_wake_separation_requires_independent_partial_phrase_evidence() {

@@ -121,7 +121,8 @@ function CenterText({ os, kind, text, color = 'var(--ol-ink-3)' }: CenterTextPro
 function CompletionMark({ label }: { label: string }) {
   return (
     <div
-      aria-hidden="true"
+      role="status"
+      aria-label={label}
       style={{
         minWidth: 0,
         height: 26,
@@ -404,9 +405,7 @@ function Pill({
       break;
     }
     case 'done':
-      center = message
-        ? <CenterText os={os} kind="default" text={message} />
-        : <CompletionMark label={t('capsule.inserted')} />;
+      center = <CompletionMark label={t('capsule.inserted')} />;
       break;
     case 'cancelled':
       center = <CenterText os={os} kind="default" text={t('capsule.cancelled')} />;

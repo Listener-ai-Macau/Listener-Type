@@ -246,6 +246,7 @@ async fn streaming_composition_commit_stable(
     delta: &str,
     delivered_display: &str,
     full_key: &str,
+    endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
 ) -> bool {
     let new_display = format!("{delivered_display}{delta}");
     pause_early_delivery_reserve(inner, session_id, new_display, full_key.to_string());
@@ -269,6 +270,7 @@ async fn streaming_composition_commit_stable(
     }
     // TSF reply 确认文本已落屏:确认账本前缀 + 粘滞底线（见 preview 侧同款）。
     pause_early_delivery_confirm(inner, session_id);
+    endpoint_clock.lock().note_body_delivery(Instant::now());
     let state = inner.streaming_composition.lock();
     log::info!(
         "[coord] streaming-composition commit prefix_chars={} total_delivered_chars={} min_stable_ms={} updates={} commits={}",

@@ -102,6 +102,11 @@ struct SettledTargetEndpointClock {
     armed_target_end_ms: Option<u64>,
     armed_at: Option<Instant>,
     armed_from_visible_body_fallback: bool,
+    /// The last body chunk submitted to the focused input. The user's
+    /// continuation window starts here, rather than at the preceding VAD
+    /// silence edge or at a later provider preview revision.
+    last_body_delivery_at: Option<Instant>,
+    last_body_delivery_audio_ms: Option<u64>,
     /// The accepted wake has not produced any body text.  This is not a
     /// second endpoint: it is an explicit mode of the same controller, armed
     /// from the automatic-wake guard's original clock.  Wake-phrase audio and
@@ -330,6 +335,47 @@ fn owner_endpoint_boundary_with_uncertain_tail(
 }
 
 impl SettledTargetEndpointClock {
+    fn note_body_delivery(&mut self, now: Instant) {
+        if !self.automatic_wake_session || self.automatic_no_body_armed {
+            return;
+        }
+        self.last_body_delivery_at = Some(now);
+        self.last_body_delivery_audio_ms = self
+            .latest_update
+            .as_ref()
+            .and_then(|update| update.audio_duration_ms);
+        self.manual_terminal_bridge_until = None;
+        self.manual_terminal_bridge_rearm_pending = false;
+        // A committed chunk is the start of the public continuation window.
+        // A later provider revision of that same audio is not a new utterance.
+        self.reset_continuation_tracking();
+        log::info!(
+            "[asr] endpoint body_delivery window_ms={} audio_ms={:?} generation={}",
+            EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+            self.last_body_delivery_audio_ms,
+            self.generation,
+        );
+    }
+
+    fn owner_spoke_after_body_delivery(
+        &self,
+        update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    ) -> bool {
+        let Some(delivery_audio_ms) = self.last_body_delivery_audio_ms else {
+            return false;
+        };
+        let owner_end_ms = if update.local_speaker_tracking_enabled {
+            // local_target_speech_end_ms can be advanced by a delayed cloud
+            // preview of audio captured before delivery (session b72c67ea).
+            // Only a fresh quality-qualified local voiceprint observation
+            // proves the enrolled owner spoke after the chunk reached input.
+            update.qualified_owner_speech_end_ms
+        } else {
+            update.local_speech_end_ms
+        };
+        owner_end_ms.is_some_and(|end_ms| end_ms > delivery_audio_ms)
+    }
+
     pub(crate) fn lifecycle(&self) -> crate::speech_decision_kernel::OwnerEndpointState {
         self.product_endpoint.state()
     }
@@ -1066,11 +1112,14 @@ impl SettledTargetEndpointClock {
         // people into one speaker id, and allowing either provider growth or
         // preview growth to re-arm here makes auto-end wait forever. This is
         // endpoint-only; it does not discard or rewrite recognized text.
+        let delivery_without_new_owner = self.last_body_delivery_at.is_some()
+            && !self.owner_spoke_after_body_delivery(update);
         let should_rearm = body_started
             && (stable_target_should_rearm
                 || unattributed_visible_body_should_arm
                 || continuation_activity_rearm)
-            && (!recent_strong_non_target || self.armed_at.is_none());
+            && (!recent_strong_non_target || self.armed_at.is_none())
+            && !(delivery_without_new_owner && self.armed_at.is_some());
         self.pending_was_seen = false;
         if !should_rearm {
             if pending_was_seen_before {
@@ -1208,6 +1257,16 @@ impl SettledTargetEndpointClock {
         }
         self.leave_automatic_no_body_mode();
         let update = self.latest_update.clone()?;
+        // The delivered body is the user's clock. A delayed preview revision
+        // of already captured audio cannot create a second three-second wait.
+        if self.last_body_delivery_at.is_some()
+            && !self.owner_spoke_after_body_delivery(&update)
+            && self.armed_at.is_some()
+        {
+            self.manual_terminal_bridge_rearm_pending = false;
+            self.manual_terminal_bridge_until = None;
+            return None;
+        }
         let recent_strong_non_target = update_has_recent_strong_non_target(&update);
         let pending_was_seen_before = self.pending_was_seen;
         // Preview growth has already refreshed the budget before this call
@@ -1364,6 +1423,12 @@ impl SettledTargetEndpointClock {
                 Duration::from_millis(ENDPOINT_PROVIDER_CATCH_UP_GRACE_MS),
             );
             return matches!(decision, crate::speech_decision_kernel::EndpointDecision::Stop);
+        }
+        if self.last_body_delivery_at.is_some_and(|delivered_at| {
+            now.saturating_duration_since(delivered_at)
+                < Duration::from_millis(EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS)
+        }) {
+            return false;
         }
         if self.automatic_wake_session
             && !self.manual_vad_guard
@@ -1871,7 +1936,7 @@ fn start_settled_target_endpoint_watchdog(
                     // 跟手②组字流式:先喂增量(update),再评估停顿落定(commit),
                     // 同一拍内顺序保证 commit 前组字内容最新。
                     streaming_composition_update_tick(&inner, session_id, &asr).await;
-                    pause_early_delivery_tick(&inner, session_id, &asr).await;
+                    pause_early_delivery_tick(&inner, session_id, &asr, &endpoint_clock).await;
                 }
             }
         }

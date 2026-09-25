@@ -4298,15 +4298,20 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
     // paste the repeated words before the final correction arrives. Use the
     // provider's complete wording when the only extra row text is an exact
     // repeat of its own ending; do not collapse a genuinely new utterance.
-    let overlapping_last_row = optimistic_utterances
+    let last_row_proven_sequential = optimistic_utterances
         .split_last()
         .and_then(|(last, previous)| {
             utterance_start_ms(last).zip(previous.iter().filter_map(utterance_end_ms).max())
         })
-        .is_some_and(|(start, previous_end)| start < previous_end);
+        .is_some_and(|(start, previous_end)| start >= previous_end);
     let optimistic_utterance_text = if !target_text.is_empty()
         && !stable_other_speaker_present
-        && overlapping_last_row
+        // A second occurrence needs a later audio interval. An untimed
+        // stream row has no such proof; when its entire text is already the
+        // provider's ending, it is the same audio published twice (sessions
+        // fb840a9e and d8d3dc96). A timed non-overlapping row remains a real
+        // repeated utterance even if the cumulative raw text lags behind.
+        && !last_row_proven_sequential
         && raw_text.starts_with(&target_text)
         && optimistic_utterance_text
             .strip_prefix(raw_text)
@@ -10800,6 +10805,24 @@ mod tests {
         });
         let mut target = Some("0".to_string());
         let filtered = filter_result_to_target_speaker(&result, &mut target);
+        assert_eq!(
+            filtered.optimistic_result["text"],
+            "开始录音，现在继续检查效率至上"
+        );
+
+        // Installed sessions fb840a9e/d8d3dc96: the extra stream row had no
+        // usable interval. Its text was already at the end of result.text;
+        // appending it doubled the clause in both live preview and early paste.
+        let mut untimed = result.clone();
+        untimed["utterances"][1]
+            .as_object_mut()
+            .unwrap()
+            .remove("start_time");
+        untimed["utterances"][1]
+            .as_object_mut()
+            .unwrap()
+            .remove("end_time");
+        let filtered = filter_result_to_target_speaker(&untimed, &mut target);
         assert_eq!(
             filtered.optimistic_result["text"],
             "开始录音，现在继续检查效率至上"

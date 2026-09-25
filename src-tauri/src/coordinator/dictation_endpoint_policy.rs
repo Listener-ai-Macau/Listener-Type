@@ -231,11 +231,16 @@ impl SettledTargetEndpointClock {
         visible_chars: usize,
         now: Instant,
     ) {
+        let new_owner_speech_after_delivery = self.last_body_delivery_at.is_none()
+            || self
+                .latest_update
+                .as_ref()
+                .is_some_and(|update| self.owner_spoke_after_body_delivery(update));
         // Visible text growth is positive dictation evidence: recognized
         // owner-attributed words appearing is the strongest "still dictating"
         // signal, so it refreshes the unclassified-evidence budget (see
         // EMBEDDED_OWNER_POSITIVE_EVIDENCE_BUDGET_MS).
-        if visible_chars
+        if new_owner_speech_after_delivery && visible_chars
             > self
                 .last_visible_body_signature
                 .map_or(0, |(_, previous_chars)| previous_chars)
@@ -251,6 +256,7 @@ impl SettledTargetEndpointClock {
             let transition_visible_chars = visible_chars.max(self.open_body_peak_visible_chars);
             if transition_visible_chars >= MANUAL_TERMINAL_BRIDGE_MIN_VISIBLE_CHARS
                 && self.latest_visible_body_ends_terminal == Some(false)
+                && new_owner_speech_after_delivery
             {
                 self.manual_terminal_bridge_until =
                     Some(now + Duration::from_millis(MANUAL_TERMINAL_BRIDGE_MAX_MS));
