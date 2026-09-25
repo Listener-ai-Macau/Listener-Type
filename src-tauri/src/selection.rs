@@ -441,7 +441,7 @@ mod macos_paste {
 // ─────────────────────────── Windows Ctrl+C send ───────────────────────────
 
 #[cfg(target_os = "windows")]
-mod windows_paste {
+pub(crate) mod windows_paste {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
         VIRTUAL_KEY, VK_C, VK_CONTROL,

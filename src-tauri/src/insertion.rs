@@ -155,6 +155,7 @@ impl TextInserter {
         if !same_target() {
             return Err("session target is no longer foreground".into());
         }
+        let focus_before_select = focused_child_snapshot(target_hwnd);
         let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
         let previous = snapshot_clipboard(&mut clipboard);
         let marker = format!("listener-selection-{}", uuid::Uuid::new_v4());
@@ -182,8 +183,17 @@ impl TextInserter {
             restore_clipboard_snapshot(&mut clipboard, &previous);
             return Err("session target changed before suffix verification".into());
         }
+        let focus_after_select = focused_child_snapshot(target_hwnd);
+        if focus_after_select != focus_before_select {
+            log::info!(
+                "[insertion] verified correction focus changed during selection target_hwnd=0x{:x} before={:?} after={:?}",
+                target_hwnd,
+                focus_before_select,
+                focus_after_select
+            );
+        }
         std::thread::sleep(Duration::from_millis(80));
-        let mut observed = match copy_verified_selection(&mut keyboard, &mut clipboard, &marker) {
+        let mut observed = match copy_verified_selection(&mut keyboard, &mut clipboard, &marker, target_hwnd) {
             Ok(value) => value,
             Err(err) => {
                 if same_target() {
@@ -203,7 +213,7 @@ impl TextInserter {
                     .map_err(|e| e.to_string())?;
                 select_previous_graphemes(count)?;
                 std::thread::sleep(Duration::from_millis(80));
-                copy_verified_selection(&mut keyboard, &mut clipboard, &marker)
+                copy_verified_selection(&mut keyboard, &mut clipboard, &marker, target_hwnd)
             })();
             match fallback {
                 Ok(value) => observed = value,
@@ -276,11 +286,14 @@ fn copy_verified_selection(
     keyboard: &mut enigo::Enigo,
     clipboard: &mut arboard::Clipboard,
     marker: &str,
+    target_hwnd: usize,
 ) -> Result<String, String> {
     use enigo::{Direction, Key, Keyboard};
+    use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
     clipboard
         .set_text(marker.to_string())
         .map_err(|e| e.to_string())?;
+    let sequence_before = unsafe { GetClipboardSequenceNumber() };
     keyboard
         .key(Key::Control, Direction::Press)
         .map_err(|e| e.to_string())?;
@@ -291,14 +304,71 @@ fn copy_verified_selection(
         .key(Key::Control, Direction::Release)
         .map_err(|e| e.to_string());
     copied.and(released)?;
-    for _ in 0..15 {
+    for _ in 0..8 {
         let value = clipboard.get_text().unwrap_or_default();
         if value != marker {
             return Ok(value);
         }
         std::thread::sleep(Duration::from_millis(20));
     }
+    let sequence_after_enigo = unsafe { GetClipboardSequenceNumber() };
+    // Copy is read-only. Retry with the native VK_C shortcut already used by
+    // the selection path. This also distinguishes an Enigo key translation
+    // failure from a missing editor selection without risking a second paste.
+    crate::selection::windows_paste::send_ctrl_c()?;
+    for _ in 0..12 {
+        let value = clipboard.get_text().unwrap_or_default();
+        if value != marker {
+            log::info!(
+                "[insertion] verified selection copy recovered by native shortcut enigo_clipboard_changed={} target_hwnd=0x{:x}",
+                sequence_after_enigo != sequence_before,
+                target_hwnd
+            );
+            return Ok(value);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let sequence_after_native = unsafe { GetClipboardSequenceNumber() };
+    let (focus_hwnd, focus_class) = focused_child_snapshot(target_hwnd);
+    log::warn!(
+        "[insertion] verified selection copy unavailable target_hwnd=0x{:x} focus_hwnd=0x{:x} focus_class={} clipboard_changed_after_enigo={} clipboard_changed_after_native={}",
+        target_hwnd,
+        focus_hwnd,
+        focus_class,
+        sequence_after_enigo != sequence_before,
+        sequence_after_native != sequence_after_enigo
+    );
     Err("selection copy did not update the clipboard".into())
+}
+
+#[cfg(target_os = "windows")]
+fn focused_child_snapshot(target_hwnd: usize) -> (usize, String) {
+    use std::ffi::c_void;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, GetGUIThreadInfo, GetWindowThreadProcessId, GUITHREADINFO,
+    };
+
+    let root = HWND(target_hwnd as *mut c_void);
+    let thread_id = unsafe { GetWindowThreadProcessId(root, None) };
+    if thread_id == 0 {
+        return (0, "unknown-thread".into());
+    }
+    let mut info = GUITHREADINFO {
+        cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+        ..Default::default()
+    };
+    if unsafe { GetGUIThreadInfo(thread_id, &mut info) }.is_err() {
+        return (0, "unknown-focus".into());
+    }
+    let focused = info.hwndFocus;
+    if focused.0.is_null() {
+        return (0, "no-focus".into());
+    }
+    let mut class_name = [0u16; 128];
+    let len = unsafe { GetClassNameW(focused, &mut class_name) };
+    let class_name = String::from_utf16_lossy(&class_name[..len.max(0) as usize]);
+    (focused.0 as usize, class_name)
 }
 
 #[cfg(target_os = "windows")]
