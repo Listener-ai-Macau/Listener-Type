@@ -196,17 +196,41 @@ impl TextInserter {
         let mut observed = match copy_verified_selection(&mut keyboard, &mut clipboard, &marker, target_hwnd) {
             Ok(value) => value,
             Err(err) => {
-                if same_target() {
-                    let _ = keyboard.key(Key::RightArrow, Direction::Click);
+                // Chromium editors can ignore Ctrl+Shift+Home after a long
+                // series of synthetic pastes. A read-only Ctrl+A copy is a
+                // second way to inspect the same focused editor. The exact
+                // session-owned text comparison below still gates replacement;
+                // Ctrl+A selecting a page (or an empty submitted composer)
+                // cannot authorize a paste.
+                let retry = same_target()
+                    .then(|| {
+                        select_all_in_editor()?;
+                        std::thread::sleep(Duration::from_millis(80));
+                        copy_verified_selection(&mut keyboard, &mut clipboard, &marker, target_hwnd)
+                    })
+                    .unwrap_or_else(|| Err("session target changed before selection retry".into()));
+                match retry {
+                    Ok(value) => {
+                        log::info!(
+                            "[insertion] verified correction selection recovered by select-all target_hwnd=0x{:x}",
+                            target_hwnd
+                        );
+                        value
+                    }
+                    Err(retry_err) => {
+                        if same_target() {
+                            let _ = keyboard.key(Key::RightArrow, Direction::Click);
+                        }
+                        restore_clipboard_snapshot(&mut clipboard, &previous);
+                        return Err(format!("could not read selected provisional suffix: {err}; select-all retry: {retry_err}"));
+                    }
                 }
-                restore_clipboard_snapshot(&mut clipboard, &previous);
-                return Err(format!("could not read selected provisional suffix: {err}"));
             }
         };
         // If the editor also contains earlier user text, leave that content
         // untouched. The old bounded suffix selection remains a fallback for
         // this case, with its own exact readback before any replacement.
-        if observed != expected && observed.ends_with(expected) && count <= 160 && same_target() {
+        if observed != expected && observed.ends_with(expected) && count <= 512 && same_target() {
             let fallback = (|| -> Result<String, String> {
                 keyboard
                     .key(Key::RightArrow, Direction::Click)
@@ -451,6 +475,43 @@ fn select_to_edit_start() -> Result<(), String> {
     let sent = unsafe { SendInput(&mut inputs, std::mem::size_of::<INPUT>() as i32) };
     if sent as usize != inputs.len() {
         let mut release = [event(VK_SHIFT, true), event(VK_CONTROL, true)];
+        unsafe { SendInput(&mut release, std::mem::size_of::<INPUT>() as i32) };
+        return Err(format!("SendInput selected {sent}/{} key events", inputs.len()));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn select_all_in_editor() -> Result<(), String> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+        KEYEVENTF_KEYUP, VK_A, VK_CONTROL,
+    };
+
+    fn event(vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY, up: bool) -> INPUT {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        }
+    }
+
+    let mut inputs = [
+        event(VK_CONTROL, false),
+        event(VK_A, false),
+        event(VK_A, true),
+        event(VK_CONTROL, true),
+    ];
+    let sent = unsafe { SendInput(&mut inputs, std::mem::size_of::<INPUT>() as i32) };
+    if sent as usize != inputs.len() {
+        let mut release = [event(VK_CONTROL, true)];
         unsafe { SendInput(&mut release, std::mem::size_of::<INPUT>() as i32) };
         return Err(format!("SendInput selected {sent}/{} key events", inputs.len()));
     }

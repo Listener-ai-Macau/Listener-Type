@@ -4316,7 +4316,11 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
         .and_then(|(last, previous)| {
             utterance_start_ms(last).zip(previous.iter().filter_map(utterance_end_ms).max())
         })
-        .is_some_and(|(start, previous_end)| start >= previous_end);
+        // An abutting interval is not evidence of a second utterance: the
+        // provider can republish the same tail as a stream row beginning at
+        // the two-pass row's end. Require an actual later interval before
+        // overriding the cumulative result's single occurrence.
+        .is_some_and(|(start, previous_end)| start > previous_end);
     let optimistic_utterance_text = if !target_text.is_empty()
         && !stable_other_speaker_present
         // A second occurrence needs a later audio interval. An untimed
@@ -10836,6 +10840,18 @@ mod tests {
             .unwrap()
             .remove("end_time");
         let filtered = filter_result_to_target_speaker(&untimed, &mut target);
+        assert_eq!(
+            filtered.optimistic_result["text"],
+            "开始录音，现在继续检查效率至上"
+        );
+
+        // Installed session 2a30b9c3: the stream row began exactly at the
+        // preceding two-pass row's end. That boundary is a publication split,
+        // not proof that the speaker said the same tail twice. The cumulative
+        // provider text contains one occurrence.
+        let mut abutting = result.clone();
+        abutting["utterances"][1]["start_time"] = json!(3300);
+        let filtered = filter_result_to_target_speaker(&abutting, &mut target);
         assert_eq!(
             filtered.optimistic_result["text"],
             "开始录音，现在继续检查效率至上"
