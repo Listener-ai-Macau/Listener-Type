@@ -37,6 +37,7 @@ Listener Type is a local-first desktop voice input app. It records speech, trans
 - Do not reintroduce upstream product names, bundle ids, service domains, OAuth client ids or TSF GUIDs.
 - Preserve user data boundaries: app data is under `Listener Type`; credential service is `com.listener.type`.
 - Keep the legacy `--ol-*` CSS token namespace unless a deliberate full UI refactor updates every consumer and traceability doc.
+- Keep dictation decisions and text reconciliation shared across Windows and macOS. Put OS input and accessibility calls behind platform adapters; a Windows-only workaround does not establish product-wide acceptance.
 
 ## Verification
 
