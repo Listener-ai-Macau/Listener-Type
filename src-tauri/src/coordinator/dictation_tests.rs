@@ -1847,6 +1847,27 @@ fn automatic_wake_does_not_early_paste_a_long_unstripped_pre_wake_lead_in() {
         "好，开始录音，正文继续。",
         "开始录音",
     ));
+    // Installed session e52bd512 had a continuously growing preview but no
+    // mid-session insertion: the raw three-character count included the
+    // hesitation, while the shared wake stripper had already removed it.
+    let same_speaker_lead_in = "呃，就是开始录音，就是就是怎么说呢？反正你就当前的光标在哪里。";
+    assert_eq!(
+        super::strip_automatic_activation_prefix(same_speaker_lead_in, "开始录音", true),
+        "就是就是怎么说呢？反正你就当前的光标在哪里。"
+    );
+    assert!(!super::automatic_wake_has_unstripped_lead_in(
+        same_speaker_lead_in,
+        "开始录音",
+    ));
+    assert_eq!(
+        super::strip_automatic_activation_prefix(
+            "小爱同学。然后现在好像开始录音，正文继续。",
+            "开始录音",
+            true,
+        ),
+        "小爱同学。然后现在好像开始录音，正文继续。",
+        "a long foreign preamble must remain blocked"
+    );
 }
 
 #[test]
@@ -16226,6 +16247,33 @@ fn pause_early_rollback_restores_confirmed_prefix_and_keeps_sticky_floor() {
     // 粘滞底线是历史事实:不因 take 消费账本而翻转(终稿先读底线再 take,
     // take 后仍可查询)。
     assert!(pause_early_ever_delivered(inner, session_id));
+}
+
+#[test]
+fn early_paste_tracks_editor_switch_without_retargeting_final_correction() {
+    use super::{
+        pause_early_delivery_confirm, pause_early_delivery_reserve,
+        pause_early_note_paste_target, pause_early_single_paste_target,
+    };
+
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session_id = uuid::Uuid::new_v4();
+    pause_early_delivery_reserve(inner, session_id, "第一句。".into(), "第一句".into());
+    pause_early_delivery_confirm(inner, session_id);
+    pause_early_note_paste_target(inner, session_id, Some(101));
+    assert_eq!(pause_early_single_paste_target(inner, session_id), Some(101));
+
+    pause_early_delivery_reserve(inner, session_id, "第一句。第二句。".into(), "第一句第二句".into());
+    pause_early_delivery_confirm(inner, session_id);
+    pause_early_note_paste_target(inner, session_id, Some(202));
+    assert_eq!(
+        pause_early_single_paste_target(inner, session_id),
+        None,
+        "a final correction must not select and rewrite text split across two apps"
+    );
+    pause_early_note_paste_target(inner, session_id, Some(101));
+    assert_eq!(pause_early_single_paste_target(inner, session_id), None);
 }
 
 #[test]

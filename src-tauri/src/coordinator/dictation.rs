@@ -289,13 +289,13 @@ fn should_send_post_dictation_key(
     key: PostDictationKey,
     status: InsertStatus,
     has_nonempty_final_text: bool,
-    original_target_restored: bool,
+    current_target_available: bool,
     clipboard_retention_satisfied: bool,
     translation_active: bool,
 ) -> Option<ShortcutBinding> {
     if !enabled
         || !has_nonempty_final_text
-        || !original_target_restored
+        || !current_target_available
         || !clipboard_retention_satisfied
         || translation_active
         || status != InsertStatus::Inserted
@@ -4074,14 +4074,10 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         return Ok(());
     }
 
-    // r23 自愈：focus_target 与其标题在会话开始原子成对抓取；存值 HWND 死亡时
-    // 按这对标题识别真实输入窗口。
-    let (focus_target, focus_target_title) = {
-        let state = inner.state.lock();
-        (state.focus_target, state.focus_target_title.clone())
-    };
-    let focus_ready_for_paste =
-        restore_focus_target_if_possible(focus_target, focus_target_title.as_deref());
+    // Resolve the foreground only at delivery time. The user may move the
+    // caret to another app while speaking; never restore the session-start
+    // window as a side effect of transcription.
+    let focus_ready_for_paste = delivery_target_is_current(current_delivery_target());
     let prefs = inner.prefs.get();
     let retain_plain_dictation =
         prefs.copy_dictation_to_clipboard && !translation_active && !polished.trim().is_empty();
@@ -4101,6 +4097,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // 丢失也绝不允许终稿整段重贴（2026-09-23 用户实锤"一毛一样粘贴两次"）。
     let pause_early_sticky = pause_early_ever_delivered(inner, current_session_id);
     let pause_early_paste = pause_early_paste_delivered(inner, current_session_id);
+    let early_paste_target = pause_early_single_paste_target(inner, current_session_id);
     let pause_early_delivered = take_pause_early_delivery(inner, current_session_id);
     let pause_early_outcome = pause_early_delivered.as_ref().map(|(display, key)| {
         // 2026-09-23 17:31 d37e3562 吞尾实锤：润色压缩+流式中间态膨胀让
@@ -4169,8 +4166,15 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         delivery_id: delivery_id.clone(),
         text: insert_text.clone(),
     };
-    // async move 闭包需要自己的标题副本；外层 3998 的调用还要用原值。
-    let focus_title_for_send = focus_target_title.clone();
+    #[cfg(target_os = "windows")]
+    let post_key_delivery_target = Arc::new(Mutex::new(None::<usize>));
+    #[cfg(target_os = "windows")]
+    if streaming_finalized == Some(true) {
+        *post_key_delivery_target.lock() =
+            streaming_composition_target(inner, current_session_id);
+    }
+    #[cfg(target_os = "macos")]
+    let post_key_delivery_app = Arc::new(Mutex::new(None::<String>));
     // 组字污染态(降级且清场也失败):文档可能有残留组字,任何粘贴都会重复,
     // 终稿宁可少交付也不双写(H 族教训)。
     let streaming_contaminated = streaming_finalized != Some(true)
@@ -4179,7 +4183,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // If that result revises any already pasted character, a suffix-only
     // reconciliation leaves the mistake in the document. The insertion layer
     // may replace it only after reading back the exact session-owned suffix
-    // from the original foreground target. Verification failure preserves the
+    // from the one editor that received every early chunk. Verification failure preserves the
     // existing no-duplicate fallback below.
     #[cfg(target_os = "windows")]
     let mut early_correction_declined = false;
@@ -4193,7 +4197,13 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             if !pause_early_final_revises_delivered_text(&polished, display) {
                 return None;
             }
-            let target = resolve_insertion_window(focus_target, focus_target_title.as_deref())?;
+            let Some(target) = early_paste_target.filter(|target| delivery_target_is_current(Some(*target))) else {
+                early_correction_declined = true;
+                log::warn!(
+                    "[coord] pause-early final correction declined session_id={current_session_id}: early text spans windows or focus moved"
+                );
+                return None;
+            };
             match inner.inserter.replace_verified_suffix(
                 display,
                 &polished,
@@ -4329,6 +4339,10 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                 );
             }
         }
+        #[cfg(target_os = "windows")]
+        let post_key_for_send = Arc::clone(&post_key_delivery_target);
+        #[cfg(target_os = "macos")]
+        let post_key_app_for_send = Arc::clone(&post_key_delivery_app);
         dispatch_delivery_request(
             delivery_request.clone(),
             DeliveryDispatchPolicy {
@@ -4339,7 +4353,12 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                 allow_foreground_insert_fallback,
             },
             pre_submitted_text.take(),
-            |operation, request| async move {
+            |operation, request| {
+                #[cfg(target_os = "windows")]
+                let post_key_delivery_target = Arc::clone(&post_key_for_send);
+                #[cfg(target_os = "macos")]
+                let post_key_delivery_app = Arc::clone(&post_key_app_for_send);
+                async move {
                 let delivery_id = request.delivery_id;
                 let polished = request.text;
                 match operation {
@@ -4349,24 +4368,17 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                         route: DeliveryRoute::CopyOnly,
                         submitted_text: None,
                     },
-                    DeliveryExternalOperation::OriginalTarget
+                    DeliveryExternalOperation::CurrentTarget
                     | DeliveryExternalOperation::ForegroundFallback => {
                         #[cfg(target_os = "windows")]
                         {
-                            // Re-validate immediately before the only external
-                            // input operation. The earlier policy snapshot can be
-                            // stale because polishing/finalization is async; do
-                            // not let the current foreground (for example a
-                            // terminal used by a runner) become an accidental
-                            // delivery target.
-                            if matches!(operation, DeliveryExternalOperation::OriginalTarget)
-                                && !restore_focus_target_if_possible(
-                                    focus_target,
-                                    focus_title_for_send.as_deref(),
-                                )
-                            {
+                            // The policy snapshot can be stale after async
+                            // finalization. Use the user's foreground cursor
+                            // at the actual send, without activating an app.
+                            let delivery_window = current_delivery_target();
+                            if !delivery_target_is_current(delivery_window) {
                                 log::warn!(
-                                    "[delivery] original target could not be restored at send time; refusing foreground insertion session_id={} focus_target={focus_target:?}",
+                                    "[delivery] no current cursor target at send time session_id={}",
                                     current_session_id
                                 );
                                 return DeliveryExternalResult {
@@ -4376,21 +4388,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                                     submitted_text: None,
                                 };
                             }
-                            let ime_target = if matches!(
-                                operation,
-                                DeliveryExternalOperation::OriginalTarget
-                            ) {
-                                // r23 自愈：存值 HWND 可能已死，与焦点恢复共用按标题
-                                // 重解出的有效窗口，否则 TSF 目标推导拿死句柄返回 None。
-                                capture_ime_submit_target_for_window(resolve_insertion_window(
-                                    focus_target,
-                                    focus_title_for_send.as_deref(),
-                                ))
-                            } else {
-                                capture_ime_submit_target()
-                            };
+                            let ime_target = capture_ime_submit_target_for_window(delivery_window);
                             log::info!(
-                                "[delivery] target snapshot used session_id={} operation={operation:?} focus_target={focus_target:?} ime_target={ime_target:?}",
+                                "[delivery] current target snapshot session_id={} operation={operation:?} delivery_window={delivery_window:?} ime_target={ime_target:?}",
                                 current_session_id
                             );
                             let result = insert_with_windows_ime_first(
@@ -4402,9 +4402,13 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                                 allow_non_tsf_insertion_fallback,
                                 paste_shortcut,
                                 ime_target,
+                                delivery_window,
                                 pause_early_paste,
                             )
                             .await;
+                            if result.status == InsertStatus::Inserted {
+                                *post_key_delivery_target.lock() = delivery_window;
+                            }
                             DeliveryExternalResult {
                                 status: result.status,
                                 target_confirmed: result.target_confirmed,
@@ -4414,6 +4418,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                         }
                         #[cfg(not(target_os = "windows"))]
                         {
+                            #[cfg(target_os = "macos")]
+                            let delivery_app = capture_frontmost_app();
                             let status = if allow_clipboard_fallback {
                                 inner
                                     .inserter
@@ -4421,6 +4427,10 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                             } else {
                                 InsertStatus::Failed
                             };
+                            #[cfg(target_os = "macos")]
+                            if status == InsertStatus::Inserted {
+                                *post_key_delivery_app.lock() = delivery_app;
+                            }
                             DeliveryExternalResult {
                                 status,
                                 target_confirmed: false,
@@ -4433,6 +4443,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                             }
                         }
                     }
+                }
                 }
             },
         )
@@ -4476,10 +4487,21 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         translation_active,
     ) {
         tokio::time::sleep(POST_DICTATION_KEY_DELAY).await;
-        if !restore_focus_target_if_possible(focus_target, focus_target_title.as_deref()) {
-            post_dictation_key_result = "original_target_lost";
+        #[cfg(target_os = "windows")]
+        let delivery_target_unchanged =
+            delivery_target_is_current(*post_key_delivery_target.lock());
+        #[cfg(target_os = "macos")]
+        let delivery_target_unchanged = {
+            let delivered_to = post_key_delivery_app.lock();
+            let current_app = capture_frontmost_app();
+            delivered_to.as_ref().is_some_and(|app| current_app.as_ref() == Some(app))
+        };
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        let delivery_target_unchanged = true;
+        if !delivery_target_unchanged {
+            post_dictation_key_result = "current_target_changed";
             log::warn!(
-                "[coord] post-dictation shortcut skipped session_id={} reason=original_target_lost",
+                "[coord] post-dictation shortcut skipped session_id={} reason=current_target_changed",
                 current_session_id
             );
         } else if claim_post_dictation_key(inner, current_session_id) {
@@ -4487,7 +4509,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                 Ok(()) => {
                     post_dictation_key_result = "sent";
                     log::info!(
-                        "[coord] post-dictation shortcut sent session_id={} shortcut={} original_target_restored=true",
+                        "[coord] post-dictation shortcut sent session_id={} shortcut={} current_target_unchanged=true",
                         current_session_id,
                         binding.display_label()
                     );
@@ -4521,7 +4543,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         );
     }
     log::info!(
-        "[coord] final completion actions session_id={} chars={} insertion_status={:?} target_confirmed={} target_restored={} user_stop={} clipboard={} post_key={} stop_to_done_ms={:?}",
+        "[coord] final completion actions session_id={} chars={} insertion_status={:?} target_confirmed={} current_target_available={} user_stop={} clipboard={} post_key={} stop_to_done_ms={:?}",
         current_session_id,
         polished.chars().count(),
         status,

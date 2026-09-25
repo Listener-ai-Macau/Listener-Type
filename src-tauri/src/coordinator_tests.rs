@@ -318,7 +318,7 @@ async fn delivery_dispatch_policy_maps_platform_branches_in_production() {
         tsf_result,
     )
     .await;
-    assert_eq!(calls[0].0, DeliveryExternalOperation::OriginalTarget);
+    assert_eq!(calls[0].0, DeliveryExternalOperation::CurrentTarget);
     assert_eq!(tsf.route, DeliveryRoute::Tsf);
     assert!(tsf.target_confirmed);
     assert_eq!(tsf.submitted_text.as_deref(), Some("测试正文"));
@@ -340,7 +340,7 @@ async fn delivery_dispatch_policy_maps_platform_branches_in_production() {
         },
     )
     .await;
-    assert_eq!(calls[0].0, DeliveryExternalOperation::OriginalTarget);
+    assert_eq!(calls[0].0, DeliveryExternalOperation::CurrentTarget);
     assert_eq!(unicode.status, InsertStatus::SubmittedUnconfirmed);
     assert_eq!(unicode.route, DeliveryRoute::Unicode);
     assert!(!unicode.target_confirmed);
@@ -5703,4 +5703,18 @@ fn non_tsf_insert_attempts_paste_before_unicode_keystrokes() {
         body.contains("clipboard_transport_is_reversible"),
         "paste transport must be declined while the clipboard holds content the restore path cannot write back"
     );
+}
+
+#[test]
+fn dictation_delivery_never_activates_the_session_start_window() {
+    let support = std::include_str!("coordinator/support.rs");
+    let preview = std::include_str!("coordinator/dictation_preview.rs");
+    let finalization = std::include_str!("coordinator/dictation.rs");
+    for (name, source) in [("support", support), ("preview", preview), ("finalization", finalization)] {
+        assert!(!source.contains("SetForegroundWindow("), "{name} must not switch apps");
+        assert!(!source.contains("BringWindowToTop("), "{name} must not raise a window");
+        assert!(!source.contains("restore_focus_target_if_possible("), "{name} must not restore recording-start focus");
+    }
+    assert!(preview.contains("current_delivery_target()"));
+    assert!(finalization.contains("capture_ime_submit_target_for_window(delivery_window)"));
 }

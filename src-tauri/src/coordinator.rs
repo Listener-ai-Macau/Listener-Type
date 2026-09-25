@@ -148,7 +148,8 @@ use support::{
     emit_capsule_for_session,
     emit_capsule_with_session, enabled_phrases, listening_session_has_no_current_asr,
     local_qwen_transcribe_timeout, publish_dictation_capsule, publish_dictation_transition,
-    restore_focus_target_if_possible, schedule_capsule_idle, startup_race_status_for_starting,
+    current_delivery_target, delivery_target_is_current, schedule_capsule_idle,
+    startup_race_status_for_starting,
     transition_pipeline_error_if_session_matches, CAPSULE_ACTIONABLE_ERROR_HIDE_DELAY_MS,
     CAPSULE_AUTO_HIDE_DELAY_MS, CAPSULE_EMPTY_TRANSCRIPT_HIDE_DELAY_MS,
     CAPSULE_STREAM_ERROR_HIDE_DELAY_MS, CAPSULE_SUCCESS_HIDE_DELAY_MS,
@@ -158,7 +159,7 @@ use support::{
 #[allow(unused_imports)]
 use support::{
     capture_ime_submit_target, capture_ime_submit_target_for_window,
-    foundry_audio_transcribe_timeout_duration, resolve_insertion_window, windows_hwnd_is_present,
+    foundry_audio_transcribe_timeout_duration, windows_hwnd_is_present,
 };
 // Tests still need these symbols in the parent namespace.
 #[allow(unused_imports)]
@@ -573,7 +574,7 @@ pub(super) struct DeliverySubmission {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DeliveryExternalOperation {
-    OriginalTarget,
+    CurrentTarget,
     ForegroundFallback,
     CopyOnly,
 }
@@ -629,7 +630,7 @@ fn choose_delivery_dispatch(
         };
     }
     if policy.focus_ready_for_paste {
-        DeliveryDispatchChoice::External(DeliveryExternalOperation::OriginalTarget)
+        DeliveryDispatchChoice::External(DeliveryExternalOperation::CurrentTarget)
     } else if policy.allow_foreground_insert_fallback {
         DeliveryDispatchChoice::External(DeliveryExternalOperation::ForegroundFallback)
     } else if policy.allow_clipboard_fallback {
@@ -650,7 +651,7 @@ fn map_delivery_external_result(
 ) -> DeliverySubmission {
     let status = if result.status == InsertStatus::Inserted
         && (result.route != DeliveryRoute::Tsf
-            || !matches!(operation, DeliveryExternalOperation::OriginalTarget))
+            || !matches!(operation, DeliveryExternalOperation::CurrentTarget))
     {
         // KEYEVENTF_UNICODE and explicit foreground fallback report only that
         // Windows accepted the input event. There is no receiver ack proving
@@ -659,7 +660,7 @@ fn map_delivery_external_result(
     } else {
         result.status
     };
-    let target_confirmed = matches!(operation, DeliveryExternalOperation::OriginalTarget)
+    let target_confirmed = matches!(operation, DeliveryExternalOperation::CurrentTarget)
         && result.route == DeliveryRoute::Tsf
         && status == InsertStatus::Inserted
         && result.target_confirmed;
@@ -866,7 +867,7 @@ where
 #[cfg(target_os = "windows")]
 pub(super) struct WindowsInsertionResult {
     pub(super) status: InsertStatus,
-    /// Only a successful TSF submit confirms that the original target accepted the text.
+    /// Only a successful TSF submit confirms that the selected target accepted the text.
     pub(super) target_confirmed: bool,
     pub(super) route: DeliveryRoute,
     pub(super) submitted_text: Option<String>,
@@ -2884,6 +2885,7 @@ async fn insert_with_windows_ime_first(
     allow_non_tsf_insertion_fallback: bool,
     paste_shortcut: PasteShortcut,
     ime_target: Option<ImeSubmitTarget>,
+    delivery_window: Option<usize>,
     continue_paste_route: bool,
 ) -> WindowsInsertionResult {
     let prepared = {
@@ -2956,6 +2958,24 @@ async fn insert_with_windows_ime_first(
         }
     };
 
+    // Preparing TSF can await a profile change. If the user switches apps in
+    // that interval, abandon the old TSF address and paste at the new cursor.
+    if !delivery_target_is_current(delivery_window) {
+        log::info!(
+            "[windows-ime] foreground changed before TSF submit session_id={session_id}; routing to current cursor"
+        );
+        inner.windows_ime.restore_session(prepared);
+        return if allow_non_tsf_insertion_fallback {
+            insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut)
+        } else {
+            WindowsInsertionResult {
+                status: InsertStatus::Failed,
+                target_confirmed: false,
+                route: DeliveryRoute::Failed,
+                submitted_text: None,
+            }
+        };
+    }
     let request = crate::windows_ime_ipc::ImeSubmitRequest {
         session_id: delivery_id.to_string(),
         text: polished.to_string(),

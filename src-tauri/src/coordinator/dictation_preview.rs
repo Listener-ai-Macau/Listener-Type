@@ -1618,6 +1618,11 @@ pub(super) struct PauseEarlyDeliveryLedger {
     /// remainder must continue on that route instead of waiting for a TSF
     /// client that did not deliver this session's preceding chunks.
     pub(super) paste_delivered_session: Option<SessionId>,
+    /// One editor can be corrected at finalization only if every early paste
+    /// landed in that same foreground window. Switching apps is allowed;
+    /// the session text ledger still prevents a duplicate full-text paste.
+    pub(super) paste_target: Option<usize>,
+    pub(super) paste_targets_diverged: bool,
     /// 一次性门诊断：同一会话同一原因只记一行，防止看门狗 20/s 刷屏。
     pub(super) gate_blocked_logged: Option<(SessionId, &'static str)>,
     /// 2026-09-23 tkg 后诊断:tick 首达行(证明看门狗路径活着+当时门状态)。
@@ -2133,6 +2138,30 @@ pub(super) fn pause_early_paste_delivered(inner: &Arc<Inner>, session_id: Sessio
     inner.embedded_audio_pause_early_delivery.lock().paste_delivered_session == Some(session_id)
 }
 
+fn pause_early_note_paste_target(inner: &Arc<Inner>, session_id: SessionId, target: Option<usize>) {
+    let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+    if ledger.session_id != Some(session_id) || ledger.paste_targets_diverged {
+        return;
+    }
+    match (ledger.paste_target, target) {
+        (None, Some(target)) => ledger.paste_target = Some(target),
+        (Some(previous), Some(target)) if previous == target => {}
+        _ => {
+            ledger.paste_target = None;
+            ledger.paste_targets_diverged = true;
+        }
+    }
+}
+
+pub(super) fn pause_early_single_paste_target(inner: &Arc<Inner>, session_id: SessionId) -> Option<usize> {
+    let ledger = inner.embedded_audio_pause_early_delivery.lock();
+    if ledger.session_id == Some(session_id) && !ledger.paste_targets_diverged {
+        ledger.paste_target
+    } else {
+        None
+    }
+}
+
 /// 终稿路径取走本会话的已交付前缀（display, key），取走即清零。粘滞底线
 /// （曾上屏）是历史事实，跨 take 保留——终稿侧即使先 take 后查询也不翻转。
 pub(super) fn take_pause_early_delivery(
@@ -2160,7 +2189,15 @@ pub(super) fn take_pause_early_delivery(
 fn automatic_wake_has_unstripped_lead_in(raw_text: &str, phrase: &str) -> bool {
     raw_text
         .find(phrase)
-        .is_some_and(|offset| raw_text[..offset].chars().filter(|ch| ch.is_alphanumeric()).count() > 2)
+        .is_some_and(|offset| {
+            raw_text[..offset].chars().filter(|ch| ch.is_alphanumeric()).count() > 2
+                // The same wake stripping path already knows how to consume
+                // bounded hesitation + short lead-ins. The old raw character
+                // count vetoed those valid results for the entire session,
+                // leaving a live preview but no early text until finalization.
+                && strip_automatic_activation_prefix(raw_text, phrase, true)
+                    == raw_text.trim()
+        })
 }
 
 fn pause_early_display_text(
@@ -2230,7 +2267,7 @@ fn pause_early_display_text(
 /// Watchdog 每拍评估（无 STOP 待决时）。条件全满足才动作：
 /// 干净会话（ASR 账本卫兵：无冻结）+ 账本前缀稳定 ≥1s +
 /// Raw 一次性路径（翻译/LLM 会整体改写，前缀会被孤立）+ 有新增内容 +
-/// 原焦点目标可恢复。组字流式活着时改走 stream_commit 落定(不碰焦点,
+/// 当前光标有输入目标。组字流式活着时改走 stream_commit 落定(不碰焦点,
 /// 组字锚在目标进程);任何失败静默回退到现行为(终稿一次性交付)。
 async fn pause_early_delivery_tick(
     inner: &Arc<Inner>,
@@ -2374,13 +2411,10 @@ async fn pause_early_delivery_tick(
         );
         return;
     }
-    let (focus_target, focus_target_title) = {
-        let state = inner.state.lock();
-        (state.focus_target, state.focus_target_title.clone())
-    };
-    if !restore_focus_target_if_possible(focus_target, focus_target_title.as_deref()) {
+    let delivery_target = current_delivery_target();
+    if !delivery_target_is_current(delivery_target) {
         log::info!(
-            "[coord] pause-early-delivery skipped: focus target unavailable session_id={session_id}"
+            "[coord] pause-early-delivery skipped: current cursor target unavailable session_id={session_id}"
         );
         return;
     }
@@ -2412,6 +2446,7 @@ async fn pause_early_delivery_tick(
         return;
     }
     pause_early_delivery_confirm(inner, session_id);
+    pause_early_note_paste_target(inner, session_id, delivery_target);
     endpoint_clock.lock().note_body_delivery(Instant::now());
     if result.route == DeliveryRoute::Paste {
         inner.embedded_audio_pause_early_delivery.lock().paste_delivered_session = Some(session_id);

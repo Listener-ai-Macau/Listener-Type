@@ -133,10 +133,9 @@ pub(super) fn capture_focus_target() -> Option<usize> {
     capture_focus_target_with_title().0
 }
 
-/// r23（2026-09-18，session 921fe510）：会话开始存下的 HWND 在 delivery 时已死
-/// （"original Windows insertion target is no longer a valid window"），但操作员
-/// 弹窗整轮存活且始终前台——抓取瞬间夹了个短命中间窗口。HWND 与其标题必须
-/// 原子成对抓取；delivery 侧的按标题自愈（resolve_insertion_window）用这对值。
+/// Session-start foreground context for style/history diagnostics. Delivery
+/// separately resolves the foreground at each insertion, so this HWND never
+/// controls which app receives text.
 #[cfg(target_os = "windows")]
 pub(super) fn capture_focus_target_with_title() -> (Option<usize>, Option<String>) {
     use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
@@ -262,133 +261,31 @@ pub(super) fn capture_frontmost_app() -> Option<String> {
     None
 }
 
-/// r23 自愈核心：给出本次插入应使用的窗口。存值还活着→存值；存值已死→若当前
-/// 前台仍带着会话开始时抓到的标题（front_app），它就是用户的真实上屏目标，返回
-/// 重抓的 HWND；标题对不上→None（绝不让 runner 终端之类的窗口意外成为目标）。
+/// Delivery follows the user's current cursor. A session-start window is
+/// useful context for text processing, but must never be reactivated to route
+/// dictation after the user has switched apps.
 #[cfg(target_os = "windows")]
-pub(super) fn resolve_insertion_window(
-    target: Option<usize>,
-    expected_title: Option<&str>,
-) -> Option<usize> {
+pub(super) fn current_delivery_target() -> Option<usize> {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsWindow};
 
-    let raw_target = target?;
-    let hwnd = HWND(raw_target as *mut std::ffi::c_void);
-    if hwnd.0.is_null() {
-        return None;
-    }
-    if unsafe { IsWindow(hwnd).as_bool() } {
-        return Some(raw_target);
-    }
-    log::warn!(
-        "[coord] original Windows insertion target is no longer a valid window hwnd={raw_target:?}"
-    );
-    let expected = expected_title.map(str::trim).filter(|t| !t.is_empty())?;
-    let foreground = unsafe { GetForegroundWindow() };
-    if foreground.0.is_null() {
-        return None;
-    }
-    let title = window_title(foreground);
-    if title.trim() != expected {
-        log::warn!(
-            "[coord] foreground title {title:?} does not match session-start title {expected:?}; refusing recapture"
-        );
-        return None;
-    }
-    log::info!(
-        "[coord] recaptured insertion target by title match after original hwnd died hwnd={:?} title={title:?}",
-        foreground.0
-    );
-    Some(foreground.0 as usize)
+    let foreground: HWND = unsafe { GetForegroundWindow() };
+    (!foreground.0.is_null() && unsafe { IsWindow(foreground).as_bool() })
+        .then_some(foreground.0 as usize)
 }
 
 #[cfg(not(target_os = "windows"))]
-pub(super) fn resolve_insertion_window(
-    target: Option<usize>,
-    _expected_title: Option<&str>,
-) -> Option<usize> {
-    target
+pub(super) fn current_delivery_target() -> Option<usize> {
+    capture_focus_target()
 }
 
-#[cfg(target_os = "windows")]
-pub(super) fn restore_focus_target_if_possible(
-    target: Option<usize>,
-    expected_title: Option<&str>,
-) -> bool {
-    use std::ffi::c_void;
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
-    use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic,
-        SetForegroundWindow, ShowWindow, SW_RESTORE,
-    };
-
-    if target.is_none() {
-        log::warn!("[coord] no original Windows insertion target captured");
-        return false;
-    }
-    // r23（2026-09-18，session 921fe510）：存值可能死于短命中间窗口；按标题
-    // 自愈到真实输入窗口（见 resolve_insertion_window）。恢复与后续 IME 目标
-    // 推导必须用同一个有效窗口。
-    let Some(effective_target) = resolve_insertion_window(target, expected_title) else {
-        return false;
-    };
-    let hwnd = HWND(effective_target as *mut c_void);
-    if hwnd.0.is_null() {
-        return false;
-    }
-
-    let foreground = unsafe { GetForegroundWindow() };
-    if foreground == hwnd {
-        return true;
-    }
-
-    if unsafe { IsIconic(hwnd).as_bool() } {
-        let _ = unsafe { ShowWindow(hwnd, SW_RESTORE) };
-    }
-    let current_thread_id = unsafe { GetCurrentThreadId() };
-    let mut foreground_process_id = 0;
-    let foreground_thread_id =
-        unsafe { GetWindowThreadProcessId(foreground, Some(&mut foreground_process_id)) };
-    let mut target_process_id = 0;
-    let target_thread_id = unsafe { GetWindowThreadProcessId(hwnd, Some(&mut target_process_id)) };
-    let attach_foreground = foreground_thread_id != 0 && foreground_thread_id != current_thread_id;
-    let attach_target = target_thread_id != 0 && target_thread_id != current_thread_id;
-    if attach_foreground {
-        let _ = unsafe { AttachThreadInput(current_thread_id, foreground_thread_id, true) };
-    }
-    if attach_target {
-        let _ = unsafe { AttachThreadInput(current_thread_id, target_thread_id, true) };
-    }
-    let _ = unsafe { BringWindowToTop(hwnd) };
-    let _ = unsafe { SetForegroundWindow(hwnd) };
-    let _ = unsafe { SetFocus(hwnd) };
-    std::thread::sleep(std::time::Duration::from_millis(90));
-    if attach_target {
-        let _ = unsafe { AttachThreadInput(current_thread_id, target_thread_id, false) };
-    }
-    if attach_foreground {
-        let _ = unsafe { AttachThreadInput(current_thread_id, foreground_thread_id, false) };
-    }
-
-    let foreground = unsafe { GetForegroundWindow() };
-    if foreground != hwnd {
-        log::warn!(
-            "[coord] failed to restore original Windows insertion target before paste target_thread={target_thread_id} foreground_thread={foreground_thread_id}"
-        );
-        return false;
-    }
-    true
+pub(super) fn delivery_target_is_current(target: Option<usize>) -> bool {
+    target.is_some() && target == current_delivery_target()
 }
 
 #[cfg(not(target_os = "windows"))]
-pub(super) fn restore_focus_target_if_possible(
-    _target: Option<usize>,
-    _expected_title: Option<&str>,
-) -> bool {
-    true
+pub(super) fn delivery_target_is_current(target: Option<usize>) -> bool {
+    target == current_delivery_target()
 }
 
 #[cfg(target_os = "windows")]
@@ -407,11 +304,8 @@ pub(super) fn capture_ime_submit_target() -> Option<ImeSubmitTarget> {
     capture_ime_submit_target_for_window(Some(foreground.0 as usize))
 }
 
-/// Derive the IME submit target from a session-bound root window. The old
-/// implementation read the *current* foreground window at finalization, so a
-/// helper process, terminal, or review dialog that briefly took focus could
-/// silently become the recipient. Keeping this conversion rooted in the
-/// saved HWND makes the target immutable for the session.
+/// Derive the IME submit target from a window captured immediately before
+/// delivery. The caller checks that it remains foreground before sending.
 #[cfg(target_os = "windows")]
 pub(super) fn capture_ime_submit_target_for_window(
     root_target: Option<usize>,

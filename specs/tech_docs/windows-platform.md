@@ -27,3 +27,10 @@ Ctrl+C for automatic verification: terminals interpret that shortcut as task
 interrupt. If safe readback is unavailable, leave the existing text in place
 and copy the final transcript for recovery; do not paste the full transcript
 again or report target-confirmed delivery.
+
+During dictation, each paste and final submit targets the currently focused
+window. Delivery must not call `SetForegroundWindow`, restore the window that
+had focus when recording began, or infer a target from its title. If the user
+switches apps during an optional TSF composition, cancel that composition and
+continue with the current foreground editor. A delayed post-dictation shortcut
+may fire only while the editor that received the final text still has focus.

@@ -39,6 +39,7 @@ impl Default for StreamingCompositionPhase {
 pub(super) struct StreamingCompositionState {
     phase: StreamingCompositionPhase,
     session_id: Option<SessionId>,
+    target_window: Option<usize>,
     /// 节流:上次 update 实际送达管道的时刻(驱动侧写)。
     last_update_sent_at: Option<Instant>,
     /// 去重:上次 update 送达的余量 stability key(驱动侧写)。
@@ -66,6 +67,11 @@ fn streaming_composition_disabled_by_env() -> bool {
 fn streaming_composition_active(inner: &Arc<Inner>, session_id: SessionId) -> bool {
     let state = inner.streaming_composition.lock();
     state.session_id == Some(session_id) && state.phase == StreamingCompositionPhase::Active
+}
+
+fn streaming_composition_target(inner: &Arc<Inner>, session_id: SessionId) -> Option<usize> {
+    let state = inner.streaming_composition.lock();
+    (state.session_id == Some(session_id)).then_some(state.target_window).flatten()
 }
 
 fn streaming_composition_contaminated(inner: &Arc<Inner>, session_id: SessionId) -> bool {
@@ -131,7 +137,8 @@ async fn begin_streaming_composition_session(inner: &Arc<Inner>, session_id: Ses
             );
             return;
         };
-        let Some(target) = capture_ime_submit_target() else {
+        let target_window = current_delivery_target();
+        let Some(target) = target_window.and_then(|window| capture_ime_submit_target_for_window(Some(window))) else {
             log::info!(
                 "[streaming-composition] disabled for session_id={session_id}: no IME target at session start"
             );
@@ -141,6 +148,7 @@ async fn begin_streaming_composition_session(inner: &Arc<Inner>, session_id: Ses
         {
             let mut state = inner.streaming_composition.lock();
             state.session_id = Some(session_id);
+            state.target_window = target_window;
             state.phase = StreamingCompositionPhase::Active;
             state.command_tx = Some(tx);
         }
@@ -154,6 +162,7 @@ async fn begin_streaming_composition_session(inner: &Arc<Inner>, session_id: Ses
             session_id,
             prepared,
             Some(target),
+            target_window,
             rx,
         ));
     }
@@ -396,6 +405,7 @@ async fn streaming_composition_driver(
     session_id: SessionId,
     prepared: crate::windows_ime_session::PreparedWindowsImeSession,
     target: Option<crate::windows_ime_ipc::ImeSubmitTarget>,
+    target_window: Option<usize>,
     mut rx: tokio::sync::mpsc::Receiver<StreamingCompositionCommand>,
 ) {
     macro_rules! cancel {
@@ -435,6 +445,23 @@ async fn streaming_composition_driver(
                 break;
             }
         };
+        // A composition is anchored in one editor. If the user moves the
+        // caret to another app, clear that editor's reversible composition
+        // and let the ordinary current-cursor paste path continue the ledger.
+        if matches!(
+            &command,
+            StreamingCompositionCommand::Update { .. } | StreamingCompositionCommand::Commit { .. }
+        ) && !delivery_target_is_current(target_window)
+        {
+            let cleared = !residue_visible || cancel!();
+            streaming_state_apply(&inner, session_id, |state| {
+                streaming_state_fail(state, "foreground_changed", !cleared);
+            });
+            if let StreamingCompositionCommand::Commit { reply: Some(reply), .. } = command {
+                let _ = reply.send(false);
+            }
+            return;
+        }
         match command {
             StreamingCompositionCommand::Update { text, key } => {
                 if streaming_run_op(
