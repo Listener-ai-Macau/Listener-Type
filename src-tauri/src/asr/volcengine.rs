@@ -2990,7 +2990,10 @@ fn recover_locally_supported_owner_prefix(
     let Some(anchor) = ordered.iter().position(|row| {
         utterance_is_stable(row)
             && utterance_speaker_id(row).as_deref() == Some(target)
-            && utterance_contains_normalized_phrase(row, &normalized_phrase)
+            // This recovery borrows the wake row's identity for the next
+            // cloud cluster. A row that already contains a spoken body is not
+            // a wake-only boundary: the next short cluster may be a bystander.
+            && utterance_normalized_text(row) == normalized_phrase
     }) else {
         return;
     };
@@ -3029,23 +3032,8 @@ fn recover_locally_supported_owner_prefix(
             {
                 break;
             }
-            let overlapping = state
-                .local_speaker_evidence
-                .iter()
-                .filter(|sample| {
-                    let center = sample
-                        .audio_end_ms
-                        .saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
-                    center >= start && center <= end
-                })
-                .collect::<Vec<_>>();
-            if overlapping.is_empty() || overlapping.iter().any(|sample| {
-                !sample.stable_target
-                    || matches!(
-                        sample.classification,
-                        crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. }
-                    )
-            }) || local_non_target_vetoes_split_utterance(state, start, end)
+            if !local_evidence_supports_split_alias(row, &state.local_speaker_evidence)
+                || local_non_target_vetoes_split_utterance(state, start, end)
                 || local_evidence_confirms_owner_absence_with_verified_wake(
                     row,
                     &state.local_speaker_evidence,
@@ -3366,6 +3354,16 @@ fn utterance_contains_normalized_phrase(utterance: &Value, normalized_phrase: &s
             .unwrap_or(false)
 }
 
+fn utterance_normalized_text(utterance: &Value) -> String {
+    utterance
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .chars()
+        .filter(|ch| ch.is_alphanumeric())
+        .collect()
+}
+
 fn utterance_is_bounded_wake_phrase(utterance: &Value, normalized_phrase: &str) -> bool {
     if !utterance_contains_normalized_phrase(utterance, normalized_phrase) {
         return false;
@@ -3517,6 +3515,40 @@ fn local_evidence_supports_cloud_target(
     }
     has_stable_owner_overlap
         && !local_evidence_confirms_owner_absence(utterance, evidence, wake_speaker_phrase)
+}
+
+/// A different cloud cluster needs positive owner evidence in its own audio
+/// interval. The debounced stable_target bit alone can remain true during a
+/// short bystander sentence. A longer real owner clause may have an isolated
+/// low-score window, so require corroborating windows rather than unanimity.
+fn local_evidence_supports_split_alias(
+    utterance: &Value,
+    evidence: &[LocalSpeakerEvidence],
+) -> bool {
+    let Some((start_ms, end_ms)) = utterance_start_ms(utterance).zip(utterance_end_ms(utterance)) else {
+        return false;
+    };
+    let mut observed = 0usize;
+    let mut positive = 0usize;
+    for sample in evidence {
+        let center_ms = sample.audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+        if center_ms < start_ms || center_ms > end_ms {
+            continue;
+        }
+        observed += 1;
+        if !sample.stable_target
+            || matches!(
+                sample.classification,
+                crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. }
+            )
+        {
+            return false;
+        }
+        if sample.classification.score() > LOCAL_OWNER_ABSENCE_MAX_SCORE {
+            positive += 1;
+        }
+    }
+    observed > 0 && positive >= observed.min(2) && positive * 2 > observed
 }
 
 /// A sealed row in the already anchored cloud speaker track can outrun the
@@ -3862,11 +3894,7 @@ fn utterance_belongs_to_target(
             utterance_start_ms(utterance).is_some_and(|start_ms| {
                 start_ms >= wake_end_ms.saturating_sub(200)
                     && start_ms <= wake_end_ms.saturating_add(MAX_WAKE_BODY_CLUSTER_SPLIT_GAP_MS)
-            }) && local_evidence_supports_cloud_target(
-                utterance,
-                local_speaker_evidence,
-                wake_speaker_phrase,
-            )
+            }) && local_evidence_supports_split_alias(utterance, local_speaker_evidence)
         });
     if immediate_wake_continuation {
         return true;
@@ -4205,10 +4233,9 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
                     (start_ms >= wake_end_ms.saturating_sub(200)
                         && start_ms
                             <= wake_end_ms.saturating_add(MAX_WAKE_BODY_CLUSTER_SPLIT_GAP_MS)
-                        && local_evidence_supports_cloud_target(
+                        && local_evidence_supports_split_alias(
                             utterance,
                             local_speaker_evidence,
-                            wake_speaker_phrase,
                         ))
                     .then_some(speaker_id)
                 })
@@ -14961,6 +14988,98 @@ mod tests {
             .expect("provider owner track remains available");
             assert_eq!(recovered.text, format!("{wake}{body_first}{body_last}"));
         }
+    }
+
+    #[test]
+    fn wake_containing_body_cannot_alias_a_low_evidence_speaker_island() {
+        // Installed session 46b9fb13: the owner spoke in speaker-0 rows on
+        // both sides of a short speaker-1 "限速80" row. The first row already
+        // contained the wake phrase AND owner body. A sticky stable_target bit
+        // during a low-score local window must not promote that middle row.
+        let first = "开始录音，现在是一个怎么样的问题？你帮我看一下。";
+        let foreign = "限速80。";
+        let last = "呃，就是帮我看看现在是什么样的一个情况。";
+        let result = json!({
+            "text": format!("{first}{foreign}{last}"),
+            "utterances": [
+                {"text": first, "start_time": 200, "end_time": 3360,
+                 "definite": true, "additions": {"speaker_id": "0", "source": "two_pass"}},
+                {"text": foreign, "start_time": 3440, "end_time": 4040,
+                 "definite": true, "additions": {"speaker_id": "1", "source": "two_pass"}},
+                {"text": last, "start_time": 4080, "end_time": 8592,
+                 "definite": true, "additions": {"speaker_id": "0", "source": "two_pass"}}
+            ]
+        });
+        let evidence = vec![
+            LocalSpeakerEvidence {
+                audio_end_ms: 2700,
+                classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                    score: 0.47,
+                },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 4300,
+                classification: crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                    score: 0.185,
+                },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 6700,
+                classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                    score: 0.48,
+                },
+                stable_target: true,
+            },
+        ];
+        let mut target = Some("0".to_string());
+        let mut filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &result, &mut target, true, &evidence, Some("开始录音"), Some(3360), true,
+            false, None, None,
+        );
+        assert_eq!(filtered.result["text"], format!("{first}{last}"));
+        assert!(filtered.stable_other_speaker_present);
+        assert!(!filtered.response_local_body_alias_present);
+
+        let state = SyncState {
+            local_speaker_tracking_enabled: true,
+            target_speaker_id: Some("0".into()),
+            wake_speaker_phrase: Some("开始录音".into()),
+            local_speaker_evidence: evidence,
+            ..Default::default()
+        };
+        recover_locally_supported_owner_prefix(&state, &result, &mut filtered);
+        assert_eq!(filtered.result["text"], format!("{first}{last}"));
+        assert!(!filtered.response_local_body_alias_present);
+        assert!(final_explicit_non_owner_tail(&state, &filtered, &result));
+    }
+
+    #[test]
+    fn wake_only_row_needs_positive_local_evidence_to_alias_next_cluster() {
+        let result = json!({
+            "text": "开始录音。限速80。",
+            "utterances": [
+                {"text": "开始录音。", "start_time": 100, "end_time": 1000,
+                 "definite": true, "additions": {"speaker_id": "0", "source": "two_pass"}},
+                {"text": "限速80。", "start_time": 1200, "end_time": 1800,
+                 "definite": true, "additions": {"speaker_id": "1", "source": "two_pass"}}
+            ]
+        });
+        let evidence = vec![LocalSpeakerEvidence {
+            audio_end_ms: 2100,
+            classification: crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                score: 0.18,
+            },
+            stable_target: true,
+        }];
+        let mut target = Some("0".to_string());
+        let filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &result, &mut target, true, &evidence, Some("开始录音"), Some(1000), true,
+            false, None, None,
+        );
+        assert_eq!(filtered.result["text"], "开始录音。");
+        assert!(filtered.stable_other_speaker_present);
     }
 
     #[test]
