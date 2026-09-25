@@ -40,6 +40,13 @@ Listener Type is a local-first desktop voice input app. It records speech, trans
 
 ## Verification
 
+### Root-cause repair rule
+
+- For a recording, wake, streaming, speaker, endpoint, preview, or insertion defect, trace one affected session from raw audio/capture timestamps through provider events, local decisions, UI updates, and final insertion. Identify the first incorrect decision and the violated invariant before changing production logic.
+- Fix the shared decision or state ownership that caused the defect. Keep distinct states such as confirmed owner, confirmed other, and unobserved/pending evidence distinct; missing or delayed evidence is not proof of another speaker or of silence. Do not add a session-specific text, duration, score, or last-row exception as the sole fix.
+- Add a regression that reproduces the observed failure and neighboring cases that must continue to work, especially bystander rejection, normal auto-end, pause continuation, and final text replacement. Run the relevant existing regressions before installing.
+- Compare the installed executable hash with the current build and validate on new sessions from that build. A source test, an old-session log, or a narrow symptom fix alone is not grounds to claim the issue is root-fixed or ready to release. Keep the release gate until runtime evidence supports it.
+
 Before claiming completion, run the narrowest relevant checks plus:
 
 ```bash

@@ -1038,8 +1038,10 @@ fn target_speaker_update_from_state(
         // the endpoint as non-owner so room speech cannot renew the owner clock.
         local_non_target_speech_end_ms: if owner_handoff_suspected {
             state.local_speech_end_ms
-        } else {
+        } else if local_owner_continuity(state) == LocalOwnerContinuity::Other {
             state.local_sustained_non_target_speech_end_ms
+        } else {
+            None
         },
         local_speaker_tracking_enabled: state.local_speaker_tracking_enabled,
         stable_attributed_speech_end_ms: state.stable_attributed_speech_end_ms,
@@ -1140,6 +1142,20 @@ fn local_owner_continuity(state: &SyncState) -> LocalOwnerContinuity {
     if !state.local_speaker_tracking_enabled {
         return LocalOwnerContinuity::Untracked;
     }
+    // An open wake did not match the enrolled bank. After body speech has
+    // established a stable session owner, a low-score Uncertain window from
+    // that same bank is still inconclusive, even during an absence run. Do not
+    // promote it to confirmed Other while the debounced owner has not changed.
+    // A current NonTarget window or a correlated handoff remains actionable.
+    let open_wake_uncertain_owner = !state.local_wake_owner_verified
+        && state.local_speaker_stable_target
+        && state.local_target_confirmed
+        && state.local_owner_absence_run_confirmed
+        && !state.local_owner_handoff_suspected
+        && matches!(
+            state.local_speaker_classification.as_ref(),
+            Some(crate::speaker_verification::SessionSpeakerClassification::Uncertain { .. })
+        );
     // The sustained non-target watermark is historical endpoint evidence, not
     // a permanent current-speaker verdict. A later Uncertain window above the
     // owner-absence band ends the confirmed absence run even if it is below
@@ -1161,8 +1177,8 @@ fn local_owner_continuity(state: &SyncState) -> LocalOwnerContinuity {
                             <= LOCAL_ENDPOINT_OWNER_ABSENCE_CONTINUATION_MAX_SCORE
                     })
         });
-    if state.local_owner_absence_run_confirmed
-        || sustained_other_is_current
+    if (!open_wake_uncertain_owner
+        && (state.local_owner_absence_run_confirmed || sustained_other_is_current))
         || matches!(
             state.local_speaker_classification.as_ref(),
             Some(crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. })
@@ -2735,6 +2751,7 @@ fn final_unfiltered_provider_recovery_allowed(
     }
     if filtered.stable_non_target_utterance_present
         || filtered.stable_other_speaker_present
+        || filtered.stable_unresolved_speaker_present
         || state.owner_isolation_frozen
         || !provider_raw_fallback_allowed(state)
     {
@@ -2860,6 +2877,7 @@ struct SpeakerFilteredResult {
     response_local_body_alias_present: bool,
     stable_non_target_utterance_present: bool,
     stable_other_speaker_present: bool,
+    stable_unresolved_speaker_present: bool,
     target_speech_end_ms: Option<u64>,
     wake_target_speech_end_ms: Option<u64>,
     stable_attributed_speech_end_ms: Option<u64>,
@@ -3426,6 +3444,34 @@ fn local_evidence_supports_cloud_target(
         && !local_evidence_confirms_owner_absence(utterance, evidence, wake_speaker_phrase)
 }
 
+/// A sealed row in the already anchored cloud speaker track can outrun the
+/// *centre* of the local verifier's latest 1.2 s window. That part of the row
+/// has no local identity verdict yet. Keep the provider's same-speaker
+/// attribution for at most one verifier cadence while the last observed
+/// identity still belongs to the owner; an observed NonTarget or a stale
+/// classifier cannot be converted into owner evidence. Different cloud
+/// speaker IDs continue to require a positive overlapping local observation.
+fn recent_unobserved_same_cloud_owner_row(
+    utterance: &Value,
+    evidence: &[LocalSpeakerEvidence],
+) -> bool {
+    let Some(start_ms) = utterance_start_ms(utterance) else {
+        return false;
+    };
+    let Some(last) = evidence.last() else {
+        return false;
+    };
+    let last_center_ms = last.audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+    last_center_ms < start_ms
+        && start_ms.saturating_sub(last_center_ms) <= LOCAL_SPEAKER_WINDOW_MS / 2
+        && last.stable_target
+        && !matches!(
+            last.classification,
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. }
+        )
+        && !local_evidence_confirms_owner_absence(utterance, evidence, None)
+}
+
 fn local_evidence_confirms_owner_absence(
     utterance: &Value,
     evidence: &[LocalSpeakerEvidence],
@@ -3726,7 +3772,7 @@ fn utterance_belongs_to_target(
             utterance,
             local_speaker_evidence,
             wake_speaker_phrase,
-        );
+        ) || recent_unobserved_same_cloud_owner_row(utterance, local_speaker_evidence);
     }
 
     // Volcengine can seal the physical wake as cluster 0, then immediately
@@ -4130,8 +4176,21 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
     let pending_unattributed_speech = !unstable_text.trim().is_empty() || raw_has_unattributed_tail;
     let stable_other_speaker_present = target_speaker_id.as_deref().is_some_and(|target| {
         utterances.iter().any(|utterance| {
+            let speaker = utterance_speaker_id(utterance);
             utterance_is_stable(utterance)
-                && utterance_speaker_id(utterance).is_some()
+                && speaker.is_some()
+                // A same-speaker row with no local vote is pending identity,
+                // not an explicit foreign speaker. Only a local observed
+                // departure can make that row a destructive final veto.
+                && (speaker.as_deref() != Some(target)
+                    || local_evidence_confirms_owner_absence_with_verified_wake(
+                        utterance,
+                        local_speaker_evidence,
+                        wake_speaker_phrase,
+                        wake_owner_verified,
+                        local_speaker_profile_adaptive,
+                        confirmed_non_target_speech_end_ms,
+                    ))
                 && !utterance_belongs_to_verified_target_or_body_alias(
                     utterance,
                     target,
@@ -4145,6 +4204,24 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
                     local_speaker_profile_adaptive,
                     confirmed_non_target_speech_end_ms,
                     confirmed_foreign_hint_end_ms,
+                )
+        })
+    });
+    // Filtering can abstain when a stable row is outside local analysis
+    // coverage. Preserve that third state: it is neither an accepted owner
+    // row nor an explicit foreign row, and cannot authorize raw-final recovery.
+    let stable_unresolved_speaker_present = target_speaker_id.as_deref().is_some_and(|target| {
+        utterances.iter().any(|utterance| {
+            utterance_is_stable(utterance)
+                && utterance_speaker_id(utterance).as_deref() == Some(target)
+                && !selected.contains(utterance)
+                && !local_evidence_confirms_owner_absence_with_verified_wake(
+                    utterance,
+                    local_speaker_evidence,
+                    wake_speaker_phrase,
+                    wake_owner_verified,
+                    local_speaker_profile_adaptive,
+                    confirmed_non_target_speech_end_ms,
                 )
         })
     });
@@ -4324,6 +4401,7 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
         response_local_body_alias_present: immediate_body_speaker_id.is_some(),
         stable_non_target_utterance_present: stable_same_cluster_owner_absence_present,
         stable_other_speaker_present,
+        stable_unresolved_speaker_present,
         target_speech_end_ms,
         wake_target_speech_end_ms: observed_wake_speaker_end_ms.or(prior_wake_speaker_end_ms),
         stable_attributed_speech_end_ms,
@@ -8069,12 +8147,13 @@ impl VolcengineStreamingASR {
                 && (open_session_body_recovery
                     || (!speaker_filtered_result.stable_non_target_utterance_present
                         && (final_wake_only_provider_gap_is_owner_safe(&state, result, target_text)
-                            || sequential_speaker_split_gap_is_owner_safe(
+                            || (!speaker_filtered_result.stable_unresolved_speaker_present
+                                && (sequential_speaker_split_gap_is_owner_safe(
                                 &state, result, target_text,
                             )
                             || final_unsegmented_provider_tail_is_owner_safe(
                                 &state, result, target_text,
-                            ))));
+                            ))))));
             let optimistic_candidate_is_already_accepted = {
                 let normalize = |text: &str| {
                     text.chars()
@@ -10983,6 +11062,7 @@ mod tests {
                 response_local_body_alias_present: false,
                 stable_non_target_utterance_present: false,
                 stable_other_speaker_present: true,
+                stable_unresolved_speaker_present: false,
                 target_speech_end_ms: Some(1000),
                 wake_target_speech_end_ms: Some(1000),
                 stable_attributed_speech_end_ms: Some(5000),
@@ -12124,6 +12204,7 @@ mod tests {
             response_local_body_alias_present: false,
             stable_non_target_utterance_present: false,
             stable_other_speaker_present: false,
+            stable_unresolved_speaker_present: false,
             target_speech_end_ms: None,
             wake_target_speech_end_ms: None,
             stable_attributed_speech_end_ms: None,
@@ -12156,6 +12237,7 @@ mod tests {
             // Cloud cluster drift alone is not identity evidence when local
             // voiceprint tracking is unavailable.
             stable_other_speaker_present: true,
+            stable_unresolved_speaker_present: false,
             target_speech_end_ms: None,
             wake_target_speech_end_ms: None,
             stable_attributed_speech_end_ms: None,
@@ -12182,6 +12264,7 @@ mod tests {
             response_local_body_alias_present: false,
             stable_non_target_utterance_present: false,
             stable_other_speaker_present: true,
+            stable_unresolved_speaker_present: false,
             target_speech_end_ms: Some(2_000),
             wake_target_speech_end_ms: Some(500),
             stable_attributed_speech_end_ms: Some(3_000),
@@ -15353,6 +15436,7 @@ mod tests {
             response_local_body_alias_present: false,
             stable_non_target_utterance_present: false,
             stable_other_speaker_present: true,
+            stable_unresolved_speaker_present: false,
             target_speech_end_ms: Some(5702),
             wake_target_speech_end_ms: Some(2041),
             stable_attributed_speech_end_ms: Some(10242),
@@ -15376,6 +15460,104 @@ mod tests {
             ),
             crate::speech_decision_kernel::FinalTranscriptAuthority::SpeakerFiltered
         );
+    }
+
+    #[test]
+    fn same_cloud_owner_row_awaiting_local_coverage_is_not_foreign() {
+        // Installed 4ec1bb64: the provider sealed three stable speaker-0 rows.
+        // The last eight characters occupied 21_441..22_181 ms, while the
+        // local verifier's final two window centres were only 20_800/21_200.
+        // A missing vote in that unobserved 241 ms gap discarded the tail and
+        // falsely marked it as another speaker.
+        let rows = json!([
+            {"additions":{"speaker_id":"0","source":"two_pass"},"definite":true,"start_time":240,"end_time":1_680,"text":"开始录音"},
+            {"additions":{"speaker_id":"0","source":"two_pass"},"definite":true,"start_time":1_680,"end_time":21_441,"text":"那就不对啊，你看一下。"},
+            {"additions":{"speaker_id":"0","source":"two_pass"},"definite":true,"start_time":21_441,"end_time":22_181,"text":"然后我看怎么样。"}
+        ]);
+        let provider = json!({
+            "text":"开始录音那就不对啊，你看一下。然后我看怎么样。",
+            "utterances":rows
+        });
+        let evidence = [(18_000, 0.51), (19_000, 0.49), (21_400, 0.28), (21_800, 0.202)]
+            .into_iter()
+            .map(|(audio_end_ms, score)| LocalSpeakerEvidence {
+                audio_end_ms,
+                classification: if score >= 0.40 {
+                    crate::speaker_verification::SessionSpeakerClassification::Target { score }
+                } else {
+                    crate::speaker_verification::SessionSpeakerClassification::Uncertain { score }
+                },
+                stable_target: true,
+            })
+            .collect::<Vec<_>>();
+        let mut target = Some("0".to_string());
+        let filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &provider, &mut target, true, &evidence, Some("开始录音"), Some(1_680),
+            false, false, Some(20_600), None,
+        );
+        assert_eq!(filtered.result["text"], provider["text"]);
+        assert!(!filtered.stable_other_speaker_present);
+
+        let mut foreign_evidence = evidence.clone();
+        foreign_evidence.last_mut().unwrap().classification =
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.15 };
+        let rejected = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &provider, &mut target, true, &foreign_evidence, Some("开始录音"), Some(1_680),
+            false, false, Some(21_800), None,
+        );
+        assert!(!rejected.result["text"].as_str().unwrap().contains("然后我看怎么样"));
+
+        let mut foreign_provider = provider.clone();
+        foreign_provider["utterances"][2]["additions"]["speaker_id"] = json!("1");
+        let foreign_row = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &foreign_provider, &mut target, true, &evidence, Some("开始录音"), Some(1_680),
+            false, false, Some(20_600), None,
+        );
+        assert!(foreign_row.stable_other_speaker_present);
+        assert!(!foreign_row.result["text"].as_str().unwrap().contains("然后我看怎么样"));
+    }
+
+    #[test]
+    fn open_wake_uncertain_owner_uses_one_preview_and_endpoint_verdict() {
+        use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Uncertain};
+
+        // Installed 4ec1bb64: the bank failed the wake, later body windows
+        // established the owner, and low-score Uncertain windows kept the
+        // absence run latched while the same cloud speaker kept talking.
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_wake_owner_verified: false,
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            local_owner_absence_run_confirmed: true,
+            local_sustained_non_target_speech_end_ms: Some(21_800),
+            qualified_owner_speech_end_ms: Some(7_000),
+            local_target_speech_end_ms: Some(19_000),
+            local_audio_duration_ms: Some(21_800),
+            local_speech_end_ms: Some(21_800),
+            local_speaker_classification: Some(Uncertain { score: 0.202 }),
+            target_speaker_id: Some("0".into()),
+            ..SyncState::default()
+        };
+        assert_eq!(local_owner_continuity(&state), LocalOwnerContinuity::Compatible);
+        assert_eq!(
+            target_speaker_update_from_state(&state, false, false, false)
+                .local_non_target_speech_end_ms,
+            None,
+        );
+        assert!(refresh_local_target_from_owner_preview_activity(&mut state));
+        assert_eq!(state.local_target_speech_end_ms, Some(21_800));
+
+        state.local_speaker_classification = Some(NonTarget { score: 0.08 });
+        assert_eq!(local_owner_continuity(&state), LocalOwnerContinuity::Other);
+        assert_eq!(
+            target_speaker_update_from_state(&state, false, false, false)
+                .local_non_target_speech_end_ms,
+            Some(21_800),
+        );
+        state.local_speaker_classification = Some(Uncertain { score: 0.202 });
+        state.local_wake_owner_verified = true;
+        assert_eq!(local_owner_continuity(&state), LocalOwnerContinuity::Other);
     }
 
     #[test]
@@ -15424,6 +15606,7 @@ mod tests {
             response_local_body_alias_present: false,
             stable_non_target_utterance_present: true,
             stable_other_speaker_present: true,
+            stable_unresolved_speaker_present: false,
             target_speech_end_ms: Some(2018),
             wake_target_speech_end_ms: Some(2018),
             stable_attributed_speech_end_ms: Some(10977),
