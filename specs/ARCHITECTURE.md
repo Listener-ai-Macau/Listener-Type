@@ -36,6 +36,8 @@ flowchart TB
 - Provider modules live under `src-tauri/src/asr/*` and `src-tauri/src/llm_*.rs`.
 - Maintainability gate: `npm run check:module-budgets` (Goals: `docs/goals/20260727-type-maintainability-excellent.md`, `docs/goals/20260727-type-maintainability-phase2.md`).
 
+The continuous BLE actor owns both the logical dictation session and its current physical audio segment. A new physical `SessionStart` can reset collector statistics, so the actor settles a predecessor `STOP` before admitting an unrelated segment. A request-tagged ENSURE continuation or an active activation race guard may carry the same logical dictation into the new segment; binding it clears the predecessor's tail-drain deadline. An untagged segment cannot inherit the old session by arrival time alone.
+
 ## Provider Network Policy
 
 Cloud LLM and HTTP-compatible ASR providers use a per-provider proxy policy stored with that provider's credential entry in the OS credential vault. The default policy is provider-aware: common mainland China providers such as Ark, DeepSeek, SiliconFlow, Bailian, Volcengine, Zhipu, MiMo and Alibaba/Coding Plan endpoints use direct connections by default, while overseas, OAuth, aggregation and custom providers follow the system proxy by default.

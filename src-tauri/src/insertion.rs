@@ -155,18 +155,11 @@ impl TextInserter {
         if !same_target() {
             return Err("session target is no longer foreground".into());
         }
+        // The target may be a terminal: Ctrl+C is a task interrupt there.
+        // Require a read-only accessibility path before selecting anything.
+        let selection_reader = crate::selection::windows_uia::WindowsSelectionReader::new(target_hwnd)?;
         let focus_before_select = focused_child_snapshot(target_hwnd);
-        let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-        let previous = snapshot_clipboard(&mut clipboard);
-        let marker = format!("listener-selection-{}", uuid::Uuid::new_v4());
-        clipboard
-            .set_text(marker.clone())
-            .map_err(|e| e.to_string())?;
-
-        let mut keyboard = Enigo::new(&Settings::default()).map_err(|e| {
-            restore_clipboard_snapshot(&mut clipboard, &previous);
-            e.to_string()
-        })?;
+        let mut keyboard = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
         // Select from the caret to the editor start with one chord. Selecting
         // by counting Left events was not reliable in Chromium: even a single
         // SendInput batch selected only 109 of 110 provisional characters in
@@ -176,30 +169,26 @@ impl TextInserter {
             if same_target() {
                 let _ = keyboard.key(Key::RightArrow, Direction::Click);
             }
-            restore_clipboard_snapshot(&mut clipboard, &previous);
             return Err(format!("could not select provisional suffix: {err}"));
         }
         if !same_target() {
-            restore_clipboard_snapshot(&mut clipboard, &previous);
             return Err("session target changed before suffix verification".into());
         }
         let focus_after_select = focused_child_snapshot(target_hwnd);
         if focus_after_select != focus_before_select {
-            log::info!(
-                "[insertion] verified correction focus changed during selection target_hwnd=0x{:x} before={:?} after={:?}",
-                target_hwnd,
-                focus_before_select,
-                focus_after_select
-            );
+            if same_target() {
+                let _ = keyboard.key(Key::RightArrow, Direction::Click);
+            }
+            return Err(format!(
+                "focused editor changed during suffix selection target_hwnd=0x{target_hwnd:x} before={focus_before_select:?} after={focus_after_select:?}"
+            ));
         }
-        std::thread::sleep(Duration::from_millis(80));
-        let mut observed = match copy_verified_selection(&mut keyboard, &mut clipboard, &marker, target_hwnd) {
+        let mut observed = match selection_reader.read_selected_text() {
             Ok(value) => value,
             Err(err) => {
                 if same_target() {
                     let _ = keyboard.key(Key::RightArrow, Direction::Click);
                 }
-                restore_clipboard_snapshot(&mut clipboard, &previous);
                 return Err(format!("could not read selected provisional suffix: {err}"));
             }
         };
@@ -212,8 +201,7 @@ impl TextInserter {
                     .key(Key::RightArrow, Direction::Click)
                     .map_err(|e| e.to_string())?;
                 select_previous_graphemes(count)?;
-                std::thread::sleep(Duration::from_millis(80));
-                copy_verified_selection(&mut keyboard, &mut clipboard, &marker, target_hwnd)
+                selection_reader.read_selected_text()
             })();
             match fallback {
                 Ok(value) => observed = value,
@@ -221,7 +209,6 @@ impl TextInserter {
                     if same_target() {
                         let _ = keyboard.key(Key::RightArrow, Direction::Click);
                     }
-                    restore_clipboard_snapshot(&mut clipboard, &previous);
                     return Err(format!("could not verify provisional suffix fallback: {err}"));
                 }
             }
@@ -230,13 +217,21 @@ impl TextInserter {
             if same_target() {
                 let _ = keyboard.key(Key::RightArrow, Direction::Click);
             }
-            restore_clipboard_snapshot(&mut clipboard, &previous);
             return Err(format!(
                 "selected text did not match provisional suffix (expected_chars={} observed_chars={} observed_prefix={} observed_suffix={})",
                 expected.chars().count(), observed.chars().count(),
                 expected.starts_with(&observed), expected.ends_with(&observed)
             ));
         }
+        // The clipboard is touched only after the target has supplied an
+        // exact readback. An unavailable provider cannot disturb user content.
+        let mut clipboard = arboard::Clipboard::new().map_err(|e| {
+            if same_target() {
+                let _ = keyboard.key(Key::RightArrow, Direction::Click);
+            }
+            e.to_string()
+        })?;
+        let previous = snapshot_clipboard(&mut clipboard);
         clipboard.set_text(replacement.to_string()).map_err(|e| {
             if same_target() {
                 let _ = keyboard.key(Key::RightArrow, Direction::Click);
@@ -249,7 +244,7 @@ impl TextInserter {
             return Err("session target changed before corrected paste".into());
         }
         // Keep the selection through paste: the host replaces exactly the
-        // text that Ctrl+C returned. No Delete or Backspace is sent.
+        // text that accessibility readback returned. No Delete or Backspace is sent.
         if let Err(err) = simulate_paste(paste_shortcut) {
             // A shortcut can fail while releasing its modifier, after the host
             // has already handled Ctrl+V. Never trigger a second full paste.
@@ -279,66 +274,6 @@ fn restore_clipboard_snapshot(clipboard: &mut arboard::Clipboard, snapshot: &Cli
     if let Err(err) = result {
         log::warn!("[insertion] failed to restore clipboard after suffix verification: {err}");
     }
-}
-
-#[cfg(target_os = "windows")]
-fn copy_verified_selection(
-    keyboard: &mut enigo::Enigo,
-    clipboard: &mut arboard::Clipboard,
-    marker: &str,
-    target_hwnd: usize,
-) -> Result<String, String> {
-    use enigo::{Direction, Key, Keyboard};
-    use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
-    clipboard
-        .set_text(marker.to_string())
-        .map_err(|e| e.to_string())?;
-    let sequence_before = unsafe { GetClipboardSequenceNumber() };
-    keyboard
-        .key(Key::Control, Direction::Press)
-        .map_err(|e| e.to_string())?;
-    let copied = keyboard
-        .key(Key::Unicode('c'), Direction::Click)
-        .map_err(|e| e.to_string());
-    let released = keyboard
-        .key(Key::Control, Direction::Release)
-        .map_err(|e| e.to_string());
-    copied.and(released)?;
-    for _ in 0..8 {
-        let value = clipboard.get_text().unwrap_or_default();
-        if value != marker {
-            return Ok(value);
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let sequence_after_enigo = unsafe { GetClipboardSequenceNumber() };
-    // Copy is read-only. Retry with the native VK_C shortcut already used by
-    // the selection path. This also distinguishes an Enigo key translation
-    // failure from a missing editor selection without risking a second paste.
-    crate::selection::windows_paste::send_ctrl_c()?;
-    for _ in 0..12 {
-        let value = clipboard.get_text().unwrap_or_default();
-        if value != marker {
-            log::info!(
-                "[insertion] verified selection copy recovered by native shortcut enigo_clipboard_changed={} target_hwnd=0x{:x}",
-                sequence_after_enigo != sequence_before,
-                target_hwnd
-            );
-            return Ok(value);
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let sequence_after_native = unsafe { GetClipboardSequenceNumber() };
-    let (focus_hwnd, focus_class) = focused_child_snapshot(target_hwnd);
-    log::warn!(
-        "[insertion] verified selection copy unavailable target_hwnd=0x{:x} focus_hwnd=0x{:x} focus_class={} clipboard_changed_after_enigo={} clipboard_changed_after_native={}",
-        target_hwnd,
-        focus_hwnd,
-        focus_class,
-        sequence_after_enigo != sequence_before,
-        sequence_after_native != sequence_after_enigo
-    );
-    Err("selection copy did not update the clipboard".into())
 }
 
 #[cfg(target_os = "windows")]
@@ -930,6 +865,16 @@ mod macos {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn automatic_final_correction_never_sends_terminal_interrupt_shortcut() {
+        // A foreground AI terminal interprets Ctrl+C as cancel. Keep the
+        // automatic correction path independent of clipboard copy shortcuts.
+        let insertion_source = include_str!("insertion.rs");
+        assert!(!insertion_source.contains(&["send_", "ctrl_c("].concat()));
+        assert!(!insertion_source.contains(&["Key::Unicode(", "'c')"].concat()));
+    }
 
     #[cfg(target_os = "windows")]
     use std::sync::{Arc, Mutex};

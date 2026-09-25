@@ -73,6 +73,54 @@ impl EmbeddedStreamingDictation {
         if let Some(observation) = observation.as_ref() {
             observation.record_coordinator_channel_received(notification.len());
         }
+        // SessionCollector resets its statistics as soon as it sees a different
+        // START. A preceding STOP may still be waiting for missing tail packets;
+        // that old product session must be settled while its own collector
+        // state is intact, before the new physical segment is admitted.
+        if self.keep_listening_after_pipeline_errors
+            && self.pending_stop_expected_packet_count.is_some()
+        {
+            if let Ok(packet) = crate::embedded_audio::parse_packet(notification) {
+                if packet.header.packet_type == crate::embedded_audio::PacketType::SessionStart {
+                    let incoming_id = packet.header.session_id;
+                    if self.embedded_session_id == Some(incoming_id) {
+                        log::warn!(
+                            "[coord] ignoring same-segment START after pending STOP embedded_session_id={incoming_id}"
+                        );
+                        return Ok(false);
+                    }
+                    if self.embedded_session_id.is_some()
+                        && (self.session.is_some() || self.speaker_candidate.is_some())
+                    {
+                        let origin = crate::embedded_audio::SessionStartOrigin::from_wire(
+                            packet.header.packet_pcm_bytes,
+                        );
+                        if !self.pending_stop_start_belongs_to_active_session(incoming_id, origin) {
+                            let old_id = self.embedded_session_id.unwrap_or_default();
+                            let stats = self.collector.inner().stats();
+                            log::warn!(
+                                "[coord] settling pending STOP before unowned START old_embedded_session_id={old_id} incoming_embedded_session_id={incoming_id} origin={origin:?} received={} missing={}",
+                                stats.received_packet_count,
+                                stats.missing_packet_count
+                            );
+                            if let Err(err) = self.finish_pending_stop_after_capture(inner).await {
+                                log::warn!(
+                                    "[coord] pending STOP could not finish before new START: {err}"
+                                );
+                                self.discard_active_session_after_stream_error(inner, &err);
+                            } else {
+                                if let Err(err) = self.submission_result() {
+                                    log::warn!(
+                                        "[coord] pending STOP submission incomplete before new START: {err}"
+                                    );
+                                }
+                                self.reset_for_next_session();
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let event = match self.collector.handle_notification(notification) {
             Ok(event) => event,
             Err(err) => {
@@ -198,6 +246,26 @@ impl EmbeddedStreamingDictation {
             observation.snapshot("coordinator_applied", false);
         }
         result
+    }
+
+    fn pending_stop_start_belongs_to_active_session(
+        &self,
+        incoming_id: u32,
+        origin: crate::embedded_audio::SessionStartOrigin,
+    ) -> bool {
+        if let Some(ensure) = self.accepted_wake_capture_ensure {
+            return self.session.is_some()
+                && incoming_id != ensure.previous_segment_id
+                && Instant::now() <= ensure.deadline_at
+                && (ensure.replacement_wait_started_at.is_some()
+                    || self.activation_segment_race_guard.is_some())
+                && embedded_ensure_start_origin_matches(origin, ensure.request_id);
+        }
+        self.session.is_some()
+            && self.activation_segment_race_guard.is_some_and(|(previous_id, _)| {
+                incoming_id != previous_id
+                    && origin == crate::embedded_audio::SessionStartOrigin::VoiceActivation
+            })
     }
 
     fn record_capture_admission_binding(

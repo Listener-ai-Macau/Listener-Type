@@ -13715,6 +13715,8 @@ async fn accepted_wake_ensure_binds_user_origin_continuation_without_reactivatio
         replacement_wait_started_at: Some(now),
         confirmed_segment_id: None,
     });
+    streaming.pending_stop_expected_packet_count = Some(58);
+    streaming.pending_stop_force_after = Some(now + Duration::from_millis(1_200));
 
     streaming
         .handle_ble_packet_actor_command(
@@ -13731,6 +13733,8 @@ async fn accepted_wake_ensure_binds_user_origin_continuation_without_reactivatio
 
     assert_eq!(streaming.embedded_session_id, Some(94));
     assert!(streaming.activation_segment_race_guard.is_none());
+    assert_eq!(streaming.pending_stop_expected_packet_count, None);
+    assert_eq!(streaming.pending_stop_force_after, None);
     assert_eq!(
         streaming
             .accepted_wake_capture_ensure
@@ -13860,6 +13864,142 @@ async fn accepted_wake_ensure_rejects_unrelated_manual_segment() {
         streaming.activation_segment_race_guard.map(|guard| guard.0),
         Some(93)
     );
+}
+
+#[test]
+fn pending_stop_ownership_requires_an_explicit_continuation() {
+    let session_id = new_session_id();
+    let consumer: Arc<dyn crate::recorder::AudioConsumer> =
+        Arc::new(CountingConsumer::default());
+    let mut streaming = EmbeddedStreamingDictation::background_listener();
+    streaming.embedded_session_id = Some(93);
+    streaming.session = Some(embedded_audio_test_session(session_id, consumer));
+    streaming.pending_stop_expected_packet_count = Some(58);
+    let now = Instant::now();
+    streaming.activation_segment_race_guard = Some((93, now));
+    streaming.accepted_wake_capture_ensure = Some(super::AcceptedWakeCaptureEnsure {
+        request_id: 7,
+        previous_segment_id: 93,
+        requested_at: now,
+        deadline_at: now + super::EMBEDDED_ACCEPTED_WAKE_CAPTURE_REPLACEMENT_TIMEOUT,
+        replacement_wait_started_at: Some(now),
+        confirmed_segment_id: None,
+    });
+
+    assert!(!streaming.pending_stop_start_belongs_to_active_session(
+        94,
+        crate::embedded_audio::SessionStartOrigin::VoiceActivation,
+    ));
+    assert!(!streaming.pending_stop_start_belongs_to_active_session(
+        94,
+        crate::embedded_audio::SessionStartOrigin::User,
+    ));
+    assert!(streaming.pending_stop_start_belongs_to_active_session(
+        94,
+        crate::embedded_audio::SessionStartOrigin::Unknown(
+            super::embedded_ensure_start_origin_marker(7),
+        ),
+    ));
+    assert!(!streaming.pending_stop_start_belongs_to_active_session(
+        94,
+        crate::embedded_audio::SessionStartOrigin::Unknown(
+            super::embedded_ensure_start_origin_marker(8),
+        ),
+    ));
+
+    streaming.accepted_wake_capture_ensure = None;
+    assert!(streaming.pending_stop_start_belongs_to_active_session(
+        94,
+        crate::embedded_audio::SessionStartOrigin::VoiceActivation,
+    ));
+    streaming.activation_segment_race_guard = None;
+    assert!(!streaming.pending_stop_start_belongs_to_active_session(
+        94,
+        crate::embedded_audio::SessionStartOrigin::VoiceActivation,
+    ));
+}
+
+#[tokio::test]
+async fn unowned_start_after_pending_stop_settles_old_session_before_admitting_new_segment() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = session_id;
+        state.phase = SessionPhase::Listening;
+        state.cancelled = false;
+    }
+    register_embedded_ble_cancel_flag(&coordinator.inner, &Arc::new(AtomicBool::new(false)));
+    let old_segment_id = 93;
+    let new_segment_id = 94;
+    assert!(coordinator
+        .inner
+        .recording_lifecycle
+        .lock()
+        .begin_manual_owner(old_segment_id, session_id));
+    let consumer: Arc<dyn crate::recorder::AudioConsumer> =
+        Arc::new(CountingConsumer::default());
+    let mut streaming = EmbeddedStreamingDictation::background_listener();
+    streaming.embedded_session_id = Some(old_segment_id);
+    streaming.session = Some(embedded_audio_test_session(session_id, consumer));
+    let old_start = build_session_start_notification(old_segment_id);
+    let old_pcm = build_audio_data_notification(old_segment_id, 0, &[1, 2, 3, 4])
+        .expect("old segment PCM");
+    let old_stop = build_session_stop_notification(old_segment_id, 2);
+    for packet in [&old_start, &old_pcm, &old_stop] {
+        streaming
+            .collector
+            .handle_notification(packet)
+            .expect("old packet collected");
+    }
+    streaming.pending_stop_expected_packet_count = Some(2);
+    assert_eq!(streaming.collector.inner().stats().received_packet_count, 1);
+    assert_eq!(streaming.collector.inner().stats().missing_packet_count, 1);
+
+    let new_start = crate::embedded_audio::build_session_start_notification_with_origin(
+        new_segment_id,
+        crate::embedded_audio::SessionStartOrigin::VoiceActivation,
+    );
+    streaming
+        .handle_notification(&coordinator.inner, &new_start)
+        .await
+        .expect("unowned new segment must not discard old dictation on mismatch");
+
+    assert_eq!(streaming.collector.inner().stats().session_id, Some(new_segment_id));
+    assert_eq!(streaming.embedded_session_id, Some(new_segment_id));
+    assert!(streaming.speaker_candidate.is_some());
+    assert!(streaming.session.is_none());
+    assert!(streaming.pending_stop_expected_packet_count.is_none());
+}
+
+#[tokio::test]
+async fn late_same_segment_start_cannot_reset_pending_stop_statistics() {
+    let coordinator = Coordinator::new();
+    let mut streaming = EmbeddedStreamingDictation::background_listener();
+    let old_segment_id = 93;
+    let old_start = build_session_start_notification(old_segment_id);
+    let old_pcm = build_audio_data_notification(old_segment_id, 0, &[1, 2, 3, 4])
+        .expect("old segment PCM");
+    let old_stop = build_session_stop_notification(old_segment_id, 2);
+    for packet in [&old_start, &old_pcm, &old_stop] {
+        streaming
+            .collector
+            .handle_notification(packet)
+            .expect("old packet collected");
+    }
+    streaming.embedded_session_id = Some(old_segment_id);
+    streaming.pending_stop_expected_packet_count = Some(2);
+
+    let handled = streaming
+        .handle_notification(&coordinator.inner, &old_start)
+        .await
+        .expect("late start ignored");
+
+    assert!(!handled);
+    assert_eq!(streaming.collector.inner().stats().session_id, Some(old_segment_id));
+    assert_eq!(streaming.collector.inner().stats().received_packet_count, 1);
+    assert_eq!(streaming.collector.inner().stats().missing_packet_count, 1);
+    assert_eq!(streaming.pending_stop_expected_packet_count, Some(2));
 }
 
 #[tokio::test]

@@ -8,6 +8,20 @@ impl EmbeddedStreamingDictation {
         if let Some(session_id) = self.session.as_ref().map(|session| session.session_id) {
             clear_embedded_ble_awaiting_post_activation_segment(inner, session_id);
         }
+        // The predecessor STOP belongs to the old physical segment. Once a
+        // tagged continuation (or the activation race guard) binds a new
+        // segment to the same product session, its missing-tail deadline must
+        // never finalize the new recording with the old expected packet count.
+        if self.embedded_session_id != Some(embedded_session_id)
+            && self.pending_stop_expected_packet_count.is_some()
+        {
+            log::info!(
+                "[coord] clearing predecessor STOP drain after continuation old_embedded_session_id={:?} new_embedded_session_id={embedded_session_id}",
+                self.embedded_session_id
+            );
+            self.pending_stop_expected_packet_count = None;
+            self.pending_stop_force_after = None;
+        }
         self.embedded_session_id = Some(embedded_session_id);
         self.activation_segment_race_guard = None;
         // The replacement is still a hidden candidate on the device. Promote

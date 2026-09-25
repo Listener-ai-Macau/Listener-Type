@@ -1,19 +1,24 @@
 //! 跨平台「划词捕获」工具：在用户触发 QA 快捷键时尝试拿到当前前台 app 的选区文本。
 //!
-//! 三级 fallback：
+//! 四级 fallback：
 //! 1. **macOS** AX：`AXUIElementCopyAttributeValue(focused, kAXSelectedTextAttribute)`
 //!    走辅助功能 API 直读焦点元素的选区，**不**触碰剪贴板。
-//! 2. **macOS / Windows** Cmd+C / Ctrl+C：snapshot 用户原剪贴板 → 模拟复制 → 80ms
+//! 2. **Windows** UI Automation：只读焦点编辑框选区，不发送会中断终端任务的 Ctrl+C。
+//! 3. **macOS** Cmd+C fallback：snapshot 用户原剪贴板 → 模拟复制 → 80ms
 //!    后读出新内容 → 还原原剪贴板。
-//! 3. **Linux**：返回 `None`（X11/Wayland AX 模式不统一，留作 best-effort 后续）。
+//! 4. **Linux**：返回 `None`（X11/Wayland AX 模式不统一，留作 best-effort 后续）。
 //!
 //! 截断策略：超过 4000 字符的选区只保留首 2000 + 尾 2000 + `[…truncated…]` 标记，
 //! 避免给 LLM 灌过长 context。
 //!
-//! 模块依赖：仅 `arboard`（跨平台剪贴板）+ libc + 平台 native 框架；不依赖其它
+//! 模块依赖：`arboard`（跨平台剪贴板）+ libc + 平台 native 框架；不依赖其它
 //! Rust 模块（与 CLAUDE.md 对齐）。
 
+#[cfg(target_os = "macos")]
 use std::time::Duration;
+
+#[cfg(target_os = "windows")]
+pub(crate) mod windows_uia;
 
 const SELECTION_MAX_CHARS: usize = 4000;
 const SELECTION_TRUNCATE_HEAD: usize = 2000;
@@ -55,8 +60,21 @@ pub fn capture_selection() -> Option<SelectionContext> {
         }
     }
 
-    // 2. 模拟复制 fallback（macOS / Windows）
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    // Windows readback is passive. A failed selection read must not interrupt
+    // a foreground terminal or change its clipboard.
+    #[cfg(target_os = "windows")]
+    if let Some(text) = windows_uia::read_focused_selection() {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            return Some(SelectionContext {
+                text: truncate_selection(trimmed),
+                source_app,
+            });
+        }
+    }
+
+    // macOS clipboard fallback after the AX read above.
+    #[cfg(target_os = "macos")]
     if let Some(text) = simulate_copy_and_read() {
         let trimmed = text.trim();
         if !trimmed.is_empty() {
@@ -110,9 +128,9 @@ fn truncate_selection(text: &str) -> String {
     format!("{head}{SELECTION_TRUNCATED_MARKER}{tail}")
 }
 
-// ─────────────────────────── 模拟复制 fallback (mac/win) ───────────────────────────
+// ─────────────────────────── macOS 模拟复制 fallback ───────────────────────────
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(target_os = "macos")]
 fn simulate_copy_and_read() -> Option<String> {
     // a) snapshot 当前剪贴板（用作还原原状态的备份）
     let mut clipboard = match arboard::Clipboard::new() {
@@ -138,14 +156,14 @@ fn simulate_copy_and_read() -> Option<String> {
         // 即使设置 sentinel 失败，也尝试发 Cmd+C 看能不能直接拿到东西
     }
 
-    // c) 模拟 Cmd+C / Ctrl+C
+    // c) 模拟 Cmd+C
     let post_ok = post_copy_shortcut();
     if !post_ok {
         log::warn!("[selection] post_copy_shortcut failed");
         // 不立刻 return：剪贴板可能已经被某些路径污染，按下方还原流程恢复。
     }
 
-    // d) 等剪贴板更新（macOS / Windows 都需要少量时间让目标 app 把数据 put 进去）
+    // d) 等剪贴板更新
     std::thread::sleep(Duration::from_millis(80));
 
     // e) 读新值
@@ -170,7 +188,7 @@ fn simulate_copy_and_read() -> Option<String> {
     Some(captured)
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(target_os = "macos")]
 fn uuid_like_token() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
@@ -183,11 +201,6 @@ fn uuid_like_token() -> String {
 #[cfg(target_os = "macos")]
 fn post_copy_shortcut() -> bool {
     macos_paste::post_cmd_c().is_ok()
-}
-
-#[cfg(target_os = "windows")]
-fn post_copy_shortcut() -> bool {
-    windows_paste::send_ctrl_c().is_ok()
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
@@ -438,50 +451,6 @@ mod macos_paste {
     }
 }
 
-// ─────────────────────────── Windows Ctrl+C send ───────────────────────────
-
-#[cfg(target_os = "windows")]
-pub(crate) mod windows_paste {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-        VIRTUAL_KEY, VK_C, VK_CONTROL,
-    };
-
-    pub fn send_ctrl_c() -> Result<(), String> {
-        let mut inputs = [
-            keyboard_event(VK_CONTROL, false),
-            keyboard_event(VK_C, false),
-            keyboard_event(VK_C, true),
-            keyboard_event(VK_CONTROL, true),
-        ];
-
-        let sent = unsafe { SendInput(&mut inputs, std::mem::size_of::<INPUT>() as i32) };
-        if (sent as usize) != inputs.len() {
-            return Err(format!("SendInput sent {sent}/{}", inputs.len()));
-        }
-        Ok(())
-    }
-
-    fn keyboard_event(vk: VIRTUAL_KEY, key_up: bool) -> INPUT {
-        let mut flags = KEYBD_EVENT_FLAGS(0);
-        if key_up {
-            flags |= KEYEVENTF_KEYUP;
-        }
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: vk,
-                    wScan: 0,
-                    dwFlags: flags,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        }
-    }
-}
-
 // ─────────────────────────── front-app label ───────────────────────────
 
 #[cfg(target_os = "macos")]
@@ -567,6 +536,16 @@ fn current_front_app() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn qa_selection_cannot_interrupt_foreground_terminal() {
+        let selection_source = include_str!("selection.rs");
+        let uia_source = include_str!("selection/windows_uia.rs");
+        let interrupt_sender = ["send_", "ctrl_c("].concat();
+        assert!(!selection_source.contains(&interrupt_sender));
+        assert!(!uia_source.contains(&interrupt_sender));
+    }
 
     #[test]
     fn truncate_short_passes_through() {

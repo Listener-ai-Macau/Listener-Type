@@ -236,6 +236,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/qa_hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/recorder.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/selection.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/selection/windows_uia.rs` | Windows selection readback | Build and targeted tests |
 | `src-tauri/src/shortcut_binding.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/shortcut_dispatch.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/speaker_verification.rs` | Core app | Build and targeted tests |
