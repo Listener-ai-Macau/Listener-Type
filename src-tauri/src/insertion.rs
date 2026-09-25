@@ -158,59 +158,49 @@ impl TextInserter {
         let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
         let previous = snapshot_clipboard(&mut clipboard);
         let marker = format!("listener-selection-{}", uuid::Uuid::new_v4());
-        clipboard.set_text(marker.clone()).map_err(|e| e.to_string())?;
+        clipboard
+            .set_text(marker.clone())
+            .map_err(|e| e.to_string())?;
 
         let mut keyboard = Enigo::new(&Settings::default()).map_err(|e| {
             restore_clipboard_snapshot(&mut clipboard, &previous);
             e.to_string()
         })?;
-        let selection_result = (|| -> Result<(), String> {
-            keyboard.key(Key::Shift, Direction::Press).map_err(|e| e.to_string())?;
-            for _ in 0..count {
-                if !same_target() {
-                    return Err("session target changed during suffix selection".into());
-                }
-                keyboard.key(Key::LeftArrow, Direction::Click).map_err(|e| e.to_string())?;
-            }
-            Ok(())
-        })();
-        let release_result = keyboard.key(Key::Shift, Direction::Release).map_err(|e| e.to_string());
-        if let Err(err) = selection_result.and(release_result) {
+        // Queue the entire suffix selection as one Win32 input batch. The old
+        // per-grapheme Enigo loop produced 160 separate calls; Chromium could
+        // process Ctrl+C after only part of that selection (55 of 70 chars in
+        // the captured failure). A single readback below remains the guard.
+        if let Err(err) = select_previous_graphemes(count) {
             if same_target() {
                 let _ = keyboard.key(Key::RightArrow, Direction::Click);
             }
             restore_clipboard_snapshot(&mut clipboard, &previous);
             return Err(format!("could not select provisional suffix: {err}"));
         }
-        let copy_result = (|| -> Result<(), String> {
-            if !same_target() {
-                return Err("session target changed before suffix verification".into());
+        if !same_target() {
+            restore_clipboard_snapshot(&mut clipboard, &previous);
+            return Err("session target changed before suffix verification".into());
+        }
+        std::thread::sleep(Duration::from_millis(80));
+        let observed = match copy_verified_selection(&mut keyboard, &mut clipboard, &marker) {
+            Ok(value) => value,
+            Err(err) => {
+                if same_target() {
+                    let _ = keyboard.key(Key::RightArrow, Direction::Click);
+                }
+                restore_clipboard_snapshot(&mut clipboard, &previous);
+                return Err(format!("could not read selected provisional suffix: {err}"));
             }
-            keyboard.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
-            let copied = keyboard.key(Key::Unicode('c'), Direction::Click).map_err(|e| e.to_string());
-            let released = keyboard.key(Key::Control, Direction::Release).map_err(|e| e.to_string());
-            copied.and(released)
-        })();
-        let observed = if copy_result.is_ok() {
-            // Clipboard updates can lag the synthetic Ctrl+C in Chromium hosts.
-            let mut value = marker.clone();
-            for _ in 0..15 {
-                value = clipboard.get_text().unwrap_or_default();
-                if value != marker { break; }
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            value
-        } else {
-            String::new()
         };
-        if copy_result.is_err() || observed != expected || !same_target() {
+        if observed != expected || !same_target() {
             if same_target() {
                 let _ = keyboard.key(Key::RightArrow, Direction::Click);
             }
             restore_clipboard_snapshot(&mut clipboard, &previous);
             return Err(format!(
-                "selected text did not match provisional suffix (expected_chars={} observed_chars={})",
-                expected.chars().count(), observed.chars().count()
+                "selected text did not match provisional suffix (expected_chars={} observed_chars={} observed_prefix={} observed_suffix={})",
+                expected.chars().count(), observed.chars().count(),
+                expected.starts_with(&observed), expected.ends_with(&observed)
             ));
         }
         clipboard.set_text(replacement.to_string()).map_err(|e| {
@@ -255,6 +245,83 @@ fn restore_clipboard_snapshot(clipboard: &mut arboard::Clipboard, snapshot: &Cli
     if let Err(err) = result {
         log::warn!("[insertion] failed to restore clipboard after suffix verification: {err}");
     }
+}
+
+#[cfg(target_os = "windows")]
+fn copy_verified_selection(
+    keyboard: &mut enigo::Enigo,
+    clipboard: &mut arboard::Clipboard,
+    marker: &str,
+) -> Result<String, String> {
+    use enigo::{Direction, Key, Keyboard};
+    clipboard
+        .set_text(marker.to_string())
+        .map_err(|e| e.to_string())?;
+    keyboard
+        .key(Key::Control, Direction::Press)
+        .map_err(|e| e.to_string())?;
+    let copied = keyboard
+        .key(Key::Unicode('c'), Direction::Click)
+        .map_err(|e| e.to_string());
+    let released = keyboard
+        .key(Key::Control, Direction::Release)
+        .map_err(|e| e.to_string());
+    copied.and(released)?;
+    for _ in 0..15 {
+        let value = clipboard.get_text().unwrap_or_default();
+        if value != marker {
+            return Ok(value);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    Err("selection copy did not update the clipboard".into())
+}
+
+#[cfg(target_os = "windows")]
+fn select_previous_graphemes(count: usize) -> Result<(), String> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+        VK_LEFT, VK_SHIFT,
+    };
+
+    fn event(vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY, up: bool) -> INPUT {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: if up {
+                        KEYEVENTF_KEYUP
+                    } else {
+                        KEYBD_EVENT_FLAGS(0)
+                    },
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        }
+    }
+
+    let mut inputs = Vec::with_capacity(count * 2 + 2);
+    inputs.push(event(VK_SHIFT, false));
+    for _ in 0..count {
+        inputs.push(event(VK_LEFT, false));
+        inputs.push(event(VK_LEFT, true));
+    }
+    inputs.push(event(VK_SHIFT, true));
+    let sent = unsafe { SendInput(&mut inputs, std::mem::size_of::<INPUT>() as i32) };
+    if sent as usize != inputs.len() {
+        // A short send can omit the final Shift key-up. Release it before
+        // returning so the user's next keystroke is not modified.
+        let mut release = [event(VK_SHIFT, true)];
+        unsafe { SendInput(&mut release, std::mem::size_of::<INPUT>() as i32) };
+        return Err(format!(
+            "SendInput selected {sent}/{} key events",
+            inputs.len()
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -408,9 +475,7 @@ fn schedule_clipboard_restore(plan: ClipboardRestorePlan) {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn remember_pending_clipboard_restore(
-    previous: ClipboardSnapshot,
-) -> (u64, ClipboardSnapshot) {
+fn remember_pending_clipboard_restore(previous: ClipboardSnapshot) -> (u64, ClipboardSnapshot) {
     let restore_id = NEXT_CLIPBOARD_RESTORE_ID.fetch_add(1, Ordering::SeqCst);
     let original = {
         let mut pending = PENDING_CLIPBOARD_RESTORE.lock();
@@ -732,6 +797,7 @@ mod macos {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[cfg(target_os = "windows")]
     use std::sync::{Arc, Mutex};
     #[cfg(target_os = "windows")]
@@ -800,8 +866,9 @@ mod tests {
     fn pending_clipboard_restore_keeps_first_original_until_latest_restore() {
         *PENDING_CLIPBOARD_RESTORE.lock() = None;
 
-        let (first_id, first_original) =
-            remember_pending_clipboard_restore(ClipboardSnapshot::Text("user clipboard".to_string()));
+        let (first_id, first_original) = remember_pending_clipboard_restore(
+            ClipboardSnapshot::Text("user clipboard".to_string()),
+        );
         let (second_id, second_original) = remember_pending_clipboard_restore(
             ClipboardSnapshot::Text("first dictated text".to_string()),
         );
