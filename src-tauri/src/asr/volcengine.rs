@@ -4305,30 +4305,12 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
         .iter()
         .filter_map(|utterance| utterance.get("text").and_then(Value::as_str))
         .collect::<String>();
-    // A two-pass row can already contain the live tail while an overlapping
-    // stream row still repeats that same tail. Joining the rows then makes the
-    // optimistic text longer than the provider's cumulative result and can
-    // paste the repeated words before the final correction arrives. Use the
-    // provider's complete wording when the only extra row text is an exact
-    // repeat of its own ending; do not collapse a genuinely new utterance.
-    let last_row_proven_sequential = optimistic_utterances
-        .split_last()
-        .and_then(|(last, previous)| {
-            utterance_start_ms(last).zip(previous.iter().filter_map(utterance_end_ms).max())
-        })
-        // An abutting interval is not evidence of a second utterance: the
-        // provider can republish the same tail as a stream row beginning at
-        // the two-pass row's end. Require an actual later interval before
-        // overriding the cumulative result's single occurrence.
-        .is_some_and(|(start, previous_end)| start > previous_end);
+    // A two-pass row can already contain the live tail while a later stream
+    // row republishes it. Provider row times describe publication windows,
+    // not proof that identical words were spoken twice. Only the cumulative
+    // provider text can confirm a second occurrence of its own suffix.
     let optimistic_utterance_text = if !target_text.is_empty()
         && !stable_other_speaker_present
-        // A second occurrence needs a later audio interval. An untimed
-        // stream row has no such proof; when its entire text is already the
-        // provider's ending, it is the same audio published twice (sessions
-        // fb840a9e and d8d3dc96). A timed non-overlapping row remains a real
-        // repeated utterance even if the cumulative raw text lags behind.
-        && !last_row_proven_sequential
         && raw_text.starts_with(&target_text)
         && optimistic_utterance_text
             .strip_prefix(raw_text)
@@ -10884,14 +10866,16 @@ mod tests {
             "开始录音，现在继续检查效率至上效率至上"
         );
 
-        // A later distinct row must remain visible even if the cumulative
-        // result.text has not yet caught up with its second occurrence.
+        // Installed session b3e1eb22: a later, non-overlapping stream row
+        // repeated the cumulative provider suffix. Its timestamp did not
+        // establish a second spoken occurrence; early paste doubled a clause.
+        // Keep it pending until result.text itself confirms the repetition.
         let mut delayed_raw = repeated;
         delayed_raw["text"] = json!("开始录音，现在继续检查效率至上");
         let filtered = filter_result_to_target_speaker(&delayed_raw, &mut target);
         assert_eq!(
             filtered.optimistic_result["text"],
-            "开始录音，现在继续检查效率至上效率至上"
+            "开始录音，现在继续检查效率至上"
         );
     }
 
