@@ -80,6 +80,13 @@ const EMPTY_FINAL_REPLAY_PEAK_CEILING: f64 = i16::MAX as f64 * 0.707_945_784;
 // 建连是全文件唯一曾经无超时边界的网络操作：TCP 黑洞下会挂到 OS 级超时
 // （21s+），期间 stop/cancel 只能排队，proactive 末帧预算耗尽后丢稿。
 const WEBSOCKET_CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
+// A transport failure can outlast the primary stream and the first recovery
+// handshake. Retained PCM is still complete, so retry only the recovery
+// connection before sending any audio; once connected, replay the recording
+// exactly once. Keep the delay bounded for a genuinely offline machine.
+const RECOVERY_CONNECT_MAX_ATTEMPTS: u32 = 3;
+const RECOVERY_CONNECT_BACKOFF: [Duration; 2] =
+    [Duration::from_secs(1), Duration::from_secs(2)];
 const PROXY_CONNECT_HEADER_LIMIT: usize = 16 * 1024;
 const FINAL_FRAME_SEND_BUDGET: Duration = Duration::from_millis(1_800);
 const FINAL_AUDIO_DRAIN_MIN_BUDGET: Duration = Duration::from_millis(800);
@@ -1238,8 +1245,20 @@ fn display_only_provisional_preview_candidate(
     // 扰。本通道 display-only，不影响终稿仲裁/端点时钟/插入——身份不确定不
     // 再压黑胶囊，归属判定继续由终稿侧执行。仅当本地稳定判定"当前说话人非
     // 主人"（防抖后的 NonTarget 连续性且无任何主人侧稳定证据）时 withhold。
+    // The endpoint's sustained-absence verdict is deliberately conservative:
+    // several low-score Uncertain windows can hold it at Other even while the
+    // debounced speaker identity still belongs to the owner. That verdict may
+    // pause committed text, but it must not also freeze this reversible,
+    // display-only channel until the provider seals the next sentence.
+    // An explicit current NonTarget, an actual debounced switch, or a pending
+    // provider handoff still suppresses the visual candidate.
     let foreign_dominant = state.local_speaker_tracking_enabled
-        && local_owner_continuity(state) == LocalOwnerContinuity::Other;
+        && (matches!(
+            state.local_speaker_classification,
+            Some(crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. })
+        ) || (local_owner_continuity(state) == LocalOwnerContinuity::Other
+            && !state.local_speaker_stable_target)
+            || state.local_owner_handoff_suspected);
     if foreign_dominant {
         return None;
     }
@@ -2003,6 +2022,7 @@ fn owner_preview_safety_ceiling(
     state: &SyncState,
     merged: &str,
     explicit_non_owner_tail: bool,
+    fully_attributed_owner_final: bool,
 ) -> Option<String> {
     if !state.finishing
         || !state.local_speaker_tracking_enabled
@@ -2010,6 +2030,11 @@ fn owner_preview_safety_ceiling(
         || spoken_content_len(merged) <= spoken_content_len(&state.last_emitted_preview_text)
         || state.wake_bound_single_speaker_final_text.is_some()
         || state.distinct_speaker_target_final_text.is_some()
+        // The speaker filter has independently accepted every sealed cloud
+        // row as the anchored owner. The visual preview is not an ownership
+        // boundary: it can lag behind that final verdict by an entire clause
+        // while local voiceprint windows are inconclusive after a pause.
+        || (fully_attributed_owner_final && !explicit_non_owner_tail)
     {
         return None;
     }
@@ -2090,6 +2115,43 @@ fn owner_preview_safety_ceiling(
         explicit_non_owner_tail,
     );
     Some(corrected_owner_prefix)
+}
+
+/// A sealed owner transcript must not be shortened merely because the live
+/// preview waited for diarization. The speaker filter is the ownership
+/// authority; this check only recognizes the case where it retained every
+/// stable row from the already anchored cloud speaker, with local owner
+/// continuity still intact. Any rejected, unresolved, or foreign row keeps
+/// the stop-boundary ceiling active.
+fn fully_attributed_owner_final(
+    state: &SyncState,
+    provider_result: &Value,
+    filtered_result: &Value,
+) -> bool {
+    if !state.local_speaker_stable_target
+        || !state.local_target_confirmed
+        || state.owner_isolation_frozen
+        || state.local_owner_handoff_suspected
+        || state.local_preview_exclusion_seen
+    {
+        return false;
+    }
+    let Some(target) = state.target_speaker_id.as_deref() else {
+        return false;
+    };
+    let (Some(provider_rows), Some(filtered_rows)) = (
+        provider_result.get("utterances").and_then(Value::as_array),
+        filtered_result.get("utterances").and_then(Value::as_array),
+    ) else {
+        return false;
+    };
+    !provider_rows.is_empty()
+        && provider_rows.len() == filtered_rows.len()
+        && provider_rows.iter().all(|row| {
+            utterance_is_stable(row)
+                && utterance_speaker_id(row).as_deref() == Some(target)
+                && filtered_rows.contains(row)
+        })
 }
 
 fn final_wake_only_provider_gap_is_owner_safe(
@@ -5384,7 +5446,30 @@ impl VolcengineStreamingASR {
             pcm.len(),
             pcm.len() as u64 / 32
         );
-        replay.open_session().await?;
+        // Session 3f7b33f0 retained all 25.9 s of audio, but a six-second
+        // recovery handshake timeout made the only replay fail immediately
+        // after the live socket stalled. Opening again is safe here: no PCM
+        // has been sent to a recovery stream yet, and the coordinator still
+        // owns one final delivery for this session.
+        let mut connect_attempt = 0;
+        loop {
+            connect_attempt += 1;
+            match replay.open_session().await {
+                Ok(()) => break,
+                Err(error @ VolcengineASRError::ConnectionFailed(_))
+                    if connect_attempt < RECOVERY_CONNECT_MAX_ATTEMPTS =>
+                {
+                    let backoff = RECOVERY_CONNECT_BACKOFF[(connect_attempt - 1) as usize];
+                    log::warn!(
+                        "[asr] recovery connection attempt {connect_attempt}/{} failed: {error}; retrying after {} ms",
+                        RECOVERY_CONNECT_MAX_ATTEMPTS,
+                        backoff.as_millis()
+                    );
+                    tokio::time::sleep(backoff).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
         replay.restore_recovery_speaker_snapshot(speaker_snapshot);
         replay.mark_audio_delivery_ready();
         replay.consume_pcm_chunk(&pcm);
@@ -5458,7 +5543,8 @@ impl VolcengineStreamingASR {
         let frame_bytes = AUDIO_FRAME_DURATION_MS as usize * BYTES_PER_MS as usize;
         let queued_frames = pcm_bytes.div_ceil(frame_bytes);
         final_audio_drain_budget(queued_frames)
-            + WEBSOCKET_CONNECT_TIMEOUT
+            + WEBSOCKET_CONNECT_TIMEOUT * RECOVERY_CONNECT_MAX_ATTEMPTS
+            + RECOVERY_CONNECT_BACKOFF.iter().sum::<Duration>()
             + FINAL_RESULT_TIMEOUT
             + FINAL_FRAME_SEND_BUDGET
             + Duration::from_secs(5)
@@ -8403,6 +8489,14 @@ impl VolcengineStreamingASR {
                 &state,
                 &candidate.text,
                 explicit_non_owner_tail,
+                matches!(
+                    final_authority,
+                    crate::speech_decision_kernel::FinalTranscriptAuthority::SpeakerFiltered
+                ) && fully_attributed_owner_final(
+                    &state,
+                    result,
+                    &speaker_filtered_result.result,
+                ),
             ) {
                 stop_ceiling_applied = true;
                 candidate.text = ceiling;
@@ -11929,6 +12023,44 @@ mod tests {
     }
 
     #[test]
+    fn uncertain_owner_after_pause_keeps_visual_preview_moving_without_committing_it() {
+        use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Uncertain};
+
+        // Installed session 32762960: the cloud stream grew through the
+        // resumed clause, but low cross-phrase scores classified the endpoint
+        // as Other while the debounced identity stayed on the owner. The
+        // visual channel froze for 7.6 s waiting for two-pass sealing.
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_wake_owner_verified: true,
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            local_owner_absence_run_confirmed: true,
+            local_speaker_classification: Some(Uncertain { score: 0.21 }),
+            last_emitted_preview_text: "开始录音。第一段话。".into(),
+            best_transcript_text: "开始录音。第一段话。".into(),
+            local_target_speech_end_ms: Some(16_000),
+            ..SyncState::default()
+        };
+        let provider = json!({"text": "开始录音。第一段话。这个是接上了以后的一句话。"});
+        assert_eq!(local_owner_continuity(&state), LocalOwnerContinuity::Other);
+        assert!(!local_speaker_allows_owner_endpoint_refresh(&state));
+        assert_eq!(
+            display_only_provisional_preview_candidate(&mut state, &provider, true),
+            provider["text"].as_str().map(str::to_string)
+        );
+        assert_eq!(state.best_transcript_text, "开始录音。第一段话。");
+        assert_eq!(state.local_target_speech_end_ms, Some(16_000));
+
+        state.local_speaker_classification = Some(NonTarget { score: 0.10 });
+        let foreign = json!({"text": "开始录音。第一段话。这个是接上了以后的一句话。旁人说话。"});
+        assert!(display_only_provisional_preview_candidate(&mut state, &foreign, true).is_none());
+        state.local_speaker_classification = Some(Uncertain { score: 0.21 });
+        state.local_speaker_stable_target = false;
+        assert!(display_only_provisional_preview_candidate(&mut state, &foreign, true).is_none());
+    }
+
+    #[test]
     fn owner_resuming_after_pause_reopens_visual_preview_past_old_other_boundary() {
         use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Target};
 
@@ -12187,9 +12319,62 @@ mod tests {
             ..SyncState::default()
         };
         assert_eq!(
-            owner_preview_safety_ceiling(&state, "开始录音。主人正文到这里。旁人插入的字。", true),
+            owner_preview_safety_ceiling(&state, "开始录音。主人正文到这里。旁人插入的字。", true, false),
             Some("开始录音。主人正文到这里。".into())
         );
+    }
+
+    #[test]
+    fn sealed_same_owner_clause_is_not_cut_to_stalled_preview_length() {
+        // Installed session 32762960: every final cloud row was stable
+        // speaker 0, the speaker filter retained all rows, and the local
+        // identity never changed. The independent preview-length ceiling
+        // nevertheless removed the final clause after a pause.
+        let state = SyncState {
+            finishing: true,
+            local_speaker_tracking_enabled: true,
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            target_speaker_id: Some("0".into()),
+            last_emitted_preview_text: "开始录音。第一段话。接上的一句话。".into(),
+            stop_boundary_server_audio_ms: Some(35_800),
+            last_server_audio_duration_ms: Some(35_880),
+            ..SyncState::default()
+        };
+        let provider = json!({"text": "开始录音。第一段话。接上的一句话。最后再说一段。", "utterances": [
+            {"text": "开始录音。第一段话。", "start_time": 1_280, "end_time": 15_872,
+             "definite": true, "additions": {"speaker": "0"}},
+            {"text": "接上的一句话。", "start_time": 20_672, "end_time": 27_841,
+             "definite": true, "additions": {"speaker": "0"}},
+            {"text": "最后再说一段。", "start_time": 31_042, "end_time": 35_882,
+             "definite": true, "additions": {"speaker": "0"}}
+        ]});
+        assert!(fully_attributed_owner_final(&state, &provider, &provider));
+        assert!(owner_preview_safety_ceiling(
+            &state,
+            provider["text"].as_str().unwrap(),
+            false,
+            fully_attributed_owner_final(&state, &provider, &provider),
+        )
+        .is_none());
+
+        let mut filtered = provider.clone();
+        filtered["utterances"].as_array_mut().unwrap().pop();
+        assert!(!fully_attributed_owner_final(&state, &provider, &filtered));
+        assert!(owner_preview_safety_ceiling(
+            &state,
+            provider["text"].as_str().unwrap(),
+            false,
+            fully_attributed_owner_final(&state, &provider, &filtered),
+        )
+        .is_some());
+        assert!(owner_preview_safety_ceiling(
+            &state,
+            provider["text"].as_str().unwrap(),
+            true,
+            true,
+        )
+        .is_some());
     }
 
     /// 2026-09-23 18:49 会话 5ac70fc7：用户停顿 ~2.6s 后在 3s 窗口内续说，
@@ -12211,6 +12396,7 @@ mod tests {
             &state,
             "开始录音。主人正文到这里。然后我现在短暂停顿，继续说话。",
             true,
+            false,
         )
         .is_none());
 
@@ -12228,6 +12414,7 @@ mod tests {
                 &drain_only,
                 "开始录音。主人正文到这里。然后我现在短暂停顿，继续说话。",
                 true,
+                false,
             ),
             Some("开始录音。主人正文到这里。".into())
         );
@@ -12245,6 +12432,7 @@ mod tests {
             &no_watermark,
             "开始录音。主人正文到这里。然后我现在短暂停顿，继续说话。",
             true,
+            false,
         )
         .is_some());
     }
@@ -12257,7 +12445,7 @@ mod tests {
             last_emitted_preview_text: "开始录音主人正文".into(),
             ..SyncState::default()
         };
-        assert!(owner_preview_safety_ceiling(&state, "开始录音，主人正文。", false).is_none());
+        assert!(owner_preview_safety_ceiling(&state, "开始录音，主人正文。", false, false).is_none());
     }
 
     #[test]
@@ -12274,12 +12462,14 @@ mod tests {
                 &state,
                 "开始录音，然后确认规划器都能递归吧？Express products.",
                 true,
+                false,
             ),
             Some("开始录音，然后确认规划器都能递归吧？".into()),
         );
         assert!(owner_preview_safety_ceiling(
             &state,
             "开始录音，然后检查规划器都能递归吧？再补一句。",
+            false,
             false,
         )
         .is_none());
@@ -17733,6 +17923,16 @@ mod tests {
         // The live failure queued 2,149,120 bytes (67.2 seconds of audio).
         asr.retained_pcm.lock().resize(2_149_120, 0);
         assert!(asr.full_audio_replay_timeout() > Duration::from_secs(60));
+        // A failed first recovery handshake must leave enough coordinator
+        // time for the bounded reconnects *and* the complete audio drain.
+        let frames = 2_149_120usize.div_ceil(AUDIO_FRAME_DURATION_MS as usize * BYTES_PER_MS as usize);
+        assert!(
+            asr.full_audio_replay_timeout()
+                >= final_audio_drain_budget(frames)
+                    + WEBSOCKET_CONNECT_TIMEOUT * RECOVERY_CONNECT_MAX_ATTEMPTS
+                    + RECOVERY_CONNECT_BACKOFF.iter().sum::<Duration>()
+                    + FINAL_RESULT_TIMEOUT
+        );
     }
 
     #[tokio::test]
