@@ -331,6 +331,8 @@ export const zhTW: typeof zhCN = {
     exportFailed: '匯出失敗：{{err}}',
     rawLabel: '原文',
     rawEmpty: '（空）',
+    asrUnavailable: '辨識失敗',
+    asrTimeout: '辨識逾時',
     selectHint: '左側選一條查看詳情。',
     insertedTo: '插入到',
     chars: '{{count}} 字',

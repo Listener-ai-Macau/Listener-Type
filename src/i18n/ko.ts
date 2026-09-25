@@ -289,6 +289,8 @@ export const ko: typeof zhCN = {
     exportFailed: '내보내기 실패: {{err}}',
     rawLabel: '원문',
     rawEmpty: '(비어 있음)',
+    asrUnavailable: '음성 인식 실패',
+    asrTimeout: '음성 인식 시간 초과',
     selectHint: '왼쪽에서 하나를 선택하여 자세히 보기.',
     insertedTo: '입력 위치',
     chars: '{{count}}자',

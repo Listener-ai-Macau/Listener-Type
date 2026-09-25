@@ -1393,8 +1393,6 @@ fn start_network_health_light<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
                 });
             };
             let mut next_probe = std::time::Instant::now();
-            // 键盘灯重发节拍：固件 status_led 告警窗 6s 自动过期，5s 重发维持。
-            let mut next_device_warn = std::time::Instant::now();
             loop {
                 if std::time::Instant::now() >= next_probe {
                     let mut snapshot = crate::net_health::probe_network_health();
@@ -1416,30 +1414,6 @@ fn start_network_health_light<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
                     if let Some(class) = crate::net_health::latest_network_health_class() {
                         update_light(class);
                     }
-                }
-                // 键盘灯（2026-09-23 用户拍板主灯放键盘上）：网络掉级期间向
-                // Listener 设备重发 PROCESSING:WARN → 固件 status_led 告警。
-                // BLE 是本地无线电，公网黑洞期间照常可达；恢复 AllGood 后
-                // 停发，≤6s 灯自然回常态。设备未连接时快速失败，不阻塞巡检。
-                let net_bad = crate::net_health::latest_network_health_class().map_or(
-                    false,
-                    |class| class != crate::net_health::NetworkHealthClass::AllGood,
-                );
-                if net_bad && std::time::Instant::now() >= next_device_warn {
-                    let send_started = std::time::Instant::now();
-                    match crate::embedded_ble::send_recording_processing_warning(
-                        std::time::Duration::from_secs(2),
-                    ) {
-                        Ok(()) => log::info!(
-                            "[net-health] device warn light sent elapsed_ms={}",
-                            send_started.elapsed().as_millis()
-                        ),
-                        Err(err) => {
-                            log::info!("[net-health] device warn light unavailable: {err}")
-                        }
-                    }
-                    next_device_warn = std::time::Instant::now()
-                        + std::time::Duration::from_secs(5);
                 }
                 std::thread::sleep(std::time::Duration::from_secs(2));
             }

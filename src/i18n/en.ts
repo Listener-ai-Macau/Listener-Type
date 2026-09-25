@@ -331,6 +331,8 @@ export const en: typeof zhCN = {
     exportFailed: 'Failed to export: {{err}}',
     rawLabel: 'Raw',
     rawEmpty: '(empty)',
+    asrUnavailable: 'Recognition failed',
+    asrTimeout: 'Recognition timed out',
     selectHint: 'Select an entry on the left to see details.',
     insertedTo: 'Inserted into',
     chars: '{{count}} chars',

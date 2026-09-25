@@ -16,7 +16,8 @@ use super::{
     embedded_pcm_capsule_level, embedded_pcm_rms_and_peak, embedded_pcm_visual_level,
     embedded_streaming_chunk_is_asr_input, emit_embedded_audio_transcribing_if_active,
     end_embedded_ble_session, filter_automatic_wake_text, filter_dictation_visual_preview_text,
-    finalize_polished_text, finish_dictation_pipeline_error, finish_dictation_timeout,
+    finalize_polished_text, finish_asr_failure_with_history,
+    finish_dictation_pipeline_error, finish_dictation_timeout,
     install_embedded_ble_listener_cancel, invalidate_embedded_audio_authoritative_preview,
     mark_automatic_wake_stop_requested, mark_embedded_ble_listener_ready,
     normalize_embedded_pcm_for_asr, normalize_embedded_streaming_pcm_for_asr,
@@ -2166,6 +2167,42 @@ fn finish_pipeline_error_after_processing_cancel_cleans_without_error_finish() {
 
     assert!(!finished_as_error);
     assert_cancelled_processing_session_cleaned(&coordinator);
+}
+
+#[test]
+fn failed_asr_keeps_recoverable_recording_in_history_once() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = session_id;
+        state.phase = SessionPhase::Processing;
+        state.cancelled = false;
+    }
+    coordinator
+        .inner
+        .audio_archive_active
+        .store(true, Ordering::Relaxed);
+    store_embedded_audio_stats(
+        &coordinator.inner,
+        crate::embedded_audio::SessionCollector::default().stats(),
+    );
+
+    assert!(finish_asr_failure_with_history(
+        &coordinator.inner,
+        session_id,
+        "识别恢复失败".to_string(),
+        false,
+    ));
+    let history = coordinator.history().list().expect("history list");
+    let matching: Vec<_> = history
+        .iter()
+        .filter(|session| session.id == session_id.to_string())
+        .collect();
+    assert_eq!(matching.len(), 1);
+    assert_eq!(matching[0].error_code.as_deref(), Some("asrUnavailable"));
+    assert_eq!(matching[0].has_audio_recording, Some(true));
+    assert!(matching[0].final_text.is_empty());
 }
 
 #[test]

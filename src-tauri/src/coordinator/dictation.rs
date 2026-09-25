@@ -2822,6 +2822,64 @@ fn finish_source_integrity_blocked(
     true
 }
 
+// A provider failure must leave a History entry under the same session id as
+// the archived WAV. Otherwise a full recording can exist on disk while the
+// user has no way to find or export it after the capsule closes.
+fn finish_asr_failure_with_history(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    message: String,
+    timed_out: bool,
+) -> bool {
+    let finished = if timed_out {
+        finish_dictation_timeout(inner, session_id, message)
+    } else {
+        finish_dictation_pipeline_error(inner, session_id, message)
+    };
+    if !finished {
+        return false;
+    }
+
+    let embedded_audio_stats = take_embedded_audio_stats(inner);
+    let duration_ms = embedded_audio_stats
+        .as_ref()
+        .map(|stats| (stats.duration_seconds.max(0.0) * 1_000.0) as u64);
+    let prefs = inner.prefs.get();
+    let error_code = if timed_out { "asrTimeout" } else { "asrUnavailable" };
+    let history = DictationSession {
+        id: session_id.to_string(),
+        created_at: Utc::now().to_rfc3339(),
+        raw_transcript: String::new(),
+        final_text: String::new(),
+        mode: prefs.default_mode,
+        app_bundle_id: None,
+        app_name: None,
+        insert_status: InsertStatus::Failed,
+        error_code: Some(error_code.to_string()),
+        duration_ms,
+        dictionary_entry_count: Some(enabled_phrases(inner).len() as u32),
+        has_audio_recording: Some(inner.audio_archive_active.load(Ordering::Relaxed)),
+        embedded_audio_stats,
+    };
+    if let Err(error) = inner.history.append_with_retention(
+        history,
+        prefs.history_retention_days,
+        prefs.history_max_entries,
+    ) {
+        log::error!("[coord] failed ASR history append failed: {error}");
+    }
+    store_embedded_audio_final_result(
+        inner,
+        crate::embedded_audio::EmbeddedAudioTranscriptResult {
+            session_id: session_id.to_string(),
+            raw_transcript: String::new(),
+            final_text: String::new(),
+            error_code: Some(error_code.to_string()),
+        },
+    );
+    true
+}
+
 fn source_integrity_must_stop(
     inner: &Arc<Inner>,
     expected_session_id: SessionId,
@@ -3153,10 +3211,11 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                                 }
                             })
                             .unwrap_or_else(|| format!("识别恢复失败: {recovery_error}"));
-                            finish_dictation_pipeline_error(
+                            finish_asr_failure_with_history(
                                 inner,
                                 current_session_id,
                                 failure_message,
+                                false,
                             );
                             return Err(recovery_error.to_string());
                         }
@@ -3165,10 +3224,11 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                                 "[coord] Volcengine retained-audio replay timed out after {} ms (primary_error={primary_error})",
                                 replay_timeout.as_millis()
                             );
-                            finish_dictation_timeout(
+                            finish_asr_failure_with_history(
                                 inner,
                                 current_session_id,
                                 "识别恢复超时".to_string(),
+                                true,
                             );
                             return Err("recovery replay timeout".to_string());
                         }
@@ -3186,12 +3246,13 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                     log::error!("[coord] Volcengine finalization failed: {primary_error}");
                     asr.cancel();
                     if primary_global_timeout {
-                        finish_dictation_timeout(inner, current_session_id, "识别超时".to_string());
+                        finish_asr_failure_with_history(inner, current_session_id, "识别超时".to_string(), true);
                     } else {
-                        finish_dictation_pipeline_error(
+                        finish_asr_failure_with_history(
                             inner,
                             current_session_id,
                             format!("识别失败: {primary_error}"),
+                            false,
                         );
                     }
                     return Err(primary_error.to_string());
@@ -3256,10 +3317,11 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                     ) {
                         return Ok(());
                     }
-                    finish_dictation_pipeline_error(
+                    finish_asr_failure_with_history(
                         inner,
                         current_session_id,
                         format!("识别失败: {e}"),
+                        false,
                     );
                     return Err(e.to_string());
                 }
@@ -3276,7 +3338,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                     ) {
                         return Ok(());
                     }
-                    finish_dictation_timeout(inner, current_session_id, "识别超时".to_string());
+                    finish_asr_failure_with_history(inner, current_session_id, "识别超时".to_string(), true);
                     return Err("whisper global timeout".to_string());
                 }
             }
@@ -3299,10 +3361,11 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                     ) {
                         return Ok(());
                     }
-                    finish_dictation_pipeline_error(
+                    finish_asr_failure_with_history(
                         inner,
                         current_session_id,
                         format!("识别失败: {e}"),
+                        false,
                     );
                     return Err(e.to_string());
                 }
@@ -3320,7 +3383,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                         return Ok(());
                     }
                     asr.cancel();
-                    finish_dictation_timeout(inner, current_session_id, "识别超时".to_string());
+                    finish_asr_failure_with_history(inner, current_session_id, "识别超时".to_string(), true);
                     return Err("bailian global timeout".to_string());
                 }
             }
@@ -3356,10 +3419,11 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                         return Ok(());
                     }
                     schedule_foundry_local_asr_release(inner, current_session_id);
-                    finish_dictation_pipeline_error(
+                    finish_asr_failure_with_history(
                         inner,
                         current_session_id,
                         format!("本地识别失败: {e}"),
+                        false,
                     );
                     return Err(e.to_string());
                 }
@@ -3395,10 +3459,11 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                     ) {
                         return Ok(());
                     }
-                    finish_dictation_pipeline_error(
+                    finish_asr_failure_with_history(
                         inner,
                         current_session_id,
                         format!("本地识别失败: {e}"),
+                        false,
                     );
                     return Err(e.to_string());
                 }
@@ -3416,7 +3481,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                     ) {
                         return Ok(());
                     }
-                    finish_dictation_timeout(inner, current_session_id, "识别超时".to_string());
+                    finish_asr_failure_with_history(inner, current_session_id, "识别超时".to_string(), true);
                     return Err("local global timeout".to_string());
                 }
             }
@@ -4117,6 +4182,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // from the original foreground target. Verification failure preserves the
     // existing no-duplicate fallback below.
     #[cfg(target_os = "windows")]
+    let mut early_correction_declined = false;
+    #[cfg(target_os = "windows")]
     let corrected_early_paste = if pause_early_paste
         && streaming_finalized.is_none()
         && !streaming_contaminated
@@ -4147,6 +4214,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                     })
                 }
                 Err(err) => {
+                    early_correction_declined = true;
                     log::warn!(
                         "[coord] pause-early final correction declined session_id={current_session_id}: {err}"
                     );
@@ -4159,8 +4227,25 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     };
     #[cfg(not(target_os = "windows"))]
     let corrected_early_paste: Option<DeliverySubmission> = None;
+    #[cfg(not(target_os = "windows"))]
+    let early_correction_declined = false;
     let delivery_submission = if let Some(submission) = corrected_early_paste {
         submission
+    } else if early_correction_declined {
+        // A failed target readback invalidates the pause-early ledger as proof
+        // of what actually landed. Do not append a guessed tail and report a
+        // quiet success. Preserve the full final text for explicit recovery.
+        let status = inner.inserter.copy_fallback(&polished);
+        log::warn!(
+            "[coord] pause-early final correction not verified; full final copied for recovery session_id={current_session_id} final_chars={} status={status:?}",
+            polished.chars().count()
+        );
+        DeliverySubmission {
+            status,
+            target_confirmed: false,
+            route: DeliveryRoute::CopyOnly,
+            submitted_text: None,
+        }
     } else if streaming_finalized == Some(true) {
         log::info!(
             "[coord] streaming-composition finalized session_id={current_session_id} chars={} route=streaming",
@@ -4448,7 +4533,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         stop_to_done_ms
     );
 
-    let inserted_chars = polished.chars().count() as u32;
+    let inserted_chars = (!early_correction_declined).then(|| polished.chars().count() as u32);
 
     // 累计每条 enabled 词条在最终文本中的命中次数。
     // 用 polished（最终插入的文本）扫描，与用户实际看到的输出一致。
@@ -4469,14 +4554,18 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
 
     // polish 失败时在 history 里标记 polishFailed，让用户能在历史详情看到为什么这次输出
     // 不是预期的 mode 风格。即使失败也不丢词 — final_text 仍是原文（保留"用户的话不丢"语义）。
-    let error_code = dictation_error_code(
-        status,
-        polish_error.is_some(),
-        focus_ready_for_paste,
-        allow_non_tsf_insertion_fallback,
-        wayland_session,
-    )
-    .map(str::to_string);
+    let error_code = if early_correction_declined {
+        Some("finalCorrectionUnverified".to_string())
+    } else {
+        dictation_error_code(
+            status,
+            polish_error.is_some(),
+            focus_ready_for_paste,
+            allow_non_tsf_insertion_fallback,
+            wayland_session,
+        )
+        .map(str::to_string)
+    };
     let transcript_error_code = error_code.clone();
     let tsf_required_insert_failed = error_code.as_deref() == Some("windowsImeTsfRequired");
     let device_processing_succeeded =
@@ -4564,7 +4653,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             }
         }
     }
-    let done_message = if status == InsertStatus::Inserted
+    let done_message = if early_correction_declined && status == InsertStatus::CopiedFallback {
+        Some("终稿未能安全替换；全文已复制，请核对后粘贴".to_string())
+    } else if status == InsertStatus::Inserted
         && !polish_error.is_some()
         && !tsf_required_insert_failed
         && !wayland_session
@@ -4593,7 +4684,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         },
         0.0,
         done_message,
-        Some(inserted_chars),
+        inserted_chars,
     );
 
     schedule_capsule_idle(

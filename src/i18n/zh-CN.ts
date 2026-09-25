@@ -329,6 +329,8 @@ export const zhCN = {
     exportFailed: '导出失败：{{err}}',
     rawLabel: '原文',
     rawEmpty: '（空）',
+    asrUnavailable: '识别失败',
+    asrTimeout: '识别超时',
     selectHint: '左侧选一条查看详情。',
     insertedTo: '插入到',
     chars: '{{count}} 字',

@@ -289,6 +289,8 @@ export const ja: typeof zhCN = {
     exportFailed: 'エクスポート失敗：{{err}}',
     rawLabel: '原文',
     rawEmpty: '（空）',
+    asrUnavailable: '音声認識に失敗',
+    asrTimeout: '音声認識がタイムアウト',
     selectHint: '左側から 1 件選択して詳細を表示。',
     insertedTo: '入力先',
     chars: '{{count}} 文字',

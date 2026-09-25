@@ -145,7 +145,7 @@ impl TextInserter {
         use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
         let count = expected.graphemes(true).count();
-        if count == 0 || count > 160 || replacement.is_empty() {
+        if count == 0 || count > 8_192 || replacement.is_empty() {
             return Err("provisional suffix is outside the verified correction bounds".into());
         }
         if !clipboard_transport_is_reversible() {
@@ -166,11 +166,12 @@ impl TextInserter {
             restore_clipboard_snapshot(&mut clipboard, &previous);
             e.to_string()
         })?;
-        // Queue the entire suffix selection as one Win32 input batch. The old
-        // per-grapheme Enigo loop produced 160 separate calls; Chromium could
-        // process Ctrl+C after only part of that selection (55 of 70 chars in
-        // the captured failure). A single readback below remains the guard.
-        if let Err(err) = select_previous_graphemes(count) {
+        // Select from the caret to the editor start with one chord. Selecting
+        // by counting Left events was not reliable in Chromium: even a single
+        // SendInput batch selected only 109 of 110 provisional characters in
+        // the captured session. Read the target once and replace only on an
+        // exact match; ordinary user content preceding this session is safe.
+        if let Err(err) = select_to_edit_start() {
             if same_target() {
                 let _ = keyboard.key(Key::RightArrow, Direction::Click);
             }
@@ -182,7 +183,7 @@ impl TextInserter {
             return Err("session target changed before suffix verification".into());
         }
         std::thread::sleep(Duration::from_millis(80));
-        let observed = match copy_verified_selection(&mut keyboard, &mut clipboard, &marker) {
+        let mut observed = match copy_verified_selection(&mut keyboard, &mut clipboard, &marker) {
             Ok(value) => value,
             Err(err) => {
                 if same_target() {
@@ -192,6 +193,29 @@ impl TextInserter {
                 return Err(format!("could not read selected provisional suffix: {err}"));
             }
         };
+        // If the editor also contains earlier user text, leave that content
+        // untouched. The old bounded suffix selection remains a fallback for
+        // this case, with its own exact readback before any replacement.
+        if observed != expected && observed.ends_with(expected) && count <= 160 && same_target() {
+            let fallback = (|| -> Result<String, String> {
+                keyboard
+                    .key(Key::RightArrow, Direction::Click)
+                    .map_err(|e| e.to_string())?;
+                select_previous_graphemes(count)?;
+                std::thread::sleep(Duration::from_millis(80));
+                copy_verified_selection(&mut keyboard, &mut clipboard, &marker)
+            })();
+            match fallback {
+                Ok(value) => observed = value,
+                Err(err) => {
+                    if same_target() {
+                        let _ = keyboard.key(Key::RightArrow, Direction::Click);
+                    }
+                    restore_clipboard_snapshot(&mut clipboard, &previous);
+                    return Err(format!("could not verify provisional suffix fallback: {err}"));
+                }
+            }
+        }
         if observed != expected || !same_target() {
             if same_target() {
                 let _ = keyboard.key(Key::RightArrow, Direction::Click);
@@ -320,6 +344,45 @@ fn select_previous_graphemes(count: usize) -> Result<(), String> {
             "SendInput selected {sent}/{} key events",
             inputs.len()
         ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn select_to_edit_start() -> Result<(), String> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+        KEYEVENTF_KEYUP, VK_CONTROL, VK_HOME, VK_SHIFT,
+    };
+
+    fn event(vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY, up: bool) -> INPUT {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        }
+    }
+
+    let mut inputs = [
+        event(VK_CONTROL, false),
+        event(VK_SHIFT, false),
+        event(VK_HOME, false),
+        event(VK_HOME, true),
+        event(VK_SHIFT, true),
+        event(VK_CONTROL, true),
+    ];
+    let sent = unsafe { SendInput(&mut inputs, std::mem::size_of::<INPUT>() as i32) };
+    if sent as usize != inputs.len() {
+        let mut release = [event(VK_SHIFT, true), event(VK_CONTROL, true)];
+        unsafe { SendInput(&mut release, std::mem::size_of::<INPUT>() as i32) };
+        return Err(format!("SendInput selected {sent}/{} key events", inputs.len()));
     }
     Ok(())
 }

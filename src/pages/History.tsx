@@ -302,7 +302,7 @@ export function History() {
                   </span>
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--ol-ink-2)', lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                  {s.finalText.split('\n')[0]}
+                  {s.finalText.split('\n')[0] || (s.errorCode === 'asrUnavailable' ? t('history.asrUnavailable') : s.errorCode === 'asrTimeout' ? t('history.asrTimeout') : t('history.rawEmpty'))}
                 </div>
                 <div><Pill size="sm" tone={s.mode === 'raw' ? 'outline' : 'default'}>{MODE_LABEL[s.mode]}</Pill></div>
               </button>
@@ -344,7 +344,7 @@ export function History() {
                 <div style={{ padding: 14, border: '0.5px solid var(--ol-blue)', borderRadius: 10, background: 'var(--ol-blue-soft)', minWidth: 0, overflow: 'hidden' }}>
                   <Pill size="sm" tone="blue" style={{ marginBottom: 10 }}>{MODE_LABEL[item.mode]}</Pill>
                   <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: 'var(--ol-ink)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                    {item.finalText}
+                    {item.finalText || (item.errorCode === 'asrUnavailable' ? t('history.asrUnavailable') : item.errorCode === 'asrTimeout' ? t('history.asrTimeout') : t('history.rawEmpty'))}
                   </p>
                 </div>
               </div>
@@ -446,7 +446,7 @@ function RecentRow({
         <Pill size="sm" tone="default">{modeLabel[session.mode]}</Pill>
       </div>
       <div style={{ minWidth: 0, fontSize: 12.5, color: 'var(--ol-ink-2)', whiteSpace: 'pre-line', lineHeight: 1.55, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflowWrap: 'anywhere' }}>
-        {session.finalText.split('\n')[0]}
+        {session.finalText.split('\n')[0] || (session.errorCode === 'asrUnavailable' ? t('history.asrUnavailable') : session.errorCode === 'asrTimeout' ? t('history.asrTimeout') : t('history.rawEmpty'))}
       </div>
       <span style={{ fontSize: 10.5, color: 'var(--ol-ink-4)', fontFamily: 'var(--ol-font-mono)', whiteSpace: 'nowrap' }}>
         {formatDuration(session.durationMs ?? 0, t)}
