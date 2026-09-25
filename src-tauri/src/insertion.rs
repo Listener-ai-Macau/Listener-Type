@@ -158,14 +158,26 @@ impl TextInserter {
         // The target may be a terminal: Ctrl+C is a task interrupt there.
         // Require a read-only accessibility path before selecting anything.
         let selection_reader = crate::selection::windows_uia::WindowsSelectionReader::new(target_hwnd)?;
+        let document_text = selection_reader.read_document_text().ok();
+        let selection_plan = verified_selection_plan(document_text.as_deref(), expected);
+        log::info!(
+            "[insertion] verified correction selection plan={selection_plan:?} document_chars={:?} expected_chars={}",
+            document_text.as_ref().map(|text| text.chars().count()),
+            expected.chars().count(),
+        );
         let focus_before_select = focused_child_snapshot(target_hwnd);
         let mut keyboard = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
-        // Select from the caret to the editor start with one chord. Selecting
-        // by counting Left events was not reliable in Chromium: even a single
-        // SendInput batch selected only 109 of 110 provisional characters in
-        // the captured session. Read the target once and replace only on an
-        // exact match; ordinary user content preceding this session is safe.
-        if let Err(err) = select_to_edit_start() {
+        // ChatGPT's ProseMirror exposes its document through TextPattern but
+        // Ctrl+Shift+Home produces an empty UIA selection. When that whole
+        // document exactly equals this session's early paste, Ctrl+A selects
+        // it reliably. An editor with any pre-existing user text keeps the
+        // bounded caret-to-start path. Both routes require exact selected-text
+        // readback before replacing anything.
+        let select_result = match selection_plan {
+            VerifiedSelectionPlan::WholeEditor => select_all_edit_text(),
+            VerifiedSelectionPlan::FromCaret => select_to_edit_start(),
+        };
+        if let Err(err) = select_result {
             if same_target() {
                 let _ = keyboard.key(Key::RightArrow, Direction::Click);
             }
@@ -262,6 +274,55 @@ impl TextInserter {
         }
         Ok(InsertStatus::PasteSent)
     }
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VerifiedSelectionPlan {
+    WholeEditor,
+    FromCaret,
+}
+
+#[cfg(target_os = "windows")]
+fn verified_selection_plan(document: Option<&str>, expected: &str) -> VerifiedSelectionPlan {
+    if document == Some(expected) {
+        VerifiedSelectionPlan::WholeEditor
+    } else {
+        VerifiedSelectionPlan::FromCaret
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn select_all_edit_text() -> Result<(), String> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+        KEYEVENTF_KEYUP, VK_CONTROL, VIRTUAL_KEY,
+    };
+
+    fn event(vk: VIRTUAL_KEY, up: bool) -> INPUT {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        }
+    }
+
+    let mut inputs = [event(VK_CONTROL, false), event(VIRTUAL_KEY(b'A' as u16), false),
+        event(VIRTUAL_KEY(b'A' as u16), true), event(VK_CONTROL, true)];
+    let sent = unsafe { SendInput(&mut inputs, std::mem::size_of::<INPUT>() as i32) };
+    if sent as usize != inputs.len() {
+        let mut release = [event(VK_CONTROL, true)];
+        unsafe { SendInput(&mut release, std::mem::size_of::<INPUT>() as i32) };
+        return Err(format!("SendInput selected {sent}/{} Ctrl+A key events", inputs.len()));
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -874,6 +935,28 @@ mod tests {
         let insertion_source = include_str!("insertion.rs");
         assert!(!insertion_source.contains(&["send_", "ctrl_c("].concat()));
         assert!(!insertion_source.contains(&["Key::Unicode(", "'c')"].concat()));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn whole_editor_selection_requires_exact_session_text() {
+        let expected = "第一段已经上屏。第二段继续。";
+        assert_eq!(
+            verified_selection_plan(Some(expected), expected),
+            VerifiedSelectionPlan::WholeEditor,
+        );
+        for document in [
+            None,
+            Some("用户原有内容。第一段已经上屏。第二段继续。"),
+            Some("第一段已经上屏。第二段继续"),
+            Some("第一段已经上屏。第二段继续。用户又输入"),
+        ] {
+            assert_eq!(
+                verified_selection_plan(document, expected),
+                VerifiedSelectionPlan::FromCaret,
+                "Ctrl+A must never replace unrelated editor content"
+            );
+        }
     }
 
     #[cfg(target_os = "windows")]

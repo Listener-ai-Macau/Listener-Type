@@ -28,6 +28,13 @@ interrupt. If safe readback is unavailable, leave the existing text in place
 and copy the final transcript for recovery; do not paste the full transcript
 again or report target-confirmed delivery.
 
+Some Chromium contenteditable controls expose their full editor text through
+UI Automation but report no selection for Ctrl+Shift+Home. If the complete
+editor text exactly equals this session's early paste, the adapter may use
+Ctrl+A and must then verify the selected text still matches exactly before
+pasting the corrected final. Editors containing any unrelated text stay on the
+bounded suffix route; unavailable selection still falls back to copying.
+
 During dictation, each paste and final submit targets the currently focused
 window. Delivery must not call `SetForegroundWindow`, restore the window that
 had focus when recording began, or infer a target from its title. If the user

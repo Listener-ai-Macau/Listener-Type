@@ -96,6 +96,14 @@ impl WindowsSelectionReader {
         }
         Err("accessibility selection did not expose text".into())
     }
+
+    pub(crate) fn read_document_text(&self) -> Result<String, String> {
+        let range = unsafe { self.pattern.DocumentRange() }
+            .map_err(|err| format!("accessibility editor text unavailable: {err}"))?;
+        unsafe { range.GetText(8_193) }
+            .map(|text| text.to_string())
+            .map_err(|err| format!("accessibility editor text read failed: {err}"))
+    }
 }
 
 pub(crate) fn read_focused_selection() -> Option<String> {
