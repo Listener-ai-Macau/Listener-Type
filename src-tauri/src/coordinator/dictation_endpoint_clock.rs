@@ -112,6 +112,11 @@ struct SettledTargetEndpointClock {
     /// while the next classifier window settles, but cannot rearm the clock.
     tentative_owner_continuation_at: Option<Instant>,
     tentative_owner_continuation_audio_ms: Option<u64>,
+    /// VAD turn containing the local Target candidate. Once attached, the
+    /// owner-compatible turn stays pending through Uncertain classifier
+    /// windows and receives the ordinary quiet interval after speech ends.
+    tentative_owner_vad_epoch: Option<u64>,
+    tentative_owner_quiet_audio_ms: Option<u64>,
     /// The accepted wake has not produced any body text.  This is not a
     /// second endpoint: it is an explicit mode of the same controller, armed
     /// from the automatic-wake guard's original clock.  Wake-phrase audio and
@@ -352,6 +357,8 @@ impl SettledTargetEndpointClock {
             .and_then(|update| update.audio_duration_ms);
         self.tentative_owner_continuation_at = None;
         self.tentative_owner_continuation_audio_ms = None;
+        self.tentative_owner_vad_epoch = None;
+        self.tentative_owner_quiet_audio_ms = None;
         self.manual_terminal_bridge_until = None;
         self.manual_terminal_bridge_rearm_pending = false;
         // A committed chunk is the start of the public continuation window.
@@ -579,6 +586,42 @@ impl SettledTargetEndpointClock {
         &mut self,
         evidence: crate::asr::volcengine::LocalSpeechEvidence,
     ) {
+        use crate::asr::volcengine::LocalSpeechActivityState;
+        // A new speech epoch inside the quiet window may be the same owner
+        // continuing after a pause. Keep it pending until speaker evidence
+        // settles; a confirmed Other observation clears the turn in observe.
+        if let (Some(tracked_epoch), Some(previous)) =
+            (self.tentative_owner_vad_epoch, self.latest_local_vad_evidence)
+        {
+            if evidence.activity_epoch == tracked_epoch
+                && evidence.state == LocalSpeechActivityState::NonSpeech
+                && self.tentative_owner_quiet_audio_ms.is_none()
+            {
+                let quiet_start_ms = evidence
+                    .last_detected_speech_end_ms
+                    .filter(|speech_end_ms| {
+                        self.tentative_owner_continuation_audio_ms
+                            .is_some_and(|candidate_ms| *speech_end_ms >= candidate_ms)
+                    })
+                    .unwrap_or(evidence.analyzed_through_ms);
+                self.tentative_owner_quiet_audio_ms = Some(quiet_start_ms);
+            }
+            if previous.activity_epoch == tracked_epoch
+                && previous.state == LocalSpeechActivityState::NonSpeech
+                && evidence.activity_epoch > tracked_epoch
+                && matches!(evidence.state, LocalSpeechActivityState::PendingSpeech | LocalSpeechActivityState::Speech)
+                && self.tentative_owner_quiet_audio_ms.is_some_and(|speech_end_ms| {
+                    evidence
+                        .pending_speech_start_ms
+                        .unwrap_or(evidence.analyzed_through_ms)
+                        .saturating_sub(speech_end_ms)
+                        < EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+                })
+            {
+                self.tentative_owner_vad_epoch = Some(evidence.activity_epoch);
+                self.tentative_owner_quiet_audio_ms = None;
+            }
+        }
         let previous_state = self.latest_local_vad_evidence.map(|previous| previous.state);
         if evidence.state == crate::asr::volcengine::LocalSpeechActivityState::Speech
             && previous_state
@@ -995,6 +1038,8 @@ impl SettledTargetEndpointClock {
             if self.owner_spoke_after_body_delivery(update) || recent_strong_non_target {
                 self.tentative_owner_continuation_at = None;
                 self.tentative_owner_continuation_audio_ms = None;
+                self.tentative_owner_vad_epoch = None;
+                self.tentative_owner_quiet_audio_ms = None;
             } else if let Some(candidate_audio_ms) = update.local_tentative_owner_speech_end_ms {
                 if self
                     .last_body_delivery_audio_ms
@@ -1005,6 +1050,18 @@ impl SettledTargetEndpointClock {
                 {
                     self.tentative_owner_continuation_at.get_or_insert(now);
                     self.tentative_owner_continuation_audio_ms = Some(candidate_audio_ms);
+                    if let Some(evidence) = self.latest_local_vad_evidence {
+                        if matches!(
+                            evidence.state,
+                            crate::asr::volcengine::LocalSpeechActivityState::PendingSpeech
+                                | crate::asr::volcengine::LocalSpeechActivityState::Speech
+                        ) && evidence.analyzed_through_ms.saturating_add(AUTOMATIC_STOP_VAD_MAX_LAG_MS)
+                            >= candidate_audio_ms
+                        {
+                            self.tentative_owner_vad_epoch = Some(evidence.activity_epoch);
+                            self.tentative_owner_quiet_audio_ms = None;
+                        }
+                    }
                 }
             }
         }
@@ -1453,6 +1510,33 @@ impl SettledTargetEndpointClock {
             now.saturating_duration_since(delivered_at)
                 < Duration::from_millis(EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS)
         }) {
+            return false;
+        }
+        if self.automatic_wake_session
+            && !update_has_recent_strong_non_target(&update)
+            && self.tentative_owner_vad_epoch.is_some()
+            && self.latest_local_vad_evidence.is_some_and(|evidence| {
+                use crate::asr::volcengine::LocalSpeechActivityState;
+                if Some(evidence.activity_epoch) != self.tentative_owner_vad_epoch {
+                    return false;
+                }
+                let captured_ms = update.audio_duration_ms.unwrap_or_default();
+                match evidence.state {
+                    LocalSpeechActivityState::PendingSpeech | LocalSpeechActivityState::Speech => {
+                        captured_ms.saturating_sub(evidence.analyzed_through_ms)
+                            <= AUTOMATIC_STOP_VAD_MAX_LAG_MS
+                    }
+                    LocalSpeechActivityState::NonSpeech => self
+                        .tentative_owner_quiet_audio_ms
+                        .is_some_and(|quiet_start_ms| {
+                            captured_ms.saturating_sub(quiet_start_ms)
+                                < EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+                        }),
+                    LocalSpeechActivityState::Unknown => false,
+                }
+            })
+        {
+            self.note_due_hold_diagnostic(self.generation, "tentative_owner_turn");
             return false;
         }
         if self.automatic_wake_session
