@@ -4001,6 +4001,27 @@ fn filter_result_to_target_speaker_with_local_evidence(
     )
 }
 
+/// A two-pass row and the active stream row are two publications of the same
+/// audio. The provider's cumulative text decides whether their shared tail
+/// occurred once or twice; row boundaries and the last row's exact spelling
+/// cannot establish another spoken occurrence.
+fn provider_cumulative_covers_optimistic_echo(
+    provider_text: &str,
+    owner_text: &str,
+    joined_utterance_text: &str,
+    stable_other_speaker_present: bool,
+) -> bool {
+    !owner_text.is_empty()
+        // An excluded cloud row elsewhere in this packet must not block
+        // reconciliation when the filtered owner text already equals every
+        // character of the provider's cumulative text.
+        && (!stable_other_speaker_present || provider_text == owner_text)
+        && provider_text.starts_with(owner_text)
+        && joined_utterance_text
+            .strip_prefix(provider_text)
+            .is_some_and(|extra| extra.chars().count() >= 2 && provider_text.ends_with(extra))
+}
+
 fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
     result: &Value,
     target_speaker_id: &mut Option<String>,
@@ -4309,19 +4330,12 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
     // row republishes it. Provider row times describe publication windows,
     // not proof that identical words were spoken twice. Only the cumulative
     // provider text can confirm a second occurrence of its own suffix.
-    let optimistic_utterance_text = if !target_text.is_empty()
-        && !stable_other_speaker_present
-        && raw_text.starts_with(&target_text)
-        && optimistic_utterance_text
-            .strip_prefix(raw_text)
-            .is_some_and(|extra| {
-                extra.chars().count() >= 2
-                    && raw_text.ends_with(extra)
-                    && optimistic_utterances.last().and_then(|row| row.get("text"))
-                        .and_then(Value::as_str)
-                        == Some(extra)
-            })
-    {
+    let optimistic_utterance_text = if provider_cumulative_covers_optimistic_echo(
+        raw_text,
+        &target_text,
+        &optimistic_utterance_text,
+        stable_other_speaker_present,
+    ) {
         log::info!(
             "[asr] reconciled overlapping stream row with provider cumulative text provider_chars={} joined_chars={}",
             raw_text.chars().count(),
@@ -7759,6 +7773,16 @@ impl VolcengineStreamingASR {
                 .and_then(Value::as_str)
                 .unwrap_or_default(),
         );
+        self.record_diagnostic_trace(
+            trace_frame,
+            has_final,
+            "speaker_optimistic_result",
+            speaker_filtered_result
+                .optimistic_result
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        );
         if provisional_holds_endpoint {
             log::info!(
                 "[asr] provisional body growth refreshed local target endpoint clock local_target_end_ms={:?}",
@@ -10877,6 +10901,40 @@ mod tests {
             filtered.optimistic_result["text"],
             "开始录音，现在继续检查效率至上"
         );
+    }
+
+    #[test]
+    fn cumulative_provider_rejects_echo_even_when_stream_row_boundary_differs() {
+        // e650c1fa: the provider and owner row had one copy, but joining the
+        // two publication rows yielded another "然后这". The final stream row
+        // need not exactly equal that suffix: row boundaries move on revision.
+        let provider = "开始录音。就是你现在新版是安装了，然后我现在进行第一次测试，这是第一段，停顿前。然后这";
+        let joined = format!("{provider}然后这");
+        assert!(provider_cumulative_covers_optimistic_echo(
+            provider, provider, &joined, false,
+        ));
+        assert!(provider_cumulative_covers_optimistic_echo(
+            provider, provider, &joined, true,
+        ));
+        assert!(!provider_cumulative_covers_optimistic_echo(
+            provider,
+            "开始录音。",
+            &joined,
+            true,
+        ));
+        assert!(!provider_cumulative_covers_optimistic_echo(
+            provider,
+            provider,
+            &format!("{provider}继续说话"),
+            false,
+        ));
+        let repeated_by_provider = format!("{provider}然后这");
+        assert!(!provider_cumulative_covers_optimistic_echo(
+            &repeated_by_provider,
+            &repeated_by_provider,
+            &repeated_by_provider,
+            false,
+        ));
     }
 
     #[test]

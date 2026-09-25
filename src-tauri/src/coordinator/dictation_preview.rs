@@ -1635,11 +1635,6 @@ pub(super) struct PauseEarlyDeliveryLedger {
     /// remainder must continue on that route instead of waiting for a TSF
     /// client that did not deliver this session's preceding chunks.
     pub(super) paste_delivered_session: Option<SessionId>,
-    /// One editor can be corrected at finalization only if every early paste
-    /// landed in that same foreground window. Switching apps is allowed;
-    /// the session text ledger still prevents a duplicate full-text paste.
-    pub(super) paste_target: Option<usize>,
-    pub(super) paste_targets_diverged: bool,
     /// 一次性门诊断：同一会话同一原因只记一行，防止看门狗 20/s 刷屏。
     pub(super) gate_blocked_logged: Option<(SessionId, &'static str)>,
     /// 2026-09-23 tkg 后诊断:tick 首达行(证明看门狗路径活着+当时门状态)。
@@ -1720,13 +1715,6 @@ fn pause_early_final_remainder(
     }
 }
 
-/// A suffix append is safe only when the final text preserves every character
-/// already pasted into the target, including punctuation. Stability keys are
-/// deliberately looser for preview alignment, so they cannot answer this.
-fn pause_early_final_revises_delivered_text(final_text: &str, delivered_display: &str) -> bool {
-    !delivered_display.is_empty() && !final_text.starts_with(delivered_display)
-}
-
 /// A live provider revision may correct words inside an already pasted
 /// segment. Continue delivering only when the end of that segment still has
 /// one unambiguous position near its old boundary. This is stricter than the
@@ -1801,17 +1789,18 @@ fn pause_early_anchored_continuation(
     (!embedded_audio_partial_preview_stability_key(&tail).is_empty()).then_some(tail)
 }
 
-/// 干净会话里云端改写了已交付前缀时的内容保全（2026-09-22 15:1x，0e9b79fc
-/// 实锤 30 字落屏后终稿改写、16 字尾巴被丢）：按最长公共前缀定位分界，
-/// 返回终稿在分界之后的尾巴（含被改写的字）。LCP 不足已交付一半时放弃
-/// （改写太剧烈，接缝读不通，宁少勿乱）。终稿比已交付短时同样放弃。
+/// The stop result may revise an already committed clause. Count content
+/// characters from the committed boundary and append only genuine growth
+/// beyond it. Never append the rewritten portion of the committed prefix.
+/// Deep revisions remain ambiguous and are left on screen as originally
+/// committed, while the exact and anchored paths handle clearer tails first.
 fn pause_early_mismatch_recovery_tail(final_text: &str, delivered_key: &str) -> Option<String> {
     if delivered_key.is_empty() {
         return None;
     }
     let delivered_content_chars = delivered_key.chars().count();
     let mut seen_key = String::new();
-    let mut divergence_offset: Option<usize> = None;
+    let mut diverged = false;
     let mut lcp_chars = 0usize;
     let mut content_index = 0usize;
     // 终稿内容第 delivered_content_chars 个字符的字节偏移：增长尾从这里切齐。
@@ -1826,47 +1815,41 @@ fn pause_early_mismatch_recovery_tail(final_text: &str, delivered_key: &str) -> 
         for lower in ch.to_lowercase() {
             seen_key.push(lower);
         }
-        if divergence_offset.is_none() && !delivered_key.starts_with(seen_key.as_str()) {
-            divergence_offset = Some(offset);
-        } else if divergence_offset.is_none() {
+        if !diverged && !delivered_key.starts_with(seen_key.as_str()) {
+            diverged = true;
+        } else if !diverged {
             lcp_chars += 1;
         }
         content_index += 1;
     }
-    let Some(divergence_offset) = divergence_offset else {
+    if !diverged || content_index <= delivered_content_chars {
         return None;
-    };
-    // 2026-09-23 13:33 panic 实锤（"…必须要报用内置浏览器看蓝湖"）：
-    // 字节级 LCP 会在共享 UTF-8 前缀的同音字内部切分（报 E6 8A A5 /
-    // 抱 E6 8A B1 共享前两字节），delivered_key[lcp..] 直接 panic 成
-    // "内部错误"。按整字符推进，切点必落字符边界。
-    let lcp_bytes: usize = delivered_key
-        .chars()
-        .take(lcp_chars)
-        .map(char::len_utf8)
-        .sum();
-    // 微增长(≤3 字)无条件补,且先于半程卫兵:2026-09-23 15:29 实锤
-    // delivered=23/final=24,深改写把 1 字新增吞掉——1-3 字的尾巴不可能
-    // 是整段重述,且严格只追加交付长度之后的内容,物理上不可能重复。
+    }
+    // A length increase can be an insertion inside the old sentence. If the
+    // committed ending still closes the stop result, there is no evidence of
+    // speech after the committed boundary (and appending would repeat it).
+    let delivered_end: Vec<char> = delivered_key.chars().rev().take(3).collect();
+    if delivered_end.len() == 3
+        && seen_key.chars().rev().take(3).eq(delivered_end.into_iter())
+    {
+        return None;
+    }
+    // Small growth (≤3 content chars) can still carry a real tail after a
+    // deep provider revision. The unchanged-ending guard above rejects an
+    // insertion inside the already committed clause.
     let growth_chars = content_index.saturating_sub(delivered_content_chars);
     if growth_chars > 0 && growth_chars <= 3 {
         return growth_offset.map(|offset| seam_deduped_growth_tail(final_text, offset, delivered_key));
     }
-    if lcp_bytes * 2 < delivered_key.len() {
+    if lcp_chars * 2 < delivered_content_chars {
         return None;
     }
     let rewritten_tail_chars = delivered_content_chars - lcp_chars;
-    if rewritten_tail_chars <= 2 {
-        // 2026-09-22 21:5x 用户实锤"出来两次"后改版契约:改写只允许在交付
-        // 末尾 ≤2 字(标点/同音边界级)时从分界补尾。
-        return Some(final_text[divergence_offset..].to_string());
-    }
     // 2026-09-23 14:31/14:32 连续实锤:云端两遍精修润色了中段一个字,旧契约
     // 把 2-16 字的纯新增尾巴一起丢掉——违反优先级锁第 3 条(不吞你的字)。
-    // 增长尾分支:终稿内容更长且改写区(已交付-LCP)在 max(8 字, 已交付/3)
-    // 以内时,从已交付长度处切齐补尾。严格只追加交付长度之后的内容,物理
-    // 上不可能重复上屏;绝对差值口径让长句(105 字会话改写 22 字)也能补,
-    // 而"出来两次"型整段重述(58 字改写 28 字)仍被挡在门外。
+    // Longer growth with a small revision near the old boundary can still
+    // append the content beyond that boundary. A deep restatement stays
+    // ambiguous and is not appended.
     if content_index > delivered_content_chars
         && rewritten_tail_chars <= usize::max(8, delivered_content_chars / 3)
     {
@@ -2155,30 +2138,6 @@ pub(super) fn pause_early_paste_delivered(inner: &Arc<Inner>, session_id: Sessio
     inner.embedded_audio_pause_early_delivery.lock().paste_delivered_session == Some(session_id)
 }
 
-fn pause_early_note_paste_target(inner: &Arc<Inner>, session_id: SessionId, target: Option<usize>) {
-    let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
-    if ledger.session_id != Some(session_id) || ledger.paste_targets_diverged {
-        return;
-    }
-    match (ledger.paste_target, target) {
-        (None, Some(target)) => ledger.paste_target = Some(target),
-        (Some(previous), Some(target)) if previous == target => {}
-        _ => {
-            ledger.paste_target = None;
-            ledger.paste_targets_diverged = true;
-        }
-    }
-}
-
-pub(super) fn pause_early_single_paste_target(inner: &Arc<Inner>, session_id: SessionId) -> Option<usize> {
-    let ledger = inner.embedded_audio_pause_early_delivery.lock();
-    if ledger.session_id == Some(session_id) && !ledger.paste_targets_diverged {
-        ledger.paste_target
-    } else {
-        None
-    }
-}
-
 /// 终稿路径取走本会话的已交付前缀（display, key），取走即清零。粘滞底线
 /// （曾上屏）是历史事实，跨 take 保留——终稿侧即使先 take 后查询也不翻转。
 pub(super) fn take_pause_early_delivery(
@@ -2463,7 +2422,6 @@ async fn pause_early_delivery_tick(
         return;
     }
     pause_early_delivery_confirm(inner, session_id);
-    pause_early_note_paste_target(inner, session_id, delivery_target);
     endpoint_clock.lock().note_body_delivery(Instant::now());
     if result.route == DeliveryRoute::Paste {
         inner.embedded_audio_pause_early_delivery.lock().paste_delivered_session = Some(session_id);

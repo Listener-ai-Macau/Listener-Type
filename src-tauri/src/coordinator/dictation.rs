@@ -4090,14 +4090,13 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             .map(|value| value == "1")
             .unwrap_or(false);
     let paste_shortcut = prefs.paste_shortcut;
-    // Pause-early-delivery（2026-09-22 跟手①）：句末稳定停顿可能已把稳定
-    // 前缀当场上屏。按 stability key 对齐终稿只派发余量；云端改写/收缩了
-    // 已交付前缀时跳过第二次插入（宁可少不可重——H 族），早期文本保留在屏。
+    // A stable clause pasted during recording is final for the editor. The
+    // provider's stop result can supply an unpasted tail, but cannot revise
+    // or replace any character already delivered to the current cursor.
     // 粘滞底线在 take 之前读：本会话只要上屏过早期文本，就算可对账前缀
     // 丢失也绝不允许终稿整段重贴（2026-09-23 用户实锤"一毛一样粘贴两次"）。
     let pause_early_sticky = pause_early_ever_delivered(inner, current_session_id);
     let pause_early_paste = pause_early_paste_delivered(inner, current_session_id);
-    let early_paste_target = pause_early_single_paste_target(inner, current_session_id);
     let pause_early_delivered = take_pause_early_delivery(inner, current_session_id);
     let pause_early_outcome = pause_early_delivered.as_ref().map(|(display, key)| {
         // 2026-09-23 17:31 d37e3562 吞尾实锤：润色压缩+流式中间态膨胀让
@@ -4105,16 +4104,16 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         // 仍不可切时用交付末尾锚点从原始终稿补未上屏的尾巴。
         let remainder = pause_early_final_remainder(&polished, display, key)
             .or_else(|| pause_early_final_remainder(&raw.text, display, key));
-        // 改写=云端修订：按 LCP 补回尾巴保内容（0e9b79fc 丢 16 字的教训）。
-        // 2026-09-22 16:47 修正：不再限定干净会话——polished 已过归属仲裁
-        // （旁人内容在上游已切），补的尾巴与不走停顿落屏时的终稿同文；
-        // 干扰会话维持丢弃只会吞你自己的字（08:47:14 交付 56/57 字实锤）。
+        // A provider revision may change an earlier word. Recover only a
+        // continuation beyond the committed boundary; never append the
+        // revised portion as a second version of that word.
         let recovery = if remainder.is_none() {
-            pause_early_mismatch_recovery_tail(&polished, key)
-                .or_else(|| pause_early_mismatch_recovery_tail(&raw.text, key))
-                .or_else(|| pause_early_tail_beyond_delivered_anchor(&polished, key))
+            pause_early_tail_beyond_delivered_anchor(&polished, key)
                 .or_else(|| pause_early_tail_beyond_delivered_anchor(&raw.text, key))
                 .or_else(|| pause_early_aligned_growth_tail(&polished, key))
+                .or_else(|| pause_early_aligned_growth_tail(&raw.text, key))
+                .or_else(|| pause_early_mismatch_recovery_tail(&polished, key))
+                .or_else(|| pause_early_mismatch_recovery_tail(&raw.text, key))
         } else {
             None
         };
@@ -4179,84 +4178,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // 终稿宁可少交付也不双写(H 族教训)。
     let streaming_contaminated = streaming_finalized != Some(true)
         && streaming_composition_contaminated(inner, current_session_id);
-    // A stable clause can be pasted before the provider's two-pass result.
-    // If that result revises any already pasted character, a suffix-only
-    // reconciliation leaves the mistake in the document. The insertion layer
-    // may replace it only after reading back the exact session-owned suffix
-    // from the one editor that received every early chunk. Verification failure preserves the
-    // existing no-duplicate fallback below.
-    #[cfg(target_os = "windows")]
-    let mut early_correction_declined = false;
-    #[cfg(target_os = "windows")]
-    let corrected_early_paste = if pause_early_paste
-        && streaming_finalized.is_none()
-        && !streaming_contaminated
-        && focus_ready_for_paste
-    {
-        pause_early_delivered.as_ref().and_then(|(display, _)| {
-            if !pause_early_final_revises_delivered_text(&polished, display) {
-                return None;
-            }
-            let Some(target) = early_paste_target.filter(|target| delivery_target_is_current(Some(*target))) else {
-                early_correction_declined = true;
-                log::warn!(
-                    "[coord] pause-early final correction declined session_id={current_session_id}: early text spans windows or focus moved"
-                );
-                return None;
-            };
-            match inner.inserter.replace_verified_suffix(
-                display,
-                &polished,
-                target,
-                restore_clipboard,
-                paste_shortcut,
-            ) {
-                Ok(status) => {
-                    log::info!(
-                        "[coord] pause-early final corrected verified suffix session_id={current_session_id} delivered_chars={} final_chars={} status={status:?}",
-                        display.chars().count(), polished.chars().count()
-                    );
-                    Some(DeliverySubmission {
-                        status,
-                        target_confirmed: false,
-                        route: DeliveryRoute::Paste,
-                        submitted_text: Some(polished.clone()),
-                    })
-                }
-                Err(err) => {
-                    early_correction_declined = true;
-                    log::warn!(
-                        "[coord] pause-early final correction declined session_id={current_session_id}: {err}"
-                    );
-                    None
-                }
-            }
-        })
-    } else {
-        None
-    };
-    #[cfg(not(target_os = "windows"))]
-    let corrected_early_paste: Option<DeliverySubmission> = None;
-    #[cfg(not(target_os = "windows"))]
-    let early_correction_declined = false;
-    let delivery_submission = if let Some(submission) = corrected_early_paste {
-        submission
-    } else if early_correction_declined {
-        // A failed target readback invalidates the pause-early ledger as proof
-        // of what actually landed. Do not append a guessed tail and report a
-        // quiet success. Preserve the full final text for explicit recovery.
-        let status = inner.inserter.copy_fallback(&polished);
-        log::warn!(
-            "[coord] pause-early final correction not verified; full final copied for recovery session_id={current_session_id} final_chars={} status={status:?}",
-            polished.chars().count()
-        );
-        DeliverySubmission {
-            status,
-            target_confirmed: false,
-            route: DeliveryRoute::CopyOnly,
-            submitted_text: None,
-        }
-    } else if streaming_finalized == Some(true) {
+    let delivery_submission = if streaming_finalized == Some(true) {
         log::info!(
             "[coord] streaming-composition finalized session_id={current_session_id} chars={} route=streaming",
             insert_text.chars().count()
@@ -4555,7 +4477,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         stop_to_done_ms
     );
 
-    let inserted_chars = (!early_correction_declined).then(|| polished.chars().count() as u32);
+    let inserted_chars = Some(polished.chars().count() as u32);
 
     // 累计每条 enabled 词条在最终文本中的命中次数。
     // 用 polished（最终插入的文本）扫描，与用户实际看到的输出一致。
@@ -4576,18 +4498,14 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
 
     // polish 失败时在 history 里标记 polishFailed，让用户能在历史详情看到为什么这次输出
     // 不是预期的 mode 风格。即使失败也不丢词 — final_text 仍是原文（保留"用户的话不丢"语义）。
-    let error_code = if early_correction_declined {
-        Some("finalCorrectionUnverified".to_string())
-    } else {
-        dictation_error_code(
+    let error_code = dictation_error_code(
             status,
             polish_error.is_some(),
             focus_ready_for_paste,
             allow_non_tsf_insertion_fallback,
             wayland_session,
         )
-        .map(str::to_string)
-    };
+        .map(str::to_string);
     let transcript_error_code = error_code.clone();
     let tsf_required_insert_failed = error_code.as_deref() == Some("windowsImeTsfRequired");
     let device_processing_succeeded =
@@ -4675,9 +4593,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             }
         }
     }
-    let done_message = if early_correction_declined && status == InsertStatus::CopiedFallback {
-        Some("终稿未能安全替换；全文已复制，请核对后粘贴".to_string())
-    } else if status == InsertStatus::Inserted
+    let done_message = if status == InsertStatus::Inserted
         && !polish_error.is_some()
         && !tsf_required_insert_failed
         && !wayland_session

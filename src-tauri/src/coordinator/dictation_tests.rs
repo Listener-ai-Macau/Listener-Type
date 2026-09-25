@@ -15982,16 +15982,20 @@ fn pause_early_final_remainder_splits_on_stability_key_prefix() {
 }
 
 #[test]
-fn final_asr_revision_of_pasted_word_requires_verified_replacement() {
-    use super::{pause_early_final_remainder, pause_early_final_revises_delivered_text};
+fn final_asr_revision_cannot_replace_a_committed_word() {
+    use super::{pause_early_final_remainder, pause_early_mismatch_recovery_tail};
     let delivered = "你不用一直轮询，检查到自动判刑再去查。";
     let final_text = "你不用一直轮询，检查到自动唤醒再去查。";
     let key = super::embedded_audio_partial_preview_stability_key(delivered);
 
     assert_eq!(pause_early_final_remainder(final_text, delivered, &key), None);
-    assert!(pause_early_final_revises_delivered_text(final_text, delivered));
-    assert!(pause_early_final_revises_delivered_text("你好！", "你好。"));
-    assert!(!pause_early_final_revises_delivered_text("你好，继续。", "你好，"));
+    assert_eq!(pause_early_mismatch_recovery_tail(final_text, &key), None);
+    let continued = "你不用一直轮询，检查到自动唤醒再去查。然后继续说。";
+    assert_eq!(
+        pause_early_mismatch_recovery_tail(continued, &key),
+        Some("然后继续说。".to_string()),
+        "the new clause is appended without replaying the corrected word"
+    );
 }
 
 #[test]
@@ -16115,18 +16119,17 @@ fn pause_early_live_continuation_survives_a_rewritten_paste_seam() {
 }
 
 #[test]
-fn pause_early_mismatch_recovery_tail_recovers_clean_rewrites() {
+fn pause_early_mismatch_recovery_tail_only_appends_new_content() {
     use super::pause_early_mismatch_recovery_tail;
     let key = |text: &str| super::embedded_audio_partial_preview_stability_key(text);
 
-    // 2026-09-22 21:5x 用户实锤"出来两次"后改版契约:改写只允许在交付
-    // 末尾 ≤2 字(标点/同音边界级)时补尾;分界深入交付区间的改写不补——
-    // 旧文本已在屏上收不回,补新尾=新旧并存重复(宁少不重复,H 族)。
+    // The stop result revises the last committed word; only the following
+    // new clause may be appended. The committed word stays unchanged.
     let delivered = "今天测试一下停顿录屏";
     let boundary = "今天测试一下停顿落屏。然后补一句。";
     let tail = pause_early_mismatch_recovery_tail(boundary, &key(delivered))
         .expect("boundary rewrite recovers tail");
-    assert_eq!(tail, "落屏。然后补一句。");
+    assert_eq!(tail, "然后补一句。");
 
     // 中段改写(分界后交付区还有 6 字旧内容)但终稿带增长尾 → 2026-09-23
     // 增长尾契约:max(8, 交付/3) 差值内从已交付长度处补尾,屏上旧字不动。
@@ -16164,12 +16167,12 @@ fn pause_early_mismatch_recovery_tail_survives_shared_utf8_prefix_divergence() {
         Some("的链接".to_string())
     );
 
-    // 同族字对落在交付末尾(≤2 字,同音边界级)时照常补尾,不 panic。
+    // A same-length correction of the committed last word adds nothing.
     let boundary_delivered = "今天测试一下停顿报";
     let boundary_final = "今天测试一下停顿抱。";
     assert_eq!(
         pause_early_mismatch_recovery_tail(boundary_final, &key(boundary_delivered)),
-        Some("抱。".to_string())
+        None
     );
 }
 
@@ -16214,6 +16217,14 @@ fn pause_early_mismatch_recovery_tail_appends_growth_tail_on_late_polish() {
         pause_early_mismatch_recovery_tail(restated, &key(delivered)),
         None
     );
+
+    let committed = "今天测试一下停顿落屏然后继续下一步";
+    let internal_insert = "今天测试一下停顿落屏然后马上继续下一步";
+    assert_eq!(
+        pause_early_mismatch_recovery_tail(internal_insert, &key(committed)),
+        None,
+        "extra words inside a committed clause are not an unpasted tail"
+    );
 }
 
 #[test]
@@ -16257,10 +16268,10 @@ fn pause_early_rollback_restores_confirmed_prefix_and_keeps_sticky_floor() {
 }
 
 #[test]
-fn early_paste_tracks_editor_switch_without_retargeting_final_correction() {
+fn early_paste_keeps_committed_ledger_across_editor_switches() {
     use super::{
         pause_early_delivery_confirm, pause_early_delivery_reserve,
-        pause_early_note_paste_target, pause_early_single_paste_target,
+        take_pause_early_delivery,
     };
 
     let coordinator = Coordinator::new();
@@ -16268,19 +16279,15 @@ fn early_paste_tracks_editor_switch_without_retargeting_final_correction() {
     let session_id = uuid::Uuid::new_v4();
     pause_early_delivery_reserve(inner, session_id, "第一句。".into(), "第一句".into());
     pause_early_delivery_confirm(inner, session_id);
-    pause_early_note_paste_target(inner, session_id, Some(101));
-    assert_eq!(pause_early_single_paste_target(inner, session_id), Some(101));
-
+    // The user may move the cursor between clauses. The delivery ledger
+    // stays session-wide; finalization only appends any remaining tail at
+    // the current cursor and never reaches back into either editor.
     pause_early_delivery_reserve(inner, session_id, "第一句。第二句。".into(), "第一句第二句".into());
     pause_early_delivery_confirm(inner, session_id);
-    pause_early_note_paste_target(inner, session_id, Some(202));
     assert_eq!(
-        pause_early_single_paste_target(inner, session_id),
-        None,
-        "a final correction must not select and rewrite text split across two apps"
+        take_pause_early_delivery(inner, session_id),
+        Some(("第一句。第二句。".into(), "第一句第二句".into()))
     );
-    pause_early_note_paste_target(inner, session_id, Some(101));
-    assert_eq!(pause_early_single_paste_target(inner, session_id), None);
 }
 
 #[test]

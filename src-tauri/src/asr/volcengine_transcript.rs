@@ -563,6 +563,30 @@ pub(super) fn authoritative_final_supersedes_repeated_streaming_ledger(
         return false;
     }
 
+    // A duplicated stream row can be appended after newer, correctly
+    // recognized speech. In that shape the ledger ends with an older clause,
+    // while the sealed provider final carries a different, newer suffix.
+    // Exact tail matching misses normal two-pass spelling corrections.
+    let shared_prefix = final_chars
+        .iter()
+        .zip(&ledger_chars)
+        .take_while(|(left, right)| left == right)
+        .count();
+    if shared_prefix >= 24
+        && shared_prefix * 5 >= final_chars.len() * 3
+        && final_chars.len().saturating_sub(shared_prefix) >= 6
+    {
+        let stale_tail = &ledger_chars[shared_prefix..];
+        if (MIN_REPEATED_TAIL_CHARS..=96).contains(&stale_tail.len())
+            && repeated_earlier_clause_with_small_correction(
+                &ledger_chars[..shared_prefix],
+                stale_tail,
+            )
+        {
+            return true;
+        }
+    }
+
     let max_tail = MAX_REPEATED_TAIL_CHARS
         .min(ledger_chars.len() / 2)
         .min(ledger_chars.len().saturating_sub(MIN_FINAL_CHARS));
@@ -588,6 +612,33 @@ pub(super) fn authoritative_final_supersedes_repeated_streaming_ledger(
             && (distance as f64 / denominator as f64) <= MAX_FINAL_TO_CLEAN_LEDGER_CER
         {
             return true;
+        }
+    }
+    false
+}
+
+fn repeated_earlier_clause_with_small_correction(earlier: &[char], tail: &[char]) -> bool {
+    const ANCHOR_CHARS: usize = 5;
+    const MAX_RECOGNITION_CORRECTION_CER: f64 = 0.25;
+    if tail.len() < ANCHOR_CHARS || earlier.len() < ANCHOR_CHARS {
+        return false;
+    }
+    let length_slack = 3usize.max(tail.len() / 5);
+    let min_len = tail.len().saturating_sub(length_slack);
+    let max_len = tail.len().saturating_add(length_slack);
+    let tail_text: String = tail.iter().collect();
+    for start in 0..=earlier.len() - ANCHOR_CHARS {
+        if earlier[start..start + ANCHOR_CHARS] != tail[..ANCHOR_CHARS] {
+            continue;
+        }
+        for length in min_len..=max_len.min(earlier.len() - start) {
+            let earlier_text: String = earlier[start..start + length].iter().collect();
+            let distance = char_edit_distance(&earlier_text, &tail_text);
+            if (distance as f64 / length.max(tail.len()) as f64)
+                <= MAX_RECOGNITION_CORRECTION_CER
+            {
+                return true;
+            }
         }
     }
     false
@@ -1766,6 +1817,27 @@ mod tests {
         assert!(authoritative_final_supersedes_repeated_streaming_ledger(
             authoritative_final,
             inflated_ledger
+        ));
+    }
+
+    #[test]
+    fn authoritative_final_replaces_replayed_earlier_clause_and_keeps_new_tail() {
+        // e650c1fa: the ledger replayed the second clause after a later
+        // sentence; the provider final had already recognized the third one.
+        let final_text = "嗯，开始录音。就是你现在新版是安装了，然后我现在进行第一次测试，这是第一段，停顿前。然后这是第二段停顿前，然后感觉这个出字速度，感觉是不是延迟了？这个延迟好像时快时慢，是网络的问题吗？呃，对，然后现在是发现了这个重复的事情，你发现同一段话重复出现了两次。然后这个东西就不行了。";
+        let inflated_ledger = "嗯，开始录音。就是你现在新版是安装了，然后我现在进行第一次测试，这是第一段，停顿前。然后这是第二段停顿前，然后感觉这个出字速度，感觉是不是延迟了？这个延迟好像时快时慢，是网络的问题吗？呃，对，然后现在是发现了这个重复的事情，你发现同一段话重复出现了两次然后这是第二段停段球，然后感觉这个出自速度，感觉是不是延迟了？这个延迟好像时快时慢了，是网络的问题";
+        assert!(authoritative_final_supersedes_repeated_streaming_ledger(
+            final_text,
+            inflated_ledger,
+        ));
+    }
+
+    #[test]
+    fn authoritative_final_keeps_unique_longer_owner_suffix() {
+        let provider = "开始录音。请检查第一段文本，然后检查第二段，最后告诉我处理结果。";
+        let ledger = format!("{provider}这一段是本人随后补充的新内容，并没有在前文说过。");
+        assert!(!authoritative_final_supersedes_repeated_streaming_ledger(
+            provider, &ledger,
         ));
     }
 
