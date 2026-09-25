@@ -112,9 +112,9 @@ struct SettledTargetEndpointClock {
     /// while the next classifier window settles, but cannot rearm the clock.
     tentative_owner_continuation_at: Option<Instant>,
     tentative_owner_continuation_audio_ms: Option<u64>,
-    /// VAD turn containing the local Target candidate. Once attached, the
-    /// owner-compatible turn stays pending through Uncertain classifier
-    /// windows and receives the ordinary quiet interval after speech ends.
+    /// VAD turn that began inside the last delivered body's continuation
+    /// window, or contains a tentative local Target. Its identity can remain
+    /// unresolved while the owner speaks; it is not an owner watermark.
     tentative_owner_vad_epoch: Option<u64>,
     tentative_owner_quiet_audio_ms: Option<u64>,
     /// The accepted wake has not produced any body text.  This is not a
@@ -201,9 +201,10 @@ struct SettledTargetEndpointClock {
 
 const RECENT_STRONG_NON_TARGET_WINDOW_MS: u64 = 900;
 // A new local VAD onset can arrive just before the owner inactivity deadline.
-// Automatic sessions use it only to veto STOP while the audio is live; it is
-// never an owner watermark or a fresh three-second lease.
+// The classifier's coverage may briefly trail capture; that gap is pending
+// analysis, not evidence of silence. It is never an owner watermark.
 const AUTOMATIC_STOP_VAD_MAX_LAG_MS: u64 = 250;
+const AUTOMATIC_STOP_VAD_STALLED_ANALYSIS_ESCAPE_MS: u64 = 3_000;
 const TENTATIVE_OWNER_CONTINUATION_MAX_WAIT_MS: u64 = 1_500;
 const MANUAL_TERMINAL_BRIDGE_MAX_MS: u64 = 3_000;
 const MANUAL_TERMINAL_BRIDGE_MIN_VISIBLE_CHARS: usize = 20;
@@ -328,7 +329,7 @@ fn automatic_vad_candidate_holds_stop(
     let captured_ms = update.audio_duration_ms.unwrap_or_default();
     evidence.revision > 0
         && captured_ms.saturating_sub(evidence.analyzed_through_ms)
-            <= AUTOMATIC_STOP_VAD_MAX_LAG_MS
+            < AUTOMATIC_STOP_VAD_STALLED_ANALYSIS_ESCAPE_MS
 }
 
 /// Once the local owner has been established, a fresh still-speakerless or
@@ -359,6 +360,18 @@ impl SettledTargetEndpointClock {
         self.tentative_owner_continuation_audio_ms = None;
         self.tentative_owner_vad_epoch = None;
         self.tentative_owner_quiet_audio_ms = None;
+        if self.latest_local_vad_evidence.is_some_and(|evidence| {
+            matches!(
+                evidence.state,
+                crate::asr::volcengine::LocalSpeechActivityState::PendingSpeech
+                    | crate::asr::volcengine::LocalSpeechActivityState::Speech
+            )
+        }) && self.latest_update.as_ref().is_some_and(|update| {
+            !update_has_recent_strong_non_target(update)
+        }) {
+            self.tentative_owner_vad_epoch =
+                self.latest_local_vad_evidence.map(|evidence| evidence.activity_epoch);
+        }
         self.manual_terminal_bridge_until = None;
         self.manual_terminal_bridge_rearm_pending = false;
         // A committed chunk is the start of the public continuation window.
@@ -587,6 +600,34 @@ impl SettledTargetEndpointClock {
         evidence: crate::asr::volcengine::LocalSpeechEvidence,
     ) {
         use crate::asr::volcengine::LocalSpeechActivityState;
+        // The last delivered chunk opens a three-second opportunity to
+        // continue. A new local speech turn within it remains unresolved until
+        // speaker evidence arrives; it cannot be silently discarded merely
+        // because every classifier window is Uncertain.
+        if self.automatic_wake_session
+            && !self.automatic_no_body_armed
+            && self.tentative_owner_vad_epoch.is_none()
+            && matches!(evidence.state, LocalSpeechActivityState::PendingSpeech | LocalSpeechActivityState::Speech)
+            && self.latest_update.as_ref().is_some_and(|update| {
+                !update_has_recent_strong_non_target(update)
+            })
+        {
+            if let (Some(delivery_ms), Some(previous)) =
+                (self.last_body_delivery_audio_ms, self.latest_local_vad_evidence)
+            {
+                let onset_ms = evidence
+                    .pending_speech_start_ms
+                    .unwrap_or(evidence.analyzed_through_ms);
+                if evidence.activity_epoch > previous.activity_epoch
+                    && onset_ms.saturating_add(AUTOMATIC_STOP_VAD_MAX_LAG_MS) >= delivery_ms
+                    && onset_ms.saturating_sub(delivery_ms)
+                        < EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+                {
+                    self.tentative_owner_vad_epoch = Some(evidence.activity_epoch);
+                    self.tentative_owner_quiet_audio_ms = None;
+                }
+            }
+        }
         // A new speech epoch inside the quiet window may be the same owner
         // continuing after a pause. Keep it pending until speaker evidence
         // settles; a confirmed Other observation clears the turn in observe.
@@ -601,6 +642,7 @@ impl SettledTargetEndpointClock {
                     .last_detected_speech_end_ms
                     .filter(|speech_end_ms| {
                         self.tentative_owner_continuation_audio_ms
+                            .or(self.last_body_delivery_audio_ms)
                             .is_some_and(|candidate_ms| *speech_end_ms >= candidate_ms)
                     })
                     .unwrap_or(evidence.analyzed_through_ms);
@@ -1524,12 +1566,14 @@ impl SettledTargetEndpointClock {
                 match evidence.state {
                     LocalSpeechActivityState::PendingSpeech | LocalSpeechActivityState::Speech => {
                         captured_ms.saturating_sub(evidence.analyzed_through_ms)
-                            <= AUTOMATIC_STOP_VAD_MAX_LAG_MS
+                            < AUTOMATIC_STOP_VAD_STALLED_ANALYSIS_ESCAPE_MS
                     }
                     LocalSpeechActivityState::NonSpeech => self
                         .tentative_owner_quiet_audio_ms
                         .is_some_and(|quiet_start_ms| {
-                            captured_ms.saturating_sub(quiet_start_ms)
+                            captured_ms.saturating_sub(evidence.analyzed_through_ms)
+                                < AUTOMATIC_STOP_VAD_STALLED_ANALYSIS_ESCAPE_MS
+                                && captured_ms.saturating_sub(quiet_start_ms)
                                 < EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
                         }),
                     LocalSpeechActivityState::Unknown => false,
