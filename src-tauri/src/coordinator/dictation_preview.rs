@@ -1543,11 +1543,12 @@ const PAUSE_EARLY_UNPUNCTUATED_QUIET: Duration = Duration::from_millis(800);
 // A one-character stable prefix is still often a provider placeholder. In
 // installed 1.0.6 session 3e8ab1c5 it was pasted, then the provider rewrote
 // the opening and final reconciliation could not safely retract it. Keep such
-// fragments in the reversible capsule. A complete punctuated clause can be
-// shorter than an unpunctuated fragment: session da86f71c held the stable
-// "我没有懂，" until the next long sentence, delaying first paste to 7.9 s.
+// fragments in the reversible capsule. Complete spoken clauses can be
+// shorter than unpunctuated fragments: sessions a89b39ce and da86f71c held
+// stable "然后呢？" and "我没有懂，" until much later sentences.
 const PAUSE_EARLY_FIRST_CHUNK_MIN_CONTENT_CHARS: usize = 6;
 const PAUSE_EARLY_FIRST_COMPLETE_CLAUSE_MIN_CONTENT_CHARS: usize = 4;
+const PAUSE_EARLY_FIRST_COMPLETE_SENTENCE_MIN_CONTENT_CHARS: usize = 3;
 const PAUSE_EARLY_NEXT_CHUNK_MIN_CONTENT_CHARS: usize = 3;
 
 /// Paste only a stable, punctuated clause. The capsule continues showing the
@@ -1594,7 +1595,16 @@ fn pause_early_chunk_ready(delivered_key: &str, delta: &str) -> bool {
         .count();
     count >= if delivered_key.is_empty() {
         if pause_early_complete_clause(delta) == Some(delta) {
-            PAUSE_EARLY_FIRST_COMPLETE_CLAUSE_MIN_CONTENT_CHARS
+            let sentence_end = delta
+                .trim_end_matches(|ch| matches!(ch, '”' | '’' | '"' | '\'' | '）' | ')' | '】' | ']'))
+                .chars()
+                .last()
+                .is_some_and(|ch| matches!(ch, '。' | '！' | '!' | '？' | '?'));
+            if sentence_end {
+                PAUSE_EARLY_FIRST_COMPLETE_SENTENCE_MIN_CONTENT_CHARS
+            } else {
+                PAUSE_EARLY_FIRST_COMPLETE_CLAUSE_MIN_CONTENT_CHARS
+            }
         } else {
             PAUSE_EARLY_FIRST_CHUNK_MIN_CONTENT_CHARS
         }

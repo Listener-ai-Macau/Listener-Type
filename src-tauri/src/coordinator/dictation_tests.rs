@@ -16000,6 +16000,10 @@ fn pause_early_delivery_waits_for_a_clause_instead_of_pasting_provider_placehold
 
     assert!(!pause_early_chunk_ready("", "哎"));
     assert!(!pause_early_chunk_ready("", "Her."));
+    assert_eq!(pause_early_segment("然后呢？不知道为什么", false), Some("然后呢？"));
+    assert!(pause_early_chunk_ready("", "然后呢？"));
+    assert!(pause_early_chunk_ready("", "他说：\"好吧！\""));
+    assert!(!pause_early_chunk_ready("", "然后呢，"));
     assert!(!pause_early_chunk_ready("", "我没有懂"));
     assert!(pause_early_chunk_ready("", "我没有懂，"));
     assert!(!pause_early_chunk_ready("", "我没有，懂了"));
