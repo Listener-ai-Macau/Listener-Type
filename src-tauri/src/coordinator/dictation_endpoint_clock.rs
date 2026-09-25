@@ -107,6 +107,11 @@ struct SettledTargetEndpointClock {
     /// silence edge or at a later provider preview revision.
     last_body_delivery_at: Option<Instant>,
     last_body_delivery_audio_ms: Option<u64>,
+    /// A local Target decision for post-delivery audio whose signal quality
+    /// has not yet qualified it as owner speech. It can briefly veto STOP
+    /// while the next classifier window settles, but cannot rearm the clock.
+    tentative_owner_continuation_at: Option<Instant>,
+    tentative_owner_continuation_audio_ms: Option<u64>,
     /// The accepted wake has not produced any body text.  This is not a
     /// second endpoint: it is an explicit mode of the same controller, armed
     /// from the automatic-wake guard's original clock.  Wake-phrase audio and
@@ -194,6 +199,7 @@ const RECENT_STRONG_NON_TARGET_WINDOW_MS: u64 = 900;
 // Automatic sessions use it only to veto STOP while the audio is live; it is
 // never an owner watermark or a fresh three-second lease.
 const AUTOMATIC_STOP_VAD_MAX_LAG_MS: u64 = 250;
+const TENTATIVE_OWNER_CONTINUATION_MAX_WAIT_MS: u64 = 1_500;
 const MANUAL_TERMINAL_BRIDGE_MAX_MS: u64 = 3_000;
 const MANUAL_TERMINAL_BRIDGE_MIN_VISIBLE_CHARS: usize = 20;
 /// Automatic-wake sessions earn the bounded open-clause continuation only
@@ -344,6 +350,8 @@ impl SettledTargetEndpointClock {
             .latest_update
             .as_ref()
             .and_then(|update| update.audio_duration_ms);
+        self.tentative_owner_continuation_at = None;
+        self.tentative_owner_continuation_audio_ms = None;
         self.manual_terminal_bridge_until = None;
         self.manual_terminal_bridge_rearm_pending = false;
         // A committed chunk is the start of the public continuation window.
@@ -983,6 +991,23 @@ impl SettledTargetEndpointClock {
         }
         let positive_evidence_live = self.positive_owner_evidence_live(now);
         let recent_strong_non_target = update_has_recent_strong_non_target(update);
+        if self.automatic_wake_session && update.local_speaker_tracking_enabled {
+            if self.owner_spoke_after_body_delivery(update) || recent_strong_non_target {
+                self.tentative_owner_continuation_at = None;
+                self.tentative_owner_continuation_audio_ms = None;
+            } else if let Some(candidate_audio_ms) = update.local_tentative_owner_speech_end_ms {
+                if self
+                    .last_body_delivery_audio_ms
+                    .is_some_and(|delivery_audio_ms| candidate_audio_ms > delivery_audio_ms)
+                    && self
+                        .tentative_owner_continuation_audio_ms
+                        .is_none_or(|previous_ms| candidate_audio_ms > previous_ms)
+                {
+                    self.tentative_owner_continuation_at.get_or_insert(now);
+                    self.tentative_owner_continuation_audio_ms = Some(candidate_audio_ms);
+                }
+            }
+        }
         let pending_was_seen_before = self.pending_was_seen;
         let mut pending_snapshot = update.clone();
         pending_snapshot.target_speech_end_ms = pending_snapshot.target_speech_end_ms
@@ -1428,6 +1453,16 @@ impl SettledTargetEndpointClock {
             now.saturating_duration_since(delivered_at)
                 < Duration::from_millis(EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS)
         }) {
+            return false;
+        }
+        if self.automatic_wake_session
+            && self.tentative_owner_continuation_at.is_some_and(|candidate_at| {
+                now.saturating_duration_since(candidate_at)
+                    < Duration::from_millis(TENTATIVE_OWNER_CONTINUATION_MAX_WAIT_MS)
+            })
+            && !update_has_recent_strong_non_target(&update)
+        {
+            self.note_due_hold_diagnostic(self.generation, "tentative_owner_continuation");
             return false;
         }
         if self.automatic_wake_session

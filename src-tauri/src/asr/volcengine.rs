@@ -538,6 +538,10 @@ pub struct TargetSpeakerUpdate {
     pub local_speaker_classification_kind: Option<LocalSpeakerClassificationKind>,
     pub local_speaker_signal_quality_sufficient: Option<bool>,
     pub local_speaker_observation_end_ms: Option<u64>,
+    /// A local Target observation that has not yet passed the signal-quality
+    /// gate. Its own audio boundary survives newer raw capture; endpointing
+    /// may use it only as a bounded pending decision, never as an owner clock.
+    pub local_tentative_owner_speech_end_ms: Option<u64>,
     pub local_target_speech_end_ms: Option<u64>,
     pub local_non_target_speech_end_ms: Option<u64>,
     pub local_speaker_tracking_enabled: bool,
@@ -1029,6 +1033,15 @@ fn target_speaker_update_from_state(
             .then_some(state.local_speaker_signal_quality_sufficient)
             .flatten(),
         local_speaker_observation_end_ms: state.local_speaker_observation_end_ms,
+        local_tentative_owner_speech_end_ms: (state.local_target_confirmed
+            && !owner_handoff_suspected
+            && state.local_speaker_signal_quality_sufficient == Some(false)
+            && matches!(
+                &state.local_speaker_classification,
+                Some(crate::speaker_verification::SessionSpeakerClassification::Target { .. })
+            ))
+        .then_some(state.local_speaker_observation_end_ms)
+        .flatten(),
         local_target_speech_end_ms: state.local_target_speech_end_ms,
         // Keep transcript filtering's immediate advisory boundary private.
         // Endpointing sees only the sustained owner-absence boundary so the
@@ -16920,6 +16933,31 @@ mod tests {
             recovered_owner.local_speaker_observation_end_ms,
             Some(raw_tail_end_ms)
         );
+    }
+
+    #[test]
+    fn tentative_local_target_survives_one_raw_capture_frame_without_becoming_confirmed_owner() {
+        use crate::speaker_verification::SessionSpeakerClassification;
+
+        let mut state = SyncState::default();
+        state.local_speaker_tracking_enabled = true;
+        state.local_target_confirmed = true;
+        state.local_speaker_stable_target = true;
+        state.local_audio_duration_ms = Some(6_300);
+        state.local_speech_end_ms = Some(6_300);
+        state.local_speaker_observation_end_ms = Some(6_200);
+        state.local_speaker_classification = Some(SessionSpeakerClassification::Target { score: 0.43 });
+        state.local_speaker_signal_quality_sufficient = Some(false);
+        state.qualified_owner_speech_end_ms = Some(3_000);
+
+        let update = target_speaker_update_from_state(&state, false, false, false);
+        assert_eq!(update.local_speaker_classification_kind, None);
+        assert_eq!(update.local_tentative_owner_speech_end_ms, Some(6_200));
+        assert_eq!(update.qualified_owner_speech_end_ms, Some(3_000));
+
+        state.local_speaker_classification = Some(SessionSpeakerClassification::NonTarget { score: 0.05 });
+        let other = target_speaker_update_from_state(&state, false, false, false);
+        assert_eq!(other.local_tentative_owner_speech_end_ms, None);
     }
 
     #[test]
