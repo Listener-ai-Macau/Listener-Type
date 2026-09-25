@@ -11470,9 +11470,17 @@ fn local_confirmation_adds_context_with_a_strict_attempt_cap() {
     );
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(5),
+        Some(3_800 * 32)
+    );
+    assert_eq!(
+        super::next_local_confirmation_snapshot_bytes(6),
+        Some(4_400 * 32)
+    );
+    assert_eq!(
+        super::next_local_confirmation_snapshot_bytes(7),
         Some(5_000 * 32)
     );
-    assert_eq!(super::next_local_confirmation_snapshot_bytes(6), None);
+    assert_eq!(super::next_local_confirmation_snapshot_bytes(8), None);
 }
 
 #[test]
@@ -11480,10 +11488,14 @@ fn local_confirmation_ladder_does_not_block_the_complete_phrase_window() {
     // Installed 569/578/583: the 1.4 s inference was still running when the
     // useful 1.8 s phrase tail arrived. The helper is single-flight, so that
     // rung increased latency instead of recall.
-    let snapshots = (0..6)
+    let snapshots = (0..8)
         .map(|attempt| super::next_local_confirmation_snapshot_bytes(attempt).unwrap() / 32)
         .collect::<Vec<_>>();
-    assert_eq!(snapshots, vec![800, 1_800, 2_000, 2_400, 3_000, 5_000]);
+    assert_eq!(
+        snapshots,
+        vec![800, 1_800, 2_000, 2_400, 3_000, 3_800, 4_400, 5_000]
+    );
+    assert!(snapshots[4..].windows(2).all(|pair| pair[1] - pair[0] <= 800));
     assert!(!snapshots.contains(&1_400));
     assert!(!snapshots.contains(&1_600));
 }

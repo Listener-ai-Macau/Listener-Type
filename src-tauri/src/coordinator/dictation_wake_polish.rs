@@ -2873,12 +2873,17 @@ const FAST_PREROLL_LOCAL_CONFIRM_DEFER_UNTIL_MS: usize = 1_200;
 // overshot to 3.633 s PCM. Keep the 0.8 s fast-speech check, then wait for a
 // realistic complete-phrase window at 1.8 s. A strong start prefix gets the
 // existing 140 ms new-audio retry, so slow speech does not wait for 2.0 s.
-const LOCAL_CONFIRMATION_SNAPSHOT_MS: [usize; 6] = [
+// A wake phrase can begin after ambient speech has already opened the
+// firmware segment. Keep the late exploratory gap bounded: session 1158
+// stayed Absent at 3.0 s but contained the complete phrase before 5.0 s.
+const LOCAL_CONFIRMATION_SNAPSHOT_MS: [usize; 8] = [
     LOCAL_CONFIRMATION_START_MS,
     1_800,
     2_000,
     2_400,
     3_000,
+    3_800,
+    4_400,
     5_000,
 ];
 /// Once KWS already heard the phrase, do not wait for the 1.8s ladder floor.

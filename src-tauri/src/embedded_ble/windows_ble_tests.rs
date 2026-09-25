@@ -255,6 +255,30 @@ fn type_heartbeat_prefers_no_response_when_available() {
 }
 
 #[test]
+fn live_recording_defers_heartbeat_but_keeps_firmware_lease() {
+    // TYPE:HB is best effort during capture; a queued wake ENSURE must not
+    // wait behind its GATT write. The firmware lease is 45 s.
+    assert!(defer_type_heartbeat_for_active_session(
+        true,
+        Some(Duration::from_secs(8))
+    ));
+    assert!(defer_type_heartbeat_for_active_session(
+        true,
+        Some(Duration::from_secs(29))
+    ));
+    assert!(!defer_type_heartbeat_for_active_session(
+        true,
+        Some(Duration::from_secs(30))
+    ));
+    assert!(!defer_type_heartbeat_for_active_session(
+        false,
+        Some(Duration::from_secs(8))
+    ));
+    assert!(!defer_type_heartbeat_for_active_session(true, None));
+    assert!(TYPE_HEARTBEAT_WRITE_TIMEOUT < Duration::from_secs(2));
+}
+
+#[test]
 fn audio_control_toggle_prefers_no_response_when_available() {
     let both =
         GattCharacteristicProperties::Write | GattCharacteristicProperties::WriteWithoutResponse;
@@ -2407,6 +2431,28 @@ fn active_audio_control_registration_only_clears_matching_capture() {
     assert_eq!(active_audio_control_sender().unwrap().capture_id, 20);
 
     drop(registration2);
+    assert!(active_audio_control_sender().is_none());
+}
+
+#[test]
+fn queued_audio_control_timeout_keeps_live_capture_and_expires_command() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    *active_audio_control_slot().lock().unwrap() = None;
+    let (tx, rx) = mpsc::channel();
+    let registration = ActiveAudioControlRegistration::install(73, tx);
+
+    let result = send_audio_control_via_active_capture(
+        b"VREC:ENSURE:00000001:00000002\n",
+        Duration::from_millis(1),
+        "accepted wake capture ensure",
+    )
+    .expect("capture registration must remain present");
+
+    assert!(result.unwrap_err().contains("timed out"));
+    assert_eq!(active_audio_control_sender().unwrap().capture_id, 73);
+    let queued = rx.try_recv().expect("expired request remains observable");
+    assert!(queued.cancelled.load(Ordering::Acquire));
+    drop(registration);
     assert!(active_audio_control_sender().is_none());
 }
 

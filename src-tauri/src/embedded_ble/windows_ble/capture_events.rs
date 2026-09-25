@@ -358,25 +358,42 @@ fn send_audio_control_via_active_capture(
 ) -> Option<Result<(), String>> {
     let active = active_audio_control_sender()?;
     let (result_tx, result_rx) = mpsc::channel();
+    let cancelled = Arc::new(AtomicBool::new(false));
     let request = AudioControlRequest {
         bytes: bytes.to_vec(),
         label: label.to_string(),
         timeout,
         queued_at: Instant::now(),
+        cancelled: Arc::clone(&cancelled),
         result_tx,
     };
     if active.tx.send(request).is_err() {
         clear_active_audio_control_sender(active.capture_id);
         return None;
     }
-    let result = result_rx
-        .recv_timeout(timeout + Duration::from_secs(1))
-        .unwrap_or_else(|_| {
-            Err(format!(
+    let result = match result_rx.recv_timeout(timeout + Duration::from_secs(1)) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            // A queued command is not a failed GATT link. Keep the active
+            // registration so a later cancel can still reach this capture,
+            // and prevent an undrained ENSURE from starting an orphan session.
+            cancelled.store(true, Ordering::Release);
+            log::warn!(
+                "[embedded-ble] active audio control reply timed out label={} capture_id={} wait_ms={}",
+                label,
+                active.capture_id,
+                (timeout + Duration::from_secs(1)).as_millis()
+            );
+            return Some(Err(format!(
                 "active Listener BLE audio control timed out after {} ms",
                 timeout.as_millis()
-            ))
-        });
+            )));
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            clear_active_audio_control_sender(active.capture_id);
+            return Some(Err("active Listener BLE audio control worker disconnected".to_string()));
+        }
+    };
     if let Err(err) = &result {
         if is_transient_audio_control_write_error(err) {
             clear_active_audio_control_sender(active.capture_id);
@@ -789,6 +806,7 @@ fn capture_notification_events_until_cancelled_impl(
     // firmware keeps its pairing/LED recovery window open until it has
     // accepted TYPE:READY (or a later Type heartbeat after a retry).
     let mut type_ready_confirmed = false;
+    let mut last_type_heartbeat_at = None;
     let type_ready_command = type_ready_command_bytes();
     if type_heartbeat_enabled && ble_ota_process_mutex_busy() {
         log::info!(
@@ -819,6 +837,7 @@ fn capture_notification_events_until_cancelled_impl(
             }
             on_ready()?;
             type_ready_confirmed = true;
+            last_type_heartbeat_at = Some(Instant::now());
             if type_heartbeat_enabled {
                 next_type_heartbeat = Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL);
             }
@@ -875,7 +894,17 @@ fn capture_notification_events_until_cancelled_impl(
         }
         if let Some(due) = next_type_heartbeat {
             if now >= due {
-                if let Err(err) = cleanup.write_type_heartbeat(b"TYPE:HB\n", "Type heartbeat") {
+                // ENSURE and STOP share this capture thread with TYPE:HB. A
+                // response-bearing or stalled heartbeat otherwise consumes
+                // the entire wake continuation deadline while PCM is live.
+                // The firmware's 45 s lease permits a bounded deferral.
+                let heartbeat_deferred = defer_type_heartbeat_for_active_session(
+                    collector_has_active_recoverable_session(&collector),
+                    last_type_heartbeat_at.map(|last| now.duration_since(last)),
+                );
+                if heartbeat_deferred {
+                    next_type_heartbeat = Some(now + Duration::from_secs(1));
+                } else if let Err(err) = cleanup.write_type_heartbeat(b"TYPE:HB\n", "Type heartbeat") {
                     consecutive_type_heartbeat_failures =
                         consecutive_type_heartbeat_failures.saturating_add(1);
                     let reason = format!("{err}; BLE audio/control response missing");
@@ -932,6 +961,7 @@ fn capture_notification_events_until_cancelled_impl(
                     }
                     consecutive_type_heartbeat_failures = 0;
                     cleanup.mark_type_heartbeat_open();
+                    last_type_heartbeat_at = Some(Instant::now());
                     if !type_ready_confirmed {
                         on_ready()?;
                         type_ready_confirmed = true;
@@ -940,7 +970,9 @@ fn capture_notification_events_until_cancelled_impl(
                         );
                     }
                 }
-                next_type_heartbeat = Some(now + TYPE_HEARTBEAT_INTERVAL);
+                if !heartbeat_deferred {
+                    next_type_heartbeat = Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL);
+                }
             }
         }
         if cancel_requested.load(Ordering::SeqCst) {

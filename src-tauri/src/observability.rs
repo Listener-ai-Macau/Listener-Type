@@ -2659,9 +2659,11 @@ impl EmbeddedAudioPipelineObservation {
 
     pub(crate) fn snapshot(&self, reason: &'static str, force: bool) {
         let now = Instant::now();
-        // Poll snapshots run on the live audio path. Serializing every bounded
-        // evidence ledger once per second grows to tens of KB per poll; retain
-        // the full ledger for terminal/error snapshots and test sinks instead.
+        // Poll snapshots run on the live audio path. Keep only the current
+        // physical segment here: serializing every prior segment once a second
+        // grows the line to tens of KB, stalls capture, and rotates away the
+        // wake/control evidence we need. Terminal/error snapshots retain the
+        // full ledger.
         if !force && self.snapshot_sink.lock().is_none() {
             let summary = {
                 let mut state = self.state.lock();
@@ -2683,7 +2685,17 @@ impl EmbeddedAudioPipelineObservation {
                     snapshot_seq: state.snapshot_seq,
                     monotonic_ms: now.duration_since(state.started_at).as_millis() as u64,
                     counters: state.counters,
-                    segment_counters: state.segment_counters.clone(),
+                    segment_counters: state
+                        .embedded_session_id
+                        .and_then(|segment_id| {
+                            state
+                                .segment_counters
+                                .get(&segment_id)
+                                .copied()
+                                .map(|counters| (segment_id, counters))
+                        })
+                        .into_iter()
+                        .collect(),
                     segment_ledger_incomplete: state.segment_ledger_incomplete,
                     interval_ledger_incomplete: state.interval_ledger_incomplete,
                     asr_destination_facts_incomplete: state.asr_destination_facts_incomplete,

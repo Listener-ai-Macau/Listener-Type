@@ -108,7 +108,10 @@ fn release_winrt_bluetooth_object<T>(object: T) {
 const RECONNECT_COOLDOWN: Duration = Duration::from_millis(350);
 const RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const TYPE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(8);
-const TYPE_HEARTBEAT_WRITE_TIMEOUT: Duration = Duration::from_millis(3000);
+// The firmware keeps TYPE ready for 45 s. A stalled best-effort heartbeat
+// must not occupy the capture/control thread for the full ENSURE deadline.
+const TYPE_HEARTBEAT_WRITE_TIMEOUT: Duration = Duration::from_millis(750);
+const TYPE_HEARTBEAT_ACTIVE_SESSION_MAX_GAP: Duration = Duration::from_secs(30);
 const POST_OTA_TYPE_READY_WRITE_TIMEOUT: Duration = Duration::from_millis(500);
 const TYPE_READY_RECOVERY_PAIRING_ADV_PROBE_TIMEOUT: Duration = Duration::from_millis(900);
 const CAPTURE_NOTIFICATION_INFO_LOG_LIMIT: usize = 4;
@@ -378,6 +381,7 @@ struct AudioControlRequest {
     label: String,
     timeout: Duration,
     queued_at: Instant,
+    cancelled: Arc<AtomicBool>,
     result_tx: mpsc::Sender<Result<(), String>>,
 }
 
@@ -2134,6 +2138,15 @@ pub(super) fn collector_has_active_recoverable_session(
     collector: &crate::embedded_audio::SessionCollector,
 ) -> bool {
     crate::embedded_audio::transport_v1::has_active_recoverable_session(collector)
+}
+
+fn defer_type_heartbeat_for_active_session(
+    active_session: bool,
+    last_success_elapsed: Option<Duration>,
+) -> bool {
+    active_session
+        && last_success_elapsed
+            .is_some_and(|elapsed| elapsed < TYPE_HEARTBEAT_ACTIVE_SESSION_MAX_GAP)
 }
 
 fn type_heartbeat_enabled_for_terminal_behavior(
@@ -5081,6 +5094,14 @@ impl NotifyCleanup {
 
     fn handle_audio_control_request(&self, request: AudioControlRequest) {
         let queued_ms = request.queued_at.elapsed().as_millis();
+        if request.cancelled.load(Ordering::Acquire) {
+            log::warn!(
+                "[embedded-ble] expired active audio control request skipped label={} queued_ms={}",
+                request.label,
+                queued_ms
+            );
+            return;
+        }
         if request.label == "audio control stop" || queued_ms >= 50 {
             log::info!(
                 "[embedded-ble] active audio control dispatch label={} queued_ms={}",
