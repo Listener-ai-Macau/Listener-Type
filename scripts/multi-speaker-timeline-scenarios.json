@@ -5,7 +5,7 @@
     {
       "id": "owner_other_owner_sequential",
       "kind": "alternating",
-      "transcript_test": "speaker_filter_locks_first_speaker_and_excludes_other_people",
+      "transcript_test": "speaker_filter_requires_identity_and_excludes_other_people",
       "endpoint_test": "target_speaker_endpoint_requires_one_second_without_that_speaker"
     },
     {
@@ -60,7 +60,7 @@
       "id": "owner_tail_survives_non_target_final_boundary",
       "kind": "overlap",
       "transcript_test": "protocol_final_preserves_owner_preview_after_non_target_tail_empties_boundaries",
-      "endpoint_test": "incomplete_and_short_body_previews_keep_one_second_endpoint"
+      "endpoint_test": "incomplete_and_short_body_previews_still_follow_owner_activity"
     }
   ],
   "lifecycle_test": "session_actor_commands_apply_asr_cancel_timeout_and_empty_final_behavior"
