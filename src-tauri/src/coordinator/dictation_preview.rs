@@ -567,42 +567,11 @@ fn update_embedded_audio_partial_preview_from_final_supplement(
 
 
 fn embedded_audio_partial_preview_stability_key(text: &str) -> String {
-    let mut key = String::new();
-    for ch in text.chars() {
-        if is_embedded_audio_partial_preview_decorative(ch) {
-            continue;
-        }
-        for lower in ch.to_lowercase() {
-            key.push(lower);
-        }
-    }
-    key
+    crate::transcript_boundary::content_key(text)
 }
 
 fn is_embedded_audio_partial_preview_decorative(ch: char) -> bool {
-    ch.is_whitespace()
-        || ch.is_ascii_punctuation()
-        || matches!(
-            ch,
-            '，' | '。'
-                | '、'
-                | '；'
-                | '：'
-                | '？'
-                | '！'
-                | '“'
-                | '”'
-                | '‘'
-                | '’'
-                | '（'
-                | '）'
-                | '【'
-                | '】'
-                | '《'
-                | '》'
-                | '…'
-                | '—'
-        )
+    crate::transcript_boundary::is_decorative(ch)
 }
 
 fn preserve_recording_transcript(text: &str) -> String {
@@ -2375,7 +2344,10 @@ async fn pause_early_delivery_tick(
             );
         }
     }
-    let Some(snapshot) = asr.pause_early_delivery_ledger_snapshot(PAUSE_EARLY_DELIVERY_MIN_STABLE)
+    let source_key = pause_early_delivery_source_key(inner, session_id);
+    let Some(snapshot) = asr.pause_early_delivery_ledger_snapshot_after(
+        PAUSE_EARLY_DELIVERY_MIN_STABLE, &source_key,
+    )
     else {
         if let Some(reason) = asr.pause_early_delivery_persistent_block_reason() {
             pause_early_note_gate_blocked(inner, session_id, reason);
@@ -2416,7 +2388,6 @@ async fn pause_early_delivery_tick(
     let prefs = inner.prefs.get();
     let (delivered_display, delivered_key) =
         pause_early_delivery_session_state(inner, session_id);
-    let source_key = pause_early_delivery_source_key(inner, session_id);
     let exact_delta = pause_early_final_remainder(&text, &delivered_display, &source_key);
     let anchored = exact_delta.is_none();
     let Some(delta) = exact_delta
@@ -2429,6 +2400,11 @@ async fn pause_early_delivery_tick(
         .or_else(|| pause_early_aligned_growth_tail(&text, &source_key))
     else {
         let current_key = embedded_audio_partial_preview_stability_key(&text);
+        if source_key.starts_with(&current_key) {
+            // A stable snapshot can stop inside an already submitted prefix.
+            // That means no new stable body, not a failed source alignment.
+            return;
+        }
         let shared = source_key
             .chars()
             .zip(current_key.chars())

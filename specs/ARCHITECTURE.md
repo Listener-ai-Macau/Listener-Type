@@ -70,6 +70,14 @@ failed delivery restores both. Subsequent ASR revisions reconcile against the
 provider coordinate, so correcting an earlier word cannot stall or replay later
 clauses. Finalization submits only the uncovered tail.
 
+Rolling delivery stability compares spoken content over the existing one-second
+window and uses the newest clause punctuation. A late comma or question mark
+does not restart a stable body's timer. Numeric separators, literal operators,
+and word spacing remain content for stability. A consumed prefix uses the same
+shared content coordinate as delivery; formatting changes before that boundary
+cannot delay its continuation. Unmapped source revisions retain full-prefix
+checks, and current speaker admission still applies.
+
 A bounded provider revision with a uniquely retained terminal source boundary
 can certify that no body remains unsubmitted, even if exact prefix matching
 fails. This path can append only missing boundary punctuation. Ambiguous

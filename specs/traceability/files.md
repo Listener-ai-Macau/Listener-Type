@@ -172,6 +172,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_asr_selection.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_delivery_diagnostics.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_device_ai.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_embedded_candidate_begin.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_embedded_detector_init.rs` | Core app | Build and targeted tests |
@@ -182,7 +183,6 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator/dictation_endpoint_clock.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_endpoint_policy.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_local_speech_activity.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation_delivery_diagnostics.rs` | Private delivery and source coverage evidence | Delivery ledger tests and installed recording capture |
 | `src-tauri/src/coordinator/dictation_preview.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_session.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_streaming_composition.rs` | Core app | Build and targeted tests |
@@ -237,13 +237,14 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/qa_hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/recorder.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/selection.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/selection/windows_uia.rs` | Windows selection readback | Build and targeted tests |
+| `src-tauri/src/selection/windows_uia.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/shortcut_binding.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/shortcut_dispatch.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/speaker_verification.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/speech_decision_kernel.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/startup_evidence.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/timeline.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/transcript_boundary.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/types.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/unicode_keystroke.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/wake_phrase.rs` | Core app | Build and targeted tests |

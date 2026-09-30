@@ -2785,6 +2785,17 @@ fn rolling_stable_transcript_prefix(
     now: Instant,
     min_stable: Duration,
 ) -> Option<String> {
+    rolling_stable_transcript_prefix_after(revisions, current, changed_at, now, min_stable, "")
+}
+
+fn rolling_stable_transcript_prefix_after(
+    revisions: &mut VecDeque<(Instant, String)>,
+    current: &str,
+    changed_at: Instant,
+    now: Instant,
+    min_stable: Duration,
+    consumed_source_key: &str,
+) -> Option<String> {
     if current.trim().is_empty() {
         revisions.clear();
         return None;
@@ -2807,19 +2818,27 @@ fn rolling_stable_transcript_prefix(
     if revisions.front().is_none_or(|(at, _)| *at > cutoff) {
         return None;
     }
-    let mut stable = revisions.front()?.1.clone();
-    for (_, revision) in revisions.iter().skip(1) {
-        stable = stable
-            .chars()
-            .zip(revision.chars())
-            .take_while(|(left, right)| left == right)
-            .map(|(ch, _)| ch)
-            .collect();
-        if stable.is_empty() {
-            return None;
-        }
+    // Submitted editor content is immutable. A formatting revision before
+    // its consumed boundary must not restart stability for the new body.
+    // Every retained revision must locate that exact content coordinate;
+    // recognition edits or incomplete history fall back to the full prefix.
+    let seams: Option<Vec<usize>> = (!consumed_source_key.is_empty()).then(|| {
+        revisions.iter().map(|(_, text)| {
+            crate::transcript_boundary::consumed_prefix_end(text, consumed_source_key)
+        }).collect()
+    }).flatten();
+    let current_seam = seams.as_ref().and_then(|seams| seams.last()).copied().unwrap_or(0);
+    let stable = crate::transcript_boundary::stable_content_prefix(
+        &current[current_seam..],
+        revisions.iter().enumerate().map(|(index, (_, revision))| {
+            let seam = seams.as_ref().map_or(0, |seams| seams[index]);
+            &revision[seam..]
+        }),
+    );
+    if stable.is_empty() && current_seam == 0 {
+        return None;
     }
-    Some(stable)
+    Some(format!("{}{stable}", &current[..current_seam]))
 }
 
 fn provider_raw_fallback_allowed(state: &SyncState) -> bool {
@@ -7368,7 +7387,8 @@ impl VolcengineStreamingASR {
     ///
     /// Cleanliness contract: no owner-isolation ceiling is frozen (hard
     /// multi-speaker evidence), and an owner-ledger prefix has remained
-    /// unchanged across all revisions for `min_stable`. Later words can keep
+    /// unchanged across all revisions for `min_stable`. Clause punctuation
+    /// does not restart a confirmed body's age. Later words can keep
     /// growing without restarting that prefix's timer. Unlike the early-seal
     /// snapshot this deliberately does
     /// NOT require `finishing` and does NOT hard-fail on
@@ -7383,6 +7403,14 @@ impl VolcengineStreamingASR {
         &self,
         min_stable: Duration,
     ) -> Option<RawTranscript> {
+        self.pause_early_delivery_ledger_snapshot_after(min_stable, "")
+    }
+
+    pub fn pause_early_delivery_ledger_snapshot_after(
+        &self,
+        min_stable: Duration,
+        consumed_source_key: &str,
+    ) -> Option<RawTranscript> {
         let mut st = self.state.lock();
         if st.owner_isolation_frozen {
             return None;
@@ -7392,12 +7420,25 @@ impl VolcengineStreamingASR {
             return None;
         }
         let current = st.best_transcript_text.clone();
-        let stable_prefix = rolling_stable_transcript_prefix(
+        // The coordinator consumes body text after stripping automatic wake.
+        // Include the explicit wake anchor only when that complete prefix is
+        // present. Correction/filler transforms that cannot map exactly use
+        // the existing full-prefix stability path.
+        let mut provider_key = consumed_source_key.to_string();
+        if !provider_key.is_empty()
+            && crate::transcript_boundary::consumed_prefix_end(&current, &provider_key).is_none()
+        {
+            if let Some(phrase) = st.wake_speaker_phrase.as_deref() {
+                provider_key = format!("{}{provider_key}", crate::transcript_boundary::content_key(phrase));
+            }
+        }
+        let stable_prefix = rolling_stable_transcript_prefix_after(
             &mut st.pause_early_recent_revisions,
             &current,
             committed_at,
             Instant::now(),
             min_stable,
+            &provider_key,
         )?;
         if stable_prefix.len() < current.len()
             && st.local_speaker_tracking_enabled
@@ -9400,6 +9441,116 @@ mod tests {
                 "the current owner continuation must survive the earlier foreign row: {}", state.best_transcript_text);
             assert!(!state.best_transcript_text.contains("旁人插话"));
         }
+    }
+
+    #[test]
+    fn pause_early_late_punctuation_does_not_restart_stable_body_age() {
+        let t0 = Instant::now();
+        let mut revisions = VecDeque::new();
+        let age = Duration::from_secs(1);
+        let body = "开始录音这句话已经完整";
+        assert!(rolling_stable_transcript_prefix(&mut revisions, body, t0, t0, age).is_none());
+        let punctuated = "开始录音这句话已经完整？然后";
+        assert_eq!(
+            rolling_stable_transcript_prefix(&mut revisions, punctuated,
+                t0 + Duration::from_millis(550), t0 + age, age).as_deref(),
+            Some("开始录音这句话已经完整？"),
+            "late punctuation must not add another second to confirmed words",
+        );
+        assert_eq!(
+            rolling_stable_transcript_prefix(&mut revisions, "开始录音这句话已经修订？然后",
+                t0 + Duration::from_millis(1_050), t0 + Duration::from_millis(1_050), age).as_deref(),
+            Some("开始录音这句话已经"),
+            "changed body words still require the full stability window",
+        );
+    }
+
+    #[test]
+    fn pause_early_consumed_formatting_cannot_block_a_stable_continuation() {
+        let t0 = Instant::now();
+        let mut revisions = VecDeque::new();
+        let age = Duration::from_secs(1);
+        let source = crate::transcript_boundary::content_key("开始录音确认 NC 的结果。");
+        let first = "开始录音确认 NC 的结果。下一句已经到达";
+        assert!(rolling_stable_transcript_prefix_after(&mut revisions, first, t0, t0, age, &source).is_none());
+        assert_eq!(
+            rolling_stable_transcript_prefix_after(&mut revisions,
+                "开始录音确认 nc 的结果，下一句已经到达。继续",
+                t0 + Duration::from_millis(700), t0 + age, age, &source).as_deref(),
+            Some("开始录音确认 nc 的结果，下一句已经到达。"),
+        );
+        assert_eq!(
+            rolling_stable_transcript_prefix_after(&mut revisions,
+                "开始录音确认 nc 的结果，下一句已经改写。继续",
+                t0 + Duration::from_millis(1_050), t0 + Duration::from_millis(1_050), age, &source).as_deref(),
+            Some("开始录音确认 nc 的结果，下一句已经"),
+        );
+    }
+
+    #[test]
+    #[ignore = "private recorded ASR trace replay; requires explicit fixture paths"]
+    fn pause_early_recorded_trace_stability_probe() {
+        let paths = std::env::var("LISTENER_STABILITY_TRACE_PATHS").expect("trace paths");
+        let wake = std::env::var("LISTENER_STABILITY_WAKE_PHRASE").expect("wake phrase");
+        let mut results = Vec::new();
+        for path in paths.split(';') {
+            let trace: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            let samples: Vec<(u64, String)> = trace["trace"]["entries"].as_array().unwrap().iter()
+                .filter(|entry| entry["stage"] == "merged_candidate" && entry["final_frame"] == false)
+                .map(|entry| (entry["elapsed_ms"].as_u64().unwrap(), entry["text"].as_str().unwrap().to_string()))
+                .collect();
+            let last_key = crate::transcript_boundary::content_key(&samples.last().unwrap().1);
+            let base = Instant::now();
+            let mut revisions = VecDeque::new();
+            let mut accepted: Vec<(u64, String)> = Vec::new();
+            let mut current = String::new();
+            let mut changed_ms = 0;
+            let mut next = 0;
+            let mut first_clause = [None, None];
+            let mut full_clause = [None, None];
+            for elapsed in (0..=samples.last().unwrap().0 + 1_100).step_by(50) {
+                while next < samples.len() && samples[next].0 <= elapsed {
+                    let (at, text) = &samples[next];
+                    if spoken_content_len(text) >= spoken_content_len(&current) && *text != current {
+                        current = text.clone();
+                        changed_ms = *at;
+                        accepted.push((*at, text.clone()));
+                    }
+                    next += 1;
+                }
+                if current.is_empty() { continue; }
+                let modern = rolling_stable_transcript_prefix(&mut revisions, &current,
+                    base + Duration::from_millis(changed_ms), base + Duration::from_millis(elapsed), Duration::from_secs(1));
+                // Reference: the previous exact display-prefix age rule.
+                let legacy = elapsed.checked_sub(1_000).and_then(|cutoff| {
+                    let anchor = accepted.iter().rposition(|(at, _)| *at <= cutoff)?;
+                    let mut stable = current.clone();
+                    for (_, text) in &accepted[anchor..] {
+                        stable = stable.chars().zip(text.chars()).take_while(|(a,b)| a == b).map(|(ch,_)|ch).collect();
+                    }
+                    Some(stable)
+                });
+                for (index, stable) in [legacy, modern].into_iter().enumerate() {
+                    let Some(stable) = stable else { continue; };
+                    let body = stable.strip_prefix(&wake).unwrap_or(&stable)
+                        .trim_start_matches(crate::transcript_boundary::is_decorative);
+                    if body.contains(['，', '。', '？', '！', '；']) {
+                        first_clause[index].get_or_insert(elapsed);
+                    }
+                    if stable.ends_with(['。', '？', '！']) && crate::transcript_boundary::content_key(&stable) == last_key {
+                        full_clause[index].get_or_insert(elapsed);
+                    }
+                }
+            }
+            results.push(serde_json::json!({
+                "session_id": trace["sessionId"], "accepted_revisions": accepted.len(),
+                "legacy_first_clause_ms": first_clause[0], "candidate_first_clause_ms": first_clause[1],
+                "legacy_full_clause_ms": full_clause[0], "candidate_full_clause_ms": full_clause[1],
+                "scope": "recorded provider decision replay; not installed-app or target-editor acceptance"
+            }));
+        }
+        std::fs::write(std::env::var("LISTENER_STABILITY_REPLAY_OUTPUT").expect("output path"),
+            serde_json::to_vec_pretty(&results).unwrap()).unwrap();
     }
 
     #[test]

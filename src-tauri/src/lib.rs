@@ -47,6 +47,7 @@ mod speaker_verification;
 mod speech_decision_kernel;
 mod startup_evidence;
 mod timeline;
+mod transcript_boundary;
 mod types;
 mod unicode_keystroke;
 mod wake_phrase;
