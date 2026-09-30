@@ -892,88 +892,92 @@ fn capture_notification_events_until_cancelled_impl(
             cleanup.disable_notify();
             return Err(background_listener_deferred_for_ota_error());
         }
-        if let Some(due) = next_type_heartbeat {
-            if now >= due {
-                // ENSURE and STOP share this capture thread with TYPE:HB. A
-                // response-bearing or stalled heartbeat otherwise consumes
-                // the entire wake continuation deadline while PCM is live.
-                // The firmware's 45 s lease permits a bounded deferral.
-                let heartbeat_deferred = defer_type_heartbeat_for_active_session(
-                    collector_has_active_recoverable_session(&collector),
-                    last_type_heartbeat_at.map(|last| now.duration_since(last)),
-                );
-                if heartbeat_deferred {
-                    next_type_heartbeat = Some(now + Duration::from_secs(1));
-                } else if let Err(err) = cleanup.write_type_heartbeat(b"TYPE:HB\n", "Type heartbeat") {
-                    consecutive_type_heartbeat_failures =
-                        consecutive_type_heartbeat_failures.saturating_add(1);
-                    let reason = format!("{err}; BLE audio/control response missing");
-                    if collector_has_active_recoverable_session(&collector) {
-                        let stats = collector.stats();
-                        if link_recovery_deadline.is_none() {
-                            link_recovery_deadline =
-                                Some(now + ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT);
-                            link_recovery_reason = Some(reason.clone());
-                            log::warn!(
-                                "[embedded-ble] capture #{capture_id}: {reason}; waiting for audio notify recovery (session_id={:?}, packets={}, timeout_ms={})",
-                                stats.session_id,
-                                stats.received_packet_count,
-                                ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT.as_millis()
-                            );
-                        } else {
-                            log::warn!(
-                                "[embedded-ble] capture #{capture_id}: additional heartbeat failure while waiting for recovery: {reason}"
-                            );
-                        }
+        let mut heartbeat_outcome = cleanup.poll_periodic_type_heartbeat();
+        if heartbeat_outcome.is_none()
+            && cleanup.pending_type_heartbeat.is_none()
+            && next_type_heartbeat.is_some_and(|due| now >= due)
+        {
+            // The audio/control queue was drained above. Start one write and
+            // return to PCM/ENSURE/STOP while WinRT completes it; active audio
+            // must not stretch the visible readiness lease to 30 seconds.
+            if let Err(err) = cleanup.begin_periodic_type_heartbeat() {
+                heartbeat_outcome = Some(Err(err));
+            }
+            next_type_heartbeat = Some(now + TYPE_HEARTBEAT_INTERVAL);
+        }
+        if let Some(outcome) = heartbeat_outcome {
+            if let Err(err) = outcome {
+                consecutive_type_heartbeat_failures =
+                    consecutive_type_heartbeat_failures.saturating_add(1);
+                let reason = format!("{err}; BLE audio/control response missing");
+                if collector_has_active_recoverable_session(&collector) {
+                    let stats = collector.stats();
+                    if link_recovery_deadline.is_none() {
+                        link_recovery_deadline =
+                            Some(now + ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT);
+                        link_recovery_reason = Some(reason.clone());
+                        log::warn!(
+                            "[embedded-ble] capture #{capture_id}: {reason}; waiting for audio notify recovery (session_id={:?}, packets={}, timeout_ms={})",
+                            stats.session_id,
+                            stats.received_packet_count,
+                            ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT.as_millis()
+                        );
                     } else {
-                        let log_message =
-                            format!("[embedded-ble] capture #{capture_id}: {reason}; keeping idle notify open for heartbeat retry");
-                        if consecutive_type_heartbeat_failures == 1 {
-                            log::info!("{log_message}");
-                        } else {
-                            log::warn!(
-                                "{log_message}; consecutive_failures={consecutive_type_heartbeat_failures}"
-                            );
-                        }
+                        log::warn!(
+                            "[embedded-ble] capture #{capture_id}: additional heartbeat failure while waiting for recovery: {reason}"
+                        );
                     }
                 } else {
-                    if consecutive_type_heartbeat_failures > 0 {
-                        log::info!(
-                            "[embedded-ble] capture #{capture_id}: Type heartbeat recovered after {consecutive_type_heartbeat_failures} failure(s)"
+                    let log_message =
+                        format!("[embedded-ble] capture #{capture_id}: {reason}; keeping idle notify open for heartbeat retry");
+                    if consecutive_type_heartbeat_failures == 1 {
+                        log::info!("{log_message}");
+                    } else {
+                        log::warn!(
+                            "{log_message}; consecutive_failures={consecutive_type_heartbeat_failures}"
                         );
-                        if should_restore_lossless_after_heartbeat(
-                            consecutive_type_heartbeat_failures,
-                            collector_has_active_recoverable_session(&collector),
+                    }
+                }
+            } else {
+                if consecutive_type_heartbeat_failures > 0 {
+                    log::info!(
+                        "[embedded-ble] capture #{capture_id}: Type heartbeat recovered after {consecutive_type_heartbeat_failures} failure(s)"
+                    );
+                    if should_restore_lossless_after_heartbeat(
+                        consecutive_type_heartbeat_failures,
+                        collector_has_active_recoverable_session(&collector),
+                    ) {
+                        if let Err(err) = cleanup.write_type_heartbeat(
+                            b"TYPE:AUDIO:LOSSLESS_RICE:3\n",
+                            "Type lossless audio capability recovery",
                         ) {
-                            if let Err(err) = cleanup.write_type_heartbeat(
-                                b"TYPE:AUDIO:LOSSLESS_RICE:3\n",
-                                "Type lossless audio capability recovery",
-                            ) {
-                                log::warn!(
-                                    "[embedded-ble] capture #{capture_id}: lossless audio capability recovery was not acknowledged; firmware will retain raw PCM: {err}"
-                                );
-                            } else {
-                                log::info!(
-                                    "[embedded-ble] capture #{capture_id}: lossless audio capability restored after heartbeat recovery"
-                                );
-                            }
+                            log::warn!(
+                                "[embedded-ble] capture #{capture_id}: lossless audio capability recovery was not acknowledged; firmware will retain raw PCM: {err}"
+                            );
+                        } else {
+                            log::info!(
+                                "[embedded-ble] capture #{capture_id}: lossless audio capability restored after heartbeat recovery"
+                            );
                         }
                     }
-                    consecutive_type_heartbeat_failures = 0;
-                    cleanup.mark_type_heartbeat_open();
-                    last_type_heartbeat_at = Some(Instant::now());
-                    if !type_ready_confirmed {
-                        on_ready()?;
-                        type_ready_confirmed = true;
-                        log::info!(
-                            "[embedded-ble] capture #{capture_id}: Type ready terminal confirmation recovered through heartbeat"
-                        );
-                    }
                 }
-                if !heartbeat_deferred {
-                    next_type_heartbeat = Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL);
+                consecutive_type_heartbeat_failures = 0;
+                cleanup.mark_type_heartbeat_open();
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: periodic Type heartbeat sent gap_ms={} active_session={}",
+                    last_type_heartbeat_at.map(|last| last.elapsed().as_millis()).unwrap_or(0),
+                    collector_has_active_recoverable_session(&collector),
+                );
+                last_type_heartbeat_at = Some(Instant::now());
+                if !type_ready_confirmed {
+                    on_ready()?;
+                    type_ready_confirmed = true;
+                    log::info!(
+                        "[embedded-ble] capture #{capture_id}: Type ready terminal confirmation recovered through heartbeat"
+                    );
                 }
             }
+            next_type_heartbeat = Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL);
         }
         if cancel_requested.load(Ordering::SeqCst) {
             log::info!(

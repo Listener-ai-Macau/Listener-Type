@@ -108,10 +108,9 @@ fn release_winrt_bluetooth_object<T>(object: T) {
 const RECONNECT_COOLDOWN: Duration = Duration::from_millis(350);
 const RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const TYPE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(8);
-// The firmware keeps TYPE ready for 45 s. A stalled best-effort heartbeat
-// must not occupy the capture/control thread for the full ENSURE deadline.
+// Renew both transport and visible Type readiness (the latter can expire in
+// 12 s). Periodic writes are polled asynchronously so ENSURE/STOP can proceed.
 const TYPE_HEARTBEAT_WRITE_TIMEOUT: Duration = Duration::from_millis(750);
-const TYPE_HEARTBEAT_ACTIVE_SESSION_MAX_GAP: Duration = Duration::from_secs(30);
 const POST_OTA_TYPE_READY_WRITE_TIMEOUT: Duration = Duration::from_millis(500);
 const TYPE_READY_RECOVERY_PAIRING_ADV_PROBE_TIMEOUT: Duration = Duration::from_millis(900);
 const CAPTURE_NOTIFICATION_INFO_LOG_LIMIT: usize = 4;
@@ -2140,13 +2139,66 @@ pub(super) fn collector_has_active_recoverable_session(
     crate::embedded_audio::transport_v1::has_active_recoverable_session(collector)
 }
 
-fn defer_type_heartbeat_for_active_session(
-    active_session: bool,
-    last_success_elapsed: Option<Duration>,
-) -> bool {
-    active_session
-        && last_success_elapsed
-            .is_some_and(|elapsed| elapsed < TYPE_HEARTBEAT_ACTIVE_SESSION_MAX_GAP)
+#[derive(Debug, PartialEq, Eq)]
+enum TypeHeartbeatPollDecision {
+    Pending,
+    ReadResult,
+    Failed(&'static str),
+}
+
+fn type_heartbeat_poll_decision(
+    status: windows::Foundation::AsyncStatus,
+    elapsed: Duration,
+) -> TypeHeartbeatPollDecision {
+    use windows::Foundation::AsyncStatus;
+    match status {
+        AsyncStatus::Completed => TypeHeartbeatPollDecision::ReadResult,
+        AsyncStatus::Error => TypeHeartbeatPollDecision::Failed("async error"),
+        AsyncStatus::Canceled => TypeHeartbeatPollDecision::Failed("async cancelled"),
+        AsyncStatus::Started if elapsed < TYPE_HEARTBEAT_WRITE_TIMEOUT => {
+            TypeHeartbeatPollDecision::Pending
+        }
+        AsyncStatus::Started => TypeHeartbeatPollDecision::Failed("write timed out"),
+        _ => TypeHeartbeatPollDecision::Failed("unknown async status"),
+    }
+}
+
+struct PendingTypeHeartbeat {
+    operation: IAsyncOperation<GattCommunicationStatus>,
+    started_at: Instant,
+}
+
+impl PendingTypeHeartbeat {
+    fn poll(&self) -> Option<Result<(), String>> {
+        let status = match self.operation.Status() {
+            Ok(status) => status,
+            Err(err) => return Some(Err(format!("Type heartbeat status failed: {err}"))),
+        };
+        match type_heartbeat_poll_decision(status, self.started_at.elapsed()) {
+            TypeHeartbeatPollDecision::Pending => None,
+            TypeHeartbeatPollDecision::ReadResult => Some(
+                self.operation.GetResults()
+                    .map_err(|err| format!("Type heartbeat result failed: {err}"))
+                    .and_then(|status| {
+                        if status == GattCommunicationStatus::Success {
+                            Ok(())
+                        } else {
+                            Err(format!("Type heartbeat write returned status={status:?}"))
+                        }
+                    }),
+            ),
+            TypeHeartbeatPollDecision::Failed(reason) => {
+                Some(Err(format!("Type heartbeat {reason}")))
+            }
+        }
+    }
+}
+
+impl Drop for PendingTypeHeartbeat {
+    fn drop(&mut self) {
+        let _ = self.operation.Cancel();
+        let _ = self.operation.Close();
+    }
 }
 
 fn type_heartbeat_enabled_for_terminal_behavior(
@@ -4914,6 +4966,7 @@ struct NotifyCleanup {
     session_status_token: Option<EventRegistrationToken>,
     audio_control_registration: Option<ActiveAudioControlRegistration>,
     type_heartbeat_open: bool,
+    pending_type_heartbeat: Option<PendingTypeHeartbeat>,
     notify_disabled: bool,
     skip_explicit_target_close: bool,
 }
@@ -4928,6 +4981,7 @@ impl NotifyCleanup {
             session_status_token: None,
             audio_control_registration: None,
             type_heartbeat_open: false,
+            pending_type_heartbeat: None,
             notify_disabled: false,
             skip_explicit_target_close: false,
         }
@@ -4986,6 +5040,33 @@ impl NotifyCleanup {
         }
     }
 
+    fn begin_periodic_type_heartbeat(&mut self) -> Result<(), String> {
+        if self.pending_type_heartbeat.is_some() {
+            return Ok(());
+        }
+        let control = self.target.control.as_ref()
+            .ok_or_else(|| "Type heartbeat audio control unavailable".to_string())?;
+        let operation = start_gatt_write_with_option_async(
+            control,
+            b"TYPE:HB\n",
+            type_heartbeat_write_option(control, "Type heartbeat"),
+            "Type heartbeat",
+        )?;
+        self.pending_type_heartbeat = Some(PendingTypeHeartbeat {
+            operation,
+            started_at: Instant::now(),
+        });
+        Ok(())
+    }
+
+    fn poll_periodic_type_heartbeat(&mut self) -> Option<Result<(), String>> {
+        let outcome = self.pending_type_heartbeat.as_ref()?.poll();
+        if outcome.is_some() {
+            self.pending_type_heartbeat.take();
+        }
+        outcome
+    }
+
     fn write_ec11_recovery_acknowledgement(&self) -> Result<(), String> {
         let Some(control) = self.target.control.as_ref() else {
             return Err("audio control unavailable".to_string());
@@ -5028,6 +5109,8 @@ impl NotifyCleanup {
     }
 
     fn finish(&mut self, teardown: NotifyCccdTeardown) {
+        // An old pending HB must not renew readiness after BYE or an OTA handoff.
+        self.pending_type_heartbeat.take();
         if self.notify_disabled {
             return;
         }

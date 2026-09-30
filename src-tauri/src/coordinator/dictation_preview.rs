@@ -1719,6 +1719,49 @@ fn pause_early_final_remainder(
     }
 }
 
+/// A final can revise earlier words without adding speech beyond the consumed
+/// boundary. Distinguish that from an unknown tail. A unique terminal anchor
+/// and a bounded full-text alignment certify the same boundary; only its
+/// punctuation may remain. Committed editor words are never replaced.
+fn pause_early_revised_terminal_remainder(
+    final_text: &str,
+    delivered_display: &str,
+    source_key: &str,
+) -> Option<String> {
+    let consumed: Vec<char> = source_key.chars().collect();
+    if !(8..=512).contains(&consumed.len()) {
+        return None;
+    }
+    let final_key = embedded_audio_partial_preview_stability_key(final_text);
+    let final_content: Vec<char> = final_key.chars().collect();
+    let anchor = &consumed[consumed.len() - 8..];
+    let max_edits = (consumed.len() / 5).clamp(2, 12);
+    if consumed.len().abs_diff(final_content.len()) > max_edits
+        || !final_content.ends_with(anchor)
+        || final_content.windows(anchor.len()).filter(|window| *window == anchor).count() != 1
+    {
+        return None;
+    }
+    let mut previous: Vec<usize> = (0..=final_content.len()).collect();
+    let mut current = vec![0; final_content.len() + 1];
+    for (index, expected) in consumed.iter().enumerate() {
+        current[0] = index + 1;
+        for prefix in 1..=final_content.len() {
+            current[prefix] = (previous[prefix] + 1)
+                .min(current[prefix - 1] + 1)
+                .min(previous[prefix - 1] + usize::from(*expected != final_content[prefix - 1]));
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+    if previous[final_content.len()] > max_edits {
+        return None;
+    }
+    let (offset, last_content) = final_text.char_indices().rev()
+        .find(|(_, ch)| !is_embedded_audio_partial_preview_decorative(*ch))?;
+    let boundary = offset + last_content.len_utf8();
+    Some(pause_early_boundary_tail(&final_text[boundary..], delivered_display).to_string())
+}
+
 /// A live provider revision may correct words inside an already pasted
 /// segment. Continue delivering only when the end of that segment still has
 /// one unambiguous position near its old boundary. This is stricter than the

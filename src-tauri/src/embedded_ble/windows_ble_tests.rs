@@ -255,27 +255,31 @@ fn type_heartbeat_prefers_no_response_when_available() {
 }
 
 #[test]
-fn live_recording_defers_heartbeat_but_keeps_firmware_lease() {
-    // TYPE:HB is best effort during capture; a queued wake ENSURE must not
-    // wait behind its GATT write. The firmware lease is 45 s.
-    assert!(defer_type_heartbeat_for_active_session(
-        true,
-        Some(Duration::from_secs(8))
-    ));
-    assert!(defer_type_heartbeat_for_active_session(
-        true,
-        Some(Duration::from_secs(29))
-    ));
-    assert!(!defer_type_heartbeat_for_active_session(
-        true,
-        Some(Duration::from_secs(30))
-    ));
-    assert!(!defer_type_heartbeat_for_active_session(
-        false,
-        Some(Duration::from_secs(8))
-    ));
-    assert!(!defer_type_heartbeat_for_active_session(true, None));
-    assert!(TYPE_HEARTBEAT_WRITE_TIMEOUT < Duration::from_secs(2));
+fn live_recording_heartbeat_renews_visible_lease_without_waiting_on_a_stalled_write() {
+    use windows::Foundation::AsyncStatus;
+    // Previously live audio postponed renewal until 30 s, although the
+    // firmware's visible readiness can expire at 12 s while audio stays live.
+    assert!(TYPE_HEARTBEAT_INTERVAL + RECEIVE_POLL_INTERVAL
+        + TYPE_HEARTBEAT_WRITE_TIMEOUT < Duration::from_secs(12));
+    for elapsed_ms in [0, 100, 749] {
+        assert_eq!(type_heartbeat_poll_decision(
+            AsyncStatus::Started, Duration::from_millis(elapsed_ms)),
+            TypeHeartbeatPollDecision::Pending);
+    }
+    assert_eq!(type_heartbeat_poll_decision(
+        AsyncStatus::Started, TYPE_HEARTBEAT_WRITE_TIMEOUT),
+        TypeHeartbeatPollDecision::Failed("write timed out"));
+    // Completed is only a request to inspect GATT's result, never proof of
+    // device readiness; failures and cancellation retain recovery ownership.
+    assert_eq!(type_heartbeat_poll_decision(
+        AsyncStatus::Completed, Duration::from_secs(1)),
+        TypeHeartbeatPollDecision::ReadResult);
+    assert_eq!(type_heartbeat_poll_decision(
+        AsyncStatus::Error, Duration::ZERO),
+        TypeHeartbeatPollDecision::Failed("async error"));
+    assert_eq!(type_heartbeat_poll_decision(
+        AsyncStatus::Canceled, Duration::ZERO),
+        TypeHeartbeatPollDecision::Failed("async cancelled"));
 }
 
 #[test]

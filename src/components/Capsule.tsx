@@ -13,7 +13,6 @@ import { getCapsuleDisplayMessage, shouldRetainCapsulePreview } from '../lib/cap
 import {
   buildPreviewRevealFrames,
   CAPSULE_APPEARANCE,
-  previewRevealIntervalMs,
   truncatePreview,
   PREVIEW_FINAL_TRANSITION,
   shouldShowStopAcknowledgement,
@@ -519,9 +518,6 @@ export function Capsule() {
   const messageSessionIdRef = useRef<string | null>(null);
   const messageRef = useRef<string | undefined>(DEV_CAPSULE_PREVIEW_MESSAGE);
   const previewTargetRef = useRef<string | undefined>(DEV_CAPSULE_PREVIEW_MESSAGE);
-  const previewSessionIdRef = useRef<string | null>(null);
-  const previewRevealFramesRef = useRef<string[]>([]);
-  const previewRevealFrameRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const capsuleOrderingRef = useRef(createCapsuleOrderingTracker());
   const capsuleIngressTraceRef = useRef<{
     elapsedMs: number;
@@ -569,58 +565,16 @@ export function Capsule() {
     setMessage(next);
   };
 
-  const clearPreviewRevealFrame = () => {
-    if (previewRevealFrameRef.current !== null) {
-      clearTimeout(previewRevealFrameRef.current);
-      previewRevealFrameRef.current = null;
-    }
-    previewRevealFramesRef.current = [];
-  };
-
   const resetPreviewReveal = (flushTarget: boolean) => {
-    clearPreviewRevealFrame();
     if (flushTarget && previewTargetRef.current !== undefined) {
       commitMessage(previewTargetRef.current);
     }
     previewTargetRef.current = undefined;
-    previewSessionIdRef.current = null;
   };
 
-  const schedulePreviewReveal = () => {
-    const intervalMs = previewRevealIntervalMs(previewRevealFramesRef.current.length + 1);
-    const revealNextFrame = () => {
-      previewRevealFrameRef.current = null;
-      const next = previewRevealFramesRef.current.shift();
-      if (next !== undefined) commitMessage(next);
-      if (previewRevealFramesRef.current.length > 0) {
-        previewRevealFrameRef.current = setTimeout(revealNextFrame, intervalMs);
-      }
-    };
-    if (previewRevealFramesRef.current.length > 0) {
-      previewRevealFrameRef.current = setTimeout(revealNextFrame, intervalMs);
-    }
-  };
-
-  const applyRecordingPreview = (target: string, sessionId: string | null) => {
-    const sessionChanged = previewSessionIdRef.current !== sessionId;
-    const current = messageRef.current;
-    clearPreviewRevealFrame();
+  const applyRecordingPreview = (target: string, _sessionId: string | null) => {
     previewTargetRef.current = target;
-    previewSessionIdRef.current = sessionId;
-    if (sessionChanged || !current) {
-      commitMessage(target);
-      return;
-    }
-
-    const frames = buildPreviewRevealFrames(current, target);
-    if (frames.length === 1) {
-      commitMessage(target);
-      return;
-    }
-    const first = frames.shift();
-    previewRevealFramesRef.current = frames;
-    if (first !== undefined) commitMessage(first);
-    schedulePreviewReveal();
+    commitMessage(buildPreviewRevealFrames(messageRef.current || '', target)[0]);
   };
 
   const hideCapsuleLocally = () => {
@@ -853,7 +807,6 @@ export function Capsule() {
       if (stopAckTimerRef.current !== null) {
         clearTimeout(stopAckTimerRef.current);
       }
-      clearPreviewRevealFrame();
       clearErrorAutoDismiss();
     };
   }, []);

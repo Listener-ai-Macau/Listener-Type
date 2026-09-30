@@ -3,8 +3,6 @@ import {
   PREVIEW_MAX_CHARS,
   PREVIEW_FINAL_TRANSITION,
   LAYOUT_RULES,
-  PREVIEW_BURST_REVEAL,
-  previewRevealIntervalMs,
   CAPSULE_APPEARANCE,
   buildPreviewRevealFrames,
   shouldShowStopAcknowledgement,
@@ -136,11 +134,7 @@ assertOk(
   const current = '这是已有的预览文字';
   const target = `${current}现在一次补回很多很多很多新字`;
   const frames = buildPreviewRevealFrames(current, target);
-  assertOk(frames.length > 1, 'large pure append should be visually smoothed');
-  assertOk(
-    frames.length <= PREVIEW_BURST_REVEAL.maxFrames,
-    'burst reveal should stay within the frame budget',
-  );
+  assertEqual(frames.length, 1, 'a burst after a pause should show the latest result immediately');
   assertEqual(frames.at(-1), target, 'burst reveal must end at the exact provider text');
   for (const frame of frames) {
     assertOk(target.startsWith(frame), 'every reveal frame must be an exact target prefix');
@@ -167,12 +161,7 @@ assertEqual(
   const frames = buildPreviewRevealFrames('预览', '预览文字流');
   assertEqual(frames.length, 1, 'routine three-character provider updates should appear immediately');
   const largeFrames = buildPreviewRevealFrames('预览', '预览一次性补回很多很多很多新字');
-  const intervalMs = previewRevealIntervalMs(largeFrames.length);
-  assertOk(intervalMs >= 8, 'large-burst reveal must stay visible');
-  assertOk(
-    intervalMs * (largeFrames.length - 1) <= PREVIEW_BURST_REVEAL.maxCatchUpMs,
-    'reveal must catch up within the bounded latency budget',
-  );
+  assertEqual(largeFrames.length, 1, 'a large update must not enqueue synthetic intermediate words');
 }
 
 {

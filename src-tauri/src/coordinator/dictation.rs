@@ -4106,7 +4106,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         // polished 域的前缀/LCP 全部失真，原始终稿域先对账（同域可比），
         // 仍不可切时用交付末尾锚点从原始终稿补未上屏的尾巴。
         let remainder = pause_early_final_remainder(&polished, display, key)
-            .or_else(|| pause_early_final_remainder(&raw.text, display, key));
+            .or_else(|| pause_early_final_remainder(&raw.text, display, key))
+            .or_else(|| pause_early_revised_terminal_remainder(&polished, display, key))
+            .or_else(|| pause_early_revised_terminal_remainder(&raw.text, display, key));
         // A provider revision may change an earlier word. Recover only a
         // continuation beyond the committed boundary; never append the
         // revised portion as a second version of that word.

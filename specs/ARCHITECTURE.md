@@ -26,6 +26,10 @@ flowchart TB
 - `src/lib/ipc.ts` owns typed frontend-to-backend calls and mock fallbacks.
 - `src/styles/tokens.css` holds Listener Type design tokens.
 
+The recording capsule renders the newest accepted preview in one update. It
+does not replay provider text through a separate character-reveal timer; clause
+commitment and provisional text remain backend decisions.
+
 ## Backend
 
 - `src-tauri/src/lib.rs` wires Tauri plugins, windows, tray, commands and platform setup.
@@ -37,6 +41,14 @@ flowchart TB
 - Maintainability gate: `npm run check:module-budgets` (Goals: `docs/goals/20260727-type-maintainability-excellent.md`, `docs/goals/20260727-type-maintainability-phase2.md`).
 
 The continuous BLE actor owns both the logical dictation session and its current physical audio segment. A new physical `SessionStart` can reset collector statistics, so the actor settles a predecessor `STOP` before admitting an unrelated segment. A request-tagged ENSURE continuation or an active activation race guard may carry the same logical dictation into the new segment; binding it clears the predecessor's tail-drain deadline. An untagged segment cannot inherit the old session by arrival time alone.
+
+The continuous listener renews Type readiness every eight seconds, including
+during live audio. The firmware's visible readiness lease can be shorter than
+its audio transport lease, so transport availability alone cannot justify
+postponing a heartbeat. A single periodic GATT write is polled asynchronously;
+audio notifications and urgent ENSURE/STOP requests continue while it is
+pending. Failed or cancelled writes retain recovery ownership. Cleanup cancels
+a pending renewal before BYE, notify teardown, or an OTA handoff.
 
 Dictation delivery follows the OS foreground cursor at each stable clause and at final dispatch. The session-start window is context for style and diagnostics, never a window to raise or restore. A TSF composition is tied to one editor; switching windows cancels its reversible composition and continues through the current-cursor paste route. Preview text may change while it is provisional. Once a stable clause is committed to the editor, it is immutable: the stop result can append only an uncommitted tail, never select or replace an earlier clause. Automatic wake uses the same prefix stripper for the early-delivery gate as for the final transcript, so a bounded hesitation before the wake phrase cannot suppress all live delivery.
 
@@ -57,6 +69,12 @@ provider-prefix key. An accepted clause advances both coordinates atomically;
 failed delivery restores both. Subsequent ASR revisions reconcile against the
 provider coordinate, so correcting an earlier word cannot stall or replay later
 clauses. Finalization submits only the uncovered tail.
+
+A bounded provider revision with a uniquely retained terminal source boundary
+can certify that no body remains unsubmitted, even if exact prefix matching
+fails. This path can append only missing boundary punctuation. Ambiguous
+boundaries, repeated anchors, and genuine new body growth remain outside this
+certificate and use the existing continuation/recovery checks.
 
 Speaker exclusions apply to their audio intervals. A retained foreign row still
 vetoes raw final recovery, while fresh verified owner speech after that interval

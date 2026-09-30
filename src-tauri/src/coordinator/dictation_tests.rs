@@ -16011,6 +16011,33 @@ fn final_asr_revision_cannot_replace_a_committed_word() {
 }
 
 #[test]
+fn pause_early_revised_terminal_preserves_punctuation_without_replaying_words() {
+    use super::{embedded_audio_partial_preview_stability_key as key,
+                pause_early_final_remainder, pause_early_revised_terminal_remainder};
+    let delivered = "然后看看这个弹珠功能怎么样处理，最后确认整个流程是否正常";
+    let final_text = "然后看看这个弹出功能怎么样处理，最后确认整个流程是否正常。";
+    assert_eq!(pause_early_final_remainder(final_text, delivered, &key(delivered)), None);
+    assert_eq!(pause_early_revised_terminal_remainder(final_text, delivered, &key(delivered)), Some("。".into()));
+    assert_eq!(pause_early_revised_terminal_remainder(final_text, &format!("{delivered}。"), &key(delivered)), Some(String::new()));
+    assert_eq!(pause_early_revised_terminal_remainder(&final_text[..final_text.len() - "。".len()], delivered, &key(delivered)), Some(String::new()));
+}
+
+#[test]
+fn pause_early_revised_terminal_rejects_new_body_repeated_anchors_and_large_rewrites() {
+    use super::{embedded_audio_partial_preview_stability_key as key,
+                pause_early_revised_terminal_remainder};
+    let delivered = "然后看看这个弹珠功能怎么样处理，最后确认整个流程是否正常";
+    let continued = "然后看看这个弹出功能怎么样处理，最后确认整个流程是否正常。然后继续说。";
+    assert_eq!(pause_early_revised_terminal_remainder(continued, delivered, &key(delivered)), None);
+    let repeated = format!("{delivered}，最后确认整个流程是否正常。");
+    assert_eq!(pause_early_revised_terminal_remainder(&repeated, delivered, &key(delivered)), None);
+    let unrelated = "另外完全不同的情况现在需要另外查清楚，最后确认整个流程是否正常。";
+    assert_eq!(pause_early_revised_terminal_remainder(unrelated, delivered, &key(delivered)), None);
+    assert_eq!(pause_early_revised_terminal_remainder("最后确认整个流程是否正常。", delivered, &key(delivered)), None);
+    assert_eq!(pause_early_revised_terminal_remainder("重新处理。", "处理", &key("处理")), None);
+}
+
+#[test]
 fn pause_early_delivery_waits_for_a_clause_instead_of_pasting_provider_placeholders() {
     use super::{pause_early_chunk_ready, pause_early_complete_clause, pause_early_segment};
 

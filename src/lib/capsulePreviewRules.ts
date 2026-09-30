@@ -50,28 +50,6 @@ export function truncatePreview(
  */
 export const PREVIEW_DEDUP_POLICY = 'exact-match' as const;
 
-/**
- * Provider partials can arrive as a larger pure append after a pause. Split
- * only that visual append into a bounded number of rendering frames.
- */
-export const PREVIEW_BURST_REVEAL = {
-  // One/two-character provider updates are already visually incremental. Do
-  // not add a second client-side queue to them; it made normal streaming feel
-  // one beat behind even though the backend event had arrived.
-  minimumAppendChars: 12,
-  maxFrames: 6,
-  // Preserve a readable reveal for genuinely large provider bursts, but catch
-  // the authoritative target within roughly five display frames.
-  maxCatchUpMs: 48,
-} as const;
-
-/** Space reveal frames across the existing catch-up budget instead of
- * consuming them at display refresh rate, which still looks like one burst. */
-export function previewRevealIntervalMs(frameCount: number): number {
-  if (frameCount <= 1) return 0;
-  return Math.max(8, Math.floor(PREVIEW_BURST_REVEAL.maxCatchUpMs / frameCount));
-}
-
 /** The wake capsule is visible immediately; only its geometry settles. */
 export const CAPSULE_APPEARANCE = {
   // The backend-to-visible path is already about one frame on Windows. Keep
@@ -83,23 +61,11 @@ export const CAPSULE_APPEARANCE = {
 } as const;
 
 /**
- * Build the visual path between two authoritative previews. Rewrites and
- * routine short updates return one immediate frame.
+ * Display the newest provider result directly, including a burst after a
+ * pause. Intermediate synthetic words make the capsule trail the result.
  */
-export function buildPreviewRevealFrames(current: string, target: string): string[] {
-  if (!current || !target.startsWith(current)) return [target];
-
-  const appended = Array.from(target.slice(current.length));
-  if (appended.length < PREVIEW_BURST_REVEAL.minimumAppendChars) return [target];
-
-  const frameCount = Math.min(PREVIEW_BURST_REVEAL.maxFrames, appended.length);
-  const charsPerFrame = Math.ceil(appended.length / frameCount);
-  const frames: string[] = [];
-  for (let end = charsPerFrame; end < appended.length; end += charsPerFrame) {
-    frames.push(current + appended.slice(0, end).join(''));
-  }
-  frames.push(target);
-  return frames;
+export function buildPreviewRevealFrames(_current: string, target: string): string[] {
+  return [target];
 }
 
 // ── Final transition ────────────────────────────────────────
