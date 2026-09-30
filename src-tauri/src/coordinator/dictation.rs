@@ -1466,6 +1466,7 @@ fn current_embedded_audio_endpoint_preview(inner: &Arc<Inner>) -> Option<String>
 }
 
 include!("dictation_preview.rs");
+include!("dictation_delivery_diagnostics.rs");
 include!("dictation_streaming_composition.rs");
 
 async fn request_embedded_ble_recording_stop_from_host_for_endpoint(
@@ -4097,8 +4098,10 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // 丢失也绝不允许终稿整段重贴（2026-09-23 用户实锤"一毛一样粘贴两次"）。
     let pause_early_sticky = pause_early_ever_delivered(inner, current_session_id);
     let pause_early_paste = pause_early_paste_delivered(inner, current_session_id);
+    let pause_early_source_key = pause_early_delivery_source_key(inner, current_session_id);
     let pause_early_delivered = take_pause_early_delivery(inner, current_session_id);
-    let pause_early_outcome = pause_early_delivered.as_ref().map(|(display, key)| {
+    let pause_early_outcome = pause_early_delivered.as_ref().map(|(display, _)| {
+        let key = &pause_early_source_key;
         // 2026-09-23 17:31 d37e3562 吞尾实锤：润色压缩+流式中间态膨胀让
         // polished 域的前缀/LCP 全部失真，原始终稿域先对账（同域可比），
         // 仍不可切时用交付末尾锚点从原始终稿补未上屏的尾巴。
@@ -4120,13 +4123,13 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         (display, remainder, recovery)
     });
     let (insert_text, skip_dispatch) = match pause_early_outcome.as_ref() {
-        Some((_, Some(remainder), _)) if remainder.is_empty() => (polished.clone(), true),
+        Some((_, Some(remainder), _)) if remainder.is_empty() => (String::new(), true),
         Some((_, Some(remainder), _)) => (remainder.clone(), false),
         Some((_, None, Some(recovery))) if !recovery.is_empty() => (recovery.clone(), false),
-        Some(_) => (polished.clone(), true),
+        Some(_) => (String::new(), true),
         // 账本空但本会话确实上屏过早期文本：取消终稿整段粘贴，早期文本
         // 保留在屏（用户拍板"完成那次可以取消"——双写比少交付更糟）。
-        None if pause_early_sticky => (polished.clone(), true),
+        None if pause_early_sticky => (String::new(), true),
         None => (polished.clone(), false),
     };
     // 组字流式终局(2026-09-22 切片3):composition 活着 → 余量/恢复尾
@@ -4178,7 +4181,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // 终稿宁可少交付也不双写(H 族教训)。
     let streaming_contaminated = streaming_finalized != Some(true)
         && streaming_composition_contaminated(inner, current_session_id);
-    let delivery_submission = if streaming_finalized == Some(true) {
+    let mut delivery_submission = if streaming_finalized == Some(true) {
         log::info!(
             "[coord] streaming-composition finalized session_id={current_session_id} chars={} route=streaming",
             insert_text.chars().count()
@@ -4225,7 +4228,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             );
         } else {
             log::warn!(
-                "[coord] pause-early-delivery final skipped: cloud rewrote delivered prefix (delivered_chars={} final_chars={} clean={}) — early text stays, tail dropped",
+                "[coord] pause-early-delivery final skipped: source boundary unresolved (delivered_chars={} final_chars={} clean={}) — committed text retained, tail coverage unverified",
                 pause_early_outcome
                     .as_ref()
                     .map(|(display, _, _)| display.chars().count())
@@ -4371,6 +4374,25 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         )
         .await
     };
+    let final_payload_submitted = delivery_submission.submitted_text.is_some()
+        && !skip_dispatch && !streaming_contaminated;
+    if streaming_finalized != Some(true) && !skip_dispatch && !streaming_contaminated {
+        if let Some((display, _)) = pause_early_delivered.as_ref() {
+            delivery_submission.submitted_text = pause_early_cumulative_submitted_text(
+                display,
+                delivery_submission.submitted_text.as_deref(),
+            );
+        }
+    }
+    let submitted_chars = delivery_submission.submitted_text.as_ref().map(|text| text.chars().count() as u32);
+    let source_coverage = match pause_early_outcome.as_ref() {
+        Some((_, Some(remainder), _)) if remainder.is_empty() => "covered",
+        Some((_, Some(_), _)) | Some((_, None, Some(_))) if final_payload_submitted => "tail_submitted",
+        Some((_, Some(_), _)) | Some((_, None, Some(_))) => "tail_not_submitted",
+        Some(_) => "unresolved",
+        None if pause_early_sticky => "ledger_missing",
+        None => "full_submission",
+    };
     let status = delivery_submission.status;
     let original_target_confirmed = delivery_submission.target_confirmed;
     // 组字流式收尾:终局 commit/cancel 已做,这里只退驱动(幂等)。
@@ -4477,7 +4499,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         stop_to_done_ms
     );
 
-    let inserted_chars = Some(polished.chars().count() as u32);
+    // A corrected provider result may differ from immutable streamed text.
+    // Count submitted characters, not characters in the alternate final.
+    let inserted_chars = submitted_chars;
 
     // 累计每条 enabled 词条在最终文本中的命中次数。
     // 用 polished（最终插入的文本）扫描，与用户实际看到的输出一致。
@@ -4558,6 +4582,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         });
     debug_assert_eq!(delivery_fact.session_id, current_session_id);
     debug_assert_eq!(delivery_fact.status, status);
+    record_dictation_delivery_diagnostic(inner, &delivery_fact, &pause_early_source_key, source_coverage);
     store_embedded_audio_final_result(
         inner,
         crate::embedded_audio::EmbeddedAudioTranscriptResult {

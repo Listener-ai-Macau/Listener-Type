@@ -50,6 +50,24 @@ Users can override each provider to direct, system proxy, or a custom HTTP proxy
 
 ## Platform Bridges
 
+### Streaming delivery ownership
+
+The delivery ledger keeps immutable submitted editor text and a separate consumed
+provider-prefix key. An accepted clause advances both coordinates atomically;
+failed delivery restores both. Subsequent ASR revisions reconcile against the
+provider coordinate, so correcting an earlier word cannot stall or replay later
+clauses. Finalization submits only the uncovered tail.
+
+Speaker exclusions apply to their audio intervals. A retained foreign row still
+vetoes raw final recovery, while fresh verified owner speech after that interval
+can continue into the live ledger. The receive frame uses the same accepted owner
+view for preview promotion and the following merge.
+
+When recording diagnostics are enabled, a private `*.delivery-trace.json` beside
+the session WAV records intended text, cumulative submitted text, source coverage
+and target acknowledgment separately. Submission alone is not editor readback;
+preview/final differences alone do not prove lost or duplicated text.
+
 - macOS uses Accessibility/keyboard event paths for hotkey and insertion.
 - Windows uses low-level hooks for hotkeys and Listener Type TSF IME for reliable insertion.
 - Windows IME identity is documented in `docs/platform/windows-ime.md`.

@@ -1464,6 +1464,49 @@ fn update_local_preview_exclusion(
         || state.local_preview_exclusion_seen
 }
 
+/// A retained foreign row describes its own audio interval, not every later
+/// interval in the session. Only release the live hold when the newest provider
+/// row is already in the locally verified owner view and starts after every
+/// excluded row. Historical exclusion remains latched for final arbitration.
+fn verified_owner_tail_after_excluded_rows(
+    state: &SyncState,
+    provider: &Value,
+    owner_view: &Value,
+) -> bool {
+    if !state.local_speaker_tracking_enabled
+        || !state.local_target_confirmed
+        || !state.local_speaker_stable_target
+        || state.owner_isolation_frozen
+        || state.local_owner_handoff_suspected
+        || !matches!(state.local_speaker_classification,
+            Some(crate::speaker_verification::SessionSpeakerClassification::Target { .. }))
+    {
+        return false;
+    }
+    let Some(target) = state.target_speaker_id.as_deref() else { return false; };
+    let (Some(rows), Some(selected)) = (
+        provider.get("utterances").and_then(Value::as_array),
+        owner_view.get("utterances").and_then(Value::as_array),
+    ) else { return false; };
+    let Some(tail) = rows.iter().max_by_key(|row| utterance_start_ms(row)) else { return false; };
+    let Some(start) = utterance_start_ms(tail) else { return false; };
+    if !selected.contains(tail)
+        || utterance_speaker_id(tail).as_deref().is_some_and(|speaker| speaker != target)
+        || !tail.get("text").and_then(Value::as_str).is_some_and(|text| {
+            !text.trim().is_empty() && provider.get("text").and_then(Value::as_str)
+                .is_some_and(|full| full.trim_end().ends_with(text.trim_end()))
+        })
+        || !(local_evidence_allows_utterance(tail, &state.local_speaker_evidence, None)
+            || local_evidence_allows_open_owner_utterance(tail, target, rows, &state.local_speaker_evidence))
+    {
+        return false;
+    }
+    rows.iter().filter(|row| !selected.contains(row)).all(|row| {
+        utterance_start_ms(row).is_some_and(|at| at < start)
+            && utterance_end_ms(row).is_some_and(|end| end <= start)
+    })
+}
+
 fn local_speaker_allows_owner_endpoint_refresh(state: &SyncState) -> bool {
     !state.local_owner_handoff_suspected
         && matches!(
@@ -7937,7 +7980,10 @@ impl VolcengineStreamingASR {
         // NonTarget evidence.
         let provider_tail_excluded_from_preview = {
             let mut state = self.state.lock();
-            update_local_preview_exclusion(&mut state, result)
+            let historical_exclusion = update_local_preview_exclusion(&mut state, result);
+            (historical_exclusion && !verified_owner_tail_after_excluded_rows(
+                &state, result, &speaker_filtered_result.optimistic_result,
+            ))
                 || state.local_owner_handoff_suspected
                 || (!has_final && provider_has_pending_speaker_change(&state, result))
         };
@@ -8093,6 +8139,7 @@ impl VolcengineStreamingASR {
             final_explicit_non_owner_tail(&state, &speaker_filtered_result, result)
                 .then(|| transcript_candidate_from_result(result))
         };
+        let mut accepted_live_owner_result = None;
         if !has_final
             && pending_unattributed_speech
             && !provider_tail_excluded_from_preview
@@ -8105,12 +8152,12 @@ impl VolcengineStreamingASR {
                 .endpoint
                 .emits_stream_preview_before_final()
         {
-            let optimistic_candidate =
-                transcript_candidate_from_result(if owner_safe_provider_split_preview {
+            let optimistic_result = if owner_safe_provider_split_preview {
                     result
                 } else {
                     &speaker_filtered_result.optimistic_result
-                });
+                };
+            let optimistic_candidate = transcript_candidate_from_result(optimistic_result);
             let (optimistic_preview, inflated_merge_inputs) = {
                 let mut state = self.state.lock();
                 let merge_inputs = self.diagnostic_trace_enabled.then(|| {
@@ -8157,6 +8204,7 @@ impl VolcengineStreamingASR {
                     // ineligible for empty-final/session-close recovery.
                     if state.local_speaker_tracking_enabled && state.local_target_confirmed {
                         commit_session_transcript_if_stronger(&mut state, &merged, segments);
+                        accepted_live_owner_result = Some(optimistic_result);
                     }
                 }
                 if owner_safe_provider_split_preview {
@@ -8463,7 +8511,13 @@ impl VolcengineStreamingASR {
                 "delivered=provider reason=wake_remnant_only",
             );
         }
-        let selected_result = if arbitration_floor_applied {
+        // The same receive frame must not promote a verified live owner tail,
+        // then overwrite it with the shorter settled-row view. Merge the owner
+        // candidate accepted above; final arbitration still chooses its own
+        // authority and keeps every historical foreign-row veto.
+        let selected_result = if !has_final && accepted_live_owner_result.is_some() {
+            accepted_live_owner_result
+        } else if arbitration_floor_applied {
             Some(result)
         } else {
             match final_authority {
@@ -9296,6 +9350,57 @@ fn hotword_context(entries: &[DictionaryHotword]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn confirmed_owner_continuation_after_a_foreign_row_reaches_the_live_ledger() {
+        use crate::speaker_verification::SessionSpeakerClassification::{Target, Uncertain};
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials { app_id: "app".into(), access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into() },
+            Vec::new(),
+        );
+        {
+            let mut state = asr.state.lock();
+            state.local_speaker_tracking_enabled = true;
+            state.local_wake_owner_verified = true;
+            state.local_target_confirmed = true;
+            state.local_speaker_stable_target = true;
+            state.local_speaker_classification = Some(Target { score: 0.7 });
+            state.target_speaker_id = Some("0".into());
+            state.wake_speaker_phrase = Some("开始录音".into());
+            state.local_confirmed_transcript_foreign_hint_end_ms = Some(6_400);
+            state.local_speaker_evidence = [(4_300, Target { score: 0.7 }),
+                (6_000, Uncertain { score: 0.20 }), (6_400, Uncertain { score: 0.20 }),
+                (6_800, Uncertain { score: 0.20 }), (8_000, Target { score: 0.7 }),
+                (8_400, Target { score: 0.7 }), (8_800, Target { score: 0.7 })].into_iter()
+                .map(|(audio_end_ms, classification)| LocalSpeakerEvidence { audio_end_ms,
+                    classification, stable_target: true }).collect();
+        }
+        let owner_prefix = "开始录音，第一段已经讲完。";
+        for (body, body_speaker, body_end) in [
+            ("第二段继续说明，", Some("0"), None),
+            ("第二段继续说明，第三段还在说。", None, Some(8_700)),
+        ] {
+            let payload = serde_json::to_vec(&json!({
+                "audio_info": { "duration": 9_000 },
+                "result": { "text": format!("{owner_prefix}旁人插话。{body}"),
+                    "utterances": [
+                        { "text": owner_prefix, "start_time": 200, "end_time": 5_000,
+                            "definite": true, "additions": {"speaker_id": "0", "source": "two_pass"} },
+                        { "text": "旁人插话。", "start_time": 5_200, "end_time": 6_000,
+                            "definite": true, "additions": {"speaker_id": "1", "source": "two_pass"} },
+                        { "text": body, "start_time": 7_300, "end_time": body_end,
+                            "definite": false, "additions": {"speaker_id": body_speaker, "source": "stream"} }
+                    ] }
+            })).unwrap();
+            let response = frame::build(MessageType::FullServerResponse, Flags::None, Serialization::Json, &payload, None);
+            assert!(asr.handle_frame(&response));
+            let state = asr.state.lock();
+            assert!(state.best_transcript_text.contains(body),
+                "the current owner continuation must survive the earlier foreign row: {}", state.best_transcript_text);
+            assert!(!state.best_transcript_text.contains("旁人插话"));
+        }
+    }
 
     #[test]
     fn pause_early_rolling_prefix_advances_while_later_words_keep_arriving() {

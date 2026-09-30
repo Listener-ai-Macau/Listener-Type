@@ -216,12 +216,13 @@ async fn streaming_composition_update_tick(
         return;
     };
     let key = embedded_audio_partial_preview_stability_key(&display);
-    let (delivered_display, delivered_key) = pause_early_delivery_session_state(inner, session_id);
-    if !key.starts_with(&delivered_key) {
+    let (delivered_display, _) = pause_early_delivery_session_state(inner, session_id);
+    let source_key = pause_early_delivery_source_key(inner, session_id);
+    if !key.starts_with(&source_key) {
         // 已 commit 前缀被改写:组字不动,交给终稿的 cancel/恢复语义。
         return;
     }
-    let Some(delta) = pause_early_final_remainder(&display, &delivered_display, &delivered_key) else {
+    let Some(delta) = pause_early_final_remainder(&display, &delivered_display, &source_key) else {
         return;
     };
     let delta_key = embedded_audio_partial_preview_stability_key(&delta);
@@ -255,10 +256,11 @@ async fn streaming_composition_commit_stable(
     delta: &str,
     delivered_display: &str,
     full_key: &str,
+    source_key: &str,
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
 ) -> bool {
     let new_display = format!("{delivered_display}{delta}");
-    pause_early_delivery_reserve(inner, session_id, new_display, full_key.to_string());
+    pause_early_delivery_reserve(inner, session_id, new_display, full_key.to_string(), source_key.to_string());
     let (tx, mut rx) = tokio::sync::oneshot::channel();
     if !streaming_composition_send(
         inner,

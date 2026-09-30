@@ -1621,11 +1621,15 @@ pub(super) struct PauseEarlyDeliveryLedger {
     pub(super) delivered_display: String,
     /// stability key（去标点小写）of `delivered_display`.
     pub(super) delivered_key: String,
+    /// Prefix of the most recent provider snapshot consumed by successful
+    /// delivery. Provider revisions change this coordinate without changing
+    /// the immutable text already submitted to the editor.
+    pub(super) source_key: String,
     /// The state before the newest unconfirmed reserve. Rollback restores
     /// this instead of wiping the ledger: a failed mid-session paste must not
     /// make the final dispatch forget (and re-paste) text that is already on
     /// screen — 2026-09-23 用户实锤"一毛一样粘贴两次"。
-    pub(super) unconfirmed_prior: Option<(String, String)>,
+    pub(super) unconfirmed_prior: Option<(String, String, String)>,
     /// Sticky proof this session delivered early text at least once. Never
     /// cleared by rollback; the final dispatch uses it as a hard floor — when
     /// set, a full-text re-paste is cancelled even if the reconcilable prefix
@@ -2080,28 +2084,79 @@ fn pause_early_delivery_session_state(
     }
 }
 
+fn pause_early_delivery_source_key(inner: &Arc<Inner>, session_id: SessionId) -> String {
+    let ledger = inner.embedded_audio_pause_early_delivery.lock();
+    if ledger.session_id == Some(session_id) {
+        if ledger.source_key.is_empty() && !ledger.delivered_key.is_empty() {
+            // A missing source coordinate cannot authorize a full replay of
+            // already submitted text. Keep the previous conservative floor.
+            ledger.delivered_key.clone()
+        } else {
+            ledger.source_key.clone()
+        }
+    } else {
+        String::new()
+    }
+}
+
+/// Advance in the provider snapshot, not in the concatenated editor text.
+/// Both the remainder and the selected clause must be exact slices of that
+/// snapshot. A failed or partial submission must not consume unsent words.
+fn pause_early_source_key_after_append(
+    snapshot: &str,
+    remainder: &str,
+    appended: &str,
+) -> Option<String> {
+    let prefix = snapshot.strip_suffix(remainder)?;
+    remainder.strip_prefix(appended)?;
+    Some(embedded_audio_partial_preview_stability_key(
+        &snapshot[..prefix.len() + appended.len()],
+    ))
+}
+
+fn pause_early_cumulative_submitted_text(
+    prior_display: &str,
+    submitted_tail: Option<&str>,
+) -> Option<String> {
+    match (prior_display.is_empty(), submitted_tail) {
+        (true, None) => None,
+        (true, Some(tail)) => Some(tail.to_string()),
+        (false, None) => Some(prior_display.to_string()),
+        (false, Some(tail)) => Some(format!("{prior_display}{tail}")),
+    }
+}
+
 fn pause_early_delivery_reserve(
     inner: &Arc<Inner>,
     session_id: SessionId,
     delivered_display: String,
     delivered_key: String,
+    source_key: String,
 ) {
     let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+    if ledger.session_id != Some(session_id) {
+        // A cancelled recording can leave a committed prefix behind. Its
+        // rollback state belongs to that recording, never the next one.
+        *ledger = PauseEarlyDeliveryLedger::default();
+    }
     // 单一漏斗日志：粘贴路径的成败行会在毫秒级跟进来；若出现 reserve 行却
     // 没有后继 success/fail 行 = 粘贴调用中断（2026-09-23 47452640 幻影
     // +40 字取证缺口——账本 72 字但全天只有 32 字粘贴成功行）。
     log::info!(
-        "[coord] pause-early reserve session_id={session_id} total_display_chars={} key_chars={}",
+        "[coord] pause-early reserve session_id={session_id} total_display_chars={} key_chars={} source_key_chars={}",
         delivered_display.chars().count(),
-        delivered_key.chars().count()
+        delivered_key.chars().count(),
+        source_key.chars().count()
     );
     ledger.unconfirmed_prior = Some((
         std::mem::take(&mut ledger.delivered_display),
         std::mem::take(&mut ledger.delivered_key),
+        std::mem::take(&mut ledger.source_key),
     ));
     ledger.session_id = Some(session_id);
     ledger.delivered_display = delivered_display;
     ledger.delivered_key = delivered_key;
+    ledger.source_key = source_key;
 }
 
 /// The newest reserved paste succeeded on screen: the ledger prefix is now
@@ -2122,9 +2177,10 @@ fn pause_early_delivery_rollback(inner: &Arc<Inner>, session_id: SessionId) {
     // 只回滚这一次未确认的交付，恢复到上一个已确认前缀；已上屏的早期文本
     // 绝不从账本里消失（整段抹掉会让终稿全文重贴 = 双粘贴）。首贴失败时
     // prior 为空串 → 前缀归零，终稿全文交付，行为与旧版一致。
-    if let Some((prior_display, prior_key)) = ledger.unconfirmed_prior.take() {
+    if let Some((prior_display, prior_key, prior_source_key)) = ledger.unconfirmed_prior.take() {
         ledger.delivered_display = prior_display;
         ledger.delivered_key = prior_key;
+        ledger.source_key = prior_source_key;
     }
 }
 
@@ -2317,19 +2373,20 @@ async fn pause_early_delivery_tick(
     let prefs = inner.prefs.get();
     let (delivered_display, delivered_key) =
         pause_early_delivery_session_state(inner, session_id);
-    let exact_delta = pause_early_final_remainder(&text, &delivered_display, &delivered_key);
+    let source_key = pause_early_delivery_source_key(inner, session_id);
+    let exact_delta = pause_early_final_remainder(&text, &delivered_display, &source_key);
     let anchored = exact_delta.is_none();
     let Some(delta) = exact_delta
-        .or_else(|| pause_early_anchored_continuation(&text, &delivered_display, &delivered_key))
+        .or_else(|| pause_early_anchored_continuation(&text, &delivered_display, &source_key))
         // Provider revisions can change the last words of an already pasted
         // clause, so an exact eight-character seam disappears even though the
         // new owner-ledger prefix has kept growing. Reuse the bounded edit
         // alignment used at finalization, on the stable owner snapshot only.
         // Its internal-growth and large-rewrite guards still prevent a replay.
-        .or_else(|| pause_early_aligned_growth_tail(&text, &delivered_key))
+        .or_else(|| pause_early_aligned_growth_tail(&text, &source_key))
     else {
         let current_key = embedded_audio_partial_preview_stability_key(&text);
-        let shared = delivered_key
+        let shared = source_key
             .chars()
             .zip(current_key.chars())
             .take_while(|(left, right)| left == right)
@@ -2338,8 +2395,8 @@ async fn pause_early_delivery_tick(
             != Some((session_id, "delivered_prefix_revised_unaligned"));
         if first_block {
             log::info!(
-                "[coord] pause-early alignment unavailable session_id={session_id} delivered_key_chars={} snapshot_key_chars={} shared_prefix_chars={shared}",
-                delivered_key.chars().count(),
+                "[coord] pause-early alignment unavailable session_id={session_id} source_key_chars={} snapshot_key_chars={} shared_prefix_chars={shared}",
+                source_key.chars().count(),
                 current_key.chars().count(),
             );
         }
@@ -2355,12 +2412,17 @@ async fn pause_early_delivery_tick(
         .last_visible_growth_at(session_id)
         .is_some_and(|at| at.elapsed() >= PAUSE_EARLY_UNPUNCTUATED_QUIET);
     let quiet_boundary = snapshot_chars == full_ledger_chars && ledger_quiet && preview_quiet;
-    let Some(delta) = pause_early_segment(&delta, quiet_boundary) else {
+    let remainder = delta;
+    let Some(delta) = pause_early_segment(&remainder, quiet_boundary) else {
         return;
     };
     if !pause_early_chunk_ready(&delivered_key, delta) {
         return;
     }
+    let Some(new_source_key) = pause_early_source_key_after_append(&text, &remainder, delta) else {
+        pause_early_note_gate_blocked(inner, session_id, "source_boundary_unavailable");
+        return;
+    };
     let new_display = format!("{delivered_display}{delta}");
     // The key must describe what was actually pasted. The provider's revised
     // full prefix may differ from that text, even when its suffix aligns.
@@ -2376,7 +2438,7 @@ async fn pause_early_delivery_tick(
     // 恢复;账本先记后 commit,失败回滚——次序与粘贴路径同款)。失败时驱动
     // 已降级清组字,下一拍以空账本走粘贴分支补上。
     if streaming_composition_active(inner, session_id) {
-        streaming_composition_commit_stable(inner, session_id, delta, &delivered_display, &new_key, endpoint_clock)
+        streaming_composition_commit_stable(inner, session_id, delta, &delivered_display, &new_key, &new_source_key, endpoint_clock)
             .await;
         return;
     }
@@ -2395,7 +2457,7 @@ async fn pause_early_delivery_tick(
         return;
     }
     // 先记账再粘贴：并发触发的终稿交付会按在途前缀计算余量；粘贴失败回滚。
-    pause_early_delivery_reserve(inner, session_id, new_display, new_key);
+    pause_early_delivery_reserve(inner, session_id, new_display, new_key, new_source_key);
     // 2026-09-23 tki:中途粘贴不恢复剪贴板。750ms 恢复窗口追不上忙碌目标
     // (VS Code/Chromium 渲染器)的粘贴派发——08:39 实锤:第 1 段 22 字正确,
     // 第 2/3 段粘出的是用户 08:22 复制的旧报告×2(账本记 14+14 字已交付,

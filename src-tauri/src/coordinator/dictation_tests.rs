@@ -16256,6 +16256,7 @@ fn pause_early_rollback_restores_confirmed_prefix_and_keeps_sticky_floor() {
         session_id,
         "你好世界".to_string(),
         "你好世界".to_string(),
+        "你好世界".to_string(),
     );
     pause_early_delivery_confirm(inner, session_id);
     assert!(pause_early_ever_delivered(inner, session_id));
@@ -16267,6 +16268,7 @@ fn pause_early_rollback_restores_confirmed_prefix_and_keeps_sticky_floor() {
         session_id,
         "你好世界然后继续".to_string(),
         "你好世界然后继续".to_string(),
+        "您好世界然后继续".to_string(),
     );
     pause_early_delivery_rollback(inner, session_id);
     let (display, key) =
@@ -16289,12 +16291,12 @@ fn early_paste_keeps_committed_ledger_across_editor_switches() {
     let coordinator = Coordinator::new();
     let inner = &coordinator.inner;
     let session_id = uuid::Uuid::new_v4();
-    pause_early_delivery_reserve(inner, session_id, "第一句。".into(), "第一句".into());
+    pause_early_delivery_reserve(inner, session_id, "第一句。".into(), "第一句".into(), "第一句".into());
     pause_early_delivery_confirm(inner, session_id);
     // The user may move the cursor between clauses. The delivery ledger
     // stays session-wide; finalization only appends any remaining tail at
     // the current cursor and never reaches back into either editor.
-    pause_early_delivery_reserve(inner, session_id, "第一句。第二句。".into(), "第一句第二句".into());
+    pause_early_delivery_reserve(inner, session_id, "第一句。第二句。".into(), "第一句第二句".into(), "第一句第二句".into());
     pause_early_delivery_confirm(inner, session_id);
     assert_eq!(
         take_pause_early_delivery(inner, session_id),
@@ -16317,6 +16319,7 @@ fn pause_early_rollback_on_first_paste_returns_to_empty_ledger() {
     pause_early_delivery_reserve(
         inner,
         session_id,
+        "你好世界".to_string(),
         "你好世界".to_string(),
         "你好世界".to_string(),
     );
@@ -16356,6 +16359,121 @@ fn pause_early_tail_beyond_delivered_anchor_recovers_tail_when_lengths_distort()
         pause_early_tail_beyond_delivered_anchor(final_diverged, &key(diverged_tail)),
         None,
     );
+}
+
+#[test]
+fn pause_early_source_coverage_survives_revised_prefix_and_final_repeat() {
+    use super::{
+        embedded_audio_partial_preview_stability_key as key,
+        pause_early_anchored_continuation, pause_early_delivery_confirm,
+        pause_early_delivery_reserve, pause_early_delivery_session_state,
+        pause_early_delivery_source_key, pause_early_final_remainder,
+        pause_early_source_key_after_append,
+    };
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session_id = uuid::Uuid::new_v4();
+    let pasted = "你帮我清理一下之前的，现在不需要再有这些 SASA";
+    pause_early_delivery_reserve(inner, session_id, pasted.into(), key(pasted), key(pasted));
+    pause_early_delivery_confirm(inner, session_id);
+
+    // c06eb382: the provider changed the first clause and acronym before
+    // delivering the rest. The source and immutable editor text now differ.
+    let snapshot = "你帮我清理一下之前的词，现在不需要再有这些 S A S H。备份一下就好，到时候重新启用的时候就可以很快的重新启用回来。就是现在目前来说，我们 SSH 的服务器已经是弃用。";
+    let appended = "备份一下就好，到时候重新启用的时候就可以很快的重新启用回来。就是现在目前来说，我们 SSH 的服务器已经是弃用。";
+    let source_key = pause_early_source_key_after_append(snapshot, appended, appended).unwrap();
+    let delivered = format!("{pasted}{appended}");
+    pause_early_delivery_reserve(inner, session_id, delivered.clone(), key(&delivered), source_key);
+    pause_early_delivery_confirm(inner, session_id);
+    assert_eq!(pause_early_final_remainder(snapshot, &delivered, &key(&delivered)), None);
+    assert_eq!(
+        pause_early_final_remainder(snapshot, &delivered, &pause_early_delivery_source_key(inner, session_id)),
+        Some(String::new()),
+        "the repeated final frame covers the consumed source; it is not evidence of a lost tail"
+    );
+    let next = format!("{snapshot}对。");
+    assert_eq!(
+        pause_early_final_remainder(&next, &delivered, &pause_early_delivery_source_key(inner, session_id)),
+        Some("对。".into()),
+        "even a short new tail continues from the source coordinate"
+    );
+    assert_eq!(pause_early_delivery_session_state(inner, session_id).0, delivered);
+
+    // A long recording can accumulate more old edits than the bounded
+    // alignment permits. A prior successful append already located them.
+    let first = "今天我们讨论新的语音输入体验";
+    let second = "今天我们来讨论新的语音输入体验，接下来继续说明实时预览。";
+    let delta = pause_early_anchored_continuation(second, first, &key(first)).unwrap();
+    let consumed = pause_early_source_key_after_append(second, &delta, &delta).unwrap();
+    assert_eq!(
+        pause_early_final_remainder(&format!("{second}第三段继续。"), &format!("{first}{delta}"), &consumed),
+        Some("第三段继续。".into())
+    );
+}
+
+#[test]
+fn pause_early_source_coverage_consumes_only_the_submitted_clause() {
+    use super::{
+        embedded_audio_partial_preview_stability_key as key,
+        pause_early_source_key_after_append, pause_early_final_remainder,
+    };
+    let snapshot = "第一段已修正，第二段完成。第三段还在说";
+    let remainder = "第二段完成。第三段还在说";
+    let consumed = pause_early_source_key_after_append(snapshot, remainder, "第二段完成。").unwrap();
+    assert_eq!(consumed, key("第一段已修正，第二段完成。"));
+    assert_eq!(pause_early_final_remainder(snapshot, "第一段旧文，第二段完成。", &consumed), Some("第三段还在说".into()));
+    assert!(pause_early_source_key_after_append(snapshot, "不是快照中的尾巴", "不是").is_none());
+    assert!(pause_early_source_key_after_append(snapshot, remainder, "第二段完成。另一段").is_none());
+}
+
+#[test]
+fn pause_early_failed_append_rolls_back_source_and_editor_coordinates_together() {
+    use super::{
+        embedded_audio_partial_preview_stability_key as key,
+        pause_early_delivery_reserve, pause_early_delivery_confirm,
+        pause_early_delivery_rollback, pause_early_delivery_source_key,
+        pause_early_delivery_session_state, pause_early_ever_delivered,
+    };
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session_id = uuid::Uuid::new_v4();
+    pause_early_delivery_reserve(inner, session_id, "第一段旧字。".into(), key("第一段旧字。"), key("第一段新字。"));
+    pause_early_delivery_confirm(inner, session_id);
+    pause_early_delivery_reserve(inner, session_id, "第一段旧字。第二段。".into(), key("第一段旧字。第二段。"), key("第一段新字。第二段。"));
+    pause_early_delivery_rollback(inner, session_id);
+    assert_eq!(pause_early_delivery_session_state(inner, session_id).0, "第一段旧字。");
+    assert_eq!(pause_early_delivery_source_key(inner, session_id), key("第一段新字。"));
+    assert!(pause_early_ever_delivered(inner, session_id));
+    assert!(pause_early_delivery_source_key(inner, uuid::Uuid::new_v4()).is_empty());
+}
+
+#[test]
+fn pause_early_new_session_cannot_restore_a_cancelled_sessions_text() {
+    use super::{
+        pause_early_delivery_confirm, pause_early_delivery_reserve,
+        pause_early_delivery_rollback, pause_early_delivery_session_state,
+        pause_early_delivery_source_key, pause_early_ever_delivered,
+    };
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let previous = uuid::Uuid::new_v4();
+    pause_early_delivery_reserve(inner, previous, "旧录音。".into(), "旧录音".into(), "旧录音".into());
+    pause_early_delivery_confirm(inner, previous);
+    let next = uuid::Uuid::new_v4();
+    pause_early_delivery_reserve(inner, next, "新录音。".into(), "新录音".into(), "新录音".into());
+    pause_early_delivery_rollback(inner, next);
+    assert_eq!(pause_early_delivery_session_state(inner, next), (String::new(), String::new()));
+    assert!(pause_early_delivery_source_key(inner, next).is_empty());
+    assert!(!pause_early_ever_delivered(inner, next));
+}
+
+#[test]
+fn pause_early_submission_evidence_includes_prior_clauses_without_claiming_unsent_tail() {
+    use super::pause_early_cumulative_submitted_text;
+    assert_eq!(pause_early_cumulative_submitted_text("第一段。", Some("第二段。")), Some("第一段。第二段。".into()));
+    assert_eq!(pause_early_cumulative_submitted_text("第一段。", None), Some("第一段。".into()));
+    assert_eq!(pause_early_cumulative_submitted_text("", Some("第一段。")), Some("第一段。".into()));
+    assert_eq!(pause_early_cumulative_submitted_text("", None), None);
 }
 
 #[test]
