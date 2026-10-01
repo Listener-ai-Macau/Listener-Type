@@ -279,6 +279,7 @@ pub(super) fn current_delivery_target() -> Option<usize> {
     capture_focus_target()
 }
 
+#[cfg(target_os = "windows")]
 pub(super) fn delivery_target_is_current(target: Option<usize>) -> bool {
     target.is_some() && target == current_delivery_target()
 }

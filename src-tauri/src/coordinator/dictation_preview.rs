@@ -2507,28 +2507,32 @@ async fn pause_early_delivery_tick(
     // 落屏的却是恢复后的旧剪贴板)。会话内剪贴板暂存听写增量无碍;终稿
     // 交付仍按用户偏好恢复,那才是剪贴板所有权归还的正当时机。
     let restore_clipboard = false;
-    let result = insert_via_non_tsf_fallback(
-        inner,
-        delta,
-        restore_clipboard,
-        prefs.paste_shortcut,
+    #[cfg(target_os = "windows")]
+    let (status, route) = {
+        let result = insert_via_non_tsf_fallback(inner, delta, restore_clipboard, prefs.paste_shortcut);
+        (result.status, result.route)
+    };
+    #[cfg(not(target_os = "windows"))]
+    let (status, route) = (
+        inner.inserter.insert(delta, restore_clipboard, prefs.paste_shortcut),
+        DeliveryRoute::Paste,
     );
     let inserted = matches!(
-        result.status,
+        status,
         InsertStatus::PasteSent | InsertStatus::Inserted | InsertStatus::SubmittedUnconfirmed
     );
     if !inserted {
         pause_early_delivery_rollback(inner, session_id);
         log::warn!(
             "[coord] pause-early-delivery paste failed status={:?} chars={} — final will deliver the remainder",
-            result.status,
+            status,
             delta.chars().count()
         );
         return;
     }
     pause_early_delivery_confirm(inner, session_id);
     endpoint_clock.lock().note_body_delivery(Instant::now());
-    if result.route == DeliveryRoute::Paste {
+    if route == DeliveryRoute::Paste {
         inner.embedded_audio_pause_early_delivery.lock().paste_delivered_session = Some(session_id);
     }
     log::info!(
@@ -2536,7 +2540,7 @@ async fn pause_early_delivery_tick(
         delta.chars().count(),
         delivered_display.chars().count() + delta.chars().count(),
         PAUSE_EARLY_DELIVERY_MIN_STABLE.as_millis(),
-        result.route,
-        result.status
+        route,
+        status
     );
 }

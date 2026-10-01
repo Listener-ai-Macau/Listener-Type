@@ -3168,6 +3168,7 @@ fn terminal_inflight_local_decision(
 const TERMINAL_LOCAL_TAIL_MS: usize = 2_500;
 const TERMINAL_LOCAL_TAIL_BYTES: usize = TERMINAL_LOCAL_TAIL_MS * 32;
 
+#[cfg(target_os = "windows")]
 fn terminal_local_result_can_activate(result: &LocalWakeConfirmation) -> bool {
     local_confirmation_can_activate(false, result.phrase_relation)
         || result.phrase_relation == crate::wake_phrase::LocalPhraseRelation::PresentLater

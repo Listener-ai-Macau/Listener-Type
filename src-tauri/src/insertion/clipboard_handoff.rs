@@ -88,6 +88,74 @@ struct PasteReceipt {
     payload: String,
     reader: Option<crate::selection::PasteReader>,
     before: Option<(String, String)>,
+    dispatched_at: Instant,
+    observation: PasteObservation,
+}
+
+#[derive(Default)]
+struct PasteObservation {
+    consumed: bool,
+    attempts: u32,
+    last_shape: Option<(usize, usize, usize, bool)>,
+    read_failed: bool,
+}
+
+impl PasteObservation {
+    fn observe(&mut self, before: &str, selected: &str, payload: &str, after: &str) {
+        if self.consumed {
+            return;
+        }
+        self.attempts += 1;
+        self.last_shape = Some((
+            before.chars().count(),
+            selected.chars().count(),
+            after.chars().count(),
+            before == after,
+        ));
+        self.read_failed = false;
+        // This receipt is a fact about the dispatched paste, not about whatever
+        // the editor contains at finalization. Sending or editing the message
+        // later cannot undo an already observed consumption of this payload.
+        self.consumed = paste_was_consumed(before, selected, payload, after);
+    }
+}
+
+impl PasteReceipt {
+    fn observing(&self) -> bool {
+        !self.observation.consumed && self.reader.is_some() && self.before.is_some()
+    }
+
+    fn observe(&mut self) {
+        if !self.observing() {
+            return;
+        }
+        let (before, selected) = self.before.as_ref().expect("snapshot checked");
+        match self.reader.as_ref().expect("reader checked").document() {
+            Ok(after) => {
+                let first_changed_read = self.observation.last_shape.is_none_or(|shape| shape.3) && before != &after;
+                self.observation.observe(before, selected, &self.payload, &after);
+                if first_changed_read && !self.observation.consumed {
+                    log::info!("[insertion] paste readback changed without receipt ticket={} shape={:?} before_lines={} after_lines={} payload_chars={}",
+                        self.ticket, self.observation.last_shape, before.matches('\n').count(), after.matches('\n').count(), self.payload.chars().count());
+                }
+            }
+            Err(_) => {
+                self.observation.attempts += 1;
+                self.observation.read_failed = true;
+            }
+        }
+        if self.observation.consumed {
+            log::info!("[insertion] paste receipt observed ticket={} elapsed_ms={} observations={} payload_chars={}",
+                self.ticket, self.dispatched_at.elapsed().as_millis(), self.observation.attempts, self.payload.chars().count());
+            self.reader = None;
+            self.before = None;
+        } else if self.dispatched_at.elapsed() >= Duration::from_secs(5) {
+            log::warn!("[insertion] paste receipt unconfirmed ticket={} observations={} read_failed={} shape={:?} payload_chars={}",
+                self.ticket, self.observation.attempts, self.observation.read_failed, self.observation.last_shape, self.payload.chars().count());
+            self.reader = None;
+            self.before = None;
+        }
+    }
 }
 
 struct PendingRetention {
@@ -109,18 +177,22 @@ fn run(receiver: Receiver<Command>) {
     let mut paste_receipt: Option<PasteReceipt> = None;
     let mut pending: Option<PendingRetention> = None;
     loop {
-        let command = if pending.is_some() {
-            match receiver.recv_timeout(Duration::from_millis(40)) {
-                Ok(command) => Some(command),
-                Err(mpsc::RecvTimeoutError::Timeout) => None,
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            }
-        } else {
-            match receiver.recv() {
-                Ok(command) => Some(command),
-                Err(_) => break,
-            }
-        };
+        // Observe from dispatch onward, including the interval before a final
+        // retention request. Waiting until the end misses the editor state
+        // after a successfully consumed paste if the user has sent the message.
+        let command =
+            if pending.is_some() || paste_receipt.as_ref().is_some_and(PasteReceipt::observing) {
+                match receiver.recv_timeout(Duration::from_millis(40)) {
+                    Ok(command) => Some(command),
+                    Err(mpsc::RecvTimeoutError::Timeout) => None,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            } else {
+                match receiver.recv() {
+                    Ok(command) => Some(command),
+                    Err(_) => break,
+                }
+            };
         match command {
             Some(Command::Paste(text, restore, shortcut, reply)) => {
                 finish(&mut pending, RetentionResult::Superseded);
@@ -154,6 +226,8 @@ fn run(receiver: Receiver<Command>) {
                     payload: text,
                     reader,
                     before,
+                    dispatched_at: Instant::now(),
+                    observation: PasteObservation::default(),
                 });
                 drop(owner);
                 let _ = reply.send(result);
@@ -199,7 +273,7 @@ fn run(receiver: Receiver<Command>) {
                     let _ = reply.send(RetentionResult::Stored);
                     continue;
                 }
-                if receipt.before.is_none() || receipt.reader.is_none() {
+                if !receipt.observation.consumed && !receipt.observing() {
                     log::warn!("[insertion] full clipboard retention unavailable: editor has no paste readback ticket={}", ticket.id);
                     let _ = reply.send(RetentionResult::Unavailable);
                     continue;
@@ -212,6 +286,19 @@ fn run(receiver: Receiver<Command>) {
                 });
             }
             None => {}
+        }
+        if let Some(receipt) = paste_receipt.as_mut() {
+            if still_owns_transport(
+                receipt.ticket,
+                *OWNER.lock(),
+                receipt.revision,
+                clipboard_revision(),
+            ) {
+                receipt.observe();
+            } else {
+                paste_receipt = None;
+                finish(&mut pending, RetentionResult::Superseded);
+            }
         }
         let (Some(job), Some(receipt)) = (pending.as_ref(), paste_receipt.as_ref()) else {
             continue;
@@ -229,18 +316,7 @@ fn run(receiver: Receiver<Command>) {
             finish(&mut pending, RetentionResult::Superseded);
             continue;
         }
-        let consumed = receipt
-            .before
-            .as_ref()
-            .zip(receipt.reader.as_ref())
-            .and_then(|((before, selected), reader)| {
-                reader
-                    .document()
-                    .ok()
-                    .map(|after| paste_was_consumed(before, selected, &receipt.payload, &after))
-            })
-            .unwrap_or(false);
-        if consumed {
+        if receipt.observation.consumed {
             // Recheck after the native read, which may have yielded to the user.
             if clipboard_revision() != receipt.revision {
                 drop(owner);
@@ -375,5 +451,45 @@ mod tests {
             "a user copy cancels even when its text happens to be the same"
         );
         assert!(!still_owns_transport(4, 5, Some(81), Some(82)));
+    }
+
+    #[test]
+    fn consumed_paste_receipt_survives_editor_submit_before_final_retention() {
+        let mut receipt = PasteObservation::default();
+        receipt.observe("第一句。", "", "最后一句。", "第一句。");
+        assert!(
+            !receipt.consumed,
+            "a queued shortcut has not consumed its payload"
+        );
+        receipt.observe("第一句。", "", "最后一句。", "第一句。最后一句。");
+        assert!(receipt.consumed);
+        // The user sends the message while the three-second endpoint window
+        // is still running. The clipboard must still retain the whole body.
+        receipt.observe("第一句。", "", "最后一句。", "");
+        assert!(
+            receipt.consumed,
+            "final retention uses the observed paste receipt"
+        );
+    }
+
+    #[test]
+    fn unobserved_or_superseded_paste_cannot_borrow_a_previous_receipt() {
+        let mut first = PasteObservation::default();
+        first.observe("前文", "", "第一段。", "前文第一段。");
+        assert!(first.consumed);
+        let mut second = PasteObservation::default();
+        second.observe("前文第一段。", "", "第二段。", "");
+        assert!(
+            !second.consumed,
+            "clearing the editor is not a paste acknowledgment"
+        );
+        assert!(
+            !still_owns_transport(1, 2, Some(81), Some(82)),
+            "a cached first receipt cannot authorize a newer write"
+        );
+        assert!(
+            !still_owns_transport(2, 2, Some(82), Some(83)),
+            "a user copy supersedes even a consumed receipt"
+        );
     }
 }

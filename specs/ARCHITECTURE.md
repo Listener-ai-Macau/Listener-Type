@@ -105,8 +105,13 @@ preview/final differences alone do not prove lost or duplicated text.
 Final clipboard retention uses the cumulative immutable delivery ledger for
 streamed sessions. A single clipboard worker owns paste payloads and deferred
 retention jobs by generation and native clipboard revision. It captures the
-focused editor before dispatch and uses a read-only UIA/AX diff to confirm the
-last paste was consumed before replacing its payload with the whole session.
+focused editor before dispatch and observes a read-only UIA/AX diff immediately
+after each paste. A positive consumption receipt is latched for that payload
+generation, so submitting or editing the message before dictation ends cannot
+erase it. Final retention uses this receipt before replacing the last payload
+with the whole session; it does not reconstruct a receipt from the editor's
+later state. The worker releases native readers after confirmation or bounded
+observation, and records readback failure shapes without editor text.
 It never dispatches a second paste, selects text, or restores focus. User copies
 and newer app writes supersede pending retention. Missing readback or a timeout
 cannot authorize a clipboard overwrite; history still provides the full body.

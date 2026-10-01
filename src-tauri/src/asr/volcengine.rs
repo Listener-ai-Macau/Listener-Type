@@ -5393,6 +5393,7 @@ impl VolcengineStreamingASR {
         }
     }
 
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     pub async fn await_target_speaker_final(&self) -> Result<Option<RawTranscript>, String> {
         // r29 延迟优化：早启动时 finish 已在跑，这里保留流的 Arc 句柄供证据读取
         // 与取消使用，结果从后台任务 join；未早启动则保持原串行语义。
