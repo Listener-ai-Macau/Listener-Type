@@ -54,7 +54,7 @@ Selected text is sent to the configured text provider. Long selections are bound
 | Open Listener Type | Ctrl+Shift+O |
 | Mark the session for translation | Shift while recording, with a target selected |
 
-Settings include shortcut customization, language, theme, autostart, recording capsule, mute, clipboard and streaming insertion. Auto-send is off by default; optional send actions are Enter or Ctrl+Enter. Keep final-text and clipboard preferences separate when troubleshooting insertion. Closing the main window can hide the app to the tray; choose Quit from the tray to exit fully. App autostart and keyboard automatic shutdown are separate settings.
+Settings include shortcut customization, language, theme, autostart, recording capsule, mute, clipboard and streaming insertion. Automatic clause insertion continues while speaking; after completion, the clipboard retains the whole submitted session body once the last paste is consumed. A user copy cancels pending retention. Editors without readback keep the safe paste payload, and the whole body remains available in History. Auto-send is off by default; optional send actions are Enter or Ctrl+Enter. Closing the main window can hide the app to the tray; choose Quit from the tray to exit fully. App autostart and keyboard automatic shutdown are separate settings.
 
 ## Keyboard controls and mappings
 
@@ -65,7 +65,7 @@ Settings include shortcut customization, language, theme, autostart, recording c
 | Knob double-click | Reset Bluetooth pairing |
 | Knob hold | Hold until shutdown confirms |
 | KEY1 / KEY2 | Right Ctrl / Ctrl+C |
-| KEY3 / KEY4 | Ctrl+V / Ctrl+Z |
+| KEY3 / KEY4 | Ctrl+V / Enter |
 
 Map key click, double-click, long-press and knob click in Device settings. Options include dictation, copy/paste, undo, styles, translation, questions, templates, shortcuts, opening apps or disabling the action. Key double-click and long-press default to disabled. Knob double-click and hold remain reserved for hardware recovery and shutdown.
 
