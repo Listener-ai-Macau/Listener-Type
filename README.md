@@ -5,7 +5,7 @@
   <img src="docs/assets/listener/type-hero-en.png" alt="Listener Type: your voice at the cursor" width="1600">
 </picture>
 
-**English** · [简体中文](README.zh-CN.md)
+**English** · [Chinese](README.zh-CN.md)
 
 # Listener Type
 
@@ -53,7 +53,7 @@ The app is free; cloud costs are set by each provider. Without an API key, prepa
 - **Cloud services:** Bring your own recognition or text-provider credentials. Charges, quotas and trial terms are set by each provider. No cloud keys are bundled.
 - **No API key:** On Windows, prepare the Foundry Local runtime and a Whisper model in local recognition settings. Choose your computer microphone and try Raw dictation. Local recognition needs no cloud ASR key; download the model first. Speed depends on your computer. Styles, translation and voice QA have separate service requirements.
 
-[Recognition services and local model setup](docs/USAGE.md#provider-和网络)
+[Recognition services and local model setup](docs/USAGE.en.md#recognition-services-and-local-models)
 
 </details>
 
@@ -122,7 +122,7 @@ Existing repository screenshot; statistics and provider settings are examples.
 
 For connection, recording or insertion problems, start with panel 08 of the foldout. If the issue persists, read [Support](SUPPORT.md) and [report the issue](https://github.com/Listener-ai-Macau/Listener-Type/issues) with your app version, operating system and input source. Include the firmware version when using the keyboard.
 
-[Usage](docs/USAGE.md) · [Feature catalog](docs/product/features.md) · [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+[Usage](docs/USAGE.en.md) · [Feature catalog](docs/product/features.en.md) · [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 Tauri 2 / Rust / React / TypeScript / Vite. Full desktop builds also require the `third_party/denzic-platform` submodule.
 

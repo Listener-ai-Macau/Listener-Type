@@ -5,7 +5,7 @@
   <img src="docs/assets/listener/type-hero.png" alt="Listener Type：把说的话写进当前输入框" width="1600">
 </picture>
 
-**简体中文** · [English](README.md)
+**简体中文** · [英文](README.md)
 
 # Listener Type
 
@@ -29,7 +29,7 @@
 2. 按右 Ctrl 开始，说一句话，再按一次结束。
 3. 检查写入的文字；目标应用阻止写入时，按提示粘贴。
 
-图中是流程示意，不是实机录屏。默认 Raw 保留原文；需要时选择整理风格或翻译。
+图中是流程示意，不是实机录屏。默认原文模式（Raw）保留措辞；需要时选择整理风格或翻译。
 
 ## 先完成一次输入
 
@@ -44,16 +44,16 @@ Windows 是主要安装与完整键盘音频路径。macOS / Linux 当前从源�
 
 ### 软件免费，服务费用分别计算
 
-软件免费；云服务费用由提供方决定。没有 API Key，可先准备 Windows 本地模型并用 Raw 听写。
+软件免费；云服务费用由提供方决定。没有云端密钥，可先准备 Windows 本地模型并用原文模式（Raw）听写。
 
 <details>
 <summary>展开费用、本地模型与首次配置说明</summary>
 
 - **软件：** Listener Type 免费开源；正常本机使用不需要 Listener 账号，也不必先买键盘。
 - **云服务：** 使用你自己的语音识别或文字服务凭据，费用、额度和试用条件由对应提供方决定。软件不附带云端密钥。
-- **没有 API Key：** Windows 可先在本地识别设置中准备 Foundry Local 运行时与 Whisper 模型，选择电脑麦克风，用原文模式（Raw）试录。本地识别无需云端识别密钥；首次需下载模型，速度取决于电脑。整理、翻译与语音问答另有服务配置要求。
+- **没有云端密钥：** Windows 可先在本地识别设置中准备 Foundry Local 运行时与 Whisper 模型，选择电脑麦克风，用原文模式（Raw）试录。本地识别无需云端识别密钥；首次需下载模型，速度取决于电脑。整理、翻译与语音问答另有服务配置要求。
 
-[查看识别服务与本地模型设置](docs/USAGE.md#provider-和网络)
+[查看识别服务与本地模型设置](docs/USAGE.md#识别服务与网络)
 
 </details>
 
@@ -94,7 +94,7 @@ Windows 是主要安装与完整键盘音频路径。macOS / Linux 当前从源�
 
 唤醒词与声纹也在**设备页**配置：按引导录三次当前唤醒词；改词后重新录制。声纹用于减少输入干扰，噪声与多人说话时仍需检查最终文字。删除声纹不会关闭语音唤醒。声纹向导在本机生成受保护模板，完成后不保留原始样本录音。
 
-[硬件操作与灯语](https://github.com/Listener-ai-Macau/Listener-Firmware) · [折页使用说明](docs/manuals/Listener-fold-ZH.pdf)
+[硬件操作与灯语](https://github.com/Listener-ai-Macau/Listener-Firmware/blob/master/README.zh-CN.md) · [折页使用说明](docs/manuals/Listener-fold-ZH.pdf)
 
 ## 服务由你配置，数据去向看得清
 
@@ -123,9 +123,9 @@ Windows 是主要安装与完整键盘音频路径。macOS / Linux 当前从源�
 
 ## 文档与开发
 
-遇到连接、录音或文字写入问题，可先查折页第 08 面。仍有问题时，查看[反馈说明](SUPPORT.md)，在[问题反馈页](https://github.com/Listener-ai-Macau/Listener-Type/issues)提供软件版本、系统和输入来源；使用键盘时一并提供固件版本。
+遇到连接、录音或文字写入问题，可先查折页第 08 面。仍有问题时，查看[反馈说明](SUPPORT.zh-CN.md)，在[问题反馈页](https://github.com/Listener-ai-Macau/Listener-Type/issues)提供软件版本、系统和输入来源；使用键盘时一并提供固件版本。
 
-[使用说明](docs/USAGE.md) · [功能目录](docs/product/features.md) · [发布记录](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [贡献指南](CONTRIBUTING.md) · [安全](SECURITY.md)
+[使用说明](docs/USAGE.md) · [功能目录](docs/product/features.md) · [发布记录](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [贡献指南](CONTRIBUTING.zh-CN.md) · [安全](SECURITY.zh-CN.md)
 
 Tauri 2 / Rust / React / TypeScript / Vite。完整桌面构建还需要 `third_party/denzic-platform` 子模块。
 
