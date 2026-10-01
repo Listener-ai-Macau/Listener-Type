@@ -1,6 +1,7 @@
 //! Own the clipboard across asynchronous paste and final transcript retention.
-//! A queued shortcut is not a receipt: only a readback of the same editor can
-//! release its payload. All decisions are shared; native readers only observe.
+//! A queued shortcut is not a receipt: only an observed payload in the same
+//! editor can release it. This is not acceptance of the entire session text.
+//! All decisions are shared; native readers only observe.
 
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
@@ -95,9 +96,16 @@ struct PasteReceipt {
 #[derive(Default)]
 struct PasteObservation {
     consumed: bool,
+    proof: Option<PasteConsumptionProof>,
     attempts: u32,
     last_shape: Option<(usize, usize, usize, bool)>,
     read_failed: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PasteConsumptionProof {
+    ExactEdit,
+    WholePayloadDocument,
 }
 
 impl PasteObservation {
@@ -116,7 +124,8 @@ impl PasteObservation {
         // This receipt is a fact about the dispatched paste, not about whatever
         // the editor contains at finalization. Sending or editing the message
         // later cannot undo an already observed consumption of this payload.
-        self.consumed = paste_was_consumed(before, selected, payload, after);
+        self.proof = paste_consumption_proof(before, selected, payload, after);
+        self.consumed = self.proof.is_some();
     }
 }
 
@@ -145,8 +154,8 @@ impl PasteReceipt {
             }
         }
         if self.observation.consumed {
-            log::info!("[insertion] paste receipt observed ticket={} elapsed_ms={} observations={} payload_chars={}",
-                self.ticket, self.dispatched_at.elapsed().as_millis(), self.observation.attempts, self.payload.chars().count());
+            log::info!("[insertion] paste receipt observed ticket={} elapsed_ms={} observations={} payload_chars={} proof={:?}",
+                self.ticket, self.dispatched_at.elapsed().as_millis(), self.observation.attempts, self.payload.chars().count(), self.observation.proof);
             self.reader = None;
             self.before = None;
         } else if self.dispatched_at.elapsed() >= Duration::from_secs(5) {
@@ -367,7 +376,12 @@ fn clipboard_revision() -> Option<u64> {
     }
 }
 
-fn paste_was_consumed(before: &str, selected: &str, payload: &str, after: &str) -> bool {
+fn paste_consumption_proof(
+    before: &str,
+    selected: &str,
+    payload: &str,
+    after: &str,
+) -> Option<PasteConsumptionProof> {
     let normalize = |value: &str| value.replace("\r\n", "\n").replace('\r', "\n");
     let (before, selected, payload, after) = (
         normalize(before),
@@ -375,12 +389,22 @@ fn paste_was_consumed(before: &str, selected: &str, payload: &str, after: &str) 
         normalize(payload),
         normalize(after),
     );
-    if payload.is_empty()
-        || before == after
-        || selected.len() > before.len()
+    if payload.is_empty() || before == after {
+        return None;
+    }
+    // Some accessibility providers expose an empty editor's prompt as document
+    // text. Do not guess which text is a prompt or rewrite the native snapshot.
+    // A changed, complete document equal to this generation's payload proves
+    // that the payload is already present, even without a reconstructable edit.
+    // This authorizes clipboard handoff only, never earlier-text preservation
+    // or whole-session delivery acceptance. A substring is not this proof.
+    if selected.is_empty() && after == payload {
+        return Some(PasteConsumptionProof::WholePayloadDocument);
+    }
+    if selected.len() > before.len()
         || before.len() - selected.len() + payload.len() != after.len()
     {
-        return false;
+        return None;
     }
     let prefix = before
         .chars()
@@ -402,10 +426,15 @@ fn paste_was_consumed(before: &str, selected: &str, payload: &str, after: &str) 
             && after[offset..].starts_with(&payload)
             && before[offset + selected.len()..] == after[offset + payload.len()..]
         {
-            return true;
+            return Some(PasteConsumptionProof::ExactEdit);
         }
     }
-    false
+    None
+}
+
+#[cfg(test)]
+fn paste_was_consumed(before: &str, selected: &str, payload: &str, after: &str) -> bool {
+    paste_consumption_proof(before, selected, payload, after).is_some()
 }
 
 #[cfg(test)]
@@ -417,6 +446,34 @@ mod tests {
         assert!(!paste_was_consumed("已经上屏", "", "。", "已经上屏"));
         assert!(paste_was_consumed("已经上屏", "", "。", "已经上屏。"));
         assert!(!paste_was_consumed("已经上屏。", "", "。", "已经上屏。"));
+    }
+
+    #[test]
+    fn whole_payload_readback_releases_paste_with_inconsistent_empty_editor_snapshot() {
+        let mut receipt = PasteObservation::default();
+        receipt.observe("An accessible prompt\n", "", "。", "An accessible prompt\n");
+        assert!(!receipt.consumed);
+        receipt.observe("An accessible prompt\n", "", "。", "。");
+        assert!(receipt.consumed);
+        assert_eq!(receipt.proof, Some(PasteConsumptionProof::WholePayloadDocument));
+        // A submitted message clears the editor, but not its observed receipt.
+        receipt.observe("An accessible prompt\n", "", "。", "An accessible prompt\n");
+        assert!(receipt.consumed);
+        assert_eq!(receipt.proof, Some(PasteConsumptionProof::WholePayloadDocument));
+    }
+
+    #[test]
+    fn payload_document_receipt_requires_new_exact_whole_payload() {
+        assert!(!paste_was_consumed("。", "", "。", "。"));
+        assert!(!paste_was_consumed("原文。", "", "。", "修改原文。"));
+        assert!(!paste_was_consumed("提示\n", "", "正文。", "正文"));
+        assert!(!paste_was_consumed("提示\n", "", "正文。", "正文。另一次编辑"));
+        assert!(!paste_was_consumed("提示\n", "", "正文。", ""));
+        assert!(!paste_was_consumed("提示\n", "不存在的选区", "正文。", "正文。"));
+        assert_eq!(
+            paste_consumption_proof("first clause", "", " final clause", "first clause final clause"),
+            Some(PasteConsumptionProof::ExactEdit)
+        );
     }
 
     #[test]

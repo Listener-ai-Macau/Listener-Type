@@ -112,6 +112,13 @@ erase it. Final retention uses this receipt before replacing the last payload
 with the whole session; it does not reconstruct a receipt from the editor's
 later state. The worker releases native readers after confirmation or bounded
 observation, and records readback failure shapes without editor text.
+Clipboard consumption has two explicit proofs: an exact edit of the observed
+document, or a changed whole document equal to the current paste payload. The
+latter handles accessibility prompts exposed as empty-editor document text
+without guessing a placeholder string. It confirms only this payload's presence;
+it does not establish preservation of earlier text or whole-session acceptance.
+Existing unchanged text, partial matches and later unrelated edits are not a
+receipt. Both proofs remain scoped to the same native editor and clipboard owner.
 It never dispatches a second paste, selects text, or restores focus. User copies
 and newer app writes supersede pending retention. Missing readback or a timeout
 cannot authorize a clipboard overwrite; history still provides the full body.
