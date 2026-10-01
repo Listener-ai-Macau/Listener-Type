@@ -14,12 +14,12 @@ xattr -cr "/Applications/Listener Type.app"
 
 ## Windows
 
-1. Download the Listener Type setup executable.
+1. Download the Windows `.msi` from [Listener Type Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases). Verify it against that release's `SHA256SUMS.txt`.
 2. Run the installer. The production installer is per-machine so Windows may ask for administrator approval.
 3. Launch Listener Type from the Start menu.
 4. On first launch, grant microphone/hotkey permissions, then follow the Listener BLE pairing prompt. Use **Start pairing** to switch into the OOBE pairing flow; you should not need Node.js, Rust, ESP-IDF, a serial port, or UUID entry.
 5. If pairing gets stuck, open **Settings -> About -> Device recovery**. Listener Type stops the current recording/BLE session and opens Windows Bluetooth; remove `listener`, then return to Recording -> Listener BLE and pair again.
-6. If first launch or pairing still fails, open **Settings -> About -> Export diagnostic package** and save the JSON file. The package includes app version, BLE/config status, recent errors and a timeline; it does not include audio recordings, transcripts, or API keys.
+6. If first launch or pairing still fails, open **Settings -> About -> Export diagnostic package** and save the JSON file. The package includes app version, BLE/config status, recent errors and a timeline; it does not include transcripts or API keys, but saved debug recordings may be attached. Debug recording is off by default; review the package and logs before sharing.
 
 ## Status Language
 
@@ -45,7 +45,10 @@ Public builds should be Authenticode-signed. Internal unsigned builds are accept
 
 ## From Source
 
+Initialize the pinned `third_party/denzic-platform` submodule before building.
+
 ```bash
+git submodule update --init --recursive
 npm ci
 npm run build
 npm run tauri -- info

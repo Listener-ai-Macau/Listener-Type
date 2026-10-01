@@ -23,9 +23,9 @@ Listener Type 有两种输入源：
 
 ### Windows
 
-1. 从发布页下载 `ListenerType_1.0.5_x64_en-US.msi` 并安装。1.0.5 当前稳定
-   MSI 的 SHA-256 是：
-   `3A3042F7B5B598DB0BD32D4EEC4F5B3F1B79919F41D0CED1530551C52DCD05BE`。
+1. 从 [GitHub Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases)
+   下载当前 Windows `.msi` 并安装；用同一发布页的 `SHA256SUMS.txt` 核对文件。
+   文件名和校验值以该次发布附件为准。
 2. 从开始菜单启动 Listener Type；首次启动允许麦克风访问。
 3. 使用硬件时按「开始配对」，在 Windows 蓝牙设置中选择 `listener`，回到
    应用后点击「检查连接」。
@@ -274,7 +274,7 @@ listener-type --cancel-dictation
 
 仍无法定位时，在「设置 → 关于」导出诊断包，并记录版本、复现步骤、输入源和安装
 包 SHA-256。诊断包用于连接、会话和设备状态定位，不包含 API Key 或转写正文；
-开启过调试录音时会附带最近的调试音频样本。不要把凭据粘贴到 issue 或日志中。
+已有保存的调试录音时，可能附带最近的调试音频样本；调试录音默认关闭。分享前检查诊断包和日志，不要把凭据粘贴到 issue 中。
 
 ## 隐私和产品边界
 
