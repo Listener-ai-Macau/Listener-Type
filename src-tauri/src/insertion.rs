@@ -523,7 +523,54 @@ fn copy_to_clipboard(text: &str) -> bool {
     clipboard_handoff::copy(text)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClipboardWritePurpose {
+    PasteTransport,
+    RetainedText,
+}
+
+/// Keep transport fragments out of clipboard history while preserving their
+/// ordinary text format for the target's paste. The purpose is shared; only
+/// the native history marker differs between Windows and macOS.
+fn set_clipboard_text(
+    clipboard: &mut arboard::Clipboard,
+    text: &str,
+    purpose: ClipboardWritePurpose,
+) -> Result<(), arboard::Error> {
+    let writer = clipboard.set();
+    #[cfg(target_os = "windows")]
+    let writer = {
+        use arboard::SetExtWindows;
+        match purpose {
+            ClipboardWritePurpose::PasteTransport => writer.exclude_from_history().exclude_from_cloud(),
+            ClipboardWritePurpose::RetainedText => writer,
+        }
+    };
+    #[cfg(target_os = "macos")]
+    let writer = {
+        use arboard::SetExtApple;
+        match purpose {
+            ClipboardWritePurpose::PasteTransport => writer.exclude_from_history(),
+            ClipboardWritePurpose::RetainedText => writer,
+        }
+    };
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let _ = purpose;
+    // arboard writes the history markers in the same native write/lock as the
+    // text, so a monitor cannot first capture an unmarked transport fragment.
+    writer.text(text.to_string())
+}
+
 fn copy_to_clipboard_now(text: &str) -> bool {
+    copy_to_clipboard_for_purpose(text, ClipboardWritePurpose::RetainedText)
+}
+
+#[cfg(target_os = "macos")]
+fn copy_transport_to_clipboard_now(text: &str) -> bool {
+    copy_to_clipboard_for_purpose(text, ClipboardWritePurpose::PasteTransport)
+}
+
+fn copy_to_clipboard_for_purpose(text: &str, purpose: ClipboardWritePurpose) -> bool {
     let mut clipboard = match arboard::Clipboard::new() {
         Ok(c) => c,
         Err(err) => {
@@ -531,7 +578,7 @@ fn copy_to_clipboard_now(text: &str) -> bool {
             return false;
         }
     };
-    if let Err(err) = clipboard.set_text(text.to_string()) {
+    if let Err(err) = set_clipboard_text(&mut clipboard, text, purpose) {
         log::error!("[insertion] clipboard set_text failed: {}", err);
         return false;
     }
@@ -578,8 +625,7 @@ fn snapshot_clipboard(clipboard: &mut arboard::Clipboard) -> ClipboardSnapshot {
 fn copy_to_clipboard_with_restore_plan(text: &str) -> Result<ClipboardRestorePlan, String> {
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
     let previous = snapshot_clipboard(&mut clipboard);
-    clipboard
-        .set_text(text.to_string())
+    set_clipboard_text(&mut clipboard, text, ClipboardWritePurpose::PasteTransport)
         .map_err(|e| e.to_string())?;
     Ok(ClipboardRestorePlan {
         inserted_text: text.to_string(),

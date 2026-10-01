@@ -123,6 +123,17 @@ It never dispatches a second paste, selects text, or restores focus. User copies
 and newer app writes supersede pending retention. Missing readback or a timeout
 cannot authorize a clipboard overwrite; history still provides the full body.
 
+Clipboard writes carry a shared purpose: temporary paste transport or retained
+user text. Transport clauses remain ordinary pasteable text but are excluded
+from native clipboard history (and Windows cloud clipboard) in the same write.
+Windows uses the documented history formats through arboard; macOS uses its
+clipboard-manager exclusion adapter. After consumption, the cumulative body is
+published once as normal retained text. A single-clause session must also publish
+when its final text equals the transport payload: equality of text does not mean
+equality of history policy. That publication keeps the same bytes for delayed
+readers and never sends a second paste. User copies and new sessions retain their
+existing generation/revision protection. Existing clipboard history is not cleared.
+
 Pre-wake preamble rejection uses the admitted source prefix of this session.
 Once that prefix has been submitted successfully, mentioning the wake phrase
 later in the same body cannot re-run initial admission and block streaming.

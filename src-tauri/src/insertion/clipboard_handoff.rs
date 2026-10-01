@@ -36,7 +36,7 @@ static WORKER: Lazy<Sender<Command>> = Lazy::new(|| {
     let (sender, receiver) = mpsc::channel();
     std::thread::Builder::new()
         .name("clipboard-handoff".into())
-        .spawn(move || run(receiver))
+        .spawn(move || run(receiver, None))
         .expect("clipboard worker must start");
     sender
 });
@@ -180,10 +180,10 @@ fn finish(pending: &mut Option<PendingRetention>, result: RetentionResult) {
     }
 }
 
-fn run(receiver: Receiver<Command>) {
+fn run(receiver: Receiver<Command>, initial_receipt: Option<PasteReceipt>) {
     // Native UIA/AX objects are constructed, used and dropped on this worker.
     // In particular, no COM pointer or apartment guard crosses threads.
-    let mut paste_receipt: Option<PasteReceipt> = None;
+    let mut paste_receipt = initial_receipt;
     let mut pending: Option<PendingRetention> = None;
     loop {
         // Observe from dispatch onward, including the interval before a final
@@ -223,7 +223,7 @@ fn run(receiver: Receiver<Command>) {
                 #[cfg(target_os = "macos")]
                 let result = {
                     let _ = (restore, shortcut);
-                    if super::copy_to_clipboard_now(&text) {
+                    if super::copy_transport_to_clipboard_now(&text) {
                         super::macos_insert_status_after_paste(super::simulate_paste())
                     } else {
                         InsertStatus::Failed
@@ -277,9 +277,24 @@ fn run(receiver: Receiver<Command>) {
                     continue;
                 };
                 if text == receipt.payload && ticket.revision == receipt.revision {
-                    // The transport already contains the entire body. There
-                    // is no clipboard mutation to wait for or repeat.
-                    let _ = reply.send(RetentionResult::Stored);
+                    // Equal text still needs publication: the paste payload
+                    // was explicitly excluded from history. Rewriting the
+                    // same bytes as retained text cannot change what a delayed
+                    // paste reads and requires no second shortcut or receipt.
+                    let mut owner = OWNER.lock();
+                    if !still_owns_transport(ticket.id, *owner, receipt.revision, clipboard_revision()) {
+                        let _ = reply.send(RetentionResult::Superseded);
+                        continue;
+                    }
+                    *owner = owner.wrapping_add(1);
+                    let result = if super::copy_to_clipboard_now(&text) {
+                        log::info!("[insertion] full clipboard published from identical transport ticket={} chars={}", ticket.id, text.chars().count());
+                        RetentionResult::Stored
+                    } else {
+                        RetentionResult::Failed
+                    };
+                    paste_receipt = None;
+                    let _ = reply.send(result);
                     continue;
                 }
                 if !receipt.observation.consumed && !receipt.observing() {
@@ -440,6 +455,121 @@ fn paste_was_consumed(before: &str, selected: &str, payload: &str, after: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Runs explicitly while dictation is idle. This uses the real clipboard,
+    /// no keyboard injection or editor automation, and exercises the worker's
+    /// single-clause publication as well as supersession/readback guards.
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "requires idle app and exclusive access to the real clipboard"]
+    fn native_history_single_clause_publication_and_supersession() {
+        use super::super::{set_clipboard_text, ClipboardWritePurpose};
+        use windows::Win32::System::DataExchange::{IsClipboardFormatAvailable, RegisterClipboardFormatW};
+        use windows::core::w;
+
+        assert_eq!(std::env::var("LISTENER_CLIPBOARD_NATIVE_TEST").as_deref(), Ok("1"));
+        assert!(super::super::clipboard_transport_is_reversible());
+        let mut board = arboard::Clipboard::new().expect("native clipboard");
+        let original = super::super::snapshot_clipboard(&mut board);
+        let marker = unsafe { RegisterClipboardFormatW(w!("CanIncludeInClipboardHistory")) };
+        assert_ne!(marker, 0);
+        let seed = format!("Listener temporary clause {}", uuid::Uuid::new_v4());
+        let final_body = format!("Listener complete body {}", uuid::Uuid::new_v4());
+        let temporary_second = format!("{seed} transport-only second");
+        let temporary_tail = format!("{seed} transport-only tail。");
+        let newer_copy = format!("Listener newer user copy {}", uuid::Uuid::new_v4());
+        let mut last_written_revision = None;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // Three temporary clauses keep their ordinary readable text but
+            // carry the native exclusion. The final body removes the marker.
+            for clause in [&seed, &temporary_second, &temporary_tail] {
+                set_clipboard_text(&mut board, clause, ClipboardWritePurpose::PasteTransport).unwrap();
+                last_written_revision = clipboard_revision();
+                assert_eq!(board.get_text().unwrap(), clause.as_str());
+                assert!(unsafe { IsClipboardFormatAvailable(marker) }.is_ok());
+                // Give the asynchronous system history monitor a chance to
+                // inspect each item. This is test settling, never a paste or
+                // retention delay in the production worker.
+                std::thread::sleep(Duration::from_millis(400));
+            }
+            set_clipboard_text(&mut board, &final_body, ClipboardWritePurpose::RetainedText).unwrap();
+            last_written_revision = clipboard_revision();
+            assert_eq!(board.get_text().unwrap(), final_body);
+            assert!(unsafe { IsClipboardFormatAvailable(marker) }.is_err());
+            std::thread::sleep(Duration::from_millis(500));
+
+            // Single-clause completion cannot take the old equal-text no-op:
+            // it must promote the same payload into user clipboard history.
+            set_clipboard_text(&mut board, &seed, ClipboardWritePurpose::PasteTransport).unwrap();
+            let transport_revision = clipboard_revision();
+            last_written_revision = transport_revision;
+            let ticket = {
+                let mut owner = OWNER.lock();
+                *owner = owner.wrapping_add(1);
+                *owner
+            };
+            let (commands, worker_rx) = mpsc::channel();
+            let worker_payload = seed.clone();
+            let worker = std::thread::spawn(move || run(worker_rx, Some(PasteReceipt {
+                ticket,
+                revision: transport_revision,
+                payload: worker_payload,
+                reader: None,
+                before: None,
+                dispatched_at: Instant::now(),
+                observation: PasteObservation::default(),
+            })));
+            let (reply, results) = mpsc::channel();
+            commands.send(Command::Retain(ClipboardTicket { id: ticket, revision: transport_revision }, final_body.clone(), true, reply)).unwrap();
+            assert_eq!(results.recv_timeout(Duration::from_secs(3)).unwrap(), RetentionResult::Unavailable);
+            assert_eq!(board.get_text().unwrap(), seed);
+            assert!(unsafe { IsClipboardFormatAvailable(marker) }.is_ok());
+            let (reply, results) = mpsc::channel();
+            commands.send(Command::Retain(ClipboardTicket { id: ticket, revision: transport_revision }, seed.clone(), true, reply)).unwrap();
+            assert_eq!(results.recv_timeout(Duration::from_secs(3)).unwrap(), RetentionResult::Stored);
+            last_written_revision = clipboard_revision();
+            assert_ne!(last_written_revision, transport_revision);
+            assert_eq!(board.get_text().unwrap(), seed);
+            assert!(unsafe { IsClipboardFormatAvailable(marker) }.is_err());
+            std::thread::sleep(Duration::from_millis(500));
+
+            // The old generation cannot publish after a newer user copy.
+            set_clipboard_text(&mut board, &newer_copy, ClipboardWritePurpose::RetainedText).unwrap();
+            last_written_revision = clipboard_revision();
+            let (reply, results) = mpsc::channel();
+            commands.send(Command::Retain(ClipboardTicket { id: ticket, revision: transport_revision }, final_body.clone(), true, reply)).unwrap();
+            assert_eq!(results.recv_timeout(Duration::from_secs(3)).unwrap(), RetentionResult::Superseded);
+            assert_eq!(board.get_text().unwrap(), newer_copy);
+            std::thread::sleep(Duration::from_millis(500));
+            drop(commands);
+            worker.join().unwrap();
+        }));
+        // Never restore over a copy the user made during this explicit check.
+        if clipboard_revision() == last_written_revision {
+            match original {
+                super::super::ClipboardSnapshot::Text(text) => {
+                    set_clipboard_text(&mut board, &text, ClipboardWritePurpose::PasteTransport).unwrap();
+                }
+                super::super::ClipboardSnapshot::Image(image) => {
+                    use arboard::SetExtWindows;
+                    board.set().exclude_from_history().image(image).unwrap();
+                }
+                super::super::ClipboardSnapshot::Absent => { board.clear().unwrap(); }
+            }
+        }
+        if let Err(error) = result { std::panic::resume_unwind(error); }
+        if let Ok(path) = std::env::var("LISTENER_CLIPBOARD_NATIVE_REPORT") {
+            std::fs::write(path, serde_json::to_vec_pretty(&serde_json::json!({
+                "passed": true,
+                "transport_only": [temporary_second, temporary_tail],
+                "retained": [seed, final_body, newer_copy],
+                "keyboard_injection": false,
+                "unconfirmed_different_text": "Unavailable",
+                "single_clause_publication": "Stored",
+                "older_ticket_after_user_copy": "Superseded"
+            })).unwrap()).unwrap();
+        }
+    }
 
     #[test]
     fn final_punctuation_receipt_releases_whole_body_without_reinsertion() {
