@@ -3,9 +3,47 @@
 
 const LOCAL_SPEAKER_CLASSIFY_WINDOW_MS: usize = 1_200;
 const LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES: usize = LOCAL_SPEAKER_CLASSIFY_WINDOW_MS * 32;
+// Keep the preceding window while the VAD analyzes the newest one. The
+// classifier consumes the covered prefix, never the unprocessed capture tail.
+const LOCAL_SPEAKER_HISTORY_BYTES: usize = LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES * 2;
 const LOCAL_SPEAKER_CLASSIFY_MIN_MS: usize = 1_000;
 const LOCAL_SPEAKER_CLASSIFY_MIN_BYTES: usize = LOCAL_SPEAKER_CLASSIFY_MIN_MS * 32;
 const LOCAL_SPEAKER_CLASSIFY_STEP_MS: u64 = 400;
+
+fn embedded_confirmed_speech_end_ms(
+    raw_energy: bool,
+    evidence: crate::asr::volcengine::LocalSpeechEvidence,
+    captured_samples: u64,
+) -> Option<u64> {
+    use crate::asr::volcengine::LocalSpeechActivityState;
+    if evidence.analyzed_through_samples > captured_samples {
+        return None;
+    }
+    match evidence.state {
+        LocalSpeechActivityState::Speech => Some(evidence.analyzed_through_ms),
+        LocalSpeechActivityState::NonSpeech | LocalSpeechActivityState::PendingSpeech => evidence
+            .last_detected_speech_end_ms
+            .filter(|end| *end <= evidence.analyzed_through_ms),
+        // Platforms without a local VAD retain their existing sampler. Once a
+        // VAD has published evidence, an unknown result is only a hold.
+        LocalSpeechActivityState::Unknown if evidence.revision == 0 =>
+            raw_energy.then_some(captured_samples / 16),
+        LocalSpeechActivityState::Unknown => None,
+    }
+}
+
+fn local_speaker_covered_pcm(
+    rolling_pcm: &[u8],
+    captured_end_ms: u64,
+    speech_end_ms: u64,
+) -> Option<&[u8]> {
+    let lag_bytes = usize::try_from(captured_end_ms.checked_sub(speech_end_ms)?)
+        .ok()?.checked_mul(32)?;
+    let covered_end = rolling_pcm.len().checked_sub(lag_bytes)?;
+    let start = covered_end.saturating_sub(LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES);
+    let covered = &rolling_pcm[start..covered_end];
+    (covered.len() >= LOCAL_SPEAKER_CLASSIFY_MIN_BYTES).then_some(covered)
+}
 // The isolated Paraformer helper is intentionally single-flight. A second
 // candidate should get a bounded chance to use it after the active request
 // finishes, but must never form an unbounded queue that delays terminal wake
@@ -245,7 +283,7 @@ impl LocalSessionSpeakerTracker {
             profile: None,
             classification_rx: None,
             adaptation_gate: Default::default(),
-            rolling_pcm: Vec::with_capacity(LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES),
+            rolling_pcm: Vec::with_capacity(LOCAL_SPEAKER_HISTORY_BYTES),
             next_classification_audio_ms: LOCAL_SPEAKER_CLASSIFY_MIN_MS as u64,
             wake_phrase,
             enrolled_owner_matched,
@@ -314,7 +352,7 @@ impl LocalSessionSpeakerTracker {
         &mut self,
         pcm: &[u8],
         audio_end_ms: u64,
-        has_speech_energy: bool,
+        confirmed_speech_end_ms: Option<u64>,
         stable_target_end_ms: Option<u64>,
     ) -> Option<(
         u64,
@@ -323,9 +361,9 @@ impl LocalSessionSpeakerTracker {
         bool,
     )> {
         self.rolling_pcm.extend_from_slice(pcm);
-        if self.rolling_pcm.len() > LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES {
+        if self.rolling_pcm.len() > LOCAL_SPEAKER_HISTORY_BYTES {
             let overflow =
-                (self.rolling_pcm.len() - LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES + 1) & !1usize;
+                (self.rolling_pcm.len() - LOCAL_SPEAKER_HISTORY_BYTES + 1) & !1usize;
             self.rolling_pcm.drain(..overflow);
         }
 
@@ -391,21 +429,22 @@ impl LocalSessionSpeakerTracker {
             }
         }
 
-        if has_speech_energy
-            && self.classification_rx.is_none()
-            && self.rolling_pcm.len() >= LOCAL_SPEAKER_CLASSIFY_MIN_BYTES
-            && audio_end_ms >= self.next_classification_audio_ms
-        {
-            if let Some(profile) = self.profile.clone() {
-                let snapshot = self.rolling_pcm.clone();
+        if let Some(speech_end_ms) = confirmed_speech_end_ms.filter(|end|
+            self.classification_rx.is_none() && *end >= self.next_classification_audio_ms
+        ) {
+            if let (Some(profile), Some(covered_pcm)) = (
+                self.profile.clone(),
+                local_speaker_covered_pcm(&self.rolling_pcm, audio_end_ms, speech_end_ms),
+            ) {
+                let snapshot = covered_pcm.to_vec();
                 let (tx, rx) = std::sync::mpsc::channel();
                 self.classification_rx = Some(rx);
                 self.next_classification_audio_ms =
-                    audio_end_ms.saturating_add(LOCAL_SPEAKER_CLASSIFY_STEP_MS);
+                    speech_end_ms.saturating_add(LOCAL_SPEAKER_CLASSIFY_STEP_MS);
                 tauri::async_runtime::spawn_blocking(move || {
                     let result =
                         crate::speaker_verification::observe_session_speaker(&profile, &snapshot)
-                            .map(|classification| (audio_end_ms, classification));
+                            .map(|classification| (speech_end_ms, classification));
                     let _ = tx.send(result);
                 });
             }
@@ -1057,20 +1096,24 @@ impl EmbeddedAudioDictationSession {
             audio_end_samples,
             pcm,
         );
-        let has_vad_supported_speech = embedded_vad_supported_speech(
+        let endpoint_speech_candidate = embedded_vad_supported_speech(
+            has_speech_energy,
+            local_speech_evidence,
+            audio_end_samples,
+        );
+        let confirmed_speech_end_ms = embedded_confirmed_speech_end_ms(
             has_speech_energy,
             local_speech_evidence,
             audio_end_samples,
         );
         if let Some(asr) = self.volcengine_asr.as_ref() {
-            // Raw energy is retained in gain_stats for diagnostics. Identity
-            // and endpoint activity must share the VAD's speech decision:
-            // room noise can have energy and even score as Target when a
-            // rolling speaker window contains the owner's earlier speech.
-            asr.note_local_audio_activity_samples(
+            // Capture and confirmed speech have separate clocks. A normal
+            // worker queue delay is not new speech and cannot mint owner
+            // evidence from a rolling window of room noise.
+            asr.note_local_audio_activity_with_speech_end_samples(
                 audio_end_ms,
                 audio_end_samples,
-                has_vad_supported_speech,
+                confirmed_speech_end_ms,
             );
             asr.note_local_speech_activity(local_speech_evidence);
         }
@@ -1082,7 +1125,7 @@ impl EmbeddedAudioDictationSession {
             tracker.observe(
                 pcm,
                 source_pcm_offset_ms.saturating_add(chunk_ms),
-                has_vad_supported_speech,
+                confirmed_speech_end_ms,
                 stable_target_end_ms,
             )
         });
@@ -1119,7 +1162,7 @@ impl EmbeddedAudioDictationSession {
         // caller can request a host-initiated device stop early. Leading silence
         // (before the user speaks the dictation body) and post-stop tails never
         // count toward the threshold.
-        if has_vad_supported_speech {
+        if endpoint_speech_candidate {
             self.proactive_stop_body_started = true;
             self.proactive_stop_silence_ms = 0;
         } else if self.proactive_stop_body_started {

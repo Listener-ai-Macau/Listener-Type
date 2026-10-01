@@ -6063,6 +6063,17 @@ impl VolcengineStreamingASR {
     }
 
     pub fn note_local_audio_activity(&self, audio_duration_ms: u64, speech_detected: bool) {
+        self.note_local_audio_activity_with_speech_end(
+            audio_duration_ms,
+            speech_detected.then_some(audio_duration_ms),
+        );
+    }
+
+    fn note_local_audio_activity_with_speech_end(
+        &self,
+        audio_duration_ms: u64,
+        confirmed_speech_end_ms: Option<u64>,
+    ) {
         let update = {
             let mut state = self.state.lock();
             state.local_audio_duration_ms = Some(
@@ -6071,12 +6082,12 @@ impl VolcengineStreamingASR {
                     .unwrap_or_default()
                     .max(audio_duration_ms),
             );
-            if speech_detected {
+            if let Some(speech_end_ms) = confirmed_speech_end_ms.filter(|end| *end <= audio_duration_ms) {
                 state.local_speech_end_ms = Some(
                     state
                         .local_speech_end_ms
                         .unwrap_or_default()
-                        .max(audio_duration_ms),
+                        .max(speech_end_ms),
                 );
             }
             target_speaker_update_from_state(&state, false, false, false)
@@ -6092,6 +6103,19 @@ impl VolcengineStreamingASR {
         audio_samples: u64,
         speech_detected: bool,
     ) {
+        self.note_local_audio_activity_with_speech_end_samples(
+            audio_duration_ms,
+            audio_samples,
+            speech_detected.then_some(audio_duration_ms),
+        );
+    }
+
+    pub fn note_local_audio_activity_with_speech_end_samples(
+        &self,
+        audio_duration_ms: u64,
+        audio_samples: u64,
+        confirmed_speech_end_ms: Option<u64>,
+    ) {
         let mut previous = self.local_audio_samples.load(Ordering::Acquire);
         while audio_samples > previous {
             match self.local_audio_samples.compare_exchange_weak(
@@ -6104,7 +6128,7 @@ impl VolcengineStreamingASR {
                 Err(observed) => previous = observed,
             }
         }
-        self.note_local_audio_activity(audio_duration_ms, speech_detected);
+        self.note_local_audio_activity_with_speech_end(audio_duration_ms, confirmed_speech_end_ms);
     }
 
     pub fn note_local_speaker_classification(

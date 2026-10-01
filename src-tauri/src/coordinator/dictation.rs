@@ -2642,10 +2642,9 @@ fn embedded_streaming_chunk_has_speech_energy(rms: f64, peak: u16) -> bool {
             && peak >= EMBEDDED_AUDIO_STREAMING_QUIET_SPEECH_PEAK)
 }
 
-/// Use the same current speech evidence for the owner clock and speaker
-/// sampler. A voiceprint score answers who a voiced window resembles; it does
-/// not establish that the newest PCM contains speech. If the VAD has not
-/// analyzed this chunk yet, retain the raw-energy hold until it catches up.
+/// A provisional endpoint hold. Unprocessed energy and PendingSpeech can
+/// protect a new onset, but cannot qualify an owner observation or select
+/// audio for the speaker classifier.
 fn embedded_vad_supported_speech(
     raw_energy: bool,
     evidence: crate::asr::volcengine::LocalSpeechEvidence,

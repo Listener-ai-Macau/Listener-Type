@@ -3282,6 +3282,134 @@ fn silent_vad_does_not_rearm_owner_clock_from_raw_room_energy() {
 }
 
 #[test]
+fn vad_coverage_queue_delay_is_a_hold_not_fresh_owner_speech() {
+    use crate::asr::volcengine::{LocalSpeechActivityState, LocalSpeechEvidence};
+    let quiet = LocalSpeechEvidence {
+        analyzed_through_ms: 26_176,
+        analyzed_through_samples: 26_176 * 16,
+        last_detected_speech_end_ms: Some(21_600),
+        revision: 261,
+        state: LocalSpeechActivityState::NonSpeech,
+        ..Default::default()
+    };
+    // Real 77854531 shape: the async detector is one capture chunk behind,
+    // while energy-only speaker windows keep scoring Target through 44.4 s.
+    for captured_ms in (26_300..=44_500).step_by(100) {
+        let evidence = LocalSpeechEvidence {
+            analyzed_through_ms: captured_ms - 124,
+            analyzed_through_samples: (captured_ms - 124) * 16,
+            ..quiet
+        };
+        assert!(super::embedded_vad_supported_speech(true, evidence, captured_ms * 16));
+        assert_eq!(super::embedded_confirmed_speech_end_ms(true, evidence, captured_ms * 16), Some(21_600));
+    }
+    let resumed = LocalSpeechEvidence {
+        state: LocalSpeechActivityState::Speech,
+        ..quiet
+    };
+    assert_eq!(super::embedded_confirmed_speech_end_ms(false, resumed, 26_300 * 16), Some(26_176));
+    let pending = LocalSpeechEvidence { state: LocalSpeechActivityState::PendingSpeech, ..quiet };
+    assert_eq!(super::embedded_confirmed_speech_end_ms(true, pending, 26_300 * 16), Some(21_600));
+    let failed = LocalSpeechEvidence { state: LocalSpeechActivityState::Unknown, ..quiet };
+    assert_eq!(super::embedded_confirmed_speech_end_ms(true, failed, 26_300 * 16), None);
+    assert_eq!(super::embedded_confirmed_speech_end_ms(true, quiet, 26_000 * 16), None);
+    // The platform adapter without a detector preserves its existing path.
+    assert_eq!(super::embedded_confirmed_speech_end_ms(true, LocalSpeechEvidence::default(), 26_300 * 16), Some(26_300));
+}
+
+#[test]
+fn vad_coverage_speaker_snapshot_excludes_the_unprocessed_tail() {
+    let pcm = (0..2_400_u16).flat_map(|ms| std::iter::repeat_n(ms.to_le_bytes(), 16).flatten()).collect::<Vec<_>>();
+    let covered = super::local_speaker_covered_pcm(&pcm, 2_400, 2_272).expect("covered voice window");
+    assert_eq!(covered.len(), super::LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES);
+    assert_eq!(u16::from_le_bytes(covered[0..2].try_into().unwrap()), 1_072);
+    assert_eq!(u16::from_le_bytes(covered[covered.len()-2..].try_into().unwrap()), 2_271);
+    assert!(super::local_speaker_covered_pcm(&pcm, 2_400, 2_401).is_none());
+    assert!(super::local_speaker_covered_pcm(&pcm, 2_400, 999).is_none());
+}
+
+#[test]
+fn vad_coverage_quiet_capture_does_not_extend_the_three_second_owner_deadline() {
+    use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
+    use crate::speaker_verification::SessionSpeakerClassification;
+    let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        app_id: "app".into(), access_token: "token".into(),
+        resource_id: VolcengineCredentials::default_resource_id().into(),
+    }, Vec::new());
+    asr.note_verified_local_speaker_tracking_started("开始录音");
+    asr.note_local_speaker_classification(21_200, SessionSpeakerClassification::Target { score: 0.80 });
+    asr.note_local_speaker_classification(21_600, SessionSpeakerClassification::Target { score: 0.80 });
+    let started = Instant::now();
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.automatic_wake_session = true;
+    clock.observe(&asr.endpoint_update_snapshot(), true, started);
+    clock.note_body_delivery(started);
+    for elapsed_ms in (100..=3_000_u64).step_by(100) {
+        let captured_ms = 21_600 + elapsed_ms;
+        asr.note_local_audio_activity_with_speech_end_samples(captured_ms, captured_ms * 16, Some(21_600));
+        let update = asr.endpoint_update_snapshot();
+        assert_eq!(update.qualified_owner_speech_end_ms, Some(21_600));
+        assert_eq!(update.local_speech_end_ms, Some(21_600));
+        clock.observe(&update, true, started + Duration::from_millis(elapsed_ms));
+    }
+    assert!(clock.latest_due_update(started + Duration::from_millis(3_000), 3_000).is_some());
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+#[ignore = "selected real recording and bundled VAD; writes an explicit offline report"]
+fn diagnostic_vad_coverage_captured_pcm_once() {
+    use crate::asr::volcengine::{LocalSpeechActivityState, LocalSpeechEvidence};
+    let input_path = std::env::var_os("LISTENER_VAD_REPLAY_WAV").expect("selected WAV");
+    let output_path = std::env::var_os("LISTENER_VAD_REPLAY_REPORT").expect("report path");
+    let wav = std::fs::read(input_path).expect("read captured WAV");
+    let pcm = crate::embedded_audio::read_wav_pcm16le(&wav).expect("16 kHz mono PCM");
+    let sink = Arc::new(parking_lot::Mutex::new(LocalSpeechEvidence::default()));
+    let mut vad = super::LocalSpeechActivity::new(Arc::clone(&sink));
+    let mut frames = Vec::new();
+    let mut rolling_pcm = Vec::new();
+    let mut next_observation_ms = super::LOCAL_SPEAKER_CLASSIFY_MIN_MS as u64;
+    let mut first_decision_difference_ms = None;
+    for (index, chunk) in pcm.chunks(3_200).enumerate() {
+        let start_samples = index as u64 * 1_600;
+        let end_samples = start_samples + chunk.len() as u64 / 2;
+        let captured_ms = end_samples / 16;
+        // Deliberately preserve the normal one-chunk asynchronous delay.
+        let previous = *sink.lock();
+        let _ = vad.submit(start_samples, end_samples, chunk);
+        rolling_pcm.extend_from_slice(chunk);
+        if rolling_pcm.len() > super::LOCAL_SPEAKER_HISTORY_BYTES {
+            rolling_pcm.drain(..rolling_pcm.len()-super::LOCAL_SPEAKER_HISTORY_BYTES);
+        }
+        let old_hold = super::embedded_vad_supported_speech(true, previous, end_samples);
+        let speech_end = super::embedded_confirmed_speech_end_ms(true, previous, end_samples);
+        let observation_end = speech_end.filter(|end| *end >= next_observation_ms)
+            .filter(|end| super::local_speaker_covered_pcm(&rolling_pcm, captured_ms, *end).is_some());
+        if let Some(end) = observation_end { next_observation_ms = end + super::LOCAL_SPEAKER_CLASSIFY_STEP_MS; }
+        if previous.revision > 0 && previous.state == LocalSpeechActivityState::NonSpeech && old_hold && observation_end.is_none() {
+            first_decision_difference_ms.get_or_insert(captured_ms);
+        }
+        frames.push(serde_json::json!({
+            "captured_ms": captured_ms, "analyzed_ms": previous.analyzed_through_ms,
+            "state": format!("{:?}", previous.state), "revision": previous.revision,
+            "legacy_energy_hold": old_hold, "confirmed_speech_end_ms": speech_end,
+            "classifier_observation_end_ms": observation_end,
+        }));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while end_samples.saturating_sub(sink.lock().analyzed_through_samples) >= 512 {
+            assert!(Instant::now() < deadline, "VAD failed to cover selected PCM");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+    assert!(first_decision_difference_ms.is_some(), "recording must reproduce the evidence distinction");
+    std::fs::write(output_path, serde_json::to_vec_pretty(&serde_json::json!({
+        "scope": "offline captured PCM, canonical VAD and shared sampler; no live input or device acceptance",
+        "pcm_ms": pcm.len()/32, "first_decision_difference_ms": first_decision_difference_ms,
+        "frames": frames,
+    })).unwrap()).expect("write replay report");
+}
+
+#[test]
 fn failed_asr_uses_only_the_bounded_local_silence_fallback() {
     assert_eq!(
         super::proactive_stop_silence_threshold_ms(true),

@@ -145,6 +145,16 @@ continues to observe the owner. A newer quality-qualified owner watermark also
 updates that paused deadline. A settled callback restores the latest verified
 origin; an old provider boundary cannot resurrect an earlier silence deadline.
 
+Local capture, pending speech and confirmed voice have separate boundaries.
+An asynchronous VAD normally trails capture by one chunk; unprocessed energy
+may hold an endpoint but cannot create a positive owner watermark. The speaker
+sampler selects a bounded PCM window ending at the VAD-covered speech edge and
+labels the observation with that edge, rather than the newest capture time.
+Pending onset still vetoes an unsafe STOP. Platforms without this VAD adapter
+retain their existing sampler; an initialized detector returning Unknown is
+not confirmed speech. Quiet evidence must not turn noise-only voiceprint
+scores into transcript aliases or continually renew a three-second deadline.
+
 - macOS uses Accessibility/keyboard event paths for hotkey and insertion.
 - Windows uses low-level hooks for hotkeys and Listener Type TSF IME for reliable insertion.
 - Windows IME identity is documented in `docs/platform/windows-ime.md`.
