@@ -17,6 +17,50 @@ pub(crate) fn content_key(text: &str) -> String {
         .collect()
 }
 
+pub(crate) fn terminal_punctuation_only(text: &str) -> bool {
+    let mut terminal = false;
+    for ch in text.chars() {
+        if matches!(ch, '。' | '.' | '！' | '!' | '？' | '?' | '…') {
+            terminal = true;
+        } else if !ch.is_whitespace() && !matches!(ch, '”' | '’' | '"' | '\'' | '）' | ')' | '】' | ']') {
+            return false;
+        }
+    }
+    terminal
+}
+
+/// Map the terminal decoration of an already covered body. A late two-pass
+/// spelling correction may preserve that boundary without permitting any
+/// rewrite or new word to cross the irreversible delivery seam.
+pub(crate) fn revised_terminal_suffix<'a>(text: &'a str, consumed_key: &str) -> Option<&'a str> {
+    let final_key = content_key(text);
+    if final_key != consumed_key {
+        let consumed: Vec<char> = consumed_key.chars().collect();
+        if !(8..=512).contains(&consumed.len()) { return None; }
+        let final_content: Vec<char> = final_key.chars().collect();
+        let anchor = &consumed[consumed.len() - 8..];
+        let max_edits = (consumed.len() / 5).clamp(2, 12);
+        if consumed.len().abs_diff(final_content.len()) > max_edits
+            || !final_content.ends_with(anchor)
+            || final_content.windows(anchor.len()).filter(|window| *window == anchor).count() != 1
+        { return None; }
+        let mut previous: Vec<usize> = (0..=final_content.len()).collect();
+        let mut current = vec![0; final_content.len() + 1];
+        for (index, expected) in consumed.iter().enumerate() {
+            current[0] = index + 1;
+            for prefix in 1..=final_content.len() {
+                current[prefix] = (previous[prefix] + 1)
+                    .min(current[prefix - 1] + 1)
+                    .min(previous[prefix - 1] + usize::from(*expected != final_content[prefix - 1]));
+            }
+            std::mem::swap(&mut previous, &mut current);
+        }
+        if previous[final_content.len()] > max_edits { return None; }
+    }
+    let (offset, last_content) = text.char_indices().rev().find(|(_, ch)| !is_decorative(*ch))?;
+    Some(&text[offset + last_content.len_utf8()..])
+}
+
 /// Locate an already consumed prefix. Only case/formatting differences are
 /// tolerated; a changed word, a shortened prefix, or a shifted opening fails.
 /// Decorations at that committed seam belong to the prefix, not the new body.

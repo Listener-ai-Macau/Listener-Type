@@ -61,12 +61,30 @@ pub(super) fn merge_filtered_streaming_candidate_with_untimed_window(
             previous_text.chars().count(), candidate.text.chars().count());
         return (candidate.text, candidate.timed_segments, String::new());
     }
-    merge_streaming_candidate_with_untimed_window(
+    let terminal_tail = (candidate.authoritative_cumulative
+        && authoritative_timed_revision_starts_near_session_start(previous_text, &candidate))
+        .then(|| crate::transcript_boundary::revised_terminal_suffix(&candidate.text,
+            &crate::transcript_boundary::content_key(previous_text)))
+        .flatten()
+        .filter(|tail| crate::transcript_boundary::terminal_punctuation_only(tail))
+        .filter(|_| !crate::transcript_boundary::terminal_punctuation_only(
+            previous_text.trim_end().chars().rev().take_while(|ch| crate::transcript_boundary::is_decorative(*ch))
+                .collect::<String>().as_str()))
+        .map(str::to_string);
+    let (mut merged, segments, window) = merge_streaming_candidate_with_untimed_window(
         previous_text,
         previous_segments,
         previous_untimed_window,
         candidate,
-    )
+    );
+    if merged.trim() == previous_text.trim() {
+        if let Some(tail) = terminal_tail {
+            // Keep committed words immutable, but don't lose their known
+            // terminal mark when a covered spelling revision is held.
+            merged = format!("{}{tail}", merged.trim_end());
+        }
+    }
+    (merged, segments, window)
 }
 
 pub(super) fn merge_streaming_candidate_with_untimed_window(
@@ -1211,6 +1229,34 @@ fn is_probable_growing_cumulative_revision(previous: &str, current: &str) -> boo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn covered_two_pass_revision_keeps_known_terminal_punctuation_on_immutable_words() {
+        let previous = "开始录音，然后确认这个弹珠功能，最后确认整个流程是否正常";
+        let revised = "开始录音，然后确认这个弹出功能，最后确认整个流程是否正常。";
+        let old_segments = vec![TranscriptSegment { start_ms: 0, end_ms: Some(1_000), text: "开始录音".into() }];
+        let candidate = TranscriptCandidate { text: revised.into(),
+            timed_segments: vec![TranscriptSegment { start_ms: 1_200, end_ms: Some(13_000), text: revised.into() }],
+            authoritative_cumulative: true };
+        let (merged, segments, _) = merge_filtered_streaming_candidate_with_untimed_window(
+            previous, &old_segments, previous, candidate.clone(), None);
+        assert_eq!(merged, format!("{previous}。"));
+        assert!(merged.contains("弹珠"), "already committed body words must not be replaced");
+        let (again, _, _) = merge_filtered_streaming_candidate_with_untimed_window(
+            &merged, &segments, previous, candidate, None);
+        assert_eq!(again, merged, "repeated provider punctuation must not duplicate");
+    }
+
+    #[test]
+    fn terminal_punctuation_mapping_rejects_new_words_and_unrelated_same_ending() {
+        let key = crate::transcript_boundary::content_key("然后确认这个弹珠功能，最后确认整个流程是否正常");
+        assert_eq!(crate::transcript_boundary::revised_terminal_suffix(
+            "然后确认这个弹出功能，最后确认整个流程是否正常。", &key), Some("。"));
+        assert_eq!(crate::transcript_boundary::revised_terminal_suffix(
+            "然后确认这个弹出功能，最后确认整个流程是否正常。继续说。", &key), None);
+        assert_eq!(crate::transcript_boundary::revised_terminal_suffix(
+            "接下来完全另外一种问题，最后确认整个流程是否正常。", &key), None);
+    }
 
     #[test]
     fn optimistic_cumulative_provider_growth_replaces_instead_of_repeating_clause() {

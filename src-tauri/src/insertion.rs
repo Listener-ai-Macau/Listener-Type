@@ -24,6 +24,7 @@ use crate::types::{InsertStatus, PasteShortcut};
 
 mod clipboard_handoff;
 pub(crate) use clipboard_handoff::{ClipboardTicket, RetentionResult};
+pub(crate) use clipboard_handoff::TerminalAppendDecision;
 
 #[cfg(target_os = "windows")]
 const CLIPBOARD_RESTORE_DELAY: Duration = Duration::from_millis(750);
@@ -130,6 +131,16 @@ impl TextInserter {
 
     pub(crate) fn clipboard_retention_ticket(&self) -> ClipboardTicket {
         clipboard_handoff::ticket()
+    }
+
+    pub(crate) fn terminal_append_decision(&self, expected: &str, suffix: &str) -> TerminalAppendDecision {
+        clipboard_handoff::current_terminal_append_decision(expected, suffix)
+    }
+
+    pub(crate) fn insert_terminal_suffix(&self, expected: &str, suffix: &str,
+        restore: bool, shortcut: PasteShortcut) -> Result<InsertStatus, TerminalAppendDecision>
+    {
+        clipboard_handoff::paste_terminal_suffix(expected, suffix, restore, shortcut)
     }
 
     pub(crate) fn retain_session_clipboard(

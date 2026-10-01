@@ -347,6 +347,14 @@ fn owner_endpoint_boundary_with_uncertain_tail(
 }
 
 impl SettledTargetEndpointClock {
+    fn note_text_delivery(&mut self, now: Instant, text: &str) {
+        // Punctuation-only revisions do not represent the owner speaking or
+        // new body delivery. They cannot postpone the three-second deadline.
+        if !embedded_audio_partial_preview_stability_key(text).is_empty() {
+            self.note_body_delivery(now);
+        }
+    }
+
     fn note_body_delivery(&mut self, now: Instant) {
         if !self.automatic_wake_session || self.automatic_no_body_armed {
             return;

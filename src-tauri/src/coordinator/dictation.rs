@@ -4133,12 +4133,16 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         None if pause_early_sticky => (String::new(), true),
         None => (polished.clone(), false),
     };
+    let terminal_suffix_expected = pause_early_delivered.as_ref()
+        .filter(|_| pause_early_terminal_punctuation_only(&insert_text))
+        .map(|(display, _)| display.as_str());
+    let mut terminal_suffix_skipped = false;
     // 组字流式终局(2026-09-22 切片3):composition 活着 → 余量/恢复尾
     // stream_commit 落定(整段已覆盖传空串清残留;改写无恢复 → cancel 清组字,
     // 今日"早期文本保留,尾巴丢弃"语义)。失败则驱动已降级清场,落回常规
     // 派发。None = 本会话组字未启用/已结束,走原路径。
     let streaming_finalized = if streaming_composition_active(inner, current_session_id) {
-        let op_text: Option<String> = match pause_early_outcome.as_ref() {
+        let mut op_text: Option<String> = match pause_early_outcome.as_ref() {
             Some((_, Some(remainder), _)) if remainder.is_empty() => Some(String::new()),
             Some((_, Some(remainder), _)) => Some(remainder.clone()),
             Some((_, None, Some(recovery))) if !recovery.is_empty() => Some(recovery.clone()),
@@ -4148,6 +4152,16 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             None if pause_early_sticky => None,
             None => Some(polished.clone()),
         };
+        if let Some(expected) = terminal_suffix_expected {
+            let decision = inner.inserter.terminal_append_decision(expected, &insert_text);
+            if !matches!(decision, crate::insertion::TerminalAppendDecision::Append
+                | crate::insertion::TerminalAppendDecision::AlreadyPresent)
+            {
+                log::info!("[coord] final terminal suffix skipped session_id={current_session_id} decision={decision:?} route=streaming");
+                terminal_suffix_skipped = true;
+                op_text = None;
+            }
+        }
         let finalized = match op_text.as_deref() {
             Some(text) => streaming_composition_finalize(inner, current_session_id, text).await,
             None => {
@@ -4193,7 +4207,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             route: DeliveryRoute::Streaming,
             submitted_text: pause_early_delivered
                 .as_ref()
-                .map(|(display, _)| format!("{display}{insert_text}"))
+                .map(|(display, _)| if terminal_suffix_skipped { display.clone() } else { format!("{display}{insert_text}") })
                 .or_else(|| Some(insert_text.clone())),
         }
     } else if streaming_contaminated {
@@ -4246,6 +4260,33 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                 .as_ref()
                 .map(|(display, _)| display.clone()),
         }
+    } else if let Some(expected) = terminal_suffix_expected {
+        // The body may already have been sent/cleared while the provider was
+        // finalizing. Only a fresh editor witness can authorize this suffix;
+        // the historical paste receipt still belongs to clipboard closeout.
+        execute_delivery_submission(delivery_request.clone(), |_| async {
+        let result = inner.inserter.insert_terminal_suffix(expected, &insert_text, restore_clipboard, paste_shortcut);
+        let status = match result {
+            Ok(status) => status,
+            Err(crate::insertion::TerminalAppendDecision::AlreadyPresent) => InsertStatus::PasteSent,
+            Err(decision) => {
+                terminal_suffix_skipped = true;
+                log::info!("[coord] final terminal suffix skipped session_id={current_session_id} decision={decision:?} route=paste");
+                // Earlier body submissions remain true; this is not a new
+                // paste and must not trigger copy-only or foreground retry.
+                InsertStatus::PasteSent
+            }
+        };
+        DeliverySubmission {
+            status,
+            target_confirmed: false,
+            route: DeliveryRoute::Paste,
+            // Common reconciliation below adds the immutable earlier body.
+            submitted_text: (!terminal_suffix_skipped && matches!(status,
+                InsertStatus::PasteSent | InsertStatus::Inserted | InsertStatus::SubmittedUnconfirmed))
+                .then(|| insert_text.clone()),
+        }
+        }).await
     } else {
         if pause_early_outcome.is_some() {
             if pause_early_outcome
@@ -4376,7 +4417,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         .await
     };
     let final_payload_submitted = delivery_submission.submitted_text.is_some()
-        && !skip_dispatch && !streaming_contaminated;
+        && !skip_dispatch && !streaming_contaminated && !terminal_suffix_skipped;
     if streaming_finalized != Some(true) && !skip_dispatch && !streaming_contaminated {
         if let Some((display, _)) = pause_early_delivered.as_ref() {
             delivery_submission.submitted_text = pause_early_cumulative_submitted_text(
@@ -4387,6 +4428,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     }
     let submitted_chars = delivery_submission.submitted_text.as_ref().map(|text| text.chars().count() as u32);
     let source_coverage = match pause_early_outcome.as_ref() {
+        _ if terminal_suffix_skipped => "terminal_suffix_not_appended",
         Some((_, Some(remainder), _)) if remainder.is_empty() => "covered",
         Some((_, Some(_), _)) | Some((_, None, Some(_))) if final_payload_submitted => "tail_submitted",
         Some((_, Some(_), _)) | Some((_, None, Some(_))) => "tail_not_submitted",

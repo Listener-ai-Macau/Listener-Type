@@ -4618,7 +4618,9 @@ fn delivered_body_starts_one_three_second_window_and_late_preview_does_not_resta
     clock.note_visible_body_boundary(false, 40, started);
     let generation = clock.observe(&owner, true, started).expect("owner arms clock");
     let delivered_at = started + Duration::from_millis(500);
-    clock.note_body_delivery(delivered_at);
+    clock.note_text_delivery(delivered_at, "最后一句正文");
+    clock.note_text_delivery(delivered_at + Duration::from_millis(2_000), "。");
+    assert_eq!(clock.last_body_delivery_at, Some(delivered_at));
     let late_preview_at = started + Duration::from_millis(1_000);
     // b72c67ea: a two-pass row published after paste inflated local_target
     // to the current capture edge while the qualified owner edge stayed old.
@@ -13951,6 +13953,95 @@ async fn activation_segment_race_rebinds_post_activation_segment_instead_of_fina
 }
 
 #[tokio::test]
+async fn accepted_wake_ensure_pending_owner_holds_untagged_events_until_confirmation() {
+    for origin in [
+        crate::embedded_audio::SessionStartOrigin::VoiceActivation,
+        crate::embedded_audio::SessionStartOrigin::User,
+        crate::embedded_audio::SessionStartOrigin::Unknown(
+            super::embedded_ensure_start_origin_marker(12),
+        ),
+    ] {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+        register_embedded_ble_cancel_flag(&coordinator.inner, &Arc::new(AtomicBool::new(false)));
+        let consumer = Arc::new(CountingConsumer::default());
+        let consumer_for_session: Arc<dyn crate::recorder::AudioConsumer> = consumer.clone();
+        let mut streaming = EmbeddedStreamingDictation::background_listener();
+        streaming.session = Some(embedded_audio_test_session(session_id, consumer_for_session));
+        let now = Instant::now();
+        streaming.activation_segment_race_guard = Some((93, now));
+        streaming.accepted_wake_capture_ensure = Some(super::AcceptedWakeCaptureEnsure {
+            request_id: 11,
+            previous_segment_id: 93,
+            requested_at: now,
+            deadline_at: now + super::EMBEDDED_ACCEPTED_WAKE_CAPTURE_REPLACEMENT_TIMEOUT,
+            replacement_wait_started_at: Some(now),
+            confirmed_segment_id: None,
+        });
+        streaming.handle_ble_packet_actor_command(&coordinator.inner,
+            StreamingSessionEvent::Started { session_id: 94, origin }).await
+            .expect("unconfirmed START must not crash the pending logical owner");
+        let pcm = pcm_from_samples(&samples_for_ms(200, 2500));
+        let chunk = || StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
+            session_id: 94, packet_sequence: 0, pcm: pcm.clone(),
+            raw_input_level_percent: Some(33), after_stop_boundary: false, metadata: None,
+        });
+        streaming.handle_ble_packet_actor_command(&coordinator.inner, chunk()).await
+            .expect("unconfirmed PCM is held");
+        streaming.handle_ble_packet_actor_command(&coordinator.inner,
+            StreamingSessionEvent::Stopped {
+                session_id: 94, expected_packet_count: 1,
+                origin: crate::embedded_audio::SessionStopOrigin::VoiceActivation,
+            }).await.expect("unconfirmed STOP cannot finish the logical owner");
+        assert_eq!(streaming.embedded_session_id, None);
+        assert!(streaming.session.is_some());
+        assert_eq!(consumer.bytes.load(Ordering::SeqCst), 0);
+        streaming.handle_ble_packet_actor_command(&coordinator.inner,
+            StreamingSessionEvent::Started {
+                session_id: 94,
+                origin: crate::embedded_audio::SessionStartOrigin::Unknown(
+                    super::embedded_ensure_start_origin_marker(11)),
+            }).await.expect("matching ENSURE marker binds the owner continuation");
+        streaming.handle_ble_packet_actor_command(&coordinator.inner, chunk()).await
+            .expect("confirmed PCM reaches the same ASR consumer");
+        assert_eq!(streaming.embedded_session_id, Some(94));
+        assert_eq!(consumer.bytes.load(Ordering::SeqCst), pcm.len());
+        assert_eq!(streaming.accepted_wake_capture_ensure.unwrap().confirmed_segment_id, Some(94));
+    }
+}
+
+#[tokio::test]
+async fn accepted_wake_ensure_pending_owner_without_body_still_expires() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = session_id;
+        state.phase = SessionPhase::Listening;
+        state.cancelled = false;
+    }
+    register_embedded_ble_cancel_flag(&coordinator.inner, &Arc::new(AtomicBool::new(false)));
+    let consumer: Arc<dyn crate::recorder::AudioConsumer> = Arc::new(CountingConsumer::default());
+    let mut streaming = EmbeddedStreamingDictation::background_listener();
+    streaming.session = Some(embedded_audio_test_session(session_id, consumer));
+    let past = Instant::now() - Duration::from_secs(30);
+    streaming.accepted_wake_capture_ensure = Some(super::AcceptedWakeCaptureEnsure {
+        request_id: 11, previous_segment_id: 93, requested_at: past,
+        deadline_at: past + super::EMBEDDED_ACCEPTED_WAKE_CAPTURE_REPLACEMENT_TIMEOUT,
+        replacement_wait_started_at: Some(past), confirmed_segment_id: None,
+    });
+    assert!(streaming.expire_accepted_wake_capture_if_due(&coordinator.inner));
+    assert!(streaming.session.is_none());
+    assert!(streaming.accepted_wake_capture_ensure.is_none());
+}
+
+#[tokio::test]
 async fn accepted_wake_ensure_binds_user_origin_continuation_without_reactivation() {
     let coordinator = Coordinator::new();
     let session_id = new_session_id();
@@ -16266,6 +16357,24 @@ fn pause_early_revised_terminal_rejects_new_body_repeated_anchors_and_large_rewr
     assert_eq!(pause_early_revised_terminal_remainder(unrelated, delivered, &key(delivered)), None);
     assert_eq!(pause_early_revised_terminal_remainder("最后确认整个流程是否正常。", delivered, &key(delivered)), None);
     assert_eq!(pause_early_revised_terminal_remainder("重新处理。", "处理", &key("处理")), None);
+}
+
+#[test]
+fn pause_early_terminal_punctuation_delivers_before_final_without_repeating_the_body() {
+    use super::{embedded_audio_partial_preview_stability_key as key,
+        pause_early_chunk_ready, pause_early_final_remainder, pause_early_segment};
+    let body = "最后一句已经上屏";
+    let punctuated = format!("{body}。");
+    let delta = pause_early_final_remainder(&punctuated, body, &key(body)).unwrap();
+    assert_eq!(delta, "。");
+    assert_eq!(pause_early_segment(&delta, false), Some("。"));
+    assert!(pause_early_chunk_ready(&key(body), &delta));
+    assert_eq!(pause_early_final_remainder(&punctuated, &punctuated, &key(body)), Some(String::new()));
+    assert!(pause_early_chunk_ready(&key(body), "？”"));
+    assert!(!pause_early_chunk_ready("", "。"));
+    assert!(!pause_early_chunk_ready(&key(body), "，"));
+    assert!(!pause_early_chunk_ready(&key(body), ".14"));
+    assert!(!pause_early_chunk_ready(&key(body), "的"));
 }
 
 #[test]

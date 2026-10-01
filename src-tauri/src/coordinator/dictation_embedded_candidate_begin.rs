@@ -1,4 +1,14 @@
 impl EmbeddedStreamingDictation {
+    fn awaiting_owned_capture_continuation(&self, incoming_id: u32) -> bool {
+        self.session.is_some()
+            && self.embedded_session_id.is_none()
+            && self.accepted_wake_capture_ensure.is_some_and(|ensure| {
+                ensure.replacement_wait_started_at.is_some()
+                    && ensure.confirmed_segment_id.is_none()
+                    && incoming_id != ensure.previous_segment_id
+            })
+    }
+
     fn bind_post_activation_segment(
         &mut self,
         inner: &Arc<Inner>,
@@ -60,6 +70,20 @@ impl EmbeddedStreamingDictation {
             return Ok(());
         }
         if self.session.is_some() || self.speaker_candidate.is_some() {
+            // Closing the predecessor leaves a valid logical owner awaiting
+            // a request-tagged continuation. An unrelated auto-start is not
+            // that confirmation and must not turn the pending state into a
+            // fatal session mismatch. PCM/STOP use the same ownership gate.
+            if self.awaiting_owned_capture_continuation(embedded_session_id)
+                && self.accepted_wake_capture_ensure.is_some_and(|ensure| {
+                    !embedded_ensure_start_origin_matches(start_origin, ensure.request_id)
+                })
+            {
+                log::info!(
+                    "[wake-phrase] awaiting owned ENSURE continuation; unconfirmed START held embedded_session_id={embedded_session_id} origin={start_origin:?}"
+                );
+                return Ok(());
+            }
             // ENSURE owns this boundary, but only the firmware's request-tagged
             // SessionStart marker is proof of ownership.  A time window plus a
             // different session id is not enough: a manual recording can land

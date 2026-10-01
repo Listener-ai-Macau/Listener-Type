@@ -766,6 +766,9 @@ struct SyncState {
     /// the wake speaker, while the latter requires a positive body-window match
     /// and remains the stricter authority for refreshing the owner endpoint.
     local_wake_owner_verified: bool,
+    /// Repeated quality-qualified body matches can verify an enrolled owner
+    /// after an open-gated wake. This does not change the physical wake anchor.
+    local_body_owner_verified: bool,
     /// True when the session identity was inferred from the short wake audio
     /// instead of a user-enrolled voiceprint. This profile is useful as a hint,
     /// but is not reliable enough to erase provider-recognized dictation.
@@ -805,6 +808,9 @@ struct SyncState {
     local_owner_absence_run_started_ms: Option<u64>,
     local_owner_absence_run_confirmed: bool,
     local_speaker_evidence: Vec<LocalSpeakerEvidence>,
+    /// Keep calibrated foreign observations at their original audio positions.
+    /// The advisory identity timeline must not erase this corroborating channel.
+    local_transcript_foreign_evidence: Vec<LocalSpeakerEvidence>,
     local_unreliable_speaker_evidence_end_ms: Vec<u64>,
     wake_speaker_phrase: Option<String>,
     speaker_info_present: bool,
@@ -855,6 +861,7 @@ struct OwnerContinuitySnapshot {
     local_speaker_classification: Option<crate::speaker_verification::SessionSpeakerClassification>,
     stable_target: bool,
     target_confirmed: bool,
+    body_owner_verified: bool,
     consecutive_target: u8,
     consecutive_non_target: u8,
     consecutive_transcript_hard_non_target: u8,
@@ -868,6 +875,7 @@ struct OwnerContinuitySnapshot {
     owner_absence_run_started_ms: Option<u64>,
     owner_absence_run_confirmed: bool,
     evidence: Vec<LocalSpeakerEvidence>,
+    transcript_foreign_evidence: Vec<LocalSpeakerEvidence>,
     unreliable_evidence_end_ms: Vec<u64>,
 }
 
@@ -890,6 +898,7 @@ impl OwnerContinuitySnapshot {
             local_speaker_classification: state.local_speaker_classification.clone(),
             stable_target: state.local_speaker_stable_target,
             target_confirmed: state.local_target_confirmed,
+            body_owner_verified: state.local_body_owner_verified,
             consecutive_target: state.local_consecutive_target,
             consecutive_non_target: state.local_consecutive_non_target,
             consecutive_transcript_hard_non_target: state
@@ -906,6 +915,7 @@ impl OwnerContinuitySnapshot {
             owner_absence_run_started_ms: state.local_owner_absence_run_started_ms,
             owner_absence_run_confirmed: state.local_owner_absence_run_confirmed,
             evidence: state.local_speaker_evidence.clone(),
+            transcript_foreign_evidence: state.local_transcript_foreign_evidence.clone(),
             unreliable_evidence_end_ms: state.local_unreliable_speaker_evidence_end_ms.clone(),
         }
     }
@@ -931,6 +941,7 @@ impl OwnerContinuitySnapshot {
         state.local_speaker_classification = self.local_speaker_classification;
         state.local_speaker_stable_target = self.stable_target;
         state.local_target_confirmed = self.target_confirmed;
+        state.local_body_owner_verified = self.body_owner_verified;
         state.local_consecutive_target = self.consecutive_target;
         state.local_consecutive_non_target = self.consecutive_non_target;
         state.local_consecutive_transcript_hard_non_target =
@@ -947,6 +958,7 @@ impl OwnerContinuitySnapshot {
         state.local_owner_absence_run_started_ms = self.owner_absence_run_started_ms;
         state.local_owner_absence_run_confirmed = self.owner_absence_run_confirmed;
         state.local_speaker_evidence = self.evidence;
+        state.local_transcript_foreign_evidence = self.transcript_foreign_evidence;
         state.local_unreliable_speaker_evidence_end_ms = self.unreliable_evidence_end_ms;
     }
 }
@@ -956,6 +968,71 @@ struct LocalSpeakerEvidence {
     audio_end_ms: u64,
     classification: crate::speaker_verification::SessionSpeakerClassification,
     stable_target: bool,
+}
+
+fn enrolled_owner_identity_verified(state: &SyncState) -> bool {
+    !state.local_speaker_profile_adaptive
+        && (state.local_wake_owner_verified || state.local_body_owner_verified)
+}
+
+fn provider_owner_evidence(state: &SyncState) -> Vec<LocalSpeakerEvidence> {
+    let mut evidence = state.local_speaker_evidence.clone();
+    for sample in &mut evidence {
+        if state.local_unreliable_speaker_evidence_end_ms.contains(&sample.audio_end_ms) {
+            sample.classification = crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                score: sample.classification.score(),
+            };
+        }
+    }
+    for foreign in &state.local_transcript_foreign_evidence {
+        if let Some(sample) = evidence.iter_mut().find(|sample| {
+            sample.audio_end_ms == foreign.audio_end_ms
+        }) {
+            sample.classification = foreign.classification;
+        }
+    }
+    evidence
+}
+
+fn repeated_owner_windows_after(
+    evidence: &[LocalSpeakerEvidence],
+    start_ms: u64,
+    end_ms: Option<u64>,
+) -> bool {
+    let Some(latest) = evidence.iter().rev().find(|sample| {
+        let center = sample.audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+        center >= start_ms && end_ms.is_none_or(|end| center <= end)
+    }) else { return false; };
+    let mut targets = 0u32;
+    let mut latest_target = None;
+    for sample in evidence {
+        let center = sample.audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+        if center < start_ms || end_ms.is_some_and(|end| center > end) {
+            continue;
+        }
+        match sample.classification {
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. } => {
+                targets = 0;
+                latest_target = None;
+            }
+            crate::speaker_verification::SessionSpeakerClassification::Target { .. }
+                if sample.stable_target =>
+            {
+                if latest_target.is_some_and(|previous| {
+                    sample.audio_end_ms.saturating_sub(previous) > LOCAL_SPEAKER_WINDOW_MS
+                }) {
+                    targets = 0;
+                }
+                targets += 1;
+                latest_target = Some(sample.audio_end_ms);
+            }
+            _ => {}
+        }
+    }
+    targets >= u32::from(LOCAL_SPEAKER_SWITCH_CONFIRMATIONS)
+        && latest_target.is_some_and(|at| {
+            latest.audio_end_ms.saturating_sub(at) <= LOCAL_SPEAKER_WINDOW_MS
+        })
 }
 
 const LOCAL_SPEAKER_SWITCH_CONFIRMATIONS: u8 = 2;
@@ -1167,7 +1244,7 @@ fn local_owner_continuity(state: &SyncState) -> LocalOwnerContinuity {
     // that same bank is still inconclusive, even during an absence run. Do not
     // promote it to confirmed Other while the debounced owner has not changed.
     // A current NonTarget window or a correlated handoff remains actionable.
-    let open_wake_uncertain_owner = !state.local_wake_owner_verified
+    let open_wake_uncertain_owner = !enrolled_owner_identity_verified(state)
         && state.local_speaker_stable_target
         && state.local_target_confirmed
         && state.local_owner_absence_run_confirmed
@@ -1331,18 +1408,9 @@ fn provider_has_pending_speaker_change(state: &SyncState, result: &Value) -> boo
                     .and_then(Value::as_str)
                     .is_some_and(|text| spoken_content_len(text) > phrase_len)
         });
-        let owner_returned = state.local_speaker_evidence.iter().any(|sample| {
-            let center = sample
-                .audio_end_ms
-                .saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
-            center >= start
-                && center <= end
-                && sample.stable_target
-                && matches!(
-                    sample.classification,
-                    crate::speaker_verification::SessionSpeakerClassification::Target { .. }
-                )
-        });
+        let owner_returned = repeated_owner_windows_after(
+            &provider_owner_evidence(state), start, Some(end),
+        );
         prior_body && !owner_returned
     })
 }
@@ -1966,10 +2034,22 @@ fn observe_provider_owner_handoff_candidate(state: &mut SyncState, result: &Valu
     if state.local_owner_handoff_suspected {
         return true;
     }
-    if !state.local_wake_owner_verified
+    let corroborated_foreign_handoff = state.target_speaker_id.as_deref().is_some_and(|target| {
+        state.local_transcript_foreign_evidence.iter().any(|foreign| {
+            let center = foreign.audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+            !repeated_owner_windows_after(&provider_owner_evidence(state), center, None)
+                && result.get("utterances").and_then(Value::as_array).into_iter().flatten().any(|row| {
+                    utterance_is_stable(row)
+                        && utterance_speaker_id(row).as_deref().is_some_and(|speaker| speaker != target)
+                        && utterance_start_ms(row).zip(utterance_end_ms(row))
+                            .is_some_and(|(start, end)| center >= start && center <= end)
+                })
+        })
+    });
+    if !enrolled_owner_identity_verified(state)
         || state.local_speaker_profile_adaptive
         || !state.local_target_confirmed
-        || !provider_has_pending_speaker_change(state, result)
+        || (!provider_has_pending_speaker_change(state, result) && !corroborated_foreign_handoff)
     {
         return false;
     }
@@ -4084,33 +4164,45 @@ fn utterance_belongs_to_verified_target_or_body_alias(
     // independently marks a stable, time-aligned different speaker, however,
     // the two weak signals form one explicit foreign-row veto. Keep this check
     // before applying the response-local body alias.
-    let corroborated_foreign_row = utterance_is_stable(utterance)
-        && utterance_speaker
-            .as_deref()
-            .is_some_and(|speaker| speaker != target_speaker_id)
-        && confirmed_foreign_hint_end_ms
+    let corroborated_foreign_end = |row: &Value| {
+        confirmed_foreign_hint_end_ms
             .into_iter()
             .chain(
                 local_speaker_evidence
                     .iter()
-                    .rev()
-                    .take(1)
                     .filter_map(|sample| {
                         matches!(sample.classification,
                     crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. }
                 ).then_some(sample.audio_end_ms)
                     }),
             )
-            .any(|audio_end_ms| {
-                utterance_start_ms(utterance)
-                    .zip(utterance_end_ms(utterance))
+            .filter(|audio_end_ms| {
+                utterance_start_ms(row)
+                    .zip(utterance_end_ms(row))
                     .is_some_and(|(start_ms, end_ms)| {
                         let center_ms = audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
                         center_ms >= start_ms && center_ms <= end_ms
                     })
-            });
-    if corroborated_foreign_row {
-        return false;
+            }).max()
+    };
+    if utterance_speaker.as_deref().is_some_and(|speaker| speaker != target_speaker_id) {
+        let current_foreign_end = utterance_is_stable(utterance)
+            .then(|| corroborated_foreign_end(utterance)).flatten();
+        // Keep a corroborated foreign cluster foreign across later rows in
+        // this response. Uncertain windows and one coincidental positive do
+        // not establish that the owner has returned to that cluster.
+        let prior_foreign_end = response_utterances.iter()
+            .filter(|row| utterance_is_stable(row)
+                && utterance_speaker_id(row) == utterance_speaker
+                && utterance_end_ms(row).zip(utterance_start_ms(utterance))
+                    .is_some_and(|(end, start)| end <= start))
+            .filter_map(corroborated_foreign_end).max();
+        if let Some(foreign_end) = current_foreign_end.into_iter().chain(prior_foreign_end).max() {
+            if !repeated_owner_windows_after(local_speaker_evidence,
+                foreign_end.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2), utterance_end_ms(utterance)) {
+                return false;
+            }
+        }
     }
     // Binding a body alias may extend its identity to later rows, but must not
     // revoke the positive local admission that originally established it.
@@ -4523,7 +4615,12 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
             if !local_speaker_tracking_enabled {
                 return true;
             }
-            local_evidence_allows_utterance(utterance, local_speaker_evidence, wake_speaker_phrase)
+            (local_evidence_allows_utterance(utterance, local_speaker_evidence, wake_speaker_phrase)
+                && utterance_start_ms(utterance).is_some_and(|start| {
+                    repeated_owner_windows_after(
+                        local_speaker_evidence, start, utterance_end_ms(utterance),
+                    )
+                }))
                 || target_speaker_id.as_deref().is_some_and(|target| {
                     local_evidence_allows_open_owner_utterance(
                         utterance,
@@ -4567,6 +4664,17 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
             crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. }
         )
     });
+    // An admitted open owner row can extend its current turn. A sealed body
+    // requires fresh evidence for the next turn; wake-only provider schema
+    // gaps retain their existing provisional recovery contract.
+    let raw_tail_owner_start = utterances.last()
+        .filter(|row| !utterance_is_stable(row) && optimistic_utterances.contains(row))
+        .and_then(utterance_start_ms)
+        .unwrap_or_else(|| utterances.iter().filter_map(utterance_end_ms).max().unwrap_or_default());
+    let only_bounded_wake_rows = !utterances.is_empty() && wake_speaker_phrase.is_some_and(|phrase| {
+        let normalized = phrase.chars().filter(|ch| ch.is_alphanumeric()).collect::<String>();
+        utterances.iter().all(|row| utterance_is_bounded_wake_phrase(row, &normalized))
+    });
     let optimistic_text = if !pending_unattributed_speech
         || (local_speaker_tracking_enabled && local_latest_is_non_target)
     {
@@ -4586,9 +4694,8 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
     } else if !stable_other_speaker_present
         && raw_has_unattributed_tail
         && !local_latest_is_non_target
-        && local_speaker_evidence
-            .last()
-            .is_some_and(|sample| sample.stable_target)
+        && (repeated_owner_windows_after(local_speaker_evidence, raw_tail_owner_start, None)
+            || (only_bounded_wake_rows && local_speaker_evidence.last().is_some_and(|sample| sample.stable_target)))
     {
         if let Some(tail) = raw_text.strip_prefix(&published_text) {
             format!("{target_text}{tail}")
@@ -4596,7 +4703,9 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
             target_text.clone()
         }
     } else if let Some(tail) = raw_text.strip_prefix(&published_text) {
-        if stable_other_speaker_present || local_latest_is_non_target {
+        if stable_other_speaker_present || local_latest_is_non_target
+            || local_speaker_tracking_enabled
+        {
             target_text.clone()
         } else {
             format!("{target_text}{tail}")
@@ -6174,7 +6283,11 @@ impl VolcengineStreamingASR {
     ) {
         let (update, stable_target, effective_classification, endpoint_strong_non_target) = {
             let mut state = self.state.lock();
-            observe_owner_handoff_recovery(&mut state, classification);
+            observe_owner_handoff_recovery(&mut state, if signal_quality_sufficient {
+                classification
+            } else {
+                crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: classification.score() }
+            });
             let endpoint_strong_non_target = matches!(
                 classification,
                 crate::speaker_verification::SessionSpeakerClassification::NonTarget { score }
@@ -6236,8 +6349,26 @@ impl VolcengineStreamingASR {
             // to freeze the ledger and produce an empty final. Keep the new
             // extreme-mismatch channel independent from identity/endpoint
             // hysteresis and enable it only for a persisted enrolled owner.
+            if !state.local_speaker_profile_adaptive
+                && signal_quality_sufficient
+                && state.local_speaker_stable_target
+                && matches!(classification,
+                    crate::speaker_verification::SessionSpeakerClassification::Target { .. })
+                && state.local_speaker_evidence.last().is_some_and(|previous| {
+                    previous.audio_end_ms < audio_duration_ms
+                        && audio_duration_ms.saturating_sub(previous.audio_end_ms)
+                            <= LOCAL_SPEAKER_WINDOW_MS
+                        && previous.stable_target
+                        && !state.local_unreliable_speaker_evidence_end_ms
+                            .contains(&previous.audio_end_ms)
+                        && matches!(previous.classification,
+                            crate::speaker_verification::SessionSpeakerClassification::Target { .. })
+                })
+            {
+                state.local_body_owner_verified = true;
+            }
             let transcript_speaker_evidence =
-                if state.local_wake_owner_verified && !state.local_speaker_profile_adaptive {
+                if enrolled_owner_identity_verified(&state) {
                     transcript_speaker_evidence
                 } else {
                     crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive
@@ -6252,6 +6383,16 @@ impl VolcengineStreamingASR {
                     | crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget
             );
             if transcript_foreign_hint_applies {
+                if signal_quality_sufficient && matches!(classification,
+                    crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. })
+                {
+                    let stable_target = state.local_speaker_stable_target;
+                    state.local_transcript_foreign_evidence.push(LocalSpeakerEvidence {
+                        audio_end_ms: audio_duration_ms,
+                        classification,
+                        stable_target,
+                    });
+                }
                 state.local_preview_foreign_hint_end_ms = Some(audio_duration_ms);
                 state.local_consecutive_transcript_foreign_hint = state
                     .local_consecutive_transcript_foreign_hint
@@ -6270,7 +6411,7 @@ impl VolcengineStreamingASR {
                 state.local_consecutive_transcript_foreign_hint = 0;
             }
             if transcript_hard_non_target_applies
-                && state.local_wake_owner_verified
+                && enrolled_owner_identity_verified(&state)
                 && !state.local_speaker_profile_adaptive
             {
                 state.local_consecutive_transcript_hard_non_target = state
@@ -6494,6 +6635,7 @@ impl VolcengineStreamingASR {
         state.local_speaker_profile_adaptive = false;
         state.local_speaker_stable_target = true;
         state.local_target_confirmed = false;
+        state.local_body_owner_verified = false;
         state.local_consecutive_target = 0;
         state.local_consecutive_non_target = 0;
         state.local_consecutive_transcript_hard_non_target = 0;
@@ -6508,6 +6650,7 @@ impl VolcengineStreamingASR {
         state.local_owner_absence_run_confirmed = false;
         state.local_sustained_non_target_speech_end_ms = None;
         state.local_speaker_evidence.clear();
+        state.local_transcript_foreign_evidence.clear();
         state.local_unreliable_speaker_evidence_end_ms.clear();
         state.qualified_owner_speech_end_ms = None;
         state.local_speaker_signal_quality_sufficient = None;
@@ -6877,6 +7020,7 @@ impl VolcengineStreamingASR {
             st.local_sustained_non_target_speech_end_ms = None;
             st.local_speaker_classification = None;
             st.local_target_confirmed = false;
+            st.local_body_owner_verified = false;
             st.local_consecutive_target = 0;
             st.local_consecutive_non_target = 0;
             st.local_consecutive_transcript_hard_non_target = 0;
@@ -6890,6 +7034,7 @@ impl VolcengineStreamingASR {
             st.local_owner_absence_run_started_ms = None;
             st.local_owner_absence_run_confirmed = false;
             st.local_speaker_evidence.clear();
+            st.local_transcript_foreign_evidence.clear();
             st.local_unreliable_speaker_evidence_end_ms.clear();
             pending_speaker_anchor.restore(&mut st);
             st.owner_isolation_frozen = false;
@@ -7928,7 +8073,7 @@ impl VolcengineStreamingASR {
         let (speaker_filtered_result, target_speaker_update, provisional_holds_endpoint) = {
             let mut state = self.state.lock();
             let local_speaker_tracking_enabled = state.local_speaker_tracking_enabled;
-            let local_speaker_evidence = state.local_speaker_evidence.clone();
+            let local_speaker_evidence = provider_owner_evidence(&state);
             let wake_speaker_phrase = state.wake_speaker_phrase.clone();
             let prior_wake_speaker_end_ms = state.wake_target_speech_end_ms;
             let wake_owner_verified = state.local_wake_owner_verified;
@@ -8850,6 +8995,8 @@ impl VolcengineStreamingASR {
                 }
             }
             let changed = !merged.is_empty() && state.last_partial_text != merged;
+            let spoken_content_changed = crate::transcript_boundary::content_key(&state.best_transcript_text)
+                != crate::transcript_boundary::content_key(&merged);
             if !merged.is_empty() {
                 if state.best_transcript_text != merged {
                     state.best_transcript_committed_at = Some(Instant::now());
@@ -8873,7 +9020,7 @@ impl VolcengineStreamingASR {
                 }
             }
             let preview_holds_endpoint = !has_final
-                && changed
+                && spoken_content_changed
                 && refresh_local_target_from_owner_preview_activity(&mut state);
             (merged, changed, preview_holds_endpoint)
         };
@@ -10358,6 +10505,229 @@ mod tests {
             },
             Vec::new(),
         )
+    }
+
+    #[test]
+    fn open_wake_body_verification_keeps_foreign_rows_out_of_final() {
+        use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Target, Uncertain};
+        use crate::speech_decision_kernel::TranscriptSpeakerEvidence::{HardNonTarget, Inconclusive};
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started("开始录音");
+        for end in [8_000, 8_480, 13_280] {
+            asr.note_local_speaker_observation(end, Target { score: 0.45 }, Inconclusive);
+        }
+        assert!(asr.state.lock().local_body_owner_verified);
+        assert!(!asr.state.lock().local_wake_owner_verified);
+        for (end, classification, hint) in [
+            (21_600, Uncertain { score: 0.387 }, Inconclusive),
+            (22_496, Target { score: 0.435 }, Inconclusive),
+            (25_280, NonTarget { score: 0.072 }, HardNonTarget),
+            (31_000, NonTarget { score: 0.10 }, HardNonTarget),
+            (31_480, NonTarget { score: 0.11 }, HardNonTarget),
+            (45_600, Uncertain { score: 0.34 }, Inconclusive),
+        ] {
+            asr.note_local_speaker_observation(end, classification, hint);
+        }
+        {
+            let state = asr.state.lock();
+            let evidence = provider_owner_evidence(&state);
+            assert!(evidence.iter().any(|sample| sample.audio_end_ms == 25_280
+                && matches!(sample.classification, NonTarget { .. })));
+            let mut restored = SyncState::default();
+            OwnerContinuitySnapshot::capture(&state).restore(&mut restored);
+            assert!(restored.local_body_owner_verified);
+            assert!(!restored.local_wake_owner_verified);
+            assert_eq!(restored.local_transcript_foreign_evidence.len(), 3);
+        }
+        let owner = "开始录音。请保留我刚才说的完整正文。";
+        let foreign = "这是播放录音里的第一句。后面还有其他人的台词。";
+        let result = json!({"text": format!("{owner}{foreign}"), "utterances": [
+            {"text": owner, "start_time": 1200, "end_time": 20271,
+             "definite": true, "additions": {"speaker_id": "0"}},
+            {"text": "这是播放录音里的第一句。", "start_time": 20271, "end_time": 25632,
+             "definite": true, "additions": {"speaker_id": "1"}},
+            {"text": "后面还有其他人的台词。", "start_time": 29202, "end_time": 45702,
+             "definite": true, "additions": {"speaker_id": "1"}}
+        ]});
+        let payload = serde_json::to_vec(&json!({"audio_info": {"duration": 45700}, "result": result})).unwrap();
+        asr.handle_frame(&frame::build(MessageType::FullServerResponse, Flags::LastPacket,
+            Serialization::Json, &payload, None));
+        assert_eq!(asr.state.lock().best_transcript_text, owner);
+    }
+
+    #[test]
+    fn open_wake_new_tail_needs_repeated_fresh_owner_windows() {
+        use crate::speaker_verification::SessionSpeakerClassification::{Target, Uncertain};
+        let owner = "开始录音。保留本人正文。";
+        let tail = "停顿后继续说话。";
+        let result = json!({"text": format!("{owner}{tail}"), "utterances": [
+            {"text": owner, "start_time": 1200, "end_time": 16000,
+             "definite": true, "additions": {"speaker_id": "0"}}
+        ]});
+        let mut evidence = vec![
+            LocalSpeakerEvidence { audio_end_ms: 13_280, classification: Target { score: 0.45 }, stable_target: true },
+            LocalSpeakerEvidence { audio_end_ms: 21_600, classification: Uncertain { score: 0.38 }, stable_target: true },
+            LocalSpeakerEvidence { audio_end_ms: 22_496, classification: Target { score: 0.435 }, stable_target: true },
+        ];
+        let filter = |evidence: &[LocalSpeakerEvidence]| {
+            filter_result_to_target_speaker_with_local_evidence_and_anchor(
+                &result, &mut Some("0".into()), true, evidence, Some("开始录音"),
+                None, false, false, None, None,
+            )
+        };
+        assert_eq!(filter(&evidence).optimistic_result["text"], owner,
+            "one isolated positive cannot admit an unattributed new tail");
+        evidence.push(LocalSpeakerEvidence {
+            audio_end_ms: 22_976, classification: Target { score: 0.48 }, stable_target: true,
+        });
+        assert_eq!(filter(&evidence).optimistic_result["text"], format!("{owner}{tail}"),
+            "two fresh owner windows allow a real continuation");
+        evidence.push(LocalSpeakerEvidence {
+            audio_end_ms: 40_192, classification: Target { score: 0.44 }, stable_target: true,
+        });
+        assert!(!repeated_owner_windows_after(&evidence, 16_000, None),
+            "positives separated by many seconds cannot jointly certify a turn");
+    }
+
+    #[test]
+    fn open_wake_body_verification_requires_quality_and_enrolled_identity() {
+        use crate::speaker_verification::SessionSpeakerClassification::Target;
+        use crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive;
+        for (adaptive, quality, second_end, expected) in [
+            (false, true, 8_480, true),
+            (true, true, 8_480, false),
+            (false, false, 8_480, false),
+            (false, true, 20_000, false),
+        ] {
+            let asr = uplink_stall_test_asr();
+            asr.note_local_speaker_tracking_started("开始录音");
+            asr.note_local_speaker_profile_adaptive(adaptive);
+            asr.note_local_speaker_observation_with_quality(8_000, Target { score: 0.45 }, Inconclusive, quality);
+            assert!(!asr.state.lock().local_body_owner_verified);
+            asr.note_local_speaker_observation_with_quality(second_end, Target { score: 0.46 }, Inconclusive, quality);
+            assert_eq!(asr.state.lock().local_body_owner_verified, expected);
+            let state = asr.state.lock();
+            if !quality {
+                assert!(!repeated_owner_windows_after(&provider_owner_evidence(&state), 7_000, None));
+            }
+        }
+    }
+
+    #[test]
+    fn open_wake_foreign_handoff_resumes_only_after_quality_owner_return() {
+        use crate::speaker_verification::SessionSpeakerClassification::Target;
+        use crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive;
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started("开始录音");
+        for end in [8_000, 8_480] {
+            asr.note_local_speaker_observation(end, Target { score: 0.45 }, Inconclusive);
+        }
+        asr.state.lock().local_owner_handoff_suspected = true;
+        asr.note_local_speaker_observation_with_quality(20_000, Target { score: 0.45 }, Inconclusive, false);
+        asr.note_local_speaker_observation(20_480, Target { score: 0.46 }, Inconclusive);
+        assert!(asr.state.lock().local_owner_handoff_suspected,
+            "an unreliable positive plus one owner match cannot resume capture identity");
+        asr.note_local_speaker_observation(20_960, Target { score: 0.47 }, Inconclusive);
+        let state = asr.state.lock();
+        assert!(!state.local_owner_handoff_suspected);
+        assert_eq!(state.qualified_owner_speech_end_ms, Some(20_960));
+        assert!(!state.local_wake_owner_verified);
+    }
+
+    #[test]
+    #[ignore = "requires explicit consented recording trace reconstructed from capture metadata"]
+    fn open_wake_recorded_foreign_tail_replay_probe() {
+        use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Target, Uncertain};
+        use crate::speech_decision_kernel::TranscriptSpeakerEvidence::{ForeignTailHint, HardNonTarget, Inconclusive};
+        let path = std::env::var("LISTENER_FOREIGN_REPLAY_INPUT").expect("recorded fixture path");
+        let output = std::env::var("LISTENER_FOREIGN_REPLAY_OUTPUT").expect("replay output path");
+        let fixture: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started("开始录音");
+        asr.state.lock().target_speaker_id = Some("0".into());
+        let mut observations = fixture["observations"].as_array().unwrap().iter().peekable();
+        let mut outcomes = Vec::new();
+        for (key, flag) in [("early_frame", Flags::None), ("middle_frame", Flags::None), ("final_frame", Flags::LastPacket)] {
+            let elapsed = fixture[key]["elapsed_ms"].as_i64().unwrap();
+            while observations.peek().is_some_and(|observation| observation["elapsed_ms"].as_i64().unwrap() <= elapsed) {
+                let observation = observations.next().unwrap();
+                let score = observation["score"].as_f64().unwrap() as f32;
+                let classification = match observation["classification"].as_str().unwrap() {
+                    "Target" => Target { score }, "NonTarget" => NonTarget { score }, _ => Uncertain { score },
+                };
+                let hint = match observation["hint"].as_str().unwrap() {
+                    "hard_non_target" => HardNonTarget, "foreign_tail_hint" => ForeignTailHint, _ => Inconclusive,
+                };
+                asr.note_local_speaker_observation_with_quality(
+                    observation["audio_end_ms"].as_u64().unwrap(), classification, hint,
+                    observation["quality"].as_bool().unwrap(),
+                );
+            }
+            let result = &fixture[key]["result"];
+            let payload = serde_json::to_vec(&json!({"audio_info": {"duration": fixture[key]["audio_duration_ms"]}, "result": result})).unwrap();
+            asr.handle_frame(&frame::build(MessageType::FullServerResponse, flag, Serialization::Json, &payload, None));
+            let state = asr.state.lock();
+            let expected = fixture["owner_expected"].as_str().unwrap();
+            let passed = state.best_transcript_text == expected;
+            let optimistic_has_foreign = fixture["foreign_phrases"].as_array().unwrap().iter()
+                .any(|phrase| state.last_emitted_preview_text.contains(phrase.as_str().unwrap()));
+            outcomes.push(json!({"frame": key, "ownerPreserved": passed, "optimisticHasForeign": optimistic_has_foreign,
+                "selectedText": state.best_transcript_text, "expectedOwner": expected,
+                "handoffSuspected": state.local_owner_handoff_suspected,
+                "qualifiedOwnerEndMs": state.qualified_owner_speech_end_ms,
+                "bodyOwnerVerified": state.local_body_owner_verified, "wakeOwnerVerified": state.local_wake_owner_verified,
+                "retainedForeignObservations": state.local_transcript_foreign_evidence.len()}));
+            std::fs::write(&output, serde_json::to_vec_pretty(&json!({"outcomes": outcomes})).unwrap()).unwrap();
+            assert!(passed, "recorded owner text must be preserved in {key}");
+            assert!(!optimistic_has_foreign, "recorded foreign row must not enter optimistic body");
+            if key != "early_frame" {
+                assert!(state.local_owner_handoff_suspected, "corroborated foreign turn must retain the original endpoint");
+                assert!(state.qualified_owner_speech_end_ms.unwrap_or_default() <= 22_496,
+                    "one late positive from the recorded bystander must not renew the owner clock");
+            }
+        }
+        let report = json!({"status": "PASS", "sessionId": fixture["session_id"],
+            "evidenceScope": fixture["reconstruction"], "installedAcceptance": false, "outcomes": outcomes});
+        std::fs::write(output, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires a user-reported punctuation trace and reconstructed row envelope"]
+    fn recorded_terminal_punctuation_merge_replay_probe() {
+        let fixture: Value = serde_json::from_slice(&std::fs::read(
+            std::env::var("LISTENER_PUNCTUATION_REPLAY_INPUT").unwrap()).unwrap()).unwrap();
+        let previous = fixture["previous_merged"].as_str().unwrap();
+        let candidate_text = fixture["filtered_revision"].as_str().unwrap();
+        let expected = format!("{previous}。");
+        let segments = vec![TranscriptSegment { start_ms: 0, end_ms: Some(1_000), text: "开始录音".into() }];
+        let candidate = TranscriptCandidate { text: candidate_text.into(),
+            timed_segments: vec![TranscriptSegment {
+                start_ms: fixture["row_start_ms"].as_i64().unwrap(),
+                end_ms: fixture["row_end_ms"].as_i64(), text: candidate_text.into() }],
+            authoritative_cumulative: true };
+        let (old, _, _) = super::super::volcengine_untimed_merge::merge_streaming_candidate_with_untimed_window(
+            previous, &segments, previous, candidate.clone());
+        assert_eq!(old, previous, "recorded held revision must reproduce the missing punctuation");
+        let (merged, merged_segments, _) = merge_filtered_streaming_candidate_with_untimed_window(
+            previous, &segments, previous, candidate, None);
+        assert_eq!(merged, expected);
+        let asr = uplink_stall_test_asr();
+        {
+            let mut state = asr.state.lock();
+            state.best_transcript_text = merged.clone();
+            state.best_transcript_segments = merged_segments;
+            state.best_transcript_committed_at = Some(Instant::now() - Duration::from_millis(1_500));
+            state.pause_early_recent_revisions.push_back((Instant::now() - Duration::from_millis(1_500), previous.into()));
+        }
+        let stable = asr.pause_early_delivery_ledger_snapshot_after(Duration::from_millis(1_000),
+            &crate::transcript_boundary::content_key(previous)).unwrap();
+        assert_eq!(stable.text, expected, "terminal mark must reach pause delivery without finalization or reaging words");
+        std::fs::write(std::env::var("LISTENER_PUNCTUATION_REPLAY_OUTPUT").unwrap(), serde_json::to_vec_pretty(&json!({
+            "status": "PASS", "sessionId": fixture["session_id"], "sourceHash": fixture["source_hash"],
+            "oldMerged": old, "newMerged": merged, "stableSnapshot": stable.text,
+            "providerElapsedMs": fixture["provider_elapsed_ms"], "finalElapsedMs": fixture["final_elapsed_ms"],
+            "evidenceScope": fixture["reconstruction"], "installedAcceptance": false
+        })).unwrap()).unwrap();
     }
 
     #[test]
@@ -12167,6 +12537,13 @@ mod tests {
             state.local_speaker_evidence.push(LocalSpeakerEvidence {
                 audio_end_ms: 14000,
                 classification: Target { score: 0.65 },
+                stable_target: true,
+            });
+            assert!(provider_has_pending_speaker_change(&state, &provider),
+                "one isolated positive cannot establish a new owner turn");
+            state.local_speaker_evidence.push(LocalSpeakerEvidence {
+                audio_end_ms: 14400,
+                classification: Target { score: 0.66 },
                 stable_target: true,
             });
             assert!(!provider_has_pending_speaker_change(&state, &provider));

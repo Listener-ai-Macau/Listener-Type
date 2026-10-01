@@ -443,6 +443,15 @@ impl EmbeddedStreamingDictation {
                     return Ok(false);
                 }
                 let chunk_session_id = chunk.session_id;
+                if self.awaiting_owned_capture_continuation(chunk_session_id) {
+                    if chunk.packet_sequence < 3 {
+                        log::info!(
+                            "[wake-phrase] ignoring unconfirmed continuation PCM while retaining logical owner embedded_session_id={chunk_session_id} packet_sequence={}",
+                            chunk.packet_sequence
+                        );
+                    }
+                    return Ok(false);
+                }
                 // The session observation is only the fact sink. A candidate's
                 // physical source must come from this packet's explicit
                 // observation; falling back to the previous session observation
@@ -821,6 +830,12 @@ impl EmbeddedStreamingDictation {
                 expected_packet_count,
                 origin,
             } => {
+                if self.awaiting_owned_capture_continuation(session_id) {
+                    log::info!(
+                        "[wake-phrase] ignoring unconfirmed continuation STOP embedded_session_id={session_id}; logical owner remains pending"
+                    );
+                    return Ok(false);
+                }
                 // Mid-reopen / orphan VoiceActivation streams often deliver STOP with no
                 // host session and no wake candidate. Finishing that path used to enter
                 // the full dictation pipeline (or error-and-kill notify). Reset and keep

@@ -26,9 +26,62 @@ pub(crate) struct ClipboardTicket {
 }
 
 enum Command {
-    Paste(String, bool, PasteShortcut, Sender<InsertStatus>),
+    Paste(String, bool, PasteShortcut, Option<String>, Sender<PasteResult>),
     Copy(String, Sender<bool>),
     Retain(ClipboardTicket, String, bool, Sender<RetentionResult>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TerminalAppendDecision {
+    Append,
+    AlreadyPresent,
+    Changed,
+    Unavailable,
+}
+
+struct PasteResult {
+    status: InsertStatus,
+    terminal_decision: Option<TerminalAppendDecision>,
+}
+
+/// An old paste receipt permits clipboard retention, not a new insertion.
+/// A punctuation-only continuation needs the current editor and caret to
+/// still contain this session's committed body. Missing readback is distinct
+/// from an observed send/clear/edit; neither authorizes a standalone suffix.
+fn terminal_append_decision(
+    snapshot: Option<(&str, &str)>,
+    caret_at_end: Option<bool>,
+    expected: &str,
+    suffix: &str,
+) -> TerminalAppendDecision {
+    let Some((document, selected)) = snapshot else {
+        return TerminalAppendDecision::Unavailable;
+    };
+    if expected.is_empty() || !crate::transcript_boundary::terminal_punctuation_only(suffix)
+        || !selected.is_empty() || caret_at_end == Some(false) {
+        return TerminalAppendDecision::Changed;
+    }
+    if caret_at_end.is_none() {
+        return TerminalAppendDecision::Unavailable;
+    }
+    // Native editor document ranges can include a trailing paragraph marker.
+    // Other user whitespace and edits remain significant.
+    let document = document.trim_end_matches(['\r', '\n']);
+    if document.ends_with(&format!("{expected}{suffix}")) {
+        TerminalAppendDecision::AlreadyPresent
+    } else if document.ends_with(expected) {
+        TerminalAppendDecision::Append
+    } else {
+        TerminalAppendDecision::Changed
+    }
+}
+
+pub(crate) fn current_terminal_append_decision(expected: &str, suffix: &str) -> TerminalAppendDecision {
+    let reader = crate::selection::PasteReader::capture();
+    let before = reader.as_ref().and_then(|reader| reader.before().ok());
+    let caret_at_end = reader.as_ref().and_then(|reader| reader.caret_at_end().ok());
+    terminal_append_decision(before.as_ref().map(|(doc, selected)| (doc.as_str(), selected.as_str())),
+        caret_at_end, expected, suffix)
 }
 
 static OWNER: Lazy<Mutex<u64>> = Lazy::new(|| Mutex::new(0));
@@ -59,12 +112,26 @@ pub(super) fn begin_external_write() -> parking_lot::MutexGuard<'static, u64> {
 pub(super) fn paste(text: &str, restore: bool, shortcut: PasteShortcut) -> InsertStatus {
     let (sender, receiver) = mpsc::channel();
     if WORKER
-        .send(Command::Paste(text.into(), restore, shortcut, sender))
+        .send(Command::Paste(text.into(), restore, shortcut, None, sender))
         .is_err()
     {
         return InsertStatus::Failed;
     }
-    receiver.recv().unwrap_or(InsertStatus::Failed)
+    receiver.recv().map(|result| result.status).unwrap_or(InsertStatus::Failed)
+}
+
+pub(crate) fn paste_terminal_suffix(expected: &str, suffix: &str, restore: bool, shortcut: PasteShortcut)
+    -> Result<InsertStatus, TerminalAppendDecision>
+{
+    let (sender, receiver) = mpsc::channel();
+    if WORKER.send(Command::Paste(suffix.into(), restore, shortcut, Some(expected.into()), sender)).is_err() {
+        return Ok(InsertStatus::Failed);
+    }
+    match receiver.recv() {
+        Ok(result) if result.terminal_decision == Some(TerminalAppendDecision::Append) => Ok(result.status),
+        Ok(result) => Err(result.terminal_decision.unwrap_or(TerminalAppendDecision::Unavailable)),
+        Err(_) => Ok(InsertStatus::Failed),
+    }
 }
 
 pub(super) fn copy(text: &str) -> bool {
@@ -203,15 +270,25 @@ fn run(receiver: Receiver<Command>, initial_receipt: Option<PasteReceipt>) {
                 }
             };
         match command {
-            Some(Command::Paste(text, restore, shortcut, reply)) => {
-                finish(&mut pending, RetentionResult::Superseded);
+            Some(Command::Paste(text, restore, shortcut, expected, reply)) => {
                 let capture_started = Instant::now();
-                let reader = if restore {
+                let reader = if restore && expected.is_none() {
                     None
                 } else {
                     crate::selection::PasteReader::capture()
                 };
                 let before = reader.as_ref().and_then(|reader| reader.before().ok());
+                let terminal_decision = expected.as_ref().map(|expected| {
+                    let caret_at_end = reader.as_ref().and_then(|reader| reader.caret_at_end().ok());
+                    terminal_append_decision(before.as_ref().map(|(doc, selected)| (doc.as_str(), selected.as_str())),
+                        caret_at_end, expected, &text)
+                });
+                if terminal_decision.is_some_and(|decision| decision != TerminalAppendDecision::Append) {
+                    log::info!("[insertion] terminal suffix not pasted decision={terminal_decision:?} suffix_chars={}", text.chars().count());
+                    let _ = reply.send(PasteResult { status: InsertStatus::Failed, terminal_decision });
+                    continue;
+                }
+                finish(&mut pending, RetentionResult::Superseded);
                 log::info!("[insertion] paste readback captured available={} capture_ms={} payload_chars={}",
                     before.is_some(), capture_started.elapsed().as_millis(), text.chars().count());
                 // The clipboard writer and receipt share one owner generation.
@@ -239,7 +316,7 @@ fn run(receiver: Receiver<Command>, initial_receipt: Option<PasteReceipt>) {
                     observation: PasteObservation::default(),
                 });
                 drop(owner);
-                let _ = reply.send(result);
+                let _ = reply.send(PasteResult { status: result, terminal_decision });
             }
             Some(Command::Copy(text, reply)) => {
                 finish(&mut pending, RetentionResult::Superseded);
@@ -455,6 +532,23 @@ fn paste_was_consumed(before: &str, selected: &str, payload: &str, after: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_suffix_requires_current_body_and_caret_not_an_old_paste_receipt() {
+        let body = "已完成的最后一句";
+        assert_eq!(terminal_append_decision(Some((body, "")), Some(true), body, "。"), TerminalAppendDecision::Append);
+        assert_eq!(terminal_append_decision(Some((&format!("旧消息\n{body}\r\n"), "")), Some(true), body, "。"), TerminalAppendDecision::Append);
+        assert_eq!(terminal_append_decision(Some((&format!("{body}。"), "")), Some(true), body, "。"), TerminalAppendDecision::AlreadyPresent);
+        // Enter sent the body and the host reused its editor for a new message.
+        assert_eq!(terminal_append_decision(Some(("", "")), Some(true), body, "。"), TerminalAppendDecision::Changed);
+        assert_eq!(terminal_append_decision(Some(("另一条消息", "")), Some(true), body, "。"), TerminalAppendDecision::Changed);
+        assert_eq!(terminal_append_decision(Some((body, "")), Some(false), body, "。"), TerminalAppendDecision::Changed);
+        assert_eq!(terminal_append_decision(Some((body, "一句")), Some(true), body, "。"), TerminalAppendDecision::Changed);
+        assert_eq!(terminal_append_decision(None, None, body, "。"), TerminalAppendDecision::Unavailable);
+        assert_eq!(terminal_append_decision(Some((body, "")), None, body, "。"), TerminalAppendDecision::Unavailable);
+        assert_eq!(terminal_append_decision(Some((body, "")), Some(true), "", "。"), TerminalAppendDecision::Changed);
+        assert_eq!(terminal_append_decision(Some((body, "")), Some(true), body, ".14"), TerminalAppendDecision::Changed);
+    }
 
     /// Runs explicitly while dictation is idle. This uses the real clipboard,
     /// no keyboard injection or editor automation, and exercises the worker's

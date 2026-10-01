@@ -1559,6 +1559,12 @@ fn pause_early_segment(delta: &str, quiet_boundary: bool) -> Option<&str> {
 }
 
 fn pause_early_chunk_ready(delivered_key: &str, delta: &str) -> bool {
+    // Stable words already crossed the irreversible delivery boundary. Their
+    // later terminal punctuation is decoration of that same body, not a new
+    // short provider placeholder to hold until finalization.
+    if !delivered_key.is_empty() && pause_early_terminal_punctuation_only(delta) {
+        return true;
+    }
     let count = embedded_audio_partial_preview_stability_key(delta)
         .chars()
         .count();
@@ -1580,6 +1586,10 @@ fn pause_early_chunk_ready(delivered_key: &str, delta: &str) -> bool {
     } else {
         PAUSE_EARLY_NEXT_CHUNK_MIN_CONTENT_CHARS
     }
+}
+
+fn pause_early_terminal_punctuation_only(delta: &str) -> bool {
+    crate::transcript_boundary::terminal_punctuation_only(delta)
 }
 
 /// Session-scoped bookkeeping of text already inserted mid-session.
@@ -1697,38 +1707,8 @@ fn pause_early_revised_terminal_remainder(
     delivered_display: &str,
     source_key: &str,
 ) -> Option<String> {
-    let consumed: Vec<char> = source_key.chars().collect();
-    if !(8..=512).contains(&consumed.len()) {
-        return None;
-    }
-    let final_key = embedded_audio_partial_preview_stability_key(final_text);
-    let final_content: Vec<char> = final_key.chars().collect();
-    let anchor = &consumed[consumed.len() - 8..];
-    let max_edits = (consumed.len() / 5).clamp(2, 12);
-    if consumed.len().abs_diff(final_content.len()) > max_edits
-        || !final_content.ends_with(anchor)
-        || final_content.windows(anchor.len()).filter(|window| *window == anchor).count() != 1
-    {
-        return None;
-    }
-    let mut previous: Vec<usize> = (0..=final_content.len()).collect();
-    let mut current = vec![0; final_content.len() + 1];
-    for (index, expected) in consumed.iter().enumerate() {
-        current[0] = index + 1;
-        for prefix in 1..=final_content.len() {
-            current[prefix] = (previous[prefix] + 1)
-                .min(current[prefix - 1] + 1)
-                .min(previous[prefix - 1] + usize::from(*expected != final_content[prefix - 1]));
-        }
-        std::mem::swap(&mut previous, &mut current);
-    }
-    if previous[final_content.len()] > max_edits {
-        return None;
-    }
-    let (offset, last_content) = final_text.char_indices().rev()
-        .find(|(_, ch)| !is_embedded_audio_partial_preview_decorative(*ch))?;
-    let boundary = offset + last_content.len_utf8();
-    Some(pause_early_boundary_tail(&final_text[boundary..], delivered_display).to_string())
+    let tail = crate::transcript_boundary::revised_terminal_suffix(final_text, source_key)?;
+    Some(pause_early_boundary_tail(tail, delivered_display).to_string())
 }
 
 /// A live provider revision may correct words inside an already pasted
@@ -2481,6 +2461,13 @@ async fn pause_early_delivery_tick(
     // 恢复;账本先记后 commit,失败回滚——次序与粘贴路径同款)。失败时驱动
     // 已降级清组字,下一拍以空账本走粘贴分支补上。
     if streaming_composition_active(inner, session_id) {
+        if pause_early_terminal_punctuation_only(delta)
+            && !matches!(inner.inserter.terminal_append_decision(&delivered_display, delta),
+                crate::insertion::TerminalAppendDecision::Append | crate::insertion::TerminalAppendDecision::AlreadyPresent)
+        {
+            pause_early_note_gate_blocked(inner, session_id, "terminal_suffix_current_editor_unverified");
+            return;
+        }
         streaming_composition_commit_stable(inner, session_id, delta, &delivered_display, &new_key, &new_source_key, endpoint_clock)
             .await;
         return;
@@ -2507,14 +2494,31 @@ async fn pause_early_delivery_tick(
     // 落屏的却是恢复后的旧剪贴板)。会话内剪贴板暂存听写增量无碍;终稿
     // 交付仍按用户偏好恢复,那才是剪贴板所有权归还的正当时机。
     let restore_clipboard = false;
+    let terminal_status = if pause_early_terminal_punctuation_only(delta) {
+        match inner.inserter.insert_terminal_suffix(&delivered_display, delta, restore_clipboard, prefs.paste_shortcut) {
+            Ok(status) => Some(status),
+            Err(crate::insertion::TerminalAppendDecision::AlreadyPresent) => Some(InsertStatus::Inserted),
+            Err(_) => {
+                pause_early_delivery_rollback(inner, session_id);
+                pause_early_note_gate_blocked(inner, session_id, "terminal_suffix_current_editor_unverified");
+                return;
+            }
+        }
+    } else {
+        None
+    };
     #[cfg(target_os = "windows")]
     let (status, route) = {
-        let result = insert_via_non_tsf_fallback(inner, delta, restore_clipboard, prefs.paste_shortcut);
-        (result.status, result.route)
+        if let Some(status) = terminal_status {
+            (status, DeliveryRoute::Paste)
+        } else {
+            let result = insert_via_non_tsf_fallback(inner, delta, restore_clipboard, prefs.paste_shortcut);
+            (result.status, result.route)
+        }
     };
     #[cfg(not(target_os = "windows"))]
     let (status, route) = (
-        inner.inserter.insert(delta, restore_clipboard, prefs.paste_shortcut),
+        terminal_status.unwrap_or_else(|| inner.inserter.insert(delta, restore_clipboard, prefs.paste_shortcut)),
         DeliveryRoute::Paste,
     );
     let inserted = matches!(
@@ -2531,7 +2535,7 @@ async fn pause_early_delivery_tick(
         return;
     }
     pause_early_delivery_confirm(inner, session_id);
-    endpoint_clock.lock().note_body_delivery(Instant::now());
+    endpoint_clock.lock().note_text_delivery(Instant::now(), delta);
     if route == DeliveryRoute::Paste {
         inner.embedded_audio_pause_early_delivery.lock().paste_delivered_session = Some(session_id);
     }

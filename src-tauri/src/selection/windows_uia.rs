@@ -11,7 +11,7 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationTextPattern, UIA_EditControlTypeId,
-    UIA_TextPatternId,
+    UIA_TextPatternId, TextPatternRangeEndpoint_Start, TextPatternRangeEndpoint_End,
 };
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
@@ -144,6 +144,25 @@ impl WindowsSelectionReader {
             return Err("paste document exceeds readback limit".into());
         }
         Ok(value)
+    }
+
+    pub(crate) fn caret_at_end(&self) -> Result<bool, String> {
+        unsafe {
+            let ranges = self.pattern.GetSelection().map_err(|err| err.to_string())?;
+            if ranges.Length().map_err(|err| err.to_string())? != 1 {
+                return Ok(false);
+            }
+            let selection = ranges.GetElement(0).map_err(|err| err.to_string())?;
+            if selection.CompareEndpoints(TextPatternRangeEndpoint_Start, &selection, TextPatternRangeEndpoint_End)
+                .map_err(|err| err.to_string())? != 0 {
+                return Ok(false);
+            }
+            let tail = self.pattern.DocumentRange().map_err(|err| err.to_string())?;
+            tail.MoveEndpointByRange(TextPatternRangeEndpoint_Start, &selection, TextPatternRangeEndpoint_End)
+                .map_err(|err| err.to_string())?;
+            let text = tail.GetText(8_193).map_err(|err| err.to_string())?.to_string();
+            Ok(text.chars().all(|ch| matches!(ch, '\r' | '\n')))
+        }
     }
 }
 

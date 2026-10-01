@@ -275,6 +275,15 @@ impl PasteReader {
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         { Err("paste readback unavailable".into()) }
     }
+
+    pub(crate) fn caret_at_end(&self) -> Result<bool, String> {
+        #[cfg(target_os = "windows")]
+        { self.reader.caret_at_end() }
+        #[cfg(target_os = "macos")]
+        { self.reader.caret_at_end().ok_or_else(|| "paste caret unavailable".into()) }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        { Err("paste caret unavailable".into()) }
+    }
 }
 
 // ─────────────────────────── macOS AX read ───────────────────────────
@@ -294,6 +303,9 @@ mod macos_ax {
 
     const AX_ERROR_SUCCESS: AxError = 0;
 
+    #[repr(C)]
+    struct CfRange { location: isize, length: isize }
+
     #[link(name = "ApplicationServices", kind = "framework")]
     extern "C" {
         fn AXUIElementCreateSystemWide() -> AxUiElementRef;
@@ -303,6 +315,8 @@ mod macos_ax {
             value: *mut CFTypeRef,
         ) -> AxError;
         fn AXUIElementSetMessagingTimeout(element: AxUiElementRef, timeout: f32) -> AxError;
+        fn AXValueGetType(value: CFTypeRef) -> i32;
+        fn AXValueGetValue(value: CFTypeRef, kind: i32, output: *mut c_void) -> bool;
     }
 
     #[link(name = "CoreFoundation", kind = "framework")]
@@ -378,6 +392,25 @@ mod macos_ax {
 
         pub(super) fn document(&self) -> Option<String> {
             self.string_attribute(b"AXValue\0")
+        }
+
+        pub(super) fn caret_at_end(&self) -> Option<bool> {
+            let document = self.document()?;
+            unsafe {
+                let attr = cfstring_from_static(b"AXSelectedTextRange\0")?;
+                let mut value = std::ptr::null();
+                let error = AXUIElementCopyAttributeValue(self.0, attr, &mut value);
+                CFRelease(attr);
+                if error != AX_ERROR_SUCCESS || value.is_null() { return None; }
+                let mut range = CfRange { location: 0, length: 0 };
+                // kAXValueCFRangeType = 4 (CoreFoundation range).
+                let read = AXValueGetType(value) == 4
+                    && AXValueGetValue(value, 4, (&mut range as *mut CfRange).cast());
+                CFRelease(value);
+                if !read { return None; }
+                Some(range.length == 0 && range.location >= 0
+                    && range.location as usize == document.encode_utf16().count())
+            }
         }
     }
 
