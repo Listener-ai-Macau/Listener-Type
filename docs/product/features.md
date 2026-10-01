@@ -2,8 +2,8 @@
 
 说话，文字出现在当前光标。聊天、邮件、文档、代码注释，不必先录进另一个 App 再复制。
 
-软件是 [Listener Type](https://github.com/Listener-ai-Macau/Listener-Type)，开源，可先用电脑麦克风试用。
-设备是 Listener 语音键盘，固件开源：[Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware)。配上键盘后，开始、停止和灯都在手上。
+软件是 [Listener Type](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/README.zh-CN.md)，开源，可先用电脑麦克风试用。
+设备是 Listener 语音键盘，固件开源：[Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware/blob/master/README.zh-CN.md)。配上键盘后，开始、停止和灯都在手上。
 
 它不是会后录音笔，也不是「说完替你写成完美文章」的机器人。
 1.0.5 卖的是**每天能用的输入闭环**。更远、更乱场景里的声纹，以及真人多人同时说话，放到 1.0.6。
