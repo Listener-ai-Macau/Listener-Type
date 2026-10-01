@@ -3,7 +3,8 @@
   "product": "Listener Type",
   "root": "..",
   "canonical": { "path": "package.json", "kind": "json", "key": "version" },
-  "semver_error": "Listener Type release version must be plain semver, got {version}",
+  "semver_error": "Listener Type version must be stable semver or a numbered beta/rc, got {version}",
+  "prerelease_channels": ["beta", "rc"],
   "must_equal": [
     { "label": "package.json", "path": "package.json", "kind": "json", "key": "version" },
     { "label": "package-lock.json", "path": "package-lock.json", "kind": "json", "key": "version" },

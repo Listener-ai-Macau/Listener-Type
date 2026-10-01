@@ -40,6 +40,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/check-regression-guard-commits.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-release-root-artifacts.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-release-version.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-release-version.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-repo-hygiene.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-tauri-info.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-traceability.mjs` | Automation and audits | Node/PowerShell script tests |

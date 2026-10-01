@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -14,7 +15,11 @@ function readJson(path) {
 }
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
-const appRoot = join(scriptsDir, '..');
+const appRoot = mkdtempSync(join(tmpdir(), 'listener-updater-gate-'));
+const fixtureScripts = join(appRoot, 'scripts');
+mkdirSync(fixtureScripts);
+copyFileSync(join(scriptsDir, 'write-updater-manifest.mjs'), join(fixtureScripts, 'write-updater-manifest.mjs'));
+writeFileSync(join(appRoot, 'package.json'), JSON.stringify({ version: '1.0.6' }));
 const bundleDir = join(appRoot, 'src-tauri', 'target', 'release', 'bundle');
 const macosDir = join(bundleDir, 'macos');
 const artifact = join(macosDir, 'ListenerType_aarch64.app.tar.gz');
@@ -29,10 +34,10 @@ function cleanup() {
   }
 }
 
-function runManifest(extraEnv = {}) {
+function runManifest(extraEnv = {}, expectSuccess = true) {
   const result = spawnSync(
     process.execPath,
-    [join(scriptsDir, 'write-updater-manifest.mjs')],
+    [join(fixtureScripts, 'write-updater-manifest.mjs')],
     {
       cwd: appRoot,
       encoding: 'utf8',
@@ -46,6 +51,7 @@ function runManifest(extraEnv = {}) {
       },
     },
   );
+  if (!expectSuccess) return result;
   if (result.status !== 0) {
     throw new Error(`manifest generation failed:\n${result.stdout}\n${result.stderr}`);
   }
@@ -78,4 +84,17 @@ assert(
 assert(!stable.url.includes(upstreamRepoNeedle), 'stable manifest must not point at the upstream repository');
 assert(!mirror.url.includes(upstreamRepoNeedle), 'mirror manifest must not point at the upstream repository');
 
+const existingStable = readFileSync(stableManifest, 'utf8');
+const existingMirror = readFileSync(mirrorManifest, 'utf8');
+for (const version of ['1.0.6-beta.4', '1.0.6-rc.1']) {
+  writeFileSync(join(appRoot, 'package.json'), JSON.stringify({ version }));
+  const result = runManifest({ LISTENER_TYPE_UPDATE_MIRROR_BASE_URL: 'https://updates.listener-type.example/' }, false);
+  assert(result.status !== 0, 'candidate cannot generate a stable updater manifest');
+  assert(result.stderr.includes('cannot generate stable updater manifests'), result.stderr);
+  assert(readFileSync(stableManifest, 'utf8') === existingStable, 'candidate must preserve stable manifest');
+  assert(readFileSync(mirrorManifest, 'utf8') === existingMirror, 'candidate must preserve mirror manifest');
+}
+
 cleanup();
+rmSync(appRoot, { recursive: true, force: true });
+console.log('PASS: stable updater generation and beta/rc rejection');

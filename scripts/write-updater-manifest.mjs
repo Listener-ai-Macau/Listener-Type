@@ -14,6 +14,9 @@ if (!target || !arch) {
 }
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+if (!/^\d+\.\d+\.\d+$/.test(packageJson.version)) {
+  throw new Error(`Candidate ${packageJson.version} cannot generate stable updater manifests`);
+}
 const bundleDir = fileURLToPath(new URL('../src-tauri/target/release/bundle/', import.meta.url));
 
 const candidatesByTarget = {

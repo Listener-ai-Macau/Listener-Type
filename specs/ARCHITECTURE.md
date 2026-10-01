@@ -89,6 +89,14 @@ vetoes raw final recovery, while fresh verified owner speech after that interval
 can continue into the live ledger. The receive frame uses the same accepted owner
 view for preview promotion and the following merge.
 
+Provider text coverage includes every published utterance, including indefinite
+rows already admitted as owner speech. Raw-tail recovery subtracts that coverage
+once; text stability and speaker identity do not create a second text occurrence.
+The physical wake cluster remains a separate anchor from a positively admitted
+body cluster. A response-local body alias retains that identity through later
+Uncertain windows and sentence boundaries. Confirmed identity departure and
+corroborated foreign rows still veto it; an alias is not persisted as a new wake.
+
 When recording diagnostics are enabled, a private `*.delivery-trace.json` beside
 the session WAV records intended text, cumulative submitted text, source coverage
 and target acknowledgment separately. Submission alone is not editor readback;

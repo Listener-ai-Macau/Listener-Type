@@ -10,6 +10,16 @@ Listener Type uses the Tauri updater plugin. Release metadata is scoped to the L
 - Listener Type `1.0.0` is the first managed release line. Do not publish development builds through the updater endpoint.
 - Signing key rotation must update `src-tauri/tauri.conf.json` and release automation together.
 
+## Candidate versions
+
+Development testing uses `1.0.6-beta.N`. After functional and real-device
+verification, a stable candidate uses `1.0.6-rc.N`; the final release is `1.0.6`.
+Package, Cargo, Tauri and lockfile versions must agree, including the suffix.
+Candidate releases stay draft/prerelease and must not replace stable updater
+manifests. Windows MSI uses the numeric base version through `bundle.windows.wix.version`;
+the app, artifact name and Git tag retain the full candidate version. Remove the
+candidate suffix and update that numeric base when preparing a stable release.
+
 ## Manifest Generation
 
 ```bash

@@ -4066,6 +4066,7 @@ fn utterance_belongs_to_verified_target(
 
 fn utterance_belongs_to_verified_target_or_body_alias(
     utterance: &Value,
+    response_utterances: &[Value],
     target_speaker_id: &str,
     immediate_body_speaker_id: Option<&str>,
     local_speaker_tracking_enabled: bool,
@@ -4111,6 +4112,16 @@ fn utterance_belongs_to_verified_target_or_body_alias(
     if corroborated_foreign_row {
         return false;
     }
+    // Binding a body alias may extend its identity to later rows, but must not
+    // revoke the positive local admission that originally established it.
+    if utterance_belongs_to_verified_target(
+        utterance, target_speaker_id, local_speaker_tracking_enabled,
+        local_speaker_evidence, wake_speaker_phrase, wake_speaker_end_ms,
+        allow_immediate_wake_continuation, wake_owner_verified,
+        local_speaker_profile_adaptive, confirmed_non_target_speech_end_ms,
+    ) {
+        return true;
+    }
     let body_alias_matches =
         immediate_body_speaker_id.is_some_and(|alias| utterance_speaker.as_deref() == Some(alias));
     let effective_target = if body_alias_matches {
@@ -4118,6 +4129,19 @@ fn utterance_belongs_to_verified_target_or_body_alias(
     } else {
         target_speaker_id
     };
+    // Once this response has positively identified the body cluster, an open
+    // row in that same cluster uses the same retained-identity test as a sealed
+    // row. Indefinite is a text-publication state, not a new speaker identity.
+    if body_alias_matches
+        && !utterance_is_stable(utterance)
+        && (local_evidence_supports_cloud_target(
+            utterance, local_speaker_evidence, wake_speaker_phrase,
+        ) || local_evidence_allows_open_owner_utterance(
+            utterance, effective_target, response_utterances, local_speaker_evidence,
+        ))
+    {
+        return true;
+    }
     utterance_belongs_to_verified_target(
         utterance,
         effective_target,
@@ -4259,12 +4283,11 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
             })
         });
 
-    // A full final response can contain both the short physical-wake cluster
-    // and a new cluster for the same uninterrupted owner body. Keep that new
-    // id as a response-local alias only: the wake must have been verified, the
-    // boundary must be tightly contiguous, and local identity evidence for the
-    // first body utterance must still retain the owner. Subsequent utterances
-    // with that same alias are independently checked against local evidence.
+    // Cloud may split the physical wake and the owner's body into two clusters.
+    // Bind a response-local body alias from a verified contiguous wake or the
+    // body's existing positive local admission. Later rows of that cluster
+    // retain owner identity through Uncertain windows, while confirmed local
+    // departure and corroborated foreign rows still veto them independently.
     // Never persist the alias, so an ordinary later speaker-id change cannot
     // silently replace the wake anchor in following provider responses.
     let bounded_wake_row_present = wake_speaker_phrase.is_some_and(|phrase| {
@@ -4277,7 +4300,7 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
                 && utterance_is_bounded_wake_phrase(utterance, &normalized_phrase)
         })
     });
-    let immediate_body_speaker_id = if wake_owner_verified
+    let immediate_body_speaker_id = (if wake_owner_verified
         && local_speaker_tracking_enabled
         && bounded_wake_row_present
     {
@@ -4305,7 +4328,40 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
         })
     } else {
         None
-    };
+    }).or_else(|| {
+        if !local_speaker_tracking_enabled {
+            return None;
+        }
+        let target = target_speaker_id.as_deref()?;
+        let wake_end_ms = wake_speaker_end_ms?;
+        // Cloud may split the physical wake from a locally verified owner
+        // body even when enrollment did not verify the wake. Reuse that body's
+        // identity within this response; a sentence boundary must not turn its
+        // later Uncertain windows into a different person. This adds no new
+        // identity vote: the anchor needs existing positive local admission.
+        utterances.iter().find_map(|utterance| {
+            let speaker = utterance_speaker_id(utterance)?;
+            let start_ms = utterance_start_ms(utterance)?;
+            if speaker == target || start_ms < wake_end_ms.saturating_sub(200) {
+                return None;
+            }
+            let positively_admitted = if utterance_is_stable(utterance) {
+                local_evidence_allows_utterance(
+                    utterance, local_speaker_evidence, None,
+                ) && utterance_belongs_to_verified_target(
+                    utterance, target, local_speaker_tracking_enabled,
+                    local_speaker_evidence, wake_speaker_phrase, wake_speaker_end_ms,
+                    allow_immediate_wake_continuation, wake_owner_verified,
+                    local_speaker_profile_adaptive, confirmed_non_target_speech_end_ms,
+                )
+            } else {
+                local_evidence_allows_open_owner_utterance(
+                    utterance, &speaker, &utterances, local_speaker_evidence,
+                )
+            };
+            positively_admitted.then_some(speaker)
+        })
+    });
 
     let selected = target_speaker_id
         .as_deref()
@@ -4315,6 +4371,7 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
                 .filter(|utterance| {
                     utterance_belongs_to_verified_target_or_body_alias(
                         utterance,
+                        &utterances,
                         target,
                         immediate_body_speaker_id.as_deref(),
                         local_speaker_tracking_enabled,
@@ -4336,12 +4393,15 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
         .iter()
         .filter_map(|utterance| utterance.get("text").and_then(Value::as_str))
         .collect::<String>();
-    let attributed_text = result
+    // Text coverage and speaker admission are separate coordinates. An open
+    // row can already be admitted as owner text while it is still indefinite.
+    // Subtract every published row before appending an unrepresented raw tail;
+    // subtracting only definite rows appends the admitted open row a second time.
+    let published_text = result
         .get("utterances")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|utterance| utterance_is_stable(utterance))
         .filter_map(|utterance| utterance.get("text").and_then(Value::as_str))
         .collect::<String>();
     let unstable_text = result
@@ -4357,7 +4417,7 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
         .and_then(Value::as_str)
         .unwrap_or_default();
     let raw_has_unattributed_tail =
-        spoken_content_len(raw_text) > spoken_content_len(&attributed_text);
+        spoken_content_len(raw_text) > spoken_content_len(&published_text);
     let pending_unattributed_speech = !unstable_text.trim().is_empty() || raw_has_unattributed_tail;
     let stable_other_speaker_present = target_speaker_id.as_deref().is_some_and(|target| {
         utterances.iter().any(|utterance| {
@@ -4378,6 +4438,7 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
                     ))
                 && !utterance_belongs_to_verified_target_or_body_alias(
                     utterance,
+                    &utterances,
                     target,
                     immediate_body_speaker_id.as_deref(),
                     local_speaker_tracking_enabled,
@@ -4440,6 +4501,7 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
             if target_speaker_id.as_deref().is_some_and(|target| {
                 utterance_belongs_to_verified_target_or_body_alias(
                     utterance,
+                    &utterances,
                     target,
                     immediate_body_speaker_id.as_deref(),
                     local_speaker_tracking_enabled,
@@ -4528,12 +4590,12 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
             .last()
             .is_some_and(|sample| sample.stable_target)
     {
-        if let Some(tail) = raw_text.strip_prefix(&attributed_text) {
+        if let Some(tail) = raw_text.strip_prefix(&published_text) {
             format!("{target_text}{tail}")
         } else {
             target_text.clone()
         }
-    } else if let Some(tail) = raw_text.strip_prefix(&attributed_text) {
+    } else if let Some(tail) = raw_text.strip_prefix(&published_text) {
         if stable_other_speaker_present || local_latest_is_non_target {
             target_text.clone()
         } else {
@@ -7917,7 +7979,7 @@ impl VolcengineStreamingASR {
                     state.distinct_speaker_target_final_text = Some(target_text.to_string());
                     if filtered.response_local_body_alias_present {
                         log::info!(
-                            "[target-speaker] verified contiguous body alias retained as provider owner track chars={}",
+                            "[target-speaker] locally admitted body alias retained as provider owner track chars={}",
                             target_text.chars().count()
                         );
                     }
@@ -11177,6 +11239,141 @@ mod tests {
             filtered.optimistic_result["text"],
             "这个东西现在能不能弄？然后帮我看一下"
         );
+    }
+
+    #[test]
+    fn admitted_provisional_owner_row_is_not_appended_as_unattributed_tail() {
+        // 3a7eda92 frame 14: the provisional row became an admitted owner row.
+        // The optimistic view must not append it again after that transition.
+        let settled = "嗯，开始录音，就是我觉得你不用每次都检查吧，然后。";
+        let provisional = "就是怎么样";
+        let provider = format!("{settled}{provisional}");
+        let result = json!({
+            "text": provider,
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true, "start_time": 0, "end_time": 6600,
+                    "text": settled
+                },
+                {
+                    "additions": { "speaker_id": "0", "source": "stream" },
+                    "definite": false, "start_time": 6600, "end_time": 7900,
+                    "text": provisional
+                }
+            ]
+        });
+        let mut target = Some("0".to_string());
+        let evidence = [4_000, 4_400, 7_200, 7_600].map(|audio_end_ms| LocalSpeakerEvidence {
+            audio_end_ms,
+            classification: crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.7 },
+            stable_target: true,
+        });
+        let filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &result, &mut target, true, &evidence, Some("开始录音"), None, true, false, None, None,
+        );
+        assert_eq!(filtered.result["text"], provider);
+        assert_eq!(filtered.optimistic_result["text"], provider);
+        assert_eq!(filtered.pending_unattributed_text, provider);
+        assert_eq!(transcript_candidate_from_result(&filtered.optimistic_result).text, provider);
+
+        // A raw continuation beyond the published open row is still new text.
+        let mut growing = result.clone();
+        growing["text"] = json!(format!("{provider}弄会好一点？"));
+        let filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &growing, &mut target, true, &evidence, Some("开始录音"), None, true, false, None, None,
+        );
+        assert_eq!(filtered.optimistic_result["text"], growing["text"]);
+
+        // Actual repeated speech occupies two provider occurrences; retain it.
+        let mut repeated = result.clone();
+        repeated["utterances"][0]["text"] = json!(provider);
+        repeated["text"] = json!(format!("{provider}{provisional}"));
+        let filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &repeated, &mut target, true, &evidence, Some("开始录音"), None, true, false, None, None,
+        );
+        assert_eq!(filtered.optimistic_result["text"], repeated["text"]);
+
+        // A positively attributed foreign row cannot enter the owner view.
+        let mut foreign = result;
+        foreign["utterances"][1]["definite"] = json!(true);
+        foreign["utterances"][1]["additions"]["speaker_id"] = json!("1");
+        let filtered = filter_result_to_target_speaker(&foreign, &mut target);
+        assert_eq!(filtered.optimistic_result["text"], settled);
+        assert!(filtered.pending_unattributed_text.is_empty());
+    }
+
+    #[test]
+    fn locally_admitted_body_cluster_retains_owner_continuation_through_media() {
+        use crate::speaker_verification::SessionSpeakerClassification::{Target, Uncertain};
+        // f39028f1: the wake was cloud cluster 0, the locally confirmed body
+        // cluster 1. The owner confirmed the next cluster-1 clause was theirs.
+        // Its mixed-media windows were Uncertain; cluster 2 was the recording.
+        let prefix = "开始录音。第一段已确认。";
+        let continuation = "然后我现在就继续续着它。";
+        let result = json!({
+            "text": format!("{prefix}{continuation}挺不错的事情啊。"),
+            "utterances": [
+                { "text": "开始录音。", "definite": true, "start_time": 1440, "end_time": 2240,
+                  "additions": { "speaker_id": "0", "source": "two_pass" } },
+                { "text": "第一段已确认。", "definite": true, "start_time": 2800, "end_time": 13192,
+                  "additions": { "speaker_id": "1", "source": "two_pass" } },
+                { "text": continuation, "definite": true, "start_time": 13192, "end_time": 16672,
+                  "additions": { "speaker_id": "1", "source": "two_pass" } },
+                { "text": "挺不错的事情啊。", "definite": true, "start_time": 16992, "end_time": 20052,
+                  "additions": { "speaker_id": "2", "source": "two_pass" } }
+            ]
+        });
+        let mut evidence = [4200, 4600, 5000, 5400, 9800, 10200, 11000, 11400]
+            .map(|audio_end_ms| LocalSpeakerEvidence {
+                audio_end_ms, classification: Target { score: 0.5 }, stable_target: true,
+            }).to_vec();
+        evidence.insert(0, LocalSpeakerEvidence {
+            audio_end_ms: 3000, classification: Target { score: 0.727 }, stable_target: true,
+        });
+        evidence.extend([(14600, 0.292), (15000, 0.331), (15400, 0.302), (15800, 0.289),
+            (16200, 0.317), (16600, 0.281), (17000, 0.358), (19000, 0.180), (19400, 0.114)]
+            .map(|(audio_end_ms, score)| LocalSpeakerEvidence {
+                audio_end_ms, classification: Uncertain { score }, stable_target: true,
+            }));
+        let mut target = Some("0".to_string());
+        let filter = |packet: &Value, target: &mut Option<String>| {
+            filter_result_to_target_speaker_with_local_evidence_and_anchor(
+                packet, target, true, &evidence, Some("开始录音"), Some(2240), false, false,
+                None, Some(19400),
+            )
+        };
+        let filtered = filter(&result, &mut target);
+        assert_eq!(filtered.result["text"], format!("{prefix}{continuation}"));
+        assert_eq!(filtered.target_speech_end_ms, Some(16672));
+        assert!(filtered.stable_other_speaker_present);
+        assert_eq!(target.as_deref(), Some("0"), "the physical wake anchor stays owned separately");
+
+        // The same source boundary must keep live output moving before sealing.
+        let mut live = result.clone();
+        live["utterances"].as_array_mut().unwrap().pop();
+        live["utterances"][2]["definite"] = json!(false);
+        live["utterances"][2]["additions"]["source"] = json!("stream");
+        live["text"] = json!(format!("{prefix}{continuation}"));
+        let filtered = filter(&live, &mut target);
+        assert_eq!(filtered.optimistic_result["text"], live["text"]);
+        assert_eq!(filtered.result["text"], live["text"]);
+
+        // A different speaker ID cannot inherit the owner's body anchor.
+        live["utterances"][2]["additions"]["speaker_id"] = json!("2");
+        let filtered = filter(&live, &mut target);
+        assert_eq!(filtered.result["text"], prefix);
+
+        // A confirmed identity departure still rejects a reused body ID.
+        let mut departed = evidence.clone();
+        for sample in &mut departed {
+            if sample.audio_end_ms >= 14600 { sample.stable_target = false; }
+        }
+        let filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &result, &mut target, true, &departed, Some("开始录音"), Some(2240), false, false,
+            Some(17000), Some(19400),
+        );
+        assert_eq!(filtered.result["text"], prefix);
     }
 
     #[test]
@@ -19862,10 +20059,20 @@ mod tests {
         .expect("build public owner session profile");
         // Match product startup ordering: KWS/speaker runtime first, target
         // extraction preload second, both before the wake-owned body starts.
-        let warm_started = Instant::now();
-        crate::asr::target_speaker_extraction::warm_up()
-            .expect("prepare target-speaker model before paced capture");
-        let warm_up_elapsed_ms = warm_started.elapsed().as_millis();
+        let (target_embedding, warm_up_elapsed_ms) = tokio::task::spawn_blocking(move || {
+            let warm_started = Instant::now();
+            crate::asr::target_speaker_extraction::warm_up()
+                .expect("prepare target-speaker model before paced capture");
+            let elapsed_ms = warm_started.elapsed().as_millis();
+            let embedding =
+                crate::asr::target_speaker_extraction::speaker_embedding_from_enrollment_pcm(
+                    &owner_pcm,
+                )
+                .expect("encode target-speaker enrollment");
+            (embedding, elapsed_ms)
+        })
+        .await
+        .expect("join blocking target-speaker model preload");
 
         let asr = Arc::new(VolcengineStreamingASR::new_with_session_options(
             credentials,
@@ -19877,11 +20084,6 @@ mod tests {
         // mark the ASR-side policy as verified/non-adaptive for this probe.
         asr.note_verified_local_speaker_tracking_started(&wake_phrase);
         asr.note_local_speaker_profile_adaptive(false);
-        let target_embedding =
-            crate::asr::target_speaker_extraction::speaker_embedding_from_enrollment_pcm(
-                &owner_pcm,
-            )
-            .expect("encode public target-speaker enrollment");
         asr.start_target_speaker_extraction_with_embedding(target_embedding);
         asr.open_session().await.expect("open provider session");
         asr.mark_audio_delivery_ready();
