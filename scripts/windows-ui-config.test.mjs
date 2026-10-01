@@ -142,12 +142,12 @@ if (!/borderRadius:\s*'var\(--ol-window-console-radius\)'/.test(floatingShellTsx
 
 assertMatch(
   deviceSectionTsx,
-  /restoreDefaultDeviceKeyboardOutput[\s\S]*key1:\s*defaultDeviceKeyboardKey\('RightControl'\)[\s\S]*key2:\s*defaultDeviceKeyboardKey\('C',\s*\['ctrl'\]\)[\s\S]*key3:\s*defaultDeviceKeyboardKey\('V',\s*\['ctrl'\]\)[\s\S]*key4:\s*defaultDeviceKeyboardKey\('Z',\s*\['ctrl'\]\)[\s\S]*knob:\s*defaultDeviceDictationKey\(\)/,
-  'device custom key defaults should remain KEY1 Ctrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Ctrl+Z, EC11 click dictation',
+  /restoreDefaultDeviceKeyboardOutput[\s\S]*key1:\s*defaultDeviceKeyboardKey\('RightControl'\)[\s\S]*key2:\s*defaultDeviceKeyboardKey\('C',\s*\['ctrl'\]\)[\s\S]*key3:\s*defaultDeviceKeyboardKey\('V',\s*\['ctrl'\]\)[\s\S]*key4:\s*defaultDeviceKeyboardKey\('Enter'\)[\s\S]*knob:\s*defaultDeviceDictationKey\(\)/,
+  'device defaults should be KEY1 Ctrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Enter, EC11 click dictation',
 );
 assertMatch(
   ipcTs,
-  /deviceCustomKeys:[\s\S]*key1:\s*defaultDeviceKeyboardKey\('RightControl'\)[\s\S]*key2:\s*defaultDeviceKeyboardKey\('C',\s*\['ctrl'\]\)[\s\S]*key3:\s*defaultDeviceKeyboardKey\('V',\s*\['ctrl'\]\)[\s\S]*key4:\s*defaultDeviceKeyboardKey\('Z',\s*\['ctrl'\]\)[\s\S]*knob:\s*\{\s*action:\s*'dictation'/,
+  /deviceCustomKeys:[\s\S]*key1:\s*defaultDeviceKeyboardKey\('RightControl'\)[\s\S]*key2:\s*defaultDeviceKeyboardKey\('C',\s*\['ctrl'\]\)[\s\S]*key3:\s*defaultDeviceKeyboardKey\('V',\s*\['ctrl'\]\)[\s\S]*key4:\s*defaultDeviceKeyboardKey\('Enter'\)[\s\S]*knob:\s*\{\s*action:\s*'dictation'/,
   'mock device custom key defaults should keep EC11 click as recording',
 );
 assertMatch(

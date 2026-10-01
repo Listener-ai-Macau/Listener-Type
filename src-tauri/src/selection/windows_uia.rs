@@ -10,14 +10,14 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
 use windows::Win32::UI::Accessibility::{
-    CUIAutomation, IUIAutomation, IUIAutomationTextPattern, UIA_EditControlTypeId,
+    CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationTextPattern, UIA_EditControlTypeId,
     UIA_TextPatternId,
 };
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
 pub(crate) struct WindowsSelectionReader {
-    _apartment: ComApartment,
     pattern: IUIAutomationTextPattern,
+    _apartment: ComApartment,
 }
 
 struct ComApartment(bool);
@@ -36,6 +36,15 @@ impl WindowsSelectionReader {
     }
 
     fn new_with_control_policy(target_hwnd: usize, require_editable: bool) -> Result<Self, String> {
+        Self::new_with_budget(target_hwnd, require_editable, false)
+    }
+
+    pub(crate) fn new_for_paste() -> Result<Self, String> {
+        let target = unsafe { GetForegroundWindow().0 as usize };
+        Self::new_with_budget(target, true, true)
+    }
+
+    fn new_with_budget(target_hwnd: usize, require_editable: bool, bounded: bool) -> Result<Self, String> {
         let init = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         let apartment = if init.is_ok() {
             ComApartment(true)
@@ -45,8 +54,17 @@ impl WindowsSelectionReader {
             return Err(format!("accessibility COM initialization failed: {init}"));
         };
         let automation: IUIAutomation =
-            unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }
+            unsafe { CoCreateInstance(if bounded { &CUIAutomation8 } else { &CUIAutomation }, None, CLSCTX_INPROC_SERVER) }
                 .map_err(|err| format!("accessibility service unavailable: {err}"))?;
+        if bounded {
+            use windows::core::Interface;
+            let timed = automation.cast::<IUIAutomation2>()
+                .map_err(|err| format!("bounded accessibility service unavailable: {err}"))?;
+            unsafe {
+                timed.SetConnectionTimeout(50).map_err(|err| err.to_string())?;
+                timed.SetTransactionTimeout(50).map_err(|err| err.to_string())?;
+            }
+        }
         let focused = unsafe { automation.GetFocusedElement() }
             .map_err(|err| format!("focused editor unavailable: {err}"))?;
         if unsafe { GetForegroundWindow().0 as usize } != target_hwnd {
@@ -103,6 +121,29 @@ impl WindowsSelectionReader {
         unsafe { range.GetText(8_193) }
             .map(|text| text.to_string())
             .map_err(|err| format!("accessibility editor text read failed: {err}"))
+    }
+
+    pub(crate) fn paste_snapshot(&self) -> Result<(String, String), String> {
+        let document = self.bounded_document()?;
+        let ranges = unsafe { self.pattern.GetSelection() }.map_err(|err| err.to_string())?;
+        if unsafe { ranges.Length() }.map_err(|err| err.to_string())? != 1 {
+            return Err("paste selection is not one contiguous range".into());
+        }
+        let range = unsafe { ranges.GetElement(0) }.map_err(|err| err.to_string())?;
+        // Empty means an ordinary caret, not an unavailable selection.
+        let selected = unsafe { range.GetText(8_193) }.map_err(|err| err.to_string())?.to_string();
+        if selected.chars().count() > 8_192 {
+            return Err("paste selection exceeds readback limit".into());
+        }
+        Ok((document, selected))
+    }
+
+    pub(crate) fn bounded_document(&self) -> Result<String, String> {
+        let value = self.read_document_text()?;
+        if value.chars().count() > 8_192 {
+            return Err("paste document exceeds readback limit".into());
+        }
+        Ok(value)
     }
 }
 

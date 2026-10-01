@@ -232,7 +232,7 @@ export function DeviceSection() {
         key1: defaultDeviceKeyboardKey('RightControl'),
         key2: defaultDeviceKeyboardKey('C', ['ctrl']),
         key3: defaultDeviceKeyboardKey('V', ['ctrl']),
-        key4: defaultDeviceKeyboardKey('Z', ['ctrl']),
+        key4: defaultDeviceKeyboardKey('Enter'),
         knob: defaultDeviceDictationKey(),
       },
     }));

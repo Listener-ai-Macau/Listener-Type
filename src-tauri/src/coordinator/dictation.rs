@@ -4403,18 +4403,26 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     }
     restore_prepared_windows_ime_session(inner, current_session_id);
 
+    // Preserve the immutable text submitted during this logical recording.
+    // A later provider rewrite must not silently make its clipboard differ
+    // from the clauses the user saw arrive while speaking.
+    let clipboard_text = if pause_early_sticky && !streaming_contaminated {
+        delivery_submission.submitted_text.as_deref().unwrap_or(&polished)
+    } else {
+        &polished
+    };
     let unconfirmed_streamed_paste = unconfirmed_paste_uses_clipboard(
         status,
         delivery_submission.route,
         pause_early_sticky,
         &insert_text,
-        &polished,
-    );
+        clipboard_text,
+    ) || (cfg!(target_os = "macos") && pause_early_sticky && delivery_submission.route == DeliveryRoute::Direct);
     let (clipboard_retention_satisfied, clipboard_result) = if retain_plain_dictation {
         retain_final_clipboard_with_foreground_budget(
             inner,
             current_session_id,
-            &polished,
+            clipboard_text,
             unconfirmed_streamed_paste,
         )
         .await

@@ -1139,6 +1139,27 @@ impl SettledTargetEndpointClock {
                     recent_strong_non_target,
                 );
             }
+            // Waiting for provider text must not erase a newer, positively
+            // verified owner turn. af4abec6 advanced 5400 -> 13400 ms here,
+            // then restored the original 8.9-second-old paused deadline when
+            // that tail settled. Replace its origin now; replayed flags,
+            // cloud-only revisions and another speaker cannot renew it.
+            if local_owner_activity_advanced && self.paused_armed_at.is_some() {
+                self.paused_armed_at = Some(now);
+                self.paused_armed_target_end_ms = update.qualified_owner_speech_end_ms;
+                self.generation = self.generation.wrapping_add(1);
+                self.stop_proposed = false;
+                self.product_endpoint.arm(product_endpoint_evidence(
+                    update,
+                    self.paused_armed_target_end_ms,
+                    true,
+                ));
+                log::info!(
+                    "[asr] endpoint paused deadline renewed by verified owner generation={} owner_end_ms={:?}",
+                    self.generation,
+                    self.paused_armed_target_end_ms,
+                );
+            }
             return None;
         }
 

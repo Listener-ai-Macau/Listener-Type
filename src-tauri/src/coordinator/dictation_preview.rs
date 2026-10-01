@@ -2111,6 +2111,21 @@ fn pause_early_delivery_source_key(inner: &Arc<Inner>, session_id: SessionId) ->
     }
 }
 
+fn pause_early_admitted_source_key(inner: &Arc<Inner>, session_id: SessionId) -> String {
+    let ledger = inner.embedded_audio_pause_early_delivery.lock();
+    if ledger.session_id != Some(session_id)
+        || ledger.ever_delivered_session != Some(session_id)
+    {
+        return String::new();
+    }
+    // A reserve is still in flight and may roll back. Only the source of a
+    // previously successful submission establishes where the body began.
+    let (source, display_key) = ledger.unconfirmed_prior.as_ref()
+        .map(|(_, key, source)| (source, key))
+        .unwrap_or((&ledger.source_key, &ledger.delivered_key));
+    if source.is_empty() { display_key.clone() } else { source.clone() }
+}
+
 /// Advance in the provider snapshot, not in the concatenated editor text.
 /// Both the remainder and the selected clause must be exact slices of that
 /// snapshot. A failed or partial submission must not consume unsent words.
@@ -2230,10 +2245,18 @@ pub(super) fn take_pause_early_delivery(
 /// 两条路径必须逐字同款,stability-key 记账才连续)。门失败返回 None。
 /// 胶囊预览继续跟随未落定文本；目标应用的中途粘贴只在稳定账本出现标点
 /// 边界时提交整段。终稿仍交付不带标点的余量，避免云端只在终稿补标点时吞尾。
-fn automatic_wake_has_unstripped_lead_in(raw_text: &str, phrase: &str) -> bool {
+fn automatic_wake_has_unstripped_lead_in(raw_text: &str, phrase: &str, admitted_source_key: &str) -> bool {
     raw_text
         .find(phrase)
         .is_some_and(|offset| {
+            let lead_key = embedded_audio_partial_preview_stability_key(&raw_text[..offset]);
+            // Once this source prefix has been admitted as body, a later wake
+            // phrase belongs to that body. Re-running initial wake admission
+            // would otherwise block every subsequent streaming clause.
+            // A newly prepended, uncovered preamble still fails this check.
+            if !admitted_source_key.is_empty() && lead_key.starts_with(admitted_source_key) {
+                return false;
+            }
             raw_text[..offset].chars().filter(|ch| ch.is_alphanumeric()).count() > 2
                 // The same wake stripping path already knows how to consume
                 // bounded hesitation + short lead-ins. The old raw character
@@ -2260,9 +2283,10 @@ fn pause_early_display_text(
         .as_ref()
         .filter(|guard| guard.session_id == session_id)
         .map(|guard| guard.phrase.clone());
+    let admitted_source_key = pause_early_admitted_source_key(inner, session_id);
     if wake_phrase
         .as_deref()
-        .is_some_and(|phrase| automatic_wake_has_unstripped_lead_in(raw_text, phrase))
+        .is_some_and(|phrase| automatic_wake_has_unstripped_lead_in(raw_text, phrase, &admitted_source_key))
     {
         pause_early_note_gate_blocked(inner, session_id, "unstripped_pre_wake_lead_in");
         return None;

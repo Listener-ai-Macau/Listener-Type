@@ -1838,14 +1838,17 @@ fn automatic_wake_does_not_early_paste_a_long_unstripped_pre_wake_lead_in() {
     assert!(super::automatic_wake_has_unstripped_lead_in(
         "小爱同学。然后现在好像开始录音，正文继续。",
         "开始录音",
+        "",
     ));
     assert!(!super::automatic_wake_has_unstripped_lead_in(
         "开始录音，正文继续。",
         "开始录音",
+        "",
     ));
     assert!(!super::automatic_wake_has_unstripped_lead_in(
         "好，开始录音，正文继续。",
         "开始录音",
+        "",
     ));
     // Installed session e52bd512 had a continuously growing preview but no
     // mid-session insertion: the raw three-character count included the
@@ -1858,6 +1861,7 @@ fn automatic_wake_does_not_early_paste_a_long_unstripped_pre_wake_lead_in() {
     assert!(!super::automatic_wake_has_unstripped_lead_in(
         same_speaker_lead_in,
         "开始录音",
+        "",
     ));
     assert_eq!(
         super::strip_automatic_activation_prefix(
@@ -1868,6 +1872,41 @@ fn automatic_wake_does_not_early_paste_a_long_unstripped_pre_wake_lead_in() {
         "小爱同学。然后现在好像开始录音，正文继续。",
         "a long foreign preamble must remain blocked"
     );
+}
+
+#[test]
+fn later_wake_phrase_in_admitted_body_does_not_block_streaming_continuation() {
+    use super::embedded_audio_partial_preview_stability_key as key;
+    // 65e0f89a: the first sentence was submitted at 00:55:37.090Z.
+    // A later mention of the wake phrase then vetoed every remaining clause.
+    let admitted = "所以说你什么需要这个停止？";
+    let body = "所以说你什么需要这个停止？为什么你要？开始录音？所以说为什么你要控制这个电脑？";
+    assert!(!super::automatic_wake_has_unstripped_lead_in(body, "开始录音", &key(admitted)));
+    assert!(super::automatic_wake_has_unstripped_lead_in(body, "开始录音", ""),
+        "without an admitted source prefix, an ambiguous pre-wake row remains blocked");
+    assert!(super::automatic_wake_has_unstripped_lead_in(
+        &format!("旁人的话。{body}"), "开始录音", &key(admitted)),
+        "a newly prepended foreign preamble is not covered by the admitted body");
+    assert!(super::automatic_wake_has_unstripped_lead_in(body, "开始录音", &key("另一段录音。")),
+        "a different session's source does not admit this body");
+}
+
+#[test]
+fn wake_body_admission_uses_successful_source_before_pending_append() {
+    use super::{pause_early_admitted_source_key, pause_early_delivery_confirm,
+        pause_early_delivery_reserve, pause_early_delivery_rollback};
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    pause_early_delivery_reserve(inner, session, "第一段。".into(), "第一段".into(), "第一段".into());
+    assert!(pause_early_admitted_source_key(inner, session).is_empty());
+    pause_early_delivery_confirm(inner, session);
+    assert_eq!(pause_early_admitted_source_key(inner, session), "第一段");
+    pause_early_delivery_reserve(inner, session, "第一段。第二段。".into(), "第一段第二段".into(), "第一段第二段".into());
+    assert_eq!(pause_early_admitted_source_key(inner, session), "第一段");
+    pause_early_delivery_rollback(inner, session);
+    assert_eq!(pause_early_admitted_source_key(inner, session), "第一段");
+    assert!(pause_early_admitted_source_key(inner, new_session_id()).is_empty());
 }
 
 #[test]
@@ -5941,6 +5980,74 @@ fn settled_target_wall_clock_cancels_for_provisional_tail_and_rearms_when_stable
             1_000,
         )
         .is_some());
+}
+
+#[test]
+fn owner_speech_during_pending_provider_tail_replaces_paused_deadline() {
+    use crate::asr::volcengine::{LocalSpeakerClassificationKind, TargetSpeakerUpdate};
+    use std::time::{Duration, Instant};
+    // af4abec6: the endpoint paused at the 5400 ms owner boundary; a
+    // quality-qualified owner observation reached 13400 ms while provider
+    // text was still provisional. The next settled callback restored the
+    // 8.9-second-old deadline and stopped 1.78 seconds after that owner edge.
+    let start = Instant::now();
+    let owner = TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(5_400),
+        provider_audio_duration_ms: Some(5_500),
+        audio_duration_ms: Some(5_500),
+        local_speech_end_ms: Some(5_400),
+        qualified_owner_speech_end_ms: Some(5_400),
+        qualified_owner_activity_advanced: true,
+        local_speaker_classification_kind: Some(LocalSpeakerClassificationKind::Target),
+        local_speaker_signal_quality_sufficient: Some(true),
+        local_speaker_observation_end_ms: Some(5_400),
+        local_tentative_owner_speech_end_ms: None,
+        local_target_speech_end_ms: Some(5_400),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(5_400),
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.observe(&owner, true, start).unwrap();
+    let pending = TargetSpeakerUpdate {
+        audio_duration_ms: Some(6_000),
+        local_speech_end_ms: Some(6_000),
+        qualified_owner_activity_advanced: false,
+        pending_unattributed_speech: true,
+        ..owner.clone()
+    };
+    clock.observe(&pending, true, start + Duration::from_millis(500));
+    assert_eq!(clock.paused_armed_at, Some(start));
+    let owner_at = start + Duration::from_millis(7_200);
+    let continuing = TargetSpeakerUpdate {
+        audio_duration_ms: Some(13_500),
+        provider_audio_duration_ms: Some(13_100),
+        local_speech_end_ms: Some(13_500),
+        qualified_owner_speech_end_ms: Some(13_400),
+        local_target_speech_end_ms: Some(13_400),
+        local_speaker_observation_end_ms: Some(13_400),
+        qualified_owner_activity_advanced: true,
+        ..pending
+    };
+    clock.observe(&continuing, true, owner_at);
+    assert_eq!(clock.paused_armed_at, Some(owner_at), "confirmed owner speech must survive the provisional branch");
+    let settled = TargetSpeakerUpdate {
+        pending_unattributed_speech: false,
+        qualified_owner_activity_advanced: false,
+        target_activity_advanced: false,
+        local_speaker_classification_kind: Some(LocalSpeakerClassificationKind::Uncertain),
+        local_speaker_signal_quality_sufficient: Some(false),
+        ..continuing
+    };
+    clock.observe(&settled, true, owner_at + Duration::from_millis(1_780));
+    assert_eq!(clock.armed_at, Some(owner_at), "settling text must restore the latest owner deadline");
+    clock.observe(&settled, true, owner_at + Duration::from_millis(2_200));
+    assert_eq!(clock.armed_at, Some(owner_at), "repeated provider bookkeeping cannot buy more time");
 }
 
 #[test]
@@ -12075,12 +12182,8 @@ fn final_clipboard_retention_cannot_hold_capsule_completion_for_seconds() {
         .map(|offset| start + offset)
         .expect("session lifecycle should follow clipboard retention helper");
     let body = &source[start..end];
-    assert!(
-        body.find("return (false, \"transport_held\")")
-            .expect("partial paste must hold the transport clipboard")
-            < body.find("spawn_blocking").expect("retention task should exist"),
-        "unconfirmed partial paste must keep its clipboard payload before any retention task starts"
-    );
+    assert!(body.find("clipboard_retention_ticket").unwrap() < body.find("spawn_blocking").unwrap());
+    assert!(body.contains("retain_session_clipboard(ticket, &text, unconfirmed_paste_uses_clipboard)"));
     assert!(body.contains("spawn_blocking"));
     assert!(body.contains("tokio::time::timeout"));
     assert!(body.contains("(false, \"pending\")"));

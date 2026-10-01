@@ -192,7 +192,7 @@ let mockSettings: UserPreferences = {
     key1: defaultDeviceKeyboardKey('RightControl'),
     key2: defaultDeviceKeyboardKey('C', ['ctrl']),
     key3: defaultDeviceKeyboardKey('V', ['ctrl']),
-    key4: defaultDeviceKeyboardKey('Z', ['ctrl']),
+    key4: defaultDeviceKeyboardKey('Enter'),
     knob: { action: 'dictation', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
   },
   deviceCustomKeyDoubleClicks: {

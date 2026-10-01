@@ -214,7 +214,7 @@
       "protects": [
         "Type writes exact low-power minutes instead of turning values such as 12 into 13.",
         "Type syncs firmware readback values into local preferences exactly.",
-        "Default device key output stays KEY1 RightCtrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Ctrl+Z.",
+        "Default device key output stays KEY1 RightCtrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Enter (operator updated KEY4 on 2026-10-01).",
         "Device custom-key UI keeps a single recorder control while preserving dictation/custom function choices."
       ],
       "machine_accepted_scope": [

@@ -226,6 +226,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/global_hotkey_runtime.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/insertion.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/insertion/clipboard_handoff.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/lib.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/llm_gemini.rs` | Polish providers | Rust unit tests, provider smoke |
 | `src-tauri/src/main.rs` | Core app | Build and targeted tests |

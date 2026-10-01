@@ -239,6 +239,44 @@ mod linux_selection {
     }
 }
 
+/// Read the editor captured before a paste, even if focus moves afterwards.
+/// It never selects text, copies, or activates an application.
+pub(crate) struct PasteReader {
+    #[cfg(target_os = "windows")]
+    reader: windows_uia::WindowsSelectionReader,
+    #[cfg(target_os = "macos")]
+    reader: macos_ax::PasteReader,
+}
+
+impl PasteReader {
+    pub(crate) fn capture() -> Option<Self> {
+        #[cfg(target_os = "windows")]
+        { windows_uia::WindowsSelectionReader::new_for_paste().ok().map(|reader| Self { reader }) }
+        #[cfg(target_os = "macos")]
+        { macos_ax::PasteReader::capture().map(|reader| Self { reader }) }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        { None }
+    }
+
+    pub(crate) fn before(&self) -> Result<(String, String), String> {
+        #[cfg(target_os = "windows")]
+        { self.reader.paste_snapshot() }
+        #[cfg(target_os = "macos")]
+        { self.reader.before().ok_or_else(|| "paste snapshot unavailable".into()) }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        { Err("paste readback unavailable".into()) }
+    }
+
+    pub(crate) fn document(&self) -> Result<String, String> {
+        #[cfg(target_os = "windows")]
+        { self.reader.bounded_document() }
+        #[cfg(target_os = "macos")]
+        { self.reader.document().ok_or_else(|| "paste document unavailable".into()) }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        { Err("paste readback unavailable".into()) }
+    }
+}
+
 // ─────────────────────────── macOS AX read ───────────────────────────
 
 #[cfg(target_os = "macos")]
@@ -264,11 +302,14 @@ mod macos_ax {
             attribute: CFStringRef,
             value: *mut CFTypeRef,
         ) -> AxError;
+        fn AXUIElementSetMessagingTimeout(element: AxUiElementRef, timeout: f32) -> AxError;
     }
 
     #[link(name = "CoreFoundation", kind = "framework")]
     extern "C" {
         fn CFRelease(cf: CFTypeRef);
+        fn CFGetTypeID(cf: CFTypeRef) -> usize;
+        fn CFStringGetTypeID() -> usize;
         fn CFStringCreateWithCString(
             allocator: CFAllocatorRef,
             cstr: *const c_char,
@@ -286,6 +327,59 @@ mod macos_ax {
     }
 
     const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
+
+    pub(super) struct PasteReader(AxUiElementRef);
+
+    impl Drop for PasteReader {
+        fn drop(&mut self) {
+            unsafe { CFRelease(self.0 as CFTypeRef) };
+        }
+    }
+
+    impl PasteReader {
+        pub(super) fn capture() -> Option<Self> {
+            unsafe {
+                let system = AXUIElementCreateSystemWide();
+                if system.is_null() { return None; }
+                AXUIElementSetMessagingTimeout(system, 0.05);
+                let attr = match cfstring_from_static(b"AXFocusedUIElement\0") {
+                    Some(attr) => attr,
+                    None => { CFRelease(system as CFTypeRef); return None; }
+                };
+                let mut focused = std::ptr::null();
+                let error = AXUIElementCopyAttributeValue(system, attr, &mut focused);
+                CFRelease(attr);
+                CFRelease(system as CFTypeRef);
+                if error != AX_ERROR_SUCCESS || focused.is_null() { return None; }
+                let reader = Self(focused as AxUiElementRef);
+                if AXUIElementSetMessagingTimeout(reader.0, 0.05) != AX_ERROR_SUCCESS { return None; }
+                Some(reader)
+            }
+        }
+
+        fn string_attribute(&self, name: &[u8]) -> Option<String> {
+            unsafe {
+                let attr = cfstring_from_static(name)?;
+                let mut value = std::ptr::null();
+                let error = AXUIElementCopyAttributeValue(self.0, attr, &mut value);
+                CFRelease(attr);
+                if error != AX_ERROR_SUCCESS || value.is_null() { return None; }
+                let result = if CFGetTypeID(value) == CFStringGetTypeID() {
+                    cfstring_to_rust(value).filter(|text| text.chars().count() <= 8_192)
+                } else { None };
+                CFRelease(value);
+                result
+            }
+        }
+
+        pub(super) fn before(&self) -> Option<(String, String)> {
+            Some((self.document()?, self.string_attribute(b"AXSelectedText\0")?))
+        }
+
+        pub(super) fn document(&self) -> Option<String> {
+            self.string_attribute(b"AXValue\0")
+        }
+    }
 
     /// 调 system-wide AX 树拿 focused element，再读它的 selected text。
     /// 失败（权限缺失 / 没焦点 / 该控件不支持选区属性）时返回 None。

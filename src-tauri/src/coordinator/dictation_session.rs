@@ -7,9 +7,8 @@
 const FINAL_CLIPBOARD_RETENTION_FOREGROUND_BUDGET: Duration = Duration::from_millis(100);
 // A PasteSent result means only that Ctrl+V was injected. The target may read
 // the clipboard later, so replacing a one-character final remainder with the
-// full transcript can paste the whole transcript a second time. There is no
-// reliable target acknowledgement on this route, so the clipboard remains the
-// transport until the user or another app changes it.
+// full transcript can paste the whole transcript a second time. The insertion
+// worker now owns that handoff until read-only target evidence releases it.
 
 fn unconfirmed_paste_uses_clipboard(
     status: InsertStatus,
@@ -29,36 +28,23 @@ async fn retain_final_clipboard_with_foreground_budget(
     text: &str,
     unconfirmed_paste_uses_clipboard: bool,
 ) -> (bool, &'static str) {
-    if unconfirmed_paste_uses_clipboard {
-        log::info!(
-            "[coord] final clipboard retention skipped: streamed paste awaiting target consumption session_id={session_id}"
-        );
-        return (false, "transport_held");
-    }
+    // Capture ownership before scheduling, so an old task cannot adopt a newer
+    // session's clipboard while waiting for its blocking worker to run.
+    let ticket = inner.inserter.clipboard_retention_ticket();
     let inner = Arc::clone(inner);
     let text = text.to_string();
     let chars = text.chars().count();
     let copy_task = async_runtime::spawn_blocking(move || {
-        let status = inner.inserter.copy_fallback(&text);
-        if status == InsertStatus::Failed {
-            log::warn!(
-                "[coord] final clipboard retention failed session_id={} chars={}",
-                session_id,
-                chars
-            );
-        } else {
-            log::info!(
-                "[coord] final clipboard retention complete session_id={} chars={}",
-                session_id,
-                chars
-            );
-        }
+        let status = inner.inserter.retain_session_clipboard(ticket, &text, unconfirmed_paste_uses_clipboard);
+        log::info!("[coord] final clipboard retention result session_id={session_id} chars={chars} result={status:?}");
         status
     });
 
     match tokio::time::timeout(FINAL_CLIPBOARD_RETENTION_FOREGROUND_BUDGET, copy_task).await {
-        Ok(Ok(InsertStatus::Failed)) => (false, "failed"),
-        Ok(Ok(_)) => (true, "stored"),
+        Ok(Ok(crate::insertion::RetentionResult::Stored)) => (true, "stored"),
+        Ok(Ok(crate::insertion::RetentionResult::Superseded)) => (false, "superseded"),
+        Ok(Ok(crate::insertion::RetentionResult::Unavailable)) => (false, "unconfirmed"),
+        Ok(Ok(crate::insertion::RetentionResult::Failed)) => (false, "failed"),
         Ok(Err(error)) => {
             log::warn!(
                 "[coord] final clipboard retention task failed session_id={session_id}: {error}"

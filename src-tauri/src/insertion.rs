@@ -22,6 +22,9 @@ use parking_lot::Mutex;
 
 use crate::types::{InsertStatus, PasteShortcut};
 
+mod clipboard_handoff;
+pub(crate) use clipboard_handoff::{ClipboardTicket, RetentionResult};
+
 #[cfg(target_os = "windows")]
 const CLIPBOARD_RESTORE_DELAY: Duration = Duration::from_millis(750);
 
@@ -50,7 +53,7 @@ impl TextInserter {
         if text.is_empty() {
             return InsertStatus::CopiedFallback;
         }
-        insert_with_clipboard_restore(text, restore_clipboard_after_paste, paste_shortcut)
+        clipboard_handoff::paste(text, restore_clipboard_after_paste, paste_shortcut)
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -109,10 +112,7 @@ impl TextInserter {
         if text.is_empty() {
             return InsertStatus::CopiedFallback;
         }
-        if !copy_to_clipboard(text) {
-            return InsertStatus::Failed;
-        }
-        macos_insert_status_after_paste(simulate_paste())
+        clipboard_handoff::paste(text, false, _paste_shortcut)
     }
 
     /// Copy text without attempting a synthetic paste. Used when the platform cannot
@@ -126,6 +126,19 @@ impl TextInserter {
         } else {
             InsertStatus::Failed
         }
+    }
+
+    pub(crate) fn clipboard_retention_ticket(&self) -> ClipboardTicket {
+        clipboard_handoff::ticket()
+    }
+
+    pub(crate) fn retain_session_clipboard(
+        &self,
+        ticket: ClipboardTicket,
+        text: &str,
+        needs_paste_receipt: bool,
+    ) -> RetentionResult {
+        clipboard_handoff::retain(ticket, text, needs_paste_receipt)
     }
 
     /// Correct a provisional paste only when the target itself confirms that
@@ -237,6 +250,7 @@ impl TextInserter {
         }
         // The clipboard is touched only after the target has supplied an
         // exact readback. An unavailable provider cannot disturb user content.
+        let _clipboard_owner = clipboard_handoff::begin_external_write();
         let mut clipboard = arboard::Clipboard::new().map_err(|e| {
             if same_target() {
                 let _ = keyboard.key(Key::RightArrow, Direction::Click);
@@ -506,6 +520,10 @@ static PENDING_CLIPBOARD_RESTORE: Lazy<Mutex<Option<PendingClipboardRestore>>> =
     Lazy::new(|| Mutex::new(None));
 
 fn copy_to_clipboard(text: &str) -> bool {
+    clipboard_handoff::copy(text)
+}
+
+fn copy_to_clipboard_now(text: &str) -> bool {
     let mut clipboard = match arboard::Clipboard::new() {
         Ok(c) => c,
         Err(err) => {
@@ -570,7 +588,7 @@ fn copy_to_clipboard_with_restore_plan(text: &str) -> Result<ClipboardRestorePla
 }
 
 #[cfg(not(target_os = "macos"))]
-fn insert_with_clipboard_restore(
+fn insert_with_clipboard_restore_now(
     text: &str,
     restore_clipboard_after_paste: bool,
     paste_shortcut: PasteShortcut,
@@ -657,6 +675,8 @@ fn restore_clipboard_after_delay(
     if !is_latest_clipboard_restore(restore_id) {
         return;
     }
+
+    let _clipboard_owner = clipboard_handoff::begin_external_write();
 
     let mut clipboard = match arboard::Clipboard::new() {
         Ok(clipboard) => clipboard,

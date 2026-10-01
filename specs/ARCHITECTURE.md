@@ -102,6 +102,26 @@ the session WAV records intended text, cumulative submitted text, source coverag
 and target acknowledgment separately. Submission alone is not editor readback;
 preview/final differences alone do not prove lost or duplicated text.
 
+Final clipboard retention uses the cumulative immutable delivery ledger for
+streamed sessions. A single clipboard worker owns paste payloads and deferred
+retention jobs by generation and native clipboard revision. It captures the
+focused editor before dispatch and uses a read-only UIA/AX diff to confirm the
+last paste was consumed before replacing its payload with the whole session.
+It never dispatches a second paste, selects text, or restores focus. User copies
+and newer app writes supersede pending retention. Missing readback or a timeout
+cannot authorize a clipboard overwrite; history still provides the full body.
+
+Pre-wake preamble rejection uses the admitted source prefix of this session.
+Once that prefix has been submitted successfully, mentioning the wake phrase
+later in the same body cannot re-run initial admission and block streaming.
+An uncovered preamble, a pending reserve, or another session's prefix is not
+admission evidence. Speaker filtering and source-tail alignment remain active.
+
+The endpoint may pause for provisional provider text while the local verifier
+continues to observe the owner. A newer quality-qualified owner watermark also
+updates that paused deadline. A settled callback restores the latest verified
+origin; an old provider boundary cannot resurrect an earlier silence deadline.
+
 - macOS uses Accessibility/keyboard event paths for hotkey and insertion.
 - Windows uses low-level hooks for hotkeys and Listener Type TSF IME for reliable insertion.
 - Windows IME identity is documented in `docs/platform/windows-ime.md`.

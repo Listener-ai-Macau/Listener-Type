@@ -778,6 +778,10 @@ fn legacy_device_custom_keys_default() -> DeviceCustomKeys {
 fn current_device_custom_keys_default_with_external_app_path(
     _external_app_path: String,
 ) -> DeviceCustomKeys {
+    device_keyboard_output_default("Enter", &[])
+}
+
+fn device_keyboard_output_default(key4_primary: &str, key4_modifiers: &[&str]) -> DeviceCustomKeys {
     DeviceCustomKeys {
         key1: DeviceCustomKeyMapping {
             action: DeviceCustomKeyAction::SendShortcut,
@@ -796,7 +800,7 @@ fn current_device_custom_keys_default_with_external_app_path(
         },
         key4: DeviceCustomKeyMapping {
             action: DeviceCustomKeyAction::SendShortcut,
-            shortcut: Some(device_keyboard_shortcut("Z", &["ctrl"])),
+            shortcut: Some(device_keyboard_shortcut(key4_primary, key4_modifiers)),
             ..DeviceCustomKeyMapping::default()
         },
         knob: DeviceCustomKeyMapping {
@@ -817,17 +821,18 @@ fn device_keyboard_shortcut(primary: &str, modifiers: &[&str]) -> ShortcutBindin
 }
 
 fn current_device_custom_keys_default_with_legacy_knob_switch_style(
-    external_app_path: String,
+    _external_app_path: String,
 ) -> DeviceCustomKeys {
-    let mut keys = current_device_custom_keys_default_with_external_app_path(external_app_path);
+    // Preserve the historical preset when the current KEY4 default changes.
+    let mut keys = device_keyboard_output_default("Z", &["ctrl"]);
     keys.knob.action = DeviceCustomKeyAction::SwitchStyle;
     keys
 }
 
 fn current_device_custom_keys_default_with_legacy_knob_disabled(
-    external_app_path: String,
+    _external_app_path: String,
 ) -> DeviceCustomKeys {
-    let mut keys = current_device_custom_keys_default_with_external_app_path(external_app_path);
+    let mut keys = device_keyboard_output_default("Z", &["ctrl"]);
     keys.knob = DeviceCustomKeyMapping::default();
     keys
 }
@@ -3172,7 +3177,7 @@ mod tests {
         assert_device_keyboard_shortcut(&prefs.device_custom_keys.key1, "RightControl", &[]);
         assert_device_keyboard_shortcut(&prefs.device_custom_keys.key2, "C", &["ctrl"]);
         assert_device_keyboard_shortcut(&prefs.device_custom_keys.key3, "V", &["ctrl"]);
-        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key4, "Z", &["ctrl"]);
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key4, "Enter", &[]);
         assert_eq!(
             prefs.device_custom_keys.knob.action,
             DeviceCustomKeyAction::Dictation
@@ -3267,7 +3272,7 @@ mod tests {
         assert_device_keyboard_shortcut(&prefs.device_custom_keys.key1, "RightControl", &[]);
         assert_device_keyboard_shortcut(&prefs.device_custom_keys.key2, "C", &["ctrl"]);
         assert_device_keyboard_shortcut(&prefs.device_custom_keys.key3, "V", &["ctrl"]);
-        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key4, "Z", &["ctrl"]);
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key4, "Enter", &[]);
         assert_eq!(
             prefs.device_custom_keys.knob.action,
             DeviceCustomKeyAction::Dictation
@@ -3293,7 +3298,7 @@ mod tests {
         assert_device_keyboard_shortcut(&prefs.device_custom_keys.key1, "RightControl", &[]);
         assert_device_keyboard_shortcut(&prefs.device_custom_keys.key2, "C", &["ctrl"]);
         assert_device_keyboard_shortcut(&prefs.device_custom_keys.key3, "V", &["ctrl"]);
-        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key4, "Z", &["ctrl"]);
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key4, "Enter", &[]);
         assert_ne!(
             prefs.device_custom_keys.key4.external_app_path,
             old_code_path
