@@ -3413,6 +3413,126 @@ fn vad_coverage_speaker_snapshot_excludes_the_unprocessed_tail() {
 }
 
 #[test]
+fn startup_voiceprint_pending_does_not_discard_unclassified_retained_audio() {
+    // A terminal wake releases six seconds in one burst while the profile
+    // and VAD workers initialize. The first words still need their own PCM
+    // evidence; retaining only the last 2.4 seconds makes them wait for a
+    // provider-final speaker row for the rest of the recording.
+    let (_pending_profile_sender, profile_rx) = std::sync::mpsc::channel();
+    let mut tracker = super::LocalSessionSpeakerTracker {
+        profile_rx: Some(profile_rx), profile: None, classification_rx: None,
+        adaptation_gate: Default::default(), rolling_pcm: Vec::new(),
+        next_classification_audio_ms: super::LOCAL_SPEAKER_CLASSIFY_MIN_MS as u64,
+        wake_phrase: "开始录音".into(), enrolled_owner_matched: true,
+    };
+    let pcm = (0..6_000_u16).flat_map(|ms|
+        std::iter::repeat_n(ms.to_le_bytes(), 16).flatten()).collect::<Vec<_>>();
+    for (index, chunk) in pcm.chunks(3_200).enumerate() {
+        let end = (index as u64 + 1) * 100;
+        tracker.observe(chunk, end, None, None);
+    }
+    let first = super::local_speaker_covered_pcm(&tracker.rolling_pcm, 6_000, 1_000)
+        .expect("startup owner proof must still have the first captured words");
+    assert_eq!(first, &pcm[..32_000]);
+}
+
+#[test]
+fn startup_speaker_windows_cover_earliest_words_before_newer_audio() {
+    let pcm = (0..6_000_u16).flat_map(|ms|
+        std::iter::repeat_n(ms.to_le_bytes(), 16).flatten()).collect::<Vec<_>>();
+    let mut next = 1_000;
+    let windows = super::local_speaker_pending_windows(&pcm, 6_000, 5_472, &mut next);
+    assert_eq!(windows.first().map(|(start, end, _)| (*start, *end)), Some((0, 1_000)));
+    assert_eq!(windows.last().map(|(start, end, _)| (*start, *end)), Some((4_200, 5_400)));
+    assert_eq!(next, 5_800);
+    let mut previous_end = 0;
+    for (start, end, actual_pcm) in windows {
+        assert!(end > previous_end && end <= 5_472);
+        assert_eq!(actual_pcm, pcm[start as usize * 32..end as usize * 32]);
+        previous_end = end;
+    }
+    assert!(super::local_speaker_pending_windows(&pcm, 6_000, 5_472, &mut next).is_empty());
+}
+
+#[test]
+fn startup_speaker_schedule_cannot_authorize_unprocessed_or_quiet_tail() {
+    let pcm = vec![0; 6_000 * 32];
+    let mut next = 1_000;
+    assert!(super::local_speaker_pending_windows(&pcm, 6_000, 6_001, &mut next).is_empty());
+    assert_eq!(next, 1_000);
+    assert!(super::local_speaker_pending_windows(&pcm, 6_000, 999, &mut next).is_empty());
+    let voice = super::local_speaker_pending_windows(&pcm, 6_000, 2_000, &mut next);
+    assert!(voice.iter().all(|(_, end, _)| *end <= 2_000));
+    // Continued captures with the same last voiced end are not fresh identity.
+    assert!(super::local_speaker_pending_windows(&pcm, 9_000, 2_000, &mut next).is_empty());
+}
+
+#[test]
+fn startup_speaker_buffer_is_bounded_and_evicted_gap_stays_unknown() {
+    let mut pcm = vec![1; 80_000 * 32];
+    super::retain_unclassified_speaker_pcm(&mut pcm, 80_000, 1_000, true);
+    assert_eq!(pcm.len(), super::MAX_BUFFERED_SPEAKER_CANDIDATE_BYTES);
+    let oldest = 80_000 - pcm.len() as u64 / 32;
+    let mut next = 1_000;
+    let windows = super::local_speaker_pending_windows(&pcm, 80_000, 80_000, &mut next);
+    assert!(!windows.is_empty());
+    assert!(windows.iter().all(|(start, end, sample)|
+        *start >= oldest && *end <= 80_000 && sample.len() >= 32_000));
+    super::retain_unclassified_speaker_pcm(&mut pcm, 80_000, next, true);
+    assert_eq!(pcm.len(), super::LOCAL_SPEAKER_HISTORY_BYTES);
+    let mut unavailable = vec![1; 6_000 * 32];
+    super::retain_unclassified_speaker_pcm(&mut unavailable, 6_000, 1_000, false);
+    assert_eq!(unavailable.len(), super::LOCAL_SPEAKER_HISTORY_BYTES);
+}
+
+#[test]
+fn late_body_submission_gets_three_full_seconds_after_processing_delay() {
+    use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
+    use crate::speaker_verification::SessionSpeakerClassification::Target;
+    let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        app_id: "app".into(), access_token: "token".into(), resource_id: "resource".into(),
+    }, Vec::new());
+    asr.note_verified_local_speaker_tracking_started("开始录音");
+    asr.note_local_audio_activity(2_000, true);
+    asr.note_local_speaker_classification(2_000, Target { score: 0.8 });
+    let started = Instant::now();
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.automatic_wake_session = true;
+    clock.observe(&asr.endpoint_update_snapshot(), true, started);
+    // The owner has stopped, but processing delays the actual body submission.
+    let submitted_at = started + Duration::from_millis(5_000);
+    clock.note_text_delivery(submitted_at, "处理完后上屏的最后一段正文");
+    assert!(clock.latest_due_update(submitted_at + Duration::from_millis(2_999), 2_900).is_none());
+    assert!(clock.latest_due_update(submitted_at + Duration::from_millis(3_000), 2_900).is_some());
+}
+
+#[test]
+fn body_submitted_after_in_window_owner_continuation_restarts_the_full_window() {
+    use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
+    use crate::speaker_verification::SessionSpeakerClassification::Target;
+    let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        app_id: "app".into(), access_token: "token".into(), resource_id: "resource".into(),
+    }, Vec::new());
+    asr.note_verified_local_speaker_tracking_started("开始录音");
+    asr.note_local_audio_activity(2_000, true);
+    asr.note_local_speaker_classification(2_000, Target { score: 0.8 });
+    let started = Instant::now();
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.automatic_wake_session = true;
+    clock.observe(&asr.endpoint_update_snapshot(), true, started);
+    clock.note_text_delivery(started, "第一句已上屏");
+    let resumed_at = started + Duration::from_millis(2_900);
+    asr.note_local_audio_activity(4_900, true);
+    asr.note_local_speaker_classification(4_900, Target { score: 0.8 });
+    clock.observe(&asr.endpoint_update_snapshot(), true, resumed_at);
+    assert!(clock.latest_due_update(started + Duration::from_millis(3_000), 2_900).is_none());
+    let submitted_at = started + Duration::from_millis(4_500);
+    clock.note_text_delivery(submitted_at, "三秒内继续说的新正文");
+    assert!(clock.latest_due_update(submitted_at + Duration::from_millis(2_999), 2_900).is_none());
+    assert!(clock.latest_due_update(submitted_at + Duration::from_millis(3_000), 2_900).is_some());
+}
+
+#[test]
 fn vad_coverage_quiet_capture_does_not_extend_the_three_second_owner_deadline() {
     use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
     use crate::speaker_verification::SessionSpeakerClassification;
@@ -3437,6 +3557,212 @@ fn vad_coverage_quiet_capture_does_not_extend_the_three_second_owner_deadline() 
         clock.observe(&update, true, started + Duration::from_millis(elapsed_ms));
     }
     assert!(clock.latest_due_update(started + Duration::from_millis(3_000), 3_000).is_some());
+}
+
+#[cfg(target_os = "windows")]
+#[tokio::test]
+#[ignore = "selected device PCM, enrolled profile and installed provider credentials; no editor acceptance"]
+async fn recorded_startup_speaker_coverage_live_delivery_probe() {
+    use crate::asr::AudioConsumer;
+    use crate::asr::volcengine::{LocalSpeechEvidence, VolcengineCredentials, VolcengineStreamingASR};
+    use crate::persistence::{CredentialAccount, CredentialsVault};
+    let input = std::env::var_os("LISTENER_STARTUP_REPLAY_INPUT").expect("explicit recording fixture");
+    let output = std::env::var_os("LISTENER_STARTUP_REPLAY_OUTPUT").expect("explicit output path");
+    let fixture: serde_json::Value = serde_json::from_slice(&std::fs::read(input).unwrap()).unwrap();
+    let pcm = std::fs::read(fixture["pcm_path"].as_str().unwrap()).unwrap();
+    assert!(!pcm.is_empty() && pcm.len() % 2 == 0 && pcm.len() <= 60 * 32_000);
+    let pcm_sha256 = {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(&pcm))
+    };
+    assert_eq!(pcm_sha256, fixture["pcm_sha256"].as_str().unwrap());
+    let wake_phrase = fixture["wake_phrase"].as_str().unwrap();
+    // Evaluate the persisted owner bank without writing adaptation templates or
+    // adding a live wake exemplar. This is conservative relative to the actual
+    // enrolled-match session; it still runs the production embedding model.
+    let profile_pcm = pcm.clone();
+    let profile_phrase = wake_phrase.to_string();
+    let wake_end_seconds = fixture["wake_end_seconds"].as_f64().unwrap() as f32;
+    let profile = tokio::task::spawn_blocking(move ||
+        crate::speaker_verification::session_profile_from_wake(
+            &profile_pcm, wake_end_seconds, &profile_phrase, false,
+        )
+    ).await.expect("join profile model task").expect("read installed enrolled profile");
+    assert!(!profile.is_adaptive(), "selected recording requires the installed enrollment");
+    let (profile_tx, profile_rx) = std::sync::mpsc::channel();
+    let mut tracker = super::LocalSessionSpeakerTracker {
+        profile_rx: Some(profile_rx), profile: None, classification_rx: None,
+        adaptation_gate: Default::default(), rolling_pcm: Vec::new(),
+        next_classification_audio_ms: super::LOCAL_SPEAKER_CLASSIFY_MIN_MS as u64,
+        wake_phrase: wake_phrase.into(), enrolled_owner_matched: false,
+    };
+    let credential = |account| CredentialsVault::get(account).unwrap()
+        .filter(|v| !v.is_empty()).expect("installed credential");
+    let mut asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        app_id: credential(CredentialAccount::VolcengineAppKey),
+        access_token: credential(CredentialAccount::VolcengineAccessKey),
+        resource_id: credential(CredentialAccount::VolcengineResourceId),
+    }, Vec::new());
+    asr.enable_diagnostic_trace();
+    let asr = Arc::new(asr);
+    let callbacks = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+    let callback_sink = Arc::clone(&callbacks);
+    asr.set_partial_transcript_callback(Some(Arc::new(move |text| callback_sink.lock().push(text))));
+    asr.note_verified_local_speaker_tracking_started(wake_phrase);
+    asr.note_local_speaker_profile_adaptive(false);
+    asr.open_session().await.expect("open recorded PCM provider session");
+    asr.mark_audio_delivery_ready();
+    let speech_sink = Arc::new(parking_lot::Mutex::new(LocalSpeechEvidence::default()));
+    let mut vad = super::LocalSpeechActivity::new(Arc::clone(&speech_sink));
+    let mut bytes = 0u64;
+    let started = Instant::now();
+    let startup_ms = fixture["buffered_startup_ms"].as_u64().unwrap();
+    let mut pending_profile = Some((profile_tx, profile));
+    let mut observations = Vec::new();
+    let mut ledgers = Vec::new();
+    let mut first_body_wall_ms = None;
+    let mut first_body_audio_ms = None;
+    let mut admitted_source_key = String::new();
+    let exercise_endpoint = fixture["exercise_endpoint_clock"].as_bool().unwrap_or(false);
+    let mut endpoint_clock = super::SettledTargetEndpointClock::default();
+    endpoint_clock.automatic_wake_session = true;
+    let mut submitted_display = String::new();
+    let mut submitted_source_key = String::new();
+    let mut submissions = Vec::new();
+    let mut first_stop_wall_ms = None;
+    let mut last_body_submission_wall_ms = None;
+    let mut visible_key = String::new();
+    let mut visible_growth_at = started;
+    // A selected recording ends at its old STOP. Add explicit quiet PCM only
+    // for the endpoint probe, so the candidate can run the complete new window.
+    // This never stands in for fresh device input or actual editor insertion.
+    let quiet_pcm = vec![0u8; if exercise_endpoint { 5 * 32_000 } else { 0 }];
+    for chunk in pcm.chunks(3_200).chain(quiet_pcm.chunks(3_200)) {
+        let start_samples = bytes / 2;
+        bytes += chunk.len() as u64;
+        let end_samples = bytes / 2;
+        let captured_ms = bytes / 32;
+        let has_signal = chunk.chunks_exact(2).any(|sample|
+            i16::from_le_bytes([sample[0], sample[1]]).unsigned_abs() >= 512);
+        let evidence = vad.submit(start_samples, end_samples, chunk);
+        let voiced_end = super::embedded_confirmed_speech_end_ms(has_signal, evidence, end_samples);
+        asr.note_local_audio_activity_with_speech_end_samples(captured_ms, end_samples, voiced_end);
+        asr.note_local_speech_activity(evidence);
+        let completed = tracker.observe(chunk, captured_ms, voiced_end, asr.stable_target_speech_end_ms());
+        for (start, end, classification, transcript_evidence, quality) in completed {
+            observations.push(serde_json::json!({"start_ms": start, "end_ms": end,
+                "classification": format!("{classification:?}"), "quality": quality,
+                "wall_ms": started.elapsed().as_millis()}));
+            asr.note_local_speaker_observation_with_audio_range(start, end, classification, transcript_evidence, quality);
+        }
+        asr.note_local_speaker_analysis_pending(tracker.classification_pending());
+        asr.consume_pcm_chunk(chunk);
+        if captured_ms >= startup_ms {
+            if let Some((tx, profile)) = pending_profile.take() { tx.send(Ok(profile)).unwrap(); }
+            tokio::time::sleep(Duration::from_millis(chunk.len() as u64 / 32)).await;
+        }
+        let now = Instant::now();
+        if exercise_endpoint {
+            endpoint_clock.note_local_vad_evidence(asr.local_speech_activity_snapshot());
+            endpoint_clock.observe(&asr.endpoint_update_snapshot(), !submitted_display.is_empty(), now);
+            if let Some(preview) = callbacks.lock().last() {
+                let key = super::embedded_audio_partial_preview_stability_key(preview);
+                if key != visible_key {
+                    visible_key = key;
+                    visible_growth_at = now;
+                }
+                endpoint_clock.note_visible_body_boundary(
+                    super::preview_ends_with_sentence_terminal(Some(preview)),
+                    preview.chars().count(), now,
+                );
+            }
+        }
+        if let Some(snapshot) = asr.pause_early_delivery_ledger_snapshot_after(Duration::from_millis(1_000), &admitted_source_key) {
+            if !super::automatic_wake_has_unstripped_lead_in(&snapshot.text, wake_phrase, &admitted_source_key) {
+                admitted_source_key = crate::transcript_boundary::content_key(&snapshot.text);
+                if crate::transcript_boundary::content_key(&snapshot.text)
+                    != crate::transcript_boundary::content_key(wake_phrase) {
+                    first_body_wall_ms.get_or_insert(started.elapsed().as_millis());
+                    first_body_audio_ms.get_or_insert(captured_ms);
+                }
+                if exercise_endpoint {
+                    let text = super::strip_automatic_activation_prefix(&snapshot.text, wake_phrase, true);
+                    let delivered_key = super::embedded_audio_partial_preview_stability_key(&submitted_display);
+                    let remainder = super::pause_early_final_remainder(&text, &submitted_display, &submitted_source_key)
+                        .or_else(|| super::pause_early_revised_terminal_remainder(&text, &submitted_display, &submitted_source_key)
+                            .filter(|tail| super::pause_early_terminal_punctuation_only(tail)))
+                        .or_else(|| super::pause_early_anchored_continuation(&text, &submitted_display, &submitted_source_key))
+                        .or_else(|| super::pause_early_aligned_growth_tail(&text, &submitted_source_key));
+                    let (_, stable_ms, full_chars) = asr.pause_early_delivery_gate_diag();
+                    let quiet = snapshot.text.chars().count() == full_chars
+                        && stable_ms.is_some_and(|ms| ms >= super::PAUSE_EARLY_DELIVERY_MIN_STABLE.as_millis())
+                        && now.saturating_duration_since(visible_growth_at) >= super::PAUSE_EARLY_UNPUNCTUATED_QUIET;
+                    if let Some(remainder) = remainder {
+                        if let Some(delta) = super::pause_early_segment(&remainder, quiet)
+                            .filter(|delta| !delta.is_empty() && super::pause_early_chunk_ready(&delivered_key, delta)) {
+                            if let Some(key) = super::pause_early_source_key_after_append(&text, &remainder, delta) {
+                                submitted_display.push_str(delta);
+                                submitted_source_key = key;
+                                endpoint_clock.note_text_delivery(now, delta);
+                                if !super::pause_early_terminal_punctuation_only(delta) {
+                                    last_body_submission_wall_ms = Some(started.elapsed().as_millis());
+                                }
+                                submissions.push(serde_json::json!({"delta": delta, "text": submitted_display,
+                                    "wall_ms": started.elapsed().as_millis(), "audio_ms": captured_ms}));
+                            }
+                        }
+                    }
+                }
+                ledgers.push(serde_json::json!({"text": snapshot.text, "audio_ms": captured_ms,
+                    "wall_ms": started.elapsed().as_millis()}));
+            }
+        }
+        if exercise_endpoint && !submitted_display.is_empty() && first_stop_wall_ms.is_none()
+            && endpoint_clock.latest_due_update_after_owner_analysis(
+                now, super::EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+                asr.local_speaker_analysis_pending(),
+            ).is_some() {
+            first_stop_wall_ms = Some(started.elapsed().as_millis());
+        }
+    }
+    asr.send_last_frame().await.expect("send selected recording final frame");
+    let final_result = asr.await_final_result_with_early_seal().await.expect("recorded final result");
+    let owner_tail = fixture["expected_owner_tail"].as_str().unwrap();
+    let tail_retained = crate::transcript_boundary::content_key(&final_result.text)
+        .contains(&crate::transcript_boundary::content_key(owner_tail));
+    let first_window_covers_start = observations.first().is_some_and(|row|
+        row["start_ms"].as_u64() == Some(0) && row["end_ms"].as_u64() == Some(1_000));
+    let streamed_before_final = first_body_wall_ms.is_some_and(|wall|
+        wall <= fixture["maximum_first_body_wall_ms"].as_u64().unwrap() as u128);
+    let live_tail_retained = fixture["expected_live_tail"].as_str().is_none_or(|tail|
+        ledgers.iter().any(|row| crate::transcript_boundary::content_key(row["text"].as_str().unwrap())
+            .contains(&crate::transcript_boundary::content_key(tail))));
+    let trace = asr.take_diagnostic_trace();
+    let endpoint_tail_submitted = !exercise_endpoint ||
+        crate::transcript_boundary::content_key(&submitted_display)
+            .contains(&crate::transcript_boundary::content_key(owner_tail));
+    let full_post_submission_window = !exercise_endpoint ||
+        first_stop_wall_ms.zip(last_body_submission_wall_ms)
+            .is_some_and(|(stop, submitted)| stop >= submitted + 3_000);
+    let passed = tail_retained && live_tail_retained && first_window_covers_start && streamed_before_final
+        && endpoint_tail_submitted && full_post_submission_window;
+    let report = serde_json::json!({
+        "status": if passed {"PASS"} else {"FAIL"}, "source_session_id": fixture["source_session_id"],
+        "scope": "real device recording replay, production VAD, chronological speaker tracker, persisted owner bank and provider; no fresh microphone/editor or broad interference acceptance",
+        "profile_policy": "persisted enrolled bank only; no live wake exemplar or persisted adaptation writes",
+        "pcm_sha256": pcm_sha256, "buffered_startup_ms": startup_ms,
+        "first_live_body_wall_ms": first_body_wall_ms, "first_live_body_audio_ms": first_body_audio_ms,
+        "first_window_covers_start": first_window_covers_start, "streamed_before_final": streamed_before_final,
+        "expected_owner_tail": owner_tail, "owner_tail_retained": tail_retained, "live_tail_retained": live_tail_retained,
+        "endpoint_exercised": exercise_endpoint, "endpoint_tail_submitted": endpoint_tail_submitted,
+        "endpoint_probe_scope": "shared source segmentation, submission boundary and endpoint clock; simulated successful submission, appended quiet PCM, no OS/editor assertion",
+        "first_stop_wall_ms": first_stop_wall_ms, "last_body_submission_wall_ms": last_body_submission_wall_ms,
+        "full_post_submission_window": full_post_submission_window, "submissions": submissions,
+        "final_text": final_result.text,
+        "observations": observations, "ledgers": ledgers, "committed_callbacks": callbacks.lock().clone(), "trace": trace,
+    });
+    std::fs::write(output, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    assert!(passed, "startup PCM must acquire source identity and stream before final; see explicit report");
 }
 
 #[cfg(target_os = "windows")]

@@ -1134,6 +1134,16 @@ fn target_speaker_update_from_state(
     qualified_owner_activity_advanced: bool,
 ) -> TargetSpeakerUpdate {
     let owner_handoff_suspected = state.local_owner_handoff_suspected;
+    // A first positively classified return is still pending while the two-window
+    // handoff gate settles. It cannot authorize insertion or advance the owner
+    // watermark, but it must reach the bounded continuation guard. Otherwise a
+    // pending speaker split calls this actual source window Other and stops the
+    // owner's resumed sentence before its text can be submitted.
+    let owner_return_candidate = state.local_target_confirmed
+        && (state.local_speaker_signal_quality_sufficient == Some(false)
+            || owner_handoff_suspected)
+        && matches!(&state.local_speaker_classification,
+            Some(crate::speaker_verification::SessionSpeakerClassification::Target { .. }));
     // The retained classifier result describes only its own covered window.
     // Once raw capture has moved beyond that window, expose the coverage but
     // do not present the old Target label/quality as if it classified the new
@@ -1169,15 +1179,9 @@ fn target_speaker_update_from_state(
             .then_some(state.local_speaker_signal_quality_sufficient)
             .flatten(),
         local_speaker_observation_end_ms: state.local_speaker_observation_end_ms,
-        local_tentative_owner_speech_end_ms: (state.local_target_confirmed
-            && !owner_handoff_suspected
-            && state.local_speaker_signal_quality_sufficient == Some(false)
-            && matches!(
-                &state.local_speaker_classification,
-                Some(crate::speaker_verification::SessionSpeakerClassification::Target { .. })
-            ))
-        .then_some(state.local_speaker_observation_end_ms)
-        .flatten(),
+        local_tentative_owner_speech_end_ms: owner_return_candidate
+            .then_some(state.local_speaker_observation_end_ms)
+            .flatten(),
         local_target_speech_end_ms: state.local_target_speech_end_ms,
         // Keep transcript filtering's immediate advisory boundary private.
         // Endpointing sees only the sustained owner-absence boundary so the
@@ -1185,7 +1189,9 @@ fn target_speaker_update_from_state(
         // A correlated provider-row/voiceprint handoff is an endpoint candidate,
         // not a destructive transcript verdict. Present its live speech edge to
         // the endpoint as non-owner so room speech cannot renew the owner clock.
-        local_non_target_speech_end_ms: if owner_handoff_suspected {
+        // A sampled positive return remains a bounded pending candidate rather
+        // than being relabeled Other by that earlier unresolved handoff.
+        local_non_target_speech_end_ms: if owner_handoff_suspected && !owner_return_candidate {
             state.local_speech_end_ms
         } else if local_owner_continuity(state) == LocalOwnerContinuity::Other {
             state.local_sustained_non_target_speech_end_ms
@@ -13773,6 +13779,44 @@ mod tests {
             );
             assert!(state.last_emitted_visual_preview_text.contains(tail));
         }
+    }
+
+    #[test]
+    fn handoff_first_positive_owner_window_protects_continuation_without_admitting_text() {
+        use crate::speaker_verification::SessionSpeakerClassification::{Target, NonTarget};
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+            app_id: "app".into(), access_token: "token".into(), resource_id: "resource".into(),
+        }, Vec::new());
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        asr.note_local_speaker_profile_adaptive(false);
+        asr.note_local_audio_activity(5_000, true);
+        asr.note_local_speaker_observation_with_audio_range(3_800, 5_000, Target { score: 0.8 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true);
+        // ebebff67: a provisional provider speaker split latched a handoff. A
+        // later actual quality Target window belonged to the owner's resumed
+        // sentence, but neither confirmed the two-window return nor reached
+        // the endpoint as a candidate; raw capture was called Other instead.
+        asr.state.lock().local_owner_handoff_suspected = true;
+        asr.note_local_audio_activity(9_800, true);
+        asr.note_local_speaker_observation_with_audio_range(8_600, 9_800, Target { score: 0.41 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true);
+        let pending = asr.endpoint_update_snapshot();
+        assert_eq!(pending.local_tentative_owner_speech_end_ms, Some(9_800),
+            "a real owner-return candidate must remain pending rather than vanish");
+        assert_eq!(pending.qualified_owner_speech_end_ms, Some(5_000));
+        assert_eq!(pending.local_non_target_speech_end_ms, None,
+            "an unresolved handoff cannot invent Other over the positive source window");
+        {
+            let state = asr.state.lock();
+            assert!(state.local_owner_handoff_suspected);
+            assert!(!state.local_owner_pcm_intervals.contains(&(8_600, 9_800)),
+                "one recovery window cannot authorize text or finish the two-window identity gate");
+        }
+        asr.note_local_audio_activity(10_200, true);
+        asr.note_local_speaker_observation_with_audio_range(9_000, 10_200, NonTarget { score: 0.02 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget, true);
+        assert_eq!(asr.endpoint_update_snapshot().local_tentative_owner_speech_end_ms, None);
+        assert!(asr.state.lock().local_owner_handoff_suspected);
     }
 
     #[test]

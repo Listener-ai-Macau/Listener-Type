@@ -44,6 +44,60 @@ fn local_speaker_covered_pcm(
     let covered = &rolling_pcm[start..covered_end];
     (covered.len() >= LOCAL_SPEAKER_CLASSIFY_MIN_BYTES).then_some(covered)
 }
+/// Schedule every not-yet-examined source window in audio order. Startup PCM
+/// can arrive in a burst while the profile and VAD workers are still preparing;
+/// jumping straight to the newest window would leave the first words without
+/// identity evidence for the rest of the session.
+fn local_speaker_pending_windows(
+    rolling_pcm: &[u8],
+    captured_end_ms: u64,
+    confirmed_speech_end_ms: u64,
+    next_audio_end_ms: &mut u64,
+) -> Vec<(u64, u64, Vec<u8>)> {
+    if confirmed_speech_end_ms > captured_end_ms {
+        return Vec::new();
+    }
+    let retained_start_ms = captured_end_ms.saturating_sub(rolling_pcm.len() as u64 / 32);
+    // A bounded-buffer overflow leaves a real unknown interval. Begin only
+    // where a complete retained sample exists; never assign identity to it.
+    *next_audio_end_ms = (*next_audio_end_ms)
+        .max(retained_start_ms.saturating_add(LOCAL_SPEAKER_CLASSIFY_MIN_MS as u64));
+    let mut windows = Vec::new();
+    while *next_audio_end_ms <= confirmed_speech_end_ms {
+        let end_ms = *next_audio_end_ms;
+        if let Some(covered) = local_speaker_covered_pcm(rolling_pcm, captured_end_ms, end_ms) {
+            let start_ms = end_ms.saturating_sub(covered.len() as u64 / 32);
+            windows.push((start_ms, end_ms, covered.to_vec()));
+        }
+        let Some(next) = end_ms.checked_add(LOCAL_SPEAKER_CLASSIFY_STEP_MS) else {
+            break;
+        };
+        *next_audio_end_ms = next;
+    }
+    windows
+}
+
+fn retain_unclassified_speaker_pcm(
+    rolling_pcm: &mut Vec<u8>,
+    captured_end_ms: u64,
+    next_audio_end_ms: u64,
+    profile_available_or_pending: bool,
+) {
+    let pending_start_ms = next_audio_end_ms.saturating_sub(LOCAL_SPEAKER_CLASSIFY_WINDOW_MS as u64);
+    let pending_bytes = usize::try_from(captured_end_ms.saturating_sub(pending_start_ms))
+        .unwrap_or(usize::MAX).saturating_mul(32);
+    let keep_bytes = if profile_available_or_pending {
+        LOCAL_SPEAKER_HISTORY_BYTES.max(pending_bytes)
+            .min(MAX_BUFFERED_SPEAKER_CANDIDATE_BYTES)
+    } else {
+        LOCAL_SPEAKER_HISTORY_BYTES
+    };
+    if rolling_pcm.len() > keep_bytes {
+        let overflow = (rolling_pcm.len() - keep_bytes + 1) & !1usize;
+        rolling_pcm.drain(..overflow);
+    }
+}
+
 // The isolated Paraformer helper is intentionally single-flight. A second
 // candidate should get a bounded chance to use it after the active request
 // finishes, but must never form an unbounded queue that delays terminal wake
@@ -259,6 +313,8 @@ struct LocalSessionSpeakerTracker {
 impl LocalSessionSpeakerTracker {
     fn classification_pending(&self) -> bool {
         self.classification_rx.is_some()
+            || (self.profile_rx.is_some()
+                && self.rolling_pcm.len() >= LOCAL_SPEAKER_CLASSIFY_MIN_BYTES)
     }
 
     fn from_wake(
@@ -354,7 +410,7 @@ impl LocalSessionSpeakerTracker {
         audio_end_ms: u64,
         confirmed_speech_end_ms: Option<u64>,
         stable_target_end_ms: Option<u64>,
-    ) -> Option<(
+    ) -> Vec<(
         u64,
         u64,
         crate::speaker_verification::SessionSpeakerClassification,
@@ -362,11 +418,12 @@ impl LocalSessionSpeakerTracker {
         bool,
     )> {
         self.rolling_pcm.extend_from_slice(pcm);
-        if self.rolling_pcm.len() > LOCAL_SPEAKER_HISTORY_BYTES {
-            let overflow =
-                (self.rolling_pcm.len() - LOCAL_SPEAKER_HISTORY_BYTES + 1) & !1usize;
-            self.rolling_pcm.drain(..overflow);
-        }
+        retain_unclassified_speaker_pcm(
+            &mut self.rolling_pcm,
+            audio_end_ms,
+            self.next_classification_audio_ms,
+            self.profile.is_some() || self.profile_rx.is_some(),
+        );
 
         if let Some(rx) = self.profile_rx.as_ref() {
             match rx.try_recv() {
@@ -391,32 +448,37 @@ impl LocalSessionSpeakerTracker {
             }
         }
 
-        let mut completed = None;
+        let mut completed = Vec::new();
+        let mut classification_finished = false;
         if let Some(rx) = self.classification_rx.as_ref() {
-            match rx.try_recv() {
-                Ok(Ok((audio_start_ms, audio_end_ms, observation))) => {
-                    self.adaptation_gate.note(audio_end_ms, observation.clone());
-                    completed = Some((
-                        audio_start_ms,
-                        audio_end_ms,
-                        observation.classification,
-                        observation.transcript_speaker_evidence,
-                        observation.signal_quality_sufficient,
-                    ));
-                    self.maybe_adapt_owner_bank_from_confident_body(&observation);
-                    self.classification_rx = None;
+            loop {
+                match rx.try_recv() {
+                    Ok(Ok((audio_start_ms, audio_end_ms, observation))) => {
+                        self.adaptation_gate.note(audio_end_ms, observation.clone());
+                        completed.push((
+                            audio_start_ms,
+                            audio_end_ms,
+                            observation.classification,
+                            observation.transcript_speaker_evidence,
+                            observation.signal_quality_sufficient,
+                        ));
+                        self.maybe_adapt_owner_bank_from_confident_body(&observation);
+                    }
+                    Ok(Err(err)) => {
+                        log::debug!(
+                            "[speaker-verification] local session-speaker sample uncertain: {err}"
+                        );
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        classification_finished = true;
+                        break;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
                 }
-                Ok(Err(err)) => {
-                    self.classification_rx = None;
-                    log::debug!(
-                        "[speaker-verification] local session-speaker sample uncertain: {err}"
-                    );
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.classification_rx = None;
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {}
             }
+        }
+        if classification_finished {
+            self.classification_rx = None;
         }
 
         if let Some(profile) = self.profile.as_mut() {
@@ -431,27 +493,41 @@ impl LocalSessionSpeakerTracker {
             }
         }
 
-        if let Some(speech_end_ms) = confirmed_speech_end_ms.filter(|end|
-            self.classification_rx.is_none() && *end >= self.next_classification_audio_ms
-        ) {
-            if let (Some(profile), Some(covered_pcm)) = (
-                self.profile.clone(),
-                local_speaker_covered_pcm(&self.rolling_pcm, audio_end_ms, speech_end_ms),
-            ) {
-                let snapshot = covered_pcm.to_vec();
-                let audio_start_ms = speech_end_ms.saturating_sub(snapshot.len() as u64 / 32);
-                let (tx, rx) = std::sync::mpsc::channel();
-                self.classification_rx = Some(rx);
-                self.next_classification_audio_ms =
-                    speech_end_ms.saturating_add(LOCAL_SPEAKER_CLASSIFY_STEP_MS);
-                tauri::async_runtime::spawn_blocking(move || {
-                    let result =
-                        crate::speaker_verification::observe_session_speaker(&profile, &snapshot)
-                            .map(|classification| (audio_start_ms, speech_end_ms, classification));
-                    let _ = tx.send(result);
-                });
+        if self.classification_rx.is_none() {
+            if let (Some(profile), Some(speech_end_ms)) =
+                (self.profile.clone(), confirmed_speech_end_ms)
+            {
+                let windows = local_speaker_pending_windows(
+                    &self.rolling_pcm,
+                    audio_end_ms,
+                    speech_end_ms,
+                    &mut self.next_classification_audio_ms,
+                );
+                if !windows.is_empty() {
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    self.classification_rx = Some(rx);
+                    tauri::async_runtime::spawn_blocking(move || {
+                        // Publish each completed window immediately. A startup
+                        // backlog must not delay its first positive result until
+                        // the last inference finishes.
+                        for (start_ms, end_ms, snapshot) in windows {
+                            let result = crate::speaker_verification::observe_session_speaker(
+                                &profile, &snapshot,
+                            ).map(|observation| (start_ms, end_ms, observation));
+                            if tx.send(result).is_err() {
+                                break;
+                            }
+                        }
+                    });
+                }
             }
         }
+        retain_unclassified_speaker_pcm(
+            &mut self.rolling_pcm,
+            audio_end_ms,
+            self.next_classification_audio_ms,
+            self.profile.is_some() || self.profile_rx.is_some(),
+        );
         completed
     }
 }
@@ -1124,14 +1200,14 @@ impl EmbeddedAudioDictationSession {
             .volcengine_asr
             .as_ref()
             .and_then(|asr| asr.stable_target_speech_end_ms());
-        let local_speaker_evidence = self.local_speaker_tracker.as_mut().and_then(|tracker| {
+        let local_speaker_evidence = self.local_speaker_tracker.as_mut().map(|tracker| {
             tracker.observe(
                 pcm,
                 source_pcm_offset_ms.saturating_add(chunk_ms),
                 confirmed_speech_end_ms,
                 stable_target_end_ms,
             )
-        });
+        }).unwrap_or_default();
         if let (Some(asr), Some(adaptive)) = (
             self.volcengine_asr.as_ref(),
             self.local_speaker_tracker
@@ -1140,16 +1216,16 @@ impl EmbeddedAudioDictationSession {
         ) {
             asr.note_local_speaker_profile_adaptive(adaptive);
         }
-        if let (Some(asr), Some((audio_start_ms, audio_end_ms, classification, transcript_speaker_evidence, signal_quality_sufficient))) =
-            (self.volcengine_asr.as_ref(), local_speaker_evidence)
-        {
-            asr.note_local_speaker_observation_with_audio_range(
-                audio_start_ms,
-                audio_end_ms,
-                classification,
-                transcript_speaker_evidence,
-                signal_quality_sufficient,
-            );
+        if let Some(asr) = self.volcengine_asr.as_ref() {
+            for (audio_start_ms, audio_end_ms, classification, transcript_speaker_evidence, signal_quality_sufficient) in local_speaker_evidence {
+                asr.note_local_speaker_observation_with_audio_range(
+                    audio_start_ms,
+                    audio_end_ms,
+                    classification,
+                    transcript_speaker_evidence,
+                    signal_quality_sufficient,
+                );
+            }
         }
         if let (Some(asr), Some(tracker)) =
             (self.volcengine_asr.as_ref(), self.local_speaker_tracker.as_ref())
