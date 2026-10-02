@@ -3638,7 +3638,9 @@ async fn recorded_startup_speaker_coverage_live_delivery_probe() {
     // A selected recording ends at its old STOP. Add explicit quiet PCM only
     // for the endpoint probe, so the candidate can run the complete new window.
     // This never stands in for fresh device input or actual editor insertion.
-    let quiet_pcm = vec![0u8; if exercise_endpoint { 5 * 32_000 } else { 0 }];
+    let quiet_ms = fixture["endpoint_quiet_ms"].as_u64().unwrap_or(5_000);
+    assert!(quiet_ms <= 15_000, "endpoint replay must remain bounded");
+    let quiet_pcm = vec![0u8; if exercise_endpoint { quiet_ms as usize * 32 } else { 0 }];
     for chunk in pcm.chunks(3_200).chain(quiet_pcm.chunks(3_200)) {
         let start_samples = bytes / 2;
         bytes += chunk.len() as u64;
