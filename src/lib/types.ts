@@ -6,7 +6,7 @@ import type { FirmwareOtaDeviceSnapshot } from './firmwareOta';
 
 export type PolishMode = 'raw' | 'light' | 'structured' | 'formal';
 
-export type InsertStatus = 'inserted' | 'pasteSent' | 'submittedUnconfirmed' | 'copiedFallback' | 'failed';
+export type InsertStatus = 'inserted' | 'pasteSent' | 'submittedUnconfirmed' | 'deferredNoTarget' | 'copiedFallback' | 'failed';
 
 export interface DictationSession {
   id: string;

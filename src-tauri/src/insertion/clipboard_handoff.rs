@@ -44,6 +44,10 @@ struct PasteResult {
     terminal_decision: Option<TerminalAppendDecision>,
 }
 
+fn paste_dispatch_allowed(focus: crate::selection::FocusedInputState) -> bool {
+    focus != crate::selection::FocusedInputState::NonEditable
+}
+
 /// An old paste receipt permits clipboard retention, not a new insertion.
 /// A punctuation-only continuation needs the current editor and caret to
 /// still contain this session's committed body. Missing readback is distinct
@@ -248,6 +252,11 @@ fn finish(pending: &mut Option<PendingRetention>, result: RetentionResult) {
 }
 
 fn run(receiver: Receiver<Command>, initial_receipt: Option<PasteReceipt>) {
+    run_with_capture(receiver, initial_receipt, crate::selection::PasteReader::capture_with_focus)
+}
+
+fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteReceipt>,
+    capture: fn() -> (Option<crate::selection::PasteReader>, crate::selection::FocusedInputState)) {
     // Native UIA/AX objects are constructed, used and dropped on this worker.
     // In particular, no COM pointer or apartment guard crosses threads.
     let mut paste_receipt = initial_receipt;
@@ -272,11 +281,17 @@ fn run(receiver: Receiver<Command>, initial_receipt: Option<PasteReceipt>) {
         match command {
             Some(Command::Paste(text, restore, shortcut, expected, reply)) => {
                 let capture_started = Instant::now();
-                let reader = if restore && expected.is_none() {
-                    None
-                } else {
-                    crate::selection::PasteReader::capture()
-                };
+                let (captured_reader, focus) = capture();
+                if !paste_dispatch_allowed(focus) {
+                    log::info!("[insertion] paste deferred: focused target is a non-editor payload_chars={} capture_ms={}",
+                        text.chars().count(), capture_started.elapsed().as_millis());
+                    // No write, shortcut, owner generation, or source commit.
+                    // Keep an older paste lease intact until its own receipt.
+                    let _ = reply.send(PasteResult { status: InsertStatus::DeferredNoTarget,
+                        terminal_decision: expected.as_ref().map(|_| TerminalAppendDecision::Unavailable) });
+                    continue;
+                }
+                let reader = if restore && expected.is_none() { None } else { captured_reader };
                 let before = reader.as_ref().and_then(|reader| reader.before().ok());
                 let terminal_decision = expected.as_ref().map(|expected| {
                     let caret_at_end = reader.as_ref().and_then(|reader| reader.caret_at_end().ok());
@@ -330,6 +345,11 @@ fn run(receiver: Receiver<Command>, initial_receipt: Option<PasteReceipt>) {
                     let _ = reply.send(RetentionResult::Superseded);
                     continue;
                 }
+                // The worker owns paste leases across all callers/sessions.
+                // A final no-target/copy-only decision cannot release a still
+                // active earlier asynchronous paste by passing false here.
+                let needs_receipt = needs_receipt || paste_receipt.as_ref()
+                    .is_some_and(|receipt| receipt.ticket == ticket.id && receipt.revision == ticket.revision);
                 if !needs_receipt {
                     let mut owner = OWNER.lock();
                     if *owner != ticket.id || ticket.revision != clipboard_revision() {
@@ -534,6 +554,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_focused_non_editor_must_not_create_a_paste_lease_for_clipboard_only_dictation() {
+        use crate::selection::FocusedInputState;
+        // The affected recording was sent to a focused Window, not a text
+        // field. A queued paste there stranded every clause in transport-only
+        // clipboard history and made whole-body retention await no receiver.
+        assert!(!paste_dispatch_allowed(FocusedInputState::NonEditable));
+        assert!(paste_dispatch_allowed(FocusedInputState::Editable));
+        // A provider failure alone is not evidence of a non-editor. Keep the
+        // existing compatibility path and delayed-consumption safeguard.
+        assert!(paste_dispatch_allowed(FocusedInputState::Unknown));
+    }
+
+    #[test]
     fn terminal_suffix_requires_current_body_and_caret_not_an_old_paste_receipt() {
         let body = "已完成的最后一句";
         assert_eq!(terminal_append_decision(Some((body, "")), Some(true), body, "。"), TerminalAppendDecision::Append);
@@ -568,7 +601,10 @@ mod tests {
         let marker = unsafe { RegisterClipboardFormatW(w!("CanIncludeInClipboardHistory")) };
         assert_ne!(marker, 0);
         let seed = format!("Listener temporary clause {}", uuid::Uuid::new_v4());
-        let final_body = format!("Listener complete body {}", uuid::Uuid::new_v4());
+        let final_body = std::env::var_os("LISTENER_CLIPBOARD_NATIVE_TEXT_FILE")
+            .map(|path| std::fs::read_to_string(path).expect("recorded owner text fixture"))
+            .unwrap_or_else(|| format!("Listener complete body {}", uuid::Uuid::new_v4()));
+        assert!(!final_body.trim().is_empty());
         let temporary_second = format!("{seed} transport-only second");
         let temporary_tail = format!("{seed} transport-only tail。");
         let newer_copy = format!("Listener newer user copy {}", uuid::Uuid::new_v4());
@@ -604,7 +640,7 @@ mod tests {
             };
             let (commands, worker_rx) = mpsc::channel();
             let worker_payload = seed.clone();
-            let worker = std::thread::spawn(move || run(worker_rx, Some(PasteReceipt {
+            let worker = std::thread::spawn(move || run_with_capture(worker_rx, Some(PasteReceipt {
                 ticket,
                 revision: transport_revision,
                 payload: worker_payload,
@@ -612,18 +648,47 @@ mod tests {
                 before: None,
                 dispatched_at: Instant::now(),
                 observation: PasteObservation::default(),
-            })));
+            }), || (None, crate::selection::FocusedInputState::NonEditable)));
             let (reply, results) = mpsc::channel();
             commands.send(Command::Retain(ClipboardTicket { id: ticket, revision: transport_revision }, final_body.clone(), true, reply)).unwrap();
             assert_eq!(results.recv_timeout(Duration::from_secs(3)).unwrap(), RetentionResult::Unavailable);
             assert_eq!(board.get_text().unwrap(), seed);
             assert!(unsafe { IsClipboardFormatAvailable(marker) }.is_ok());
+            // An empty/non-editor target does not dispatch another shortcut,
+            // alter the clipboard or consume/replace a previous paste lease.
+            let (reply, results) = mpsc::channel();
+            commands.send(Command::Paste(temporary_second.clone(), false,
+                PasteShortcut::CtrlV, None, reply)).unwrap();
+            assert_eq!(results.recv_timeout(Duration::from_secs(3)).unwrap().status, InsertStatus::DeferredNoTarget);
+            assert_eq!(clipboard_revision(), transport_revision);
+            assert_eq!(*OWNER.lock(), ticket);
+            assert_eq!(board.get_text().unwrap(), seed);
+            let (reply, results) = mpsc::channel();
+            commands.send(Command::Retain(ClipboardTicket { id: ticket, revision: transport_revision }, final_body.clone(), false, reply)).unwrap();
+            assert_eq!(results.recv_timeout(Duration::from_secs(3)).unwrap(), RetentionResult::Unavailable);
+            assert_eq!(board.get_text().unwrap(), seed);
             let (reply, results) = mpsc::channel();
             commands.send(Command::Retain(ClipboardTicket { id: ticket, revision: transport_revision }, seed.clone(), true, reply)).unwrap();
             assert_eq!(results.recv_timeout(Duration::from_secs(3)).unwrap(), RetentionResult::Stored);
             last_written_revision = clipboard_revision();
             assert_ne!(last_written_revision, transport_revision);
             assert_eq!(board.get_text().unwrap(), seed);
+            assert!(unsafe { IsClipboardFormatAvailable(marker) }.is_err());
+            std::thread::sleep(Duration::from_millis(500));
+
+            // With no outstanding transport lease, an entire no-editor
+            // recording can publish its final body without a paste receipt.
+            let no_paste_ticket = self::ticket();
+            let (reply, results) = mpsc::channel();
+            commands.send(Command::Paste(temporary_tail.clone(), false,
+                PasteShortcut::CtrlV, None, reply)).unwrap();
+            assert_eq!(results.recv_timeout(Duration::from_secs(3)).unwrap().status, InsertStatus::DeferredNoTarget);
+            assert_eq!(clipboard_revision(), no_paste_ticket.revision);
+            let (reply, results) = mpsc::channel();
+            commands.send(Command::Retain(no_paste_ticket, final_body.clone(), false, reply)).unwrap();
+            assert_eq!(results.recv_timeout(Duration::from_secs(3)).unwrap(), RetentionResult::Stored);
+            last_written_revision = clipboard_revision();
+            assert_eq!(board.get_text().unwrap(), final_body);
             assert!(unsafe { IsClipboardFormatAvailable(marker) }.is_err());
             std::thread::sleep(Duration::from_millis(500));
 
@@ -660,6 +725,9 @@ mod tests {
                 "keyboard_injection": false,
                 "unconfirmed_different_text": "Unavailable",
                 "single_clause_publication": "Stored",
+                "non_editor_paste": "DeferredNoTarget: clipboard and owner generation unchanged",
+                "non_editor_whole_body": "Stored: exact Unicode body, history exclusion absent",
+                "older_paste_lease_with_no_target_caller": "Unavailable: transport preserved",
                 "older_ticket_after_user_copy": "Superseded"
             })).unwrap()).unwrap();
         }

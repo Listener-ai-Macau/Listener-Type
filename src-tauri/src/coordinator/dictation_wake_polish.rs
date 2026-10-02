@@ -4898,6 +4898,7 @@ fn wayland_done_message(status: InsertStatus, polish_failed: bool) -> Option<Str
         } else {
             "Wayland 未启用自动输入，已复制到剪贴板，请手动粘贴".to_string()
         }),
+        InsertStatus::DeferredNoTarget => Some("未找到输入框，正文已保存在历史记录".to_string()),
         InsertStatus::Failed => Some("Wayland 未启用自动输入，剪贴板写入失败".to_string()),
     }
 }
@@ -4927,6 +4928,7 @@ fn default_done_message(
         } else {
             "已复制到剪贴板，请粘贴".to_string()
         }),
+        InsertStatus::DeferredNoTarget => Some("未找到输入框，正文已保存在历史记录".to_string()),
         InsertStatus::Failed => Some(if clipboard_retained {
             if cfg!(target_os = "windows") {
                 "上屏失败，内容在剪贴板，请 Ctrl+V".to_string()
@@ -4944,7 +4946,7 @@ fn default_done_message(
 fn device_processing_final_succeeded(status: InsertStatus, error_code: Option<&str>) -> bool {
     if matches!(
         status,
-        InsertStatus::Failed | InsertStatus::SubmittedUnconfirmed
+        InsertStatus::Failed | InsertStatus::SubmittedUnconfirmed | InsertStatus::DeferredNoTarget
     ) {
         return false;
     }

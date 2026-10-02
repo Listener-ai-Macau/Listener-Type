@@ -103,6 +103,9 @@ pub enum InsertStatus {
     /// receiver acknowledgement proving that the original target rendered the
     /// text. This must not be presented as confirmed on-screen insertion.
     SubmittedUnconfirmed,
+    /// A positively observed non-editor received no paste/input events. The
+    /// session remains unsubmitted until its full clipboard fallback is saved.
+    DeferredNoTarget,
     CopiedFallback,
     Failed,
 }

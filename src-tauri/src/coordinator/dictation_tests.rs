@@ -12448,6 +12448,25 @@ fn voice_activation_stop_never_counts_as_user_initiated() {
 }
 
 #[test]
+fn clipboard_only_completion_reports_copy_only_after_the_full_body_was_stored() {
+    use super::final_clipboard_insert_status;
+    use InsertStatus::*;
+    assert_eq!(final_clipboard_insert_status(DeferredNoTarget, true, "stored"), CopiedFallback);
+    for result in ["pending", "failed", "superseded", "unconfirmed", "disabled"] {
+        assert_eq!(final_clipboard_insert_status(DeferredNoTarget, true, result), DeferredNoTarget);
+    }
+    assert_eq!(final_clipboard_insert_status(DeferredNoTarget, false, "stored"), DeferredNoTarget);
+    assert_eq!(final_clipboard_insert_status(PasteSent, true, "stored"), PasteSent);
+    assert_eq!(final_clipboard_insert_status(Inserted, true, "stored"), Inserted);
+    assert!(!device_processing_final_succeeded(DeferredNoTarget, None));
+    assert_eq!(dictation_error_code(DeferredNoTarget, false, true, true, false), Some("noEditableTarget"));
+    for status in [DeferredNoTarget, CopiedFallback] {
+        assert!(should_send_post_dictation_key(true, PostDictationKey::Enter, status,
+            true, true, true, false).is_none());
+    }
+}
+
+#[test]
 fn post_dictation_key_requires_a_successful_plain_dictation_insert() {
     let enter = should_send_post_dictation_key(
         true,

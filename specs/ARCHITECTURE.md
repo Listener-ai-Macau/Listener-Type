@@ -186,6 +186,16 @@ equality of history policy. That publication keeps the same bytes for delayed
 readers and never sends a second paste. User copies and new sessions retain their
 existing generation/revision protection. Existing clipboard history is not cleared.
 
+Focused input state is an explicit native fact: editable, positively non-editable,
+or unknown. An exposed non-input container defers paste before any transport write,
+shortcut or delivery ledger commit. At completion its whole owner transcript may
+be published as copy-only without inventing an editor receipt. Unreadable custom
+or web controls remain unknown and keep the existing paste compatibility path.
+The worker protects any outstanding paste lease even if a later caller asks for
+copy-only retention; neither a target change nor a false receipt hint releases
+an asynchronous reader's payload. Copy-only success is reported only after the
+full body was stored and never authorizes a post-dictation send key.
+
 Pre-wake preamble rejection uses the admitted source prefix of this session.
 Once that prefix has been submitted successfully, mentioning the wake phrase
 later in the same body cannot re-run initial admission and block streaming.

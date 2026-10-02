@@ -239,6 +239,14 @@ mod linux_selection {
     }
 }
 
+/// Native focus facts. An unavailable accessibility provider stays Unknown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FocusedInputState {
+    Editable,
+    NonEditable,
+    Unknown,
+}
+
 /// Read the editor captured before a paste, even if focus moves afterwards.
 /// It never selects text, copies, or activates an application.
 pub(crate) struct PasteReader {
@@ -250,12 +258,24 @@ pub(crate) struct PasteReader {
 
 impl PasteReader {
     pub(crate) fn capture() -> Option<Self> {
+        Self::capture_with_focus().0
+    }
+
+    pub(crate) fn capture_with_focus() -> (Option<Self>, FocusedInputState) {
         #[cfg(target_os = "windows")]
-        { windows_uia::WindowsSelectionReader::new_for_paste().ok().map(|reader| Self { reader }) }
+        {
+            let (reader, state) = windows_uia::WindowsSelectionReader::capture_for_paste();
+            (reader.map(|reader| Self { reader }), state)
+        }
         #[cfg(target_os = "macos")]
-        { macos_ax::PasteReader::capture().map(|reader| Self { reader }) }
+        {
+            let reader = macos_ax::PasteReader::capture();
+            let state = reader.as_ref().map(|reader| reader.focused_input_state())
+                .unwrap_or(FocusedInputState::Unknown);
+            (reader.map(|reader| Self { reader }), state)
+        }
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-        { None }
+        { (None, FocusedInputState::Unknown) }
     }
 
     pub(crate) fn before(&self) -> Result<(String, String), String> {
@@ -383,6 +403,17 @@ mod macos_ax {
                 } else { None };
                 CFRelease(value);
                 result
+            }
+        }
+
+        pub(super) fn focused_input_state(&self) -> super::FocusedInputState {
+            use super::FocusedInputState;
+            // Opaque web/custom controls remain Unknown and keep the existing
+            // paste path. Only a positively exposed non-input role defers it.
+            match self.string_attribute(b"AXRole\0").as_deref() {
+                Some("AXTextField" | "AXTextArea") => FocusedInputState::Editable,
+                Some("AXWindow" | "AXToolbar" | "AXMenuBar") => FocusedInputState::NonEditable,
+                _ => FocusedInputState::Unknown,
             }
         }
 

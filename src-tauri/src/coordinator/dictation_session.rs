@@ -22,6 +22,14 @@ fn unconfirmed_paste_uses_clipboard(
         && (early_paste_seen || dispatched_text != final_text)
 }
 
+fn final_clipboard_insert_status(status: InsertStatus, retention_enabled: bool, result: &str) -> InsertStatus {
+    if status == InsertStatus::DeferredNoTarget && retention_enabled && result == "stored" {
+        InsertStatus::CopiedFallback
+    } else {
+        status
+    }
+}
+
 async fn retain_final_clipboard_with_foreground_budget(
     inner: &Arc<Inner>,
     session_id: SessionId,

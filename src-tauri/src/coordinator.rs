@@ -3073,6 +3073,14 @@ fn insert_via_non_tsf_fallback(
         );
         InsertStatus::Failed
     };
+    if paste_status == InsertStatus::DeferredNoTarget {
+        return WindowsInsertionResult {
+            status: paste_status,
+            target_confirmed: false,
+            route: DeliveryRoute::CopyOnly,
+            submitted_text: None,
+        };
+    }
     if paste_status == InsertStatus::PasteSent || paste_status == InsertStatus::Inserted {
         log::info!(
             "[windows-ime] non-TSF clipboard paste submitted status={paste_status:?} chars={}",

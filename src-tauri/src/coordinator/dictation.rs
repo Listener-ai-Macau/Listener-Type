@@ -4410,12 +4410,15 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                             DeliveryExternalResult {
                                 status,
                                 target_confirmed: false,
-                                route: if cfg!(target_os = "macos") {
+                                route: if status == InsertStatus::DeferredNoTarget {
+                                    DeliveryRoute::CopyOnly
+                                } else if cfg!(target_os = "macos") {
                                     DeliveryRoute::Direct
                                 } else {
                                     DeliveryRoute::Paste
                                 },
-                                submitted_text: Some(polished),
+                                submitted_text: matches!(status, InsertStatus::Inserted | InsertStatus::PasteSent
+                                    | InsertStatus::SubmittedUnconfirmed).then_some(polished),
                             }
                         }
                     }
@@ -4437,6 +4440,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     }
     let submitted_chars = delivery_submission.submitted_text.as_ref().map(|text| text.chars().count() as u32);
     let source_coverage = match pause_early_outcome.as_ref() {
+        None if delivery_submission.status == InsertStatus::DeferredNoTarget => "clipboard_only",
         _ if terminal_suffix_skipped => "terminal_suffix_not_appended",
         Some((_, Some(remainder), _)) if remainder.is_empty() => "covered",
         Some((_, Some(_), _)) | Some((_, None, Some(_))) if final_payload_submitted => "tail_submitted",
@@ -4479,6 +4483,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     } else {
         (true, "disabled")
     };
+    let status = final_clipboard_insert_status(status, retain_plain_dictation, clipboard_result);
+    delivery_submission.status = status;
 
     let mut post_dictation_key_result = "not_eligible";
     if let Some(binding) = should_send_post_dictation_key(
@@ -4728,6 +4734,8 @@ pub(super) fn dictation_error_code(
 ) -> Option<&'static str> {
     if status == InsertStatus::SubmittedUnconfirmed {
         Some("insertUnconfirmed")
+    } else if status == InsertStatus::DeferredNoTarget {
+        Some("noEditableTarget")
     } else if wayland_session && status == InsertStatus::Failed {
         Some("waylandClipboardWriteFailed")
     } else if !focus_ready_for_paste && status == InsertStatus::Failed {

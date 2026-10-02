@@ -10,10 +10,39 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
 use windows::Win32::UI::Accessibility::{
-    CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationTextPattern, UIA_EditControlTypeId,
-    UIA_TextPatternId, TextPatternRangeEndpoint_Start, TextPatternRangeEndpoint_End,
+    CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern, UIA_EditControlTypeId,
+    UIA_TextPatternId, UIA_WindowControlTypeId, UIA_CONTROLTYPE_ID,
+    UIA_ValuePatternId, UIA_PATTERN_ID,
+    TextPatternRangeEndpoint_Start, TextPatternRangeEndpoint_End,
 };
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+use super::FocusedInputState;
+
+fn pattern_available(element: &IUIAutomationElement, pattern: UIA_PATTERN_ID) -> Option<bool> {
+    use windows::core::{Interface, IUnknown};
+    // Preserve the native S_OK/null distinction. The generated IUnknown
+    // wrapper turns a successful null pattern into E_POINTER, hiding the
+    // difference between an absent capability and a failed provider call.
+    let mut raw = std::ptr::null_mut();
+    let result = unsafe {
+        (Interface::vtable(element).GetCurrentPattern)(Interface::as_raw(element), pattern, &mut raw)
+    };
+    let available = !raw.is_null();
+    if available { unsafe { drop(IUnknown::from_raw(raw)); } }
+    result.is_ok().then_some(available)
+}
+
+fn focused_input_state(control: UIA_CONTROLTYPE_ID, keyboard_focusable: Option<bool>,
+    text_pattern: Option<bool>, value_pattern: Option<bool>) -> FocusedInputState {
+    if control == UIA_EditControlTypeId {
+        FocusedInputState::Editable
+    } else if control == UIA_WindowControlTypeId && keyboard_focusable == Some(false)
+        && text_pattern == Some(false) && value_pattern == Some(false) {
+        FocusedInputState::NonEditable
+    } else {
+        FocusedInputState::Unknown
+    }
+}
 
 pub(crate) struct WindowsSelectionReader {
     pattern: IUIAutomationTextPattern,
@@ -36,15 +65,18 @@ impl WindowsSelectionReader {
     }
 
     fn new_with_control_policy(target_hwnd: usize, require_editable: bool) -> Result<Self, String> {
-        Self::new_with_budget(target_hwnd, require_editable, false)
+        Self::new_with_budget(target_hwnd, require_editable, false, &mut FocusedInputState::Unknown)
     }
 
-    pub(crate) fn new_for_paste() -> Result<Self, String> {
+    pub(crate) fn capture_for_paste() -> (Option<Self>, FocusedInputState) {
         let target = unsafe { GetForegroundWindow().0 as usize };
-        Self::new_with_budget(target, true, true)
+        let mut state = FocusedInputState::Unknown;
+        let reader = Self::new_with_budget(target, true, true, &mut state).ok();
+        (reader, state)
     }
 
-    fn new_with_budget(target_hwnd: usize, require_editable: bool, bounded: bool) -> Result<Self, String> {
+    fn new_with_budget(target_hwnd: usize, require_editable: bool, bounded: bool,
+        state: &mut FocusedInputState) -> Result<Self, String> {
         let init = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         let apartment = if init.is_ok() {
             ComApartment(true)
@@ -76,12 +108,24 @@ impl WindowsSelectionReader {
         {
             return Err("accessibility editor does not have keyboard focus".into());
         }
-        if require_editable
-            && unsafe { focused.CurrentControlType() }
-                .map_err(|err| format!("focused editor control type unavailable: {err}"))?
-                != UIA_EditControlTypeId
-        {
-            return Err("focused control is not an editable text field".into());
+        if require_editable {
+            let control = unsafe { focused.CurrentControlType() }
+                .map_err(|err| format!("focused editor control type unavailable: {err}"))?;
+            if control == UIA_EditControlTypeId {
+                *state = FocusedInputState::Editable;
+            } else {
+                // Positive container/capability facts, never a window title or
+                // a failed text read. Provider failure stays Unknown; only a
+                // successful native query can establish absent patterns.
+                let focusable = unsafe { focused.CurrentIsKeyboardFocusable() }.ok().map(|v| v.as_bool());
+                let text = pattern_available(&focused, UIA_TextPatternId);
+                let value = pattern_available(&focused, UIA_ValuePatternId);
+                if unsafe { GetForegroundWindow().0 as usize } == target_hwnd
+                    && unsafe { focused.CurrentHasKeyboardFocus() }.ok().is_some_and(|v| v.as_bool()) {
+                    *state = focused_input_state(control, focusable, text, value);
+                }
+                return Err("focused control is not an editable text field".into());
+            }
         }
         let pattern: IUIAutomationTextPattern =
             unsafe { focused.GetCurrentPatternAs(UIA_TextPatternId) }
@@ -162,6 +206,26 @@ impl WindowsSelectionReader {
                 .map_err(|err| err.to_string())?;
             let text = tail.GetText(8_193).map_err(|err| err.to_string())?.to_string();
             Ok(text.chars().all(|ch| matches!(ch, '\r' | '\n')))
+        }
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+    use windows::Win32::UI::Accessibility::{UIA_CustomControlTypeId, UIA_DocumentControlTypeId};
+
+    #[test]
+    fn exposed_window_container_is_distinct_from_unreadable_or_custom_editor() {
+        assert_eq!(focused_input_state(UIA_WindowControlTypeId, Some(false), Some(false), Some(false)), FocusedInputState::NonEditable);
+        assert_eq!(focused_input_state(UIA_EditControlTypeId, Some(true), Some(false), Some(false)), FocusedInputState::Editable);
+        for control in [UIA_CustomControlTypeId, UIA_DocumentControlTypeId] {
+            assert_eq!(focused_input_state(control, Some(false), Some(false), Some(false)), FocusedInputState::Unknown);
+        }
+        for facts in [(None, Some(false), Some(false)), (Some(false), None, Some(false)),
+            (Some(false), Some(false), None), (Some(true), Some(false), Some(false)),
+            (Some(false), Some(true), Some(false)), (Some(false), Some(false), Some(true))] {
+            assert_eq!(focused_input_state(UIA_WindowControlTypeId, facts.0, facts.1, facts.2), FocusedInputState::Unknown);
         }
     }
 }
