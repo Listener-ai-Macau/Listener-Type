@@ -236,11 +236,16 @@ impl SettledTargetEndpointClock {
                 .latest_update
                 .as_ref()
                 .is_some_and(|update| self.owner_spoke_after_body_delivery(update));
-        // Visible text growth is positive dictation evidence: recognized
-        // owner-attributed words appearing is the strongest "still dictating"
-        // signal, so it refreshes the unclassified-evidence budget (see
-        // EMBEDDED_OWNER_POSITIVE_EVIDENCE_BUDGET_MS).
-        if new_owner_speech_after_delivery && visible_chars
+        // After body delivery, tracked sessions renew this budget when a newer
+        // local owner edge arrives in observe(). A visual-only provider tail
+        // must not reuse that same older edge on every preview growth. Its
+        // words remain visible and pending while attribution settles. Before
+        // first delivery, and without tracking, preserve flowing-body startup
+        // (including the recorded r10 uncertain-owner script pause).
+        let visible_growth_is_owner_evidence = self.last_body_delivery_at.is_none()
+            || self.latest_update.as_ref()
+                .is_none_or(|update| !update.local_speaker_tracking_enabled);
+        if visible_growth_is_owner_evidence && new_owner_speech_after_delivery && visible_chars
             > self
                 .last_visible_body_signature
                 .map_or(0, |(_, previous_chars)| previous_chars)

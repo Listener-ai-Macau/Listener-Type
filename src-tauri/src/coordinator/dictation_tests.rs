@@ -7870,6 +7870,56 @@ fn automatic_wake_target_speaker_endpoint_uses_one_policy_snapshot_for_decision_
 }
 
 #[test]
+fn provisional_preview_growth_cannot_reuse_an_old_owner_observation() {
+    use crate::asr::volcengine::{LocalSpeakerClassificationKind, TargetSpeakerUpdate};
+    let started = std::time::Instant::now();
+    let owner = TargetSpeakerUpdate {
+        speaker_id: None, target_speech_end_ms: None,
+        provider_audio_duration_ms: Some(11_800), audio_duration_ms: Some(12_000),
+        local_speech_end_ms: Some(11_872), qualified_owner_speech_end_ms: Some(11_776),
+        qualified_owner_activity_advanced: false,
+        local_speaker_classification_kind: None,
+        local_speaker_signal_quality_sufficient: None,
+        local_speaker_observation_end_ms: Some(11_776),
+        local_tentative_owner_speech_end_ms: None,
+        local_target_speech_end_ms: Some(11_776), local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true, stable_attributed_speech_end_ms: None,
+        target_activity_advanced: false, pending_unattributed_speech: true,
+        pending_activity_advanced: false, speaker_info_present: false,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.automatic_wake_session = true;
+    clock.last_body_delivery_at = Some(started);
+    clock.last_body_delivery_audio_ms = Some(10_200);
+    clock.last_positive_owner_evidence_at = Some(started);
+    clock.latest_update = Some(owner.clone());
+    for second in 1..=8 {
+        clock.note_visible_body_boundary(false, 53 + second, started + std::time::Duration::from_secs(second as u64));
+        assert_eq!(clock.last_positive_owner_evidence_at, Some(started),
+            "one qualified owner edge cannot confirm every later provisional word");
+    }
+    assert!(!clock.positive_owner_evidence_live(started + std::time::Duration::from_secs(8)));
+    let new_owner_at = started + std::time::Duration::from_secs(9);
+    let new_owner = TargetSpeakerUpdate {
+        audio_duration_ms: Some(21_000), local_speech_end_ms: Some(21_000),
+        local_speaker_observation_end_ms: Some(21_000),
+        local_speaker_classification_kind: Some(LocalSpeakerClassificationKind::Target),
+        local_speaker_signal_quality_sufficient: Some(true),
+        local_target_speech_end_ms: Some(21_000), qualified_owner_speech_end_ms: Some(21_000),
+        qualified_owner_activity_advanced: true, ..owner
+    };
+    clock.observe(&new_owner, true, new_owner_at);
+    assert_eq!(clock.last_positive_owner_evidence_at, Some(new_owner_at),
+        "a genuinely newer owner observation still renews continuation");
+
+    let mut manual = super::SettledTargetEndpointClock::default();
+    manual.note_visible_body_boundary(false, 20, started);
+    manual.note_visible_body_boundary(false, 30, new_owner_at);
+    assert_eq!(manual.last_positive_owner_evidence_at, Some(new_owner_at),
+        "no-tracker dictation keeps visible-body continuity");
+}
+
+#[test]
 fn automatic_endpoint_does_not_stop_during_a_new_owner_compatible_vad_onset() {
     // Installed session 651ad979: PendingSpeech began 258 ms before the
     // three-second owner deadline, but automatic STOP ignored the VAD and

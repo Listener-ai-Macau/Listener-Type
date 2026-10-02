@@ -7691,7 +7691,8 @@ impl VolcengineStreamingASR {
     /// Session-ledger snapshot eligible to stand in for the provider final:
     /// the stream is finishing, the ledger is non-empty, attribution never
     /// froze an isolation ceiling and never saw a non-target window, and the
-    /// text has been byte-stable for at least `min_stable`.
+    /// text has been byte-stable for at least `min_stable` and covers the
+    /// current provider content. Pending attribution is not source completion.
     fn stable_ledger_final_snapshot(&self, min_stable: Duration) -> Option<RawTranscript> {
         // Early sealing cancels the whole provider, including its owner-only
         // worker. A mixture cannot win that race after independent rejection.
@@ -7705,6 +7706,17 @@ impl VolcengineStreamingASR {
         }
         let committed_at = st.best_transcript_committed_at?;
         if st.best_transcript_text.trim().is_empty() {
+            return None;
+        }
+        let pending_key = crate::transcript_boundary::content_key(&st.pending_unattributed_text);
+        if st.transcript_evidence.has_unresolved_provider_content(&st.best_transcript_text)
+            || (!pending_key.is_empty()
+                && !crate::transcript_boundary::content_key(&st.best_transcript_text).ends_with(&pending_key))
+        {
+            log::info!(
+                "[asr] stable ledger early seal withheld for unresolved provider content ledger_chars={} pending_chars={}",
+                st.best_transcript_text.chars().count(), st.pending_unattributed_text.chars().count(),
+            );
             return None;
         }
         if committed_at.elapsed() < min_stable {
@@ -10165,6 +10177,69 @@ mod tests {
         }
         *noise_only.target_speaker_stream.lock() = Some(super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(None, true, false));
         assert_eq!(noise_only.pause_early_delivery_ledger_snapshot_after(Duration::ZERO, "").unwrap().text, text, "a noise-only residual must not suppress the clean primary stream");
+    }
+
+    #[test]
+    fn stable_ledger_cannot_seal_a_recorded_unresolved_owner_tail() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: String::new(), access_token: String::new(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            }, Vec::new(),
+        );
+        // Physical Beta.13 recording 89b37e33: the owner confirmed this tail.
+        // The provider had it while the stable owner ledger still ended at
+        // "不行了"; cancelling after 170 ms prevented the final attribution.
+        let prefix = "开始录音，我现在是在哦，你看一下这个干扰是不是能够正立的排除，因为我记得之前是可以的，但是不知道为什么最近好像不行了";
+        let full = format!("{prefix}。然后你看一下这个东西怎么样搞会比较好？");
+        {
+            let mut st = asr.state.lock();
+            st.finishing = true;
+            st.best_transcript_text = prefix.into();
+            st.best_transcript_committed_at = Some(Instant::now() - Duration::from_secs(10));
+            st.pending_unattributed_text = full.clone();
+            st.transcript_evidence.note_provider_revision(&full, Some(21_238), false, false);
+        }
+        assert!(asr.stable_ledger_final_snapshot(Duration::ZERO).is_none(),
+            "unchanged owner prefix is not proof that the pending tail is complete");
+        asr.state.lock().pending_unattributed_text.clear();
+        assert!(asr.stable_ledger_final_snapshot(Duration::ZERO).is_none(),
+            "clearing a transient pending slot cannot erase provider source coverage");
+        {
+            let mut st = asr.state.lock();
+            st.best_transcript_text = full.clone();
+            st.transcript_evidence.note_provider_revision(&full, Some(21_238), true, true);
+        }
+        assert_eq!(asr.stable_ledger_final_snapshot(Duration::ZERO).unwrap().text, full);
+    }
+
+    #[tokio::test]
+    async fn unresolved_tail_waits_for_the_complete_final_instead_of_cancelling() {
+        let asr = Arc::new(VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: String::new(), access_token: String::new(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            }, Vec::new(),
+        ));
+        let prefix = "已经上屏的本人开头。";
+        let full = "已经上屏的本人开头。本人还在继续的完整尾句。";
+        {
+            let mut st = asr.state.lock();
+            st.finishing = true;
+            st.best_transcript_text = prefix.into();
+            st.best_transcript_committed_at = Some(Instant::now() - Duration::from_secs(10));
+            st.pending_unattributed_text = full.into();
+            st.transcript_evidence.note_provider_revision(full, Some(12_000), false, false);
+        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        *asr.final_rx.lock() = Some(rx);
+        let provider = tokio::spawn(async move {
+            tokio::time::sleep(EARLY_SEAL_FINAL_HEAD_START + Duration::from_millis(30)).await;
+            tx.send(Ok(RawTranscript { text: full.into(), duration_ms: 12_000 }))
+                .expect("pending source must keep the final receiver alive");
+        });
+        assert_eq!(asr.await_final_result_with_early_seal().await.unwrap().text, full);
+        provider.await.unwrap();
     }
 
     #[test]
@@ -20691,6 +20766,130 @@ mod tests {
             "provider_cadence_probe_status={}",
             if all_succeeded { "PASS" } else { "NO_GO" }
         );
+    }
+
+    /// Replays consented device PCM with the identity observations captured
+    /// during that recording. It exercises provider finalization, not a new
+    /// acoustic identity decision or an actual editor/hardware acceptance.
+    #[tokio::test]
+    #[ignore = "requires explicit consented PCM, captured observations and installed provider credentials"]
+    async fn recorded_pending_tail_finalization_probe() {
+        use crate::persistence::{CredentialAccount, CredentialsVault};
+        use crate::speaker_verification::SessionSpeakerClassification;
+        let input_path = std::env::var("LISTENER_PENDING_TAIL_REPLAY_INPUT").expect("explicit recording fixture");
+        let output_path = std::env::var("LISTENER_PENDING_TAIL_REPLAY_OUTPUT").expect("explicit output path");
+        let fixture: Value = serde_json::from_slice(&std::fs::read(&input_path).unwrap()).unwrap();
+        let pcm = std::fs::read(fixture["pcm_path"].as_str().unwrap()).unwrap();
+        assert!(!pcm.is_empty() && pcm.len() % 2 == 0 && pcm.len() <= 60 * 32_000);
+        let input_sha256 = {
+            use sha2::{Digest, Sha256};
+            format!("{:x}", Sha256::digest(&pcm))
+        };
+        assert_eq!(input_sha256, fixture["pcm_sha256"].as_str().unwrap().to_ascii_lowercase());
+        let credential = |account| CredentialsVault::get(account).unwrap().filter(|v| !v.is_empty()).expect("installed credential");
+        let mut asr = VolcengineStreamingASR::new_with_session_options(
+            VolcengineCredentials {
+                app_id: credential(CredentialAccount::VolcengineAppKey),
+                access_token: credential(CredentialAccount::VolcengineAccessKey),
+                resource_id: credential(CredentialAccount::VolcengineResourceId),
+            }, Vec::new(), VolcengineSessionOptions::default(),
+        );
+        asr.enable_diagnostic_trace();
+        let asr = Arc::new(asr);
+        asr.note_local_speaker_tracking_started(fixture["wake_phrase"].as_str().unwrap());
+        asr.note_local_speaker_profile_adaptive(false);
+        asr.open_session().await.unwrap();
+        asr.mark_audio_delivery_ready();
+        let observations = fixture["observations"].as_array().unwrap();
+        let mut next_observation = 0;
+        let mut bytes = 0u64;
+        for chunk in pcm.chunks(TARGET_AUDIO_CHUNK_BYTES) {
+            bytes += chunk.len() as u64;
+            let end_ms = bytes / 32;
+            let has_signal = chunk.chunks_exact(2).any(|s| i16::from_le_bytes([s[0], s[1]]).unsigned_abs() >= 512);
+            asr.note_local_audio_activity(end_ms, has_signal);
+            while next_observation < observations.len() && observations[next_observation]["end_ms"].as_u64().unwrap() <= end_ms {
+                let row = &observations[next_observation];
+                let score = row["score"].as_f64().unwrap() as f32;
+                let classification = match row["kind"].as_str().unwrap() {
+                    "Target" => SessionSpeakerClassification::Target { score },
+                    "NonTarget" => SessionSpeakerClassification::NonTarget { score },
+                    "Uncertain" => SessionSpeakerClassification::Uncertain { score },
+                    _ => panic!("invalid captured classification"),
+                };
+                asr.note_local_speaker_observation_with_quality(
+                    row["end_ms"].as_u64().unwrap(), classification,
+                    crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive,
+                    row["quality"].as_bool().unwrap(),
+                );
+                next_observation += 1;
+            }
+            asr.consume_pcm_chunk(chunk);
+            tokio::time::sleep(Duration::from_millis(chunk.len() as u64 / 32)).await;
+        }
+        let before_seal = asr.state.lock().best_transcript_text.clone();
+        let finishing_at = Instant::now();
+        let send = asr.send_last_frame().await;
+        let result = asr.await_final_result_with_early_seal().await;
+        let elapsed_ms = finishing_at.elapsed().as_millis();
+        let (text, error) = match result { Ok(r) => (r.text, None), Err(e) => (String::new(), Some(e.to_string())) };
+        let expected_tail = fixture["expected_owner_tail"].as_str().unwrap();
+        // Provider word revisions are separate from dropping an entire owner
+        // clause. Alternatives must be explicitly supplied in this fixture;
+        // production admission does not normalize or whitelist these phrases.
+        let mut expected_variants = vec![expected_tail];
+        if let Some(variants) = fixture["accepted_owner_tail_variants"].as_array() {
+            expected_variants.extend(variants.iter().map(|variant| variant.as_str().unwrap()));
+        }
+        let selected_key = crate::transcript_boundary::content_key(&text);
+        let matched_tail = expected_variants.iter().copied().find(|tail| {
+            selected_key.contains(&crate::transcript_boundary::content_key(tail))
+        });
+        let tail_retained = matched_tail.is_some();
+        let trace = asr.take_diagnostic_trace();
+        let provider_final_received = trace.entries.iter().any(|entry| entry.final_frame);
+        let provider_final = trace.entries.iter().rev().find(|entry| {
+            entry.final_frame && entry.stage == "provider_raw_result"
+        });
+        let filtered_final = trace.entries.iter().rev().find(|entry| {
+            entry.final_frame && entry.stage == "speaker_filtered_result"
+        });
+        let selected_owner_filtered_final = filtered_final.is_some_and(|entry| {
+            crate::transcript_boundary::content_key(&entry.text) == selected_key
+        });
+        let foreign_phrases = fixture["expected_foreign_phrases"].as_array().unwrap();
+        assert!(!foreign_phrases.is_empty());
+        let foreign_present_in_provider = provider_final.is_some_and(|entry| {
+            let raw_key = crate::transcript_boundary::content_key(&entry.text);
+            foreign_phrases.iter().any(|phrase| {
+                raw_key.contains(&crate::transcript_boundary::content_key(phrase.as_str().unwrap()))
+            })
+        });
+        let foreign_excluded_from_final = foreign_phrases.iter().all(|phrase| {
+            !selected_key.contains(&crate::transcript_boundary::content_key(phrase.as_str().unwrap()))
+        });
+        let send_error = send.err().map(|e| e.to_string());
+        let passed = error.is_none() && send_error.is_none() && tail_retained
+            && provider_final_received && selected_owner_filtered_final
+            && foreign_present_in_provider && foreign_excluded_from_final;
+        let report = serde_json::json!({
+            "status": if passed { "PASS" } else { "FAIL" },
+            "scope": "consented recording and captured identity observations; provider finalization only; no physical/editor or new identity accuracy pass",
+            "source_session_id": fixture["source_session_id"], "pcm_sha256": fixture["pcm_sha256"],
+            "captured_observations": next_observation, "input_bytes": pcm.len(),
+            "ledger_before_stop": before_seal, "selected_final": text,
+            "expected_owner_tail": expected_tail, "owner_tail_retained": tail_retained,
+            "accepted_owner_tail_variants": expected_variants, "matched_owner_tail": matched_tail,
+            "expected_foreign_phrases": foreign_phrases,
+            "selected_owner_filtered_final": selected_owner_filtered_final,
+            "foreign_present_in_provider": foreign_present_in_provider,
+            "foreign_excluded_from_final": foreign_excluded_from_final,
+            "send_final_error": send_error, "final_error": error,
+            "stop_to_final_ms": elapsed_ms, "provider_final_received": provider_final_received,
+            "trace": trace,
+        });
+        std::fs::write(output_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+        assert!(passed, "recorded owner tail must survive while provider-attributed foreign text stays excluded; see saved replay report");
     }
 
     /// Runs the same provider diarization and local session-voiceprint path as

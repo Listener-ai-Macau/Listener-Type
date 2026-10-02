@@ -177,6 +177,17 @@ An owner-analysis wait budget belongs to the qualified owner watermark. Ending
 and restarting asynchronous background jobs releases their active hold but does
 not grant a fresh budget. Expiration remains latched until new qualified owner
 activity; provider revisions and repeated foreign/noise windows cannot renew it.
+After body delivery in a tracked session, provisional preview growth also cannot
+reuse one old owner edge to renew that budget. New qualified owner observations
+still renew continuation. Before first delivery, and without local tracking,
+flowing body growth retains its existing startup and continuation protection.
+
+An unchanged admitted transcript is not a completeness certificate. Early final
+sealing compares it with the latest nonempty provider revision and pending source
+tail; unresolved content vetoes sealing without admitting raw mixture as owner
+text. This keeps the provider alive to finish speaker attribution and final text.
+Punctuation-only revisions do not hold the body boundary, and a superseded longer
+provider revision cannot permanently block a now-complete shorter owner result.
 
 Independent owner audio also supplies live transcript authority. Strong physical
 interference plus an explicitly rejected extracted voice switches product preview,

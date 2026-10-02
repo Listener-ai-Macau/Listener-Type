@@ -388,6 +388,18 @@ impl TranscriptEvidenceLedger {
             .map(|revision| revision.text.as_str())
     }
 
+    /// An unchanged admitted prefix is not a complete source boundary when
+    /// the latest provider revision still contains unresolved content. This
+    /// only vetoes early sealing; it never admits the raw text as owner text.
+    pub(crate) fn has_unresolved_provider_content(&self, owner_candidate: &str) -> bool {
+        self.revisions.iter().rev()
+            .find(|revision| !revision.text.trim().is_empty())
+            .is_some_and(|revision| {
+                crate::transcript_boundary::content_key(&revision.text)
+                    != crate::transcript_boundary::content_key(owner_candidate)
+            })
+    }
+
     /// Claims the sole terminal transcript delivery for this provider session.
     /// A caller may use raw fallback only after its ownership policy has proved
     /// there is no explicit non-target exclusion for the session.
