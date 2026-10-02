@@ -3516,6 +3516,12 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // Build immutable evidence candidates first. Wake-prefix stripping is a
     // deterministic normalization; candidate selection happens exactly once
     // below in `arbitrate_product_final_transcript`.
+    note_automatic_wake_transcript_timing(
+        inner,
+        current_session_id,
+        volcengine_for_empty_retry.as_ref()
+            .and_then(|asr| asr.provider_timed_transcript_snapshot()),
+    );
     let mut provider_primary = raw;
     let unfiltered_text = provider_primary.text.clone();
     provider_primary.text =

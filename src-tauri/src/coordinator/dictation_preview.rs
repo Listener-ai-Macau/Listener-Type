@@ -846,6 +846,8 @@ fn arm_automatic_wake_text_guard(
     *inner.embedded_audio_automatic_wake_guard.lock() = Some(AutomaticWakeGuard {
         session_id,
         phrase,
+        activation_audio_end_ms: None,
+        activation_prefix_evidence: Vec::new(),
         latest_audio_ms: capsule_audio_boundary_ms,
         initial_body_wait_until_audio_ms: body_wait_armed_immediately.then_some(
             capsule_audio_boundary_ms.saturating_add(EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS),
@@ -1035,13 +1037,50 @@ fn automatic_wake_body_started(inner: &Arc<Inner>, session_id: SessionId) -> boo
         .is_some_and(|guard| guard.session_id == session_id && guard.body_started)
 }
 
+fn bind_automatic_wake_audio_boundary(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    wake_end_seconds: f32,
+    retained_audio_offset_bytes: usize,
+) {
+    if !wake_end_seconds.is_finite() || wake_end_seconds <= 0.0 { return; }
+    let wake_end_ms = (wake_end_seconds as f64 * 1000.0).round() as u64;
+    let offset_ms = retained_audio_offset_bytes as u64 / 32;
+    let Some(relative_end_ms) = wake_end_ms.checked_sub(offset_ms) else { return; };
+    if let Some(guard) = inner.embedded_audio_automatic_wake_guard.lock().as_mut()
+        .filter(|guard| guard.session_id == session_id)
+    {
+        guard.activation_audio_end_ms = Some(relative_end_ms);
+        log::info!("[wake-phrase] retained audio activation boundary bound session_id={session_id} activation_end_ms={relative_end_ms} retained_origin_ms={offset_ms}");
+    }
+}
+
+fn note_automatic_wake_transcript_timing(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    timing: Option<crate::transcript_boundary::TimedTranscript>,
+) {
+    let Some(timing) = timing else { return; };
+    let mut slot = inner.embedded_audio_automatic_wake_guard.lock();
+    let Some(guard) = slot.as_mut().filter(|guard| guard.session_id == session_id) else { return; };
+    let Some(end_ms) = guard.activation_audio_end_ms else { return; };
+    let Some(evidence) = timing.activation_prefix(end_ms, &guard.phrase) else { return; };
+    guard.activation_prefix_evidence.retain(|prior| prior.source_key != evidence.source_key);
+    // Keep bounded revision evidence: an early-sealed provider ledger may
+    // select an older snapshot, while a later final can revise its preamble.
+    if guard.activation_prefix_evidence.len() == 64 {
+        guard.activation_prefix_evidence.remove(0);
+    }
+    guard.activation_prefix_evidence.push(evidence);
+}
+
 fn filter_automatic_wake_text(
     inner: &Arc<Inner>,
     session_id: SessionId,
     text: &str,
     partial: bool,
 ) -> String {
-    let (phrase, late_body_blocked) = inner
+    let (phrase, timed_body, late_body_blocked) = inner
         .embedded_audio_automatic_wake_guard
         .lock()
         .as_ref()
@@ -1049,26 +1088,32 @@ fn filter_automatic_wake_text(
         .map(|guard| {
             (
                 Some(guard.phrase.clone()),
+                guard.activation_prefix_evidence.iter().rev()
+                    .find_map(|evidence| evidence.body(text).map(str::to_string)),
                 guard.stop_requested && !guard.body_started,
             )
         })
-        .unwrap_or((None, false));
+        .unwrap_or((None, None, false));
+    // Audio-aligned evidence is tied to this exact provider revision. Once it
+    // identifies the control prefix, do not strip a later literal wake phrase
+    // from the body a second time. Untimed revisions retain the legacy path.
+    let body_phrase = if timed_body.is_some() { None } else { phrase.as_deref() };
+    let filtered = timed_body.unwrap_or_else(|| phrase.as_deref().map_or_else(
+        || preserve_recording_transcript(text),
+        |phrase| strip_automatic_activation_prefix(text, phrase, partial && !late_body_blocked),
+    ));
     if late_body_blocked {
         // Live afd9e265: 28-char final arrived after stop with no visual
         // latch, then late_body returned empty and the spoken sentence was
         // swallowed. Keep a stripped body even after stop; only drop true
         // wake-only leftovers.
-        let filtered = phrase.as_deref().map_or_else(
-            || preserve_recording_transcript(text),
-            |phrase| strip_automatic_activation_prefix(text, phrase, false),
-        );
-        if automatic_wake_filtered_text_is_body(&filtered, text, phrase.as_deref()) {
+        if automatic_wake_filtered_text_is_body(&filtered, text, body_phrase) {
             latch_automatic_wake_body_if_filtered(
                 inner,
                 session_id,
                 &filtered,
                 text,
-                phrase.as_deref(),
+                body_phrase,
             );
             log::info!(
                 "[wake-phrase] kept spoken body after stop before visual latch session_id={session_id} chars={}",
@@ -1082,11 +1127,7 @@ fn filter_automatic_wake_text(
         );
         return String::new();
     }
-    let filtered = phrase.as_deref().map_or_else(
-        || preserve_recording_transcript(text),
-        |phrase| strip_automatic_activation_prefix(text, phrase, partial),
-    );
-    latch_automatic_wake_body_if_filtered(inner, session_id, &filtered, text, phrase.as_deref());
+    latch_automatic_wake_body_if_filtered(inner, session_id, &filtered, text, body_phrase);
     filtered
 }
 
@@ -1363,25 +1404,7 @@ fn filter_dictation_visual_preview_text(
     // Strip the wake prefix before latching visible body so a provisional body
     // cannot expire as a wake-only session. Final delivery separately requires
     // the authoritative preview; this visual path does not supply final text.
-    let phrase = inner
-        .embedded_audio_automatic_wake_guard
-        .lock()
-        .as_ref()
-        .filter(|guard| guard.session_id == session_id)
-        .map(|guard| guard.phrase.clone());
-    let original = text;
-    let phrase_for_latch = phrase.clone();
-    let text = phrase.map_or_else(
-        || preserve_recording_transcript(text),
-        |phrase| strip_automatic_activation_prefix(text, &phrase, true),
-    );
-    latch_automatic_wake_body_if_filtered(
-        inner,
-        session_id,
-        &text,
-        original,
-        phrase_for_latch.as_deref(),
-    );
+    let text = filter_automatic_wake_text(inner, session_id, text, true);
     // Filler cleanup belongs on the sealed insert, not the live capsule.
     // Stripping 嗯/呃 from short partials delayed the first visible body
     // and made the preview look like it was swallowing text.
@@ -2265,9 +2288,9 @@ fn pause_early_display_text(
 ) -> Option<String> {
     // The phrase detector can open a session even when the provider's early
     // text begins with another speaker and places the real wake phrase later.
-    // Keep that text in the reversible capsule preview, but do not paste the
-    // ambiguous pre-wake prefix into the target app. The speaker-filtered
-    // final can then discard the foreign row without leaving it on screen.
+    // Normalize the same proven control prefix used by capsule and final
+    // before checking for an ambiguous, still-unstripped lead-in.
+    let text = filter_automatic_wake_text(inner, session_id, raw_text, false);
     let wake_phrase = inner
         .embedded_audio_automatic_wake_guard
         .lock()
@@ -2277,12 +2300,11 @@ fn pause_early_display_text(
     let admitted_source_key = pause_early_admitted_source_key(inner, session_id);
     if wake_phrase
         .as_deref()
-        .is_some_and(|phrase| automatic_wake_has_unstripped_lead_in(raw_text, phrase, &admitted_source_key))
+        .is_some_and(|phrase| automatic_wake_has_unstripped_lead_in(&text, phrase, &admitted_source_key))
     {
         pause_early_note_gate_blocked(inner, session_id, "unstripped_pre_wake_lead_in");
         return None;
     }
-    let text = filter_automatic_wake_text(inner, session_id, raw_text, false);
     let prefs = inner.prefs.get();
     let text = if prefs.remove_filler_words {
         remove_standalone_dictation_fillers(&text)

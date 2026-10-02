@@ -2029,6 +2029,14 @@ fn terminal_wake_body_release_pieces(
     pieces
 }
 
+struct PrefetchedOwnerVerification {
+    source_range: Option<crate::observability::CandidateRange>,
+    task: tauri::async_runtime::JoinHandle<(
+        Result<crate::speaker_verification::VerificationResult, String>,
+        u64,
+    )>,
+}
+
 struct BufferedSpeakerCandidate {
     candidate_id: u64,
     kind: BufferedSpeakerCandidateKind,
@@ -2058,12 +2066,7 @@ struct BufferedSpeakerCandidate {
     /// Voiceprint inference starts with the first live KWS hit and runs beside
     /// the bounded local-ASR secondary check. The secondary keeps its existing
     /// false-wake veto; this only removes the old serial 60 ms + inference wait.
-    owner_verification_task: Option<
-        tauri::async_runtime::JoinHandle<(
-            Result<crate::speaker_verification::VerificationResult, String>,
-            u64,
-        )>,
-    >,
+    owner_verification_task: Option<PrefetchedOwnerVerification>,
     /// A candidate gets at most one speculative owner snapshot. Once that
     /// bounded task completes, do not immediately spawn another copy on every
     /// incoming PCM chunk; repeated inference starves preview/ASR processing.
@@ -3109,6 +3112,7 @@ fn offset_streaming_wake_match(
         let origin_seconds = stream_origin_bytes as f32 / 32_000.0;
         found.start_seconds = found.start_seconds.map(|start| start + origin_seconds);
         found.end_seconds += origin_seconds;
+        found.audio_end_seconds = found.audio_end_seconds.map(|end| end + origin_seconds);
         found
     })
 }

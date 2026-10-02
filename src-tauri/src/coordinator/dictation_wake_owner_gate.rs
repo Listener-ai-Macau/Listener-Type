@@ -49,19 +49,77 @@ fn maybe_prefetch_owner_verification(
     ) {
         return;
     }
+    start_owner_verification_prefetch(candidate, phrase, embedded_session_id);
+}
+
+fn start_owner_verification_prefetch(
+    candidate: &mut BufferedSpeakerCandidate,
+    phrase: &str,
+    embedded_session_id: u32,
+) {
     let pcm = candidate.pcm.clone();
+    let source_range = candidate.current_candidate_range();
     let voiceprint_phrase = phrase.to_string();
     candidate.owner_verification_attempted = true;
-    candidate.owner_verification_task = Some(tauri::async_runtime::spawn_blocking(move || {
+    let task = tauri::async_runtime::spawn_blocking(move || {
         let started = Instant::now();
         let result = crate::speaker_verification::verify(&pcm, &voiceprint_phrase);
         (result, started.elapsed().as_millis() as u64)
-    }));
+    });
+    candidate.owner_verification_task = Some(PrefetchedOwnerVerification { source_range, task });
     log::info!(
         "[speaker-verification] owner check prefetched beside stage2 embedded_session_id={} pcm_ms={}",
         embedded_session_id,
         candidate.pcm.len() / 32
     );
+}
+
+fn owner_verification_covers_wake(
+    sampled: Option<crate::observability::CandidateRange>,
+    required: Option<crate::observability::CandidateRange>,
+) -> bool {
+    match (sampled, required) {
+        (Some(sampled), Some(required)) => sampled.start <= required.start
+            && sampled.end >= required.end && required.end > required.start,
+        _ => false,
+    }
+}
+
+fn owner_verification_required_wake_range(
+    candidate: &BufferedSpeakerCandidate,
+    wake_match: &crate::wake_phrase::Match,
+    require_latest_confirmation: bool,
+) -> Option<crate::observability::CandidateRange> {
+    // Local-only endpoints are estimates. A real keyword endpoint permits
+    // reuse of a completed identity window even when later body PCM grew.
+    let audio_end = wake_match.audio_end_seconds.filter(|end| end.is_finite() && *end > 0.0);
+    let required_bytes = if let Some(audio_end) = audio_end.filter(|_| !require_latest_confirmation) {
+        let end = (audio_end as f64 * 32_000.0).ceil() as usize;
+        if end > candidate.pcm.len() { return None; }
+        end
+    } else {
+        candidate.pcm.len()
+    };
+    candidate_slice_range(candidate.pcm_base_offset, 0, required_bytes)
+}
+
+fn refresh_owner_verification_prefetch_for_wake(
+    candidate: &mut BufferedSpeakerCandidate,
+    phrase: &str,
+    embedded_session_id: u32,
+    wake_match: &crate::wake_phrase::Match,
+) {
+    let required = owner_verification_required_wake_range(candidate, wake_match, false);
+    if required.is_none() { return; }
+    let Some(prefetched) = candidate.owner_verification_task.as_ref() else { return; };
+    if owner_verification_covers_wake(prefetched.source_range, required) { return; }
+    // Replace the one speculative pre-phrase window when concrete phrase
+    // evidence arrives. Never start another task on every incoming PCM chunk.
+    log::info!(
+        "[speaker-verification] replacing pre-wake owner snapshot embedded_session_id={} sampled_range={:?} required_wake_range={:?} current_pcm_ms={}",
+        embedded_session_id, prefetched.source_range, required, candidate.pcm.len() / 32,
+    );
+    start_owner_verification_prefetch(candidate, phrase, embedded_session_id);
 }
 
 fn next_owner_verification_retry_after(
@@ -513,6 +571,7 @@ async fn evaluate_target_wake_extraction(
             phrase.chars().count(),
         ),
         matched_keyword: None,
+        audio_end_seconds: None,
     };
     Ok(Some(ExtractedOwnerWakeEvidence {
         wake_match,

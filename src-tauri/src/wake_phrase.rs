@@ -5,6 +5,9 @@ pub struct Match {
     /// unset because it cannot distinguish pre-wake speech from the phrase.
     pub start_seconds: Option<f32>,
     pub end_seconds: f32,
+    /// Proven keyword token end in the same PCM clock. Transport and local
+    /// fallback estimates cannot authorize transcript removal or identity reuse.
+    pub audio_end_seconds: Option<f32>,
     pub matched_keyword: Option<String>,
 }
 
@@ -54,6 +57,35 @@ fn absolute_keyword_end_seconds(
     let recent_detection_floor =
         (accepted_seconds - MAX_KEYWORD_DETECTION_LOOKBACK_SECONDS).max(0.0);
     native_end.max(recent_detection_floor).min(accepted_seconds)
+}
+
+fn proven_keyword_audio_end_seconds(
+    segment_start_seconds: f32,
+    token_end_seconds: Option<f32>,
+    accepted_seconds: f32,
+) -> Option<f32> {
+    let token_end = token_end_seconds?;
+    if !segment_start_seconds.is_finite() || segment_start_seconds < 0.0
+        || !token_end.is_finite() || token_end < 0.0
+        || !accepted_seconds.is_finite() || accepted_seconds <= 0.0
+    {
+        return None;
+    }
+    let end = segment_start_seconds + token_end;
+    (end.is_finite() && end > 0.0 && end <= accepted_seconds).then_some(end)
+}
+
+#[cfg(test)]
+mod audio_boundary_tests {
+    #[test]
+    fn only_actual_keyword_coordinates_authorize_word_removal() {
+        assert_eq!(super::proven_keyword_audio_end_seconds(2.14, Some(1.92), 4.6), Some(4.06));
+        assert_eq!(super::proven_keyword_audio_end_seconds(0.0, Some(1.68), 2.086), Some(1.68));
+        assert_eq!(super::proven_keyword_audio_end_seconds(2.14, None, 4.6), None);
+        assert_eq!(super::proven_keyword_audio_end_seconds(f32::NAN, Some(1.92), 4.6), None);
+        assert_eq!(super::proven_keyword_audio_end_seconds(0.0, Some(5.0), 4.6), None);
+        assert_eq!(super::proven_keyword_audio_end_seconds(0.0, Some(-1.0), 4.6), None);
+    }
 }
 
 #[cfg(test)]
@@ -1103,6 +1135,9 @@ mod platform {
                                 .is_finite()
                                 .then_some(value.start_time.max(0.0).min(end_seconds)),
                             end_seconds,
+                            audio_end_seconds: super::proven_keyword_audio_end_seconds(
+                                value.start_time, token_end_seconds, accepted_seconds,
+                            ),
                             matched_keyword: Some(matched_keyword),
                         });
                     }
@@ -1221,6 +1256,7 @@ mod platform {
                         return Ok(Some(Match {
                             start_seconds: found.start_seconds.map(|start| start + offset_s),
                             end_seconds,
+                            audio_end_seconds: found.audio_end_seconds.map(|end| end + offset_s),
                             matched_keyword: found.matched_keyword,
                         }));
                     }

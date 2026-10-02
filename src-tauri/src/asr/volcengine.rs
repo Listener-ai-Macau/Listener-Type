@@ -673,6 +673,7 @@ use super::volcengine_untimed_merge::{
 /// audio-consumer fast path.
 #[derive(Default)]
 struct SyncState {
+    provider_timed_transcript: Option<crate::transcript_boundary::TimedTranscript>,
     #[cfg(test)]
     diagnostic_provider_responses: Vec<Value>,
     pending_audio: Vec<u8>,
@@ -6234,6 +6235,10 @@ impl VolcengineStreamingASR {
         *self.partial_callback.lock() = callback;
     }
 
+    pub(crate) fn provider_timed_transcript_snapshot(&self) -> Option<crate::transcript_boundary::TimedTranscript> {
+        self.state.lock().provider_timed_transcript.clone()
+    }
+
     pub fn set_visual_partial_transcript_callback(
         &self,
         callback: Option<Arc<dyn Fn(String) + Send + Sync>>,
@@ -8342,6 +8347,12 @@ impl VolcengineStreamingASR {
         let Some(result) = normalized_result(&json) else {
             return true;
         };
+
+        // Install raw word coordinates before either preview callback runs.
+        // Ownership filtering keeps its original provider input unchanged.
+        self.state.lock().provider_timed_transcript = Some(
+            super::volcengine_transcript::timed_transcript_from_result(result),
+        );
 
         #[cfg(test)]
         self.state

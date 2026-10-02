@@ -2681,3 +2681,28 @@ mod tests {
         ));
     }
 }
+pub(crate) fn timed_transcript_from_result(result: &serde_json::Value) -> crate::transcript_boundary::TimedTranscript {
+    use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+    let mut words = Vec::new();
+    if let Some(rows) = result.get("utterances").and_then(serde_json::Value::as_array) {
+        for row in rows {
+            let Some(row_words) = row.get("words").and_then(serde_json::Value::as_array) else {
+                // An untimed row at the beginning is a gap, not permission to
+                // classify the following row as the beginning of the source.
+                break;
+            };
+            for word in row_words {
+                let text = word.get("text").and_then(serde_json::Value::as_str).unwrap_or_default();
+                if text.is_empty() { break; }
+                let end_ms = ["end_time", "endTime", "end_ms"].iter()
+                    .find_map(|key| word.get(*key))
+                    .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()));
+                words.push(TimedTranscriptWord { text: text.to_string(), end_ms });
+            }
+        }
+    }
+    TimedTranscript {
+        text: result.get("text").and_then(serde_json::Value::as_str).unwrap_or_default().to_string(),
+        words,
+    }
+}

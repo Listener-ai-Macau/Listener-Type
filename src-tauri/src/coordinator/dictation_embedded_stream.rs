@@ -1709,6 +1709,7 @@ impl EmbeddedStreamingDictation {
                                     start_seconds: None,
                                     end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
                                     matched_keyword: None,
+                                    audio_end_seconds: None,
                                 });
                             }
                             if open_terminal_local_near_can_accept(
@@ -1731,6 +1732,7 @@ impl EmbeddedStreamingDictation {
                                     start_seconds: None,
                                     end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
                                     matched_keyword: None,
+                                    audio_end_seconds: None,
                                 });
                             }
                             match terminal_inflight_local_decision(
@@ -1754,6 +1756,7 @@ impl EmbeddedStreamingDictation {
                                         start_seconds: None,
                                         end_seconds: refined_end,
                                         matched_keyword: None,
+                                        audio_end_seconds: None,
                                     })
                                 }
                                 TerminalInflightLocalDecision::PreserveKwsFusion => {
@@ -1985,6 +1988,7 @@ impl EmbeddedStreamingDictation {
                                                     start_seconds: None,
                                                     end_seconds,
                                                     matched_keyword: None,
+                                                    audio_end_seconds: None,
                                                 })
                                             }
                                             Some((result, _))
@@ -2007,6 +2011,7 @@ impl EmbeddedStreamingDictation {
                                                         start_seconds: None,
                                                         end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
                                                         matched_keyword: None,
+                                                        audio_end_seconds: None,
                                                     })
                                             }
                                             Some((result, origin_bytes))
@@ -2032,6 +2037,7 @@ impl EmbeddedStreamingDictation {
                                                         start_seconds: None,
                                                         end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
                                                         matched_keyword: None,
+                                                        audio_end_seconds: None,
                                                     })
                                             }
                                             Some((result, _)) => {
@@ -2167,6 +2173,7 @@ impl EmbeddedStreamingDictation {
                     start_seconds: None,
                     end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
                     matched_keyword: None,
+                    audio_end_seconds: None,
                 });
                 log::info!(
                     "[wake-phrase] terminal owner near-phrase recovery accepted embedded_session_id={} confirmations={} owner_score={:.6}",
@@ -2193,6 +2200,7 @@ impl EmbeddedStreamingDictation {
                     start_seconds: None,
                     end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
                     matched_keyword: None,
+                    audio_end_seconds: None,
                 });
                 log::info!(
                     "[wake-phrase] terminal owner overlap recovered with single strong confirmation embedded_session_id={} confirmations={} owner_score={:.6}",
@@ -2215,6 +2223,7 @@ impl EmbeddedStreamingDictation {
                     start_seconds: None,
                     end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
                     matched_keyword: None,
+                    audio_end_seconds: None,
                 });
                 log::info!(
                     "[wake-phrase] terminal enrolled owner recovered overlap-degraded phrase embedded_session_id={} confirmations={} end_s={:.3}",
@@ -2244,6 +2253,7 @@ impl EmbeddedStreamingDictation {
                     start_seconds: None,
                     end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
                     matched_keyword: None,
+                    audio_end_seconds: None,
                 });
                 log::info!(
                     "[wake-phrase] sustained near-phrase wake rescued (owner-blind) embedded_session_id={} confirmations={} owner_score={:.6}",
@@ -2359,6 +2369,7 @@ impl EmbeddedStreamingDictation {
                     start_seconds: None,
                     end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
                     matched_keyword: None,
+                    audio_end_seconds: None,
                 });
             }
             let Some(wake_match) = wake_match else {
@@ -3449,6 +3460,10 @@ impl EmbeddedStreamingDictation {
                         );
                     }
                     maybe_prefetch_owner_verification(candidate, &phrase, embedded_session_id);
+                    refresh_owner_verification_prefetch_for_wake(
+                        candidate, &phrase, embedded_session_id,
+                        kws_hit.as_ref().expect("keyword hit checked"),
+                    );
                 }
             }
             let wake_match = {
@@ -3710,6 +3725,7 @@ impl EmbeddedStreamingDictation {
                                         show_early_wake_recording_capsule(inner, candidate);
                                     }
                                     Some(crate::wake_phrase::Match {
+                                        audio_end_seconds: kws_hit.as_ref().and_then(|found| found.audio_end_seconds),
                                         start_seconds: kws_hit
                                             .as_ref()
                                             .and_then(|found| found.start_seconds),
@@ -3793,6 +3809,7 @@ impl EmbeddedStreamingDictation {
                                             ),
                                             end_seconds: wake_end_seconds,
                                             matched_keyword: None,
+                                            audio_end_seconds: None,
                                         })
                                     } else if self.speaker_candidate.as_ref().is_some_and(|candidate| {
                                         crate::speech_decision_kernel::live_repeated_owner_near_phrase_can_verify(
@@ -4075,8 +4092,17 @@ impl EmbeddedStreamingDictation {
         let pcm_ms = pcm.len() / 32;
         let kws_ms = candidate.kws_total_ms;
         let voiceprint_phrase = phrase.clone();
-        let verification_task = match candidate.owner_verification_task.take() {
-            Some(task) => task.await,
+        // Repeated near-phrase recovery relies on the newer confirmation
+        // window, so its identity evidence must cover that same accumulated
+        // audio. A completed exact keyword keeps the ordinary fast reuse path.
+        let required_wake_range = owner_verification_required_wake_range(
+            candidate, &wake_match, live_repeated_owner_near,
+        );
+        let prefetched = candidate.owner_verification_task.take().filter(|prefetched| {
+            owner_verification_covers_wake(prefetched.source_range, required_wake_range)
+        });
+        let verification_task = match prefetched {
+            Some(prefetched) => prefetched.task.await,
             None => {
                 tauri::async_runtime::spawn_blocking(move || {
                     let started = Instant::now();
@@ -4379,6 +4405,17 @@ impl EmbeddedStreamingDictation {
             capsule_audio_ms,
             candidate.early_capsule_session_id.is_some(),
         );
+        // Only a real keyword timeline can be translated into the retained
+        // ASR audio clock. Local-only matches use an approximate end and must
+        // not authorize removal of a spoken prefix.
+        if let Some(audio_end_seconds) = wake_match.audio_end_seconds {
+            bind_automatic_wake_audio_boundary(
+                inner,
+                session.session_id,
+                audio_end_seconds,
+                wake_anchor_offset,
+            );
+        }
         // Automatic wake promotion keeps the candidate's live dependency
         // ledger; finalization must not fall back to the actor's bounded log.
         session.source_admission_ledger = Arc::clone(&candidate.source_admission_ledger);

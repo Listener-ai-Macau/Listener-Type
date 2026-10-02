@@ -1834,6 +1834,90 @@ fn automatic_wake_guard_removes_only_the_activation_prefix() {
 }
 
 #[test]
+fn automatic_wake_timed_boundary_keeps_recorded_control_out_of_all_text_channels() {
+    // Installed Beta.18 session 44218e7c: the accepted candidate began at
+    // 2.020 s and its keyword ended at 4.060 s. The first cloud callbacks
+    // contained played speech before the accepted activation, not a body.
+    use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 2569);
+    super::bind_automatic_wake_audio_boundary(inner, session, 4.060, 64640);
+    for (text, words, body) in [
+        ("求。", vec![("求", 1199)], ""),
+        ("求婚那。", vec![("求", 1000), ("婚", 1080), ("那", 1380)], ""),
+        ("求婚那晚开始录音。", vec![("求婚那晚", 1320), ("开始", 1560), ("录音", 1940)], ""),
+        ("求婚那晚开始录音，然后帮我看一下这个现象。", vec![("求婚那晚", 1320), ("开始", 1560), ("录音", 1940), ("然后", 2540), ("帮我看一下这个现象", 5500)], "然后帮我看一下这个现象。"),
+    ] {
+        super::note_automatic_wake_transcript_timing(inner, session, Some(TimedTranscript {
+            text: text.into(),
+            words: words.into_iter().map(|(text, end_ms)| TimedTranscriptWord { text: text.into(), end_ms: Some(end_ms) }).collect(),
+        }));
+        assert_eq!(super::filter_dictation_visual_preview_text(inner, session, text), body, "visual: {text}");
+        assert_eq!(super::filter_automatic_wake_text(inner, session, text, true), body, "stream: {text}");
+        assert_eq!(super::filter_automatic_wake_text(inner, session, text, false), body, "final: {text}");
+        assert_eq!(super::pause_early_display_text(inner, session, text), (!body.is_empty()).then(|| body.to_string()), "delivery: {text}");
+        assert_eq!(super::automatic_wake_body_started(inner, session), !body.is_empty());
+    }
+    assert_eq!(super::filter_automatic_wake_text(inner, session, "求婚那晚开始录音。", false), "", "an older early-sealed source remains activation context");
+    assert_eq!(super::filter_automatic_wake_text(inner, new_session_id(), "求婚那晚开始录音。", false), "求婚那晚开始录音。", "evidence cannot cross sessions");
+}
+
+#[test]
+fn automatic_wake_timed_body_preserves_literal_wake_words_and_manual_recordings() {
+    use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 3000);
+    super::bind_automatic_wake_audio_boundary(inner, session, 1.0, 0);
+    let text = "开始录音。";
+    super::note_automatic_wake_transcript_timing(inner, session, Some(TimedTranscript {
+        text: text.into(), words: vec![TimedTranscriptWord { text: "开始录音".into(), end_ms: Some(1800) }],
+    }));
+    assert_eq!(super::filter_dictation_visual_preview_text(inner, session, text), text);
+    assert!(super::automatic_wake_body_started(inner, session));
+    assert_eq!(super::filter_automatic_wake_text(inner, new_session_id(), "开始录音，正文。", false), "开始录音，正文。");
+    assert_eq!(super::filter_automatic_wake_text(inner, session, "开始录音，然后继续。", false), "然后继续。", "a different untimed revision uses its own existing normalization");
+}
+
+#[test]
+#[ignore = "requires an explicitly selected captured provider replay"]
+fn recorded_provider_activation_coordinates_match_all_output_channels() {
+    let path = std::env::var("LISTENER_ACTIVATION_PROVIDER_REPLAY_PATH").expect("selected provider replay");
+    let replay: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).expect("read replay")).expect("provider JSON");
+    let mut control_frames = 0;
+    let mut body_frames = 0;
+    for variant in replay["variants"].as_array().expect("variants") {
+        let coordinator = Coordinator::new();
+        let inner = &coordinator.inner;
+        let session = new_session_id();
+        arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 2569);
+        super::bind_automatic_wake_audio_boundary(inner, session, 4.060, 64640);
+        for response in variant["provider_responses"].as_array().expect("responses") {
+            let result = &response["result"];
+            let Some(text) = result["text"].as_str().filter(|text| !text.is_empty()) else { continue; };
+            // This replay checks the human-confirmed opening boundary only;
+            // unfiltered provider tails are not speaker-acceptance evidence.
+            if !text.starts_with("求") { break; }
+            let expected = text.find("开始录音").map_or("", |start| text[start + "开始录音".len()..].trim_start_matches(crate::transcript_boundary::is_decorative));
+            super::note_automatic_wake_transcript_timing(inner, session, Some(
+                crate::asr::volcengine_transcript::timed_transcript_from_result(result),
+            ));
+            assert_eq!(super::filter_dictation_visual_preview_text(inner, session, text), expected, "capsule: {text}");
+            assert_eq!(super::filter_automatic_wake_text(inner, session, text, true), expected, "stream: {text}");
+            assert_eq!(super::filter_automatic_wake_text(inner, session, text, false), expected, "final: {text}");
+            assert_eq!(super::pause_early_display_text(inner, session, text), (!expected.is_empty()).then(|| expected.to_string()));
+            if expected.is_empty() { control_frames += 1; }
+            else { body_frames += 1; }
+        }
+    }
+    assert!(control_frames >= 3 && body_frames >= 1, "must exercise actual control and owner-body frames");
+    println!("ACTIVATION_REPLAY_PASS control_frames={control_frames} body_frames={body_frames}");
+}
+
+#[test]
 fn automatic_wake_does_not_early_paste_a_long_unstripped_pre_wake_lead_in() {
     assert!(super::automatic_wake_has_unstripped_lead_in(
         "小爱同学。然后现在好像开始录音，正文继续。",
@@ -9019,11 +9103,13 @@ fn rolling_wake_match_keeps_absolute_candidate_boundary() {
         start_seconds: Some(0.10),
         end_seconds: 0.75,
         matched_keyword: Some("开始录音".into()),
+        audio_end_seconds: Some(0.75),
     };
     let adjusted = super::offset_streaming_wake_match(Some(found), 1_500 * 32)
         .expect("rolling detector match");
     assert!((adjusted.start_seconds.expect("keyword start") - 1.60).abs() < f32::EPSILON);
     assert!((adjusted.end_seconds - 2.25).abs() < f32::EPSILON);
+    assert!((adjusted.audio_end_seconds.expect("proven keyword end") - 2.25).abs() < f32::EPSILON);
 }
 
 #[test]
@@ -11505,6 +11591,27 @@ fn owner_verification_prefetch_requires_enrollment_and_a_real_model_window() {
         false,
         super::OWNER_VERIFICATION_START_BYTES,
     ));
+}
+
+#[test]
+fn owner_snapshot_must_cover_the_same_wake_or_repeated_confirmation_audio() {
+    use crate::observability::CandidateRange;
+    let range = |start_ms: u64, end_ms: u64| Some(CandidateRange {
+        start: start_ms * 32, end: end_ms * 32,
+    });
+    // Installed Beta.18 de2d82ba: a 1.102 s warm-up score of 0.094630
+    // was reused for a keyword ending at 1.680 s and a later 4.445 s
+    // repeated confirmation. Identity decisions cannot cross that boundary.
+    assert!(!super::owner_verification_covers_wake(range(0, 1102), range(0, 1680)));
+    assert!(!super::owner_verification_covers_wake(range(0, 2086), range(0, 4445)));
+    assert!(super::owner_verification_covers_wake(range(0, 2086), range(0, 1680)));
+    assert!(super::owner_verification_covers_wake(range(0, 4445), range(0, 4445)));
+    assert!(!super::owner_verification_covers_wake(range(1000, 4445), range(0, 1680)));
+    assert!(!super::owner_verification_covers_wake(None, range(0, 1680)));
+    assert!(!super::owner_verification_covers_wake(range(0, 4445), None));
+    assert!(!crate::speech_decision_kernel::repeated_owner_near_phrase_wake_can_activate(false, 0.094630, 2));
+    assert!(crate::speech_decision_kernel::repeated_owner_near_phrase_wake_can_activate(true, 0.517879, 2));
+    assert!(!crate::speech_decision_kernel::repeated_owner_near_phrase_wake_can_activate(false, 0.30, 2));
 }
 
 #[test]

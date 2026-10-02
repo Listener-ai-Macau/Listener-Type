@@ -252,6 +252,8 @@ pub struct Coordinator {
 struct AutomaticWakeGuard {
     session_id: SessionId,
     phrase: String,
+    activation_audio_end_ms: Option<u64>,
+    activation_prefix_evidence: Vec<crate::transcript_boundary::ControlPrefixEvidence>,
     latest_audio_ms: u64,
     initial_body_wait_until_audio_ms: Option<u64>,
     /// Wall-clock twin of the audio deadline. Provider coverage can stall,

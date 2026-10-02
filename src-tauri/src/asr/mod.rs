@@ -12,7 +12,7 @@ pub mod local;
 pub(crate) mod target_speaker_extraction;
 pub mod volcengine;
 mod volcengine_platform;
-mod volcengine_transcript;
+pub(crate) mod volcengine_transcript;
 mod volcengine_untimed_merge;
 pub mod wav;
 pub mod whisper;

@@ -17,6 +17,71 @@ pub(crate) fn content_key(text: &str) -> String {
         .collect()
 }
 
+/// Provider word coordinates are evidence about the retained audio, not a
+/// speaker verdict. Only a contiguous, text-aligned prefix can be classified
+/// as activation context; missing or conflicting coordinates prove nothing.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct TimedTranscript {
+    pub text: String,
+    pub words: Vec<TimedTranscriptWord>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct TimedTranscriptWord {
+    pub text: String,
+    pub end_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ControlPrefixEvidence {
+    pub source_key: String,
+    pub control_key: String,
+}
+
+impl TimedTranscript {
+    pub(crate) fn activation_prefix(&self, activation_end_ms: u64, phrase: &str) -> Option<ControlPrefixEvidence> {
+        let source_key = content_key(&self.text);
+        if source_key.is_empty() { return None; }
+        let mut control_key = String::new();
+        let mut last_end_ms = 0;
+        let mut observed_coordinate = false;
+        for word in &self.words {
+            let key = content_key(&word.text);
+            if key.is_empty() { continue; }
+            if !source_key[control_key.len()..].starts_with(&key) { break; }
+            let Some(end_ms) = word.end_ms else { break; };
+            if end_ms < last_end_ms { break; }
+            observed_coordinate = true;
+            if end_ms > activation_end_ms { break; }
+            control_key.push_str(&key);
+            last_end_ms = end_ms;
+        }
+        // A word can straddle the detector's keyword end. Finish only an exact
+        // accepted phrase that already began in the timed control prefix;
+        // an ordinary wake-word mention starting in the body is untouched.
+        let phrase_key = content_key(phrase);
+        if !phrase_key.is_empty() {
+            if let Some(start) = source_key.find(&phrase_key) {
+                if start < control_key.len() && start + phrase_key.len() > control_key.len() {
+                    control_key = source_key[..start + phrase_key.len()].to_string();
+                }
+            }
+        }
+        observed_coordinate.then_some(ControlPrefixEvidence { source_key, control_key })
+    }
+}
+
+impl ControlPrefixEvidence {
+    pub(crate) fn body<'a>(&self, text: &'a str) -> Option<&'a str> {
+        // Bind the decision to this provider revision. Reusing a phrase-only
+        // prefix on a later body that mentions the wake words would erase it.
+        if content_key(text) != self.source_key { return None; }
+        if self.control_key.is_empty() { return Some(text.trim()); }
+        let end = consumed_prefix_end(text, &self.control_key)?;
+        Some(text[end..].trim_start_matches(is_decorative))
+    }
+}
+
 pub(crate) fn terminal_punctuation_only(text: &str) -> bool {
     let mut terminal = false;
     for ch in text.chars() {
@@ -217,6 +282,48 @@ pub(crate) fn stable_content_prefix<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activation_coordinates_preserve_straddling_body_and_unknown_words() {
+        let timing = |text: &str, words: Vec<(&str, Option<u64>)>| TimedTranscript {
+            text: text.into(),
+            words: words.into_iter().map(|(text, end_ms)| TimedTranscriptWord {
+                text: text.into(), end_ms,
+            }).collect(),
+        };
+        let evidence = timing("开始录音，然后继续。", vec![("开始录音", Some(900)), ("然后", Some(1200)), ("继续", Some(1500))])
+            .activation_prefix(1000, "开始录音").unwrap();
+        assert_eq!(evidence.body("开始录音，然后继续。"), Some("然后继续。"));
+        assert_eq!(evidence.body("开始录音，另外一段。"), None);
+        assert!(timing("正文不应消失。", vec![("正文", None)])
+            .activation_prefix(1000, "开始录音").is_none());
+        assert!(timing("正文不应消失。", vec![("别人的", Some(500))])
+            .activation_prefix(1000, "开始录音").is_none());
+        let gap = timing("开始录音，然后继续。", vec![("开始录音", Some(900)), ("然后", None)])
+            .activation_prefix(1000, "开始录音").unwrap();
+        assert_eq!(gap.body("开始录音，然后继续。"), Some("然后继续。"));
+        let reversal = timing("前文，然后继续。", vec![("前文", Some(900)), ("然后", Some(800))])
+            .activation_prefix(1000, "开始录音").unwrap();
+        assert_eq!(reversal.body("前文，然后继续。"), Some("然后继续。"));
+    }
+
+    #[test]
+    fn activation_coordinates_keep_later_wake_mentions_and_finish_only_control_phrase() {
+        let body_mention = TimedTranscript {
+            text: "开始录音是产品的唤醒词。".into(),
+            words: vec![TimedTranscriptWord { text: "开始录音".into(), end_ms: Some(1800) }],
+        }.activation_prefix(1000, "开始录音").unwrap();
+        assert_eq!(body_mention.body("开始录音是产品的唤醒词。"), Some("开始录音是产品的唤醒词。"));
+        assert_eq!(body_mention.body("“开始录音”是产品的唤醒词。"), Some("“开始录音”是产品的唤醒词。"));
+        let control = TimedTranscript {
+            text: "前声开始录音，然后正文。".into(),
+            words: vec![
+                TimedTranscriptWord { text: "前声开始".into(), end_ms: Some(900) },
+                TimedTranscriptWord { text: "录音".into(), end_ms: Some(1050) },
+            ],
+        }.activation_prefix(1000, "开始录音").unwrap();
+        assert_eq!(control.body("前声开始录音，然后正文。"), Some("然后正文。"));
+    }
 
     #[test]
     fn consumed_boundary_uses_the_shared_content_coordinate() {
