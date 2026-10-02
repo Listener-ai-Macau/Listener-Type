@@ -1985,6 +1985,11 @@ fn pause_early_tail_beyond_delivered_anchor(
 /// only content after that boundary. A large rewrite remains ambiguous and is
 /// left to the existing no-duplicate fallback.
 fn pause_early_aligned_growth_tail(final_text: &str, delivered_key: &str) -> Option<String> {
+    if let Some(end) = crate::transcript_boundary::revised_prefix_end(final_text, delivered_key) {
+        return Some(final_text[end..]
+            .trim_start_matches(is_embedded_audio_partial_preview_decorative)
+            .to_string());
+    }
     let delivered: Vec<char> = delivered_key.chars().collect();
     let len = delivered.len();
     if len < 8 || len > 512 {

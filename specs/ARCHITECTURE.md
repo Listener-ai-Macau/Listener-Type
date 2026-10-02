@@ -78,6 +78,15 @@ shared content coordinate as delivery; formatting changes before that boundary
 cannot delay its continuation. Unmapped source revisions retain full-prefix
 checks, and current speaker admission still applies.
 
+A short early clause can lose its exact prefix after an opening spelling
+correction. Shared revised-prefix mapping aligns the complete consumed source
+prefix with a bounded edit budget, at least four retained comparison units,
+and a unique best seam that retains the last consumed unit. Equal-cost seams,
+internal-only insertions, and seams splitting a Unicode character cannot
+authorize this continuation. Both live and final delivery append only its
+unsubmitted tail and advance the provider key; submitted editor words remain
+immutable. This mapping never admits provisional preview past speaker gates.
+
 A bounded provider revision with a uniquely retained terminal source boundary
 can certify that no body remains unsubmitted, even if exact prefix matching
 fails. This path can append only missing boundary punctuation. Ambiguous

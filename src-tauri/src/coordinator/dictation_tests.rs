@@ -16436,6 +16436,41 @@ fn pause_early_delivery_waits_for_a_clause_instead_of_pasting_provider_placehold
 }
 
 #[test]
+fn pause_early_short_opening_correction_keeps_unsubmitted_owner_body() {
+    use super::{embedded_audio_partial_preview_stability_key as key, pause_early_aligned_growth_tail};
+
+    // Beta.11 live 8644afa9: only this six-character prefix was submitted.
+    // The owner-safe final corrected its second character and retained the
+    // complete continuation. It must append the tail without replaying or
+    // rewriting the earlier paste.
+    let submitted = "那里看一下先";
+    let owner_final = "那你看一下先优化一下速度，然后这个胶囊弹起的速度，然后看一下能不能先优化一下速度，就是这个唤醒速度以及这个说话文字到文字处理完的速度。";
+    let tail = pause_early_aligned_growth_tail(owner_final, &key(submitted))
+        .expect("a unique small opening correction must not drop the entire owner tail");
+    assert_eq!(tail, "优化一下速度，然后这个胶囊弹起的速度，然后看一下能不能先优化一下速度，就是这个唤醒速度以及这个说话文字到文字处理完的速度。");
+    assert!(format!("{submitted}{tail}").starts_with(submitted));
+}
+
+#[test]
+fn pause_early_short_opening_correction_advances_source_without_replaying() {
+    use super::{
+        embedded_audio_partial_preview_stability_key as key,
+        pause_early_aligned_growth_tail, pause_early_final_remainder,
+        pause_early_source_key_after_append,
+    };
+
+    let submitted = "那里看一下先";
+    let next = "那你看一下先优化一下速度，然后继续说话。";
+    let tail = pause_early_aligned_growth_tail(next, &key(submitted)).unwrap();
+    let source = pause_early_source_key_after_append(next, &tail, &tail).unwrap();
+    let displayed = format!("{submitted}{tail}");
+    assert_ne!(source, key(&displayed), "provider and immutable editor words are separate coordinates");
+    assert_eq!(pause_early_final_remainder(next, &displayed, &source), Some(String::new()));
+    let later = "那你看一下先优化一下速度，然后继续说话。最后补一句。";
+    assert_eq!(pause_early_final_remainder(later, &displayed, &source), Some("最后补一句。".into()));
+}
+
+#[test]
 fn pause_early_live_continuation_survives_an_earlier_cloud_word_revision() {
     use super::{
         embedded_audio_partial_preview_stability_key as key,

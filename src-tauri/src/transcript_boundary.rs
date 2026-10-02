@@ -99,6 +99,69 @@ pub(crate) fn consumed_prefix_end(text: &str, key: &str) -> Option<usize> {
     next.is_none().then_some(text.len())
 }
 
+/// Locate the end of a revised, already consumed prefix in an owner-approved
+/// snapshot. The editor's submitted words remain immutable: this only maps
+/// their source coordinate so genuinely new words can continue after it.
+/// Require retained context and a unique best alignment, including competing
+/// terminal seams, rather than choosing a later equally plausible boundary.
+pub(crate) fn revised_prefix_end(text: &str, consumed_key: &str) -> Option<usize> {
+    let consumed: Vec<char> = consumed_key.chars().collect();
+    if consumed.len() > 512 {
+        return None;
+    }
+    let max_edits = (consumed.len() / 5).clamp(1, 12);
+    if consumed.len().saturating_sub(max_edits) < 4 {
+        return None;
+    }
+    let mut content = Vec::new();
+    let mut ends = Vec::new();
+    for (offset, ch) in text.char_indices() {
+        if is_decorative(ch) {
+            continue;
+        }
+        for lower in ch.to_lowercase() {
+            content.push(lower);
+            ends.push(offset + ch.len_utf8());
+        }
+    }
+    // An insertion inside the old body is not independent proof of a new
+    // continuation, even when it can be aligned to an earlier prefix.
+    if content.ends_with(&consumed[consumed.len() - 4..]) {
+        return None;
+    }
+    let first = consumed.len().saturating_sub(max_edits);
+    let last = content.len().min(consumed.len() + max_edits);
+    if first > last {
+        return None;
+    }
+    let mut previous: Vec<usize> = (0..=last).collect();
+    let mut current = vec![0; last + 1];
+    for (index, expected) in consumed.iter().enumerate() {
+        current[0] = index + 1;
+        for prefix in 1..=last {
+            current[prefix] = (previous[prefix] + 1)
+                .min(current[prefix - 1] + 1)
+                .min(previous[prefix - 1] + usize::from(*expected != content[prefix - 1]));
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+    let cost = *previous[first..=last].iter().min()?;
+    if cost > max_edits {
+        return None;
+    }
+    let mut seams = (first..=last).filter(|&prefix| previous[prefix] == cost);
+    let boundary = seams.next()?;
+    if seams.next().is_some()
+        || boundary == 0
+        || boundary >= content.len()
+        || content[boundary - 1] != *consumed.last()?
+        || ends[boundary - 1] == ends[boundary]
+    {
+        return None;
+    }
+    Some(ends[boundary - 1])
+}
+
 fn stability_units(text: &str) -> Vec<(char, usize)> {
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     let mut units = Vec::new();
@@ -172,6 +235,38 @@ mod tests {
         let text = "İ 已确认。新的正文。";
         let end = consumed_prefix_end(text, &content_key("İ 已确认。")).unwrap();
         assert_eq!(&text[end..], "新的正文。");
+    }
+
+    #[test]
+    fn revised_prefix_maps_short_corrected_openings_and_small_growth() {
+        let key = content_key("那里看一下先");
+        for (text, tail) in [
+            ("那你看一下先优化速度。", "优化速度。"),
+            ("那你看一下先，继续。", "，继续。"),
+            ("那里看一下先好。", "好。"),
+        ] {
+            let end = revised_prefix_end(text, &key).unwrap();
+            assert_eq!(&text[end..], tail);
+        }
+        let text = "İ 那你看一下先，继续说话。";
+        let end = revised_prefix_end(text, &content_key("İ 那里看一下先")).unwrap();
+        assert_eq!(&text[end..], "，继续说话。");
+    }
+
+    #[test]
+    fn revised_prefix_rejects_ambiguous_or_unproved_continuations() {
+        for (consumed, text) in [
+            ("aaaaab", "aaaabbbc"), // Both five and six units cost one edit.
+            ("那里看一下先", "完全不同的任务继续说话。"),
+            ("那里", "那你继续说话。"), // Too little retained context.
+            ("那里看一下先", "那你看一下先。"), // Only a correction, no new body.
+            ("那里看一下先", "那里现在看一下先。"), // Internal insertion only.
+            ("那里看一下先", "那你看一下后优化速度。"), // The old seam was also rewritten.
+            ("那里看一下先", "先把那里看一下先优化速度。"), // Shifted opening exceeds the budget.
+            ("abcdxi", "abcdİ继续。"), // A seam inside the multi-unit lowercase of İ is invalid.
+        ] {
+            assert_eq!(revised_prefix_end(text, &content_key(consumed)), None, "{consumed} -> {text}");
+        }
     }
 
     #[test]
