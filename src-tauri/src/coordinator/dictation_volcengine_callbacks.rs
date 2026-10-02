@@ -189,13 +189,15 @@ fn set_volcengine_preview_callbacks(
             endpoint_policy,
             &update,
         );
-        let local_vad_evidence = use_manual_vad
-            .then(|| asr_for_speaker.local_speech_activity_snapshot());
-        let local_vad_revision = local_vad_evidence.map(|evidence| evidence.revision);
+        // Automatic owner updates also need the current PCM/VAD epoch at the
+        // moment a qualified edge arrives. It is a STOP veto, not an owner
+        // classification or a replacement for the automatic decision update.
+        let local_vad_evidence = asr_for_speaker.local_speech_activity_snapshot();
+        let local_vad_revision = use_manual_vad.then_some(local_vad_evidence.revision);
         let decision_update = if use_manual_vad {
             asr_for_speaker.endpoint_update_with_local_speech_evidence_snapshot(
                 update,
-                local_vad_evidence.expect("manual endpoint VAD evidence snapshot"),
+                local_vad_evidence,
             )
         } else {
             update
@@ -203,9 +205,7 @@ fn set_volcengine_preview_callbacks(
         let now = Instant::now();
         {
             let mut clock = clock_for_speaker.lock();
-            if let Some(evidence) = local_vad_evidence {
-                clock.note_local_vad_evidence(evidence);
-            }
+            clock.note_local_vad_evidence_at(local_vad_evidence, now);
             clock.observe_with_local_vad_revision(
                 &decision_update,
                 endpoint_policy.body_started,

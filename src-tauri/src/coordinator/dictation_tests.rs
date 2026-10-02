@@ -3624,12 +3624,14 @@ async fn recorded_startup_speaker_coverage_live_delivery_probe() {
     let mut first_body_audio_ms = None;
     let mut admitted_source_key = String::new();
     let exercise_endpoint = fixture["exercise_endpoint_clock"].as_bool().unwrap_or(false);
+    let check_undelivered_turn = fixture["check_undelivered_turn"].as_bool().unwrap_or(false);
     let mut endpoint_clock = super::SettledTargetEndpointClock::default();
     endpoint_clock.automatic_wake_session = true;
     let mut submitted_display = String::new();
     let mut submitted_source_key = String::new();
     let mut submissions = Vec::new();
     let mut first_stop_wall_ms = None;
+    let mut first_stop_audio_ms = None;
     let mut last_body_submission_wall_ms = None;
     let mut visible_key = String::new();
     let mut visible_growth_at = started;
@@ -3663,8 +3665,10 @@ async fn recorded_startup_speaker_coverage_live_delivery_probe() {
         }
         let now = Instant::now();
         if exercise_endpoint {
-            endpoint_clock.note_local_vad_evidence(asr.local_speech_activity_snapshot());
-            endpoint_clock.observe(&asr.endpoint_update_snapshot(), !submitted_display.is_empty(), now);
+            endpoint_clock.note_local_vad_evidence_at(asr.local_speech_activity_snapshot(), now);
+            let body_started = !submitted_display.is_empty() || (check_undelivered_turn
+                && captured_ms >= fixture["recorded_body_started_audio_ms"].as_u64().unwrap());
+            endpoint_clock.observe(&asr.endpoint_update_snapshot(), body_started, now);
             if let Some(preview) = callbacks.lock().last() {
                 let key = super::embedded_audio_partial_preview_stability_key(preview);
                 if key != visible_key {
@@ -3717,12 +3721,13 @@ async fn recorded_startup_speaker_coverage_live_delivery_probe() {
                     "wall_ms": started.elapsed().as_millis()}));
             }
         }
-        if exercise_endpoint && !submitted_display.is_empty() && first_stop_wall_ms.is_none()
+        if exercise_endpoint && (!submitted_display.is_empty() || check_undelivered_turn) && first_stop_wall_ms.is_none()
             && endpoint_clock.latest_due_update_after_owner_analysis(
                 now, super::EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
                 asr.local_speaker_analysis_pending(),
             ).is_some() {
             first_stop_wall_ms = Some(started.elapsed().as_millis());
+            first_stop_audio_ms = Some(captured_ms);
         }
     }
     asr.send_last_frame().await.expect("send selected recording final frame");
@@ -3744,8 +3749,13 @@ async fn recorded_startup_speaker_coverage_live_delivery_probe() {
     let full_post_submission_window = !exercise_endpoint ||
         first_stop_wall_ms.zip(last_body_submission_wall_ms)
             .is_some_and(|(stop, submitted)| stop >= submitted + 3_000);
-    let passed = tail_retained && live_tail_retained && first_window_covers_start && streamed_before_final
-        && endpoint_tail_submitted && full_post_submission_window;
+    let captured_body_not_cut = first_stop_audio_ms.is_some_and(|stop_ms| stop_ms >= pcm.len() as u64 / 32);
+    let passed = if check_undelivered_turn {
+        tail_retained && first_window_covers_start && captured_body_not_cut
+    } else {
+        tail_retained && live_tail_retained && first_window_covers_start && streamed_before_final
+            && endpoint_tail_submitted && full_post_submission_window
+    };
     let report = serde_json::json!({
         "status": if passed {"PASS"} else {"FAIL"}, "source_session_id": fixture["source_session_id"],
         "scope": "real device recording replay, production VAD, chronological speaker tracker, persisted owner bank and provider; no fresh microphone/editor or broad interference acceptance",
@@ -3756,6 +3766,8 @@ async fn recorded_startup_speaker_coverage_live_delivery_probe() {
         "expected_owner_tail": owner_tail, "owner_tail_retained": tail_retained, "live_tail_retained": live_tail_retained,
         "endpoint_exercised": exercise_endpoint, "endpoint_tail_submitted": endpoint_tail_submitted,
         "endpoint_probe_scope": "shared source segmentation, submission boundary and endpoint clock; simulated successful submission, appended quiet PCM, no OS/editor assertion",
+        "check_undelivered_turn": check_undelivered_turn, "captured_body_not_cut": captured_body_not_cut,
+        "first_stop_audio_ms": first_stop_audio_ms, "recorded_pcm_ms": pcm.len() / 32,
         "first_stop_wall_ms": first_stop_wall_ms, "last_body_submission_wall_ms": last_body_submission_wall_ms,
         "full_post_submission_window": full_post_submission_window, "submissions": submissions,
         "final_text": final_result.text,
@@ -5207,6 +5219,244 @@ fn delivered_body_waits_briefly_for_a_local_owner_candidate_without_renewing_on_
     };
     bystander_clock.observe(&bystander, true, delivered_at + Duration::from_millis(2_700));
     assert!(bystander_clock.due_update(bystander_generation, delivered_at + Duration::from_millis(3_000), 2_900).is_some(), "confirmed room speech must not extend the owner's window");
+}
+
+#[test]
+fn automatic_delivered_owner_turn_uses_the_submission_wall_clock_for_resumed_speech() {
+    use crate::asr::volcengine::{LocalSpeechActivityState as VadState, LocalSpeechEvidence};
+    use std::time::Duration;
+    let (mut clock, owner, started) = undelivered_owner_turn_clock();
+    let delivered_at = started + Duration::from_millis(12_000);
+    // 6d1ce93c: capture was 16800 ms at delivery, but the next VAD onset
+    // at 20064 ms arrived only 2869 ms later in wall time. The continuation
+    // promise starts at successful submission, not at the PCM timestamp.
+    clock.note_local_vad_evidence(LocalSpeechEvidence {
+        state: VadState::NonSpeech,
+        activity_epoch: 1,
+        revision: 10,
+        analyzed_through_ms: 16_700,
+        last_detected_speech_end_ms: Some(14_784),
+        ..Default::default()
+    });
+    let quiet = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(16_800),
+        provider_audio_duration_ms: Some(16_500),
+        local_speech_end_ms: Some(14_784),
+        qualified_owner_activity_advanced: false,
+        target_activity_advanced: false,
+        ..owner
+    };
+    clock.observe(&quiet, true, delivered_at);
+    clock.note_body_delivery(delivered_at);
+    clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+        state: VadState::PendingSpeech,
+        activity_epoch: 2,
+        revision: 39,
+        analyzed_through_ms: 20_096,
+        pending_speech_start_ms: Some(20_064),
+        last_detected_speech_end_ms: Some(14_784),
+        ..Default::default()
+    }, delivered_at + Duration::from_millis(2_869));
+    let resumed = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(20_200),
+        provider_audio_duration_ms: Some(20_200),
+        local_speech_end_ms: Some(20_096),
+        ..quiet
+    };
+    clock.observe(&resumed, true, delivered_at + Duration::from_millis(3_035));
+    assert!(clock.latest_due_update(delivered_at + Duration::from_millis(3_035), 2_900).is_none(),
+        "a speech onset arriving within the full submission window must survive its PCM/wall-clock drift");
+}
+
+#[test]
+fn automatic_undelivered_owner_turn_survives_uncertain_identity_until_real_quiet() {
+    use crate::asr::volcengine::{LocalSpeechActivityState as VadState, LocalSpeechEvidence};
+    use std::time::Duration;
+
+    let (mut clock, owner, started) = undelivered_owner_turn_clock();
+    // 4980801c: before the first paste, the 3800 ms qualified owner edge
+    // stayed frozen while the same VAD turn and provider words kept growing.
+    // The previous positive-evidence budget expired and STOP was sent at
+    // 13400 ms, although local speech still extended through 13280 ms.
+    let pending = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(13_400),
+        provider_audio_duration_ms: Some(13_100),
+        local_speech_end_ms: Some(13_280),
+        local_speaker_classification_kind: Some(crate::asr::volcengine::LocalSpeakerClassificationKind::Uncertain),
+        local_speaker_observation_end_ms: Some(13_000),
+        qualified_owner_activity_advanced: false,
+        target_activity_advanced: false,
+        speaker_info_present: false,
+        ..owner.clone()
+    };
+    // Both short pauses in the captured recording start another VAD epoch
+    // inside the same three-second continuation window, before any paste.
+    for (epoch, quiet_ms, onset_ms) in [(1, 5_472, 5_568), (2, 10_176, 10_560)] {
+        clock.note_local_vad_evidence(LocalSpeechEvidence {
+            state: VadState::NonSpeech,
+            activity_epoch: epoch,
+            revision: epoch * 10,
+            analyzed_through_ms: quiet_ms,
+            last_detected_speech_end_ms: Some(quiet_ms - 128),
+            ..Default::default()
+        });
+        clock.note_local_vad_evidence(LocalSpeechEvidence {
+            state: VadState::PendingSpeech,
+            activity_epoch: epoch + 1,
+            revision: epoch * 10 + 1,
+            analyzed_through_ms: onset_ms + 32,
+            pending_speech_start_ms: Some(onset_ms),
+            ..Default::default()
+        });
+    }
+    clock.note_local_vad_evidence(LocalSpeechEvidence {
+        state: VadState::Speech,
+        activity_epoch: 3,
+        revision: 94,
+        analyzed_through_ms: 13_280,
+        ..Default::default()
+    });
+    let speaking_at = started + Duration::from_millis(9_400);
+    clock.observe(&pending, true, speaking_at);
+    assert!(clock.latest_due_update(speaking_at, 2_900).is_none(),
+        "identity-pending speech in the verified owner's undelivered turn must veto STOP");
+    assert_eq!(clock.last_body_delivery_at, None);
+    assert_eq!(clock.latest_update.as_ref().unwrap().qualified_owner_speech_end_ms, Some(3_800),
+        "a STOP veto must not manufacture an owner watermark");
+
+    for (revision, audio_ms) in [(101, 14_100), (128, 16_900), (130, 17_000)] {
+        clock.note_local_vad_evidence(LocalSpeechEvidence {
+            state: VadState::NonSpeech,
+            activity_epoch: 3,
+            revision,
+            analyzed_through_ms: audio_ms,
+            last_detected_speech_end_ms: Some(14_000),
+            ..Default::default()
+        });
+        let quiet = crate::asr::volcengine::TargetSpeakerUpdate {
+            audio_duration_ms: Some(audio_ms),
+            provider_audio_duration_ms: Some(audio_ms),
+            local_speech_end_ms: Some(14_000),
+            ..pending.clone()
+        };
+        let now = started + Duration::from_millis(audio_ms - 4_000);
+        clock.observe(&quiet, true, now);
+        assert_eq!(clock.latest_due_update(now, 2_900).is_some(), audio_ms == 17_000,
+            "quiet PCM boundary must stay latched and expire once, audio_ms={audio_ms}");
+    }
+}
+
+fn undelivered_owner_turn_clock() -> (
+    super::SettledTargetEndpointClock,
+    crate::asr::volcengine::TargetSpeakerUpdate,
+    std::time::Instant,
+) {
+    use crate::asr::volcengine::{LocalSpeechActivityState as VadState, LocalSpeechEvidence};
+    let started = std::time::Instant::now();
+    let owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: None,
+        target_speech_end_ms: None,
+        provider_audio_duration_ms: Some(4_000),
+        audio_duration_ms: Some(4_000),
+        local_speech_end_ms: Some(3_980),
+        qualified_owner_speech_end_ms: Some(3_800),
+        qualified_owner_activity_advanced: true,
+        // The production automatic endpoint adapter publishes the qualified
+        // edge, but intentionally omits the raw classification/quality pair.
+        local_speaker_classification_kind: None,
+        local_speaker_signal_quality_sufficient: None,
+        local_speaker_observation_end_ms: Some(3_800),
+        local_tentative_owner_speech_end_ms: None,
+        local_target_speech_end_ms: Some(3_800),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: None,
+        target_activity_advanced: true,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: false,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.automatic_wake_session = true;
+    let wake = crate::asr::volcengine::TargetSpeakerUpdate {
+        qualified_owner_speech_end_ms: None,
+        qualified_owner_activity_advanced: false,
+        ..owner.clone()
+    };
+    clock.arm_automatic_no_body_if_needed(&wake, started, started);
+    clock.note_local_vad_evidence(LocalSpeechEvidence {
+        state: VadState::Speech,
+        activity_epoch: 1,
+        revision: 1,
+        analyzed_through_ms: 3_980,
+        ..Default::default()
+    });
+    clock.observe(&owner, false, started);
+    clock.note_visible_body_boundary(true, 25, started);
+    clock.observe(&owner, true, started).expect("owner arms endpoint");
+    (clock, owner, started)
+}
+
+#[test]
+fn automatic_undelivered_owner_turn_releases_on_other_or_stalled_vad() {
+    use crate::asr::volcengine::{LocalSpeechActivityState as VadState, LocalSpeechEvidence};
+    use std::time::Duration;
+    for other in [false, true] {
+        let (mut clock, owner, started) = undelivered_owner_turn_clock();
+        let audio_ms = if other { 13_400 } else { 17_000 };
+        clock.note_local_vad_evidence(LocalSpeechEvidence {
+            state: VadState::Speech,
+            activity_epoch: 1,
+            revision: 94,
+            analyzed_through_ms: 13_280,
+            ..Default::default()
+        });
+        let update = crate::asr::volcengine::TargetSpeakerUpdate {
+            audio_duration_ms: Some(audio_ms),
+            provider_audio_duration_ms: Some(audio_ms),
+            local_speech_end_ms: Some(13_280),
+            local_speaker_classification_kind: Some(if other {
+                crate::asr::volcengine::LocalSpeakerClassificationKind::NonTarget
+            } else {
+                crate::asr::volcengine::LocalSpeakerClassificationKind::Uncertain
+            }),
+            local_speaker_observation_end_ms: Some(13_000),
+            local_non_target_speech_end_ms: other.then_some(13_000),
+            qualified_owner_activity_advanced: false,
+            target_activity_advanced: false,
+            ..owner
+        };
+        let now = started + Duration::from_millis(audio_ms - 4_000);
+        clock.observe(&update, true, now);
+        assert!(clock.latest_due_update(now, 2_900).is_some(),
+            "confirmed room speech or stalled analysis cannot retain an owner turn, other={other}");
+    }
+}
+
+#[test]
+fn automatic_undelivered_owner_turn_requires_fresh_owner_pcm_in_the_current_vad_epoch() {
+    use crate::asr::volcengine::{LocalSpeechActivityState as VadState, LocalSpeechEvidence};
+    let (_, owner, started) = undelivered_owner_turn_clock();
+    for (state, replayed, onset_ms) in [
+        (VadState::Unknown, false, 1_400),
+        (VadState::Speech, true, 1_400),
+        (VadState::PendingSpeech, false, 10_560),
+    ] {
+        let mut clock = super::SettledTargetEndpointClock::default();
+        clock.automatic_wake_session = true;
+        if replayed { clock.latest_update = Some(owner.clone()); }
+        clock.note_local_vad_evidence(LocalSpeechEvidence {
+            state,
+            activity_epoch: 3,
+            revision: 1,
+            analyzed_through_ms: 3_980,
+            pending_speech_start_ms: Some(onset_ms),
+            ..Default::default()
+        });
+        clock.observe(&owner, true, started);
+        assert_eq!(clock.tentative_owner_vad_epoch, None,
+            "unknown VAD, replayed owner flags and PCM from a previous turn cannot seed a STOP veto");
+    }
 }
 
 #[test]

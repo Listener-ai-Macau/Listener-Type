@@ -112,9 +112,10 @@ struct SettledTargetEndpointClock {
     /// while the next classifier window settles, but cannot rearm the clock.
     tentative_owner_continuation_at: Option<Instant>,
     tentative_owner_continuation_audio_ms: Option<u64>,
-    /// VAD turn that began inside the last delivered body's continuation
-    /// window, or contains a tentative local Target. Its identity can remain
-    /// unresolved while the owner speaks; it is not an owner watermark.
+    /// VAD turn containing fresh qualified owner speech, or beginning inside
+    /// the last delivered body's continuation window. Carry this across the
+    /// wake/body handoff even before the first paste. Unresolved continuation
+    /// only vetoes STOP; it never becomes a transcript owner watermark.
     tentative_owner_vad_epoch: Option<u64>,
     tentative_owner_quiet_audio_ms: Option<u64>,
     /// The accepted wake has not produced any body text.  This is not a
@@ -146,6 +147,10 @@ struct SettledTargetEndpointClock {
     /// bounded provider-stall observation and evaluates it exactly once from
     /// the watchdog.
     latest_update_at: Option<Instant>,
+    /// PCM onset of the current VAD epoch, retained after PendingSpeech
+    /// becomes Speech. A late owner observation for the previous epoch must
+    /// not adopt a new room-speech turn.
+    latest_local_vad_epoch_start_ms: Option<u64>,
     /// Whether the latest visible preview ends at a sentence boundary. A
     /// provider row can stop advancing for several seconds in the middle of a
     /// long clause; the settled-text wall clock must not cut that open body
@@ -603,11 +608,34 @@ impl SettledTargetEndpointClock {
         true
     }
 
+    #[cfg(test)]
     fn note_local_vad_evidence(
         &mut self,
         evidence: crate::asr::volcengine::LocalSpeechEvidence,
     ) {
+        self.note_local_vad_evidence_at(evidence, Instant::now());
+    }
+
+    fn note_local_vad_evidence_at(
+        &mut self,
+        evidence: crate::asr::volcengine::LocalSpeechEvidence,
+        observed_at: Instant,
+    ) {
         use crate::asr::volcengine::LocalSpeechActivityState;
+        if matches!(evidence.state, LocalSpeechActivityState::PendingSpeech | LocalSpeechActivityState::Speech)
+            && self.latest_local_vad_evidence.is_none_or(|previous| {
+                previous.activity_epoch != evidence.activity_epoch
+            })
+        {
+            self.latest_local_vad_epoch_start_ms = Some(
+                evidence.pending_speech_start_ms.unwrap_or_else(|| {
+                    self.latest_local_vad_evidence.map_or(
+                        evidence.last_detected_speech_end_ms.unwrap_or_default(),
+                        |previous| previous.analyzed_through_ms,
+                    )
+                }),
+            );
+        }
         // The last delivered chunk opens a three-second opportunity to
         // continue. A new local speech turn within it remains unresolved until
         // speaker evidence arrives; it cannot be silently discarded merely
@@ -628,8 +656,13 @@ impl SettledTargetEndpointClock {
                     .unwrap_or(evidence.analyzed_through_ms);
                 if evidence.activity_epoch > previous.activity_epoch
                     && onset_ms.saturating_add(AUTOMATIC_STOP_VAD_MAX_LAG_MS) >= delivery_ms
-                    && onset_ms.saturating_sub(delivery_ms)
-                        < EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+                    && self.last_body_delivery_at.is_some_and(|delivered_at| {
+                        // Microphone PCM and wall time can drift during BLE
+                        // catch-up. The public window starts at submission;
+                        // a fresh VAD onset inside it must remain pending.
+                        observed_at.saturating_duration_since(delivered_at)
+                            < Duration::from_millis(EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS)
+                    })
                 {
                     self.tentative_owner_vad_epoch = Some(evidence.activity_epoch);
                     self.tentative_owner_quiet_audio_ms = None;
@@ -680,6 +713,50 @@ impl SettledTargetEndpointClock {
             self.canonical_speech_serial = self.canonical_speech_serial.wrapping_add(1);
         }
         self.latest_local_vad_evidence = Some(evidence);
+    }
+
+    fn note_qualified_owner_vad_turn(
+        &mut self,
+        update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    ) {
+        if !self.automatic_wake_session || !update.local_speaker_tracking_enabled {
+            return;
+        }
+        if update_has_recent_strong_non_target(update) {
+            self.tentative_owner_vad_epoch = None;
+            self.tentative_owner_quiet_audio_ms = None;
+            return;
+        }
+        // Delivery already seeds its own continuation window. Before it,
+        // preserve the actual owner-qualified turn from the no-body stage;
+        // waiting for provider attribution cannot discard that turn's VAD.
+        if self.last_body_delivery_at.is_some() {
+            return;
+        }
+        let Some(owner_end_ms) = update.qualified_owner_speech_end_ms.filter(|edge| {
+            *edge > 0 && self.latest_update.as_ref()
+                .and_then(|previous| previous.qualified_owner_speech_end_ms)
+                .is_none_or(|previous| *edge > previous)
+        }) else { return; };
+        let Some(evidence) = self.latest_local_vad_evidence else { return; };
+        use crate::asr::volcengine::LocalSpeechActivityState;
+        if matches!(evidence.state, LocalSpeechActivityState::PendingSpeech | LocalSpeechActivityState::Speech)
+            && evidence.activity_epoch > 0
+            && evidence.revision > 0
+            && self.latest_local_vad_epoch_start_ms.is_some_and(|onset| owner_end_ms >= onset)
+            && owner_end_ms <= evidence.analyzed_through_ms.saturating_add(AUTOMATIC_STOP_VAD_MAX_LAG_MS)
+            && update.audio_duration_ms.is_some_and(|captured| {
+                captured.abs_diff(evidence.analyzed_through_ms) <= AUTOMATIC_STOP_VAD_MAX_LAG_MS
+            })
+        {
+            self.tentative_owner_vad_epoch = Some(evidence.activity_epoch);
+            self.tentative_owner_continuation_audio_ms = Some(owner_end_ms);
+            self.tentative_owner_quiet_audio_ms = None;
+            log::info!(
+                "[asr] endpoint owner_turn source=qualified_local_pcm activity_epoch={} owner_end_ms={} onset_ms={:?} before_first_delivery=true",
+                evidence.activity_epoch, owner_end_ms, self.latest_local_vad_epoch_start_ms,
+            );
+        }
     }
 
     fn clear_continuation_pending(&mut self) {
@@ -996,6 +1073,7 @@ impl SettledTargetEndpointClock {
         if local_vad_revision.is_some() {
             self.manual_vad_guard = true;
         }
+        self.note_qualified_owner_vad_turn(update);
         if self.automatic_no_body_armed {
             if !body_started {
                 self.observe_automatic_no_body_speech(update, now);
@@ -1954,7 +2032,7 @@ fn start_settled_target_endpoint_watchdog(
             };
             let (update, hold_diagnostic) = {
                 let mut clock = endpoint_clock.lock();
-                clock.note_local_vad_evidence(local_vad_evidence);
+                clock.note_local_vad_evidence_at(local_vad_evidence, Instant::now());
                 // If the provider never opened, keep feeding the reducer from
                 // the local owner clock. This preserves the same single
                 // watchdog decision path while removing generic room-energy
