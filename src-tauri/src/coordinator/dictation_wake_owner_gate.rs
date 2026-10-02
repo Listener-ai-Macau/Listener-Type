@@ -85,13 +85,25 @@ fn owner_verification_covers_wake(
     }
 }
 
+fn wake_owner_source_range(
+    current: Option<crate::observability::CandidateRange>,
+    keyword: Option<crate::observability::CandidateRange>,
+    confirmed_local: Option<crate::observability::CandidateRange>,
+    require_latest: bool,
+) -> Option<crate::observability::CandidateRange> {
+    let current = current?;
+    if require_latest { return Some(current); }
+    keyword.or(confirmed_local).filter(|range| range.start == current.start
+        && range.end > range.start && range.end <= current.end).or(Some(current))
+}
+
 fn owner_verification_required_wake_range(
     candidate: &BufferedSpeakerCandidate,
     wake_match: &crate::wake_phrase::Match,
     require_latest_confirmation: bool,
 ) -> Option<crate::observability::CandidateRange> {
-    // Local-only endpoints are estimates. A real keyword endpoint permits
-    // reuse of a completed identity window even when later body PCM grew.
+    // Local-only endpoints are estimates, but the complete phrase came from
+    // a frozen PCM snapshot. Identity must cover that source, not later body.
     let audio_end = wake_match.audio_end_seconds.filter(|end| end.is_finite() && *end > 0.0);
     let required_bytes = if let Some(audio_end) = audio_end.filter(|_| !require_latest_confirmation) {
         let end = (audio_end as f64 * 32_000.0).ceil() as usize;
@@ -100,7 +112,27 @@ fn owner_verification_required_wake_range(
     } else {
         candidate.pcm.len()
     };
-    candidate_slice_range(candidate.pcm_base_offset, 0, required_bytes)
+    wake_owner_source_range(
+        candidate.current_candidate_range(),
+        audio_end.and_then(|_| candidate_slice_range(candidate.pcm_base_offset, 0, required_bytes)),
+        candidate.owner_local_phrase_source_range,
+        require_latest_confirmation,
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn prefetch_owner_for_local_confirmation(
+    candidate: &mut BufferedSpeakerCandidate, phrase: &str, embedded_session_id: u32,
+) {
+    if !crate::speaker_verification::is_enrolled_for_phrase(phrase)
+        || candidate.pcm.len() < OWNER_VERIFICATION_START_BYTES { return; }
+    if let Some(prefetched) = candidate.owner_verification_task.as_ref() {
+        if owner_verification_covers_wake(prefetched.source_range, candidate.current_candidate_range())
+            || !prefetched.task.inner().is_finished() { return; }
+    }
+    // Called only on the bounded local-ASR launch ladder. Keep one in-flight
+    // inference, and classify the same frozen audio beside phrase recognition.
+    start_owner_verification_prefetch(candidate, phrase, embedded_session_id);
 }
 
 fn refresh_owner_verification_prefetch_for_wake(
@@ -266,12 +298,13 @@ fn evaluate_candidate_owner_gate(
     candidate: &mut BufferedSpeakerCandidate,
     phrase_signal: denzic_voice_activation_v1_core::PhraseSignal,
     verification: &Result<crate::speaker_verification::VerificationResult, String>,
+    verified_pcm_ms: usize,
 ) -> OwnerGateEvaluation {
     evaluate_owner_gate_evidence(
         &mut candidate.owner_ambiguous_confirmations,
         &mut candidate.owner_best_ambiguous_score,
         phrase_signal,
-        candidate.pcm.len() / 32,
+        verified_pcm_ms,
         verification,
     )
 }
@@ -290,11 +323,12 @@ fn arbitrate_candidate_wake(
     verification: &Result<crate::speaker_verification::VerificationResult, String>,
     owner_verified_by_extraction: bool,
     terminal: bool,
+    verified_pcm_ms: usize,
 ) -> (
     OwnerGateEvaluation,
     crate::speech_decision_kernel::WakeArbitration,
 ) {
-    let mut owner_gate = evaluate_candidate_owner_gate(candidate, phrase_signal, verification);
+    let mut owner_gate = evaluate_candidate_owner_gate(candidate, phrase_signal, verification, verified_pcm_ms);
     if owner_verified_by_extraction {
         owner_gate.access = crate::speech_decision_kernel::OwnerAccessEvidence::EnrolledMatch;
         owner_gate.recovered_by_local_phrase = true;

@@ -252,6 +252,7 @@ impl EmbeddedStreamingDictation {
                 owner_best_ambiguous_score: 0.0,
                 owner_verification_task: None,
                 owner_verification_attempted: false,
+                owner_local_phrase_source_range: None,
                 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
                 target_wake_extraction_task: None,
                 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -264,6 +265,8 @@ impl EmbeddedStreamingDictation {
                 local_confirmation_window_origin_bytes: 0,
                 #[cfg(target_os = "windows")]
                 local_confirmation_task_origin_bytes: 0,
+                #[cfg(target_os = "windows")]
+                local_confirmation_task_source_range: None,
                 #[cfg(target_os = "windows")]
                 local_confirmation_task_has_keyword_model_hit: false,
                 #[cfg(target_os = "windows")]

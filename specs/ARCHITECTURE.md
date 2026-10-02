@@ -252,6 +252,20 @@ capture ready. Idle by itself is not a successful-final certificate.
 - Windows uses low-level hooks for hotkeys and Listener Type TSF IME for reliable insertion.
 - Windows IME identity is documented in `docs/platform/windows-ime.md`.
 
+## Wake confirmation source and parallel verification
+
+Wake phrase evidence belongs to the immutable PCM supplied to its local confirmation.
+A later body chunk must not move that identity boundary. The bounded Windows local
+confirmation launch also schedules verification of the same retained snapshot; it
+starts no additional owner inference while another is in flight. A real keyword
+endpoint takes precedence, while repeated near-phrase recovery still requires the
+latest confirmation audio. Fallback duration checks use the actual verified window,
+not later accumulated PCM. Missing/expired source ranges retain current verification.
+
+The endpoint clock still starts at the last successful confirmed-body submission.
+Wake inference scheduling does not shorten the full 3000 ms continuation window;
+fresh owner speech protects recording and a new body submission restarts it.
+
 ## Data Boundaries
 
 - App data directory name: `Listener Type`.

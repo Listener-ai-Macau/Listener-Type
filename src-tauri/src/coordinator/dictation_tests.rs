@@ -11920,6 +11920,66 @@ fn owner_verification_prefetch_requires_enrollment_and_a_real_model_window() {
 }
 
 #[test]
+fn local_wake_identity_uses_frozen_confirmation_audio_not_later_body() {
+    use crate::observability::CandidateRange;
+    let range = |end_ms: u64| Some(CandidateRange {start:0,end:end_ms*32});
+    let required = super::wake_owner_source_range(range(1886),None,range(1832),false);
+    assert!(super::owner_verification_covers_wake(range(1832),required),
+        "a parallel voiceprint of the exact confirmed phrase must survive later body PCM growth");
+    assert!(!super::owner_verification_covers_wake(range(1102),required),
+        "the speculative pre-phrase score still cannot authorize the later wake");
+    let latest = super::wake_owner_source_range(range(4445),None,range(1832),true);
+    assert!(!super::owner_verification_covers_wake(range(1832),latest),
+        "repeated near-phrase recovery still needs the latest confirmation audio");
+    assert_eq!(super::wake_owner_source_range(range(1886),range(1680),range(1832),false),range(1680));
+    assert_eq!(super::wake_owner_source_range(range(1886),None,None,false),range(1886));
+    assert_eq!(super::wake_owner_source_range(None,None,range(1832),false),None);
+    assert_eq!(super::wake_owner_source_range(range(1886),None,range(2000),false),range(1886));
+    let retained = Some(CandidateRange {start:1000*32,end:4445*32});
+    assert_eq!(super::wake_owner_source_range(retained,None,range(1832),false),retained,
+        "a retired confirmation cannot authorize a different retained buffer");
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+#[ignore = "explicit recorded PCM, enrolled owner and isolated installed local helper; no device/editor acceptance"]
+fn recorded_wake_parallel_inference_latency_probe() {
+    let input = std::env::var("LISTENER_WAKE_PARALLEL_REPLAY_INPUT").expect("explicit frozen wake PCM");
+    let output = std::env::var("LISTENER_WAKE_PARALLEL_REPLAY_OUTPUT").expect("explicit output");
+    let fixture:serde_json::Value = serde_json::from_slice(&std::fs::read(input).unwrap()).unwrap();
+    let mut pcm = std::fs::read(fixture["pcm_path"].as_str().unwrap()).unwrap();
+    pcm.truncate(fixture["snapshot_pcm_ms"].as_u64().unwrap() as usize * 32);
+    let phrase = fixture["wake_phrase"].as_str().unwrap();
+    crate::asr::local::wake_helper::preload().expect("preload isolated helper");
+    crate::speaker_verification::verify(&pcm,phrase).expect("warm enrolled verifier");
+    let mut trials = Vec::new();
+    for _ in 0..3 {
+        let started = std::time::Instant::now();
+        let serial_phrase = crate::asr::local::wake_helper::confirm(&pcm,phrase,std::time::Duration::from_secs(3)).unwrap();
+        let serial_owner = crate::speaker_verification::verify(&pcm,phrase).unwrap();
+        let serial_ms = started.elapsed().as_millis();
+        let started = std::time::Instant::now();
+        let phrase_pcm = pcm.clone(); let phrase_text = phrase.to_string();
+        let phrase_task = std::thread::spawn(move || crate::asr::local::wake_helper::confirm(
+            &phrase_pcm,&phrase_text,std::time::Duration::from_secs(3)));
+        let owner_pcm = pcm.clone(); let owner_phrase = phrase.to_string();
+        let owner_task = std::thread::spawn(move || crate::speaker_verification::verify(&owner_pcm,&owner_phrase));
+        let parallel_phrase = phrase_task.join().unwrap().unwrap();
+        let parallel_owner = owner_task.join().unwrap().unwrap();
+        let parallel_ms = started.elapsed().as_millis();
+        assert_eq!(serial_phrase.matched,parallel_phrase.matched);
+        assert_eq!(serial_owner.owner_matched,parallel_owner.owner_matched);
+        assert!((serial_owner.score-parallel_owner.score).abs()<0.00001);
+        assert!(parallel_phrase.matched && parallel_owner.owner_matched,"recorded positive wake remains gated by both models");
+        trials.push(serde_json::json!({"serial_wall_ms":serial_ms,"parallel_wall_ms":parallel_ms,
+            "phrase_matched":parallel_phrase.matched,"owner_matched":parallel_owner.owner_matched,"owner_score":parallel_owner.score}));
+    }
+    std::fs::write(output,serde_json::to_vec_pretty(&serde_json::json!({"scope":
+        "same consented frozen PCM and unchanged local-helper model; inference wall time only, no live wake-end claim",
+        "source_session_id":fixture["source_session_id"],"snapshot_pcm_ms":fixture["snapshot_pcm_ms"],"trials":trials})).unwrap()).unwrap();
+}
+
+#[test]
 fn owner_snapshot_must_cover_the_same_wake_or_repeated_confirmation_audio() {
     use crate::observability::CandidateRange;
     let range = |start_ms: u64, end_ms: u64| Some(CandidateRange {

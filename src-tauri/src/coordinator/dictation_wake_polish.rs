@@ -2151,6 +2151,9 @@ struct BufferedSpeakerCandidate {
     /// bounded task completes, do not immediately spawn another copy on every
     /// incoming PCM chunk; repeated inference starves preview/ASR processing.
     owner_verification_attempted: bool,
+    /// The PCM snapshot that supplied a complete local phrase. Later body
+    /// growth cannot move that proof's identity boundary.
+    owner_local_phrase_source_range: Option<crate::observability::CandidateRange>,
     /// Strong continuous Mandarin can hide the owner's phrase from both raw
     /// KWS and local ASR. Run one bounded, enrolled-owner extraction beside the
     /// established raw path; it may release only after the extracted output
@@ -2175,6 +2178,8 @@ struct BufferedSpeakerCandidate {
     local_confirmation_window_origin_bytes: usize,
     #[cfg(target_os = "windows")]
     local_confirmation_task_origin_bytes: usize,
+    #[cfg(target_os = "windows")]
+    local_confirmation_task_source_range: Option<crate::observability::CandidateRange>,
     #[cfg(target_os = "windows")]
     local_confirmation_task_has_keyword_model_hit: bool,
     #[cfg(target_os = "windows")]

@@ -2335,12 +2335,14 @@ impl EmbeddedStreamingDictation {
                 .as_ref()
                 .map(|_| phrase_signal)
                 .unwrap_or(denzic_voice_activation_v1_core::PhraseSignal::None);
+            let verified_pcm_ms = candidate.pcm.len() / 32;
             let (owner_gate, arbitration) = arbitrate_candidate_wake(
                 &mut candidate,
                 effective_phrase_signal,
                 &verification,
                 owner_verified_by_extraction,
                 true,
+                verified_pcm_ms,
             );
             let gate_decision = arbitration.decision;
             let enrolled_owner_matched = arbitration.owner_access.enrolled_owner_verified();
@@ -3571,6 +3573,9 @@ impl EmbeddedStreamingDictation {
                                 let confirmation_pcm_ms = confirmation_pcm.len() / 32;
                                 candidate.local_confirmation_task_origin_bytes =
                                     task_origin_bytes;
+                                candidate.local_confirmation_task_source_range = candidate.current_candidate_range();
+                                candidate.owner_local_phrase_source_range = None;
+                                prefetch_owner_for_local_confirmation(candidate, &phrase, embedded_session_id);
                                 candidate.local_confirmation_task_has_keyword_model_hit =
                                     kws_hit.is_some();
                                 candidate.local_confirmation_task_started_at =
@@ -3621,13 +3626,14 @@ impl EmbeddedStreamingDictation {
                                     task,
                                     candidate.local_confirmation_task_origin_bytes,
                                     candidate.local_confirmation_task_has_keyword_model_hit,
+                                    candidate.local_confirmation_task_source_range.take(),
                                 )
                             })
                         } else {
                             None
                         }
                     };
-                    if let Some((task, task_origin_bytes, task_has_keyword_model_hit)) =
+                    if let Some((task, task_origin_bytes, task_has_keyword_model_hit, task_source_range)) =
                         completed_task
                     {
                         let task_result = task.await;
@@ -3722,6 +3728,7 @@ impl EmbeddedStreamingDictation {
                                     };
                                     phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
                                     if let Some(candidate) = self.speaker_candidate.as_mut() {
+                                        candidate.owner_local_phrase_source_range = task_source_range;
                                         show_early_wake_recording_capsule(inner, candidate);
                                     }
                                     Some(crate::wake_phrase::Match {
@@ -4101,6 +4108,9 @@ impl EmbeddedStreamingDictation {
         let prefetched = candidate.owner_verification_task.take().filter(|prefetched| {
             owner_verification_covers_wake(prefetched.source_range, required_wake_range)
         });
+        let verified_pcm_ms = prefetched.as_ref().and_then(|prefetched| prefetched.source_range)
+            .map(|range| ((range.end - range.start) / 32) as usize).unwrap_or(pcm_ms);
+        let owner_join_started = Instant::now();
         let verification_task = match prefetched {
             Some(prefetched) => prefetched.task.await,
             None => {
@@ -4116,6 +4126,7 @@ impl EmbeddedStreamingDictation {
             Ok(result) => result,
             Err(err) => (Err(format!("声纹验证任务失败: {err}")), 0),
         };
+        let owner_join_wait_ms = owner_join_started.elapsed().as_millis() as u64;
         let total_ms = kws_ms
             .saturating_add(local_confirmation_ms)
             .saturating_add(voiceprint_ms);
@@ -4149,11 +4160,12 @@ impl EmbeddedStreamingDictation {
             &verification,
             owner_verified_by_extraction,
             false,
+            verified_pcm_ms,
         );
         let gate_decision = arbitration.decision;
         let enrolled_owner_matched = arbitration.owner_access.enrolled_owner_verified();
         log::info!(
-            "[wake-phrase] automatic streaming gate embedded_session_id={} terminal=false pcm_ms={} kws_fed_bytes={} kws_step_ms={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} total_compute_ms={} phrase_signal={:?} gate_decision={:?} owner_policy={} enrolled_owner_matched={} owner_recovered_by_local_phrase={} owner_ambiguous_confirmations={} owner_best_ambiguous_score={:.6}",
+            "[wake-phrase] automatic streaming gate embedded_session_id={} terminal=false pcm_ms={} kws_fed_bytes={} kws_step_ms={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} total_compute_ms={} phrase_signal={:?} gate_decision={:?} owner_policy={} enrolled_owner_matched={} owner_recovered_by_local_phrase={} owner_ambiguous_confirmations={} owner_best_ambiguous_score={:.6} owner_verified_pcm_ms={} owner_join_wait_ms={}",
             embedded_session_id,
             pcm_ms,
             candidate.kws_fed_bytes,
@@ -4168,7 +4180,9 @@ impl EmbeddedStreamingDictation {
             enrolled_owner_matched,
             owner_gate.recovered_by_local_phrase,
             candidate.owner_ambiguous_confirmations,
-            candidate.owner_best_ambiguous_score
+            candidate.owner_best_ambiguous_score,
+            verified_pcm_ms,
+            owner_join_wait_ms,
         );
 
         if gate_decision != denzic_voice_activation_v1_core::GateDecision::Accept {
