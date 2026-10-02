@@ -15959,7 +15959,11 @@ async fn recorded_separator_product_authority_probe() {
     asr.enable_diagnostic_trace();
     let asr = std::sync::Arc::new(asr);
     let phrase = fixture["wake_phrase"].as_str().unwrap();
-    asr.note_local_speaker_tracking_started(phrase);
+    if fixture["wake_owner_verified"].as_bool().unwrap_or(false) {
+        asr.note_verified_local_speaker_tracking_started(phrase);
+    } else {
+        asr.note_local_speaker_tracking_started(phrase);
+    }
     asr.note_local_speaker_profile_adaptive(false);
     asr.open_session().await.unwrap();
     asr.mark_audio_delivery_ready();

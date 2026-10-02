@@ -811,6 +811,9 @@ struct SyncState {
     /// Keep calibrated foreign observations at their original audio positions.
     /// The advisory identity timeline must not erase this corroborating channel.
     local_transcript_foreign_evidence: Vec<LocalSpeakerEvidence>,
+    /// Usable raw negatives remain advisory until a different stable provider
+    /// speaker overlaps their audio interval. Retained identity is independent.
+    local_advisory_foreign_evidence: Vec<LocalSpeakerEvidence>,
     local_unreliable_speaker_evidence_end_ms: Vec<u64>,
     wake_speaker_phrase: Option<String>,
     speaker_info_present: bool,
@@ -879,6 +882,7 @@ struct OwnerContinuitySnapshot {
     owner_absence_run_confirmed: bool,
     evidence: Vec<LocalSpeakerEvidence>,
     transcript_foreign_evidence: Vec<LocalSpeakerEvidence>,
+    advisory_foreign_evidence: Vec<LocalSpeakerEvidence>,
     unreliable_evidence_end_ms: Vec<u64>,
 }
 
@@ -919,6 +923,7 @@ impl OwnerContinuitySnapshot {
             owner_absence_run_confirmed: state.local_owner_absence_run_confirmed,
             evidence: state.local_speaker_evidence.clone(),
             transcript_foreign_evidence: state.local_transcript_foreign_evidence.clone(),
+            advisory_foreign_evidence: state.local_advisory_foreign_evidence.clone(),
             unreliable_evidence_end_ms: state.local_unreliable_speaker_evidence_end_ms.clone(),
         }
     }
@@ -962,6 +967,7 @@ impl OwnerContinuitySnapshot {
         state.local_owner_absence_run_confirmed = self.owner_absence_run_confirmed;
         state.local_speaker_evidence = self.evidence;
         state.local_transcript_foreign_evidence = self.transcript_foreign_evidence;
+        state.local_advisory_foreign_evidence = self.advisory_foreign_evidence;
         state.local_unreliable_speaker_evidence_end_ms = self.unreliable_evidence_end_ms;
     }
 }
@@ -995,6 +1001,28 @@ fn provider_owner_evidence(state: &SyncState) -> Vec<LocalSpeakerEvidence> {
         }
     }
     evidence
+}
+
+fn correlate_advisory_foreign_evidence(state: &mut SyncState, provider: &Value) {
+    if !state.local_speaker_tracking_enabled || !enrolled_owner_identity_verified(state) {
+        return;
+    }
+    let Some(rows) = provider.get("utterances").and_then(Value::as_array) else { return; };
+    let target = state.target_speaker_id.clone().or_else(|| {
+        state.wake_speaker_phrase.as_deref().and_then(|phrase| wake_phrase_bound_target_speaker(rows, phrase))
+    });
+    let Some(target) = target else { return; };
+    for sample in &state.local_advisory_foreign_evidence {
+        let center = sample.audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+        if rows.iter().any(|row| {
+            utterance_is_stable(row) && utterance_speaker_id(row).is_some_and(|id| id != target)
+                && utterance_start_ms(row).zip(utterance_end_ms(row))
+                    .is_some_and(|(start, end)| center >= start && center <= end)
+        }) && !state.local_transcript_foreign_evidence.iter().any(|prior| prior.audio_end_ms == sample.audio_end_ms) {
+            state.local_transcript_foreign_evidence.push(sample.clone());
+            log::info!("[asr] advisory local mismatch corroborated by distinct provider speaker audio_end_ms={}", sample.audio_end_ms);
+        }
+    }
 }
 
 fn repeated_owner_windows_after(
@@ -2739,6 +2767,11 @@ fn stable_provider_foreign_row_has_local_veto(state: &SyncState, provider_result
                             center_ms >= start_ms && center_ms <= end_ms
                         });
                     confirmed_short_foreign_hint_overlaps
+                        || state.local_transcript_foreign_evidence.iter().any(|sample| {
+                            let center = sample_center(sample.audio_end_ms);
+                            center >= start_ms && center <= end_ms
+                                && !repeated_owner_windows_after(&provider_owner_evidence(state), center, Some(end_ms))
+                        })
                         || local_non_target_vetoes_split_utterance(state, start_ms, end_ms)
                 })
         })
@@ -6529,6 +6562,17 @@ impl VolcengineStreamingASR {
                 } else {
                     crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive
                 };
+            // Keep the observation before identity hysteresis converts a
+            // momentary NonTarget into Uncertain. It cannot delete same-track
+            // owner text or serve as a room baseline without provider correlation.
+            if enrolled_owner_identity_verified(&state) && signal_quality_sufficient
+                && matches!(classification, crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. })
+            {
+                let stable_target = state.local_speaker_stable_target;
+                state.local_advisory_foreign_evidence.push(LocalSpeakerEvidence {
+                    audio_end_ms: audio_duration_ms, classification, stable_target,
+                });
+            }
             let transcript_hard_non_target_applies = matches!(
                 transcript_speaker_evidence,
                 crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget
@@ -6807,6 +6851,7 @@ impl VolcengineStreamingASR {
         state.local_sustained_non_target_speech_end_ms = None;
         state.local_speaker_evidence.clear();
         state.local_transcript_foreign_evidence.clear();
+        state.local_advisory_foreign_evidence.clear();
         state.local_unreliable_speaker_evidence_end_ms.clear();
         state.qualified_owner_speech_end_ms = None;
         state.local_speaker_signal_quality_sufficient = None;
@@ -7218,6 +7263,7 @@ impl VolcengineStreamingASR {
             st.local_owner_absence_run_confirmed = false;
             st.local_speaker_evidence.clear();
             st.local_transcript_foreign_evidence.clear();
+            st.local_advisory_foreign_evidence.clear();
             st.local_unreliable_speaker_evidence_end_ms.clear();
             pending_speaker_anchor.restore(&mut st);
             st.owner_isolation_frozen = false;
@@ -8308,6 +8354,7 @@ impl VolcengineStreamingASR {
         }
         let (speaker_filtered_result, target_speaker_update, provisional_holds_endpoint) = {
             let mut state = self.state.lock();
+            correlate_advisory_foreign_evidence(&mut state, result);
             let local_speaker_tracking_enabled = state.local_speaker_tracking_enabled;
             let local_speaker_evidence = provider_owner_evidence(&state);
             let wake_speaker_phrase = state.wake_speaker_phrase.clone();
@@ -10286,6 +10333,136 @@ mod tests {
         state.local_unreliable_speaker_evidence_end_ms.clear();
         state.local_body_owner_verified = false;
         assert!(verified_provider_owner_candidate(&state, &filtered, &provider, true).is_none());
+    }
+
+    #[test]
+    fn usable_advisory_mismatch_still_correlates_with_a_different_provider_speaker() {
+        use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Target, Uncertain};
+        use crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive;
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started("开始录音");
+        asr.state.lock().local_wake_owner_verified = true;
+        for (end, classification, quality) in [
+            (3_488, Target { score: 0.47168362 }, true),
+            (4_000, Target { score: 0.52355164 }, true),
+            (10_688, Target { score: 0.4891601 }, true),
+            (11_200, Target { score: 0.4373984 }, true),
+            (11_680, Uncertain { score: 0.39000276 }, false),
+            (12_576, Uncertain { score: 0.281584 }, true),
+            (12_992, Uncertain { score: 0.18511528 }, false),
+            (13_472, NonTarget { score: 0.17435727 }, true),
+            (13_888, Uncertain { score: 0.11385983 }, false),
+        ] {
+            asr.note_local_speaker_observation_with_quality(end, classification, Inconclusive, quality);
+        }
+        // aa39bfa8: the provider split the owner's 200..11080 ms row from
+        // the media's 11600..15282 ms row. Debounced identity stayed Target,
+        // but the latter row had its own usable raw NonTarget observation.
+        let owner = "开始录音，请检查干扰中的完整正文 ABCDEFG。";
+        let foreign = "何总，罗师傅他们还没来，我问问。";
+        let result = json!({"text": format!("{owner}{foreign}"), "utterances": [
+            {"text": owner, "start_time": 200, "end_time": 11080,
+             "definite": true, "additions": {"speaker_id": "0", "source": "two_pass"}},
+            {"text": foreign, "start_time": 11600, "end_time": 15282,
+             "definite": true, "additions": {"speaker_id": "1", "source": "two_pass"}}
+        ]});
+        let payload = serde_json::to_vec(&json!({"audio_info": {"duration": 17371}, "result": result})).unwrap();
+        asr.handle_frame(&frame::build(MessageType::FullServerResponse, Flags::LastPacket,
+            Serialization::Json, &payload, None));
+        let state = asr.state.lock();
+        assert_eq!(state.last_partial_text, owner, "a retained owner latch is not ownership of the second provider speaker");
+        assert_eq!(state.verified_provider_owner.as_ref().map(|candidate| candidate.text.as_str()), Some(owner));
+        assert!(state.local_speaker_stable_target, "one advisory mismatch must not erase the owner identity");
+        assert!(!state.owner_isolation_frozen, "the accepted owner row stays intact");
+    }
+
+    #[test]
+    fn advisory_mismatch_preserves_same_track_owner_and_ignores_unusable_signal() {
+        use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Target};
+        use crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive;
+        for quality in [true, false] {
+            let asr = uplink_stall_test_asr();
+            asr.note_local_speaker_tracking_started("开始录音");
+            asr.state.lock().local_wake_owner_verified = true;
+            for end in [2000, 2480] {
+                asr.note_local_speaker_observation(end, Target { score: 0.52 }, Inconclusive);
+            }
+            for end in [5000, 5480] {
+                asr.note_local_speaker_observation_with_quality(end, NonTarget { score: 0.174 }, Inconclusive, quality);
+            }
+            let owner = "开始录音，我停顿之后还在继续说自己的正文。";
+            let result = json!({"text": owner, "utterances": [
+                {"text": owner, "start_time": 200, "end_time": 6000,
+                 "definite": true, "additions": {"speaker_id": "0"}}
+            ]});
+            let payload = serde_json::to_vec(&json!({"audio_info": {"duration": 8000}, "result": result})).unwrap();
+            asr.handle_frame(&frame::build(MessageType::FullServerResponse, Flags::LastPacket,
+                Serialization::Json, &payload, None));
+            let state = asr.state.lock();
+            assert_eq!(state.last_partial_text, owner);
+            assert!(!state.owner_isolation_frozen);
+            assert!(state.local_transcript_foreign_evidence.is_empty(),
+                "an advisory dip in the known owner track cannot become a foreign baseline");
+            if !quality {
+                assert!(state.local_advisory_foreign_evidence.is_empty());
+                assert!(provider_owner_evidence(&state).iter().all(|sample| !matches!(sample.classification, NonTarget { .. })),
+                    "unusable signal cannot become a provider identity veto");
+            }
+        }
+    }
+
+    #[test]
+    fn correlated_advisory_mismatch_keeps_owner_return_and_session_reset() {
+        use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Target, Uncertain};
+        use crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive;
+        let asr = uplink_stall_test_asr();
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        for (end, classification) in [
+            (2000, Target { score: 0.55 }), (2480, Target { score: 0.57 }),
+            (5600, NonTarget { score: 0.174 }), (6080, Uncertain { score: 0.18 }),
+            (6600, Uncertain { score: 0.15 }),
+        ] {
+            asr.note_local_speaker_observation(end, classification, Inconclusive);
+        }
+        {
+            let state = asr.state.lock();
+            assert!(state.local_transcript_foreign_evidence.is_empty());
+            let mut restored = SyncState::default();
+            OwnerContinuitySnapshot::capture(&state).restore(&mut restored);
+            assert_eq!(restored.local_advisory_foreign_evidence.len(), 1,
+                "the ASR open/reset boundary must keep still-unmatched raw evidence");
+        }
+        let owner = "开始录音，这是我的第一句。";
+        let foreign = "这是旁人的一段声音。";
+        let mut result = json!({"text": format!("{owner}{foreign}"), "utterances": [
+            {"text": owner, "start_time": 200, "end_time": 3600,
+             "definite": true, "additions": {"speaker_id": "0"}},
+            {"text": foreign, "start_time": 4500, "end_time": 6400,
+             "definite": true, "additions": {"speaker_id": "1"}}
+        ]});
+        let send = |value: &Value, flags| {
+            let payload = serde_json::to_vec(&json!({"audio_info": {"duration": 10000}, "result": value})).unwrap();
+            asr.handle_frame(&frame::build(MessageType::FullServerResponse, flags, Serialization::Json, &payload, None));
+        };
+        send(&result, Flags::None);
+        assert_eq!(asr.state.lock().last_partial_text, owner);
+        for end in [7600, 8080] {
+            asr.note_local_speaker_observation(end, Target { score: 0.56 }, Inconclusive);
+        }
+        let resumed = "现在我本人继续说第二句。";
+        result["utterances"].as_array_mut().unwrap().push(json!({
+            "text": resumed, "start_time": 6800, "end_time": 8400,
+            "definite": true, "additions": {"speaker_id": "0"}
+        }));
+        result["text"] = json!(format!("{owner}{foreign}{resumed}"));
+        send(&result, Flags::LastPacket);
+        assert_eq!(asr.state.lock().last_partial_text, format!("{owner}{resumed}"));
+        assert_eq!(asr.verified_provider_owner_final().unwrap().text, format!("{owner}{resumed}"));
+        assert_eq!(asr.state.lock().local_transcript_foreign_evidence.len(), 1);
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        let state = asr.state.lock();
+        assert!(state.local_advisory_foreign_evidence.is_empty());
+        assert!(state.local_transcript_foreign_evidence.is_empty());
     }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]

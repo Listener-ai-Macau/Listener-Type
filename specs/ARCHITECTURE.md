@@ -107,6 +107,16 @@ vetoes raw final recovery, while fresh verified owner speech after that interval
 can continue into the live ledger. The receive frame uses the same accepted owner
 view for preview promotion and the following merge.
 
+Usable raw local NonTarget observations remain separate from the advisory identity
+timeline. The retained owner latch can stay true through a single score dip;
+that must not erase the original observation before a delayed provider revision
+identifies a stable different speaker in the same audio interval. Only that
+correlation promotes the observation into foreign evidence. An owner-track dip,
+unusable signal or missing provider identity cannot create a foreign baseline.
+The ASR open/reset snapshot preserves unmatched observations until the logical
+session ends, and new sessions clear them. Fresh repeated owner windows still
+permit continuation after a correlated foreign interval.
+
 Separated audio carries an explicit Owner, Other or Pending identity. Usable
 positive owner evidence authorizes the secondary ASR; connection availability,
 uncertain similarity, missing identity and failed separation do not. Other and
