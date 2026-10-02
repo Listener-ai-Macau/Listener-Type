@@ -151,6 +151,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/asr/target_speaker_extraction.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_platform.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_speaker_partition.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_transcript.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_untimed_merge.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/wav.rs` | ASR providers | Provider tests, dictation smoke |
@@ -246,7 +247,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/speech_decision_kernel.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/startup_evidence.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/timeline.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/transcript_boundary.rs` | Core app | Word/PCM owner coverage, activation coordinates, delivery regressions |
+| `src-tauri/src/transcript_boundary.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/types.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/unicode_keystroke.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/wake_phrase.rs` | Core app | Build and targeted tests |

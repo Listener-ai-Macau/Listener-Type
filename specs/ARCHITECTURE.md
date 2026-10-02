@@ -107,6 +107,17 @@ vetoes raw final recovery, while fresh verified owner speech after that interval
 can continue into the live ledger. The receive frame uses the same accepted owner
 view for preview promotion and the following merge.
 
+The provider source partition also survives a two-pass revision that merges
+owner and foreign rows under one cloud speaker id. Stable rejected rows need
+corroborating local NonTarget observations and disjoint owner audio before their
+source intervals are retained. Pending identity and simultaneous owner speech
+cannot create an exclusion. Revised rows are projected by word PCM coordinates;
+excluded text rendering and numeral changes cannot move those coordinates. Live
+delivery and final arbitration use the same projected owner rows. Missing word
+coordinates permit only previously admitted owner segments in that audio range,
+and ambiguous rendering uses the retained timed words. The transport snapshot
+preserves the partition; starting a new product recording clears it.
+
 Usable raw local NonTarget observations remain separate from the advisory identity
 timeline. The retained owner latch can stay true through a single score dip;
 that must not erase the original observation before a delayed provider revision

@@ -29,6 +29,9 @@ use crate::polish::{EffectiveProxyMode, ProviderProxyConfig};
 use super::frame::{self, Flags, MessageType, Serialization};
 use super::{AudioConsumer, DictionaryHotword, RawTranscript};
 
+#[path = "volcengine_speaker_partition.rs"]
+mod speaker_partition;
+
 const FINAL_TRANSCRIPT_ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
 const BIDIRECTIONAL_TRANSCRIPT_ENDPOINT: &str =
     "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";
@@ -681,6 +684,11 @@ struct SyncState {
     /// Actual PCM windows, in the retained recording's clock, that positively
     /// matched the owner. Pending windows never extend these intervals.
     local_owner_pcm_intervals: Vec<(u64, u64)>,
+    /// Corroborated, disjoint foreign source intervals survive cloud row
+    /// coalescing and speaker-id revisions. Pending identity adds nothing.
+    provider_non_owner_audio_ranges: Vec<(u64, u64)>,
+    provider_distinct_foreign_audio_ranges: Vec<(u64, u64)>,
+    provider_source_exclusion_applied: bool,
     #[cfg(test)]
     diagnostic_provider_responses: Vec<Value>,
     pending_audio: Vec<u8>,
@@ -858,6 +866,8 @@ struct OwnerContinuitySnapshot {
     live_owner_delivery_timing: Option<crate::transcript_boundary::TimedTranscript>,
     live_owner_delivery_updated_at: Option<Instant>,
     local_owner_pcm_intervals: Vec<(u64, u64)>,
+    provider_non_owner_audio_ranges: Vec<(u64, u64)>,
+    provider_distinct_foreign_audio_ranges: Vec<(u64, u64)>,
     tracking_enabled: bool,
     wake_owner_verified: bool,
     profile_adaptive: bool,
@@ -906,6 +916,8 @@ impl OwnerContinuitySnapshot {
             live_owner_delivery_timing: state.live_owner_delivery_timing.clone(),
             live_owner_delivery_updated_at: state.live_owner_delivery_updated_at,
             local_owner_pcm_intervals: state.local_owner_pcm_intervals.clone(),
+            provider_non_owner_audio_ranges: state.provider_non_owner_audio_ranges.clone(),
+            provider_distinct_foreign_audio_ranges: state.provider_distinct_foreign_audio_ranges.clone(),
             tracking_enabled: state.local_speaker_tracking_enabled,
             wake_owner_verified: state.local_wake_owner_verified,
             profile_adaptive: state.local_speaker_profile_adaptive,
@@ -957,6 +969,8 @@ impl OwnerContinuitySnapshot {
         state.live_owner_delivery_timing = self.live_owner_delivery_timing;
         state.live_owner_delivery_updated_at = self.live_owner_delivery_updated_at;
         state.local_owner_pcm_intervals = self.local_owner_pcm_intervals;
+        state.provider_non_owner_audio_ranges = self.provider_non_owner_audio_ranges;
+        state.provider_distinct_foreign_audio_ranges = self.provider_distinct_foreign_audio_ranges;
         state.local_audio_duration_ms = self.local_audio_duration_ms;
         state.local_speech_end_ms = self.local_speech_end_ms;
         state.qualified_owner_speech_end_ms = self.qualified_owner_speech_end_ms;
@@ -1393,6 +1407,22 @@ fn owner_scoped_live_candidate(state: &SyncState, filtered: &SpeakerFilteredResu
             continue;
         }
         if utterance_is_stable(row) && utterance_speaker_id(row).is_some() {
+            if state.provider_source_exclusion_applied {
+                // A coalesced raw row can now contain several admitted owner
+                // subsets. Keep the same source projection for live delivery;
+                // exact equality with the longer mixed raw row is insufficient.
+                let (projected, _) = speaker_partition::project_row(state, row);
+                owned_rows.extend(projected.into_iter().filter(|source| {
+                    accepted_rows.is_some_and(|accepted| accepted.iter().any(|owner| {
+                        utterance_is_stable(owner)
+                            && utterance_speaker_id(owner) == utterance_speaker_id(source)
+                            && utterance_start_ms(owner) == utterance_start_ms(source)
+                            && utterance_end_ms(owner) == utterance_end_ms(source)
+                            && owner.get("text").and_then(Value::as_str)
+                                == source.get("text").and_then(Value::as_str)
+                    }))
+                }));
+            }
             // This row did not pass the shared provider ownership policy.
             // A later owner PCM window cannot license its earlier audio.
             continue;
@@ -3222,6 +3252,9 @@ fn final_explicit_non_owner_tail(
     filtered: &SpeakerFilteredResult,
     provider_result: &Value,
 ) -> bool {
+    if state.provider_source_exclusion_applied {
+        return true;
+    }
     // 2026-09-20 0dbc59da/86768c0e: a wake that itself failed bank
     // verification cannot license the same verifier to veto the
     // wake-anchored body as foreign. See the kernel decision for the full
@@ -3294,10 +3327,11 @@ fn verified_provider_owner_candidate(
         utterance_is_stable(row) && utterance_speaker_id(row).as_deref() == Some(target)
             && (utterance_normalized_text(row) == normalized_phrase || positive_body_row(row))
     });
-    let distinct_foreign_track = filtered.stable_other_speaker_present && provider_rows.iter().any(|row| {
+    let distinct_foreign_track = filtered.stable_other_speaker_present && (provider_rows.iter().any(|row| {
         utterance_is_stable(row) && !rows.contains(row)
             && utterance_speaker_id(row).is_some_and(|id| id != target)
-    });
+    }) || (state.provider_source_exclusion_applied
+        && speaker_partition::retained_distinct_foreign_track_applies(state, provider)));
     let row_text: String = rows.iter().filter_map(|row| row.get("text").and_then(Value::as_str)).collect();
     let complete_attributed_view = !text.is_empty()
         && crate::transcript_boundary::content_key(text) == crate::transcript_boundary::content_key(&row_text)
@@ -7048,6 +7082,9 @@ impl VolcengineStreamingASR {
         state.live_owner_delivery_timing = None;
         state.live_owner_delivery_updated_at = None;
         state.local_owner_pcm_intervals.clear();
+        state.provider_non_owner_audio_ranges.clear();
+        state.provider_distinct_foreign_audio_ranges.clear();
+        state.provider_source_exclusion_applied = false;
         state.local_speaker_tracking_enabled = true;
         state.local_wake_owner_verified = wake_owner_verified;
         state.local_speaker_profile_adaptive = false;
@@ -7454,6 +7491,9 @@ impl VolcengineStreamingASR {
             st.live_owner_delivery_timing = None;
             st.live_owner_delivery_updated_at = None;
             st.local_owner_pcm_intervals.clear();
+            st.provider_non_owner_audio_ranges.clear();
+            st.provider_distinct_foreign_audio_ranges.clear();
+            st.provider_source_exclusion_applied = false;
             st.pause_early_recent_revisions.clear();
             st.best_transcript_segments.clear();
             st.best_untimed_window.clear();
@@ -8637,6 +8677,7 @@ impl VolcengineStreamingASR {
                 confirmed_foreign_hint_end_ms,
             );
             recover_locally_supported_owner_prefix(&state, result, &mut filtered);
+            speaker_partition::preserve_source_partition(&mut state, result, &mut filtered);
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             if has_final {
                 clamp_degraded_same_cluster_foreign_tail(&state, result, &mut filtered);
@@ -10619,6 +10660,59 @@ mod tests {
         assert_eq!(timing.activation_prefix(800,"开始录音").unwrap().body(&output),Some("我现在"));
         let snapshot=asr.pause_early_delivery_ledger_snapshot_after(Duration::ZERO,"").unwrap();
         assert_eq!(snapshot.text,text);
+    }
+
+    #[test]
+    fn coalesced_final_cannot_relabel_a_corroborated_foreign_audio_prefix_as_owner() {
+        // Recorded short-drama replay: a correct three-row live partition
+        // became one speaker-1 final row. Row-start was absent (word times
+        // were present) and final rendering changed a numeral. A later
+        // owner match must not authorize the earlier foreign audio.
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        use crate::speaker_verification::SessionSpeakerClassification;
+        for (start, end, classification) in [
+            (200, 1400, SessionSpeakerClassification::NonTarget { score: 0.13 }),
+            (1800, 3000, SessionSpeakerClassification::Target { score: 0.62 }),
+            (2200, 3400, SessionSpeakerClassification::Target { score: 0.60 }),
+            (2800, 4000, SessionSpeakerClassification::Target { score: 0.58 }),
+            (4000, 5200, SessionSpeakerClassification::Target { score: 0.57 }),
+        ] {
+            asr.note_local_speaker_observation_with_audio_range(start, end, classification,
+                crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true);
+        }
+        let live = json!({"audio_info":{"duration":5400},"result":{
+            "text":"视频10分钟。开始录音，本人正文。", "utterances":[
+                {"text":"视频10分钟。","start_time":200,"end_time":1600,"definite":true,"additions":{"speaker_id":"2","source":"two_pass"}},
+                {"text":"开始录音，本人正文。","start_time":2000,"end_time":5000,"definite":true,"additions":{"speaker_id":"1","source":"two_pass"}}
+            ]}});
+        let packet = frame::build(MessageType::FullServerResponse, Flags::None, Serialization::Json,
+            &serde_json::to_vec(&live).unwrap(), None);
+        assert!(asr.handle_frame(&packet));
+        assert_eq!(asr.state.lock().best_transcript_text, "开始录音，本人正文。");
+        let (tx, mut rx) = oneshot::channel();
+        asr.state.lock().final_tx = Some(tx);
+        let final_result = json!({"audio_info":{"duration":5400},"result":{
+            "text":"视频十分钟开始录音本人正文已完成。", "utterances":[
+                {"text":"视频十分钟开始录音本人正文已完成。","end_time":5200,"definite":true,"additions":{"speaker_id":"1","source":"two_pass"},"words":[
+                    {"text":"视频","start_time":200,"end_time":500},
+                    {"text":"10","start_time":500,"end_time":900},
+                    {"text":"分钟","start_time":900,"end_time":1600},
+                    {"text":"开始录音","start_time":2000,"end_time":2800},
+                    {"text":"本人正文已完成","start_time":3000,"end_time":5200}
+                ]}
+            ]}});
+        assert!(asr.handle_frame(&frame::build(MessageType::FullServerResponse, Flags::None,
+            Serialization::Json, &serde_json::to_vec(&final_result).unwrap(), None)));
+        let live_owner_key = crate::transcript_boundary::content_key(
+            &asr.state.lock().live_owner_delivery.as_ref().unwrap().text);
+        assert!(live_owner_key.contains("已完成"), "coalesced owner correction must retain live delivery");
+        assert!(!live_owner_key.contains("视频"));
+        assert!(!asr.handle_frame(&frame::build(MessageType::FullServerResponse, Flags::LastPacket,
+            Serialization::Json, &serde_json::to_vec(&final_result).unwrap(), None)));
+        assert_eq!(rx.try_recv().unwrap().unwrap().text, "开始录音本人正文已完成。");
+        assert!(asr.verified_provider_owner_final().is_some(),
+            "confirmed source partition must also retain the independent owner-final certificate");
     }
 
     #[test]
@@ -21657,6 +21751,70 @@ mod tests {
             "provider_cadence_probe_status={}",
             if all_succeeded { "PASS" } else { "NO_GO" }
         );
+    }
+
+    /// Reprocess the exact failed provider revisions and captured identity
+    /// observations. This has no network, microphone or editor interaction.
+    #[test]
+    #[ignore = "requires explicitly supplied captured provider response fixture"]
+    fn captured_provider_speaker_partition_replay() {
+        use crate::speaker_verification::SessionSpeakerClassification;
+        let input_path = std::env::var("LISTENER_CAPTURED_PROVIDER_REPLAY_INPUT").expect("explicit captured fixture");
+        let output_path = std::env::var("LISTENER_CAPTURED_PROVIDER_REPLAY_OUTPUT").expect("explicit report destination");
+        let fixture: Value = serde_json::from_slice(&std::fs::read(input_path).unwrap()).unwrap();
+        let mut asr = uplink_stall_test_asr();
+        asr.enable_diagnostic_trace();
+        asr.note_local_speaker_tracking_started_with_owner(fixture["wake_phrase"].as_str().unwrap(),
+            fixture["wake_owner_verified"].as_bool().unwrap());
+        let observations = fixture["observations"].as_array().unwrap();
+        let mut next_observation = 0;
+        let (tx, mut rx) = oneshot::channel();
+        asr.state.lock().final_tx = Some(tx);
+        for frame in fixture["responses"].as_array().unwrap() {
+            let response = &frame["payload"];
+            let end_ms = response["audio_info"]["duration"].as_u64().unwrap_or_default();
+            asr.note_local_audio_activity(end_ms, true);
+            while next_observation < observations.len()
+                && observations[next_observation]["end_ms"].as_u64().unwrap() <= end_ms
+            {
+                let sample = &observations[next_observation];
+                let score = sample["score"].as_f64().unwrap() as f32;
+                let classification = match sample["kind"].as_str().unwrap() {
+                    "Target" => SessionSpeakerClassification::Target { score },
+                    "NonTarget" => SessionSpeakerClassification::NonTarget { score },
+                    "Uncertain" => SessionSpeakerClassification::Uncertain { score },
+                    _ => panic!("invalid captured identity"),
+                };
+                asr.note_local_speaker_observation_with_audio_range(sample["audio_start_ms"].as_u64().unwrap(),
+                    sample["end_ms"].as_u64().unwrap(), classification,
+                    crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive,
+                    sample["quality"].as_bool().unwrap());
+                next_observation += 1;
+            }
+            let final_frame = frame["final_frame"].as_bool().unwrap();
+            let keep_reading = asr.handle_frame(&frame::build(MessageType::FullServerResponse,
+                if final_frame { Flags::LastPacket } else { Flags::None }, Serialization::Json,
+                &serde_json::to_vec(response).unwrap(), None));
+            assert_eq!(keep_reading, !final_frame);
+        }
+        let selected = rx.try_recv().unwrap().unwrap();
+        let key = crate::transcript_boundary::content_key(&selected.text);
+        let owner_retained = key.contains(&crate::transcript_boundary::content_key(fixture["expected_owner_tail"].as_str().unwrap()));
+        let foreign_excluded = fixture["expected_foreign_phrases"].as_array().unwrap().iter()
+            .all(|phrase| !key.contains(&crate::transcript_boundary::content_key(phrase.as_str().unwrap())));
+        let report = json!({
+            "source_session_id":fixture["source_session_id"], "source_pcm_sha256":fixture["pcm_sha256"],
+            "captured_provider_frames":fixture["responses"].as_array().unwrap().len(),
+            "captured_identity_observations":next_observation,
+            "selected_final":selected.text, "owner_tail_retained":owner_retained,
+            "foreign_excluded_from_final":foreign_excluded,
+            "retained_foreign_audio_ranges":asr.state.lock().provider_non_owner_audio_ranges,
+            "independent_owner_final_certified":asr.verified_provider_owner_final().is_some(),
+            "scope":"deterministic reprocessing of captured provider revisions; no new acoustic, installed runtime or editor acceptance",
+            "status":if owner_retained && foreign_excluded { "PASS" } else { "FAIL" },
+        });
+        std::fs::write(output_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+        assert!(owner_retained && foreign_excluded, "captured coalesced final must preserve source ownership");
     }
 
     /// Replays consented device PCM with the identity observations captured
