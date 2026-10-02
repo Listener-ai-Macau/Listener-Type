@@ -117,6 +117,15 @@ The ASR open/reset snapshot preserves unmatched observations until the logical
 session ends, and new sessions clear them. Fresh repeated owner windows still
 permit continuation after a correlated foreign interval.
 
+A response-local body alias distinguishes a wake-only track splitting into its
+first body from a later speaker change after the wake track already carries
+owner body text. The latter boundary requires corroborating local observations
+inside the new track's own interval, using the same split-identity decision for
+direct row admission and alias creation. One coincidental positive among pending
+observations cannot assign that entire track to the retained owner. Once an alias
+is supported, later same-track Uncertain clauses retain continuity; the original
+owner track and first-body recall remain independent of this new-track gate.
+
 Separated audio carries an explicit Owner, Other or Pending identity. Usable
 positive owner evidence authorizes the secondary ASR; connection availability,
 uncertain similarity, missing identity and failed separation do not. Other and

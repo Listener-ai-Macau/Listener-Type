@@ -4239,6 +4239,28 @@ fn utterance_belongs_to_verified_target(
         ))
 }
 
+/// A wake-only cluster can split from its first body without changing the
+/// speaker. Once that track already carries a complete body, however, a later
+/// different cluster is a new identity boundary, not another wake/body split.
+fn owner_body_precedes_different_provider_track(
+    utterance: &Value,
+    response_utterances: &[Value],
+    target_speaker_id: &str,
+    wake_speaker_phrase: Option<&str>,
+) -> bool {
+    let Some(start_ms) = utterance_start_ms(utterance) else { return false; };
+    let wake_key = wake_speaker_phrase.map(|phrase| {
+        phrase.chars().filter(|ch| ch.is_alphanumeric()).collect::<String>()
+    });
+    response_utterances.iter().any(|row| {
+        let text = utterance_normalized_text(row);
+        utterance_is_stable(row)
+            && utterance_speaker_id(row).as_deref() == Some(target_speaker_id)
+            && utterance_end_ms(row).is_some_and(|end| end <= start_ms)
+            && !text.is_empty() && Some(&text) != wake_key.as_ref()
+    })
+}
+
 fn utterance_belongs_to_verified_target_or_body_alias(
     utterance: &Value,
     response_utterances: &[Value],
@@ -4255,6 +4277,20 @@ fn utterance_belongs_to_verified_target_or_body_alias(
     confirmed_foreign_hint_end_ms: Option<u64>,
 ) -> bool {
     let utterance_speaker = utterance_speaker_id(utterance);
+    let body_alias_matches =
+        immediate_body_speaker_id.is_some_and(|alias| utterance_speaker.as_deref() == Some(alias));
+    if local_speaker_tracking_enabled && !body_alias_matches
+        && utterance_speaker.as_deref().is_some_and(|speaker| speaker != target_speaker_id)
+        && owner_body_precedes_different_provider_track(
+            utterance, response_utterances, target_speaker_id, wake_speaker_phrase,
+        )
+        && !local_evidence_supports_split_alias(utterance, local_speaker_evidence)
+    {
+        // A single positive vote among an otherwise inconclusive new track
+        // cannot inherit ownership of an already established owner body. Use
+        // the same interval corroboration as the verified wake/body split.
+        return false;
+    }
     // A short local mismatch cannot reject same-cluster text. When the cloud
     // independently marks a stable, time-aligned different speaker, however,
     // the two weak signals form one explicit foreign-row veto. Keep this check
@@ -4309,8 +4345,6 @@ fn utterance_belongs_to_verified_target_or_body_alias(
     ) {
         return true;
     }
-    let body_alias_matches =
-        immediate_body_speaker_id.is_some_and(|alias| utterance_speaker.as_deref() == Some(alias));
     let effective_target = if body_alias_matches {
         immediate_body_speaker_id.unwrap_or(target_speaker_id)
     } else {
@@ -4530,6 +4564,11 @@ fn filter_result_to_target_speaker_with_local_evidence_and_anchor(
             let speaker = utterance_speaker_id(utterance)?;
             let start_ms = utterance_start_ms(utterance)?;
             if speaker == target || start_ms < wake_end_ms.saturating_sub(200) {
+                return None;
+            }
+            if owner_body_precedes_different_provider_track(
+                utterance, &utterances, target, wake_speaker_phrase,
+            ) && !local_evidence_supports_split_alias(utterance, local_speaker_evidence) {
                 return None;
             }
             let positively_admitted = if utterance_is_stable(utterance) {
@@ -10333,6 +10372,112 @@ mod tests {
         state.local_unreliable_speaker_evidence_end_ms.clear();
         state.local_body_owner_verified = false;
         assert!(verified_provider_owner_candidate(&state, &filtered, &provider, true).is_none());
+    }
+
+    #[test]
+    fn open_wake_later_speaker_is_not_licensed_by_an_isolated_owner_vote() {
+        use crate::speaker_verification::SessionSpeakerClassification::{Target, Uncertain};
+        use crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive;
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started("开始录音");
+        // 7bbe9149: the wake was phrase-accepted, not bank-verified. The
+        // owner's complete body was already in track 0; track 1 had many
+        // inconclusive windows and just one coincidental positive match.
+        for (end, score, quality) in [
+            (3296, 0.61610156, true), (3776, 0.59011346, true),
+            (4192, 0.5027642, true), (4672, 0.55707204, true),
+            (5088, 0.4263607, true), (5600, 0.44517618, true),
+            (6080, 0.49519745, true), (6496, 0.42145938, true),
+            (7872, 0.5019729, true), (8800, 0.34882376, true),
+            (9280, 0.29856202, true), (9696, 0.37103677, true),
+            (10176, 0.26655427, true), (10592, 0.28355598, true),
+            (11072, 0.29492047, true), (11488, 0.26500568, true),
+            (12000, 0.2325139, true), (12480, 0.25568017, true),
+            (12896, 0.25655895, true), (13376, 0.29629022, true),
+            (13792, 0.2387945, false), (14272, 0.25448895, true),
+            (14688, 0.28527737, true), (15200, 0.20834316, true),
+            (15680, 0.22426277, true), (16096, 0.3075532, false),
+            (16576, 0.4302938, true), (16992, 0.3043329, true),
+            (17472, 0.28466237, true), (17888, 0.2634825, true),
+            (18400, 0.29202163, false), (18880, 0.32068864, true),
+            (19296, 0.27250683, true), (19776, 0.26230964, true),
+            (20192, 0.2001785, false), (20672, 0.23912415, true),
+            (21088, 0.22583511, false), (24096, 0.258484, true),
+            (24576, 0.24879579, true), (27072, 0.22267988, true),
+        ] {
+            // These are the captured classifications, not a new classifier
+            // threshold inferred for the fixture.
+            let classification = if matches!(end, 3296 | 3776 | 4192 | 4672 | 5088 | 5600 | 6080 | 6496 | 7872 | 16576) {
+                Target { score }
+            } else { Uncertain { score } };
+            asr.note_local_speaker_observation_with_quality(end, classification, Inconclusive, quality);
+        }
+        let owner = "开始录音，我正在继续抗干扰测试，请检查正常使用。";
+        let foreign = "冠军直接内定了，全年百分之九十八的胜率。";
+        let foreign_tail = "不仅差一届奥运冠军，还有三个世锦赛，四个全英。";
+        let result = json!({"text": format!("{owner}{foreign}{foreign_tail}"), "utterances": [
+            {"text": owner, "start_time": 960, "end_time": 11640, "definite": true,
+             "additions": {"speaker_id": "0", "source": "two_pass"}},
+            {"text": foreign, "start_time": 12240, "end_time": 20271, "definite": true,
+             "additions": {"speaker_id": "1", "source": "two_pass"}},
+            {"text": foreign_tail, "start_time": 20271, "end_time": 27332, "definite": true,
+             "additions": {"speaker_id": "1", "source": "two_pass"}}
+        ]});
+        let observed = Arc::new(ParkingMutex::new(Vec::new()));
+        let partials = Arc::clone(&observed);
+        asr.set_partial_transcript_callback(Some(Arc::new(move |text| partials.lock().push(text))));
+        let payload = serde_json::to_vec(&json!({"audio_info": {"duration": 27336}, "result": result})).unwrap();
+        asr.handle_frame(&frame::build(MessageType::FullServerResponse, Flags::LastPacket,
+            Serialization::Json, &payload, None));
+        let state = asr.state.lock();
+        assert_eq!(state.last_partial_text, owner,
+            "a later distinct provider speaker needs its own sustained owner evidence, not one coincidental vote");
+        assert!(observed.lock().iter().all(|text| !text.contains(foreign) && !text.contains(foreign_tail)));
+        assert!(state.local_speaker_stable_target, "the original owner identity remains retained");
+    }
+
+    #[test]
+    fn open_wake_owner_track_change_and_first_body_keep_supported_continuation() {
+        use crate::speaker_verification::SessionSpeakerClassification::{Target, Uncertain};
+        for established_body in [false, true] {
+            let prefix = if established_body { "开始录音，这是已确认的本人正文。" } else { "开始录音。" };
+            let first = "我本人继续说新的句子。";
+            let tail = "换句以后仍然保留我的完整正文。";
+            let prefix_end = if established_body { 11640 } else { 1100 };
+            let body_start = prefix_end + 600;
+            let result = json!({"text": format!("{prefix}{first}{tail}"), "utterances": [
+                {"text": prefix, "start_time": 200, "end_time": prefix_end,
+                 "definite": true, "additions": {"speaker_id": "0"}},
+                {"text": first, "start_time": body_start, "end_time": body_start + 1800,
+                 "definite": true, "additions": {"speaker_id": "1"}},
+                {"text": tail, "start_time": body_start + 2400, "end_time": body_start + 5400,
+                 "definite": true, "additions": {"speaker_id": "1"}}
+            ]});
+            let mut evidence = vec![
+                LocalSpeakerEvidence { audio_end_ms: 900, classification: Target { score: 0.51 }, stable_target: true },
+                LocalSpeakerEvidence { audio_end_ms: body_start + 800, classification: Target { score: 0.48 }, stable_target: true },
+                LocalSpeakerEvidence { audio_end_ms: body_start + 1300,
+                    classification: if established_body { Target { score: 0.50 } } else { Uncertain { score: 0.24 } },
+                    stable_target: true },
+                LocalSpeakerEvidence { audio_end_ms: body_start + 1700,
+                    classification: if established_body { Uncertain { score: 0.34 } } else { Uncertain { score: 0.26 } },
+                    stable_target: true },
+                LocalSpeakerEvidence { audio_end_ms: body_start + 3200, classification: Uncertain { score: 0.24 }, stable_target: true },
+                LocalSpeakerEvidence { audio_end_ms: body_start + 3700, classification: Uncertain { score: 0.26 }, stable_target: true },
+                LocalSpeakerEvidence { audio_end_ms: body_start + 4300, classification: Uncertain { score: 0.28 }, stable_target: true },
+            ];
+            if established_body {
+                evidence.insert(1, LocalSpeakerEvidence { audio_end_ms: 6500, classification: Target { score: 0.52 }, stable_target: true });
+            }
+            let mut target = Some("0".to_string());
+            let filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+                &result, &mut target, true, &evidence, Some("开始录音"), None, false, false, None, None,
+            );
+            assert_eq!(filtered.result["text"], format!("{prefix}{first}{tail}"),
+                "a supported new owner track and an open wake's first body both retain their later Uncertain clauses");
+            assert_eq!(target.as_deref(), Some("0"), "response aliases never replace the wake anchor");
+            assert!(filtered.response_local_body_alias_present);
+        }
     }
 
     #[test]
