@@ -1200,14 +1200,12 @@ fn target_speaker_update_from_state(
         // Keep transcript filtering's immediate advisory boundary private.
         // Endpointing sees only the sustained owner-absence boundary so the
         // installed session-2024 two-window owner dip cannot stop recording.
-        // A correlated provider-row/voiceprint handoff is an endpoint candidate,
-        // not a destructive transcript verdict. Present its live speech edge to
-        // the endpoint as non-owner so room speech cannot renew the owner clock.
-        // A sampled positive return remains a bounded pending candidate rather
-        // than being relabeled Other by that earlier unresolved handoff.
-        local_non_target_speech_end_ms: if owner_handoff_suspected && !owner_return_candidate {
-            state.local_speech_end_ms
-        } else if local_owner_continuity(state) == LocalOwnerContinuity::Other {
+        // A reversible provider handoff suppresses owner-clock renewal above;
+        // it is not confirmed Other. Publishing raw VAD as a non-owner edge
+        // erased the submission-window STOP veto during owner-only cc267192.
+        // Keep the isolation candidate private and expose only corroborated,
+        // sustained local Other evidence. Pending never authorizes owner text.
+        local_non_target_speech_end_ms: if local_owner_continuity(state) == LocalOwnerContinuity::Other {
             state.local_sustained_non_target_speech_end_ms
         } else {
             None
@@ -13914,7 +13912,48 @@ mod tests {
     }
 
     #[test]
-    fn correlated_handoff_freezes_all_endpoint_growth_until_two_owner_windows_return() {
+    fn unresolved_provider_handoff_is_not_confirmed_other_for_endpoint() {
+        use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Uncertain};
+        // Installed Beta.23 cc267192: owner-only dictation had a pending
+        // provider speaker split and no local NonTarget sample. At STOP the
+        // VAD speech edge was11680ms, qualified owner1800ms, and the current
+        // classifier window was Uncertain0.309. The adapter relabeled the
+        // whole live VAD edge Other solely from the reversible handoff flag.
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_wake_owner_verified: true,
+            local_speaker_profile_adaptive: false,
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            local_owner_handoff_suspected: true,
+            local_audio_duration_ms: Some(11_800),
+            local_speech_end_ms: Some(11_680),
+            qualified_owner_speech_end_ms: Some(1_800),
+            local_target_speech_end_ms: Some(7_200),
+            local_speaker_classification: Some(Uncertain { score: 0.309 }),
+            local_speaker_observation_end_ms: Some(11_400),
+            local_speaker_signal_quality_sufficient: Some(true),
+            ..SyncState::default()
+        };
+        let pending = target_speaker_update_from_state(&state, true, true, false);
+        assert_eq!(pending.local_non_target_speech_end_ms, None,
+            "a reversible provider handoff is Pending, not confirmed Other");
+        assert_eq!(pending.qualified_owner_speech_end_ms, Some(1_800));
+        assert!(!pending.target_activity_advanced && !pending.pending_activity_advanced,
+            "pending handoff cannot renew the owner clock or authorize text");
+
+        // A sustained confirmed room-speaker run still reaches endpointing.
+        state.local_speaker_classification = Some(NonTarget { score: 0.02 });
+        state.local_owner_absence_run_confirmed = true;
+        state.local_sustained_non_target_speech_end_ms = Some(11_400);
+        assert_eq!(target_speaker_update_from_state(&state, false, false, false)
+            .local_non_target_speech_end_ms, Some(11_400));
+        assert!(state.local_owner_handoff_suspected,
+            "changing endpoint evidence must preserve transcript isolation");
+    }
+
+    #[test]
+    fn correlated_handoff_freezes_owner_growth_without_inventing_other() {
         use crate::speaker_verification::SessionSpeakerClassification::{Target, Uncertain};
 
         let provider = json!({"text": "开始录音。本人正文。旁人新句。", "utterances": [
@@ -13942,7 +13981,7 @@ mod tests {
             &mut state, &provider
         ));
         let frozen = target_speaker_update_from_state(&state, true, true, false);
-        assert_eq!(frozen.local_non_target_speech_end_ms, Some(22_100));
+        assert_eq!(frozen.local_non_target_speech_end_ms, None);
         assert!(!frozen.target_activity_advanced);
         assert!(!frozen.pending_activity_advanced);
         assert!(!refresh_local_target_from_owner_preview_activity(

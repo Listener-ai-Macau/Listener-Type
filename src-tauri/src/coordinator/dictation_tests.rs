@@ -5224,6 +5224,66 @@ fn delivered_body_waits_briefly_for_a_local_owner_candidate_without_renewing_on_
 }
 
 #[test]
+fn unresolved_handoff_after_body_delivery_preserves_owner_vad_turn() {
+    use crate::asr::volcengine::{LocalSpeechActivityState as VadState, LocalSpeechEvidence};
+    use std::time::{Duration, Instant};
+    let started = Instant::now();
+    let (_, owner, _) = undelivered_owner_turn_clock();
+    let pending = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(8_400),
+        provider_audio_duration_ms: Some(7_100),
+        local_speech_end_ms: Some(8_272),
+        qualified_owner_speech_end_ms: Some(1_800),
+        qualified_owner_activity_advanced: false,
+        local_target_speech_end_ms: Some(7_200),
+        local_non_target_speech_end_ms: None,
+        target_activity_advanced: false,
+        pending_unattributed_speech: true,
+        ..owner
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.automatic_wake_session = true;
+    clock.note_visible_body_boundary(true, 23, started);
+    clock.observe(&pending, true, started);
+    clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+        state: VadState::Speech, activity_epoch: 2, revision: 60,
+        analyzed_through_ms: 8_300, last_detected_speech_end_ms: Some(8_272),
+        ..Default::default()
+    }, started);
+    clock.note_body_delivery(started);
+    clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+        state: VadState::NonSpeech, activity_epoch: 2, revision: 68,
+        analyzed_through_ms: 9_184, last_detected_speech_end_ms: Some(9_056),
+        ..Default::default()
+    }, started + Duration::from_millis(636));
+    clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+        state: VadState::PendingSpeech, activity_epoch: 3, revision: 70,
+        analyzed_through_ms: 9_472, pending_speech_start_ms: Some(9_440),
+        last_detected_speech_end_ms: Some(9_056), ..Default::default()
+    }, started + Duration::from_millis(918));
+    clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+        state: VadState::Speech, activity_epoch: 3, revision: 90,
+        analyzed_through_ms: 11_700, last_detected_speech_end_ms: Some(11_680),
+        ..Default::default()
+    }, started + Duration::from_millis(3_041));
+    let speaking = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(11_800), provider_audio_duration_ms: Some(11_500),
+        local_speech_end_ms: Some(11_680), ..pending
+    };
+    clock.observe(&speaking, true, started + Duration::from_millis(3_041));
+    assert!(clock.latest_due_update(started + Duration::from_millis(3_041), 2_900).is_none(),
+        "cc267192: unresolved handoff must preserve active in-window owner continuation");
+    assert_eq!(clock.latest_update.as_ref().unwrap().qualified_owner_speech_end_ms, Some(1_800));
+    // Confirmed Other removes this STOP veto; the pending speech protection
+    // cannot turn room speech into owner evidence or keep recording forever.
+    let other = crate::asr::volcengine::TargetSpeakerUpdate {
+        local_non_target_speech_end_ms: Some(11_680), ..speaking
+    };
+    clock.observe(&other, true, started + Duration::from_millis(3_050));
+    assert_eq!(clock.tentative_owner_vad_epoch, None);
+}
+
+#[test]
 fn automatic_delivered_owner_turn_uses_the_submission_wall_clock_for_resumed_speech() {
     use crate::asr::volcengine::{LocalSpeechActivityState as VadState, LocalSpeechEvidence};
     use std::time::Duration;

@@ -277,6 +277,16 @@ The endpoint clock still starts at the last successful confirmed-body submission
 Wake inference scheduling does not shorten the full 3000 ms continuation window;
 fresh owner speech protects recording and a new body submission restarts it.
 
+## Pending speaker handoff and the endpoint
+
+A reversible cloud speaker-handoff candidate remains Pending. It suppresses
+owner-watermark renewal and retains transcript isolation, but it cannot publish
+raw VAD speech as confirmed Other. Only the corroborated sustained local Other
+boundary crosses that adapter. During the last submitted body's three-second
+window, unresolved speech can veto STOP without authorizing text or manufacturing
+owner identity; real quiet and confirmed Other retain their existing termination.
+Beta.23 device session cc267192 reproduced the incorrect Pending-to-Other mapping.
+
 ## Data Boundaries
 
 - App data directory name: `Listener Type`.
