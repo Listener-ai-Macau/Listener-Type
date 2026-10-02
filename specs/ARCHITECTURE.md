@@ -173,6 +173,26 @@ retain their existing sampler; an initialized detector returning Unknown is
 not confirmed speech. Quiet evidence must not turn noise-only voiceprint
 scores into transcript aliases or continually renew a three-second deadline.
 
+An owner-analysis wait budget belongs to the qualified owner watermark. Ending
+and restarting asynchronous background jobs releases their active hold but does
+not grant a fresh budget. Expiration remains latched until new qualified owner
+activity; provider revisions and repeated foreign/noise windows cannot renew it.
+
+Independent owner audio also supplies live transcript authority. Strong physical
+interference plus an explicitly rejected extracted voice switches product preview,
+streaming submission and final supplementation to the owner-only provider. Noise
+residual or an unusable extraction alone does not establish another speaker. While
+the owner provider is pending, retain source evidence without admitting the mixture
+or deleting submitted owner text. Early final sealing and raw-tail recovery cannot
+bypass this same boundary or cancel the owner worker before arbitration. Platforms
+produce evidence through their adapters; the authority decision remains shared.
+
+Cancellation and successful completion have separate actor cleanup. An externally
+closed Idle state with a cancelled session must run the session-owned cancel path
+before releasing its actor: preserve debug audio and trace under the user's existing
+recording preference, settle only that session's ASR resource, and keep continuous
+capture ready. Idle by itself is not a successful-final certificate.
+
 - macOS uses Accessibility/keyboard event paths for hotkey and insertion.
 - Windows uses low-level hooks for hotkeys and Listener Type TSF IME for reliable insertion.
 - Windows IME identity is documented in `docs/platform/windows-ime.md`.

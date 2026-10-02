@@ -4838,11 +4838,11 @@ pub struct VolcengineStreamingASR {
     session_options: VolcengineSessionOptions,
     proxy_config: ProviderProxyConfig,
     state: ParkingMutex<SyncState>,
-    partial_callback: ParkingMutex<Option<PartialTranscriptCallback>>,
+    partial_callback: Arc<ParkingMutex<Option<PartialTranscriptCallback>>>,
     visual_partial_callback: ParkingMutex<Option<VisualPartialTranscriptCallback>>,
-    final_intermediate_callback: ParkingMutex<Option<FinalIntermediateTranscriptCallback>>,
+    final_intermediate_callback: Arc<ParkingMutex<Option<FinalIntermediateTranscriptCallback>>>,
     target_speaker_update_callback: ParkingMutex<Option<TargetSpeakerUpdateCallback>>,
-    streaming_event_callback: ParkingMutex<Option<StreamingEventCallback>>,
+    streaming_event_callback: Arc<ParkingMutex<Option<StreamingEventCallback>>>,
     /// Guards the WebSocket write half so concurrent `send` calls serialize.
     /// Stored as Arc so spawned send tasks can hold their own clone — independent
     /// of the lifetime of any particular `&self` borrow.
@@ -4904,6 +4904,8 @@ pub struct VolcengineStreamingASR {
         ParkingMutex<Option<Arc<super::target_speaker_extraction::TargetSpeakerStream>>>,
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     target_speaker_filter_required: AtomicBool,
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    primary_mixture_rejected: AtomicBool,
     /// r36：最后一次终判封存的 authority 标签（None=尚未封存）。供协调层
     /// 判断 provider_primary 是否为 speaker_filtered 认证稿。
     last_final_seal_authority_label: ParkingMutex<Option<&'static str>>,
@@ -5286,11 +5288,11 @@ impl VolcengineStreamingASR {
             session_options,
             proxy_config,
             state: ParkingMutex::new(SyncState::default()),
-            partial_callback: ParkingMutex::new(None),
+            partial_callback: Arc::new(ParkingMutex::new(None)),
             visual_partial_callback: ParkingMutex::new(None),
-            final_intermediate_callback: ParkingMutex::new(None),
+            final_intermediate_callback: Arc::new(ParkingMutex::new(None)),
             target_speaker_update_callback: ParkingMutex::new(None),
-            streaming_event_callback: ParkingMutex::new(None),
+            streaming_event_callback: Arc::new(ParkingMutex::new(None)),
             writer: Arc::new(AsyncMutex::new(None)),
             final_rx: ParkingMutex::new(None),
             audio_tx: ParkingMutex::new(None),
@@ -5319,6 +5321,8 @@ impl VolcengineStreamingASR {
             target_speaker_stream: ParkingMutex::new(None),
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             target_speaker_filter_required: AtomicBool::new(false),
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            primary_mixture_rejected: AtomicBool::new(false),
             last_final_seal_authority_label: ParkingMutex::new(None),
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             target_speaker_final_task: ParkingMutex::new(None),
@@ -5443,12 +5447,27 @@ impl VolcengineStreamingASR {
         if slot.is_some() {
             return;
         }
+        let partial_slot = Arc::clone(&self.partial_callback);
+        let event_slot = Arc::clone(&self.streaming_event_callback);
+        let final_intermediate_slot = Arc::clone(&self.final_intermediate_callback);
         *slot = Some(
             super::target_speaker_extraction::TargetSpeakerStream::start(
                 self.credentials.clone(),
                 self.hotwords.clone(),
                 embedding,
                 self.proxy_config.clone(),
+                Arc::new(move |text| {
+                    let callback = partial_slot.lock().clone();
+                    if let Some(callback) = callback { callback(text); }
+                }),
+                Arc::new(move |event| {
+                    let callback = event_slot.lock().clone();
+                    if let Some(callback) = callback { callback(event); }
+                }),
+                Arc::new(move |update| {
+                    let callback = final_intermediate_slot.lock().clone();
+                    if let Some(callback) = callback { callback(update); }
+                }),
             ),
         );
         log::info!(
@@ -5458,9 +5477,53 @@ impl VolcengineStreamingASR {
         );
     }
 
+    /// The extractor is an evidence producer. Shared product policy selects
+    /// the live source; a longer mixture is never an ownership certificate.
+    fn live_transcript_source(&self) -> (crate::speech_decision_kernel::LiveTranscriptAuthority, Option<Arc<Self>>) {
+        #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+        {
+            let stream = self.target_speaker_stream.lock().clone().or_else(|| {
+                self.target_speaker_final_task.lock().as_ref().map(|(stream, _)| Arc::clone(stream))
+            });
+            if let Some(stream) = stream {
+                let owner = stream.live_owner_asr();
+                let evidence = crate::speech_decision_kernel::InterferenceEvidence {
+                    physical_overlap: stream.interference_detected(),
+                    // Residual alone can be noise. A usable extracted chunk
+                    // rejected as another voice supplies the independent
+                    // identity evidence missing from a reused cloud id.
+                    sustained_non_target: stream.interference_detected() && stream.non_target_speech_detected(),
+                    degraded_owner_tail: false,
+                };
+                let authority = crate::speech_decision_kernel::live_transcript_authority(evidence, owner.is_some());
+                if authority != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary {
+                    self.primary_mixture_rejected.store(true, Ordering::SeqCst);
+                }
+                if authority != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary
+                    && !self.target_speaker_filter_required.swap(true, Ordering::SeqCst)
+                {
+                    log::info!(
+                        "[target-speaker] live source requires independent owner evidence physical_overlap={} rejected_non_owner={} owner_stream_ready={}",
+                        evidence.physical_overlap, evidence.sustained_non_target, owner.is_some(),
+                    );
+                }
+                return (authority, owner);
+            }
+            if self.target_speaker_filter_required.load(Ordering::SeqCst) {
+                return (crate::speech_decision_kernel::LiveTranscriptAuthority::OwnerEvidencePending, None);
+            }
+        }
+        (crate::speech_decision_kernel::LiveTranscriptAuthority::Primary, None)
+    }
+
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     pub fn target_speaker_filter_was_required(&self) -> bool {
         self.target_speaker_filter_required.load(Ordering::SeqCst)
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    pub fn primary_mixture_was_rejected(&self) -> bool {
+        self.primary_mixture_rejected.load(Ordering::SeqCst)
     }
 
     /// r36：主轨终稿是否以 speaker_filtered 认证封存（说话人过滤已切尾的
@@ -5538,7 +5601,8 @@ impl VolcengineStreamingASR {
         ) = {
             let state = self.state.lock();
             (
-                state.local_sustained_non_target_speech_end_ms.is_some(),
+                state.local_sustained_non_target_speech_end_ms.is_some()
+                    || (stream.interference_detected() && stream.non_target_speech_detected()),
                 degraded_owner_tail_suggests_interference_with_quality(
                     &state.local_speaker_evidence,
                     &state.local_unreliable_speaker_evidence_end_ms,
@@ -5549,6 +5613,9 @@ impl VolcengineStreamingASR {
             )
         };
         let physical_interference_detected = stream.interference_detected();
+        if physical_interference_detected && stream.non_target_speech_detected() {
+            self.primary_mixture_rejected.store(true, Ordering::SeqCst);
+        }
         let interference = crate::speech_decision_kernel::InterferenceEvidence {
             physical_overlap: physical_interference_detected,
             sustained_non_target: sustained_non_target_seen,
@@ -5610,7 +5677,11 @@ impl VolcengineStreamingASR {
                 // trigger this final check in an otherwise clean session; do
                 // not leave `filter_required` armed and erase that certified
                 // primary transcript in the coordinator.
-                let clean_primary_certified = matches!(&result, Ok(None));
+                if stream.interference_detected() && stream.non_target_speech_detected() {
+                    self.primary_mixture_rejected.store(true, Ordering::SeqCst);
+                }
+                let clean_primary_certified = matches!(&result, Ok(None))
+                    && !self.primary_mixture_was_rejected();
                 let filter_required =
                     target_speaker_filter_required_after_finish(true, clean_primary_certified);
                 self.target_speaker_filter_required
@@ -5637,10 +5708,17 @@ impl VolcengineStreamingASR {
                             .map(|text| RawTranscript { text, duration_ms }),
                     )
                 };
-                let recovered = recover_incomplete_separator_final_from_distinct_provider_track(
-                    result,
-                    distinct_provider_target.clone(),
-                );
+                let recovered = if self.primary_mixture_was_rejected() {
+                    // A longer primary track can cover the same rejected
+                    // mixture. Length alone cannot revoke explicit independent
+                    // identity evidence after live delivery changed source.
+                    result
+                } else {
+                    recover_incomplete_separator_final_from_distinct_provider_track(
+                        result,
+                        distinct_provider_target.clone(),
+                    )
+                };
                 let recovered = recover_noise_only_separator_collapse_from_certified_primary(
                     recovered,
                     certified_primary.clone(),
@@ -6850,6 +6928,9 @@ impl VolcengineStreamingASR {
     }
 
     fn emit_partial_transcript(&self, text: &str) {
+        if self.live_transcript_source().0 != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary {
+            return;
+        }
         let callback = self.partial_callback.lock().clone();
         if let Some(callback) = callback {
             callback(text.to_string());
@@ -6857,6 +6938,9 @@ impl VolcengineStreamingASR {
     }
 
     fn emit_visual_partial_transcript(&self, text: &str) {
+        if self.live_transcript_source().0 != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary {
+            return;
+        }
         let callback = self.visual_partial_callback.lock().clone();
         if let Some(callback) = callback {
             callback(text.to_string());
@@ -6864,6 +6948,9 @@ impl VolcengineStreamingASR {
     }
 
     fn emit_final_intermediate_transcript(&self, update: FinalIntermediateTranscript) {
+        if self.live_transcript_source().0 != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary {
+            return;
+        }
         let callback = self.final_intermediate_callback.lock().clone();
         if let Some(callback) = callback {
             callback(update);
@@ -6878,6 +6965,9 @@ impl VolcengineStreamingASR {
     }
 
     fn emit_streaming_event(&self, event: VolcengineStreamingEvent) {
+        if self.live_transcript_source().0 != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary {
+            return;
+        }
         let callback = self.streaming_event_callback.lock().clone();
         if let Some(callback) = callback {
             callback(event);
@@ -7603,6 +7693,11 @@ impl VolcengineStreamingASR {
     /// froze an isolation ceiling and never saw a non-target window, and the
     /// text has been byte-stable for at least `min_stable`.
     fn stable_ledger_final_snapshot(&self, min_stable: Duration) -> Option<RawTranscript> {
+        // Early sealing cancels the whole provider, including its owner-only
+        // worker. A mixture cannot win that race after independent rejection.
+        if self.live_transcript_source().0 != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary {
+            return None;
+        }
         let st = self.state.lock();
         if !st.finishing || st.owner_isolation_frozen || st.local_non_target_speech_end_ms.is_some()
         {
@@ -7656,6 +7751,23 @@ impl VolcengineStreamingASR {
         min_stable: Duration,
         consumed_source_key: &str,
     ) -> Option<RawTranscript> {
+        match self.live_transcript_source() {
+            (crate::speech_decision_kernel::LiveTranscriptAuthority::OwnerEvidencePending, _) => return None,
+            (crate::speech_decision_kernel::LiveTranscriptAuthority::IndependentOwner, Some(owner)) => {
+                let mut provider_key = consumed_source_key.to_string();
+                let owner_text = owner.state.lock().best_transcript_text.clone();
+                if !provider_key.is_empty()
+                    && crate::transcript_boundary::consumed_prefix_end(&owner_text, &provider_key).is_none()
+                {
+                    if let Some(phrase) = self.state.lock().wake_speaker_phrase.as_deref() {
+                        provider_key = format!("{}{provider_key}", crate::transcript_boundary::content_key(phrase));
+                    }
+                }
+                return owner.pause_early_delivery_ledger_snapshot_after(min_stable, &provider_key);
+            }
+            (crate::speech_decision_kernel::LiveTranscriptAuthority::IndependentOwner, None) => return None,
+            (crate::speech_decision_kernel::LiveTranscriptAuthority::Primary, _) => {}
+        }
         let mut st = self.state.lock();
         if st.owner_isolation_frozen {
             return None;
@@ -7715,6 +7827,9 @@ impl VolcengineStreamingASR {
     /// means no persistent blocker (empty/immature ledgers resolve on their
     /// own as the session progresses and are not worth a log line).
     pub fn pause_early_delivery_persistent_block_reason(&self) -> Option<&'static str> {
+        if self.live_transcript_source().0 == crate::speech_decision_kernel::LiveTranscriptAuthority::OwnerEvidencePending {
+            return Some("independent_owner_evidence_pending");
+        }
         let st = self.state.lock();
         if st.owner_isolation_frozen {
             return Some("owner_isolation_frozen");
@@ -7742,6 +7857,9 @@ impl VolcengineStreamingASR {
     /// interference the rewrite may re-attribute foreign speech, so the
     /// delivered owner-verified prefix stays and the tail is dropped.
     pub fn pause_early_final_clean_session(&self) -> bool {
+        if self.live_transcript_source().0 != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary {
+            return false;
+        }
         let st = self.state.lock();
         !st.owner_isolation_frozen && st.local_non_target_speech_end_ms.is_none()
     }
@@ -9952,6 +10070,101 @@ mod tests {
                 .map(|snapshot| snapshot.text),
             Some(first.into())
         );
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn live_interference_delivery_uses_owner_audio_not_the_longer_same_cloud_mixture() {
+        let make_asr = || Arc::new(VolcengineStreamingASR::new(
+            VolcengineCredentials { app_id: "app".into(), access_token: "token".into(), resource_id: VolcengineCredentials::default_resource_id().into() },
+            Vec::new(),
+        ));
+        let primary = make_asr();
+        let owner = make_asr();
+        // Redacted boundary reproduction of 0aab1faa. The exact cancelled
+        // provider text was not archived; this exercises its observed source
+        // decision: cloud id 0 and retained local Target, despite an explicit
+        // extracted non-owner chunk, must not authorize the longer mixture.
+        let owner_text = "开始录音现在播放干扰，请检查这段测试。";
+        let mixture = format!("{owner_text}预算被砍了百分之二十，我们得自救。管理费需要提高。");
+        {
+            let mut state = primary.state.lock();
+            state.best_transcript_text = mixture.clone();
+            state.best_transcript_committed_at = Some(Instant::now() - Duration::from_secs(2));
+            state.wake_speaker_phrase = Some("开始录音".into());
+            state.target_speaker_id = Some("0".into());
+            state.local_speaker_tracking_enabled = true;
+            state.local_speaker_stable_target = true;
+            state.local_target_confirmed = true;
+            state.local_speaker_classification = Some(crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.598_978_76 });
+        }
+        {
+            let mut state = owner.state.lock();
+            state.best_transcript_text = owner_text.into();
+            state.best_transcript_committed_at = Some(Instant::now() - Duration::from_secs(2));
+        }
+        *primary.target_speaker_stream.lock() = Some(super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(Some(Arc::clone(&owner)), true, true));
+        assert_eq!(primary.pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), "").unwrap().text, owner_text);
+        assert!(primary.target_speaker_filter_was_required());
+        assert!(primary.primary_mixture_was_rejected());
+        let seen = Arc::new(ParkingMutex::new(Vec::new()));
+        let observed = Arc::clone(&seen);
+        primary.set_partial_transcript_callback(Some(Arc::new(move |text| { observed.lock().push(text); })));
+        primary.emit_partial_transcript(&mixture);
+        assert!(seen.lock().is_empty(), "the mixture must not regain product partial authority through another callback");
+        let final_seen = Arc::new(ParkingMutex::new(Vec::new()));
+        let final_observed = Arc::clone(&final_seen);
+        primary.set_final_intermediate_transcript_callback(Some(Arc::new(move |update| {
+            final_observed.lock().push(update.text);
+        })));
+        primary.emit_final_intermediate_transcript(FinalIntermediateTranscript {
+            text: mixture.clone(),
+            authoritative_two_pass: true,
+        });
+        assert!(final_seen.lock().is_empty(), "two-pass supplementation cannot bypass independent ownership");
+        primary.state.lock().finishing = true;
+        assert!(primary.stable_ledger_final_snapshot(Duration::ZERO).is_none(), "a mixture early seal must not cancel the pending owner worker");
+        assert!(!primary.pause_early_final_clean_session(), "independent rejection vetoes raw final rewrite recovery");
+
+        let resumed_owner = format!("{owner_text}现在我本人继续说话。");
+        {
+            let mut state = owner.state.lock();
+            state.best_transcript_text = resumed_owner.clone();
+            state.best_transcript_committed_at = Some(Instant::now() - Duration::from_secs(2));
+        }
+        let consumed = crate::transcript_boundary::content_key("现在播放干扰，请检查这段测试。");
+        let resumed = primary.pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &consumed).unwrap();
+        assert_eq!(resumed.text, resumed_owner, "owner return stays streamable without reintroducing the mixture");
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn pending_owner_stream_never_falls_back_to_the_rejected_mixture() {
+        let primary = VolcengineStreamingASR::new(
+            VolcengineCredentials { app_id: "app".into(), access_token: "token".into(), resource_id: VolcengineCredentials::default_resource_id().into() }, Vec::new(),
+        );
+        let text = "已提交的本人开头。随后是待确认的混合音轨。";
+        {
+            let mut state = primary.state.lock();
+            state.best_transcript_text = text.into();
+            state.best_transcript_committed_at = Some(Instant::now() - Duration::from_secs(2));
+        }
+        *primary.target_speaker_stream.lock() = Some(super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(None, true, true));
+        assert!(primary.pause_early_delivery_ledger_snapshot_after(Duration::ZERO, "").is_none());
+        assert_eq!(primary.state.lock().best_transcript_text, text, "waiting is not deletion");
+        primary.target_speaker_stream.lock().take();
+        assert!(primary.pause_early_delivery_ledger_snapshot_after(Duration::ZERO, "").is_none(), "the source boundary stays latched while the owner final settles");
+
+        let noise_only = VolcengineStreamingASR::new(
+            VolcengineCredentials { app_id: "app".into(), access_token: "token".into(), resource_id: VolcengineCredentials::default_resource_id().into() }, Vec::new(),
+        );
+        {
+            let mut state = noise_only.state.lock();
+            state.best_transcript_text = text.into();
+            state.best_transcript_committed_at = Some(Instant::now() - Duration::from_secs(2));
+        }
+        *noise_only.target_speaker_stream.lock() = Some(super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(None, true, false));
+        assert_eq!(noise_only.pause_early_delivery_ledger_snapshot_after(Duration::ZERO, "").unwrap().text, text, "a noise-only residual must not suppress the clean primary stream");
     }
 
     #[test]

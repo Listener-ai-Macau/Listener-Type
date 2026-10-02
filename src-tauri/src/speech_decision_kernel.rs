@@ -202,6 +202,9 @@ impl ProductFinalAuthority {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ProductFinalEvidence {
     pub(crate) target_filter_required: bool,
+    /// Independent audio rejected the primary mixture, even if the provider
+    /// reused an owner speaker id or sealed it as speaker-filtered text.
+    pub(crate) primary_mixture_rejected: bool,
     pub(crate) separated_owner_available: bool,
     pub(crate) provider_primary_available: bool,
     pub(crate) retained_audio_replay_available: bool,
@@ -212,6 +215,9 @@ pub(crate) struct ProductFinalEvidence {
 pub(crate) fn arbitrate_product_final(evidence: ProductFinalEvidence) -> ProductFinalAuthority {
     if evidence.separated_owner_available {
         return ProductFinalAuthority::SeparatedOwner;
+    }
+    if evidence.primary_mixture_rejected {
+        return ProductFinalAuthority::Empty;
     }
     if evidence.provider_primary_available {
         return ProductFinalAuthority::ProviderPrimary;
@@ -523,6 +529,8 @@ pub(crate) struct OwnerEndpointController {
     phase: EndpointPhase,
     text_revision: u64,
     owner_analysis_deadline: Option<Instant>,
+    owner_analysis_pending: bool,
+    owner_analysis_watermark_ms: Option<u64>,
 }
 
 /// Session-scoped preview reducer.
@@ -993,7 +1001,7 @@ impl RecordingLifecycleController {
 
 impl OwnerEndpointController {
     pub(crate) fn state(&self) -> OwnerEndpointState {
-        if self.owner_analysis_deadline.is_some() {
+        if self.owner_analysis_pending && self.owner_analysis_deadline.is_some() {
             return OwnerEndpointState::OwnerEvidencePending;
         }
         match self.phase {
@@ -1008,6 +1016,8 @@ impl OwnerEndpointController {
         self.phase = EndpointPhase::Listening;
         self.text_revision = 0;
         self.owner_analysis_deadline = None;
+        self.owner_analysis_pending = false;
+        self.owner_analysis_watermark_ms = None;
     }
 
     /// Register the lifecycle of the single-flight owner classifier.  This is
@@ -1021,12 +1031,13 @@ impl OwnerEndpointController {
         now: Instant,
         maximum_wait: Duration,
     ) {
+        self.owner_analysis_pending = pending;
         if pending {
             self.owner_analysis_deadline
                 .get_or_insert(now + maximum_wait);
-        } else {
-            self.owner_analysis_deadline = None;
         }
+        // Completing a background job releases the current barrier, but
+        // cannot reset its budget. Only new owner activity earns another one.
     }
 
     pub(crate) fn note_text_revision(&mut self) {
@@ -1040,6 +1051,10 @@ impl OwnerEndpointController {
     }
 
     pub(crate) fn arm(&mut self, evidence: EndpointEvidence) {
+        if evidence.owner_watermark_ms > self.owner_analysis_watermark_ms {
+            self.owner_analysis_deadline = None;
+            self.owner_analysis_watermark_ms = evidence.owner_watermark_ms;
+        }
         self.phase = EndpointPhase::CandidateEnd {
             owner_watermark_ms: evidence.owner_watermark_ms,
             text_revision: self.text_revision,
@@ -1072,15 +1087,14 @@ impl OwnerEndpointController {
         now: Instant,
         catch_up_grace: Duration,
     ) -> EndpointDecision {
-        if self
+        if self.owner_analysis_pending && self
             .owner_analysis_deadline
             .is_some_and(|deadline| now < deadline)
         {
             return EndpointDecision::AwaitingOwnerAnalysis;
         }
-        if self.owner_analysis_deadline.is_some() {
-            self.owner_analysis_deadline = None;
-        }
+        // Keep the expired budget until the owner watermark changes. Clearing
+        // it here lets the next watchdog/classifier job start another wait.
         // Provisional provider text is only a stop barrier while the local
         // capture still shows a recent owner-compatible tail.  Under strong
         // interference the provider can leave this bit set forever even after
@@ -1171,6 +1185,29 @@ pub(crate) struct InterferenceEvidence {
 pub(crate) enum InterferenceDecision {
     PreservePrimary,
     AwaitSeparatedOwner,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LiveTranscriptAuthority {
+    Primary,
+    IndependentOwner,
+    OwnerEvidencePending,
+}
+
+/// Live delivery and the final must respect the same ownership authority.
+/// An unavailable owner decode stays pending; it is neither foreign speech
+/// nor permission to paste the already rejected mixture.
+pub(crate) const fn live_transcript_authority(
+    evidence: InterferenceEvidence,
+    independent_owner_ready: bool,
+) -> LiveTranscriptAuthority {
+    match decide_interference(evidence) {
+        InterferenceDecision::PreservePrimary => LiveTranscriptAuthority::Primary,
+        InterferenceDecision::AwaitSeparatedOwner if independent_owner_ready => {
+            LiveTranscriptAuthority::IndependentOwner
+        }
+        InterferenceDecision::AwaitSeparatedOwner => LiveTranscriptAuthority::OwnerEvidencePending,
+    }
 }
 
 pub(crate) const fn decide_interference(evidence: InterferenceEvidence) -> InterferenceDecision {
@@ -2097,6 +2134,47 @@ mod tests {
     }
 
     #[test]
+    fn repeated_background_analysis_jobs_share_one_endpoint_wait_budget() {
+        // 0aab1faa: qualified owner stopped at 22688 ms, but the classifier
+        // completed/restarted on room speech every 400 ms. Each false/true
+        // transition used to renew the stop barrier without any owner return.
+        let started = Instant::now();
+        let evidence = EndpointEvidence {
+            owner_watermark_ms: Some(22_688),
+            provider_coverage_ms: Some(35_312),
+            pending_provider_text: false,
+            latest_speech_confirmed_non_target: false,
+            unresolved_owner_tail: false,
+        };
+        let mut endpoint = OwnerEndpointController::default();
+        endpoint.arm(evidence);
+        for ms in [0, 400, 800, 1_200, 1_600, 2_000, 2_400, 2_800, 3_200] {
+            endpoint.note_owner_analysis_pending(false, started + Duration::from_millis(ms), Duration::from_millis(3_000));
+            endpoint.note_owner_analysis_pending(true, started + Duration::from_millis(ms), Duration::from_millis(3_000));
+        }
+        assert_eq!(
+            endpoint.decide_stop(evidence, started + Duration::from_millis(3_201), Duration::from_millis(300)),
+            EndpointDecision::Stop,
+            "new background jobs cannot buy another wait after the original owner deadline",
+        );
+        endpoint.arm(EndpointEvidence { owner_watermark_ms: None, ..evidence });
+        endpoint.arm(evidence);
+        endpoint.note_owner_analysis_pending(true, started + Duration::from_millis(3_500), Duration::from_millis(3_000));
+        assert_eq!(
+            endpoint.decide_stop(evidence, started + Duration::from_millis(3_501), Duration::from_millis(300)),
+            EndpointDecision::Stop,
+            "missing evidence followed by the old owner edge is not new owner activity",
+        );
+        endpoint.arm(EndpointEvidence { owner_watermark_ms: Some(36_000), ..evidence });
+        endpoint.note_owner_analysis_pending(true, started + Duration::from_millis(4_000), Duration::from_millis(3_000));
+        assert_eq!(
+            endpoint.decide_stop(EndpointEvidence { owner_watermark_ms: Some(36_000), ..evidence }, started + Duration::from_millis(4_001), Duration::from_millis(300)),
+            EndpointDecision::AwaitingOwnerAnalysis,
+            "a real owner return gets its own analysis budget",
+        );
+    }
+
+    #[test]
     fn preview_revision_does_not_permanently_disable_armed_endpoint() {
         let started = Instant::now();
         let evidence = EndpointEvidence {
@@ -2933,6 +3011,7 @@ mod tests {
     fn target_speaker_endpoint_product_final_blocks_unverified_recovery_under_interference() {
         let evidence = ProductFinalEvidence {
             target_filter_required: true,
+            primary_mixture_rejected: false,
             separated_owner_available: false,
             provider_primary_available: false,
             retained_audio_replay_available: true,
@@ -2963,9 +3042,26 @@ mod tests {
     }
 
     #[test]
+    fn independently_rejected_primary_cannot_become_final_during_owner_outage() {
+        let evidence = ProductFinalEvidence {
+            primary_mixture_rejected: true,
+            provider_primary_available: true,
+            retained_audio_replay_available: true,
+            partial_preview_available: true,
+            ..ProductFinalEvidence::default()
+        };
+        assert_eq!(arbitrate_product_final(evidence), ProductFinalAuthority::Empty);
+        assert_eq!(
+            arbitrate_product_final(ProductFinalEvidence { separated_owner_available: true, ..evidence }),
+            ProductFinalAuthority::SeparatedOwner,
+        );
+    }
+
+    #[test]
     fn target_speaker_endpoint_product_final_has_one_clean_recovery_precedence() {
         let all_recovery_candidates = ProductFinalEvidence {
             target_filter_required: false,
+            primary_mixture_rejected: false,
             separated_owner_available: false,
             provider_primary_available: false,
             retained_audio_replay_available: true,
@@ -2997,6 +3093,7 @@ mod tests {
     fn product_final_prefers_provider_over_preview() {
         let evidence = ProductFinalEvidence {
             target_filter_required: false,
+            primary_mixture_rejected: false,
             separated_owner_available: false,
             provider_primary_available: true,
             retained_audio_replay_available: false,

@@ -8210,6 +8210,31 @@ fn target_speaker_endpoint_rotated_segment_handoff_is_single_use() {
 }
 
 #[test]
+fn cancelled_idle_session_runs_cancel_cleanup_before_releasing_actor_evidence() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    let consumer: Arc<dyn crate::recorder::AudioConsumer> = Arc::new(CountingConsumer::default());
+    let mut actor = EmbeddedStreamingDictation::background_listener();
+    actor.embedded_session_id = Some(2356882905);
+    actor.session = Some(embedded_audio_test_session(session_id, consumer));
+    actor.session.as_mut().unwrap().archive_pcm = None;
+    let asr = Arc::new(crate::asr::VolcengineStreamingASR::new(
+        crate::asr::VolcengineCredentials { app_id: "app".into(), access_token: "token".into(), resource_id: crate::asr::VolcengineCredentials::default_resource_id().into() }, Vec::new(),
+    ));
+    *coordinator.inner.asr.lock() = Some(super::SessionResource::new(session_id, super::ActiveAsr::Volcengine(asr)));
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = session_id;
+        state.phase = SessionPhase::Idle;
+        state.cancelled = true;
+    }
+    assert!(actor.release_externally_finalized_session_if_needed(&coordinator.inner));
+    assert!(actor.session.is_none());
+    assert!(actor.keep_listening_after_pipeline_errors);
+    assert!(coordinator.inner.asr.lock().is_none(), "Idle after cancellation still needs cancel cleanup; a successful-finalization reset leaves this orphaned ASR slot");
+}
+
+#[test]
 fn target_speaker_endpoint_no_body_finalization_cannot_steal_next_physical_wake() {
     // Session 2899 reached the no-body endpoint, but the old actor waited for
     // a hypothetical post-activation segment. Forty-two seconds later it
@@ -15601,6 +15626,7 @@ fn product_final_candidates(primary: &str) -> super::ProductFinalCandidates {
         local_shadow: None,
         local_shadow_owner_end_aligned: false,
         target_filter_required: false,
+        primary_mixture_rejected: false,
         primary_speaker_filtered_certified: false,
     }
 }
@@ -15812,6 +15838,33 @@ fn product_final_does_not_replace_provider_body_with_longer_preview() {
         decision.transcript.text, "今天天气",
         "a longer preview cannot override a non-empty provider body"
     );
+}
+
+#[test]
+fn independent_audio_rejection_prevents_longer_primary_from_demoting_owner_final() {
+    let primary = "现在播放干扰，请检查这段测试。预算被砍了百分之二十，我们得自救。管理费需要提高。";
+    for owner in ["现在播放干扰，请检查这段测试。", "现在放的是录音，请检查这个测试。"] {
+        let mut candidates = product_final_candidates(primary);
+        candidates.target_filter_required = true;
+        candidates.primary_mixture_rejected = true;
+        // The same cloud speaker id can even label the mixture as filtered.
+        // That certificate cannot overrule independent audio rejection.
+        candidates.primary_speaker_filtered_certified = true;
+        candidates.separated_owner = Some(crate::asr::RawTranscript {
+            text: owner.into(),
+            duration_ms: 7_462,
+        });
+        let decision = super::arbitrate_product_final_transcript(candidates, &[], false);
+        assert_eq!(decision.authority, crate::speech_decision_kernel::ProductFinalAuthority::SeparatedOwner);
+        assert_eq!(decision.transcript.text, owner);
+    }
+    let mut unavailable = product_final_candidates(primary);
+    unavailable.target_filter_required = true;
+    unavailable.primary_mixture_rejected = true;
+    unavailable.primary_speaker_filtered_certified = true;
+    let decision = super::arbitrate_product_final_transcript(unavailable, &[], false);
+    assert_eq!(decision.authority, crate::speech_decision_kernel::ProductFinalAuthority::Empty);
+    assert!(decision.transcript.text.is_empty());
 }
 
 #[test]

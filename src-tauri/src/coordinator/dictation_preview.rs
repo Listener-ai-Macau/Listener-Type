@@ -11,6 +11,7 @@ struct ProductFinalCandidates {
     local_shadow: Option<String>,
     local_shadow_owner_end_aligned: bool,
     target_filter_required: bool,
+    primary_mixture_rejected: bool,
     /// r36：主轨终稿是否为 speaker_filtered 认证封存（说话人过滤已切尾的
     /// 干净本人全文）。认证稿覆盖分离稿时分离稿必为截断/劣化（r36 吞字
     /// 形态：主轨 51 字完好 vs 分离稿截断 20 字被误当"排除"放行）。
@@ -100,7 +101,7 @@ fn arbitrate_product_final_transcript(
                     .unwrap_or_default();
                 compact_subsequence_of(separated_text, &candidates.provider_primary.text)
             };
-        if primary >= separated && !separated_still_excluding {
+        if !candidates.primary_mixture_rejected && primary >= separated && !separated_still_excluding {
             log::info!(
                 "[target-speaker] separated owner final demoted: {} (primary_spoken={primary} separated_spoken={separated}); keeping primary rendering",
                 if candidates.primary_speaker_filtered_certified {
@@ -115,6 +116,7 @@ fn arbitrate_product_final_transcript(
 
     let authority = arbitrate_product_final(ProductFinalEvidence {
         target_filter_required: candidates.target_filter_required,
+        primary_mixture_rejected: candidates.primary_mixture_rejected,
         separated_owner_available: nonempty_transcript(&candidates.separated_owner),
         provider_primary_available: !candidates.provider_primary.text.trim().is_empty(),
         retained_audio_replay_available: nonempty_transcript(&candidates.retained_audio_replay),

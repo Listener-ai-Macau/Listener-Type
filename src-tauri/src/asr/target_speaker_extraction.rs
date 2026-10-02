@@ -666,14 +666,15 @@ pub(crate) fn wake_phrase_enrollment_pcm(wake_pcm: &[u8], wake_end_seconds: f32)
 }
 
 /// A hidden authoritative stream fed only target-speaker-extracted audio.
-/// The normal cloud stream keeps driving low-latency preview and endpointing;
-/// this stream replaces only the final text when it completes successfully.
+/// The normal stream keeps driving clean-room preview. After explicit
+/// non-owner evidence, this stream owns live text as well as the final.
 pub(crate) struct TargetSpeakerStream {
     audio_tx: Mutex<Option<mpsc::UnboundedSender<Vec<u8>>>>,
     worker: Mutex<
         Option<tauri::async_runtime::JoinHandle<Result<Option<crate::asr::RawTranscript>, String>>>,
     >,
     interference_detected: Arc<AtomicBool>,
+    non_target_speech_detected: Arc<AtomicBool>,
     secondary_asr: Arc<Mutex<Option<Arc<crate::asr::VolcengineStreamingASR>>>>,
 }
 
@@ -688,7 +689,11 @@ async fn feed_extracted_chunk(
     mixture_energy: &mut f64,
     interference_evidence_chunks: &mut usize,
     interference_detected: &AtomicBool,
+    non_target_speech_detected: &AtomicBool,
     secondary_slot: &Mutex<Option<Arc<crate::asr::VolcengineStreamingASR>>>,
+    on_partial: &Arc<dyn Fn(String) + Send + Sync>,
+    on_streaming_event: &Arc<dyn Fn(super::volcengine::VolcengineStreamingEvent) + Send + Sync>,
+    on_final_intermediate: &Arc<dyn Fn(super::volcengine::FinalIntermediateTranscript) + Send + Sync>,
 ) -> Result<(), String> {
     let measurement_valid = accumulate_physical_interference_evidence(
         &extracted,
@@ -696,7 +701,9 @@ async fn feed_extracted_chunk(
         mixture_energy,
         interference_evidence_chunks,
     );
-    extracted.suppress_confident_non_target("stream");
+    if extracted.suppress_confident_non_target("stream") {
+        non_target_speech_detected.store(true, Ordering::SeqCst);
+    }
     if let Some(asr) = secondary.as_ref() {
         asr.consume_pcm_chunk(&extracted.pcm);
         return Ok(());
@@ -720,6 +727,9 @@ async fn feed_extracted_chunk(
         hotwords.to_vec(),
         proxy_config.clone(),
     ));
+    asr.set_partial_transcript_callback(Some(Arc::clone(on_partial)));
+    asr.set_streaming_event_callback(Some(Arc::clone(on_streaming_event)));
+    asr.set_final_intermediate_transcript_callback(Some(Arc::clone(on_final_intermediate)));
     asr.open_session_for_deferred_audio()
         .await
         .map_err(|err| format!("open target-speaker ASR failed: {err}"))?;
@@ -737,10 +747,27 @@ impl TargetSpeakerStream {
         hotwords: Vec<crate::asr::DictionaryHotword>,
         speaker_embedding: Vec<f32>,
         proxy_config: ProviderProxyConfig,
+        on_partial: Arc<dyn Fn(String) + Send + Sync>,
+        on_streaming_event: Arc<dyn Fn(super::volcengine::VolcengineStreamingEvent) + Send + Sync>,
+        on_final_intermediate: Arc<dyn Fn(super::volcengine::FinalIntermediateTranscript) + Send + Sync>,
     ) -> Arc<Self> {
         let (audio_tx, mut audio_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let interference_detected = Arc::new(AtomicBool::new(false));
         let worker_interference_detected = Arc::clone(&interference_detected);
+        let non_target_speech_detected = Arc::new(AtomicBool::new(false));
+        let worker_non_target_speech_detected = Arc::clone(&non_target_speech_detected);
+        let partial_evidence = Arc::clone(&non_target_speech_detected);
+        let event_evidence = Arc::clone(&non_target_speech_detected);
+        let final_evidence = Arc::clone(&non_target_speech_detected);
+        let on_partial: Arc<dyn Fn(String) + Send + Sync> = Arc::new(move |text| {
+            if partial_evidence.load(Ordering::SeqCst) { on_partial(text); }
+        });
+        let on_streaming_event: Arc<dyn Fn(super::volcengine::VolcengineStreamingEvent) + Send + Sync> = Arc::new(move |event| {
+            if event_evidence.load(Ordering::SeqCst) { on_streaming_event(event); }
+        });
+        let on_final_intermediate: Arc<dyn Fn(super::volcengine::FinalIntermediateTranscript) + Send + Sync> = Arc::new(move |update| {
+            if final_evidence.load(Ordering::SeqCst) { on_final_intermediate(update); }
+        });
         let secondary_asr = Arc::new(Mutex::new(None));
         let worker_secondary_asr = Arc::clone(&secondary_asr);
         let worker = tauri::async_runtime::spawn(async move {
@@ -778,7 +805,11 @@ impl TargetSpeakerStream {
                         &mut mixture_energy,
                         &mut interference_evidence_chunks,
                         &worker_interference_detected,
+                        &worker_non_target_speech_detected,
                         &worker_secondary_asr,
+                        &on_partial,
+                        &on_streaming_event,
+                        &on_final_intermediate,
                     )
                     .await?;
                 }
@@ -801,7 +832,11 @@ impl TargetSpeakerStream {
                     &mut mixture_energy,
                     &mut interference_evidence_chunks,
                     &worker_interference_detected,
+                    &worker_non_target_speech_detected,
                     &worker_secondary_asr,
+                    &on_partial,
+                    &on_streaming_event,
+                    &on_final_intermediate,
                 )
                 .await?;
             }
@@ -816,7 +851,9 @@ impl TargetSpeakerStream {
                 return Ok(None);
             }
             let residual_ratio = residual_energy / mixture_energy.max(1e-12);
-            if residual_ratio < STRONG_INTERFERENCE_RESIDUAL_RATIO {
+            if residual_ratio < STRONG_INTERFERENCE_RESIDUAL_RATIO
+                && !worker_non_target_speech_detected.load(Ordering::SeqCst)
+            {
                 if let Some(asr) = secondary {
                     asr.cancel();
                 }
@@ -844,12 +881,31 @@ impl TargetSpeakerStream {
             audio_tx: Mutex::new(Some(audio_tx)),
             worker: Mutex::new(Some(worker)),
             interference_detected,
+            non_target_speech_detected,
             secondary_asr,
         })
     }
 
     pub(crate) fn interference_detected(&self) -> bool {
         self.interference_detected.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn non_target_speech_detected(&self) -> bool {
+        self.non_target_speech_detected.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn live_owner_asr(&self) -> Option<Arc<crate::asr::VolcengineStreamingASR>> {
+        self.secondary_asr.lock().clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_live_owner(asr: Option<Arc<crate::asr::VolcengineStreamingASR>>, physical_overlap: bool, non_target: bool) -> Arc<Self> {
+        Arc::new(Self {
+            audio_tx: Mutex::new(None), worker: Mutex::new(None),
+            interference_detected: Arc::new(AtomicBool::new(physical_overlap)),
+            non_target_speech_detected: Arc::new(AtomicBool::new(non_target)),
+            secondary_asr: Arc::new(Mutex::new(asr)),
+        })
     }
 
     pub(crate) fn consume_pcm_chunk(&self, pcm: &[u8]) {

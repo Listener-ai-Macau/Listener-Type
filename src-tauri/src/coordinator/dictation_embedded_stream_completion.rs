@@ -105,12 +105,18 @@ impl EmbeddedStreamingDictation {
         let Some(session_id) = self.session.as_ref().map(|session| session.session_id) else {
             return false;
         };
-        let product_closed = {
+        let (product_closed, cancelled) = {
             let state = inner.state.lock();
-            state.session_id == session_id && state.phase == SessionPhase::Idle
+            (state.session_id == session_id && state.phase == SessionPhase::Idle, state.cancelled)
         };
         if !product_closed {
             return false;
+        }
+        if cancelled {
+            // Idle is also the result of Cancel. Do not drop the actor's PCM
+            // and provider trace as if successful no-body finalization had
+            // already archived them. The cancel cleanup owns that evidence.
+            return self.discard_active_session_after_user_cancel(inner);
         }
         clear_embedded_ble_awaiting_post_activation_segment(inner, session_id);
         self.close_owned_product_lifecycle(inner);

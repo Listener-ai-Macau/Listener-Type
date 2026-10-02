@@ -3076,11 +3076,15 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     let mut target_speaker_filter_required = false;
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    let mut primary_mixture_rejected = false;
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     let mut primary_speaker_filtered_certified = false;
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     let mut separated_owner_candidate: Option<RawTranscript> = None;
     #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
     let target_speaker_filter_required = false;
+    #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
+    let primary_mixture_rejected = false;
     #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
     let primary_speaker_filtered_certified = false;
     #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
@@ -3261,6 +3265,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             {
                 target_speaker_filter_required = asr.target_speaker_filter_was_required();
+                primary_mixture_rejected = asr.primary_mixture_was_rejected();
                 // r36：主轨终稿的封存认证。speaker_filtered 认证 = 干净本人
                 // 全文，产品仲裁据此把"分离稿截断成前缀"（r36 吞字形态）判为
                 // 劣化而非排除。
@@ -3694,6 +3699,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             local_shadow: local_shadow_candidate,
             local_shadow_owner_end_aligned,
             target_filter_required: target_speaker_filter_required,
+            primary_mixture_rejected,
             primary_speaker_filtered_certified,
         },
         &enabled_hotwords(inner),
