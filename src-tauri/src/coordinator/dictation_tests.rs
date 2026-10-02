@@ -16345,6 +16345,23 @@ fn pause_early_revised_terminal_preserves_punctuation_without_replaying_words() 
 }
 
 #[test]
+fn pause_early_revised_terminal_updates_source_without_changing_submitted_words() {
+    use super::{embedded_audio_partial_preview_stability_key as key,
+        pause_early_revised_terminal_remainder, pause_early_source_key_after_append,
+        pause_early_chunk_ready, pause_early_segment};
+    let body = "我们先检查这个流程然后看下怎么处理";
+    let revised = "我们先检查这个系统然后看一下怎么处理。";
+    let delta = pause_early_revised_terminal_remainder(revised, body, &key(body)).unwrap();
+    assert_eq!(delta, "。");
+    assert_eq!(pause_early_segment(&delta, false), Some("。"));
+    assert!(pause_early_chunk_ready(&key(body), &delta));
+    assert_eq!(pause_early_source_key_after_append(revised, &delta, &delta), Some(key(revised)));
+    assert_eq!(format!("{body}{delta}"), "我们先检查这个流程然后看下怎么处理。");
+    assert_eq!(pause_early_revised_terminal_remainder(revised, &format!("{body}。"), &key(revised)),
+        Some(String::new()), "terminal punctuation cannot duplicate after a source revision");
+}
+
+#[test]
 fn pause_early_revised_terminal_rejects_new_body_repeated_anchors_and_large_rewrites() {
     use super::{embedded_audio_partial_preview_stability_key as key,
                 pause_early_revised_terminal_remainder};

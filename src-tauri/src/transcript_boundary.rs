@@ -40,10 +40,10 @@ pub(crate) fn revised_terminal_suffix<'a>(text: &'a str, consumed_key: &str) -> 
         let final_content: Vec<char> = final_key.chars().collect();
         let anchor = &consumed[consumed.len() - 8..];
         let max_edits = (consumed.len() / 5).clamp(2, 12);
-        if consumed.len().abs_diff(final_content.len()) > max_edits
-            || !final_content.ends_with(anchor)
-            || final_content.windows(anchor.len()).filter(|window| *window == anchor).count() != 1
-        { return None; }
+        if consumed.len().abs_diff(final_content.len()) > max_edits { return None; }
+        let retained_anchor = final_content.ends_with(anchor)
+            && final_content.windows(anchor.len()).filter(|window| *window == anchor).count() == 1;
+        if !retained_anchor && consumed.last() != final_content.last() { return None; }
         let mut previous: Vec<usize> = (0..=final_content.len()).collect();
         let mut current = vec![0; final_content.len() + 1];
         for (index, expected) in consumed.iter().enumerate() {
@@ -55,7 +55,19 @@ pub(crate) fn revised_terminal_suffix<'a>(text: &'a str, consumed_key: &str) -> 
             }
             std::mem::swap(&mut previous, &mut current);
         }
-        if previous[final_content.len()] > max_edits { return None; }
+        let terminal_cost = previous[final_content.len()];
+        if terminal_cost > max_edits { return None; }
+        if !retained_anchor {
+            // A correction inside the old suffix can remove that exact
+            // anchor. The complete consumed body must then align uniquely
+            // to this terminal position, with the last content unit retained.
+            // A cheaper or equally good earlier seam means possible new
+            // speech, so it cannot authorize punctuation-only coverage.
+            let first_possible_seam = consumed.len().saturating_sub(max_edits);
+            if previous[first_possible_seam..final_content.len()]
+                    .iter().any(|cost| *cost <= terminal_cost)
+            { return None; }
+        }
     }
     let (offset, last_content) = text.char_indices().rev().find(|(_, ch)| !is_decorative(*ch))?;
     Some(&text[offset + last_content.len_utf8()..])
@@ -167,6 +179,19 @@ mod tests {
         assert_eq!(stable_content_prefix("第一句话？接下来", ["第一句话", "第一句话？接"].into_iter()), "第一句话？");
         assert_eq!(stable_content_prefix("确认 nc 的结果，继续下一句。", ["确认 NC 的结果。继续下一句", "确认 nc 的结果，继续下一句"].into_iter()), "确认 nc 的结果，继续下一句。");
         assert_eq!(stable_content_prefix("今天谈论速度。", ["今天讨论速度"].into_iter()), "今天");
+    }
+
+    #[test]
+    fn terminal_boundary_survives_a_revision_inside_the_old_suffix_anchor() {
+        let consumed = content_key("我们先检查这个流程然后看下怎么处理");
+        assert_eq!(revised_terminal_suffix(
+            "我们先检查这个流程然后看一下怎么处理。", &consumed), Some("。"));
+        assert_eq!(revised_terminal_suffix(
+            "我们先检查这个系统然后看一下怎么处理。", &consumed), Some("。"));
+        assert_eq!(revised_terminal_suffix(
+            "我们先检查这个流程然后看下怎么处理，然后继续处理。", &consumed), None);
+        assert_eq!(revised_terminal_suffix(
+            "完全不同的任务现在还需要知道如何处理。", &consumed), None);
     }
 
     #[test]

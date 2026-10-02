@@ -2395,6 +2395,8 @@ async fn pause_early_delivery_tick(
     let exact_delta = pause_early_final_remainder(&text, &delivered_display, &source_key);
     let anchored = exact_delta.is_none();
     let Some(delta) = exact_delta
+        .or_else(|| pause_early_revised_terminal_remainder(&text, &delivered_display, &source_key)
+            .filter(|tail| pause_early_terminal_punctuation_only(tail)))
         .or_else(|| pause_early_anchored_continuation(&text, &delivered_display, &source_key))
         // Provider revisions can change the last words of an already pasted
         // clause, so an exact eight-character seam disappears even though the

@@ -2886,13 +2886,26 @@ fn rolling_stable_transcript_prefix_after(
     {
         revisions.push_back((changed_at, current.to_string()));
     }
+    while revisions.len() > 64 {
+        revisions.pop_front();
+    }
+    // The source coordinate certifies body already submitted to the editor.
+    // A terminal decoration of that same body needs no new word-age window,
+    // including when a bounded two-pass correction changes the old seam.
+    // This certificate cannot expose a genuinely new or ambiguous body tail.
+    if !consumed_source_key.is_empty()
+        && current.chars().rev()
+            .take_while(|ch| crate::transcript_boundary::is_decorative(*ch))
+            .any(|ch| matches!(ch, '。' | '.' | '！' | '!' | '？' | '?' | '…'))
+        && crate::transcript_boundary::revised_terminal_suffix(current, consumed_source_key)
+            .is_some_and(crate::transcript_boundary::terminal_punctuation_only)
+    {
+        return Some(current.to_string());
+    }
     let cutoff = now.checked_sub(min_stable)?;
     // Keep the newest revision before the cutoff plus every later revision.
     // All of them must agree on the prefix before it can leave the app.
     while revisions.len() > 1 && revisions.get(1).is_some_and(|(at, _)| *at <= cutoff) {
-        revisions.pop_front();
-    }
-    while revisions.len() > 64 {
         revisions.pop_front();
     }
     if revisions.front().is_none_or(|(at, _)| *at > cutoff) {
@@ -9700,6 +9713,44 @@ mod tests {
     }
 
     #[test]
+    fn pause_early_consumed_terminal_revision_needs_no_new_word_age() {
+        let t0 = Instant::now();
+        let body = "我们先检查这个流程然后看下怎么处理";
+        let revised = "我们先检查这个系统然后看一下怎么处理。";
+        let source = crate::transcript_boundary::content_key(body);
+        let mut revisions = VecDeque::from([(t0, body.to_string())]);
+        let now = t0 + Duration::from_millis(1_500);
+        assert_eq!(rolling_stable_transcript_prefix_after(
+            &mut revisions, revised, now, now, Duration::from_secs(1), &source),
+            Some(revised.into()), "only punctuation of already submitted words is immediately eligible");
+
+        let growing = "我们先检查这个系统然后看一下怎么处理。继续下一步。";
+        let fresh = Instant::now();
+        assert!(rolling_stable_transcript_prefix_after(
+            &mut VecDeque::new(), growing, fresh, fresh, Duration::from_secs(1), &source).is_none(),
+            "new body words still need the full stability window");
+        assert!(rolling_stable_transcript_prefix_after(
+            &mut VecDeque::new(), revised, fresh, fresh, Duration::from_secs(1), "").is_none(),
+            "a provider revision without a consumed source cannot bypass word stability");
+    }
+
+    #[test]
+    fn pause_early_consumed_terminal_revision_still_obeys_owner_isolation() {
+        let asr = uplink_stall_test_asr();
+        let body = "我们先检查这个流程然后看下怎么处理";
+        let source = crate::transcript_boundary::content_key(body);
+        {
+            let mut st = asr.state.lock();
+            st.best_transcript_text = "我们先检查这个系统然后看一下怎么处理。".into();
+            st.best_transcript_committed_at = Some(Instant::now());
+            st.owner_isolation_frozen = true;
+        }
+        assert!(asr.pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &source).is_none());
+        asr.state.lock().owner_isolation_frozen = false;
+        assert!(asr.pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &source).is_some());
+    }
+
+    #[test]
     fn pause_early_consumed_formatting_cannot_block_a_stable_continuation() {
         let t0 = Instant::now();
         let mut revisions = VecDeque::new();
@@ -10728,6 +10779,39 @@ mod tests {
             "providerElapsedMs": fixture["provider_elapsed_ms"], "finalElapsedMs": fixture["final_elapsed_ms"],
             "evidenceScope": fixture["reconstruction"], "installedAcceptance": false
         })).unwrap()).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires explicit private captured terminal-boundary trace paths"]
+    fn recorded_terminal_boundary_stability_replay_probe() {
+        let fixture: Value = serde_json::from_slice(&std::fs::read(
+            std::env::var("LISTENER_TERMINAL_BOUNDARY_REPLAY_INPUT").unwrap()).unwrap()).unwrap();
+        let previous = fixture["previous_provider_text"].as_str().unwrap();
+        let revised = fixture["revised_provider_text"].as_str().unwrap();
+        let t0 = Instant::now();
+        let previous_at = t0 + Duration::from_millis(fixture["previous_elapsed_ms"].as_u64().unwrap());
+        let now = t0 + Duration::from_millis(fixture["revision_elapsed_ms"].as_u64().unwrap());
+        let history = VecDeque::from([(previous_at, previous.to_string())]);
+        let baseline = rolling_stable_transcript_prefix_after(&mut history.clone(),
+            revised, now, now, Duration::from_secs(1), "");
+        let stable = rolling_stable_transcript_prefix_after(&mut history.clone(),
+            revised, now, now, Duration::from_secs(1), &crate::transcript_boundary::content_key(previous));
+        assert!(baseline.as_ref().is_none_or(|text| text.len() < revised.len()),
+            "the real revision must reproduce the old word-age truncation");
+        assert_eq!(stable.as_deref(), Some(revised));
+        let terminal = crate::transcript_boundary::revised_terminal_suffix(
+            fixture["revised_display"].as_str().unwrap(), fixture["previous_source_key"].as_str().unwrap());
+        assert_eq!(terminal, Some("。"));
+        let display = fixture["delivered_display"].as_str().unwrap();
+        std::fs::write(std::env::var("LISTENER_TERMINAL_BOUNDARY_REPLAY_OUTPUT").unwrap(),
+            serde_json::to_vec_pretty(&json!({"status": "PASS", "sessionId": fixture["session_id"],
+                "installedHash": fixture["installed_hash"], "oldStableSnapshot": baseline,
+                "newStableSnapshot": stable, "terminalOnly": terminal,
+                "immutableSubmittedTextWithTerminal": format!("{display}。"),
+                "sourceDecisionAtProviderRevisionMs": fixture["revision_elapsed_ms"],
+                "punctuationAvailableBeforeFinalMs": fixture["final_elapsed_ms"].as_u64().unwrap()
+                    - fixture["revision_elapsed_ms"].as_u64().unwrap(),
+                "evidenceScope": fixture["evidence_scope"], "installedAcceptance": false})).unwrap()).unwrap();
     }
 
     #[test]

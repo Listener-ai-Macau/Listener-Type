@@ -84,6 +84,15 @@ fails. This path can append only missing boundary punctuation. Ambiguous
 boundaries, repeated anchors, and genuine new body growth remain outside this
 certificate and use the existing continuation/recovery checks.
 
+If a correction edits the old terminal anchor, the same bounded full-body
+alignment must have its unique best seam at the terminal position and retain
+the last content unit. An earlier equal or cheaper seam cannot certify full
+coverage. For already consumed body only, that certificate makes known
+terminal punctuation eligible immediately, without aging revised words again;
+the coordinator submits only the punctuation and advances the source key.
+Fresh editor readback still decides whether it can append at the current
+caret. New speech retains the normal stability and owner-admission gates.
+
 Speaker exclusions apply to their audio intervals. A retained foreign row still
 vetoes raw final recovery, while fresh verified owner speech after that interval
 can continue into the live ledger. The receive frame uses the same accepted owner
