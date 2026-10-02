@@ -153,6 +153,10 @@ pub(super) fn project_row(state: &SyncState, row: &Value) -> (Vec<Value>, bool) 
 
 pub(super) fn preserve_source_partition(state: &mut SyncState, raw: &Value, filtered: &mut SpeakerFilteredResult) {
     note_foreign_ranges(state, raw, filtered);
+    if state.provider_non_owner_audio_ranges.is_empty() {
+        state.provider_source_exclusion_applied = false;
+        return;
+    }
     let mut changed = false;
     let mut unobserved_source = false;
     for result in [&mut filtered.result, &mut filtered.optimistic_result] {
