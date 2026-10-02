@@ -42,8 +42,8 @@ const MAX_ALIGNMENT_GAIN: f64 = 4.0;
 // similarity 0.600-0.818, while every non-owner-only tail stays at
 // 0.184-0.323. Installed-device owner evidence has dipped to 0.361, so the
 // hard mismatch ceiling deliberately stops at 0.35. The wider 0.35-0.42 band
-// still requires low separator energy; that keeps an uncertain owner chunk
-// audible instead of reviving the historic tail-truncation regression.
+// remains pending identity. Retain original PCM, but do not certify that band
+// as an owner-only source merely because it is above the hard mismatch floor.
 const EXTRACTED_HARD_NON_TARGET_MAX_SIMILARITY: f32 = 0.35;
 const EXTRACTED_SOFT_NON_TARGET_MAX_SIMILARITY: f32 = 0.42;
 const EXTRACTED_NON_TARGET_MAX_ENERGY_RATIO: f64 = 0.025;
@@ -339,6 +339,25 @@ pub(crate) struct ExtractedChunk {
 }
 
 impl ExtractedChunk {
+    fn ownership(&self) -> crate::speech_decision_kernel::SeparatedAudioOwnership {
+        crate::speech_decision_kernel::separated_audio_ownership(
+            !self.separator_failed(),
+            self.target_similarity.is_some_and(|score| score >= EXTRACTED_SOFT_NON_TARGET_MAX_SIMILARITY),
+            self.confidently_non_target(),
+        )
+    }
+
+    fn owner_transport_pcm(&self) -> Vec<u8> {
+        if self.ownership() == crate::speech_decision_kernel::SeparatedAudioOwnership::Owner {
+            self.pcm.clone()
+        } else {
+            // Keep provider times aligned without interpreting missing/failed
+            // identity as owner speech. Full original audio stays in the main
+            // retained recording; pending is not a destructive Other decision.
+            vec![0; self.pcm.len()]
+        }
+    }
+
     fn separator_failed(&self) -> bool {
         self.target_to_mix_energy < EXTRACTED_NON_TARGET_MAX_ENERGY_RATIO
     }
@@ -676,6 +695,7 @@ pub(crate) struct TargetSpeakerStream {
     interference_detected: Arc<AtomicBool>,
     non_target_speech_detected: Arc<AtomicBool>,
     secondary_asr: Arc<Mutex<Option<Arc<crate::asr::VolcengineStreamingASR>>>>,
+    owner_audio_verified: Arc<AtomicBool>,
 }
 
 async fn feed_extracted_chunk(
@@ -691,10 +711,18 @@ async fn feed_extracted_chunk(
     interference_detected: &AtomicBool,
     non_target_speech_detected: &AtomicBool,
     secondary_slot: &Mutex<Option<Arc<crate::asr::VolcengineStreamingASR>>>,
+    owner_audio_verified: &AtomicBool,
     on_partial: &Arc<dyn Fn(String) + Send + Sync>,
     on_streaming_event: &Arc<dyn Fn(super::volcengine::VolcengineStreamingEvent) + Send + Sync>,
     on_final_intermediate: &Arc<dyn Fn(super::volcengine::FinalIntermediateTranscript) + Send + Sync>,
 ) -> Result<(), String> {
+    let ownership = extracted.ownership();
+    let owner_pcm = extracted.owner_transport_pcm();
+    if ownership == crate::speech_decision_kernel::SeparatedAudioOwnership::Owner {
+        owner_audio_verified.store(true, Ordering::SeqCst);
+    } else {
+        log::info!("[target-speaker] extracted audio ownership={ownership:?} valid_ms={} target_similarity={:?}; retained original, owner transport muted", extracted.pcm.len() / 32, extracted.target_similarity);
+    }
     let measurement_valid = accumulate_physical_interference_evidence(
         &extracted,
         residual_energy,
@@ -705,11 +733,11 @@ async fn feed_extracted_chunk(
         non_target_speech_detected.store(true, Ordering::SeqCst);
     }
     if let Some(asr) = secondary.as_ref() {
-        asr.consume_pcm_chunk(&extracted.pcm);
+        asr.consume_pcm_chunk(&owner_pcm);
         return Ok(());
     }
 
-    staged_pcm.extend_from_slice(&extracted.pcm);
+    staged_pcm.extend_from_slice(&owner_pcm);
     if !measurement_valid {
         return Ok(());
     }
@@ -719,6 +747,9 @@ async fn feed_extracted_chunk(
     }
 
     interference_detected.store(true, Ordering::SeqCst);
+    if !owner_audio_verified.load(Ordering::SeqCst) {
+        return Ok(());
+    }
     log::info!(
         "[target-speaker] strong interference detected during capture residual_ratio={residual_ratio:.6} threshold={STRONG_INTERFERENCE_RESIDUAL_RATIO:.6}; opening streaming extracted ASR"
     );
@@ -756,6 +787,8 @@ impl TargetSpeakerStream {
         let worker_interference_detected = Arc::clone(&interference_detected);
         let non_target_speech_detected = Arc::new(AtomicBool::new(false));
         let worker_non_target_speech_detected = Arc::clone(&non_target_speech_detected);
+        let owner_audio_verified = Arc::new(AtomicBool::new(false));
+        let worker_owner_audio_verified = Arc::clone(&owner_audio_verified);
         let partial_evidence = Arc::clone(&non_target_speech_detected);
         let event_evidence = Arc::clone(&non_target_speech_detected);
         let final_evidence = Arc::clone(&non_target_speech_detected);
@@ -807,6 +840,7 @@ impl TargetSpeakerStream {
                         &worker_interference_detected,
                         &worker_non_target_speech_detected,
                         &worker_secondary_asr,
+                        &worker_owner_audio_verified,
                         &on_partial,
                         &on_streaming_event,
                         &on_final_intermediate,
@@ -834,6 +868,7 @@ impl TargetSpeakerStream {
                     &worker_interference_detected,
                     &worker_non_target_speech_detected,
                     &worker_secondary_asr,
+                    &worker_owner_audio_verified,
                     &on_partial,
                     &on_streaming_event,
                     &on_final_intermediate,
@@ -864,7 +899,8 @@ impl TargetSpeakerStream {
                 return Ok(None);
             }
             let Some(secondary) = secondary else {
-                return Err("strong target-speaker interference had no extracted ASR".to_string());
+                log::warn!("[target-speaker] interference remains unresolved: no positively verified owner audio; no secondary candidate");
+                return Ok(None);
             };
             let result = match secondary.send_last_frame().await {
                 Ok(()) => secondary
@@ -883,6 +919,7 @@ impl TargetSpeakerStream {
             interference_detected,
             non_target_speech_detected,
             secondary_asr,
+            owner_audio_verified,
         })
     }
 
@@ -895,7 +932,7 @@ impl TargetSpeakerStream {
     }
 
     pub(crate) fn live_owner_asr(&self) -> Option<Arc<crate::asr::VolcengineStreamingASR>> {
-        self.secondary_asr.lock().clone()
+        self.owner_audio_verified.load(Ordering::SeqCst).then(|| self.secondary_asr.lock().clone()).flatten()
     }
 
     #[cfg(test)]
@@ -905,6 +942,7 @@ impl TargetSpeakerStream {
             interference_detected: Arc::new(AtomicBool::new(physical_overlap)),
             non_target_speech_detected: Arc::new(AtomicBool::new(non_target)),
             secondary_asr: Arc::new(Mutex::new(asr)),
+            owner_audio_verified: Arc::new(AtomicBool::new(true)),
         })
     }
 
@@ -1005,6 +1043,29 @@ mod tests {
         assert!(!classified_chunk(Some(0.38), 0.002).confidently_non_target());
         assert!(!classified_chunk(Some(0.38), 0.037).confidently_non_target());
         assert!(!classified_chunk(None, 0.002).confidently_non_target());
+    }
+
+    #[test]
+    fn uncertain_failed_and_missing_identity_never_feed_owner_transport() {
+        use crate::speech_decision_kernel::SeparatedAudioOwnership::{Other, Owner, Pending};
+        // Installed 1bd43a15: 0.369 opened a raw secondary; failed 0.302/0.017
+        // and a short tail with no similarity then decoded the bystander's time.
+        for chunk in [
+            classified_chunk(Some(0.36989865), 0.034466),
+            classified_chunk(Some(0.30255014), 0.017264),
+            classified_chunk(None, 0.033514),
+        ] {
+            assert_eq!(chunk.ownership(), Pending);
+            assert!(!chunk.confidently_non_target());
+            assert_eq!(chunk.owner_transport_pcm(), vec![0; chunk.pcm.len()]);
+            assert_eq!(chunk.pcm, vec![1, 2, 3, 4], "pending source retained");
+        }
+        let owner = classified_chunk(Some(0.65), 0.037);
+        assert_eq!(owner.ownership(), Owner);
+        assert_eq!(owner.owner_transport_pcm(), owner.pcm);
+        let foreign = classified_chunk(Some(0.30), 0.037);
+        assert_eq!(foreign.ownership(), Other);
+        assert_eq!(foreign.owner_transport_pcm(), vec![0; foreign.pcm.len()]);
     }
 
     #[test]

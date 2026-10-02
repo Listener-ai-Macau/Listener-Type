@@ -826,6 +826,9 @@ struct SyncState {
     /// same final also contains a distinct stable speaker. This is a safe
     /// fallback if physical separation drops a large owner tail.
     distinct_speaker_target_final_text: Option<String>,
+    verified_provider_owner: Option<RawTranscript>,
+    verified_provider_owner_updated_at: Option<Instant>,
+    verified_provider_owner_is_final: bool,
     /// Final provider text from one stable speaker track, bound to the
     /// voiceprint-verified wake owner. Body voiceprint windows may remain
     /// uncertain (installed 61→15 and 37→20 sessions), so absence of explicit
@@ -3112,6 +3115,52 @@ struct SpeakerFilteredResult {
     wake_target_speech_end_ms: Option<u64>,
     stable_attributed_speech_end_ms: Option<u64>,
     pending_unattributed_text: String,
+}
+
+/// Certify a filtered subset from its own attributed audio intervals. A
+/// speaker-filtered label, an old owner vote or a response-local alias alone
+/// cannot rescue a rejected mixture. The retained foreign rows are excluded.
+fn verified_provider_owner_candidate(
+    state: &SyncState, filtered: &SpeakerFilteredResult, provider: &Value, has_final: bool,
+) -> Option<RawTranscript> {
+    use crate::speech_decision_kernel::{provider_owner_is_certified, ProviderOwnerCertificateEvidence};
+    let target = state.target_speaker_id.as_deref()?;
+    let rows = filtered.result.get("utterances")?.as_array()?;
+    let provider_rows = provider.get("utterances")?.as_array()?;
+    let text = filtered.result.get("text")?.as_str()?.trim();
+    let phrase = state.wake_speaker_phrase.as_deref()?;
+    let normalized_phrase = crate::transcript_boundary::content_key(phrase);
+    let local = provider_owner_evidence(state);
+    let positive_body_row = |row: &Value| {
+        let (start, end) = utterance_start_ms(row).zip(utterance_end_ms(row)).unwrap_or((0, 0));
+        end > start && local.iter().any(|sample| {
+            let center = sample.audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+            center >= start && center <= end && sample.stable_target
+                && matches!(sample.classification, crate::speaker_verification::SessionSpeakerClassification::Target { .. })
+        }) && !local_non_target_vetoes_split_utterance(state, start, end)
+    };
+    let has_body = rows.iter().any(|row| {
+        utterance_normalized_text(row) != normalized_phrase && positive_body_row(row)
+    });
+    let all_owner_rows_supported = !rows.is_empty() && has_body && rows.iter().all(|row| {
+        utterance_is_stable(row) && utterance_speaker_id(row).as_deref() == Some(target)
+            && (utterance_normalized_text(row) == normalized_phrase || positive_body_row(row))
+    });
+    let distinct_foreign_track = filtered.stable_other_speaker_present && provider_rows.iter().any(|row| {
+        utterance_is_stable(row) && !rows.contains(row)
+            && utterance_speaker_id(row).is_some_and(|id| id != target)
+    });
+    let row_text: String = rows.iter().filter_map(|row| row.get("text").and_then(Value::as_str)).collect();
+    let complete_attributed_view = !text.is_empty()
+        && crate::transcript_boundary::content_key(text) == crate::transcript_boundary::content_key(&row_text)
+        && (!has_final || (!filtered.stable_unresolved_speaker_present && filtered.pending_unattributed_text.is_empty()));
+    provider_owner_is_certified(ProviderOwnerCertificateEvidence {
+        enrolled_owner_verified: state.local_speaker_tracking_enabled && enrolled_owner_identity_verified(state),
+        distinct_foreign_track, all_owner_rows_supported,
+        response_body_alias: filtered.response_local_body_alias_present, complete_attributed_view,
+    }).then(|| RawTranscript {
+        text: text.to_string(), duration_ms: rows.iter().filter_map(utterance_end_ms).max().unwrap_or_default(),
+    })
 }
 
 /// Validate the owner prefix row by row. A later foreign cluster must not
@@ -5495,7 +5544,9 @@ impl VolcengineStreamingASR {
                     sustained_non_target: stream.interference_detected() && stream.non_target_speech_detected(),
                     degraded_owner_tail: false,
                 };
-                let authority = crate::speech_decision_kernel::live_transcript_authority(evidence, owner.is_some());
+                let authority = crate::speech_decision_kernel::live_transcript_authority_with_certified_provider(
+                    evidence, owner.is_some(), self.state.lock().verified_provider_owner.is_some(),
+                );
                 if authority != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary {
                     self.primary_mixture_rejected.store(true, Ordering::SeqCst);
                 }
@@ -5510,6 +5561,9 @@ impl VolcengineStreamingASR {
                 return (authority, owner);
             }
             if self.target_speaker_filter_required.load(Ordering::SeqCst) {
+                if self.state.lock().verified_provider_owner.is_some() {
+                    return (crate::speech_decision_kernel::LiveTranscriptAuthority::VerifiedProviderOwner, None);
+                }
                 return (crate::speech_decision_kernel::LiveTranscriptAuthority::OwnerEvidencePending, None);
             }
         }
@@ -5533,6 +5587,11 @@ impl VolcengineStreamingASR {
         self.last_final_seal_authority_label
             .lock()
             .is_some_and(|label| label == "speaker_filtered")
+    }
+
+    pub(crate) fn verified_provider_owner_final(&self) -> Option<RawTranscript> {
+        let state = self.state.lock();
+        state.verified_provider_owner_is_final.then(|| state.verified_provider_owner.clone()).flatten()
     }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -5592,6 +5651,12 @@ impl VolcengineStreamingASR {
         let Some(stream) = stream else {
             return Ok(None);
         };
+        if self.verified_provider_owner_final().is_some() {
+            stream.cancel();
+            if let Some(task) = early_task.as_ref() { task.abort(); }
+            log::info!("[target-speaker] locally supported distinct provider owner final certified; cancelling redundant separator wait, rejected mixture remains excluded");
+            return Ok(None);
+        }
         let (
             sustained_non_target_seen,
             degraded_owner_tail_seen,
@@ -6927,30 +6992,34 @@ impl VolcengineStreamingASR {
         }
     }
 
-    fn emit_partial_transcript(&self, text: &str) {
-        if self.live_transcript_source().0 != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary {
-            return;
+    fn primary_output_text(&self, text: &str) -> Option<String> {
+        use crate::speech_decision_kernel::LiveTranscriptAuthority;
+        match self.live_transcript_source().0 {
+            LiveTranscriptAuthority::Primary => Some(text.to_string()),
+            LiveTranscriptAuthority::VerifiedProviderOwner => self.state.lock().verified_provider_owner.as_ref().map(|candidate| candidate.text.clone()),
+            _ => None,
         }
+    }
+
+    fn emit_partial_transcript(&self, text: &str) {
+        let Some(text) = self.primary_output_text(text) else { return; };
         let callback = self.partial_callback.lock().clone();
         if let Some(callback) = callback {
-            callback(text.to_string());
+            callback(text);
         }
     }
 
     fn emit_visual_partial_transcript(&self, text: &str) {
-        if self.live_transcript_source().0 != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary {
-            return;
-        }
+        let Some(text) = self.primary_output_text(text) else { return; };
         let callback = self.visual_partial_callback.lock().clone();
         if let Some(callback) = callback {
-            callback(text.to_string());
+            callback(text);
         }
     }
 
-    fn emit_final_intermediate_transcript(&self, update: FinalIntermediateTranscript) {
-        if self.live_transcript_source().0 != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary {
-            return;
-        }
+    fn emit_final_intermediate_transcript(&self, mut update: FinalIntermediateTranscript) {
+        let Some(text) = self.primary_output_text(&update.text) else { return; };
+        update.text = text;
         let callback = self.final_intermediate_callback.lock().clone();
         if let Some(callback) = callback {
             callback(update);
@@ -6965,9 +7034,20 @@ impl VolcengineStreamingASR {
     }
 
     fn emit_streaming_event(&self, event: VolcengineStreamingEvent) {
-        if self.live_transcript_source().0 != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary {
-            return;
-        }
+        let event = match event {
+            VolcengineStreamingEvent::Partial(text) => {
+                let Some(text) = self.primary_output_text(&text) else { return; };
+                VolcengineStreamingEvent::Partial(text)
+            }
+            VolcengineStreamingEvent::Final(text) => {
+                let Some(text) = self.primary_output_text(&text) else { return; };
+                VolcengineStreamingEvent::Final(text)
+            }
+            event => {
+                if self.live_transcript_source().0 != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary { return; }
+                event
+            }
+        };
         let callback = self.streaming_event_callback.lock().clone();
         if let Some(callback) = callback {
             callback(event);
@@ -7144,6 +7224,9 @@ impl VolcengineStreamingASR {
             st.owner_isolation_ceiling_text.clear();
             st.owner_isolation_ceiling_segments.clear();
             st.distinct_speaker_target_final_text = None;
+            st.verified_provider_owner = None;
+            st.verified_provider_owner_updated_at = None;
+            st.verified_provider_owner_is_final = false;
             st.wake_bound_single_speaker_final_text = None;
             st.transcript_evidence.reset();
             st.speaker_info_present = false;
@@ -7763,7 +7846,9 @@ impl VolcengineStreamingASR {
         min_stable: Duration,
         consumed_source_key: &str,
     ) -> Option<RawTranscript> {
-        match self.live_transcript_source() {
+        let authority = self.live_transcript_source();
+        let certified_provider = authority.0 == crate::speech_decision_kernel::LiveTranscriptAuthority::VerifiedProviderOwner;
+        match authority {
             (crate::speech_decision_kernel::LiveTranscriptAuthority::OwnerEvidencePending, _) => return None,
             (crate::speech_decision_kernel::LiveTranscriptAuthority::IndependentOwner, Some(owner)) => {
                 let mut provider_key = consumed_source_key.to_string();
@@ -7779,16 +7864,20 @@ impl VolcengineStreamingASR {
             }
             (crate::speech_decision_kernel::LiveTranscriptAuthority::IndependentOwner, None) => return None,
             (crate::speech_decision_kernel::LiveTranscriptAuthority::Primary, _) => {}
+            (crate::speech_decision_kernel::LiveTranscriptAuthority::VerifiedProviderOwner, _) => {}
         }
         let mut st = self.state.lock();
-        if st.owner_isolation_frozen {
+        if st.owner_isolation_frozen && !certified_provider {
             return None;
         }
-        let committed_at = st.best_transcript_committed_at?;
-        if st.best_transcript_text.trim().is_empty() {
+        let (current, committed_at) = if certified_provider {
+            (st.verified_provider_owner.as_ref()?.text.clone(), st.verified_provider_owner_updated_at?)
+        } else {
+            (st.best_transcript_text.clone(), st.best_transcript_committed_at?)
+        };
+        if current.trim().is_empty() {
             return None;
         }
-        let current = st.best_transcript_text.clone();
         // The coordinator consumes body text after stripping automatic wake.
         // Include the explicit wake anchor only when that complete prefix is
         // present. Correction/filler transforms that cannot map exactly use
@@ -7810,6 +7899,7 @@ impl VolcengineStreamingASR {
             &provider_key,
         )?;
         if stable_prefix.len() < current.len()
+            && !certified_provider
             && st.local_speaker_tracking_enabled
             && (st.local_owner_handoff_suspected
                 || !matches!(
@@ -7839,6 +7929,9 @@ impl VolcengineStreamingASR {
     /// means no persistent blocker (empty/immature ledgers resolve on their
     /// own as the session progresses and are not worth a log line).
     pub fn pause_early_delivery_persistent_block_reason(&self) -> Option<&'static str> {
+        if self.live_transcript_source().0 == crate::speech_decision_kernel::LiveTranscriptAuthority::VerifiedProviderOwner {
+            return None;
+        }
         if self.live_transcript_source().0 == crate::speech_decision_kernel::LiveTranscriptAuthority::OwnerEvidencePending {
             return Some("independent_owner_evidence_pending");
         }
@@ -8253,6 +8346,17 @@ impl VolcengineStreamingASR {
             if let Some(wake_end_ms) = filtered.wake_target_speech_end_ms {
                 state.wake_target_speech_end_ms = Some(wake_end_ms);
             }
+            let verified_owner = verified_provider_owner_candidate(&state, &filtered, result, has_final);
+            if verified_owner.as_ref().map(|candidate| &candidate.text)
+                != state.verified_provider_owner.as_ref().map(|candidate| &candidate.text)
+            {
+                state.verified_provider_owner_updated_at = verified_owner.as_ref().map(|_| Instant::now());
+                if let Some(candidate) = verified_owner.as_ref() {
+                    log::info!("[target-speaker] distinct provider owner certified chars={} final={has_final}", candidate.text.chars().count());
+                }
+            }
+            state.verified_provider_owner_is_final = has_final && verified_owner.is_some();
+            state.verified_provider_owner = verified_owner;
             if filtered.stable_non_target_utterance_present {
                 freeze_owner_isolation_at_filtered_result(&mut state, &filtered.result);
             }
@@ -10147,6 +10251,69 @@ mod tests {
         let consumed = crate::transcript_boundary::content_key("现在播放干扰，请检查这段测试。");
         let resumed = primary.pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &consumed).unwrap();
         assert_eq!(resumed.text, resumed_owner, "owner return stays streamable without reintroducing the mixture");
+    }
+
+    #[test]
+    fn distinct_provider_owner_certificate_requires_interval_identity_and_real_track_split() {
+        use crate::speaker_verification::SessionSpeakerClassification::Target;
+        let owner = "开始录音，这是我的完整正文。";
+        let foreign = "八点零五分，你过来找我。";
+        let provider = json!({"text": format!("{owner}{foreign}"), "utterances": [
+            {"text": owner, "start_time": 200, "end_time": 5000, "definite": true, "additions": {"speaker_id": "0"}},
+            {"text": foreign, "start_time": 5500, "end_time": 7000, "definite": true, "additions": {"speaker_id": "1"}}
+        ]});
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true, local_body_owner_verified: true,
+            target_speaker_id: Some("0".into()), wake_speaker_phrase: Some("开始录音".into()),
+            local_speaker_evidence: vec![
+                LocalSpeakerEvidence { audio_end_ms: 3000, classification: Target { score: 0.48 }, stable_target: true },
+                LocalSpeakerEvidence { audio_end_ms: 4500, classification: Target { score: 0.52 }, stable_target: true },
+            ], ..Default::default()
+        };
+        let mut target = state.target_speaker_id.clone();
+        let mut filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            &provider, &mut target, true, &state.local_speaker_evidence, Some("开始录音"), None, false, false, None, None,
+        );
+        assert_eq!(verified_provider_owner_candidate(&state, &filtered, &provider, true).unwrap().text, owner);
+        filtered.response_local_body_alias_present = true;
+        assert!(verified_provider_owner_candidate(&state, &filtered, &provider, true).is_none());
+        filtered.response_local_body_alias_present = false;
+        let mut reused = provider.clone();
+        reused["utterances"][1]["additions"]["speaker_id"] = json!("0");
+        assert!(verified_provider_owner_candidate(&state, &filtered, &reused, true).is_none(), "a reused id is still the rejected mixture");
+        state.local_unreliable_speaker_evidence_end_ms = vec![3000, 4500];
+        assert!(verified_provider_owner_candidate(&state, &filtered, &provider, true).is_none(), "old positive votes without usable signal cannot certify the subset");
+        state.local_unreliable_speaker_evidence_end_ms.clear();
+        state.local_body_owner_verified = false;
+        assert!(verified_provider_owner_candidate(&state, &filtered, &provider, true).is_none());
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn certified_owner_subset_keeps_streaming_without_emitting_raw_foreign_tail() {
+        let primary = VolcengineStreamingASR::new(VolcengineCredentials {
+            app_id: "app".into(), access_token: "token".into(), resource_id: VolcengineCredentials::default_resource_id().into(),
+        }, Vec::new());
+        let owner = "开始录音，这是我的完整正文。";
+        let mixture = format!("{owner}八点零五分，你过来找我。");
+        {
+            let mut state = primary.state.lock();
+            state.best_transcript_text = mixture.clone();
+            state.owner_isolation_frozen = true;
+            state.verified_provider_owner = Some(RawTranscript { text: owner.into(), duration_ms: 5000 });
+            state.verified_provider_owner_updated_at = Some(Instant::now() - Duration::from_secs(2));
+        }
+        *primary.target_speaker_stream.lock() = Some(super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(None, true, true));
+        let seen = Arc::new(ParkingMutex::new(Vec::new()));
+        let observed = Arc::clone(&seen);
+        primary.set_partial_transcript_callback(Some(Arc::new(move |text| observed.lock().push(text))));
+        primary.emit_partial_transcript(&mixture);
+        assert_eq!(*seen.lock(), vec![owner.to_string()]);
+        assert_eq!(primary.pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), "").unwrap().text, owner);
+        assert!(primary.primary_mixture_was_rejected());
+        assert!(!primary.pause_early_final_clean_session(), "no raw final-rewrite recovery");
+        primary.state.lock().verified_provider_owner = None;
+        assert!(primary.primary_output_text(&mixture).is_none(), "revoked certificate cannot restore the mixture");
     }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]

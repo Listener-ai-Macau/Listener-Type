@@ -178,6 +178,7 @@ pub(crate) fn arbitrate_final_transcript(
 /// are evidence producers; none of them may write the final text directly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProductFinalAuthority {
+    VerifiedProviderOwner,
     SeparatedOwner,
     ProviderPrimary,
     RetainedAudioReplay,
@@ -189,6 +190,7 @@ pub(crate) enum ProductFinalAuthority {
 impl ProductFinalAuthority {
     pub(crate) const fn label(self) -> &'static str {
         match self {
+            Self::VerifiedProviderOwner => "verified_provider_owner",
             Self::SeparatedOwner => "separated_owner",
             Self::ProviderPrimary => "provider_primary",
             Self::RetainedAudioReplay => "retained_audio_replay",
@@ -201,6 +203,9 @@ impl ProductFinalAuthority {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ProductFinalEvidence {
+    /// A distinct owner subset, supported in its own audio intervals. This
+    /// is separate from the rejected mixture and from a speaker-filtered label.
+    pub(crate) verified_provider_owner_available: bool,
     pub(crate) target_filter_required: bool,
     /// Independent audio rejected the primary mixture, even if the provider
     /// reused an owner speaker id or sealed it as speaker-filtered text.
@@ -213,6 +218,9 @@ pub(crate) struct ProductFinalEvidence {
 }
 
 pub(crate) fn arbitrate_product_final(evidence: ProductFinalEvidence) -> ProductFinalAuthority {
+    if evidence.verified_provider_owner_available {
+        return ProductFinalAuthority::VerifiedProviderOwner;
+    }
     if evidence.separated_owner_available {
         return ProductFinalAuthority::SeparatedOwner;
     }
@@ -1202,8 +1210,48 @@ pub(crate) enum InterferenceDecision {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LiveTranscriptAuthority {
     Primary,
+    VerifiedProviderOwner,
     IndependentOwner,
     OwnerEvidencePending,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ProviderOwnerCertificateEvidence {
+    pub(crate) enrolled_owner_verified: bool,
+    pub(crate) distinct_foreign_track: bool,
+    pub(crate) all_owner_rows_supported: bool,
+    pub(crate) response_body_alias: bool,
+    pub(crate) complete_attributed_view: bool,
+}
+
+pub(crate) const fn provider_owner_is_certified(e: ProviderOwnerCertificateEvidence) -> bool {
+    e.enrolled_owner_verified && e.distinct_foreign_track && e.all_owner_rows_supported
+        && !e.response_body_alias && e.complete_attributed_view
+}
+
+/// A separator output without an observed identity remains pending. An ASR
+/// connection or successful model inference cannot certify a person's voice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SeparatedAudioOwnership { Owner, Other, Pending }
+
+pub(crate) const fn separated_audio_ownership(
+    usable_signal: bool, positive_owner: bool, explicit_other: bool,
+) -> SeparatedAudioOwnership {
+    if !usable_signal { SeparatedAudioOwnership::Pending }
+    else if explicit_other { SeparatedAudioOwnership::Other }
+    else if positive_owner { SeparatedAudioOwnership::Owner }
+    else { SeparatedAudioOwnership::Pending }
+}
+
+pub(crate) const fn live_transcript_authority_with_certified_provider(
+    evidence: InterferenceEvidence, independent_owner_ready: bool, provider_owner_ready: bool,
+) -> LiveTranscriptAuthority {
+    let authority = live_transcript_authority(evidence, independent_owner_ready);
+    match authority {
+        LiveTranscriptAuthority::Primary => authority,
+        _ if provider_owner_ready => LiveTranscriptAuthority::VerifiedProviderOwner,
+        _ => authority,
+    }
 }
 
 /// Live delivery and the final must respect the same ownership authority.
@@ -3022,6 +3070,7 @@ mod tests {
     #[test]
     fn target_speaker_endpoint_product_final_blocks_unverified_recovery_under_interference() {
         let evidence = ProductFinalEvidence {
+            verified_provider_owner_available: false,
             target_filter_required: true,
             primary_mixture_rejected: false,
             separated_owner_available: false,
@@ -3056,6 +3105,7 @@ mod tests {
     #[test]
     fn independently_rejected_primary_cannot_become_final_during_owner_outage() {
         let evidence = ProductFinalEvidence {
+            verified_provider_owner_available: false,
             primary_mixture_rejected: true,
             provider_primary_available: true,
             retained_audio_replay_available: true,
@@ -3072,6 +3122,7 @@ mod tests {
     #[test]
     fn target_speaker_endpoint_product_final_has_one_clean_recovery_precedence() {
         let all_recovery_candidates = ProductFinalEvidence {
+            verified_provider_owner_available: false,
             target_filter_required: false,
             primary_mixture_rejected: false,
             separated_owner_available: false,
@@ -3104,6 +3155,7 @@ mod tests {
     #[test]
     fn product_final_prefers_provider_over_preview() {
         let evidence = ProductFinalEvidence {
+            verified_provider_owner_available: false,
             target_filter_required: false,
             primary_mixture_rejected: false,
             separated_owner_available: false,

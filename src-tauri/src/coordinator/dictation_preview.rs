@@ -4,6 +4,7 @@
 #[derive(Debug)]
 struct ProductFinalCandidates {
     provider_primary: RawTranscript,
+    verified_provider_owner: Option<RawTranscript>,
     separated_owner: Option<RawTranscript>,
     retained_audio_replay: Option<RawTranscript>,
     debug_override: Option<RawTranscript>,
@@ -115,6 +116,7 @@ fn arbitrate_product_final_transcript(
     }
 
     let authority = arbitrate_product_final(ProductFinalEvidence {
+        verified_provider_owner_available: nonempty_transcript(&candidates.verified_provider_owner),
         target_filter_required: candidates.target_filter_required,
         primary_mixture_rejected: candidates.primary_mixture_rejected,
         separated_owner_available: nonempty_transcript(&candidates.separated_owner),
@@ -135,6 +137,8 @@ fn arbitrate_product_final_transcript(
     .flatten();
 
     let mut transcript = match authority {
+        ProductFinalAuthority::VerifiedProviderOwner => candidates
+            .verified_provider_owner.expect("certified distinct provider owner candidate"),
         ProductFinalAuthority::SeparatedOwner => candidates
             .separated_owner
             .expect("available separated-owner candidate"),

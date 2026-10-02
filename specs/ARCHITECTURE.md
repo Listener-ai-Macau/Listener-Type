@@ -107,6 +107,21 @@ vetoes raw final recovery, while fresh verified owner speech after that interval
 can continue into the live ledger. The receive frame uses the same accepted owner
 view for preview promotion and the following merge.
 
+Separated audio carries an explicit Owner, Other or Pending identity. Usable
+positive owner evidence authorizes the secondary ASR; connection availability,
+uncertain similarity, missing identity and failed separation do not. Other and
+Pending intervals use clock-preserving silence in the owner transport while the
+main recording retains original audio. Pending is never a foreign identity vote.
+
+A distinct provider owner subset can separately survive rejection of the raw
+mixture. Its certificate requires an enrolled local identity, usable positive
+owner evidence in each accepted body row, stable attributed rows, a real excluded
+foreign track, and no response-local alias. Live callbacks and the stable delivery
+snapshot publish that subset only; raw or optimistic tails cannot borrow its
+certificate. A complete certified final cancels a redundant separator wait and
+enters the shared product arbiter as `verified_provider_owner`. A provider label
+or reused speaker id alone still cannot restore a rejected mixture.
+
 Provider text coverage includes every published utterance, including indefinite
 rows already admitted as owner speech. Raw-tail recovery subtracts that coverage
 once; text stability and speaker identity do not create a second text occurrence.

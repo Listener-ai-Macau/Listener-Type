@@ -3081,6 +3081,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     let mut primary_speaker_filtered_certified = false;
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     let mut separated_owner_candidate: Option<RawTranscript> = None;
+    let mut verified_provider_owner_candidate: Option<RawTranscript> = None;
     #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
     let target_speaker_filter_required = false;
     #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
@@ -3157,6 +3158,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             };
             // 干净标志在终稿落定后读：见上方 pause_early_final_clean 注释。
             pause_early_final_clean = asr.pause_early_final_clean_session();
+            verified_provider_owner_candidate = asr.verified_provider_owner_final();
             let primary_result = match primary {
                 Ok(result) => result,
                 Err((primary_error, _)) if primary_error.permits_full_audio_replay() => {
@@ -3692,6 +3694,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     let product_final = arbitrate_product_final_transcript(
         ProductFinalCandidates {
             provider_primary,
+            verified_provider_owner: verified_provider_owner_candidate,
             separated_owner: separated_owner_candidate,
             retained_audio_replay: retained_audio_replay_candidate,
             debug_override: debug_override_candidate,

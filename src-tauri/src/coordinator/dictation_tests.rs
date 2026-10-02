@@ -15665,6 +15665,7 @@ fn local_shadow_rejects_rewrites_and_large_other_speaker_gaps() {
 
 fn product_final_candidates(primary: &str) -> super::ProductFinalCandidates {
     super::ProductFinalCandidates {
+        verified_provider_owner: None,
         provider_primary: crate::asr::RawTranscript {
             text: primary.into(),
             duration_ms: 7_462,
@@ -15915,6 +15916,128 @@ fn independent_audio_rejection_prevents_longer_primary_from_demoting_owner_final
     let decision = super::arbitrate_product_final_transcript(unavailable, &[], false);
     assert_eq!(decision.authority, crate::speech_decision_kernel::ProductFinalAuthority::Empty);
     assert!(decision.transcript.text.is_empty());
+}
+
+#[test]
+fn distinct_verified_owner_survives_mixture_rejection_without_foreign_substitution() {
+    let owner = "开始录音，然后呢我看一下这个东西是在干扰情况下是怎么样一个事情，然后现在在不停的干扰干扰中。";
+    let mut candidates = product_final_candidates(owner);
+    candidates.target_filter_required = true;
+    candidates.primary_mixture_rejected = true;
+    candidates.primary_speaker_filtered_certified = true;
+    candidates.verified_provider_owner = Some(crate::asr::RawTranscript { text: owner.into(), duration_ms: 12000 });
+    let product = super::arbitrate_product_final_transcript(candidates, &[], false);
+    assert_eq!(product.authority, crate::speech_decision_kernel::ProductFinalAuthority::VerifiedProviderOwner);
+    assert_eq!(product.transcript.text, owner);
+}
+
+/// Explicit recorded PCM plus captured identity observations through the real
+/// separator, both providers and the product arbiter. This does not operate a
+/// device/editor or recompute the primary microphone identity observations.
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+#[tokio::test]
+#[ignore = "requires consented recording, installed owner template/models and provider credentials"]
+async fn recorded_separator_product_authority_probe() {
+    use crate::asr::AudioConsumer;
+    use crate::persistence::{CredentialAccount, CredentialsVault};
+    use crate::speaker_verification::SessionSpeakerClassification;
+    use sha2::{Digest, Sha256};
+    let fixture_path = std::env::var("LISTENER_SOURCE_AUTHORITY_REPLAY_INPUT").unwrap();
+    let output_path = std::env::var("LISTENER_SOURCE_AUTHORITY_REPLAY_OUTPUT").unwrap();
+    let fixture: serde_json::Value = serde_json::from_slice(&std::fs::read(fixture_path).unwrap()).unwrap();
+    let pcm = std::fs::read(fixture["pcm_path"].as_str().unwrap()).unwrap();
+    assert_eq!(format!("{:x}", Sha256::digest(&pcm)), fixture["pcm_sha256"].as_str().unwrap().to_ascii_lowercase());
+    assert!(!pcm.is_empty() && pcm.len() % 2 == 0 && pcm.len() <= 60 * 32_000);
+    let credential = |account| CredentialsVault::get(account).unwrap().filter(|v| !v.is_empty()).unwrap();
+    let mut asr = crate::asr::VolcengineStreamingASR::new(
+        crate::asr::VolcengineCredentials {
+            app_id: credential(CredentialAccount::VolcengineAppKey),
+            access_token: credential(CredentialAccount::VolcengineAccessKey),
+            resource_id: credential(CredentialAccount::VolcengineResourceId),
+        }, Vec::new(),
+    );
+    asr.enable_diagnostic_trace();
+    let asr = std::sync::Arc::new(asr);
+    let phrase = fixture["wake_phrase"].as_str().unwrap();
+    asr.note_local_speaker_tracking_started(phrase);
+    asr.note_local_speaker_profile_adaptive(false);
+    asr.open_session().await.unwrap();
+    asr.mark_audio_delivery_ready();
+    let enrolled_phrase = phrase.to_string();
+    let enrolled = tokio::task::spawn_blocking(move || {
+        crate::asr::target_speaker_extraction::warm_up().unwrap();
+        crate::speaker_verification::target_speaker_embedding_for_phrase(&enrolled_phrase).unwrap().is_some()
+    }).await.unwrap();
+    assert!(enrolled, "recorded pipeline must use the enrolled owner, not mixture enrollment");
+    asr.start_target_speaker_extraction(phrase, &pcm, fixture["wake_end_ms"].as_u64().unwrap() as f32 / 1000.0);
+    let observations = fixture["observations"].as_array().unwrap();
+    let mut observed = 0;
+    let mut bytes = 0u64;
+    for chunk in pcm.chunks(3_200) {
+        bytes += chunk.len() as u64;
+        let end_ms = bytes / 32;
+        let has_signal = chunk.chunks_exact(2).any(|s| i16::from_le_bytes([s[0], s[1]]).unsigned_abs() >= 512);
+        asr.note_local_audio_activity(end_ms, has_signal);
+        while observed < observations.len() && observations[observed]["end_ms"].as_u64().unwrap() <= end_ms {
+            let row = &observations[observed];
+            let score = row["score"].as_f64().unwrap() as f32;
+            let classification = match row["kind"].as_str().unwrap() {
+                "Target" => SessionSpeakerClassification::Target { score },
+                "NonTarget" => SessionSpeakerClassification::NonTarget { score },
+                "Uncertain" => SessionSpeakerClassification::Uncertain { score },
+                _ => panic!("invalid captured classification"),
+            };
+            asr.note_local_speaker_observation_with_quality(row["end_ms"].as_u64().unwrap(), classification,
+                crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive,
+                row["quality"].as_bool().unwrap());
+            observed += 1;
+        }
+        asr.consume_pcm_chunk(chunk);
+        tokio::time::sleep(std::time::Duration::from_millis(chunk.len() as u64 / 32)).await;
+    }
+    let stop_at = std::time::Instant::now();
+    asr.send_last_frame().await.unwrap();
+    asr.begin_target_speaker_final_early();
+    let primary = asr.await_final_result_with_early_seal().await.unwrap();
+    let primary_text = primary.text.clone();
+    let separated = asr.await_target_speaker_final().await;
+    let separated_error = separated.as_ref().err().cloned();
+    let separated = separated.unwrap_or(None);
+    let separated_text = separated.as_ref().map(|r| r.text.clone());
+    let mut candidates = product_final_candidates(&primary_text);
+    candidates.provider_primary = primary;
+    candidates.verified_provider_owner = asr.verified_provider_owner_final();
+    candidates.separated_owner = separated;
+    candidates.target_filter_required = asr.target_speaker_filter_was_required();
+    candidates.primary_mixture_rejected = asr.primary_mixture_was_rejected();
+    candidates.primary_speaker_filtered_certified = asr.primary_seal_speaker_filtered_certified();
+    let primary_rejected = candidates.primary_mixture_rejected;
+    let filter_required = candidates.target_filter_required;
+    let product = super::arbitrate_product_final_transcript(candidates, &[], false);
+    let selected_key = crate::transcript_boundary::content_key(&product.transcript.text);
+    let primary_key = crate::transcript_boundary::content_key(&primary_text);
+    let owner_source_present = fixture["required_owner_fragments"].as_array().unwrap().iter().all(|value| {
+        primary_key.contains(&crate::transcript_boundary::content_key(value.as_str().unwrap()))
+    });
+    let foreign_excluded = fixture["foreign_fragments"].as_array().unwrap().iter().all(|value| {
+        !selected_key.contains(&crate::transcript_boundary::content_key(value.as_str().unwrap()))
+    });
+    let owner_preserved = owner_source_present && selected_key == primary_key;
+    let passed = owner_preserved && foreign_excluded;
+    let report = serde_json::json!({
+        "status": if passed { "PASS" } else { "FAIL" },
+        "scope": "original PCM, actual separator and both provider paths, captured primary identity, product arbitration; no new-device/editor or new primary voiceprint acceptance",
+        "source_session_id": fixture["source_session_id"], "pcm_sha256": fixture["pcm_sha256"],
+        "captured_observations": observed, "input_bytes": pcm.len(),
+        "primary_owner_text": primary_text, "separated_text": separated_text, "separated_error": separated_error,
+        "selected_text": product.transcript.text, "selected_authority": product.authority.label(),
+        "owner_source_present": owner_source_present, "owner_preserved": owner_preserved,
+        "foreign_excluded": foreign_excluded, "primary_mixture_rejected": primary_rejected,
+        "target_filter_required": filter_required, "stop_to_product_final_ms": stop_at.elapsed().as_millis(),
+        "primary_trace": asr.take_diagnostic_trace(),
+    });
+    std::fs::write(output_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    assert!(passed, "recorded real separator must preserve the distinct owner body and exclude foreign speech; see replay report");
 }
 
 #[test]
