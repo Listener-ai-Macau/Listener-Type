@@ -2697,7 +2697,10 @@ pub(crate) fn timed_transcript_from_result(result: &serde_json::Value) -> crate:
                 let end_ms = ["end_time", "endTime", "end_ms"].iter()
                     .find_map(|key| word.get(*key))
                     .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()));
-                words.push(TimedTranscriptWord { text: text.to_string(), end_ms });
+                let start_ms = ["start_time", "startTime", "start_ms"].iter()
+                    .find_map(|key| word.get(*key))
+                    .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()));
+                words.push(TimedTranscriptWord { text: text.to_string(), start_ms, end_ms });
             }
         }
     }

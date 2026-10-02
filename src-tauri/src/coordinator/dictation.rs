@@ -3539,6 +3539,16 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             filter_automatic_wake_text(inner, current_session_id, &candidate.text, false);
         candidate
     });
+    // The provider-owned candidate is selected later by the product arbiter.
+    // Bind normalization to its own filtered word coordinates, then normalize
+    // it at the same boundary as every other authoritative final candidate.
+    let verified_provider_owner_candidate = normalize_automatic_wake_final_candidate(
+        inner,
+        current_session_id,
+        verified_provider_owner_candidate,
+        volcengine_for_empty_retry.as_ref()
+            .and_then(|asr| asr.verified_provider_owner_timing_snapshot()),
+    );
 
     #[cfg(any(debug_assertions, test))]
     let debug_override_candidate =

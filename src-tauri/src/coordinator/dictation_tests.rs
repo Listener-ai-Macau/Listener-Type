@@ -1852,7 +1852,7 @@ fn automatic_wake_timed_boundary_keeps_recorded_control_out_of_all_text_channels
     ] {
         super::note_automatic_wake_transcript_timing(inner, session, Some(TimedTranscript {
             text: text.into(),
-            words: words.into_iter().map(|(text, end_ms)| TimedTranscriptWord { text: text.into(), end_ms: Some(end_ms) }).collect(),
+            words: words.into_iter().map(|(text, end_ms)| TimedTranscriptWord { start_ms: None, text: text.into(), end_ms: Some(end_ms) }).collect(),
         }));
         assert_eq!(super::filter_dictation_visual_preview_text(inner, session, text), body, "visual: {text}");
         assert_eq!(super::filter_automatic_wake_text(inner, session, text, true), body, "stream: {text}");
@@ -1874,7 +1874,7 @@ fn automatic_wake_timed_body_preserves_literal_wake_words_and_manual_recordings(
     super::bind_automatic_wake_audio_boundary(inner, session, 1.0, 0);
     let text = "开始录音。";
     super::note_automatic_wake_transcript_timing(inner, session, Some(TimedTranscript {
-        text: text.into(), words: vec![TimedTranscriptWord { text: "开始录音".into(), end_ms: Some(1800) }],
+        text: text.into(), words: vec![TimedTranscriptWord { start_ms: None, text: "开始录音".into(), end_ms: Some(1800) }],
     }));
     assert_eq!(super::filter_dictation_visual_preview_text(inner, session, text), text);
     assert!(super::automatic_wake_body_started(inner, session));
@@ -16055,6 +16055,33 @@ fn distinct_verified_owner_survives_mixture_rejection_without_foreign_substituti
     let product = super::arbitrate_product_final_transcript(candidates, &[], false);
     assert_eq!(product.authority, crate::speech_decision_kernel::ProductFinalAuthority::VerifiedProviderOwner);
     assert_eq!(product.transcript.text, owner);
+}
+
+#[test]
+fn verified_owner_final_uses_its_own_activation_coordinates_before_product_selection() {
+    let coordinator=Coordinator::new();
+    let inner=&coordinator.inner;
+    let session=new_session_id();
+    arm_automatic_wake_text_guard(inner,session,"开始录音".into(),3000);
+    super::bind_automatic_wake_audio_boundary(inner,session,1.0,0);
+    let candidate=|text:&str| Some(crate::asr::RawTranscript {text:text.into(),duration_ms:2500});
+    let timing=|text:&str,end| Some(crate::transcript_boundary::TimedTranscript {
+        text:text.into(),words:vec![crate::transcript_boundary::TimedTranscriptWord {
+            text:"开始录音".into(),start_ms:Some(100),end_ms:Some(end),
+        }],
+    });
+    let owned="开始录音。本人正文。";
+    let normalized=super::normalize_automatic_wake_final_candidate(inner,session,candidate(owned),timing(owned,900));
+    let mut candidates=product_final_candidates("本人正文。");
+    candidates.target_filter_required=true;
+    candidates.primary_mixture_rejected=true;
+    candidates.verified_provider_owner=normalized;
+    let product=super::arbitrate_product_final_transcript(candidates,&[],false);
+    assert_eq!(product.authority,crate::speech_decision_kernel::ProductFinalAuthority::VerifiedProviderOwner);
+    assert_eq!(product.transcript.text,"本人正文。");
+    // A literal mention in owner body must survive a later candidate revision.
+    let mention="开始录音是我们的唤醒词。";
+    assert_eq!(super::normalize_automatic_wake_final_candidate(inner,session,candidate(mention),timing(mention,1800)).unwrap().text,mention);
 }
 
 /// Explicit recorded PCM plus captured identity observations through the real

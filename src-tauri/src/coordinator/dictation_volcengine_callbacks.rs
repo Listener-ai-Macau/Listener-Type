@@ -26,7 +26,7 @@ fn set_volcengine_preview_callbacks(
     let asr_for_stream = Arc::clone(asr);
     asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
         note_automatic_wake_transcript_timing(
-            &inner_for_stream, session_id, asr_for_stream.provider_timed_transcript_snapshot(),
+            &inner_for_stream, session_id, asr_for_stream.transcript_timing_snapshot_for(&text),
         );
         let previous_preview = current_embedded_audio_partial_preview(&inner_for_stream);
         let preview_changed =
@@ -94,7 +94,7 @@ fn set_volcengine_preview_callbacks(
     let asr_for_visual_stream = Arc::clone(asr);
     asr.set_visual_partial_transcript_callback(Some(Arc::new(move |text| {
         note_automatic_wake_transcript_timing(
-            &inner_for_visual_stream, session_id, asr_for_visual_stream.provider_timed_transcript_snapshot(),
+            &inner_for_visual_stream, session_id, asr_for_visual_stream.transcript_timing_snapshot_for(&text),
         );
         update_embedded_audio_visual_preview(&inner_for_visual_stream, session_id, text);
     })));
@@ -104,7 +104,7 @@ fn set_volcengine_preview_callbacks(
     let asr_for_partial = Arc::clone(asr);
     asr.set_final_intermediate_transcript_callback(Some(Arc::new(move |update| {
         note_automatic_wake_transcript_timing(
-            &inner_for_partial, session_id, asr_for_partial.provider_timed_transcript_snapshot(),
+            &inner_for_partial, session_id, asr_for_partial.transcript_timing_snapshot_for(&update.text),
         );
         let previous_preview = current_embedded_audio_partial_preview(&inner_for_partial);
         let preview_changed = update_embedded_audio_partial_preview_from_final_supplement(

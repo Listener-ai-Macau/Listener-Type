@@ -1074,6 +1074,19 @@ fn note_automatic_wake_transcript_timing(
     guard.activation_prefix_evidence.push(evidence);
 }
 
+fn normalize_automatic_wake_final_candidate(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    candidate: Option<RawTranscript>,
+    timing: Option<crate::transcript_boundary::TimedTranscript>,
+) -> Option<RawTranscript> {
+    note_automatic_wake_transcript_timing(inner, session_id, timing);
+    candidate.map(|mut candidate| {
+        candidate.text = filter_automatic_wake_text(inner, session_id, &candidate.text, false);
+        candidate
+    })
+}
+
 fn filter_automatic_wake_text(
     inner: &Arc<Inner>,
     session_id: SessionId,

@@ -29,6 +29,7 @@ pub(crate) struct TimedTranscript {
 #[derive(Clone, Debug)]
 pub(crate) struct TimedTranscriptWord {
     pub text: String,
+    pub start_ms: Option<u64>,
     pub end_ms: Option<u64>,
 }
 
@@ -39,6 +40,43 @@ pub(crate) struct ControlPrefixEvidence {
 }
 
 impl TimedTranscript {
+    /// Admit only a contiguous revision prefix whose new words are covered by
+    /// positive owner PCM intervals. Previously admitted words remain owned;
+    /// a later positive sample cannot authorize an earlier unobserved gap.
+    pub(crate) fn owner_supported_prefix(&self, accepted_key: &str, intervals: &[(u64, u64)]) -> String {
+        let source_key = content_key(&self.text);
+        let accepted_len = if source_key.starts_with(accepted_key) { accepted_key.len() } else { 0 };
+        let mut covered_key = String::new();
+        let mut previous_end = None;
+        for word in &self.words {
+            let key = content_key(&word.text);
+            if key.is_empty() { continue; }
+            if !source_key[covered_key.len()..].starts_with(&key) { break; }
+            let new_len = covered_key.len() + key.len();
+            if new_len > accepted_len {
+                let (Some(start), Some(end)) = (word.start_ms, word.end_ms) else { break; };
+                if start >= end || previous_end.is_some_and(|previous| end < previous) { break; }
+                let mut through = start;
+                for &(owner_start, owner_end) in intervals {
+                    if owner_start <= through && owner_end >= through {
+                        through = through.max(owner_end);
+                    }
+                }
+                if through < end || !intervals.iter().any(|&(start_ms, end_ms)| start_ms <= start && end_ms >= start) {
+                    break;
+                }
+            }
+            covered_key.push_str(&key);
+            previous_end = word.end_ms;
+        }
+        // Untimed accepted text may be re-rendered, but never extended.
+        if covered_key.len() < accepted_len { covered_key = source_key[..accepted_len].to_string(); }
+        if covered_key.is_empty() { return String::new(); }
+        consumed_prefix_end(&self.text, &covered_key)
+            .map(|end| self.text[..end].trim().to_string())
+            .unwrap_or_default()
+    }
+
     pub(crate) fn activation_prefix(&self, activation_end_ms: u64, phrase: &str) -> Option<ControlPrefixEvidence> {
         let source_key = content_key(&self.text);
         if source_key.is_empty() { return None; }
@@ -281,6 +319,37 @@ pub(crate) fn stable_content_prefix<'a>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn owner_word_admission_requires_coverage_of_the_same_audio_occurrence() {
+        let timing = TimedTranscript {
+            text: "本人继续。旁人说话。本人回来。".into(),
+            words: vec![
+                TimedTranscriptWord {text:"本人继续".into(),start_ms:Some(100),end_ms:Some(700)},
+                TimedTranscriptWord {text:"旁人说话".into(),start_ms:Some(900),end_ms:Some(1500)},
+                TimedTranscriptWord {text:"本人回来".into(),start_ms:Some(1700),end_ms:Some(2300)},
+            ],
+        };
+        assert_eq!(timing.owner_supported_prefix("", &[(100,500),(400,800),(1700,2400)]),"本人继续。");
+        assert_eq!(timing.owner_supported_prefix("", &[(1700,2400)]),"");
+        assert_eq!(timing.owner_supported_prefix(&content_key("本人继续"), &[(1700,2400)]),"本人继续。");
+        assert_eq!(timing.owner_supported_prefix("", &[(100,2400)]),timing.text);
+    }
+
+    #[test]
+    fn absent_or_conflicting_word_coordinates_never_extend_owner_text() {
+        let mut timing = TimedTranscript {
+            text:"本人继续。".into(),
+            words:vec![TimedTranscriptWord {text:"本人继续".into(),start_ms:None,end_ms:Some(700)}],
+        };
+        assert_eq!(timing.owner_supported_prefix("", &[(0,1000)]),"");
+        assert_eq!(timing.owner_supported_prefix(&content_key("本人继续"), &[]),"本人继续。");
+        timing.words[0].start_ms=Some(800);
+        assert_eq!(timing.owner_supported_prefix("", &[(0,1000)]),"");
+        timing.words[0].start_ms=Some(100);
+        timing.words[0].text="另一修订".into();
+        assert_eq!(timing.owner_supported_prefix("", &[(0,1000)]),"");
+    }
+
     use super::*;
 
     #[test]
@@ -288,7 +357,7 @@ mod tests {
         let timing = |text: &str, words: Vec<(&str, Option<u64>)>| TimedTranscript {
             text: text.into(),
             words: words.into_iter().map(|(text, end_ms)| TimedTranscriptWord {
-                text: text.into(), end_ms,
+                text: text.into(), start_ms: None, end_ms,
             }).collect(),
         };
         let evidence = timing("开始录音，然后继续。", vec![("开始录音", Some(900)), ("然后", Some(1200)), ("继续", Some(1500))])
@@ -311,15 +380,15 @@ mod tests {
     fn activation_coordinates_keep_later_wake_mentions_and_finish_only_control_phrase() {
         let body_mention = TimedTranscript {
             text: "开始录音是产品的唤醒词。".into(),
-            words: vec![TimedTranscriptWord { text: "开始录音".into(), end_ms: Some(1800) }],
+            words: vec![TimedTranscriptWord { start_ms: None, text: "开始录音".into(), end_ms: Some(1800) }],
         }.activation_prefix(1000, "开始录音").unwrap();
         assert_eq!(body_mention.body("开始录音是产品的唤醒词。"), Some("开始录音是产品的唤醒词。"));
         assert_eq!(body_mention.body("“开始录音”是产品的唤醒词。"), Some("“开始录音”是产品的唤醒词。"));
         let control = TimedTranscript {
             text: "前声开始录音，然后正文。".into(),
             words: vec![
-                TimedTranscriptWord { text: "前声开始".into(), end_ms: Some(900) },
-                TimedTranscriptWord { text: "录音".into(), end_ms: Some(1050) },
+                TimedTranscriptWord { start_ms: None, text: "前声开始".into(), end_ms: Some(900) },
+                TimedTranscriptWord { start_ms: None, text: "录音".into(), end_ms: Some(1050) },
             ],
         }.activation_prefix(1000, "开始录音").unwrap();
         assert_eq!(control.body("前声开始录音，然后正文。"), Some("然后正文。"));

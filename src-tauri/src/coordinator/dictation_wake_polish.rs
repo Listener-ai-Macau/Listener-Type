@@ -246,7 +246,7 @@ struct LocalSessionSpeakerTracker {
     profile: Option<crate::speaker_verification::SessionSpeakerProfile>,
     classification_rx: Option<
         std::sync::mpsc::Receiver<
-            Result<(u64, crate::speaker_verification::SessionSpeakerObservation), String>,
+            Result<(u64, u64, crate::speaker_verification::SessionSpeakerObservation), String>,
         >,
     >,
     adaptation_gate: crate::speaker_verification::SessionSpeakerAdaptationGate,
@@ -356,6 +356,7 @@ impl LocalSessionSpeakerTracker {
         stable_target_end_ms: Option<u64>,
     ) -> Option<(
         u64,
+        u64,
         crate::speaker_verification::SessionSpeakerClassification,
         crate::speech_decision_kernel::TranscriptSpeakerEvidence,
         bool,
@@ -393,9 +394,10 @@ impl LocalSessionSpeakerTracker {
         let mut completed = None;
         if let Some(rx) = self.classification_rx.as_ref() {
             match rx.try_recv() {
-                Ok(Ok((audio_end_ms, observation))) => {
+                Ok(Ok((audio_start_ms, audio_end_ms, observation))) => {
                     self.adaptation_gate.note(audio_end_ms, observation.clone());
                     completed = Some((
+                        audio_start_ms,
                         audio_end_ms,
                         observation.classification,
                         observation.transcript_speaker_evidence,
@@ -437,6 +439,7 @@ impl LocalSessionSpeakerTracker {
                 local_speaker_covered_pcm(&self.rolling_pcm, audio_end_ms, speech_end_ms),
             ) {
                 let snapshot = covered_pcm.to_vec();
+                let audio_start_ms = speech_end_ms.saturating_sub(snapshot.len() as u64 / 32);
                 let (tx, rx) = std::sync::mpsc::channel();
                 self.classification_rx = Some(rx);
                 self.next_classification_audio_ms =
@@ -444,7 +447,7 @@ impl LocalSessionSpeakerTracker {
                 tauri::async_runtime::spawn_blocking(move || {
                     let result =
                         crate::speaker_verification::observe_session_speaker(&profile, &snapshot)
-                            .map(|classification| (speech_end_ms, classification));
+                            .map(|classification| (audio_start_ms, speech_end_ms, classification));
                     let _ = tx.send(result);
                 });
             }
@@ -1137,10 +1140,11 @@ impl EmbeddedAudioDictationSession {
         ) {
             asr.note_local_speaker_profile_adaptive(adaptive);
         }
-        if let (Some(asr), Some((audio_end_ms, classification, transcript_speaker_evidence, signal_quality_sufficient))) =
+        if let (Some(asr), Some((audio_start_ms, audio_end_ms, classification, transcript_speaker_evidence, signal_quality_sufficient))) =
             (self.volcengine_asr.as_ref(), local_speaker_evidence)
         {
-            asr.note_local_speaker_observation_with_quality(
+            asr.note_local_speaker_observation_with_audio_range(
+                audio_start_ms,
                 audio_end_ms,
                 classification,
                 transcript_speaker_evidence,
