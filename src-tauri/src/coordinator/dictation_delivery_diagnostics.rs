@@ -5,6 +5,7 @@ fn record_dictation_delivery_diagnostic(
     inner: &Arc<Inner>,
     fact: &DeliveryFact,
     source_key: &str,
+    consumed: Option<&crate::asr::volcengine::LiveBodyConsumption>,
     source_coverage: &str,
 ) {
     log::info!(
@@ -24,15 +25,24 @@ fn record_dictation_delivery_diagnostic(
         return;
     };
     let payload = serde_json::json!({
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "sessionId": fact.session_id.to_string(),
         "intendedFinalText": fact.intended_text,
         "submittedText": fact.submitted_text,
         "consumedSourceKey": source_key,
+        "consumedRawSource": consumed.map(|value| serde_json::json!({
+            "prefix": value.raw_prefix, "bodyStartByte": value.body_start,
+            "captureStream": value.source.capture_stream_id,
+            "captureGeneration": value.source.capture_generation,
+            "decoderStream": value.source.decoder_stream_id,
+            "ownerGeneration": value.source.owner_generation,
+            "audioBoundaryMs": value.boundary.as_ref().map(|boundary| boundary.range_ms()),
+        })),
         "sourceCoverage": source_coverage,
         "route": fact.route.label(),
         "status": format!("{:?}", fact.status),
         "targetConfirmed": fact.target_confirmed,
+        "nativeComposition": native_composition_diagnostic(inner, fact.session_id),
     });
     async_runtime::spawn_blocking(move || {
         if !wav.exists() {

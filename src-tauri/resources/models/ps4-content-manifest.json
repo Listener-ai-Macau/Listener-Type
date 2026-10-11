@@ -1,0 +1,8 @@
+{
+  "author_revision": "8feb7a1b3da1264659f155c42bfb40a5be88d730",
+  "author_checkpoint_sha256": "3d5621c89e4af7d6a42180604aa191962636826b244c86cc3ac5bc2508064196",
+  "parity_passed": true,
+  "encoder_sha256": "2b25cbc959b854ec2bed5f51bca2759a94c020f52288027dc37769fa36c54046",
+  "separator_sha256": "5348fbf800da4d5fe8995c49f3ade8aa810bfe9f3b49b3046ee7c247c439569e",
+  "mel_sha256": "8d3d92001ebf2e73cc7e4b5d7febc967a4661659a1c22b76140e6fdf0016d035"
+}

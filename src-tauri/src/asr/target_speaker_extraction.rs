@@ -14,10 +14,14 @@ use kaldi_native_fbank::{
     stft_compute, FbankComputer, FbankOptions, IstftOptions, StftOptions, StftResult,
 };
 use once_cell::sync::OnceCell;
-use ort::{session::Session, value::TensorRef};
+use ort::{
+    session::{RunOptions, Session},
+    value::TensorRef,
+};
 use parking_lot::Mutex;
+use std::collections::VecDeque;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
 use std::time::Instant;
@@ -34,6 +38,12 @@ const ENROLLMENT_FRAMES: usize = 300;
 const FBANK_BINS: usize = 80;
 pub(crate) const SPEAKER_EMBEDDING_DIMENSION: usize = 192;
 const STRONG_INTERFERENCE_RESIDUAL_RATIO: f64 = 0.03;
+// The enrolled session profile is derived beside the separator worker. Model
+// scheduling can let the separator consume its first source chunks before the
+// profile callback arrives. Retain only this bounded prefix for later source
+// identity observation; separator/ASR delivery never waits for the profile and
+// the rest of the recording is never accumulated here.
+const SOURCE_PROFILE_PENDING_MAX_CHUNKS: usize = 2;
 // The separated waveform has scale/sign ambiguity. Restore it to the mixture
 // projection before ASR, but keep a hard ceiling so a nearly-silent target
 // estimate cannot amplify separator residue into speech-like noise.
@@ -44,9 +54,6 @@ const MAX_ALIGNMENT_GAIN: f64 = 4.0;
 // hard mismatch ceiling deliberately stops at 0.35. The wider 0.35-0.42 band
 // remains pending identity. Retain original PCM, but do not certify that band
 // as an owner-only source merely because it is above the hard mismatch floor.
-const EXTRACTED_HARD_NON_TARGET_MAX_SIMILARITY: f32 = 0.35;
-const EXTRACTED_SOFT_NON_TARGET_MAX_SIMILARITY: f32 = 0.42;
-const EXTRACTED_NON_TARGET_MAX_ENERGY_RATIO: f64 = 0.025;
 const SEPARATOR_MODEL_FILE_NAME: &str = "wesep-bsrnn-voicefilter-3s-int8.onnx";
 const ENCODER_MODEL_FILE_NAME: &str = "wesep-speaker-encoder-int8.onnx";
 pub(crate) const SEPARATOR_MODEL_SHA256: &str =
@@ -56,6 +63,21 @@ pub(crate) const ENCODER_MODEL_SHA256: &str =
 
 static ENCODER_SESSION: OnceCell<Mutex<Session>> = OnceCell::new();
 static SEPARATOR_SESSION: OnceCell<Mutex<Session>> = OnceCell::new();
+static INFERENCE_RUN_OPTIONS: OnceCell<RunOptions> = OnceCell::new();
+
+fn inference_run_options() -> Result<&'static RunOptions, String> {
+    INFERENCE_RUN_OPTIONS.get_or_try_init(|| {
+        let mut options = RunOptions::new()
+            .map_err(|err| format!("create target-speaker run options failed: {err}"))?;
+        // Keep the models and thread pools warm, but return unused temporary
+        // CPU arena regions after each chunk. Otherwise one three-second
+        // inference keeps hundreds of MiB committed for the app's lifetime.
+        options
+            .add_config_entry("memory.enable_memory_arena_shrinkage", "cpu:0")
+            .map_err(|err| format!("configure target-speaker memory reclamation failed: {err}"))?;
+        Ok(options)
+    })
+}
 
 fn ensure_ort_environment() -> Result<(), String> {
     static ENVIRONMENT: OnceCell<()> = OnceCell::new();
@@ -338,75 +360,10 @@ pub(crate) struct ExtractedChunk {
     pub(crate) target_similarity: Option<f32>,
 }
 
-impl ExtractedChunk {
-    fn ownership(&self) -> crate::speech_decision_kernel::SeparatedAudioOwnership {
-        crate::speech_decision_kernel::separated_audio_ownership(
-            !self.separator_failed(),
-            self.target_similarity.is_some_and(|score| score >= EXTRACTED_SOFT_NON_TARGET_MAX_SIMILARITY),
-            self.confidently_non_target(),
-        )
-    }
-
-    fn owner_transport_pcm(&self) -> Vec<u8> {
-        if self.ownership() == crate::speech_decision_kernel::SeparatedAudioOwnership::Owner {
-            self.pcm.clone()
-        } else {
-            // Keep provider times aligned without interpreting missing/failed
-            // identity as owner speech. Full original audio stays in the main
-            // retained recording; pending is not a destructive Other decision.
-            vec![0; self.pcm.len()]
-        }
-    }
-
-    fn separator_failed(&self) -> bool {
-        self.target_to_mix_energy < EXTRACTED_NON_TARGET_MAX_ENERGY_RATIO
-    }
-
-    fn confidently_non_target(&self) -> bool {
-        // Near-silent extracts are separator failure, not another speaker.
-        // Live b975/52db zeroed owner chunks (energy ~3e-5, sim 0.16) and the
-        // final arbiter then discarded a 68-character shown preview.
-        if self.separator_failed() {
-            return false;
-        }
-        self.target_similarity.is_some_and(|similarity| {
-            similarity < EXTRACTED_HARD_NON_TARGET_MAX_SIMILARITY
-                || (similarity < EXTRACTED_SOFT_NON_TARGET_MAX_SIMILARITY
-                    && self.target_to_mix_energy < EXTRACTED_NON_TARGET_MAX_ENERGY_RATIO)
-        })
-    }
-
-    fn suppress_confident_non_target(&mut self, context: &str) -> bool {
-        if !self.confidently_non_target() {
-            return false;
-        }
-        log::info!(
-            "[target-speaker] suppressing confident non-target extracted chunk context={context} valid_ms={} target_similarity={:?} target_to_mix_energy={:.6}",
-            self.pcm.len() / 32,
-            self.target_similarity,
-            self.target_to_mix_energy,
-        );
-        self.pcm.fill(0);
-        true
-    }
-
-    fn supports_physical_interference_measurement(&self) -> bool {
-        // Residual energy only means "another physical source" when the
-        // separator first produced a credible estimate of the enrolled owner.
-        // If the target branch is near-silent or embeds as a different speaker,
-        // mixture-minus-target is merely separator failure and naturally looks
-        // like a large residual. Installed session 486 exposed that exact false
-        // positive: every extracted owner chunk was suppressed, yet a 14.9%
-        // residual opened the authoritative secondary ASR and erased a clean
-        // 53-character primary transcript with an empty result.
-        self.target_similarity.is_some()
-            && !self.separator_failed()
-            && !self.confidently_non_target()
-    }
-}
+use super::target_speaker_output::{ExtractedOutputDecision, ExtractedOutputQueue};
 
 fn accumulate_physical_interference_evidence(
-    extracted: &ExtractedChunk,
+    extracted: &ExtractedOutputDecision,
     residual_energy: &mut f64,
     mixture_energy: &mut f64,
     evidence_chunks: &mut usize,
@@ -476,10 +433,13 @@ impl TargetSpeakerExtractor {
         let output = {
             let mut session = separator_session()?.lock();
             let outputs = session
-                .run(ort::inputs![
-                    "mix_stft_ri" => mix_tensor,
-                    "speaker_logits" => speaker_tensor
-                ])
+                .run_with_options(
+                    ort::inputs![
+                        "mix_stft_ri" => mix_tensor,
+                        "speaker_logits" => speaker_tensor
+                    ],
+                    inference_run_options()?,
+                )
                 .map_err(|err| format!("run target-speaker model failed: {err}"))?;
             let (shape, values) = outputs["target_stft_ri"]
                 .try_extract_tensor::<f32>()
@@ -597,13 +557,14 @@ pub(crate) fn extract_enrolled_owner_pcm_with_report(
         "chunk,valid_ms,target_similarity,target_to_mix_energy,residual_ratio,suppressed\n",
     );
     for (index, chunk) in mixture_pcm.chunks(CHUNK_BYTES).enumerate() {
-        let mut extracted = extractor.extract_chunk_with_metrics(chunk)?;
+        let extracted = extractor.extract_chunk_with_metrics(chunk)?;
         let similarity = extracted
             .target_similarity
             .map(|value| format!("{value:.6}"))
             .unwrap_or_else(|| "unknown".to_string());
         let residual_ratio = extracted.residual_energy / extracted.mixture_energy.max(1e-12);
-        let suppressed = extracted.suppress_confident_non_target("diagnostic");
+        // Raw extraction diagnostic: conditioning cosine cannot authorize suppression.
+        let suppressed = false;
         report.push_str(&format!(
             "{index},{},{similarity},{:.6},{residual_ratio:.6},{suppressed}\n",
             chunk.len() / 32,
@@ -649,7 +610,10 @@ fn speaker_embedding_from_single_window(pcm: &[u8]) -> Result<Vec<f32>, String> 
     .map_err(|err| format!("create target-speaker enrollment tensor failed: {err}"))?;
     let mut session = encoder_session()?.lock();
     let outputs = session
-        .run(ort::inputs!["speaker_fbank" => tensor])
+        .run_with_options(
+            ort::inputs!["speaker_fbank" => tensor],
+            inference_run_options()?,
+        )
         .map_err(|err| format!("run target-speaker encoder failed: {err}"))?;
     let (shape, values) = outputs["speaker_logits"]
         .try_extract_tensor::<f32>()
@@ -684,18 +648,311 @@ pub(crate) fn wake_phrase_enrollment_pcm(wake_pcm: &[u8], wake_end_seconds: f32)
     wake_pcm[start..end].to_vec()
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TargetSpeakerFinishReason {
+    CleanPrimary,
+    OwnerCandidate,
+    NoOwnerEvidence,
+    Unresolved,
+}
+
+#[derive(Debug)]
+pub(crate) struct TargetSpeakerFinishOutcome {
+    pub(crate) transcript: Option<crate::asr::RawTranscript>,
+    pub(crate) reason: TargetSpeakerFinishReason,
+    pub(crate) enqueued_bytes: u64,
+    pub(crate) processed_bytes: u64,
+}
+
+impl TargetSpeakerFinishOutcome {
+    fn new(
+        transcript: Option<crate::asr::RawTranscript>,
+        reason: TargetSpeakerFinishReason,
+        enqueued_bytes: u64,
+        processed_bytes: u64,
+        output_unresolved: bool,
+    ) -> Self {
+        let reason = if output_unresolved || enqueued_bytes != processed_bytes {
+            TargetSpeakerFinishReason::Unresolved
+        } else {
+            reason
+        };
+        Self {
+            transcript,
+            reason,
+            enqueued_bytes,
+            processed_bytes,
+        }
+    }
+
+    pub(crate) fn is_complete(&self) -> bool {
+        self.enqueued_bytes == self.processed_bytes
+    }
+
+    pub(crate) fn certifies_clean_primary(&self) -> bool {
+        self.reason == TargetSpeakerFinishReason::CleanPrimary && self.is_complete()
+    }
+
+    pub(crate) fn into_owner_candidate(self) -> Option<crate::asr::RawTranscript> {
+        // A pending tail prevents a complete/clean certificate, but cannot
+        // revoke already decoded, positively authorized owner audio. Timing
+        // and owner ranges still constrain recovery of this prefix.
+        match self.reason {
+            TargetSpeakerFinishReason::OwnerCandidate | TargetSpeakerFinishReason::Unresolved => self.transcript,
+            _ => None,
+        }
+    }
+}
+
 /// A hidden authoritative stream fed only target-speaker-extracted audio.
 /// The normal stream keeps driving clean-room preview. After explicit
 /// non-owner evidence, this stream owns live text as well as the final.
 pub(crate) struct TargetSpeakerStream {
     audio_tx: Mutex<Option<mpsc::UnboundedSender<Vec<u8>>>>,
     worker: Mutex<
-        Option<tauri::async_runtime::JoinHandle<Result<Option<crate::asr::RawTranscript>, String>>>,
+        Option<
+            tauri::async_runtime::JoinHandle<Result<TargetSpeakerFinishOutcome, String>>,
+        >,
     >,
     interference_detected: Arc<AtomicBool>,
     non_target_speech_detected: Arc<AtomicBool>,
     secondary_asr: Arc<Mutex<Option<Arc<crate::asr::VolcengineStreamingASR>>>>,
     owner_audio_verified: Arc<AtomicBool>,
+    owner_audio_ranges: Arc<Mutex<Vec<(u64, u64)>>>,
+    source_profile: Arc<Mutex<Option<crate::speaker_verification::SessionSpeakerProfile>>>,
+    source_owner_audio_ranges: Arc<Mutex<Vec<(u64, u64)>>>,
+    source_owner_audio_ranges_updated_at: Arc<Mutex<Option<Instant>>>,
+    physical_interference_ranges: Arc<Mutex<Vec<(u64, u64)>>>,
+    final_timing: Arc<Mutex<Option<crate::transcript_boundary::TimedTranscript>>>,
+    /// Last complete three-second source chunk for which separator and original-
+    /// source identity processing have both finished. Endpointing reads this
+    /// frontier only as a bounded in-flight barrier; it never grants ownership.
+    processed_through_ms: Arc<AtomicU64>,
+    /// Exact input and worker frontiers. Millisecond frontiers round PCM byte
+    /// offsets and therefore cannot prove that STOP drained the final samples.
+    enqueued_bytes: Arc<AtomicU64>,
+    processed_bytes: Arc<AtomicU64>,
+    /// True while extracted output lacks a resolved owner decision. Pending is
+    /// neither clean nor foreign and therefore cannot certify the primary.
+    output_unresolved: Arc<AtomicBool>,
+    worker_terminal: Arc<AtomicBool>,
+    #[cfg(test)]
+    chunk_diagnostics: Arc<Mutex<Vec<TargetSpeakerChunkDiagnostic>>>,
+    #[cfg(test)]
+    secondary_opened_ever: Arc<AtomicBool>,
+    #[cfg(test)]
+    secondary_provider_responses: Arc<Mutex<Vec<serde_json::Value>>>,
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct TargetSpeakerChunkDiagnostic {
+    pub(crate) start_ms: u64,
+    pub(crate) end_ms: u64,
+    pub(crate) ownership: String,
+    pub(crate) target_similarity: Option<f32>,
+    pub(crate) target_to_mix_energy: f64,
+    pub(crate) residual_energy: f64,
+    pub(crate) mixture_energy: f64,
+    pub(crate) output_silence_confirmed: bool,
+    pub(crate) extracted_pcm_path: Option<String>,
+    pub(crate) owner_transport_pcm_path: Option<String>,
+}
+
+#[cfg(test)]
+const TEST_PCM_EXPORT_DIRECTORY_ENV: &str = "LISTENER_TEST_SEPARATOR_PCM_EXPORT_DIR";
+
+#[cfg(test)]
+fn test_pcm_export_directory() -> Option<std::path::PathBuf> {
+    std::env::var_os(TEST_PCM_EXPORT_DIRECTORY_ENV)
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+}
+
+#[cfg(test)]
+fn export_test_chunk_pcm(
+    source_range_ms: (u64, u64),
+    extracted: &ExtractedChunk,
+    transport: Option<Vec<u8>>,
+) -> Result<Option<(String, Option<String>)>, String> {
+    let Some(directory) = test_pcm_export_directory() else {
+        return Ok(None);
+    };
+    std::fs::create_dir_all(&directory).map_err(|error| {
+        format!(
+            "create target-speaker test PCM export directory {} failed: {error}",
+            directory.display()
+        )
+    })?;
+    let stem = format!(
+        "source-{:06}-{:06}",
+        source_range_ms.0, source_range_ms.1
+    );
+    let extracted_path = directory.join(format!("{stem}-extracted.pcm"));
+    let owner_transport_path = directory.join(format!("{stem}-owner-transport.pcm"));
+    std::fs::write(&extracted_path, &extracted.pcm).map_err(|error| {
+        format!(
+            "write target-speaker extracted test PCM {} failed: {error}",
+            extracted_path.display()
+        )
+    })?;
+    let transport_path = if let Some(pcm) = transport {
+        std::fs::write(&owner_transport_path, pcm)
+            .map_err(|error| format!("write owner transport failed: {error}"))?;
+        Some(owner_transport_path.to_string_lossy().into_owned())
+    } else { None };
+    Ok(Some((extracted_path.to_string_lossy().into_owned(), transport_path)))
+}
+
+struct TargetSpeakerWorkerTerminalGuard(Arc<AtomicBool>);
+
+impl Drop for TargetSpeakerWorkerTerminalGuard {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+fn source_owner_analysis_is_pending(
+    enrolled_profile_ready: bool,
+    worker_terminal: bool,
+    processed_through_ms: u64,
+    captured_audio_ms: u64,
+    speech_end_ms: u64,
+) -> bool {
+    if !enrolled_profile_ready || worker_terminal {
+        return false;
+    }
+    let complete_chunk_ms = (CHUNK_BYTES / 32) as u64;
+    let available_frontier_ms = captured_audio_ms / complete_chunk_ms * complete_chunk_ms;
+    speech_end_ms > processed_through_ms && available_frontier_ms > processed_through_ms
+}
+
+fn push_merged_audio_range(ranges: &Mutex<Vec<(u64, u64)>>, range: (u64, u64)) {
+    if range.0 >= range.1 {
+        return;
+    }
+    let mut ranges = ranges.lock();
+    if let Some(last) = ranges.last_mut() {
+        if range.0 <= last.1 {
+            last.1 = last.1.max(range.1);
+            return;
+        }
+    }
+    ranges.push(range);
+}
+
+fn retain_source_owner_ranges(
+    ranges: &Mutex<Vec<(u64, u64)>>,
+    updated_at: &Mutex<Option<Instant>>,
+    certified: Vec<(u64, u64)>,
+) {
+    if certified.is_empty() {
+        return;
+    }
+    for range in &certified {
+        push_merged_audio_range(ranges, *range);
+    }
+    *updated_at.lock() = Some(Instant::now());
+    log::info!(
+        "[target-speaker] original source owner evidence retained ranges={certified:?}"
+    );
+}
+
+fn retain_extracted_chunk_ranges(
+    extracted: &ExtractedOutputDecision,
+    source_range_ms: (u64, u64),
+    owner_audio_ranges: &Mutex<Vec<(u64, u64)>>,
+    physical_interference_ranges: &Mutex<Vec<(u64, u64)>>,
+) {
+    if extracted.ownership() != crate::speech_decision_kernel::SeparatedAudioOwnership::Owner {
+        return;
+    }
+    push_merged_audio_range(owner_audio_ranges, source_range_ms);
+    let residual_ratio = extracted.residual_energy / extracted.mixture_energy.max(1e-12);
+    if extracted_chunk_has_physical_interference(extracted) {
+        push_merged_audio_range(physical_interference_ranges, source_range_ms);
+        log::info!(
+            "[target-speaker] physical interference interval retained start_ms={} end_ms={} residual_ratio={residual_ratio:.6}",
+            source_range_ms.0,
+            source_range_ms.1,
+        );
+    }
+}
+
+fn extracted_chunk_has_physical_interference(extracted: &ExtractedOutputDecision) -> bool {
+    extracted.supports_physical_interference_measurement()
+        && extracted.residual_energy / extracted.mixture_energy.max(1e-12)
+            >= STRONG_INTERFERENCE_RESIDUAL_RATIO
+}
+
+// The separator's output identity cannot classify its input: suppression or
+// distortion may remove the owner's voice. Reuse the independently verified
+// session profile on the bounded ORIGINAL chunk. This evidence authorizes only
+// source-timed recovery outside confirmed overlap/foreign intervals.
+#[cfg(test)]
+fn source_observation_certifies_owner(
+    signal_quality_sufficient: bool,
+    classification: crate::speaker_verification::SessionSpeakerClassification,
+) -> bool {
+    signal_quality_sufficient
+        && matches!(
+            classification,
+            crate::speaker_verification::SessionSpeakerClassification::Target { .. }
+        )
+}
+
+#[derive(Debug)]
+struct PendingSourceOwnerChunk {
+    pcm: Vec<u8>,
+    source_range_ms: (u64, u64),
+}
+
+#[derive(Default)]
+struct PendingSourceOwnerEvidence {
+    prefix: VecDeque<PendingSourceOwnerChunk>,
+}
+
+impl PendingSourceOwnerEvidence {
+    fn submit(
+        &mut self,
+        profile_ready: bool,
+        current: Option<PendingSourceOwnerChunk>,
+    ) -> Vec<PendingSourceOwnerChunk> {
+        if !profile_ready {
+            if let Some(current) = current {
+                if self.prefix.len() < SOURCE_PROFILE_PENDING_MAX_CHUNKS {
+                    self.prefix.push_back(current);
+                }
+            }
+            return Vec::new();
+        }
+
+        let mut ready = self.prefix.drain(..).collect::<Vec<_>>();
+        if let Some(current) = current {
+            ready.push(current);
+        }
+        ready
+    }
+}
+
+fn certified_source_owner_ranges(
+    profile: Option<&crate::speaker_verification::SessionSpeakerProfile>,
+    context: &mut Option<crate::speaker_verification::VerifiedOriginalSourceContext>,
+    chunks: Vec<PendingSourceOwnerChunk>,
+    quality: &Mutex<crate::speech_signal_quality::SpeechSignalTimeline>,
+) -> Vec<(u64, u64)> {
+    if context.is_none() {
+        *context = profile.cloned()
+            .and_then(crate::speaker_verification::VerifiedOriginalSourceContext::new);
+    }
+    chunks
+        .into_iter()
+        .filter_map(|chunk| {
+            let upper_bound = quality.lock().speech_upper_bound_ms(chunk.source_range_ms.0, chunk.source_range_ms.1);
+            context.as_mut().is_some_and(|context| context.certifies_original_pcm_with_quality(&chunk.pcm, upper_bound))
+                .then_some(chunk.source_range_ms)
+        })
+        .collect()
 }
 
 async fn feed_extracted_chunk(
@@ -704,7 +961,8 @@ async fn feed_extracted_chunk(
     credentials: &crate::asr::VolcengineCredentials,
     hotwords: &[crate::asr::DictionaryHotword],
     proxy_config: &ProviderProxyConfig,
-    mut extracted: ExtractedChunk,
+    extracted: ExtractedOutputDecision,
+    source_range_ms: (u64, u64),
     residual_energy: &mut f64,
     mixture_energy: &mut f64,
     interference_evidence_chunks: &mut usize,
@@ -712,12 +970,16 @@ async fn feed_extracted_chunk(
     non_target_speech_detected: &AtomicBool,
     secondary_slot: &Mutex<Option<Arc<crate::asr::VolcengineStreamingASR>>>,
     owner_audio_verified: &AtomicBool,
+    owner_audio_ranges: &Mutex<Vec<(u64, u64)>>,
+    physical_interference_ranges: &Mutex<Vec<(u64, u64)>>,
     on_partial: &Arc<dyn Fn(String) + Send + Sync>,
     on_streaming_event: &Arc<dyn Fn(super::volcengine::VolcengineStreamingEvent) + Send + Sync>,
-    on_final_intermediate: &Arc<dyn Fn(super::volcengine::FinalIntermediateTranscript) + Send + Sync>,
+    on_final_intermediate: &Arc<
+        dyn Fn(super::volcengine::FinalIntermediateTranscript) + Send + Sync,
+    >,
 ) -> Result<(), String> {
     let ownership = extracted.ownership();
-    let owner_pcm = extracted.owner_transport_pcm();
+    let owner_pcm = extracted.owner_transport_pcm().ok_or_else(|| "unresolved output must remain queued".to_string())?;
     if ownership == crate::speech_decision_kernel::SeparatedAudioOwnership::Owner {
         owner_audio_verified.store(true, Ordering::SeqCst);
     } else {
@@ -729,7 +991,13 @@ async fn feed_extracted_chunk(
         mixture_energy,
         interference_evidence_chunks,
     );
-    if extracted.suppress_confident_non_target("stream") {
+    retain_extracted_chunk_ranges(
+        &extracted,
+        source_range_ms,
+        owner_audio_ranges,
+        physical_interference_ranges,
+    );
+    if extracted.confidently_non_target() {
         non_target_speech_detected.store(true, Ordering::SeqCst);
     }
     if let Some(asr) = secondary.as_ref() {
@@ -741,8 +1009,10 @@ async fn feed_extracted_chunk(
     if !measurement_valid {
         return Ok(());
     }
-    let residual_ratio = *residual_energy / mixture_energy.max(1e-12);
-    if residual_ratio < STRONG_INTERFERENCE_RESIDUAL_RATIO {
+    // Ranges and decoder activation consume the same local decision. Averaging
+    // this interval into minutes of clean audio must not erase its existence.
+    let residual_ratio = extracted.residual_energy / extracted.mixture_energy.max(1e-12);
+    if !extracted_chunk_has_physical_interference(&extracted) {
         return Ok(());
     }
 
@@ -778,9 +1048,12 @@ impl TargetSpeakerStream {
         hotwords: Vec<crate::asr::DictionaryHotword>,
         speaker_embedding: Vec<f32>,
         proxy_config: ProviderProxyConfig,
+        quality_sink: Arc<Mutex<crate::speech_signal_quality::SpeechSignalTimeline>>,
         on_partial: Arc<dyn Fn(String) + Send + Sync>,
         on_streaming_event: Arc<dyn Fn(super::volcengine::VolcengineStreamingEvent) + Send + Sync>,
-        on_final_intermediate: Arc<dyn Fn(super::volcengine::FinalIntermediateTranscript) + Send + Sync>,
+        on_final_intermediate: Arc<
+            dyn Fn(super::volcengine::FinalIntermediateTranscript) + Send + Sync,
+        >,
     ) -> Arc<Self> {
         let (audio_tx, mut audio_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let interference_detected = Arc::new(AtomicBool::new(false));
@@ -789,21 +1062,67 @@ impl TargetSpeakerStream {
         let worker_non_target_speech_detected = Arc::clone(&non_target_speech_detected);
         let owner_audio_verified = Arc::new(AtomicBool::new(false));
         let worker_owner_audio_verified = Arc::clone(&owner_audio_verified);
+        let owner_audio_ranges = Arc::new(Mutex::new(Vec::new()));
+        let worker_owner_audio_ranges = Arc::clone(&owner_audio_ranges);
+        let source_profile = Arc::new(Mutex::new(None::<crate::speaker_verification::SessionSpeakerProfile>));
+        let worker_source_profile = Arc::clone(&source_profile);
+        let source_owner_audio_ranges = Arc::new(Mutex::new(Vec::new()));
+        let worker_source_owner_audio_ranges = Arc::clone(&source_owner_audio_ranges);
+        let source_owner_audio_ranges_updated_at = Arc::new(Mutex::new(None));
+        let worker_source_owner_audio_ranges_updated_at =
+            Arc::clone(&source_owner_audio_ranges_updated_at);
+        let physical_interference_ranges = Arc::new(Mutex::new(Vec::new()));
+        let worker_physical_interference_ranges = Arc::clone(&physical_interference_ranges);
+        let final_timing = Arc::new(Mutex::new(None));
+        let worker_final_timing = Arc::clone(&final_timing);
+        #[cfg(test)]
+        let chunk_diagnostics = Arc::new(Mutex::new(Vec::new()));
+        #[cfg(test)]
+        let worker_chunk_diagnostics = Arc::clone(&chunk_diagnostics);
+        let processed_through_ms = Arc::new(AtomicU64::new(0));
+        let worker_processed_through_ms = Arc::clone(&processed_through_ms);
+        let enqueued_bytes = Arc::new(AtomicU64::new(0));
+        let worker_enqueued_bytes = Arc::clone(&enqueued_bytes);
+        let processed_bytes_frontier = Arc::new(AtomicU64::new(0));
+        let worker_processed_bytes_frontier = Arc::clone(&processed_bytes_frontier);
+        let output_unresolved = Arc::new(AtomicBool::new(false));
+        let worker_output_unresolved = Arc::clone(&output_unresolved);
+        #[cfg(test)]
+        let secondary_opened_ever = Arc::new(AtomicBool::new(false));
+        #[cfg(test)]
+        let worker_secondary_opened_ever = Arc::clone(&secondary_opened_ever);
+        #[cfg(test)]
+        let secondary_provider_responses = Arc::new(Mutex::new(Vec::new()));
+        #[cfg(test)]
+        let worker_secondary_provider_responses = Arc::clone(&secondary_provider_responses);
+        let worker_terminal = Arc::new(AtomicBool::new(false));
+        let worker_terminal_guard = Arc::clone(&worker_terminal);
         let partial_evidence = Arc::clone(&non_target_speech_detected);
         let event_evidence = Arc::clone(&non_target_speech_detected);
         let final_evidence = Arc::clone(&non_target_speech_detected);
         let on_partial: Arc<dyn Fn(String) + Send + Sync> = Arc::new(move |text| {
-            if partial_evidence.load(Ordering::SeqCst) { on_partial(text); }
+            if partial_evidence.load(Ordering::SeqCst) {
+                on_partial(text);
+            }
         });
-        let on_streaming_event: Arc<dyn Fn(super::volcengine::VolcengineStreamingEvent) + Send + Sync> = Arc::new(move |event| {
-            if event_evidence.load(Ordering::SeqCst) { on_streaming_event(event); }
+        let on_streaming_event: Arc<
+            dyn Fn(super::volcengine::VolcengineStreamingEvent) + Send + Sync,
+        > = Arc::new(move |event| {
+            if event_evidence.load(Ordering::SeqCst) {
+                on_streaming_event(event);
+            }
         });
-        let on_final_intermediate: Arc<dyn Fn(super::volcengine::FinalIntermediateTranscript) + Send + Sync> = Arc::new(move |update| {
-            if final_evidence.load(Ordering::SeqCst) { on_final_intermediate(update); }
+        let on_final_intermediate: Arc<
+            dyn Fn(super::volcengine::FinalIntermediateTranscript) + Send + Sync,
+        > = Arc::new(move |update| {
+            if final_evidence.load(Ordering::SeqCst) {
+                on_final_intermediate(update);
+            }
         });
         let secondary_asr = Arc::new(Mutex::new(None));
         let worker_secondary_asr = Arc::clone(&secondary_asr);
         let worker = tauri::async_runtime::spawn(async move {
+            let _terminal_guard = TargetSpeakerWorkerTerminalGuard(worker_terminal_guard);
             let extractor = tauri::async_runtime::spawn_blocking(move || {
                 TargetSpeakerExtractor::from_embedding(speaker_embedding)
             })
@@ -815,67 +1134,250 @@ impl TargetSpeakerStream {
             let mut residual_energy = 0.0f64;
             let mut mixture_energy = 0.0f64;
             let mut interference_evidence_chunks = 0usize;
+            let mut processed_bytes = 0usize;
+            let mut pending_source_owner_evidence = PendingSourceOwnerEvidence::default();
+            let mut source_context = None;
+            let mut output_queue = tauri::async_runtime::spawn_blocking(ExtractedOutputQueue::new)
+                .await.map_err(|err| format!("extracted quality initialization failed: {err}"))?;
             let mut secondary = None;
             while let Some(pcm) = audio_rx.recv().await {
                 buffered.extend_from_slice(&pcm);
                 while buffered.len() >= CHUNK_BYTES {
                     let trailing = buffered.split_off(CHUNK_BYTES);
                     let chunk = std::mem::replace(&mut buffered, trailing);
+                    let source_range_ms = (
+                        (processed_bytes / 32) as u64,
+                        ((processed_bytes + CHUNK_BYTES) / 32) as u64,
+                    );
+                    processed_bytes += CHUNK_BYTES;
                     let extractor = Arc::clone(&extractor);
-                    let extracted = tauri::async_runtime::spawn_blocking(move || {
-                        extractor.extract_chunk_with_metrics(&chunk)
+                    let profile = worker_source_profile.lock().clone();
+                    let source_candidates = pending_source_owner_evidence.submit(
+                        profile.as_ref().is_some_and(|profile| !profile.is_adaptive()),
+                        Some(PendingSourceOwnerChunk {
+                            pcm: chunk.clone(),
+                            source_range_ms,
+                        }),
+                    );
+                    let mut context = source_context.take();
+                    let quality = Arc::clone(&quality_sink);
+                    let (extracted, certified_ranges, context) = tauri::async_runtime::spawn_blocking(move || {
+                        let certified_ranges = certified_source_owner_ranges(
+                            profile.as_ref(),
+                            &mut context,
+                            source_candidates,
+                            &quality,
+                        );
+                        extractor
+                            .extract_chunk_with_metrics(&chunk)
+                            .map(|extracted| (extracted, certified_ranges, context))
                     })
                     .await
                     .map_err(|err| format!("target-speaker chunk task failed: {err}"))??;
-                    feed_extracted_chunk(
-                        &mut secondary,
-                        &mut staged_pcm,
-                        &credentials,
-                        &hotwords,
-                        &proxy_config,
-                        extracted,
-                        &mut residual_energy,
-                        &mut mixture_energy,
-                        &mut interference_evidence_chunks,
-                        &worker_interference_detected,
-                        &worker_non_target_speech_detected,
-                        &worker_secondary_asr,
-                        &worker_owner_audio_verified,
-                        &on_partial,
-                        &on_streaming_event,
-                        &on_final_intermediate,
-                    )
-                    .await?;
+                    source_context = context;
+                    #[cfg(test)]
+                    export_test_chunk_pcm(source_range_ms, &extracted, None)?;
+                    let profile = worker_source_profile.lock().clone();
+                    let (queue, ready_outputs) = tauri::async_runtime::spawn_blocking(move || {
+                        let result = output_queue.submit(extracted, source_range_ms, profile);
+                        (output_queue, result)
+                    }).await.map_err(|err| format!("extracted identity task failed: {err}"))?;
+                    output_queue = queue;
+                    worker_output_unresolved.store(output_queue.unresolved(), Ordering::SeqCst);
+                    let ready_outputs = ready_outputs?;
+                    for (extracted, output_range_ms) in ready_outputs {
+                        #[cfg(test)]
+                        let chunk_diagnostic = {
+                            let exported = export_test_chunk_pcm(output_range_ms, &extracted, extracted.owner_transport_pcm())?;
+                            TargetSpeakerChunkDiagnostic {
+                                start_ms: output_range_ms.0, end_ms: output_range_ms.1,
+                                ownership: format!("{:?}", extracted.ownership()),
+                                target_similarity: extracted.target_similarity,
+                                target_to_mix_energy: extracted.target_to_mix_energy,
+                                residual_energy: extracted.residual_energy, mixture_energy: extracted.mixture_energy,
+                                output_silence_confirmed: extracted.silence_confirmed,
+                                extracted_pcm_path: exported.as_ref().map(|paths| paths.0.clone()),
+                                owner_transport_pcm_path: exported.and_then(|paths| paths.1),
+                            }
+                        };
+                        feed_extracted_chunk(
+                            &mut secondary, &mut staged_pcm, &credentials, &hotwords, &proxy_config,
+                            extracted, output_range_ms, &mut residual_energy, &mut mixture_energy,
+                            &mut interference_evidence_chunks, &worker_interference_detected,
+                            &worker_non_target_speech_detected, &worker_secondary_asr,
+                            &worker_owner_audio_verified, &worker_owner_audio_ranges,
+                            &worker_physical_interference_ranges, &on_partial, &on_streaming_event,
+                            &on_final_intermediate,
+                        ).await?;
+                        #[cfg(test)] {
+                            worker_chunk_diagnostics.lock().push(chunk_diagnostic);
+                            if worker_secondary_asr.lock().is_some() {
+                                worker_secondary_opened_ever.store(true, Ordering::SeqCst);
+                            }
+                        }
+                    }
+                retain_source_owner_ranges(
+                        &worker_source_owner_audio_ranges,
+                        &worker_source_owner_audio_ranges_updated_at,
+                        certified_ranges,
+                    );
+                    worker_processed_bytes_frontier
+                        .store(processed_bytes as u64, Ordering::Release);
+                    worker_processed_through_ms.store(source_range_ms.1, Ordering::Release);
+
                 }
             }
             if !buffered.is_empty() {
+                let tail_bytes = buffered.len();
+                let source_range_ms = (
+                    (processed_bytes / 32) as u64,
+                    ((processed_bytes + tail_bytes) / 32) as u64,
+                );
                 let extractor = Arc::clone(&extractor);
-                let extracted = tauri::async_runtime::spawn_blocking(move || {
-                    extractor.extract_chunk_with_metrics(&buffered)
+                let profile = worker_source_profile.lock().clone();
+                let source_candidates = pending_source_owner_evidence.submit(
+                    profile.as_ref().is_some_and(|profile| !profile.is_adaptive()),
+                    Some(PendingSourceOwnerChunk {
+                        pcm: buffered.clone(),
+                        source_range_ms,
+                    }),
+                );
+                let mut context = source_context.take();
+                let quality = Arc::clone(&quality_sink);
+                let (extracted, certified_ranges, context) = tauri::async_runtime::spawn_blocking(move || {
+                    let certified_ranges = certified_source_owner_ranges(
+                        profile.as_ref(),
+                        &mut context,
+                        source_candidates,
+                        &quality,
+                    );
+                    extractor
+                        .extract_chunk_with_metrics(&buffered)
+                        .map(|extracted| (extracted, certified_ranges, context))
                 })
                 .await
                 .map_err(|err| format!("target-speaker tail task failed: {err}"))??;
-                feed_extracted_chunk(
-                    &mut secondary,
-                    &mut staged_pcm,
-                    &credentials,
-                    &hotwords,
-                    &proxy_config,
-                    extracted,
-                    &mut residual_energy,
-                    &mut mixture_energy,
-                    &mut interference_evidence_chunks,
-                    &worker_interference_detected,
-                    &worker_non_target_speech_detected,
-                    &worker_secondary_asr,
-                    &worker_owner_audio_verified,
-                    &on_partial,
-                    &on_streaming_event,
-                    &on_final_intermediate,
-                )
-                .await?;
+                source_context = context;
+                #[cfg(test)]
+                export_test_chunk_pcm(source_range_ms, &extracted, None)?;
+                let profile = worker_source_profile.lock().clone();
+                let (queue, ready_outputs) = tauri::async_runtime::spawn_blocking(move || {
+                    let result = output_queue.submit(extracted, source_range_ms, profile);
+                    (output_queue, result)
+                }).await.map_err(|err| format!("extracted identity task failed: {err}"))?;
+                output_queue = queue;
+                worker_output_unresolved.store(output_queue.unresolved(), Ordering::SeqCst);
+                let ready_outputs = ready_outputs?;
+                for (extracted, output_range_ms) in ready_outputs {
+                    #[cfg(test)]
+                    let chunk_diagnostic = {
+                        let exported = export_test_chunk_pcm(output_range_ms, &extracted, extracted.owner_transport_pcm())?;
+                        TargetSpeakerChunkDiagnostic {
+                            start_ms: output_range_ms.0, end_ms: output_range_ms.1,
+                            ownership: format!("{:?}", extracted.ownership()),
+                            target_similarity: extracted.target_similarity,
+                            target_to_mix_energy: extracted.target_to_mix_energy,
+                            residual_energy: extracted.residual_energy, mixture_energy: extracted.mixture_energy,
+                            output_silence_confirmed: extracted.silence_confirmed,
+                            extracted_pcm_path: exported.as_ref().map(|paths| paths.0.clone()),
+                            owner_transport_pcm_path: exported.and_then(|paths| paths.1),
+                        }
+                    };
+                    feed_extracted_chunk(
+                        &mut secondary, &mut staged_pcm, &credentials, &hotwords, &proxy_config,
+                        extracted, output_range_ms, &mut residual_energy, &mut mixture_energy,
+                        &mut interference_evidence_chunks, &worker_interference_detected,
+                        &worker_non_target_speech_detected, &worker_secondary_asr,
+                        &worker_owner_audio_verified, &worker_owner_audio_ranges,
+                        &worker_physical_interference_ranges, &on_partial, &on_streaming_event,
+                        &on_final_intermediate,
+                    ).await?;
+                    #[cfg(test)] {
+                        worker_chunk_diagnostics.lock().push(chunk_diagnostic);
+                        if worker_secondary_asr.lock().is_some() {
+                            worker_secondary_opened_ever.store(true, Ordering::SeqCst);
+                        }
+                    }
+                }
+                retain_source_owner_ranges(
+                    &worker_source_owner_audio_ranges,
+                    &worker_source_owner_audio_ranges_updated_at,
+                    certified_ranges,
+                );
+                processed_bytes += tail_bytes;
+                worker_processed_bytes_frontier.store(processed_bytes as u64, Ordering::Release);
+                worker_processed_through_ms.store(source_range_ms.1, Ordering::Release);
+
             }
+            let profile = worker_source_profile.lock().clone();
+            let (queue, ready_outputs) = tauri::async_runtime::spawn_blocking(move || {
+                let ready = output_queue.finish(profile);
+                (output_queue, ready)
+            }).await.map_err(|err| format!("extracted identity drain failed: {err}"))?;
+            output_queue = queue;
+            worker_output_unresolved.store(output_queue.unresolved(), Ordering::SeqCst);
+            for (extracted, output_range_ms) in ready_outputs {
+                #[cfg(test)]
+                let chunk_diagnostic = {
+                    let exported = export_test_chunk_pcm(output_range_ms, &extracted, extracted.owner_transport_pcm())?;
+                    TargetSpeakerChunkDiagnostic {
+                        start_ms: output_range_ms.0, end_ms: output_range_ms.1,
+                        ownership: format!("{:?}", extracted.ownership()),
+                        target_similarity: extracted.target_similarity,
+                        target_to_mix_energy: extracted.target_to_mix_energy,
+                        residual_energy: extracted.residual_energy, mixture_energy: extracted.mixture_energy,
+                        output_silence_confirmed: extracted.silence_confirmed,
+                        extracted_pcm_path: exported.as_ref().map(|paths| paths.0.clone()),
+                        owner_transport_pcm_path: exported.and_then(|paths| paths.1),
+                    }
+                };
+                feed_extracted_chunk(
+                    &mut secondary, &mut staged_pcm, &credentials, &hotwords, &proxy_config,
+                    extracted, output_range_ms, &mut residual_energy, &mut mixture_energy,
+                    &mut interference_evidence_chunks, &worker_interference_detected,
+                    &worker_non_target_speech_detected, &worker_secondary_asr,
+                    &worker_owner_audio_verified, &worker_owner_audio_ranges,
+                    &worker_physical_interference_ranges, &on_partial, &on_streaming_event,
+                    &on_final_intermediate,
+                ).await?;
+                #[cfg(test)] {
+                    worker_chunk_diagnostics.lock().push(chunk_diagnostic);
+                    if worker_secondary_asr.lock().is_some() {
+                        worker_secondary_opened_ever.store(true, Ordering::SeqCst);
+                    }
+                }
+            }
+            let profile = worker_source_profile.lock().clone();
+            let source_candidates = pending_source_owner_evidence.submit(
+                profile.as_ref().is_some_and(|profile| !profile.is_adaptive()),
+                None,
+            );
+            if !source_candidates.is_empty() {
+                let certified_ranges = tauri::async_runtime::spawn_blocking(move || {
+                    certified_source_owner_ranges(profile.as_ref(), &mut source_context, source_candidates, &quality_sink)
+                })
+                .await
+                .map_err(|err| format!("target-speaker deferred source identity task failed: {err}"))?;
+                retain_source_owner_ranges(
+                    &worker_source_owner_audio_ranges,
+                    &worker_source_owner_audio_ranges_updated_at,
+                    certified_ranges,
+                );
+            }
+            let finish_outcome =
+                |transcript, reason| TargetSpeakerFinishOutcome::new(
+                    transcript,
+                    reason,
+                    worker_enqueued_bytes.load(Ordering::Acquire),
+                    worker_processed_bytes_frontier.load(Ordering::Acquire),
+                    worker_output_unresolved.load(Ordering::Acquire),
+                );
             if interference_evidence_chunks == 0 {
+                #[cfg(test)]
+                if let Some(asr) = secondary.as_ref() {
+                    *worker_secondary_provider_responses.lock() =
+                        asr.diagnostic_provider_responses();
+                }
                 if let Some(asr) = secondary {
                     asr.cancel();
                 }
@@ -883,12 +1385,20 @@ impl TargetSpeakerStream {
                 log::warn!(
                     "[target-speaker] separator produced no owner-valid interference evidence; preserving primary final"
                 );
-                return Ok(None);
+                return Ok(finish_outcome(
+                    None,
+                    TargetSpeakerFinishReason::NoOwnerEvidence,
+                ));
             }
             let residual_ratio = residual_energy / mixture_energy.max(1e-12);
-            if residual_ratio < STRONG_INTERFERENCE_RESIDUAL_RATIO
+            if !worker_interference_detected.load(Ordering::SeqCst)
                 && !worker_non_target_speech_detected.load(Ordering::SeqCst)
             {
+                #[cfg(test)]
+                if let Some(asr) = secondary.as_ref() {
+                    *worker_secondary_provider_responses.lock() =
+                        asr.diagnostic_provider_responses();
+                }
                 if let Some(asr) = secondary {
                     asr.cancel();
                 }
@@ -896,20 +1406,33 @@ impl TargetSpeakerStream {
                 log::info!(
                     "[target-speaker] clean owner stream kept on primary residual_ratio={residual_ratio:.6} threshold={STRONG_INTERFERENCE_RESIDUAL_RATIO:.6}"
                 );
-                return Ok(None);
+                return Ok(finish_outcome(
+                    None,
+                    TargetSpeakerFinishReason::CleanPrimary,
+                ));
             }
             let Some(secondary) = secondary else {
                 log::warn!("[target-speaker] interference remains unresolved: no positively verified owner audio; no secondary candidate");
-                return Ok(None);
+                return Ok(finish_outcome(
+                    None,
+                    TargetSpeakerFinishReason::Unresolved,
+                ));
             };
             let result = match secondary.send_last_frame().await {
-                Ok(()) => secondary
-                    .await_final_result()
-                    .await
-                    .map(Some)
-                    .map_err(|err| format!("await target-speaker ASR failed: {err}")),
+                Ok(()) => secondary.await_final_result().await.map(|result| {
+                    *worker_final_timing.lock() = secondary.transcript_timing_snapshot_for(&result.text);
+                    finish_outcome(
+                        Some(result),
+                        TargetSpeakerFinishReason::OwnerCandidate,
+                    )
+                }).map_err(|err| format!("await target-speaker ASR failed: {err}")),
                 Err(err) => Err(format!("finalize target-speaker ASR failed: {err}")),
             };
+            #[cfg(test)]
+            {
+                *worker_secondary_provider_responses.lock() =
+                    secondary.diagnostic_provider_responses();
+            }
             worker_secondary_asr.lock().take();
             result
         });
@@ -920,6 +1443,23 @@ impl TargetSpeakerStream {
             non_target_speech_detected,
             secondary_asr,
             owner_audio_verified,
+            owner_audio_ranges,
+            source_profile,
+            source_owner_audio_ranges,
+            source_owner_audio_ranges_updated_at,
+            physical_interference_ranges,
+            final_timing,
+            processed_through_ms,
+            enqueued_bytes,
+            processed_bytes: processed_bytes_frontier,
+            output_unresolved,
+            worker_terminal,
+            #[cfg(test)]
+            chunk_diagnostics,
+            #[cfg(test)]
+            secondary_opened_ever,
+            #[cfg(test)]
+            secondary_provider_responses,
         })
     }
 
@@ -931,31 +1471,172 @@ impl TargetSpeakerStream {
         self.non_target_speech_detected.load(Ordering::SeqCst)
     }
 
+    pub(crate) fn owner_audio_ranges(&self) -> Vec<(u64, u64)> {
+        self.owner_audio_ranges.lock().clone()
+    }
+
+    pub(crate) fn set_source_profile(&self, profile: &crate::speaker_verification::SessionSpeakerProfile) {
+        let mut slot = self.source_profile.lock();
+        if slot.is_none() && !profile.is_adaptive() {
+            *slot = Some(profile.clone());
+        }
+    }
+
+    pub(crate) fn source_owner_audio_ranges(&self) -> Vec<(u64, u64)> {
+        self.source_owner_audio_ranges.lock().clone()
+    }
+
+    pub(crate) fn source_owner_audio_ranges_updated_at(&self) -> Option<Instant> {
+        *self.source_owner_audio_ranges_updated_at.lock()
+    }
+
+    /// Whether a complete source chunk overlapping the latest speech edge has
+    /// entered this worker but has not published its identity result yet.
+    /// Partial tail PCM is intentionally excluded: it is finalized only after
+    /// STOP and therefore cannot hold STOP waiting on itself.
+    pub(crate) fn source_owner_analysis_pending(
+        &self,
+        captured_audio_ms: u64,
+        speech_end_ms: u64,
+    ) -> bool {
+        source_owner_analysis_is_pending(
+            self.source_profile
+                .lock()
+                .as_ref()
+                .is_some_and(|profile| !profile.is_adaptive()),
+            self.worker_terminal.load(Ordering::Acquire),
+            self.processed_through_ms.load(Ordering::Acquire),
+            captured_audio_ms,
+            speech_end_ms,
+        )
+    }
+
+    pub(crate) fn physical_interference_ranges(&self) -> Vec<(u64, u64)> {
+        self.physical_interference_ranges.lock().clone()
+    }
+
+    pub(crate) fn final_timing_snapshot(
+        &self,
+    ) -> Option<crate::transcript_boundary::TimedTranscript> {
+        self.final_timing.lock().clone()
+    }
+
     pub(crate) fn live_owner_asr(&self) -> Option<Arc<crate::asr::VolcengineStreamingASR>> {
-        self.owner_audio_verified.load(Ordering::SeqCst).then(|| self.secondary_asr.lock().clone()).flatten()
+        self.owner_audio_verified
+            .load(Ordering::SeqCst)
+            .then(|| self.secondary_asr.lock().clone())
+            .flatten()
     }
 
     #[cfg(test)]
-    pub(crate) fn test_live_owner(asr: Option<Arc<crate::asr::VolcengineStreamingASR>>, physical_overlap: bool, non_target: bool) -> Arc<Self> {
+    pub(crate) async fn test_wait_for_terminal(&self, timeout: std::time::Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        while !self.worker_terminal.load(Ordering::SeqCst) && Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        self.worker_terminal.load(Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_diagnostics(&self) -> serde_json::Value {
+        let live_secondary = self.secondary_asr.lock().clone();
+        let secondary_provider_responses = live_secondary
+            .as_ref()
+            .map(|asr| asr.diagnostic_provider_responses())
+            .unwrap_or_else(|| self.secondary_provider_responses.lock().clone());
+        let secondary_final_timing = self.final_timing_snapshot().map(|timing| {
+            serde_json::json!({
+                "text": timing.text,
+                "words": timing.words.into_iter().map(|word| serde_json::json!({
+                    "text": word.text,
+                    "start_ms": word.start_ms,
+                    "end_ms": word.end_ms,
+                })).collect::<Vec<_>>(),
+            })
+        });
+        serde_json::json!({
+            "worker_terminal": self.worker_terminal.load(Ordering::SeqCst),
+            "processed_through_ms": self.processed_through_ms.load(Ordering::Acquire),
+            "enqueued_bytes": self.enqueued_bytes.load(Ordering::Acquire),
+            "processed_bytes": self.processed_bytes.load(Ordering::Acquire),
+            "output_unresolved": self.output_unresolved.load(Ordering::Acquire),
+            "owner_audio_verified": self.owner_audio_verified.load(Ordering::SeqCst),
+            "secondary_opened_ever": self.secondary_opened_ever.load(Ordering::SeqCst),
+            "owner_audio_ranges": self.owner_audio_ranges(),
+            "source_owner_audio_ranges": self.source_owner_audio_ranges(),
+            "physical_interference_ranges": self.physical_interference_ranges(),
+            "chunks": self.chunk_diagnostics.lock().clone(),
+            "pcm_export_directory": test_pcm_export_directory()
+                .map(|path| path.to_string_lossy().into_owned()),
+            "secondary_provider_responses": secondary_provider_responses,
+            "secondary_final_timing": secondary_final_timing,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_live_owner(
+        asr: Option<Arc<crate::asr::VolcengineStreamingASR>>,
+        physical_overlap: bool,
+        non_target: bool,
+    ) -> Arc<Self> {
+        let secondary_opened = asr.is_some();
+        let secondary_provider_responses = asr
+            .as_ref()
+            .map(|asr| asr.diagnostic_provider_responses())
+            .unwrap_or_default();
         Arc::new(Self {
-            audio_tx: Mutex::new(None), worker: Mutex::new(None),
+            audio_tx: Mutex::new(None),
+            worker: Mutex::new(None),
             interference_detected: Arc::new(AtomicBool::new(physical_overlap)),
             non_target_speech_detected: Arc::new(AtomicBool::new(non_target)),
             secondary_asr: Arc::new(Mutex::new(asr)),
             owner_audio_verified: Arc::new(AtomicBool::new(true)),
+            owner_audio_ranges: Arc::new(Mutex::new(Vec::new())),
+            source_profile: Arc::new(Mutex::new(None)),
+            source_owner_audio_ranges: Arc::new(Mutex::new(Vec::new())),
+            source_owner_audio_ranges_updated_at: Arc::new(Mutex::new(None)),
+            physical_interference_ranges: Arc::new(Mutex::new(Vec::new())),
+            final_timing: Arc::new(Mutex::new(None)),
+            chunk_diagnostics: Arc::new(Mutex::new(Vec::new())),
+            processed_through_ms: Arc::new(AtomicU64::new(0)),
+            enqueued_bytes: Arc::new(AtomicU64::new(0)),
+            processed_bytes: Arc::new(AtomicU64::new(0)),
+            output_unresolved: Arc::new(AtomicBool::new(false)),
+            secondary_opened_ever: Arc::new(AtomicBool::new(secondary_opened)),
+            secondary_provider_responses: Arc::new(Mutex::new(secondary_provider_responses)),
+            worker_terminal: Arc::new(AtomicBool::new(true)),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_set_source_owner_evidence(
+        &self,
+        ranges: Vec<(u64, u64)>,
+        updated_at: Instant,
+    ) {
+        *self.source_owner_audio_ranges.lock() = ranges;
+        *self.source_owner_audio_ranges_updated_at.lock() = Some(updated_at);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_set_physical_interference_ranges(&self, ranges: Vec<(u64, u64)>) {
+        *self.physical_interference_ranges.lock() = ranges;
     }
 
     pub(crate) fn consume_pcm_chunk(&self, pcm: &[u8]) {
         if pcm.is_empty() {
             return;
         }
-        if let Some(tx) = self.audio_tx.lock().as_ref() {
-            let _ = tx.send(pcm.to_vec());
+        let tx = self.audio_tx.lock();
+        if let Some(tx) = tx.as_ref() {
+            if tx.send(pcm.to_vec()).is_ok() {
+                self.enqueued_bytes
+                    .fetch_add(pcm.len() as u64, Ordering::Release);
+            }
         }
     }
 
-    pub(crate) async fn finish(&self) -> Result<Option<crate::asr::RawTranscript>, String> {
+    pub(crate) async fn finish(&self) -> Result<TargetSpeakerFinishOutcome, String> {
         self.audio_tx.lock().take();
         let worker = self.worker.lock().take();
         let Some(worker) = worker else {
@@ -965,7 +1646,13 @@ impl TargetSpeakerStream {
             Ok(result) => result,
             Err(err) => Err(format!("target-speaker worker failed: {err}")),
         };
-        if let Some(asr) = self.secondary_asr.lock().take() {
+        let secondary = self.secondary_asr.lock().take();
+        if let Some(asr) = secondary {
+            #[cfg(test)]
+            {
+                *self.secondary_provider_responses.lock() =
+                    asr.diagnostic_provider_responses();
+            }
             if result.is_err() {
                 asr.cancel();
             }
@@ -978,7 +1665,13 @@ impl TargetSpeakerStream {
         if let Some(worker) = self.worker.lock().take() {
             worker.abort();
         }
-        if let Some(asr) = self.secondary_asr.lock().take() {
+        let secondary = self.secondary_asr.lock().take();
+        if let Some(asr) = secondary {
+            #[cfg(test)]
+            {
+                *self.secondary_provider_responses.lock() =
+                    asr.diagnostic_provider_responses();
+            }
             asr.cancel();
         }
     }
@@ -987,6 +1680,181 @@ impl TargetSpeakerStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_or_pending_output_never_certifies_a_clean_primary() {
+        let no_owner = TargetSpeakerFinishOutcome::new(
+            None,
+            TargetSpeakerFinishReason::NoOwnerEvidence,
+            32_000,
+            32_000,
+            false,
+        );
+        assert!(!no_owner.certifies_clean_primary());
+
+        let pending = TargetSpeakerFinishOutcome::new(
+            None,
+            TargetSpeakerFinishReason::CleanPrimary,
+            32_000,
+            32_000,
+            true,
+        );
+        assert_eq!(pending.reason, TargetSpeakerFinishReason::Unresolved);
+        assert!(!pending.certifies_clean_primary());
+    }
+
+    #[test]
+    fn clean_primary_requires_an_exact_stop_frontier() {
+        let incomplete = TargetSpeakerFinishOutcome::new(
+            None,
+            TargetSpeakerFinishReason::CleanPrimary,
+            32_000,
+            31_998,
+            false,
+        );
+        assert_eq!(incomplete.reason, TargetSpeakerFinishReason::Unresolved);
+        assert!(!incomplete.is_complete());
+        assert!(!incomplete.certifies_clean_primary());
+    }
+
+    #[test]
+    fn pending_tail_retains_an_already_authorized_owner_prefix() {
+        let pending = TargetSpeakerFinishOutcome::new(
+            Some(crate::asr::RawTranscript { text: "已确认的本人正文".into(), duration_ms: 3000 }),
+            TargetSpeakerFinishReason::OwnerCandidate, 128_000, 128_000, true,
+        );
+        assert_eq!(pending.reason, TargetSpeakerFinishReason::Unresolved);
+        assert!(!pending.certifies_clean_primary());
+        assert_eq!(pending.into_owner_candidate().unwrap().text, "已确认的本人正文");
+    }
+
+    fn pending_source_chunk(index: u8) -> PendingSourceOwnerChunk {
+        let start_ms = u64::from(index) * 3_000;
+        PendingSourceOwnerChunk {
+            pcm: vec![index; 8],
+            source_range_ms: (start_ms, start_ms + 3_000),
+        }
+    }
+
+    #[test]
+    fn delayed_source_profile_replays_only_the_bounded_prefix_without_waiting() {
+        let mut pending = PendingSourceOwnerEvidence::default();
+        assert!(pending.submit(false, Some(pending_source_chunk(0))).is_empty());
+        assert!(pending.submit(false, Some(pending_source_chunk(1))).is_empty());
+        assert!(pending.submit(false, Some(pending_source_chunk(2))).is_empty());
+        assert_eq!(pending.prefix.len(), SOURCE_PROFILE_PENDING_MAX_CHUNKS);
+
+        let ready = pending.submit(true, Some(pending_source_chunk(3)));
+        assert_eq!(
+            ready
+                .iter()
+                .map(|chunk| chunk.source_range_ms)
+                .collect::<Vec<_>>(),
+            vec![(0, 3_000), (3_000, 6_000), (9_000, 12_000)],
+            "the first bounded chunks are replayed, the overflow remains unknown, and current audio continues"
+        );
+        assert!(pending.prefix.is_empty());
+    }
+
+    #[test]
+    fn unknown_source_identity_never_certifies_owner_audio() {
+        use crate::speaker_verification::SessionSpeakerClassification::{
+            NonTarget, Uncertain,
+        };
+        assert!(!source_observation_certifies_owner(
+            true,
+            Uncertain { score: 0.41 },
+        ));
+        assert!(!source_observation_certifies_owner(
+            true,
+            NonTarget { score: 0.04 },
+        ));
+    }
+
+    #[test]
+    fn insufficient_quality_cannot_turn_target_score_into_source_owner() {
+        use crate::speaker_verification::SessionSpeakerClassification::Target;
+        assert!(!source_observation_certifies_owner(
+            false,
+            Target { score: 0.93 },
+        ));
+        assert!(source_observation_certifies_owner(
+            true,
+            Target { score: 0.44 },
+        ));
+    }
+
+    #[test]
+    #[ignore = "requires the installed ONNX Runtime and bundled speaker models"]
+    fn cpu_arena_reclamation_preserves_model_outputs() {
+        ensure_ort_environment().unwrap();
+        let options = inference_run_options().unwrap();
+        {
+            let mut session = encoder_session().unwrap().lock();
+            for amplitude in [0.0, 0.25, 1.0] {
+                let features: Vec<f32> = (0..ENROLLMENT_FRAMES * FBANK_BINS)
+                    .map(|index| (index as f32 * 0.017).sin() * amplitude)
+                    .collect();
+                let input = || {
+                    TensorRef::from_array_view((
+                        [1usize, ENROLLMENT_FRAMES, FBANK_BINS],
+                        features.as_slice(),
+                    ))
+                    .unwrap()
+                };
+                let baseline = session
+                    .run(ort::inputs!["speaker_fbank" => input()])
+                    .unwrap()["speaker_logits"]
+                    .try_extract_tensor::<f32>()
+                    .unwrap()
+                    .1
+                    .to_vec();
+                let reclaimed = session
+                    .run_with_options(ort::inputs!["speaker_fbank" => input()], options)
+                    .unwrap()["speaker_logits"]
+                    .try_extract_tensor::<f32>()
+                    .unwrap()
+                    .1
+                    .to_vec();
+                assert_eq!(
+                    baseline, reclaimed,
+                    "encoder changed at amplitude={amplitude}"
+                );
+            }
+        }
+        let mut session = separator_session().unwrap().lock();
+        let embedding =
+            vec![1.0 / (SPEAKER_EMBEDDING_DIMENSION as f32).sqrt(); SPEAKER_EMBEDDING_DIMENSION];
+        for amplitude in [0.0, 0.25, 1.0] {
+            let mixture: Vec<f32> = (0..2 * FFT_BINS * STFT_FRAMES)
+                .map(|index| (index as f32 * 0.013).sin() * amplitude)
+                .collect();
+            let inputs = || {
+                ort::inputs![
+                    "mix_stft_ri" => TensorRef::from_array_view((
+                        [1usize, 2usize, FFT_BINS, STFT_FRAMES], mixture.as_slice(),
+                    )).unwrap(),
+                    "speaker_logits" => TensorRef::from_array_view((
+                        [1usize, SPEAKER_EMBEDDING_DIMENSION], embedding.as_slice(),
+                    )).unwrap()
+                ]
+            };
+            let baseline = session.run(inputs()).unwrap()["target_stft_ri"]
+                .try_extract_tensor::<f32>()
+                .unwrap()
+                .1
+                .to_vec();
+            let reclaimed = session.run_with_options(inputs(), options).unwrap()["target_stft_ri"]
+                .try_extract_tensor::<f32>()
+                .unwrap()
+                .1
+                .to_vec();
+            assert_eq!(
+                baseline, reclaimed,
+                "separator changed at amplitude={amplitude}"
+            );
+        }
+    }
 
     #[test]
     fn wake_enrollment_is_bounded_to_phrase_tail() {
@@ -1022,101 +1890,88 @@ mod tests {
             .all(|value| (*value - 3.0).abs() < f32::EPSILON));
     }
 
-    fn classified_chunk(similarity: Option<f32>, energy_ratio: f64) -> ExtractedChunk {
-        ExtractedChunk {
-            pcm: vec![1, 2, 3, 4],
-            residual_energy: 1.0,
-            mixture_energy: 2.0,
-            target_to_mix_energy: energy_ratio,
-            target_similarity: similarity,
+    fn decided_chunk(ownership: crate::speech_decision_kernel::SeparatedAudioOwnership,
+        similarity: Option<f32>, energy_ratio: f64) -> ExtractedOutputDecision {
+        ExtractedOutputDecision { extracted: ExtractedChunk {
+            pcm: vec![1, 2, 3, 4], residual_energy: 1.0, mixture_energy: 2.0,
+            target_to_mix_energy: energy_ratio, target_similarity: similarity,
+        }, ownership, silence_confirmed: false }
+    }
+
+    #[test]
+    fn output_authority_is_independent_of_conditioning_similarity_and_scale() {
+        use crate::speech_decision_kernel::SeparatedAudioOwnership::Owner;
+        // Quiet saved extraction was intelligible at these conditioning scores;
+        // long 57-60s was Owner despite raw scale below the old 0.025 cutoff.
+        for (similarity, ratio) in [(0.35147, 0.037), (0.26037, 0.03),
+            (0.18226, 0.04), (0.19177, 0.03), (0.3000, 0.00498)] {
+            let owner = decided_chunk(Owner, Some(similarity), ratio);
+            assert_eq!(owner.owner_transport_pcm(), Some(owner.pcm.clone()));
+            let mut residual = 0.0; let mut mixture = 0.0; let mut count = 0;
+            assert!(accumulate_physical_interference_evidence(&owner, &mut residual, &mut mixture, &mut count));
+            assert_eq!((residual, mixture, count), (1.0, 2.0, 1));
         }
     }
 
     #[test]
-    fn hard_mismatch_or_dual_soft_evidence_can_suppress_a_chunk() {
-        assert!(
-            !classified_chunk(Some(0.16), 0.00003).confidently_non_target(),
-            "near-silent extract is separator failure, not another speaker"
-        );
-        assert!(classified_chunk(Some(0.32), 0.041).confidently_non_target());
-        assert!(!classified_chunk(Some(0.65), 0.002).confidently_non_target());
-        assert!(!classified_chunk(Some(0.38), 0.002).confidently_non_target());
-        assert!(!classified_chunk(Some(0.38), 0.037).confidently_non_target());
-        assert!(!classified_chunk(None, 0.002).confidently_non_target());
+    fn pending_output_keeps_pcm_and_has_no_transport_or_physical_authority() {
+        use crate::speech_decision_kernel::SeparatedAudioOwnership::Pending;
+        let pending = decided_chunk(Pending, Some(0.95), 1.0);
+        assert_eq!(pending.owner_transport_pcm(), None);
+        assert_eq!(pending.pcm, vec![1, 2, 3, 4]);
+        assert!(!pending.confidently_non_target());
+        let mut residual = 0.0; let mut mixture = 0.0; let mut count = 0;
+        assert!(!accumulate_physical_interference_evidence(&pending, &mut residual, &mut mixture, &mut count));
+        assert_eq!((residual, mixture, count), (0.0, 0.0, 0));
     }
 
     #[test]
-    fn uncertain_failed_and_missing_identity_never_feed_owner_transport() {
-        use crate::speech_decision_kernel::SeparatedAudioOwnership::{Other, Owner, Pending};
-        // Installed 1bd43a15: 0.369 opened a raw secondary; failed 0.302/0.017
-        // and a short tail with no similarity then decoded the bystander's time.
-        for chunk in [
-            classified_chunk(Some(0.36989865), 0.034466),
-            classified_chunk(Some(0.30255014), 0.017264),
-            classified_chunk(None, 0.033514),
-        ] {
-            assert_eq!(chunk.ownership(), Pending);
-            assert!(!chunk.confidently_non_target());
-            assert_eq!(chunk.owner_transport_pcm(), vec![0; chunk.pcm.len()]);
-            assert_eq!(chunk.pcm, vec![1, 2, 3, 4], "pending source retained");
+    fn same_output_decision_controls_transport_ranges_and_residual() {
+        use crate::speech_decision_kernel::SeparatedAudioOwnership::{Owner, Other, Pending};
+        let owner_ranges = Mutex::new(Vec::new());
+        let physical_ranges = Mutex::new(Vec::new());
+        for (index, ownership) in [Owner, Other, Pending, Owner].into_iter().enumerate() {
+            let mut chunk = decided_chunk(ownership, Some(0.25), 0.004);
+            chunk.extracted.residual_energy = if index == 0 { 0.01 } else { 0.15 };
+            chunk.extracted.mixture_energy = 1.0;
+            let start = index as u64 * 3000;
+            retain_extracted_chunk_ranges(&chunk, (start, start + 3000), &owner_ranges, &physical_ranges);
+            assert_eq!(chunk.supports_physical_interference_measurement(), ownership == Owner);
+            assert_eq!(chunk.confidently_non_target(), ownership == Other);
         }
-        let owner = classified_chunk(Some(0.65), 0.037);
-        assert_eq!(owner.ownership(), Owner);
-        assert_eq!(owner.owner_transport_pcm(), owner.pcm);
-        let foreign = classified_chunk(Some(0.30), 0.037);
-        assert_eq!(foreign.ownership(), Other);
-        assert_eq!(foreign.owner_transport_pcm(), vec![0; foreign.pcm.len()]);
+        assert_eq!(*owner_ranges.lock(), vec![(0,3000),(9000,12000)]);
+        assert_eq!(*physical_ranges.lock(), vec![(9000,12000)]);
     }
 
     #[test]
-    fn invalid_separator_target_cannot_claim_physical_interference() {
-        let invalid_owner = classified_chunk(Some(0.306_831_84), 0.000_652);
-        let mut residual_energy = 0.0;
-        let mut mixture_energy = 0.0;
-        let mut evidence_chunks = 0;
-
-        assert!(!accumulate_physical_interference_evidence(
-            &invalid_owner,
-            &mut residual_energy,
-            &mut mixture_energy,
-            &mut evidence_chunks,
-        ));
-        assert_eq!(evidence_chunks, 0);
-        assert_eq!(residual_energy, 0.0);
-        assert_eq!(mixture_energy, 0.0);
-        assert!(
-            invalid_owner.residual_energy / invalid_owner.mixture_energy
-                >= STRONG_INTERFERENCE_RESIDUAL_RATIO,
-            "session 486 had a large residual, but it came from an invalid near-silent owner estimate"
-        );
+    fn local_interference_survives_a_lower_whole_session_average() {
+        use crate::speech_decision_kernel::SeparatedAudioOwnership::Owner;
+        let mut owner = decided_chunk(Owner, Some(0.30), 0.00498);
+        owner.extracted.residual_energy = 0.178936638;
+        owner.extracted.mixture_energy = 1.0;
+        let mut residual = 0.0;
+        let mut mixture = 10.0;
+        let mut count = 10;
+        accumulate_physical_interference_evidence(&owner, &mut residual, &mut mixture, &mut count);
+        assert!(residual / mixture < STRONG_INTERFERENCE_RESIDUAL_RATIO);
+        assert!(extracted_chunk_has_physical_interference(&owner));
+        let owner_ranges = Mutex::new(Vec::new());
+        let physical_ranges = Mutex::new(Vec::new());
+        retain_extracted_chunk_ranges(&owner, (57000,60000), &owner_ranges, &physical_ranges);
+        assert_eq!(*physical_ranges.lock(), vec![(57000,60000)]);
     }
 
     #[test]
-    fn credible_owner_estimate_can_measure_physical_interference() {
-        let credible_owner = classified_chunk(Some(0.65), 0.35);
-        let mut residual_energy = 0.0;
-        let mut mixture_energy = 0.0;
-        let mut evidence_chunks = 0;
-
-        assert!(accumulate_physical_interference_evidence(
-            &credible_owner,
-            &mut residual_energy,
-            &mut mixture_energy,
-            &mut evidence_chunks,
-        ));
-        assert_eq!(evidence_chunks, 1);
-        assert_eq!(residual_energy, credible_owner.residual_energy);
-        assert_eq!(mixture_energy, credible_owner.mixture_energy);
-    }
-
-    #[test]
-    fn suppression_preserves_timeline_with_silence() {
-        let mut silent = classified_chunk(Some(0.30), 0.002);
-        assert!(!silent.suppress_confident_non_target("test"));
-        assert_eq!(silent.pcm, vec![1, 2, 3, 4]);
-        let mut chunk = classified_chunk(Some(0.30), 0.08);
-        assert!(chunk.suppress_confident_non_target("test"));
-        assert_eq!(chunk.pcm, vec![0, 0, 0, 0]);
+    fn known_silence_preserves_time_without_becoming_other_or_owner() {
+        use crate::speech_decision_kernel::SeparatedAudioOwnership::{Other, Pending};
+        let other = decided_chunk(Other, Some(0.9), 1.0);
+        assert_eq!(other.owner_transport_pcm(), Some(vec![0;4]));
+        assert!(other.confidently_non_target());
+        let mut silence = decided_chunk(Pending, None, 0.0);
+        silence.silence_confirmed = true;
+        assert_eq!(silence.owner_transport_pcm(), Some(vec![0;4]));
+        assert!(!silence.confidently_non_target());
+        assert!(!silence.supports_physical_interference_measurement());
     }
 
     #[test]
@@ -1124,6 +1979,20 @@ mod tests {
         assert_eq!(cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]), Some(1.0));
         assert_eq!(cosine_similarity(&[1.0], &[1.0, 0.0]), None);
         assert_eq!(cosine_similarity(&[0.0, 0.0], &[1.0, 0.0]), None);
+    }
+
+    #[test]
+    fn source_owner_analysis_frontier_is_bounded_to_available_complete_chunks() {
+        assert!(source_owner_analysis_is_pending(true, false, 9_000, 13_000, 12_896),
+            "the 9-12s source chunk is a real in-flight identity decision");
+        assert!(!source_owner_analysis_is_pending(true, false, 12_000, 13_000, 12_896),
+            "a partial 12-13s tail cannot wait for STOP to finalize itself");
+        assert!(!source_owner_analysis_is_pending(true, false, 9_000, 11_900, 11_800),
+            "capture without another complete chunk has no actionable frontier");
+        assert!(!source_owner_analysis_is_pending(false, false, 9_000, 13_000, 12_896),
+            "unknown/adaptive identity cannot manufacture an owner-analysis hold");
+        assert!(!source_owner_analysis_is_pending(true, true, 9_000, 13_000, 12_896),
+            "a terminal worker cannot keep endpointing alive");
     }
 
     #[test]

@@ -1,0 +1,2601 @@
+{
+  "source_session_id": "a6ff7b12-12dd-48f5-84df-f60c2525ac03",
+  "pcm_sha256": "75834d72609457fa68ab939cd2bed803b8d39d2910f335d34ca552a7b5729a0a",
+  "provenance": "E:\\ListenerAnalysisState\\new-chat\\beta36-state-review\\word-source-replay\\20261004-173058\\long-report.json",
+  "primary": {
+    "text": "开始录音，今天我们一起整理一下下周的工作，文件列成清单，再逐量负责，确认负责人，所有内容和按照实际进度填写。周一上午先检查会议室设备。然后包括屏幕、麦克风和网络，发现异常就记录下来，提前安排处理，避免开会时耽误大家。车。周末下午联系时还没有回复的同事，确认他们能否参加讨论。如果时间冲突，就把可选时间安排到原来的安排里面。然后资料分成三个部分，左边核对已放过的文件，中间放需要补充的部分，右边放还没有确认的事项。然后最后整理后再统一编号。然后暂时按照三百，二百三十元记录。实际支出以后再核对，采购的东西要写清楚名称和数量，同时保留对应的票据，方便后边查询。现在需要去任执行律师。",
+    "utterances": [
+      {
+        "text": "开始录音，今天我们一起整理一下下周的工作，文件列成清单，再逐量负责，确认负责人，所有内容和按照实际进度填写。",
+        "end_time": 11112,
+        "words": [
+          {
+            "end_time": 920,
+            "start_time": 640,
+            "text": "开"
+          },
+          {
+            "end_time": 1040,
+            "start_time": 920,
+            "text": "始"
+          },
+          {
+            "end_time": 1240,
+            "start_time": 1040,
+            "text": "录"
+          },
+          {
+            "end_time": 1440,
+            "start_time": 1240,
+            "text": "音"
+          },
+          {
+            "end_time": 1640,
+            "start_time": 1480,
+            "text": "今"
+          },
+          {
+            "end_time": 1720,
+            "start_time": 1640,
+            "text": "天"
+          },
+          {
+            "end_time": 1840,
+            "start_time": 1720,
+            "text": "我"
+          },
+          {
+            "end_time": 1960,
+            "start_time": 1840,
+            "text": "们"
+          },
+          {
+            "end_time": 2160,
+            "start_time": 1960,
+            "text": "一"
+          },
+          {
+            "end_time": 2240,
+            "start_time": 2160,
+            "text": "起"
+          },
+          {
+            "end_time": 2600,
+            "start_time": 2400,
+            "text": "整"
+          },
+          {
+            "end_time": 2680,
+            "start_time": 2600,
+            "text": "理"
+          },
+          {
+            "end_time": 2840,
+            "start_time": 2680,
+            "text": "一"
+          },
+          {
+            "end_time": 2960,
+            "start_time": 2840,
+            "text": "下"
+          },
+          {
+            "end_time": 3240,
+            "start_time": 3000,
+            "text": "下"
+          },
+          {
+            "end_time": 3440,
+            "start_time": 3240,
+            "text": "周"
+          },
+          {
+            "end_time": 3600,
+            "start_time": 3440,
+            "text": "的"
+          },
+          {
+            "end_time": 3760,
+            "start_time": 3600,
+            "text": "工"
+          },
+          {
+            "end_time": 3840,
+            "start_time": 3760,
+            "text": "作"
+          },
+          {
+            "end_time": 4200,
+            "start_time": 4080,
+            "text": "文"
+          },
+          {
+            "end_time": 4320,
+            "start_time": 4200,
+            "text": "件"
+          },
+          {
+            "end_time": 4480,
+            "start_time": 4360,
+            "text": "列"
+          },
+          {
+            "end_time": 4680,
+            "start_time": 4520,
+            "text": "成"
+          },
+          {
+            "end_time": 4880,
+            "start_time": 4720,
+            "text": "清"
+          },
+          {
+            "end_time": 5040,
+            "start_time": 4880,
+            "text": "单"
+          },
+          {
+            "end_time": 5280,
+            "start_time": 5080,
+            "text": "再"
+          },
+          {
+            "end_time": 5440,
+            "start_time": 5320,
+            "text": "逐"
+          },
+          {
+            "end_time": 5600,
+            "start_time": 5480,
+            "text": "量"
+          },
+          {
+            "end_time": 5960,
+            "start_time": 5800,
+            "text": "负"
+          },
+          {
+            "end_time": 6160,
+            "start_time": 5960,
+            "text": "责"
+          },
+          {
+            "end_time": 6920,
+            "start_time": 6640,
+            "text": "确"
+          },
+          {
+            "end_time": 7080,
+            "start_time": 6920,
+            "text": "认"
+          },
+          {
+            "end_time": 7240,
+            "start_time": 7120,
+            "text": "负"
+          },
+          {
+            "end_time": 7400,
+            "start_time": 7240,
+            "text": "责"
+          },
+          {
+            "end_time": 7640,
+            "start_time": 7400,
+            "text": "人"
+          },
+          {
+            "end_time": 8160,
+            "start_time": 7960,
+            "text": "所"
+          },
+          {
+            "end_time": 8320,
+            "start_time": 8160,
+            "text": "有"
+          },
+          {
+            "end_time": 8440,
+            "start_time": 8320,
+            "text": "内"
+          },
+          {
+            "end_time": 8560,
+            "start_time": 8440,
+            "text": "容"
+          },
+          {
+            "end_time": 8840,
+            "start_time": 8600,
+            "text": "和"
+          },
+          {
+            "end_time": 9240,
+            "start_time": 9040,
+            "text": "按"
+          },
+          {
+            "end_time": 9400,
+            "start_time": 9240,
+            "text": "照"
+          },
+          {
+            "end_time": 9680,
+            "start_time": 9480,
+            "text": "实"
+          },
+          {
+            "end_time": 9800,
+            "start_time": 9680,
+            "text": "际"
+          },
+          {
+            "end_time": 10000,
+            "start_time": 9920,
+            "text": "进"
+          },
+          {
+            "end_time": 10120,
+            "start_time": 10040,
+            "text": "度"
+          },
+          {
+            "end_time": 10400,
+            "start_time": 10200,
+            "text": "填"
+          },
+          {
+            "end_time": 10600,
+            "start_time": 10400,
+            "text": "写"
+          }
+        ]
+      },
+      {
+        "text": "周一上午先检查会议室设备。",
+        "start_time": 11352,
+        "end_time": 15362,
+        "words": [
+          {
+            "end_time": 11952,
+            "start_time": 11712,
+            "text": "周"
+          },
+          {
+            "end_time": 12192,
+            "start_time": 11952,
+            "text": "一"
+          },
+          {
+            "end_time": 12472,
+            "start_time": 12192,
+            "text": "上"
+          },
+          {
+            "end_time": 12672,
+            "start_time": 12472,
+            "text": "午"
+          },
+          {
+            "end_time": 13032,
+            "start_time": 12712,
+            "text": "先"
+          },
+          {
+            "end_time": 13272,
+            "start_time": 13032,
+            "text": "检"
+          },
+          {
+            "end_time": 13512,
+            "start_time": 13272,
+            "text": "查"
+          },
+          {
+            "end_time": 13912,
+            "start_time": 13632,
+            "text": "会"
+          },
+          {
+            "end_time": 14032,
+            "start_time": 13912,
+            "text": "议"
+          },
+          {
+            "end_time": 14272,
+            "start_time": 14032,
+            "text": "室"
+          },
+          {
+            "end_time": 14512,
+            "start_time": 14312,
+            "text": "设"
+          },
+          {
+            "end_time": 14712,
+            "start_time": 14512,
+            "text": "备"
+          }
+        ]
+      },
+      {
+        "text": "然后包括屏幕、麦克风和网络，发现异常就记录下来，提前安排处理，避免开会时耽误大家。车。周末下午联系时还没有回复的同事，确认他们能否参加讨论。如果时间冲突，就把可选时间安排到原来的安排里面。",
+        "start_time": 15362,
+        "end_time": 33801,
+        "words": [
+          {
+            "end_time": 15642,
+            "start_time": 15442,
+            "text": "然"
+          },
+          {
+            "end_time": 15882,
+            "start_time": 15642,
+            "text": "后"
+          },
+          {
+            "end_time": 16202,
+            "start_time": 16002,
+            "text": "包"
+          },
+          {
+            "end_time": 16362,
+            "start_time": 16202,
+            "text": "括"
+          },
+          {
+            "end_time": 16522,
+            "start_time": 16362,
+            "text": "屏"
+          },
+          {
+            "end_time": 16642,
+            "start_time": 16522,
+            "text": "幕"
+          },
+          {
+            "end_time": 16842,
+            "start_time": 16682,
+            "text": "麦"
+          },
+          {
+            "end_time": 17002,
+            "start_time": 16842,
+            "text": "克"
+          },
+          {
+            "end_time": 17162,
+            "start_time": 17002,
+            "text": "风"
+          },
+          {
+            "end_time": 17362,
+            "start_time": 17162,
+            "text": "和"
+          },
+          {
+            "end_time": 17522,
+            "start_time": 17362,
+            "text": "网"
+          },
+          {
+            "end_time": 17682,
+            "start_time": 17522,
+            "text": "络"
+          },
+          {
+            "end_time": 18282,
+            "start_time": 18042,
+            "text": "发"
+          },
+          {
+            "end_time": 18402,
+            "start_time": 18282,
+            "text": "现"
+          },
+          {
+            "end_time": 18722,
+            "start_time": 18562,
+            "text": "异"
+          },
+          {
+            "end_time": 18802,
+            "start_time": 18722,
+            "text": "常"
+          },
+          {
+            "end_time": 19082,
+            "start_time": 18882,
+            "text": "就"
+          },
+          {
+            "end_time": 19162,
+            "start_time": 19082,
+            "text": "记"
+          },
+          {
+            "end_time": 19322,
+            "start_time": 19162,
+            "text": "录"
+          },
+          {
+            "end_time": 19482,
+            "start_time": 19322,
+            "text": "下"
+          },
+          {
+            "end_time": 19642,
+            "start_time": 19482,
+            "text": "来"
+          },
+          {
+            "end_time": 19962,
+            "start_time": 19762,
+            "text": "提"
+          },
+          {
+            "end_time": 20082,
+            "start_time": 19962,
+            "text": "前"
+          },
+          {
+            "end_time": 20482,
+            "start_time": 20282,
+            "text": "安"
+          },
+          {
+            "end_time": 20642,
+            "start_time": 20482,
+            "text": "排"
+          },
+          {
+            "end_time": 20842,
+            "start_time": 20642,
+            "text": "处"
+          },
+          {
+            "end_time": 21002,
+            "start_time": 20842,
+            "text": "理"
+          },
+          {
+            "end_time": 21642,
+            "start_time": 21442,
+            "text": "避"
+          },
+          {
+            "end_time": 21802,
+            "start_time": 21642,
+            "text": "免"
+          },
+          {
+            "end_time": 22002,
+            "start_time": 21802,
+            "text": "开"
+          },
+          {
+            "end_time": 22202,
+            "start_time": 22002,
+            "text": "会"
+          },
+          {
+            "end_time": 22442,
+            "start_time": 22242,
+            "text": "时"
+          },
+          {
+            "end_time": 22602,
+            "start_time": 22442,
+            "text": "耽"
+          },
+          {
+            "end_time": 22722,
+            "start_time": 22602,
+            "text": "误"
+          },
+          {
+            "end_time": 22842,
+            "start_time": 22722,
+            "text": "大"
+          },
+          {
+            "end_time": 23002,
+            "start_time": 22842,
+            "text": "家"
+          },
+          {
+            "end_time": 23242,
+            "start_time": 23082,
+            "text": "车"
+          },
+          {
+            "end_time": 23922,
+            "start_time": 23762,
+            "text": "周"
+          },
+          {
+            "end_time": 24042,
+            "start_time": 23922,
+            "text": "末"
+          },
+          {
+            "end_time": 24282,
+            "start_time": 24122,
+            "text": "下"
+          },
+          {
+            "end_time": 24402,
+            "start_time": 24282,
+            "text": "午"
+          },
+          {
+            "end_time": 24562,
+            "start_time": 24442,
+            "text": "联"
+          },
+          {
+            "end_time": 24682,
+            "start_time": 24562,
+            "text": "系"
+          },
+          {
+            "end_time": 24882,
+            "start_time": 24802,
+            "text": "时"
+          },
+          {
+            "end_time": 25162,
+            "start_time": 25002,
+            "text": "还"
+          },
+          {
+            "end_time": 25282,
+            "start_time": 25162,
+            "text": "没"
+          },
+          {
+            "end_time": 25402,
+            "start_time": 25282,
+            "text": "有"
+          },
+          {
+            "end_time": 25602,
+            "start_time": 25402,
+            "text": "回"
+          },
+          {
+            "end_time": 25722,
+            "start_time": 25602,
+            "text": "复"
+          },
+          {
+            "end_time": 25882,
+            "start_time": 25762,
+            "text": "的"
+          },
+          {
+            "end_time": 26082,
+            "start_time": 25922,
+            "text": "同"
+          },
+          {
+            "end_time": 26202,
+            "start_time": 26082,
+            "text": "事"
+          },
+          {
+            "end_time": 26522,
+            "start_time": 26282,
+            "text": "确"
+          },
+          {
+            "end_time": 26602,
+            "start_time": 26522,
+            "text": "认"
+          },
+          {
+            "end_time": 26762,
+            "start_time": 26642,
+            "text": "他"
+          },
+          {
+            "end_time": 26882,
+            "start_time": 26762,
+            "text": "们"
+          },
+          {
+            "end_time": 27082,
+            "start_time": 26882,
+            "text": "能"
+          },
+          {
+            "end_time": 27242,
+            "start_time": 27082,
+            "text": "否"
+          },
+          {
+            "end_time": 27562,
+            "start_time": 27362,
+            "text": "参"
+          },
+          {
+            "end_time": 27722,
+            "start_time": 27562,
+            "text": "加"
+          },
+          {
+            "end_time": 27922,
+            "start_time": 27762,
+            "text": "讨"
+          },
+          {
+            "end_time": 28082,
+            "start_time": 27922,
+            "text": "论"
+          },
+          {
+            "end_time": 29042,
+            "start_time": 28842,
+            "text": "如"
+          },
+          {
+            "end_time": 29282,
+            "start_time": 29042,
+            "text": "果"
+          },
+          {
+            "end_time": 29602,
+            "start_time": 29402,
+            "text": "时"
+          },
+          {
+            "end_time": 29722,
+            "start_time": 29602,
+            "text": "间"
+          },
+          {
+            "end_time": 29962,
+            "start_time": 29762,
+            "text": "冲"
+          },
+          {
+            "end_time": 30042,
+            "start_time": 30002,
+            "text": "突"
+          },
+          {
+            "end_time": 30362,
+            "start_time": 30162,
+            "text": "就"
+          },
+          {
+            "end_time": 30602,
+            "start_time": 30362,
+            "text": "把"
+          },
+          {
+            "end_time": 31042,
+            "start_time": 30842,
+            "text": "可"
+          },
+          {
+            "end_time": 31242,
+            "start_time": 31122,
+            "text": "选"
+          },
+          {
+            "end_time": 31562,
+            "start_time": 31362,
+            "text": "时"
+          },
+          {
+            "end_time": 31722,
+            "start_time": 31562,
+            "text": "间"
+          },
+          {
+            "end_time": 31962,
+            "start_time": 31762,
+            "text": "安"
+          },
+          {
+            "end_time": 32122,
+            "start_time": 31962,
+            "text": "排"
+          },
+          {
+            "end_time": 32322,
+            "start_time": 32122,
+            "text": "到"
+          },
+          {
+            "end_time": 32482,
+            "start_time": 32322,
+            "text": "原"
+          },
+          {
+            "end_time": 32602,
+            "start_time": 32482,
+            "text": "来"
+          },
+          {
+            "end_time": 32762,
+            "start_time": 32602,
+            "text": "的"
+          },
+          {
+            "end_time": 32882,
+            "start_time": 32762,
+            "text": "安"
+          },
+          {
+            "end_time": 33002,
+            "start_time": 32882,
+            "text": "排"
+          },
+          {
+            "end_time": 33162,
+            "start_time": 33002,
+            "text": "里"
+          },
+          {
+            "end_time": 33322,
+            "start_time": 33162,
+            "text": "面"
+          }
+        ]
+      },
+      {
+        "text": "然后资料分成三个部分，左边核对已放过的文件，中间放需要补充的部分，右边放还没有确认的事项。然后最后整理后再统一编号。",
+        "start_time": 34062,
+        "end_time": 47021,
+        "words": [
+          {
+            "end_time": 34422,
+            "start_time": 34222,
+            "text": "然"
+          },
+          {
+            "end_time": 34662,
+            "start_time": 34422,
+            "text": "后"
+          },
+          {
+            "end_time": 34902,
+            "start_time": 34742,
+            "text": "资"
+          },
+          {
+            "end_time": 35022,
+            "start_time": 34902,
+            "text": "料"
+          },
+          {
+            "end_time": 35262,
+            "start_time": 35102,
+            "text": "分"
+          },
+          {
+            "end_time": 35422,
+            "start_time": 35262,
+            "text": "成"
+          },
+          {
+            "end_time": 35582,
+            "start_time": 35422,
+            "text": "三"
+          },
+          {
+            "end_time": 35742,
+            "start_time": 35582,
+            "text": "个"
+          },
+          {
+            "end_time": 35902,
+            "start_time": 35742,
+            "text": "部"
+          },
+          {
+            "end_time": 36022,
+            "start_time": 35902,
+            "text": "分"
+          },
+          {
+            "end_time": 36422,
+            "start_time": 36222,
+            "text": "左"
+          },
+          {
+            "end_time": 36622,
+            "start_time": 36422,
+            "text": "边"
+          },
+          {
+            "end_time": 36902,
+            "start_time": 36742,
+            "text": "核"
+          },
+          {
+            "end_time": 37022,
+            "start_time": 36902,
+            "text": "对"
+          },
+          {
+            "end_time": 37222,
+            "start_time": 37102,
+            "text": "已"
+          },
+          {
+            "end_time": 37382,
+            "start_time": 37262,
+            "text": "放"
+          },
+          {
+            "end_time": 37502,
+            "start_time": 37382,
+            "text": "过"
+          },
+          {
+            "end_time": 37662,
+            "start_time": 37502,
+            "text": "的"
+          },
+          {
+            "end_time": 37782,
+            "start_time": 37662,
+            "text": "文"
+          },
+          {
+            "end_time": 37982,
+            "start_time": 37782,
+            "text": "件"
+          },
+          {
+            "end_time": 38302,
+            "start_time": 38102,
+            "text": "中"
+          },
+          {
+            "end_time": 38462,
+            "start_time": 38302,
+            "text": "间"
+          },
+          {
+            "end_time": 38742,
+            "start_time": 38502,
+            "text": "放"
+          },
+          {
+            "end_time": 38942,
+            "start_time": 38742,
+            "text": "需"
+          },
+          {
+            "end_time": 39102,
+            "start_time": 38942,
+            "text": "要"
+          },
+          {
+            "end_time": 39342,
+            "start_time": 39182,
+            "text": "补"
+          },
+          {
+            "end_time": 39462,
+            "start_time": 39382,
+            "text": "充"
+          },
+          {
+            "end_time": 39622,
+            "start_time": 39502,
+            "text": "的"
+          },
+          {
+            "end_time": 39822,
+            "start_time": 39662,
+            "text": "部"
+          },
+          {
+            "end_time": 39942,
+            "start_time": 39822,
+            "text": "分"
+          },
+          {
+            "end_time": 40902,
+            "start_time": 40702,
+            "text": "右"
+          },
+          {
+            "end_time": 41102,
+            "start_time": 40902,
+            "text": "边"
+          },
+          {
+            "end_time": 41382,
+            "start_time": 41142,
+            "text": "放"
+          },
+          {
+            "end_time": 41582,
+            "start_time": 41382,
+            "text": "还"
+          },
+          {
+            "end_time": 41702,
+            "start_time": 41582,
+            "text": "没"
+          },
+          {
+            "end_time": 41822,
+            "start_time": 41702,
+            "text": "有"
+          },
+          {
+            "end_time": 42022,
+            "start_time": 41822,
+            "text": "确"
+          },
+          {
+            "end_time": 42142,
+            "start_time": 42022,
+            "text": "认"
+          },
+          {
+            "end_time": 42302,
+            "start_time": 42142,
+            "text": "的"
+          },
+          {
+            "end_time": 42502,
+            "start_time": 42302,
+            "text": "事"
+          },
+          {
+            "end_time": 42662,
+            "start_time": 42502,
+            "text": "项"
+          },
+          {
+            "end_time": 43622,
+            "start_time": 43462,
+            "text": "然"
+          },
+          {
+            "end_time": 43822,
+            "start_time": 43622,
+            "text": "后"
+          },
+          {
+            "end_time": 44022,
+            "start_time": 43822,
+            "text": "最"
+          },
+          {
+            "end_time": 44222,
+            "start_time": 44022,
+            "text": "后"
+          },
+          {
+            "end_time": 44502,
+            "start_time": 44262,
+            "text": "整"
+          },
+          {
+            "end_time": 44622,
+            "start_time": 44502,
+            "text": "理"
+          },
+          {
+            "end_time": 44942,
+            "start_time": 44662,
+            "text": "后"
+          },
+          {
+            "end_time": 45142,
+            "start_time": 44942,
+            "text": "再"
+          },
+          {
+            "end_time": 45382,
+            "start_time": 45222,
+            "text": "统"
+          },
+          {
+            "end_time": 45502,
+            "start_time": 45382,
+            "text": "一"
+          },
+          {
+            "end_time": 45702,
+            "start_time": 45542,
+            "text": "编"
+          },
+          {
+            "end_time": 45942,
+            "start_time": 45702,
+            "text": "号"
+          }
+        ]
+      },
+      {
+        "text": "然后暂时按照三百，二百三十元记录。实际支出以后再核对，采购的东西要写清楚名称和数量，同时保留对应的票据，方便后边查询。",
+        "start_time": 47141,
+        "end_time": 61321,
+        "words": [
+          {
+            "end_time": 47821,
+            "start_time": 47621,
+            "text": "然"
+          },
+          {
+            "end_time": 48061,
+            "start_time": 47821,
+            "text": "后"
+          },
+          {
+            "end_time": 48381,
+            "start_time": 48101,
+            "text": "暂"
+          },
+          {
+            "end_time": 48541,
+            "start_time": 48381,
+            "text": "时"
+          },
+          {
+            "end_time": 48781,
+            "start_time": 48541,
+            "text": "按"
+          },
+          {
+            "end_time": 49021,
+            "start_time": 48781,
+            "text": "照"
+          },
+          {
+            "end_time": 49541,
+            "start_time": 49301,
+            "text": "三"
+          },
+          {
+            "end_time": 49781,
+            "start_time": 49541,
+            "text": "百"
+          },
+          {
+            "end_time": 50181,
+            "start_time": 50021,
+            "text": "二"
+          },
+          {
+            "end_time": 50341,
+            "start_time": 50181,
+            "text": "百"
+          },
+          {
+            "end_time": 50461,
+            "start_time": 50341,
+            "text": "三"
+          },
+          {
+            "end_time": 50581,
+            "start_time": 50461,
+            "text": "十"
+          },
+          {
+            "end_time": 50701,
+            "start_time": 50581,
+            "text": "元"
+          },
+          {
+            "end_time": 50901,
+            "start_time": 50821,
+            "text": "记"
+          },
+          {
+            "end_time": 51021,
+            "start_time": 50941,
+            "text": "录"
+          },
+          {
+            "end_time": 51781,
+            "start_time": 51501,
+            "text": "实"
+          },
+          {
+            "end_time": 51901,
+            "start_time": 51781,
+            "text": "际"
+          },
+          {
+            "end_time": 52181,
+            "start_time": 51981,
+            "text": "支"
+          },
+          {
+            "end_time": 52581,
+            "start_time": 52181,
+            "text": "出"
+          },
+          {
+            "end_time": 52941,
+            "start_time": 52701,
+            "text": "以"
+          },
+          {
+            "end_time": 53101,
+            "start_time": 52941,
+            "text": "后"
+          },
+          {
+            "end_time": 53301,
+            "start_time": 53101,
+            "text": "再"
+          },
+          {
+            "end_time": 53461,
+            "start_time": 53301,
+            "text": "核"
+          },
+          {
+            "end_time": 53701,
+            "start_time": 53461,
+            "text": "对"
+          },
+          {
+            "end_time": 54141,
+            "start_time": 53941,
+            "text": "采"
+          },
+          {
+            "end_time": 54381,
+            "start_time": 54141,
+            "text": "购"
+          },
+          {
+            "end_time": 54701,
+            "start_time": 54381,
+            "text": "的"
+          },
+          {
+            "end_time": 54861,
+            "start_time": 54701,
+            "text": "东"
+          },
+          {
+            "end_time": 54981,
+            "start_time": 54861,
+            "text": "西"
+          },
+          {
+            "end_time": 55221,
+            "start_time": 54981,
+            "text": "要"
+          },
+          {
+            "end_time": 55421,
+            "start_time": 55221,
+            "text": "写"
+          },
+          {
+            "end_time": 55621,
+            "start_time": 55421,
+            "text": "清"
+          },
+          {
+            "end_time": 55741,
+            "start_time": 55621,
+            "text": "楚"
+          },
+          {
+            "end_time": 56021,
+            "start_time": 55821,
+            "text": "名"
+          },
+          {
+            "end_time": 56141,
+            "start_time": 56021,
+            "text": "称"
+          },
+          {
+            "end_time": 56341,
+            "start_time": 56221,
+            "text": "和"
+          },
+          {
+            "end_time": 56501,
+            "start_time": 56381,
+            "text": "数"
+          },
+          {
+            "end_time": 56661,
+            "start_time": 56501,
+            "text": "量"
+          },
+          {
+            "end_time": 57621,
+            "start_time": 57381,
+            "text": "同"
+          },
+          {
+            "end_time": 57781,
+            "start_time": 57621,
+            "text": "时"
+          },
+          {
+            "end_time": 58141,
+            "start_time": 57861,
+            "text": "保"
+          },
+          {
+            "end_time": 58381,
+            "start_time": 58141,
+            "text": "留"
+          },
+          {
+            "end_time": 58581,
+            "start_time": 58381,
+            "text": "对"
+          },
+          {
+            "end_time": 58661,
+            "start_time": 58581,
+            "text": "应"
+          },
+          {
+            "end_time": 58861,
+            "start_time": 58661,
+            "text": "的"
+          },
+          {
+            "end_time": 59101,
+            "start_time": 58861,
+            "text": "票"
+          },
+          {
+            "end_time": 59261,
+            "start_time": 59101,
+            "text": "据"
+          },
+          {
+            "end_time": 59821,
+            "start_time": 59541,
+            "text": "方"
+          },
+          {
+            "end_time": 59901,
+            "start_time": 59821,
+            "text": "便"
+          },
+          {
+            "end_time": 60141,
+            "start_time": 59941,
+            "text": "后"
+          },
+          {
+            "end_time": 60261,
+            "start_time": 60181,
+            "text": "边"
+          },
+          {
+            "end_time": 60581,
+            "start_time": 60381,
+            "text": "查"
+          },
+          {
+            "end_time": 60781,
+            "start_time": 60581,
+            "text": "询"
+          }
+        ]
+      },
+      {
+        "text": "现在需要去任执行律师。",
+        "start_time": 61391,
+        "end_time": 64012,
+        "words": [
+          {
+            "end_time": 62071,
+            "start_time": 61911,
+            "text": "现"
+          },
+          {
+            "end_time": 62271,
+            "start_time": 62071,
+            "text": "在"
+          },
+          {
+            "end_time": 62551,
+            "start_time": 62391,
+            "text": "需"
+          },
+          {
+            "end_time": 62671,
+            "start_time": 62551,
+            "text": "要"
+          },
+          {
+            "end_time": 62911,
+            "start_time": 62831,
+            "text": "去"
+          },
+          {
+            "end_time": 63111,
+            "start_time": 63071,
+            "text": "任"
+          },
+          {
+            "end_time": 63471,
+            "start_time": 63391,
+            "text": "执"
+          },
+          {
+            "end_time": 63591,
+            "start_time": 63551,
+            "text": "行"
+          },
+          {
+            "end_time": 63871,
+            "start_time": 63831,
+            "text": "律"
+          },
+          {
+            "end_time": 63911,
+            "start_time": 63871,
+            "text": "师"
+          }
+        ]
+      }
+    ]
+  },
+  "secondary": {
+    "text": "开始录音。今天我们一起整理一下下周的工作，文件列成清单，再逐量负责，确认负责人，所有内容和按照实际进度填写。周一上午先检查会议室设备，然后包括屏幕、麦克风和网络，发现异常就记录下来，提前安排处理，避免开会时耽误大家。周五下午联系时还没有回复的同事，确认他们能否参加讨论。如果时间充足，就把可选时间安。然后资料分成三个部分，左边核对已放过的文件，中间放需要补充的部分，右边放还没有确认的事项。然后最后整理后再统一编号。然后暂时按照三百，二百三十元记录，实际支出以后再核对。采购的东西要写清楚名称和数量，同时保留对应的票据，方便。",
+    "utterances": [
+      {
+        "text": "开始录音。今天我们一起整理一下下周的工作，文件列成清单，再逐量负责，确认负责人，所有内容和按照实际进度填写。",
+        "end_time": 11112,
+        "words": [
+          {
+            "end_time": 920,
+            "start_time": 640,
+            "text": "开"
+          },
+          {
+            "end_time": 1040,
+            "start_time": 920,
+            "text": "始"
+          },
+          {
+            "end_time": 1240,
+            "start_time": 1040,
+            "text": "录"
+          },
+          {
+            "end_time": 1440,
+            "start_time": 1240,
+            "text": "音"
+          },
+          {
+            "end_time": 1640,
+            "start_time": 1480,
+            "text": "今"
+          },
+          {
+            "end_time": 1720,
+            "start_time": 1640,
+            "text": "天"
+          },
+          {
+            "end_time": 1840,
+            "start_time": 1720,
+            "text": "我"
+          },
+          {
+            "end_time": 1960,
+            "start_time": 1840,
+            "text": "们"
+          },
+          {
+            "end_time": 2160,
+            "start_time": 1960,
+            "text": "一"
+          },
+          {
+            "end_time": 2240,
+            "start_time": 2160,
+            "text": "起"
+          },
+          {
+            "end_time": 2600,
+            "start_time": 2400,
+            "text": "整"
+          },
+          {
+            "end_time": 2680,
+            "start_time": 2600,
+            "text": "理"
+          },
+          {
+            "end_time": 2840,
+            "start_time": 2680,
+            "text": "一"
+          },
+          {
+            "end_time": 2960,
+            "start_time": 2840,
+            "text": "下"
+          },
+          {
+            "end_time": 3240,
+            "start_time": 3000,
+            "text": "下"
+          },
+          {
+            "end_time": 3440,
+            "start_time": 3240,
+            "text": "周"
+          },
+          {
+            "end_time": 3600,
+            "start_time": 3440,
+            "text": "的"
+          },
+          {
+            "end_time": 3760,
+            "start_time": 3600,
+            "text": "工"
+          },
+          {
+            "end_time": 3840,
+            "start_time": 3760,
+            "text": "作"
+          },
+          {
+            "end_time": 4200,
+            "start_time": 4080,
+            "text": "文"
+          },
+          {
+            "end_time": 4320,
+            "start_time": 4200,
+            "text": "件"
+          },
+          {
+            "end_time": 4480,
+            "start_time": 4360,
+            "text": "列"
+          },
+          {
+            "end_time": 4680,
+            "start_time": 4520,
+            "text": "成"
+          },
+          {
+            "end_time": 4880,
+            "start_time": 4720,
+            "text": "清"
+          },
+          {
+            "end_time": 5040,
+            "start_time": 4880,
+            "text": "单"
+          },
+          {
+            "end_time": 5280,
+            "start_time": 5080,
+            "text": "再"
+          },
+          {
+            "end_time": 5440,
+            "start_time": 5320,
+            "text": "逐"
+          },
+          {
+            "end_time": 5600,
+            "start_time": 5480,
+            "text": "量"
+          },
+          {
+            "end_time": 5960,
+            "start_time": 5800,
+            "text": "负"
+          },
+          {
+            "end_time": 6160,
+            "start_time": 5960,
+            "text": "责"
+          },
+          {
+            "end_time": 6920,
+            "start_time": 6640,
+            "text": "确"
+          },
+          {
+            "end_time": 7080,
+            "start_time": 6920,
+            "text": "认"
+          },
+          {
+            "end_time": 7240,
+            "start_time": 7120,
+            "text": "负"
+          },
+          {
+            "end_time": 7400,
+            "start_time": 7240,
+            "text": "责"
+          },
+          {
+            "end_time": 7640,
+            "start_time": 7400,
+            "text": "人"
+          },
+          {
+            "end_time": 8160,
+            "start_time": 7960,
+            "text": "所"
+          },
+          {
+            "end_time": 8320,
+            "start_time": 8160,
+            "text": "有"
+          },
+          {
+            "end_time": 8440,
+            "start_time": 8320,
+            "text": "内"
+          },
+          {
+            "end_time": 8560,
+            "start_time": 8440,
+            "text": "容"
+          },
+          {
+            "end_time": 8840,
+            "start_time": 8600,
+            "text": "和"
+          },
+          {
+            "end_time": 9240,
+            "start_time": 9040,
+            "text": "按"
+          },
+          {
+            "end_time": 9400,
+            "start_time": 9240,
+            "text": "照"
+          },
+          {
+            "end_time": 9680,
+            "start_time": 9480,
+            "text": "实"
+          },
+          {
+            "end_time": 9800,
+            "start_time": 9680,
+            "text": "际"
+          },
+          {
+            "end_time": 9960,
+            "start_time": 9920,
+            "text": "进"
+          },
+          {
+            "end_time": 10120,
+            "start_time": 10040,
+            "text": "度"
+          },
+          {
+            "end_time": 10400,
+            "start_time": 10200,
+            "text": "填"
+          },
+          {
+            "end_time": 10600,
+            "start_time": 10400,
+            "text": "写"
+          }
+        ]
+      },
+      {
+        "text": "周一上午先检查会议室设备，然后包括屏幕、麦克风和网络，发现异常就记录下来，提前安排处理，避免开会时耽误大家。周五下午联系时还没有回复的同事，确认他们能否参加讨论。如果时间充足，就把可选时间安。",
+        "start_time": 11522,
+        "end_time": 32032,
+        "words": [
+          {
+            "end_time": 11922,
+            "start_time": 11682,
+            "text": "周"
+          },
+          {
+            "end_time": 12242,
+            "start_time": 11922,
+            "text": "一"
+          },
+          {
+            "end_time": 12482,
+            "start_time": 12242,
+            "text": "上"
+          },
+          {
+            "end_time": 12682,
+            "start_time": 12482,
+            "text": "午"
+          },
+          {
+            "end_time": 13002,
+            "start_time": 12682,
+            "text": "先"
+          },
+          {
+            "end_time": 13282,
+            "start_time": 13002,
+            "text": "检"
+          },
+          {
+            "end_time": 13522,
+            "start_time": 13282,
+            "text": "查"
+          },
+          {
+            "end_time": 13922,
+            "start_time": 13642,
+            "text": "会"
+          },
+          {
+            "end_time": 14042,
+            "start_time": 13922,
+            "text": "议"
+          },
+          {
+            "end_time": 14282,
+            "start_time": 14042,
+            "text": "室"
+          },
+          {
+            "end_time": 14522,
+            "start_time": 14322,
+            "text": "设"
+          },
+          {
+            "end_time": 14722,
+            "start_time": 14522,
+            "text": "备"
+          },
+          {
+            "end_time": 15602,
+            "start_time": 15322,
+            "text": "然"
+          },
+          {
+            "end_time": 15922,
+            "start_time": 15602,
+            "text": "后"
+          },
+          {
+            "end_time": 16202,
+            "start_time": 15962,
+            "text": "包"
+          },
+          {
+            "end_time": 16362,
+            "start_time": 16202,
+            "text": "括"
+          },
+          {
+            "end_time": 16522,
+            "start_time": 16362,
+            "text": "屏"
+          },
+          {
+            "end_time": 16682,
+            "start_time": 16522,
+            "text": "幕"
+          },
+          {
+            "end_time": 16842,
+            "start_time": 16682,
+            "text": "麦"
+          },
+          {
+            "end_time": 17002,
+            "start_time": 16842,
+            "text": "克"
+          },
+          {
+            "end_time": 17162,
+            "start_time": 17002,
+            "text": "风"
+          },
+          {
+            "end_time": 17362,
+            "start_time": 17162,
+            "text": "和"
+          },
+          {
+            "end_time": 17522,
+            "start_time": 17362,
+            "text": "网"
+          },
+          {
+            "end_time": 17722,
+            "start_time": 17522,
+            "text": "络"
+          },
+          {
+            "end_time": 18282,
+            "start_time": 18002,
+            "text": "发"
+          },
+          {
+            "end_time": 18402,
+            "start_time": 18282,
+            "text": "现"
+          },
+          {
+            "end_time": 18722,
+            "start_time": 18562,
+            "text": "异"
+          },
+          {
+            "end_time": 18802,
+            "start_time": 18722,
+            "text": "常"
+          },
+          {
+            "end_time": 19082,
+            "start_time": 18882,
+            "text": "就"
+          },
+          {
+            "end_time": 19162,
+            "start_time": 19082,
+            "text": "记"
+          },
+          {
+            "end_time": 19322,
+            "start_time": 19162,
+            "text": "录"
+          },
+          {
+            "end_time": 19482,
+            "start_time": 19322,
+            "text": "下"
+          },
+          {
+            "end_time": 19642,
+            "start_time": 19482,
+            "text": "来"
+          },
+          {
+            "end_time": 19962,
+            "start_time": 19762,
+            "text": "提"
+          },
+          {
+            "end_time": 20082,
+            "start_time": 19962,
+            "text": "前"
+          },
+          {
+            "end_time": 20482,
+            "start_time": 20282,
+            "text": "安"
+          },
+          {
+            "end_time": 20642,
+            "start_time": 20482,
+            "text": "排"
+          },
+          {
+            "end_time": 20882,
+            "start_time": 20642,
+            "text": "处"
+          },
+          {
+            "end_time": 21042,
+            "start_time": 20882,
+            "text": "理"
+          },
+          {
+            "end_time": 21642,
+            "start_time": 21442,
+            "text": "避"
+          },
+          {
+            "end_time": 21802,
+            "start_time": 21642,
+            "text": "免"
+          },
+          {
+            "end_time": 22002,
+            "start_time": 21802,
+            "text": "开"
+          },
+          {
+            "end_time": 22202,
+            "start_time": 22002,
+            "text": "会"
+          },
+          {
+            "end_time": 22442,
+            "start_time": 22202,
+            "text": "时"
+          },
+          {
+            "end_time": 22602,
+            "start_time": 22442,
+            "text": "耽"
+          },
+          {
+            "end_time": 22722,
+            "start_time": 22602,
+            "text": "误"
+          },
+          {
+            "end_time": 22882,
+            "start_time": 22722,
+            "text": "大"
+          },
+          {
+            "end_time": 23002,
+            "start_time": 22882,
+            "text": "家"
+          },
+          {
+            "end_time": 23922,
+            "start_time": 23722,
+            "text": "周"
+          },
+          {
+            "end_time": 24002,
+            "start_time": 23962,
+            "text": "五"
+          },
+          {
+            "end_time": 24282,
+            "start_time": 24122,
+            "text": "下"
+          },
+          {
+            "end_time": 24402,
+            "start_time": 24282,
+            "text": "午"
+          },
+          {
+            "end_time": 24562,
+            "start_time": 24402,
+            "text": "联"
+          },
+          {
+            "end_time": 24682,
+            "start_time": 24562,
+            "text": "系"
+          },
+          {
+            "end_time": 24882,
+            "start_time": 24802,
+            "text": "时"
+          },
+          {
+            "end_time": 25162,
+            "start_time": 25002,
+            "text": "还"
+          },
+          {
+            "end_time": 25282,
+            "start_time": 25162,
+            "text": "没"
+          },
+          {
+            "end_time": 25402,
+            "start_time": 25282,
+            "text": "有"
+          },
+          {
+            "end_time": 25602,
+            "start_time": 25402,
+            "text": "回"
+          },
+          {
+            "end_time": 25722,
+            "start_time": 25602,
+            "text": "复"
+          },
+          {
+            "end_time": 25922,
+            "start_time": 25722,
+            "text": "的"
+          },
+          {
+            "end_time": 26082,
+            "start_time": 25922,
+            "text": "同"
+          },
+          {
+            "end_time": 26202,
+            "start_time": 26082,
+            "text": "事"
+          },
+          {
+            "end_time": 26482,
+            "start_time": 26282,
+            "text": "确"
+          },
+          {
+            "end_time": 26602,
+            "start_time": 26482,
+            "text": "认"
+          },
+          {
+            "end_time": 26762,
+            "start_time": 26642,
+            "text": "他"
+          },
+          {
+            "end_time": 26882,
+            "start_time": 26762,
+            "text": "们"
+          },
+          {
+            "end_time": 27082,
+            "start_time": 26882,
+            "text": "能"
+          },
+          {
+            "end_time": 27242,
+            "start_time": 27082,
+            "text": "否"
+          },
+          {
+            "end_time": 27562,
+            "start_time": 27362,
+            "text": "参"
+          },
+          {
+            "end_time": 27722,
+            "start_time": 27562,
+            "text": "加"
+          },
+          {
+            "end_time": 27922,
+            "start_time": 27762,
+            "text": "讨"
+          },
+          {
+            "end_time": 28042,
+            "start_time": 27922,
+            "text": "论"
+          },
+          {
+            "end_time": 29042,
+            "start_time": 28842,
+            "text": "如"
+          },
+          {
+            "end_time": 29282,
+            "start_time": 29042,
+            "text": "果"
+          },
+          {
+            "end_time": 29522,
+            "start_time": 29402,
+            "text": "时"
+          },
+          {
+            "end_time": 29682,
+            "start_time": 29602,
+            "text": "间"
+          },
+          {
+            "end_time": 29922,
+            "start_time": 29882,
+            "text": "充"
+          },
+          {
+            "end_time": 30042,
+            "start_time": 30002,
+            "text": "足"
+          },
+          {
+            "end_time": 30322,
+            "start_time": 30162,
+            "text": "就"
+          },
+          {
+            "end_time": 30602,
+            "start_time": 30322,
+            "text": "把"
+          },
+          {
+            "end_time": 31042,
+            "start_time": 30722,
+            "text": "可"
+          },
+          {
+            "end_time": 31242,
+            "start_time": 31082,
+            "text": "选"
+          },
+          {
+            "end_time": 31522,
+            "start_time": 31362,
+            "text": "时"
+          },
+          {
+            "end_time": 31682,
+            "start_time": 31522,
+            "text": "间"
+          },
+          {
+            "end_time": 31842,
+            "start_time": 31802,
+            "text": "安"
+          }
+        ]
+      },
+      {
+        "start_time": 32032,
+        "end_time": 33792
+      },
+      {
+        "text": "然后资料分成三个部分，左边核对已放过的文件，中间放需要补充的部分，右边放还没有确认的事项。然后最后整理后再统一编号。",
+        "start_time": 34091,
+        "end_time": 46521,
+        "words": [
+          {
+            "end_time": 34411,
+            "start_time": 34251,
+            "text": "然"
+          },
+          {
+            "end_time": 34651,
+            "start_time": 34411,
+            "text": "后"
+          },
+          {
+            "end_time": 34891,
+            "start_time": 34731,
+            "text": "资"
+          },
+          {
+            "end_time": 35011,
+            "start_time": 34891,
+            "text": "料"
+          },
+          {
+            "end_time": 35251,
+            "start_time": 35091,
+            "text": "分"
+          },
+          {
+            "end_time": 35411,
+            "start_time": 35251,
+            "text": "成"
+          },
+          {
+            "end_time": 35571,
+            "start_time": 35411,
+            "text": "三"
+          },
+          {
+            "end_time": 35731,
+            "start_time": 35571,
+            "text": "个"
+          },
+          {
+            "end_time": 35891,
+            "start_time": 35731,
+            "text": "部"
+          },
+          {
+            "end_time": 36011,
+            "start_time": 35891,
+            "text": "分"
+          },
+          {
+            "end_time": 36451,
+            "start_time": 36211,
+            "text": "左"
+          },
+          {
+            "end_time": 36611,
+            "start_time": 36451,
+            "text": "边"
+          },
+          {
+            "end_time": 36931,
+            "start_time": 36771,
+            "text": "核"
+          },
+          {
+            "end_time": 37011,
+            "start_time": 36931,
+            "text": "对"
+          },
+          {
+            "end_time": 37251,
+            "start_time": 37091,
+            "text": "已"
+          },
+          {
+            "end_time": 37371,
+            "start_time": 37251,
+            "text": "放"
+          },
+          {
+            "end_time": 37491,
+            "start_time": 37371,
+            "text": "过"
+          },
+          {
+            "end_time": 37651,
+            "start_time": 37491,
+            "text": "的"
+          },
+          {
+            "end_time": 37811,
+            "start_time": 37651,
+            "text": "文"
+          },
+          {
+            "end_time": 37971,
+            "start_time": 37811,
+            "text": "件"
+          },
+          {
+            "end_time": 38331,
+            "start_time": 38091,
+            "text": "中"
+          },
+          {
+            "end_time": 38451,
+            "start_time": 38331,
+            "text": "间"
+          },
+          {
+            "end_time": 38731,
+            "start_time": 38491,
+            "text": "放"
+          },
+          {
+            "end_time": 38931,
+            "start_time": 38771,
+            "text": "需"
+          },
+          {
+            "end_time": 39091,
+            "start_time": 38931,
+            "text": "要"
+          },
+          {
+            "end_time": 39331,
+            "start_time": 39171,
+            "text": "补"
+          },
+          {
+            "end_time": 39451,
+            "start_time": 39371,
+            "text": "充"
+          },
+          {
+            "end_time": 39611,
+            "start_time": 39531,
+            "text": "的"
+          },
+          {
+            "end_time": 39811,
+            "start_time": 39651,
+            "text": "部"
+          },
+          {
+            "end_time": 39971,
+            "start_time": 39811,
+            "text": "分"
+          },
+          {
+            "end_time": 40891,
+            "start_time": 40691,
+            "text": "右"
+          },
+          {
+            "end_time": 41091,
+            "start_time": 40891,
+            "text": "边"
+          },
+          {
+            "end_time": 41371,
+            "start_time": 41171,
+            "text": "放"
+          },
+          {
+            "end_time": 41611,
+            "start_time": 41371,
+            "text": "还"
+          },
+          {
+            "end_time": 41731,
+            "start_time": 41611,
+            "text": "没"
+          },
+          {
+            "end_time": 41811,
+            "start_time": 41731,
+            "text": "有"
+          },
+          {
+            "end_time": 42011,
+            "start_time": 41811,
+            "text": "确"
+          },
+          {
+            "end_time": 42131,
+            "start_time": 42011,
+            "text": "认"
+          },
+          {
+            "end_time": 42331,
+            "start_time": 42131,
+            "text": "的"
+          },
+          {
+            "end_time": 42491,
+            "start_time": 42331,
+            "text": "事"
+          },
+          {
+            "end_time": 42691,
+            "start_time": 42491,
+            "text": "项"
+          },
+          {
+            "end_time": 43611,
+            "start_time": 43411,
+            "text": "然"
+          },
+          {
+            "end_time": 43811,
+            "start_time": 43611,
+            "text": "后"
+          },
+          {
+            "end_time": 44011,
+            "start_time": 43811,
+            "text": "最"
+          },
+          {
+            "end_time": 44211,
+            "start_time": 44011,
+            "text": "后"
+          },
+          {
+            "end_time": 44531,
+            "start_time": 44251,
+            "text": "整"
+          },
+          {
+            "end_time": 44651,
+            "start_time": 44531,
+            "text": "理"
+          },
+          {
+            "end_time": 44971,
+            "start_time": 44651,
+            "text": "后"
+          },
+          {
+            "end_time": 45171,
+            "start_time": 44971,
+            "text": "再"
+          },
+          {
+            "end_time": 45371,
+            "start_time": 45171,
+            "text": "统"
+          },
+          {
+            "end_time": 45531,
+            "start_time": 45371,
+            "text": "一"
+          },
+          {
+            "end_time": 45731,
+            "start_time": 45571,
+            "text": "编"
+          },
+          {
+            "end_time": 46011,
+            "start_time": 45731,
+            "text": "号"
+          }
+        ]
+      },
+      {
+        "text": "然后暂时按照三百，二百三十元记录，实际支出以后再核对。采购的东西要写清楚名称和数量，同时保留对应的票据，方便。",
+        "start_time": 47452,
+        "end_time": 60462,
+        "words": [
+          {
+            "end_time": 47812,
+            "start_time": 47612,
+            "text": "然"
+          },
+          {
+            "end_time": 48052,
+            "start_time": 47812,
+            "text": "后"
+          },
+          {
+            "end_time": 48372,
+            "start_time": 48092,
+            "text": "暂"
+          },
+          {
+            "end_time": 48532,
+            "start_time": 48372,
+            "text": "时"
+          },
+          {
+            "end_time": 48812,
+            "start_time": 48532,
+            "text": "按"
+          },
+          {
+            "end_time": 49012,
+            "start_time": 48812,
+            "text": "照"
+          },
+          {
+            "end_time": 49572,
+            "start_time": 49292,
+            "text": "三"
+          },
+          {
+            "end_time": 49812,
+            "start_time": 49572,
+            "text": "百"
+          },
+          {
+            "end_time": 50172,
+            "start_time": 49932,
+            "text": "二"
+          },
+          {
+            "end_time": 50292,
+            "start_time": 50172,
+            "text": "百"
+          },
+          {
+            "end_time": 50452,
+            "start_time": 50292,
+            "text": "三"
+          },
+          {
+            "end_time": 50572,
+            "start_time": 50452,
+            "text": "十"
+          },
+          {
+            "end_time": 50692,
+            "start_time": 50572,
+            "text": "元"
+          },
+          {
+            "end_time": 50892,
+            "start_time": 50852,
+            "text": "记"
+          },
+          {
+            "end_time": 51012,
+            "start_time": 50972,
+            "text": "录"
+          },
+          {
+            "end_time": 51772,
+            "start_time": 51492,
+            "text": "实"
+          },
+          {
+            "end_time": 51892,
+            "start_time": 51772,
+            "text": "际"
+          },
+          {
+            "end_time": 52172,
+            "start_time": 51972,
+            "text": "支"
+          },
+          {
+            "end_time": 52572,
+            "start_time": 52172,
+            "text": "出"
+          },
+          {
+            "end_time": 52932,
+            "start_time": 52692,
+            "text": "以"
+          },
+          {
+            "end_time": 53092,
+            "start_time": 52932,
+            "text": "后"
+          },
+          {
+            "end_time": 53292,
+            "start_time": 53132,
+            "text": "再"
+          },
+          {
+            "end_time": 53492,
+            "start_time": 53292,
+            "text": "核"
+          },
+          {
+            "end_time": 53732,
+            "start_time": 53492,
+            "text": "对"
+          },
+          {
+            "end_time": 54132,
+            "start_time": 53892,
+            "text": "采"
+          },
+          {
+            "end_time": 54372,
+            "start_time": 54132,
+            "text": "购"
+          },
+          {
+            "end_time": 54692,
+            "start_time": 54412,
+            "text": "的"
+          },
+          {
+            "end_time": 54852,
+            "start_time": 54692,
+            "text": "东"
+          },
+          {
+            "end_time": 54972,
+            "start_time": 54852,
+            "text": "西"
+          },
+          {
+            "end_time": 55212,
+            "start_time": 54972,
+            "text": "要"
+          },
+          {
+            "end_time": 55412,
+            "start_time": 55212,
+            "text": "写"
+          },
+          {
+            "end_time": 55612,
+            "start_time": 55412,
+            "text": "清"
+          },
+          {
+            "end_time": 55732,
+            "start_time": 55612,
+            "text": "楚"
+          },
+          {
+            "end_time": 56012,
+            "start_time": 55852,
+            "text": "名"
+          },
+          {
+            "end_time": 56132,
+            "start_time": 56012,
+            "text": "称"
+          },
+          {
+            "end_time": 56332,
+            "start_time": 56212,
+            "text": "和"
+          },
+          {
+            "end_time": 56532,
+            "start_time": 56372,
+            "text": "数"
+          },
+          {
+            "end_time": 56692,
+            "start_time": 56532,
+            "text": "量"
+          },
+          {
+            "end_time": 57612,
+            "start_time": 57412,
+            "text": "同"
+          },
+          {
+            "end_time": 57812,
+            "start_time": 57612,
+            "text": "时"
+          },
+          {
+            "end_time": 58132,
+            "start_time": 57852,
+            "text": "保"
+          },
+          {
+            "end_time": 58372,
+            "start_time": 58132,
+            "text": "留"
+          },
+          {
+            "end_time": 58572,
+            "start_time": 58372,
+            "text": "对"
+          },
+          {
+            "end_time": 58692,
+            "start_time": 58572,
+            "text": "应"
+          },
+          {
+            "end_time": 58852,
+            "start_time": 58692,
+            "text": "的"
+          },
+          {
+            "end_time": 59092,
+            "start_time": 58852,
+            "text": "票"
+          },
+          {
+            "end_time": 59252,
+            "start_time": 59092,
+            "text": "据"
+          },
+          {
+            "end_time": 59852,
+            "start_time": 59692,
+            "text": "方"
+          },
+          {
+            "end_time": 59972,
+            "start_time": 59852,
+            "text": "便"
+          }
+        ]
+      }
+    ]
+  },
+  "extracted_owner": [
+    [
+      0,
+      60000
+    ]
+  ],
+  "physical": [
+    [
+      9000,
+      12000
+    ],
+    [
+      15000,
+      18000
+    ],
+    [
+      27000,
+      30000
+    ],
+    [
+      45000,
+      48000
+    ],
+    [
+      57000,
+      60000
+    ]
+  ],
+  "source_owner": [
+    [
+      0,
+      64011
+    ]
+  ]
+}

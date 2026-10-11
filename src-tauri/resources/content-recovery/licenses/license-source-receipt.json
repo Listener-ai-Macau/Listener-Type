@@ -1,0 +1,32 @@
+[
+  {
+    "file": "OpenMDW-1.1.html",
+    "url": "https://openmdw.ai/license/1-1/",
+    "bytes": 54206,
+    "sha256": "b4801149644740a9f9e23256ecbc9cfe03cd30832300208eaf8126f5aff55858"
+  },
+  {
+    "file": "NVIDIA-Open-Model-License.html",
+    "url": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/",
+    "bytes": 307222,
+    "sha256": "ea7d669d258f9343eb1bccd4dae67083da4423418735724a4491b5e3d8fb7768"
+  },
+  {
+    "file": "Apache-2.0.txt",
+    "url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+    "bytes": 11358,
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  {
+    "file": "Nemotron-3.5-MODEL-CARD.md",
+    "url": "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b/raw/ea30d66debe3740a08b573244286791d423d6b3e/README.md",
+    "bytes": 54239,
+    "sha256": "a3344caadf796c084c6b90a9fa5978068fd45e3a019790bebe50489bb3c0f7b7"
+  },
+  {
+    "file": "Sortformer-2.1-MODEL-CARD.md",
+    "url": "https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2.1/raw/cd03eee90fbec18297ac31b8c21546e596b7f71c/README.md",
+    "bytes": 27604,
+    "sha256": "0cfd901cb5e44b20b107f939532f772905a4f1da453182a4047963e6eb87d619"
+  }
+]

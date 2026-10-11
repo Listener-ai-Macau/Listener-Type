@@ -5,6 +5,7 @@ param(
   [switch]$SkipRustInstall,
   [switch]$SkipNpmCi,
   [switch]$IncludePortable,
+  [switch]$ExportOnly,
   [switch]$CleanArtifacts,
   [switch]$ReuseExistingExe,
   [switch]$SkipDesktopShortcut,
@@ -506,6 +507,43 @@ function Reset-ArtifactsRoot {
   New-Item -ItemType Directory -Force -Path $ArtifactsRoot | Out-Null
 }
 
+function Copy-PortableTauriResources {
+  param([string]$DestinationRoot)
+
+  $tauriRoot = [System.IO.Path]::GetFullPath((Join-Path $appRoot "src-tauri"))
+  $sourcePrefix = $tauriRoot.TrimEnd([char[]]'\/') + [System.IO.Path]::DirectorySeparatorChar
+  $config = Get-Content -LiteralPath (Join-Path $tauriRoot "tauri.conf.json") -Raw | ConvertFrom-Json
+  $copied = @{}
+  foreach ($resource in $config.bundle.resources) {
+    if ($resource -isnot [string]) {
+      throw "Portable resource export requires the configured resource path list."
+    }
+    if ($resource.EndsWith('/**/*')) {
+      $directory = Join-Path $tauriRoot $resource.Substring(0, $resource.Length - 5)
+      $files = @(Get-ChildItem -LiteralPath $directory -File -Recurse -ErrorAction Stop)
+    } elseif ($resource.Contains('*')) {
+      $files = @(Get-ChildItem -Path (Join-Path $tauriRoot $resource) -File -ErrorAction Stop)
+    } else {
+      $entry = Get-Item -LiteralPath (Join-Path $tauriRoot $resource) -ErrorAction Stop
+      $files = if ($entry.PSIsContainer) { @(Get-ChildItem -LiteralPath $entry.FullName -File -Recurse) } else { @($entry) }
+    }
+    if ($files.Count -eq 0) { throw "No portable payload files for configured resource: $resource" }
+    foreach ($file in $files) {
+      $sourcePath = [System.IO.Path]::GetFullPath($file.FullName)
+      if (-not $sourcePath.StartsWith($sourcePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Portable resource is outside the Tauri source directory: $sourcePath"
+      }
+      $relativePath = $sourcePath.Substring($sourcePrefix.Length)
+      if ($copied.ContainsKey($relativePath)) { continue }
+      $destination = Join-Path $DestinationRoot $relativePath
+      New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+      Copy-Item -LiteralPath $sourcePath -Destination $destination -Force
+      $copied[$relativePath] = $true
+    }
+  }
+  Write-Host "[ok] Portable ZIP includes $($copied.Count) configured model, runtime and license resources."
+}
+
 function Copy-WindowsArtifacts {
   $version = Get-PackageVersion
   $msiName = Get-MsiName
@@ -521,6 +559,12 @@ function Copy-WindowsArtifacts {
   Reset-ArtifactsRoot
   Copy-Item -LiteralPath $msiPath -Destination (Join-Path $ArtifactsRoot $msiName) -Force
 
+  $artifactPrefix = [System.IO.Path]::GetFullPath($ArtifactsRoot).TrimEnd([char[]]'\/') + [System.IO.Path]::DirectorySeparatorChar
+  foreach ($outputPath in @($portableRoot, $zipPath)) {
+    if (-not [System.IO.Path]::GetFullPath($outputPath).StartsWith($artifactPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+      throw "Portable cleanup target is outside the artifact directory: $outputPath"
+    }
+  }
   Remove-Item -LiteralPath $portableRoot -Recurse -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
 
@@ -541,6 +585,7 @@ function Copy-WindowsArtifacts {
     New-Item -ItemType Directory -Force -Path $portableRoot | Out-Null
     Copy-Item -LiteralPath $exePath -Destination (Join-Path $portableRoot "listener-type.exe") -Force
     Copy-Item -LiteralPath $webView2Loader.FullName -Destination (Join-Path $portableRoot "WebView2Loader.dll") -Force
+    Copy-PortableTauriResources -DestinationRoot $portableRoot
     Compress-Archive -LiteralPath $portableRoot -DestinationPath $zipPath -CompressionLevel Optimal
     $hashPaths += $zipPath
   }
@@ -801,6 +846,10 @@ function Update-DesktopShortcut {
 Push-Location $appRoot
 try {
   Write-Host "[info] App root: $appRoot"
+  if ($ExportOnly.IsPresent) {
+    Copy-WindowsArtifacts
+    return
+  }
   Install-RustMsvcToolchain
   Test-WebView2Runtime
 

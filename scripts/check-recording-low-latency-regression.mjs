@@ -125,16 +125,16 @@ const captureLoop = captureEventsOnly.slice(captureLoopStart);
 for (const token of [
   "mpsc::channel::<AudioControlRequest>()",
   "ActiveAudioControlRegistration::install(",
-  "cleanup.drain_audio_control_requests(&control_rx);",
+  "cleanup.poll_audio_control_requests(&control_rx);",
   "rx.recv_timeout(receive_timeout)",
 ]) {
   requireIncludes(captureLoop, token, "Active capture low-latency control channel");
 }
 if (
-  captureLoop.indexOf("cleanup.drain_audio_control_requests(&control_rx);") >
+  captureLoop.indexOf("cleanup.poll_audio_control_requests(&control_rx);") >
   captureLoop.indexOf("rx.recv_timeout(receive_timeout)")
 ) {
-  fail("Active capture must drain audio control requests before waiting for the next BLE notification");
+  fail("Active capture must poll audio control requests before waiting for the next BLE notification");
 }
 
 const stopHelper = section(
@@ -169,13 +169,17 @@ requireIncludes(writePolicy, "AudioControlWritePolicy::LowLatency", "Recording s
 
 const controlRequestHandler = section(
   embeddedBle,
-  "fn handle_audio_control_request",
-  "fn drain_audio_control_requests",
+  "fn poll_audio_control_requests",
+  "fn has_pending_audio_control",
   "active audio control request handler",
 );
 for (const token of ["queued_ms", "active audio control dispatch label={}"]) {
   requireIncludes(controlRequestHandler, token, "Runtime latency evidence logging");
 }
+for (const token of ["poll_pending_audio_control_write", "next_live_audio_control_request", "PendingAudioControlWrite::start"]) {
+  requireIncludes(controlRequestHandler, token, "Control writes must progress asynchronously in the capture poll");
+}
+requireExcludes(controlRequestHandler, ".get()", "Capture control dispatch must not wait for a WinRT operation");
 
 requireIncludes(
   embeddedFileSmoke,

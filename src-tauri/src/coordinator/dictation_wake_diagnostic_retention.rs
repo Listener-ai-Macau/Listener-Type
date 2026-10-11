@@ -10,7 +10,8 @@ fn prune_default_wake_diagnostics(directory: &std::path::Path) -> Result<usize, 
         let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
             continue;
         };
-        let is_matching_wav = file_name.starts_with("wake-candidate-")
+        let is_matching_wav = (file_name.starts_with("wake-candidate-")
+            || file_name.starts_with("wake-stage2-"))
             && path
                 .extension()
                 .and_then(|value| value.to_str())

@@ -5,6 +5,222 @@
 
 use serde_json::Value;
 
+/// Clause confirmation narrows irreversible delivery; it never grants speaker
+/// ownership or seals the stream. Keep the certificate in its decoder's clock.
+#[derive(Default)]
+pub(super) struct RecognitionBoundary {
+    advertised: bool,
+    words: std::collections::HashMap<(u64, u64, String), bool>,
+    complete_rendering: Option<String>,
+}
+
+impl RecognitionBoundary {
+    pub(super) fn requires_confirmation(&self) -> bool { self.advertised }
+
+    pub(super) fn update(&mut self, result: &Value) {
+        use crate::transcript_boundary::content_key;
+        // Second-pass result.text can correct the rendering before its word
+        // rows do. Keep a certificate for this response's whole occurrence;
+        // do not borrow word coordinates from a preceding rendering.
+        self.complete_rendering = complete_confirmed_result_rendering(result);
+        let previous = std::mem::take(&mut self.words);
+        for row in result.get("utterances").and_then(Value::as_array).into_iter().flatten() {
+            let definite = row.get("definite").and_then(Value::as_bool);
+            self.advertised |= definite.is_some();
+            let row_key = content_key(row.get("text").and_then(Value::as_str).unwrap_or_default());
+            let mut through_key = String::new();
+            let mut entries = Vec::new();
+            let mut valid = true;
+            let mut previous_end = None;
+            for word in row.get("words").and_then(Value::as_array).into_iter().flatten() {
+                let key = content_key(word.get("text").and_then(Value::as_str).unwrap_or_default());
+                if key.is_empty() { continue; }
+                through_key.push_str(&key);
+                let coordinate = |keys: &[&str]| keys.iter().find_map(|key| word.get(*key))
+                    .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()));
+                let (Some(start), Some(end)) = (
+                    coordinate(&["start_time", "startTime", "start_ms"]),
+                    coordinate(&["end_time", "endTime", "end_ms"]),
+                ) else { valid = false; continue; };
+                valid &= start < end && previous_end.is_none_or(|prior| start >= prior);
+                previous_end = Some(end);
+                entries.push((start, end, key));
+            }
+            let aligned = valid && through_key == row_key;
+            for entry in entries {
+                // A later stream row can coalesce a confirmed clause and a
+                // provisional tail. Preserve only the exact unchanged words
+                // and audio occurrence from the preceding response.
+                let confirmed = aligned && (definite == Some(true) || previous.get(&entry) == Some(&true));
+                self.words.entry(entry).and_modify(|prior| *prior &= confirmed).or_insert(confirmed);
+            }
+        }
+    }
+
+    pub(super) fn complete_rendering_matches(&self, text: &str) -> bool {
+        self.complete_rendering.as_ref().is_some_and(|current|
+            crate::transcript_boundary::content_key(current)
+                == crate::transcript_boundary::content_key(text))
+    }
+
+    /// An explicit empty occurrence in an otherwise nonempty response retracts
+    /// only previously observed provisional words at those source coordinates.
+    /// A seal-only empty response, a missing observation, and confirmed speech
+    /// cannot acquire this deletion authority.
+    pub(super) fn retract_explicit_empty_words(
+        &self,
+        result: &Value,
+        previous: &crate::transcript_boundary::TimedTranscript,
+        protected_owner_audio: &[(u64, u64)],
+    ) -> Option<crate::transcript_boundary::TimedTranscript> {
+        use crate::transcript_boundary::{content_key, consumed_prefix_end, TimedTranscript};
+        if self.complete_rendering_matches(&previous.text)
+            || content_key(result.get("text")?.as_str()?).is_empty()
+        { return None; }
+        let rows = result.get("utterances")?.as_array()?;
+        let ranges: Vec<_> = rows.iter().filter_map(explicit_confirmed_empty_range).collect();
+        if ranges.is_empty() { return None; }
+        let mut key = String::new();
+        let mut cursor = 0;
+        let mut text = String::new();
+        let mut retained = Vec::new();
+        let mut previous_end = None;
+        let mut removed = false;
+        for word in &previous.words {
+            let word_key = content_key(&word.text);
+            if word_key.is_empty() { continue; }
+            let (start, end) = (word.start_ms?, word.end_ms?);
+            if start >= end || previous_end.is_some_and(|prior| start < prior) { return None; }
+            previous_end = Some(end);
+            key.push_str(&word_key);
+            let through = consumed_prefix_end(&previous.text, &key)?;
+            let retract = ranges.iter().any(|(left, right)| *left <= start && end <= *right)
+                && self.words.get(&(start, end, word_key)) == Some(&false)
+                && !protected_owner_audio.iter().any(|(left, right)| start < *right && *left < end);
+            if retract { removed = true; }
+            else {
+                text.push_str(&previous.text[cursor..through]);
+                retained.push(word.clone());
+            }
+            cursor = through;
+        }
+        // Incomplete timing cannot remove an untimed or differently rendered
+        // occurrence. Retained punctuation, spacing and numeric spelling stay
+        // byte-identical to the old accepted rendering.
+        if !removed || key != content_key(&previous.text) { return None; }
+        text.push_str(&previous.text[cursor..]);
+        Some(TimedTranscript { text, words: retained })
+    }
+
+    pub(super) fn confirmed_admitted_prefix(
+        &self,
+        text: &str,
+        timing: Option<&crate::transcript_boundary::TimedTranscript>,
+    ) -> Option<String> {
+        if self.complete_rendering_matches(text) {
+            return Some(text.to_string());
+        }
+        self.confirmed_prefix(text, timing)
+    }
+
+    pub(super) fn confirmed_prefix(
+        &self,
+        text: &str,
+        timing: Option<&crate::transcript_boundary::TimedTranscript>,
+    ) -> Option<String> {
+        use crate::transcript_boundary::{content_key, consumed_prefix_end};
+        // Legacy formats without clause finality retain rolling stability.
+        // Once advertised, missing metadata cannot downgrade this contract.
+        if !self.advertised { return Some(text.to_string()); }
+        let timing = timing?;
+        let key = content_key(text);
+        if key.is_empty() || !content_key(&timing.text).starts_with(&key) { return None; }
+        let mut confirmed = String::new();
+        let mut previous_end = None;
+        for word in &timing.words {
+            let word_key = content_key(&word.text);
+            if word_key.is_empty() { continue; }
+            if !key[confirmed.len()..].starts_with(&word_key) { break; }
+            let (Some(start), Some(end)) = (word.start_ms, word.end_ms) else { break; };
+            if start >= end || previous_end.is_some_and(|prior| start < prior)
+                || self.words.get(&(start, end, word_key.clone())) != Some(&true) { break; }
+            previous_end = Some(end);
+            confirmed.push_str(&word_key);
+            if confirmed == key { break; }
+        }
+        if confirmed.is_empty() { return None; }
+        consumed_prefix_end(text, &confirmed).map(|end| text[..end].to_string())
+    }
+}
+
+/// Empty audio has no lexical rendering. It is distinct from a missing text
+/// row or contradictory word data, neither of which can authorize retraction
+/// or fill a hole in whole-response confirmation.
+pub(crate) fn has_explicit_empty_flag(row: &Value) -> bool {
+    row.pointer("/additions/two_pass_empty").is_some_and(|flag|
+        flag == &Value::Bool(true) || flag == "true" || flag == "1" || flag == &Value::from(1))
+}
+
+pub(crate) fn explicit_confirmed_empty_range(row: &Value) -> Option<(u64, u64)> {
+    use crate::transcript_boundary::content_key;
+    if !has_explicit_empty_flag(row) || row.get("definite").and_then(Value::as_bool) != Some(true)
+        || row.pointer("/additions/source").and_then(Value::as_str) != Some("two_pass")
+        || !content_key(row.get("text").and_then(Value::as_str).unwrap_or_default()).is_empty()
+        || row.get("words").and_then(Value::as_array).into_iter().flatten()
+            .any(|word| !content_key(word.get("text").and_then(Value::as_str).unwrap_or_default()).is_empty())
+    { return None; }
+    let start = value_millis_field(row, &["start_time", "startTime", "start_ms"])?;
+    let end = value_millis_field(row, &["end_time", "endTime", "end_ms"])?;
+    (start >= 0 && start < end).then_some((start as u64, end as u64))
+}
+
+fn complete_confirmed_result_rendering(result: &Value) -> Option<String> {
+    use crate::transcript_boundary::{content_key, revised_terminal_suffix};
+    let text = result.get("text")?.as_str()?.trim();
+    if content_key(text).is_empty() { return None; }
+    let mut row_text = String::new();
+    let mut previous_end = None;
+    for row in result.get("utterances")?.as_array()? {
+        // Native hard-VAD responses omit text/words on an explicitly empty
+        // occurrence. It does not make the other confirmed clauses pending.
+        if has_explicit_empty_flag(row) {
+            explicit_confirmed_empty_range(row)?;
+            continue;
+        }
+        let rendering = row.get("text")?.as_str()?;
+        let row_key = content_key(rendering);
+        if row_key.is_empty() { continue; }
+        if row.get("definite").and_then(Value::as_bool) != Some(true)
+            || row.pointer("/additions/source").and_then(Value::as_str) != Some("two_pass")
+        { return None; }
+        let mut words_key = String::new();
+        for word in row.get("words")?.as_array()? {
+            let key = content_key(word.get("text")?.as_str()?);
+            if key.is_empty() { continue; }
+            let coordinate = |keys: &[&str]| keys.iter().find_map(|key| word.get(*key))
+                .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()));
+            let start = coordinate(&["start_time", "startTime", "start_ms"])?;
+            let end = coordinate(&["end_time", "endTime", "end_ms"])?;
+            if start >= end || previous_end.is_some_and(|prior| start < prior) { return None; }
+            previous_end = Some(end);
+            words_key.push_str(&key);
+        }
+        // The provider's corrected clause can contain a rendering edit absent
+        // from its timed tokens (e.g. a restored hesitation or a written
+        // number). Use the existing full-body seam only for this same fully
+        // confirmed response. The strict per-word ownership path above keeps
+        // its exact token/range checks and gains no new word permission.
+        revised_terminal_suffix(rendering, &words_key)?;
+        row_text.push_str(rendering);
+    }
+    if content_key(&row_text).is_empty() { return None; }
+    // The same bounded, uniquely retained full-body seam used by editor
+    // reconciliation maps a small spelling/number correction. A divergent,
+    // unrelated or ambiguous rendering cannot acquire this certificate.
+    revised_terminal_suffix(text, &content_key(&row_text))?;
+    Some(text.to_string())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct TranscriptSegment {
     pub(super) start_ms: i64,
@@ -38,6 +254,91 @@ pub(super) fn normalized_result(json: &Value) -> Option<&Value> {
 
 pub(super) fn transcript_text_from_result(result: &Value) -> String {
     transcript_candidate_from_result(result).text
+}
+
+/// A missing row rendering is not an empty audio occurrence. Reconcile it
+/// before timing, recognition confirmation, speaker projection and merging
+/// consume the response. Explicit empty second-pass rows remain empty.
+pub(super) fn reconcile_missing_row_renderings<'a>(
+    result: &'a Value,
+    previous: Option<&Value>,
+) -> std::borrow::Cow<'a, Value> {
+    use crate::transcript_boundary::content_key;
+    use std::borrow::Cow;
+    let Some(rows) = result.get("utterances").and_then(Value::as_array) else {
+        return Cow::Borrowed(result);
+    };
+    let mut recovered = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        if !row.get("text").and_then(Value::as_str).unwrap_or_default().trim().is_empty()
+            || row.pointer("/additions/two_pass_empty").is_some_and(|value|
+                value == "true" || value == &Value::Bool(true))
+        { continue; }
+        let Some(words) = validated_row_word_occurrences(row) else { continue; };
+        let key: String = words.iter().map(|(_, _, text)| content_key(text)).collect();
+        // Reuse punctuation/spacing only for exactly the same words at the
+        // same audio coordinates. A preceding row or repeated phrase cannot
+        // lend its rendering to a new occurrence.
+        let prior = previous.and_then(|previous| previous.get("utterances"))
+            .and_then(Value::as_array).into_iter().flatten().find_map(|prior| {
+                let text = prior.get("text")?.as_str()?;
+                (validated_row_word_occurrences(prior).as_ref() == Some(&words)
+                    && content_key(text) == key).then(|| text.to_string())
+            });
+        let text = prior.unwrap_or_else(|| words.iter().fold(String::new(), |text, (_, _, word)|
+            join_transcript_segments(&text, word)));
+        recovered.push((index, text));
+    }
+    if recovered.is_empty() { return Cow::Borrowed(result); }
+    let original_rows: String = rows.iter().filter_map(|row| row.get("text")?.as_str()).collect();
+    let mut reconciled = result.clone();
+    let patched = reconciled.get_mut("utterances").unwrap().as_array_mut().unwrap();
+    for (index, text) in &recovered { patched[*index]["text"] = Value::String(text.clone()); }
+    let rendered = patched.iter().filter_map(|row| row.get("text")?.as_str())
+        .fold(String::new(), |text, row| join_transcript_segments(&text, row));
+    let main = result.get("text").and_then(Value::as_str).unwrap_or_default();
+    if content_key(main) == content_key(&original_rows) {
+        // Insert only the missing occurrences. Re-rendering all rows here
+        // would also rewrite existing numeric separators, literal operators
+        // or spacing that result.text owns independently of its word rows.
+        let mut prefix = String::new();
+        let mut cursor = 0;
+        let mut with_gaps = String::new();
+        for (index, row) in rows.iter().enumerate() {
+            if let Some((_, text)) = recovered.iter().find(|(missing, _)| *missing == index) {
+                let Some(seam) = crate::transcript_boundary::consumed_prefix_end(main, &prefix) else {
+                    return Cow::Borrowed(result);
+                };
+                with_gaps = join_transcript_segments(&with_gaps, &main[cursor..seam]);
+                with_gaps = join_transcript_segments(&with_gaps, text);
+                cursor = seam;
+            }
+            prefix.push_str(&content_key(row.get("text").and_then(Value::as_str).unwrap_or_default()));
+        }
+        reconciled["text"] = Value::String(join_transcript_segments(&with_gaps, &main[cursor..]));
+    } else if content_key(main) != content_key(&rendered) {
+        // A separate lexical correction cannot be replaced by concatenating
+        // older row renderings. Leave this ambiguous response unmodified.
+        return Cow::Borrowed(result);
+    }
+    Cow::Owned(reconciled)
+}
+
+fn validated_row_word_occurrences(row: &Value) -> Option<Vec<(i64, i64, String)>> {
+    let start = value_millis_field(row, &["start_time", "startTime", "start_ms"]).unwrap_or(0);
+    let end = value_millis_field(row, &["end_time", "endTime", "end_ms"])?;
+    let mut previous_end = start;
+    let mut occurrences = Vec::new();
+    for word in row.get("words")?.as_array()? {
+        let text = word.get("text")?.as_str()?;
+        if crate::transcript_boundary::content_key(text).is_empty() { continue; }
+        let word_start = value_millis_field(word, &["start_time", "startTime", "start_ms"])?;
+        let word_end = value_millis_field(word, &["end_time", "endTime", "end_ms"])?;
+        if word_start < previous_end || word_start >= word_end || word_end > end { return None; }
+        previous_end = word_end;
+        occurrences.push((word_start, word_end, text.to_string()));
+    }
+    (!occurrences.is_empty()).then_some(occurrences)
 }
 
 pub(super) fn transcript_candidate_from_result(result: &Value) -> TranscriptCandidate {
@@ -1080,7 +1381,7 @@ pub(super) fn authoritative_owner_prefix_covers_ledger(
         && authoritative_segments_cover_previous(previous_segments, &provider.timed_segments)
 }
 
-fn authoritative_segments_cover_previous(
+pub(super) fn authoritative_segments_cover_previous(
     previous_segments: &[TranscriptSegment],
     incoming_segments: &[TranscriptSegment],
 ) -> bool {
@@ -1523,6 +1824,169 @@ fn join_transcript_segments(previous: &str, current: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn explicit_empty_retracts_only_provisional_occurrences_including_a_middle_gap() {
+        let rows = vec![
+            json!({"text":"I paid 1,200.00.\r\n", "definite":true, "words":[
+                {"text":"I paid 1,200.00", "start_time":100,"end_time":400}]}),
+            json!({"text":"noise. ", "definite":false, "words":[
+                {"text":"noise", "start_time":500,"end_time":700}]}),
+            json!({"text":"Keep my next sentence.", "definite":true, "words":[
+                {"text":"Keep my next sentence", "start_time":900,"end_time":1200}]}),
+        ];
+        let previous = json!({"text":"I paid 1,200.00.\r\nnoise. Keep my next sentence.","utterances":rows});
+        let mut boundary = RecognitionBoundary::default();
+        boundary.update(&previous);
+        let revision = json!({"text":"I paid 1,200.00. Keep my next sentence.","utterances":[
+            {"start_time":500,"end_time":700,"definite":true,
+             "additions":{"source":"two_pass","two_pass_empty":"true"}}
+        ]});
+        let revised = boundary.retract_explicit_empty_words(&revision, &timed_transcript_from_result(&previous), &[]).unwrap();
+        assert_eq!(revised.text, "I paid 1,200.00.\r\nKeep my next sentence.");
+        assert_eq!(revised.words.len(), 2);
+        assert_eq!(revised.words[1].start_ms, Some(900));
+    }
+
+    #[test]
+    fn empty_markers_cannot_erase_confirmed_unobserved_untimed_or_partial_occurrences() {
+        for definite in [true, false] {
+            let previous = json!({"text":"本人正文。暂存尾句。", "utterances":[
+                {"text":"本人正文。", "definite":true, "words":[
+                    {"text":"本人正文", "start_time":100,"end_time":500}]},
+                {"text":"暂存尾句。", "definite":definite,"words":[
+                    {"text":"暂存尾句","start_time":700,"end_time":1000}]}
+            ]});
+            let timing = timed_transcript_from_result(&previous);
+            let mut boundary = RecognitionBoundary::default();
+            boundary.update(&previous);
+            let base = json!({"text":"本人正文。", "utterances":[
+                {"start_time":700,"end_time":1000,"definite":true,
+                 "additions":{"source":"two_pass","two_pass_empty":true}}
+            ]});
+            if definite { assert!(boundary.retract_explicit_empty_words(&base, &timing, &[]).is_none()); }
+            else { assert_eq!(boundary.retract_explicit_empty_words(&base, &timing, &[]).unwrap().text, "本人正文。"); }
+            assert!(boundary.retract_explicit_empty_words(&base, &timing, &[(800, 900)]).is_none(),
+                "positive owner audio protects the provisional word from a weaker empty ASR revision");
+            for variant in ["seal_only", "unmarked", "partial", "missing_start", "unobserved", "untimed"] {
+                let mut response = base.clone();
+                let mut source = timing.clone();
+                let mut observed = RecognitionBoundary::default();
+                if variant != "unobserved" { observed.update(&previous); }
+                match variant {
+                    "seal_only" => response["text"] = json!(""),
+                    "unmarked" => { response["utterances"][0]["additions"].as_object_mut().unwrap().remove("two_pass_empty"); },
+                    "partial" => response["utterances"][0]["start_time"] = json!(800),
+                    "missing_start" => { response["utterances"][0].as_object_mut().unwrap().remove("start_time"); },
+                    "untimed" => source.words[1].start_ms = None,
+                    _ => {},
+                }
+                assert!(observed.retract_explicit_empty_words(&response, &source, &[]).is_none(), "{variant}");
+            }
+        }
+    }
+
+    #[test]
+    fn source_retraction_preserves_retained_languages_and_rendering() {
+        for text in ["Keep my words. ", "保留本人正文。", "自分の言葉を残す。", "내 말을 보존합니다. ", "احتفظ بكلماتي. "] {
+            let previous = json!({"text":format!("{text}noise"),"utterances":[
+                {"text":text,"definite":true,"words":[{"text":text,"start_time":100,"end_time":500}]},
+                {"text":"noise","definite":false,"words":[{"text":"noise","start_time":700,"end_time":1000}]}
+            ]});
+            let mut boundary = RecognitionBoundary::default(); boundary.update(&previous);
+            let response = json!({"text":text,"utterances":[
+                {"start_time":700,"end_time":1000,"definite":true,
+                 "additions":{"source":"two_pass","two_pass_empty":"true"}}
+            ]});
+            assert_eq!(boundary.retract_explicit_empty_words(&response, &timed_transcript_from_result(&previous), &[]).unwrap().text, text);
+        }
+    }
+
+    #[test]
+    fn missing_row_rendering_preserves_same_occurrence_and_native_confirmation() {
+        let row = json!({"text":"Please keep my whole sentence.", "start_time":100,
+            "end_time":1000, "definite":false, "additions":{"source":"stream","speaker_id":"0"},
+            "words":[{"text":"Please keep", "start_time":100,"end_time":400},
+                {"text":"my whole sentence", "start_time":400,"end_time":900}]});
+        let prior = json!({"text":"Please keep my whole sentence.","utterances":[row.clone()]});
+        let mut missing = row.clone();
+        missing.as_object_mut().unwrap().remove("text");
+        missing["definite"] = json!(true);
+        missing["additions"]["source"] = json!("two_pass");
+        let input = json!({"text":"", "utterances":[missing.clone()]});
+        let normalized = reconcile_missing_row_renderings(&input, Some(&prior));
+        assert_eq!(normalized["text"], prior["text"]);
+        assert_eq!(normalized["utterances"][0]["words"], missing["words"]);
+        assert_eq!(normalized["utterances"][0]["additions"]["speaker_id"], "0");
+        assert!(!input["utterances"][0]["text"].is_string(), "raw provider input remains unchanged");
+        let mut boundary = RecognitionBoundary::default();
+        boundary.update(&normalized);
+        assert!(boundary.complete_rendering_matches(prior["text"].as_str().unwrap()),
+            "definite word evidence must become deliverable before STOP");
+        assert!(matches!(reconcile_missing_row_renderings(&normalized, Some(&prior)), std::borrow::Cow::Borrowed(_)));
+
+        let without_prior = reconcile_missing_row_renderings(&input, None);
+        assert_eq!(without_prior["text"], "Please keep my whole sentence");
+        let already_in_main = json!({"text":"Please keep my whole sentence!","utterances":[missing.clone()]});
+        assert_eq!(reconcile_missing_row_renderings(&already_in_main, Some(&prior))["text"], already_in_main["text"]);
+        let revised_main = json!({"text":"A different corrected sentence.","utterances":[missing.clone()]});
+        assert!(matches!(reconcile_missing_row_renderings(&revised_main, Some(&prior)), std::borrow::Cow::Borrowed(_)));
+        let mut provisional = input.clone();
+        provisional["utterances"][0]["definite"] = json!(false);
+        let provisional = reconcile_missing_row_renderings(&provisional, Some(&prior));
+        let mut pending = RecognitionBoundary::default();
+        pending.update(&provisional);
+        assert!(!pending.complete_rendering_matches(prior["text"].as_str().unwrap()),
+            "rendering repair cannot manufacture native confirmation");
+        let mut later_occurrence = input.clone();
+        later_occurrence["utterances"][0]["end_time"] = json!(2000);
+        later_occurrence["utterances"][0]["start_time"] = json!(1100);
+        for word in later_occurrence["utterances"][0]["words"].as_array_mut().unwrap() {
+            for clock in ["start_time", "end_time"] { word[clock] = json!(word[clock].as_i64().unwrap() + 1000); }
+        }
+        assert_eq!(reconcile_missing_row_renderings(&later_occurrence, Some(&prior))["text"], "Please keep my whole sentence",
+            "a repeated later occurrence must not borrow the earlier punctuation");
+        for invalid in ["explicit_empty", "overlap", "outside", "missing_clock"] {
+            let mut bad = input.clone();
+            match invalid {
+                "explicit_empty" => bad["utterances"][0]["additions"]["two_pass_empty"] = json!("true"),
+                "overlap" => bad["utterances"][0]["words"][1]["start_time"] = json!(200),
+                "outside" => bad["utterances"][0]["words"][1]["end_time"] = json!(1100),
+                _ => { bad["utterances"][0]["words"][1].as_object_mut().unwrap().remove("start_time"); }
+            }
+            assert!(matches!(reconcile_missing_row_renderings(&bad, Some(&prior)), std::borrow::Cow::Borrowed(_)), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn missing_row_rendering_keeps_multilingual_tokens_and_source_identity() {
+        for text in ["请保留我的整句话。", "私の言葉を全部残してください。", "내 말을 모두 남겨 주세요.",
+                     "กรุณาเก็บคำพูดของฉัน", "احتفظ بكل كلامي."] {
+            let row = json!({"text":text,"start_time":100,"end_time":900,"definite":true,
+                "additions":{"source":"two_pass","speaker_id":"foreign-id"},
+                "words":[{"text":text,"start_time":100,"end_time":800}]});
+            let prior = json!({"text":text,"utterances":[row.clone()]});
+            let mut missing = row;
+            missing.as_object_mut().unwrap().remove("text");
+            let input = json!({"text":"","utterances":[missing]});
+            let restored = reconcile_missing_row_renderings(&input, Some(&prior));
+            assert_eq!(restored["text"], text);
+            assert_eq!(restored["utterances"][0]["additions"]["speaker_id"], "foreign-id");
+        }
+    }
+
+    #[test]
+    fn missing_row_rendering_inserts_only_the_gap_preserving_existing_literals() {
+        let input = json!({"text":"Budget 3.50+2: Next sentence.","utterances":[
+            {"text":"Budget 3502:","start_time":0,"end_time":1000},
+            {"start_time":1100,"end_time":1900,"definite":true,
+                "words":[{"text":"keep this","start_time":1200,"end_time":1800}]},
+            {"text":"Next sentence.","start_time":2000,"end_time":2500}]});
+        let restored = reconcile_missing_row_renderings(&input, None);
+        assert_eq!(restored["text"], "Budget 3.50+2: keep this Next sentence.");
+        assert_eq!(restored["utterances"][0], input["utterances"][0]);
+        assert_eq!(restored["utterances"][2], input["utterances"][2]);
+    }
 
     fn transcript_text_prefers_accumulated_result_when_utterances_are_suffix() {
         let result = json!({
@@ -2686,11 +3150,27 @@ pub(crate) fn timed_transcript_from_result(result: &serde_json::Value) -> crate:
     let mut words = Vec::new();
     if let Some(rows) = result.get("utterances").and_then(serde_json::Value::as_array) {
         for row in rows {
+            let row_has_content = row
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|text| !crate::transcript_boundary::content_key(text).is_empty());
             let Some(row_words) = row.get("words").and_then(serde_json::Value::as_array) else {
-                // An untimed row at the beginning is a gap, not permission to
-                // classify the following row as the beginning of the source.
-                break;
+                if row_has_content {
+                    // An untimed spoken row is a gap, not permission to classify
+                    // a later timed row as contiguous with the source prefix.
+                    break;
+                }
+                // Hard VAD can emit a marker row with no text and no words
+                // between two timed clauses. It contributes no transcript or
+                // authority and must not truncate the later word coordinates.
+                continue;
             };
+            if row_words.is_empty() {
+                if row_has_content {
+                    break;
+                }
+                continue;
+            }
             for word in row_words {
                 let text = word.get("text").and_then(serde_json::Value::as_str).unwrap_or_default();
                 if text.is_empty() { break; }
@@ -2707,5 +3187,310 @@ pub(crate) fn timed_transcript_from_result(result: &serde_json::Value) -> crate:
     TimedTranscript {
         text: result.get("text").and_then(serde_json::Value::as_str).unwrap_or_default().to_string(),
         words,
+    }
+}
+
+#[cfg(test)]
+mod recognition_boundary_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn second_pass_row(text: &str, start: u64) -> Value {
+        let mut value = row(text, start, true);
+        value["additions"] = json!({"source":"two_pass"});
+        value
+    }
+
+    #[test]
+    fn confirmed_response_spelling_is_admitted_without_borrowing_word_ownership() {
+        let opening = "我先整理文件。";
+        let mut result = response(vec![second_pass_row(opening, 0),
+            second_pass_row("明天在检查设备。", 1200)]);
+        result["text"] = json!("我先整理文件。明天再检查设备。");
+        let mut boundary = RecognitionBoundary::default();
+        boundary.update(&result);
+        let text = result["text"].as_str().unwrap();
+        let timing = timed_transcript_from_result(&result);
+        assert_eq!(boundary.confirmed_admitted_prefix(text, Some(&timing)), Some(text.to_string()));
+        assert_eq!(boundary.confirmed_prefix(text, Some(&timing)), Some(opening.to_string()),
+            "source-projected ownership still requires the exact word rendering and occurrence");
+    }
+
+    #[test]
+    fn confirmed_clause_rendering_with_an_empty_occurrence_is_not_a_word_identity_certificate() {
+        let words = "请把最后说出的整句话保留下来。";
+        let rendering = format!("嗯，{words}");
+        let mut clause = second_pass_row(&rendering, 0);
+        clause["words"][0]["text"] = json!(words);
+        let empty = json!({"start_time":1000,"end_time":1200,"definite":true,
+            "additions":{"source":"two_pass","two_pass_empty":"true"}});
+        let mut result = json!({"text":rendering,"utterances":[clause,empty]});
+        let mut boundary = RecognitionBoundary::default();
+        boundary.update(&result);
+        let timing = timed_transcript_from_result(&result);
+        assert_eq!(boundary.confirmed_admitted_prefix(&rendering, Some(&timing)), Some(rendering.clone()),
+            "fully confirmed rendering must not wait for STOP because an empty occurrence has no text or a corrected token lacks word timing");
+        assert!(boundary.confirmed_prefix(&rendering, Some(&timing)).is_none(),
+            "recognition cannot manufacture the corrected token's audio ownership");
+        result["utterances"][0]["definite"] = json!(false);
+        boundary.update(&result);
+        assert!(boundary.confirmed_admitted_prefix(&rendering, Some(&timing)).is_none(),
+            "the previous whole response cannot certify a later provisional clause");
+    }
+
+    #[test]
+    fn empty_occurrence_confirmation_rejects_missing_or_contradictory_source_data() {
+        let text = "请保留我的整句正文。";
+        let clause = second_pass_row(text, 0);
+        let empty = json!({"start_time":1000,"end_time":1200,"definite":true,
+            "additions":{"source":"two_pass","two_pass_empty":true}});
+        let mut invalid = Vec::new();
+        let mut missing_flag = empty.clone();
+        missing_flag["additions"].as_object_mut().unwrap().remove("two_pass_empty");
+        invalid.push(missing_flag);
+        let mut pending = empty.clone(); pending["definite"] = json!(false); invalid.push(pending);
+        let mut source = empty.clone(); source["additions"]["source"] = json!("stream"); invalid.push(source);
+        let mut backwards = empty.clone(); backwards["end_time"] = json!(900); invalid.push(backwards);
+        let mut untimed = empty.clone(); untimed.as_object_mut().unwrap().remove("end_time"); invalid.push(untimed);
+        let mut contradictory = empty.clone(); contradictory["words"] = json!([
+            {"text":"another voice","start_time":1000,"end_time":1200}]); invalid.push(contradictory);
+        for gap in invalid {
+            let result = json!({"text":text,"utterances":[clause.clone(),gap]});
+            let mut boundary = RecognitionBoundary::default();
+            boundary.update(&result);
+            assert!(!boundary.complete_rendering_matches(text), "a missing or conflicting row cannot disappear from confirmation: {result}");
+        }
+        let mut false_flag = clause;
+        false_flag["additions"]["two_pass_empty"] = json!(false);
+        let mut boundary = RecognitionBoundary::default();
+        boundary.update(&json!({"text":text,"utterances":[false_flag]}));
+        assert!(boundary.complete_rendering_matches(text), "false is not an empty occurrence");
+    }
+
+    #[test]
+    fn later_provisional_or_missing_rows_cannot_reuse_whole_response_confirmation() {
+        let mut result = response(vec![second_pass_row("我先整理文件。", 0),
+            second_pass_row("明天在检查设备。", 1200)]);
+        result["text"] = json!("我先整理文件。明天再检查设备。");
+        let text = result["text"].as_str().unwrap().to_string();
+        let mut boundary = RecognitionBoundary::default();
+        boundary.update(&result);
+        assert!(boundary.complete_rendering_matches(&text));
+        result["utterances"][1]["definite"] = json!(false);
+        boundary.update(&result);
+        assert!(!boundary.complete_rendering_matches(&text));
+        boundary.update(&json!({"text":text}));
+        assert!(!boundary.complete_rendering_matches(&text));
+    }
+
+    #[test]
+    fn whole_response_confirmation_rejects_bad_scope_and_missing_occurrences() {
+        let base = response(vec![second_pass_row("我先整理文件。", 0),
+            second_pass_row("明天再检查设备。", 1200)]);
+        let mut variants = Vec::new();
+        let mut divergent = base.clone();
+        divergent["text"] = json!("这个完全不同的旁人内容不能冒充刚才的正文。");
+        variants.push(divergent);
+        let mut shortened = base.clone();
+        shortened["text"] = json!("设备。");
+        variants.push(shortened);
+        let mut overlapping = base.clone();
+        overlapping["utterances"][1]["words"][0]["start_time"] = json!(900);
+        variants.push(overlapping);
+        let mut missing = base.clone();
+        missing["utterances"][1]["words"] = json!([]);
+        variants.push(missing);
+        for result in variants {
+            let mut boundary = RecognitionBoundary::default();
+            boundary.update(&result);
+            assert!(!boundary.complete_rendering_matches(result["text"].as_str().unwrap()));
+        }
+    }
+
+    #[test]
+    fn complete_rendering_mapping_is_not_chinese_specific() {
+        for (rows, corrected) in [
+            (["I checked the file. ", "The colour is correct."], "I checked the file. The color is correct."),
+            (["書類を整理しました。", "明日機械を調べます。"], "書類を整理しました。明日機器を調べます。"),
+        ] {
+            let mut result = response(vec![second_pass_row(rows[0], 0), second_pass_row(rows[1], 1200)]);
+            result["text"] = json!(corrected);
+            let mut boundary = RecognitionBoundary::default();
+            boundary.update(&result);
+            assert_eq!(boundary.confirmed_admitted_prefix(corrected, Some(&timed_transcript_from_result(&result))),
+                Some(corrected.to_string()));
+        }
+    }
+
+    fn row(text: &str, start: u64, definite: bool) -> Value {
+        json!({"text":text,"definite":definite,"words":[
+            {"text":text,"start_time":start,"end_time":start+1000}]})
+    }
+    fn response(rows: Vec<Value>) -> Value {
+        let text: String = rows.iter().map(|r| r["text"].as_str().unwrap()).collect();
+        json!({"text":text,"utterances":rows})
+    }
+    fn cap(boundary: &RecognitionBoundary, result: &Value) -> Option<String> {
+        boundary.confirmed_prefix(result["text"].as_str().unwrap(), Some(&timed_transcript_from_result(result)))
+    }
+
+    #[test]
+    fn timed_transcript_skips_empty_marker_between_complete_clauses() {
+        let result = json!({
+            "text": "第一句。第二句。",
+            "utterances": [
+                row("第一句。", 0, true),
+                {"text":"", "start_time":1000, "end_time":1200,
+                    "definite":true, "additions":{"two_pass_empty":"true"}},
+                row("第二句。", 1200, true)
+            ]
+        });
+
+        let timing = timed_transcript_from_result(&result);
+        assert_eq!(timing.words.len(), 2);
+        assert_eq!(timing.words[0].text, "第一句。");
+        assert_eq!(timing.words[1].text, "第二句。");
+    }
+
+    #[test]
+    fn timed_transcript_stops_at_nonempty_untimed_gap() {
+        let result = json!({
+            "text": "第一句。缺词正文。第三句。",
+            "utterances": [
+                row("第一句。", 0, true),
+                {"text":"缺词正文。", "start_time":1000, "end_time":2000,
+                    "definite":true},
+                row("第三句。", 2000, true)
+            ]
+        });
+
+        let timing = timed_transcript_from_result(&result);
+        assert_eq!(timing.words.len(), 1);
+        assert_eq!(timing.words[0].text, "第一句。");
+    }
+
+    #[test]
+    fn timed_transcript_keeps_all_words_across_recorded_empty_hard_vad_row() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "volcengine_secondary_timing_empty_row_fixture.json"
+        ))
+        .unwrap();
+        let result = &fixture["response"]["result"];
+        let rows = result["utterances"].as_array().unwrap();
+        assert_eq!(rows.len(), 5);
+        assert_eq!(rows[2]["text"].as_str().unwrap_or_default(), "");
+        assert!(rows[2].get("words").is_none());
+
+        let timing = timed_transcript_from_result(result);
+        assert_eq!(timing.words.len(), 236);
+        assert_eq!(timing.words[133].text, "安");
+        assert_eq!(timing.words[134].text, "然");
+        assert_eq!(timing.words.last().unwrap().text, "便");
+        assert_eq!(timing.words.last().unwrap().end_ms, Some(59_972));
+    }
+
+    #[test]
+    fn provisional_missing_word_waits_for_confirmed_corrected_clause() {
+        let mut boundary = RecognitionBoundary::default();
+        let provisional = response(vec![row("需要保留内容", 1000, false)]);
+        boundary.update(&provisional);
+        assert_eq!(cap(&boundary, &provisional), None);
+        let corrected = response(vec![row("需要保留的内容", 1000, true)]);
+        boundary.update(&corrected);
+        assert_eq!(cap(&boundary, &corrected).as_deref(), Some("需要保留的内容"));
+        assert_eq!(cap(&boundary, &provisional), None, "old text cannot borrow corrected timing");
+    }
+
+    #[test]
+    fn confirmed_prefix_stops_at_unconfirmed_hole_even_with_later_confirmed_words() {
+        let result = response(vec![row("第一句。", 0, true), row("第二句，", 1000, false), row("第三句。", 2000, true)]);
+        let mut boundary = RecognitionBoundary::default();
+        boundary.update(&result);
+        assert_eq!(cap(&boundary, &result).as_deref(), Some("第一句。"));
+    }
+
+    #[test]
+    fn coalesced_stream_preserves_only_unchanged_previously_confirmed_words() {
+        let mut boundary = RecognitionBoundary::default();
+        boundary.update(&response(vec![row("本人正文。", 0, true)]));
+        let coalesced = json!({"text":"本人正文。待确认尾句。", "utterances":[
+            {"text":"本人正文。待确认尾句。", "definite":false,"words":[
+                {"text":"本人正文。","start_time":0,"end_time":1000},
+                {"text":"待确认尾句。","start_time":1000,"end_time":2000}]}]});
+        boundary.update(&coalesced);
+        assert_eq!(cap(&boundary, &coalesced).as_deref(), Some("本人正文。"));
+        let revised = response(vec![row("本人修订正文。", 0, false)]);
+        boundary.update(&revised);
+        assert_eq!(cap(&boundary, &revised), None, "same time alone cannot preserve lexical permission");
+    }
+
+    #[test]
+    fn identical_text_at_another_occurrence_or_decoder_cannot_borrow_confirmation() {
+        let confirmed = response(vec![row("继续说话", 1000, true)]);
+        let other_occurrence = response(vec![row("继续说话", 4000, true)]);
+        let mut boundary = RecognitionBoundary::default();
+        boundary.update(&confirmed);
+        assert_eq!(cap(&boundary, &other_occurrence), None);
+        let mut child = RecognitionBoundary::default();
+        child.update(&response(vec![row("继续说话", 1000, false)]));
+        assert_eq!(cap(&child, &confirmed), None);
+    }
+
+    #[test]
+    fn invalid_row_alignment_coordinates_or_conflicting_duplicate_cannot_confirm() {
+        for invalid in [
+            json!({"text":"完整正文","definite":true,"words":[{"text":"正文","start_time":0,"end_time":1000}]}),
+            json!({"text":"正文","definite":true,"words":[{"text":"正文","start_time":1000,"end_time":0}]}),
+            json!({"text":"正文","definite":true}),
+            json!({"text":"正文","definite":true,"words":[{"text":"正","start_time":1000,"end_time":2000},{"text":"文","start_time":500,"end_time":1000}]}),
+        ] {
+            let result = response(vec![invalid]);
+            let mut boundary = RecognitionBoundary::default();
+            boundary.update(&result);
+            assert_eq!(cap(&boundary, &result), None);
+        }
+        let mut boundary = RecognitionBoundary::default();
+        boundary.update(&response(vec![row("正文", 0, true), row("正文", 0, false)]));
+        assert_eq!(cap(&boundary, &response(vec![row("正文", 0, true)])), None);
+    }
+
+    #[test]
+    fn missing_finality_cannot_downgrade_an_advertised_contract() {
+        let legacy = json!({"text":"正文"});
+        let mut boundary = RecognitionBoundary::default();
+        boundary.update(&legacy);
+        assert_eq!(cap(&boundary, &legacy).as_deref(), Some("正文"));
+        boundary.update(&response(vec![row("正文", 0, false)]));
+        boundary.update(&legacy);
+        assert_eq!(cap(&boundary, &legacy), None);
+    }
+
+    #[test]
+    #[ignore = "requires archived real provider packets via LISTENER_RECOGNITION_REPLAY_INPUT"]
+    fn recorded_recognition_confirmation_boundary_probe() {
+        let path = std::env::var("LISTENER_RECOGNITION_REPLAY_INPUT").expect("archived replay report path");
+        let data: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let mut boundary = RecognitionBoundary::default();
+        let mut saw_unconfirmed_missing_word = false;
+        let mut saw_confirmed_corrected_word = false;
+        let mut admitted = Vec::new();
+        for packet in data["provider_responses"].as_array().expect("real provider responses") {
+            let Some(result) = normalized_result(packet) else { continue; };
+            boundary.update(result);
+            let text = result["text"].as_str().unwrap_or_default();
+            let prefix = boundary.confirmed_prefix(text, Some(&timed_transcript_from_result(result)));
+            if text.contains("需要保留内容") {
+                saw_unconfirmed_missing_word = true;
+                assert!(!prefix.as_deref().unwrap_or_default().contains("需要保留内容"),
+                    "archived provisional missing word must never be authorized");
+            }
+            if let Some(prefix) = prefix {
+                saw_confirmed_corrected_word |= prefix.contains("需要保留的内容");
+                if admitted.last() != Some(&prefix) { admitted.push(prefix); }
+            }
+        }
+        assert!(saw_unconfirmed_missing_word, "fixture must reproduce the original failure");
+        assert!(saw_confirmed_corrected_word, "corrected owner clause must remain deliverable");
+        eprintln!("RECOGNITION_REPLAY {}", serde_json::json!({"status":"PASS","prefixes":admitted}));
     }
 }

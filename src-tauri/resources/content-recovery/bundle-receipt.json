@@ -1,0 +1,15 @@
+{
+  "builtAt": "2026-10-06T20:24:14+08:00",
+  "sha256": "970b624a8a2be33450e56bb4ca4ff8380d2c5d795e6a1131d8831dd07746aef4",
+  "bytes": 890413984,
+  "asrTensors": 653,
+  "diarizerTensors": 971,
+  "originalAsrDataSha256": "268dfcf3598af2122559fd53fa7057d8a7f5006b5b6900a8a348270265a3c4e4",
+  "originalDiarizerDataSha256": "8be46a19b770316191c1e9c9dd907f81e2e01eed0e632548319e68176745c1b4",
+  "completeWeightBytesCopiedWithoutConversion": true,
+  "ordinaryVariantPreserved": true,
+  "trainedSpeakerKernel": false,
+  "experimentalMaskedOnly": true,
+  "upstreamAsr": "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b",
+  "upstreamDiarizer": "https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2.1"
+}

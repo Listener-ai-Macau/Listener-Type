@@ -23,7 +23,7 @@ try {
   const version = readVersion(root, config.canonical);
   const base = '(?:0|[1-9][0-9]*)';
   const stable = `${base}\\.${base}\\.${base}`;
-  const candidate = version?.match(new RegExp(`^${stable}-([a-z]+)\\.(${base})$`));
+  const candidate = version?.match(new RegExp(`^${stable}-([a-z]+)\\.?(${base})$`));
   if (!new RegExp(`^${stable}$`).test(version) && !config.prerelease_channels?.includes(candidate?.[1])) {
     throw new Error(config.semver_error.replace('{version}', version));
   }

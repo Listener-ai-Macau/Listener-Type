@@ -20,6 +20,9 @@ manifests. Windows MSI uses the numeric base version through `bundle.windows.wix
 the app, artifact name and Git tag retain the full candidate version. Remove the
 candidate suffix and update that numeric base when preparing a stable release.
 
+The 2026-10-11 customer candidate uses `1.0.6-rc1` / `v1.0.6-rc1`, as requested
+for the first public RC. Earlier dotted `rc.N` drafts remain separate history.
+
 ## Manifest Generation
 
 ```bash

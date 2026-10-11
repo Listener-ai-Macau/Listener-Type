@@ -171,9 +171,23 @@ fn data_dir() -> Result<PathBuf> {
 }
 
 pub(crate) fn speaker_verification_root() -> Result<PathBuf> {
+    #[cfg(test)]
+    if let Some(root) = std::env::var_os("LISTENER_SPEAKER_MODEL_ROOT") {
+        let root=PathBuf::from(root);
+        if !root.is_dir() { return Err(anyhow!("explicit saved speaker model root is unavailable")); }
+        return Ok(root);
+    }
     let dir = data_dir()?.join("models").join("speaker-verification");
     fs::create_dir_all(&dir)?;
     Ok(dir)
+}
+
+pub(crate) fn capsule_placement_path() -> Result<PathBuf> {
+    Ok(data_dir()?.join("capsule-position.json"))
+}
+
+pub(crate) fn write_capsule_placement(path: &Path, bytes: &[u8]) -> Result<()> {
+    atomic_write(path, bytes)
 }
 
 fn ensure_dir(dir: &Path) -> Result<()> {
@@ -536,6 +550,8 @@ struct CredsRoot {
     providers: CredsProviders,
     #[serde(default)]
     marketplace: CredsMarketplace,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cloud_account: Option<String>,
 }
 
 fn credsroot_default_version() -> u32 {
@@ -2590,6 +2606,19 @@ impl CredentialsVault {
         let _guard = credentials_lock().lock();
         let mut root = load_credentials_for_update()?;
         write_account(&mut root, account, None);
+        save_credentials(&root)
+    }
+
+    /// Account tokens share the existing chunked OS vault, never Preferences/snapshot IPC.
+    pub fn get_cloud_account() -> Result<Option<String>> {
+        let _guard = credentials_lock().lock();
+        Ok(load_credentials().cloud_account)
+    }
+
+    pub fn set_cloud_account(value: Option<String>) -> Result<()> {
+        let _guard = credentials_lock().lock();
+        let mut root = load_credentials_for_update()?;
+        root.cloud_account = value;
         save_credentials(&root)
     }
 

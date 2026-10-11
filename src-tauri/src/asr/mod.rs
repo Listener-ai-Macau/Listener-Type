@@ -6,13 +6,32 @@
 //! `volcengine.rs`.
 
 pub mod bailian;
+pub mod cloud_voiceprint;
+pub mod cloud_gateway;
+pub(crate) mod content_consensus;
 mod frame;
 pub mod local;
+// Candidate batch engine. Live delivery must first qualify language coverage,
+// process isolation and reconciliation with the shared insertion ledger.
+#[cfg(target_os = "windows")]
+#[allow(dead_code)]
+pub(crate) mod multitalker_native;
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+pub(crate) mod owner_content_extraction;
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+pub(crate) mod content_recovery_worker;
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 pub(crate) mod target_speaker_extraction;
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+mod target_speaker_output;
 pub mod volcengine;
 mod volcengine_platform;
 pub(crate) mod volcengine_transcript;
+pub(crate) mod volcengine_speaker_ledger;
+#[cfg(target_os = "windows")]
+pub(crate) mod volcengine_native_identity;
+#[cfg(target_os = "windows")]
+pub(crate) mod volcengine_pending_source;
 mod volcengine_untimed_merge;
 pub mod wav;
 pub mod whisper;

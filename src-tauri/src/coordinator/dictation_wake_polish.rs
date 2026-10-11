@@ -308,11 +308,28 @@ struct LocalSessionSpeakerTracker {
     next_classification_audio_ms: u64,
     wake_phrase: String,
     enrolled_owner_matched: bool,
+    evidence_sink: Option<std::sync::Weak<crate::asr::VolcengineStreamingASR>>,
+    classification_inflight: Arc<std::sync::atomic::AtomicBool>,
+}
+
+fn publish_local_speaker_evidence(
+    sink: Option<&std::sync::Weak<crate::asr::VolcengineStreamingASR>>,
+    start_ms: u64,
+    end_ms: u64,
+    classification: crate::speaker_verification::SessionSpeakerClassification,
+    transcript_evidence: crate::speech_decision_kernel::TranscriptSpeakerEvidence,
+    quality: bool,
+) {
+    if let Some(asr) = sink.and_then(std::sync::Weak::upgrade) {
+        asr.note_local_speaker_observation_with_audio_range(
+            start_ms, end_ms, classification, transcript_evidence, quality,
+        );
+    }
 }
 
 impl LocalSessionSpeakerTracker {
     fn classification_pending(&self) -> bool {
-        self.classification_rx.is_some()
+        self.classification_inflight.load(std::sync::atomic::Ordering::Acquire)
             || (self.profile_rx.is_some()
                 && self.rolling_pcm.len() >= LOCAL_SPEAKER_CLASSIFY_MIN_BYTES)
     }
@@ -322,8 +339,10 @@ impl LocalSessionSpeakerTracker {
         wake_end_seconds: f32,
         wake_phrase: String,
         enrolled_owner_matched: bool,
+        asr: Option<Arc<crate::asr::VolcengineStreamingASR>>,
     ) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
+        let evidence_sink = asr.as_ref().map(Arc::downgrade);
         let wake_phrase_for_profile = wake_phrase.clone();
         tauri::async_runtime::spawn_blocking(move || {
             let result = crate::speaker_verification::session_profile_from_wake(
@@ -332,6 +351,12 @@ impl LocalSessionSpeakerTracker {
                 &wake_phrase_for_profile,
                 enrolled_owner_matched,
             );
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            if let (Some(asr), Ok(profile)) = (asr, result.as_ref()) {
+                asr.set_target_speaker_source_profile(profile);
+            }
+            #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
+            let _ = asr;
             let _ = tx.send(result);
         });
         Self {
@@ -343,6 +368,8 @@ impl LocalSessionSpeakerTracker {
             next_classification_audio_ms: LOCAL_SPEAKER_CLASSIFY_MIN_MS as u64,
             wake_phrase,
             enrolled_owner_matched,
+            evidence_sink,
+            classification_inflight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -506,17 +533,46 @@ impl LocalSessionSpeakerTracker {
                 if !windows.is_empty() {
                     let (tx, rx) = std::sync::mpsc::channel();
                     self.classification_rx = Some(rx);
+                    let sink = self.evidence_sink.clone();
+                    let inflight = Arc::clone(&self.classification_inflight);
+                    inflight.store(true, std::sync::atomic::Ordering::Release);
                     tauri::async_runtime::spawn_blocking(move || {
                         // Publish each completed window immediately. A startup
                         // backlog must not delay its first positive result until
                         // the last inference finishes.
                         for (start_ms, end_ms, snapshot) in windows {
+                            let inference_started = Instant::now();
                             let result = crate::speaker_verification::observe_session_speaker(
                                 &profile, &snapshot,
-                            ).map(|observation| (start_ms, end_ms, observation));
+                            ).map(|mut observation| {
+                                if let Some(asr) = sink.as_ref().and_then(std::sync::Weak::upgrade) {
+                                    asr.constrain_local_speaker_quality(start_ms, end_ms, &mut observation);
+                                }
+                                (start_ms, end_ms, observation)
+                            });
+                            let inference_ms = inference_started.elapsed().as_millis();
+                            if let Ok((start, end, observation)) = &result {
+                                // The mailbox is for profile adaptation/reporting.
+                                // Identity decisions consume each completed result
+                                // now, even when the audio/session actor is busy.
+                                let publication_started = Instant::now();
+                                publish_local_speaker_evidence(sink.as_ref(), *start, *end,
+                                    observation.classification, observation.transcript_speaker_evidence,
+                                    observation.signal_quality_sufficient);
+                                let publication_ms = publication_started.elapsed().as_millis();
+                                if publication_ms >= 100 {
+                                    log::warn!("[speaker-verification] local evidence publication delayed start_ms={start} end_ms={end} inference_ms={inference_ms} publication_ms={publication_ms}");
+                                }
+                                #[cfg(test)]
+                                eprintln!("LOCAL_EVIDENCE_PROBE start_ms={start} end_ms={end} inference_ms={inference_ms} publication_ms={publication_ms}");
+                            }
                             if tx.send(result).is_err() {
                                 break;
                             }
+                        }
+                        inflight.store(false, std::sync::atomic::Ordering::Release);
+                        if let Some(asr) = sink.as_ref().and_then(std::sync::Weak::upgrade) {
+                            asr.note_local_speaker_analysis_pending(false);
                         }
                     });
                 }
@@ -536,7 +592,7 @@ impl EmbeddedAudioDictationSession {
     fn release_terminal_wake_body(
         &mut self,
         inner: &Arc<Inner>,
-        body: TerminalWakeBody,
+        mut body: TerminalWakeBody,
     ) -> Result<(), String> {
         if body.pcm.is_empty() {
             log::info!(
@@ -547,6 +603,20 @@ impl EmbeddedAudioDictationSession {
         }
 
         let release_pieces = terminal_wake_body_release_pieces(&body);
+        let provider_was_empty = self.streamed_pcm_bytes == 0
+            && self.normalized_pcm_bytes == 0 && self.streaming_pcm_buffer.is_empty();
+        let retained_source = body.retained_verification_source.take().and_then(|source| {
+            source.for_terminal_body(body.candidate_id, body.candidate_range, &body.pcm)
+        }).filter(|source| {
+            release_pieces.iter().all(|piece| {
+                piece.segment_id == Some(source.capture.segment_id)
+                    && piece.collector_metadata.is_some_and(|metadata| {
+                        metadata.collector_instance_id == Some(source.capture.collector_instance_id)
+                            && metadata.segment_ordinal == source.capture.segment_ordinal
+                            && !metadata.metadata_incomplete && !metadata.revision_conflict
+                    })
+            })
+        });
         let mut accepted_total = 0usize;
         for piece in release_pieces {
             let release_bytes = piece.bytes;
@@ -627,6 +697,14 @@ impl EmbeddedAudioDictationSession {
             accepted_total,
             body.candidate_range
         );
+        // Only a complete, first provider input has the body origin asserted
+        // here. Failed/partial release drops its one-shot source receipt.
+        if provider_was_empty && accepted_total == body.pcm.len() {
+            self.attach_retained_wake_verification_source(
+                retained_source,
+                body.candidate_range.map(|range| range.start),
+            );
+        }
         Ok(())
     }
 
@@ -740,6 +818,27 @@ impl EmbeddedAudioDictationSession {
         enrolled_owner_matched: bool,
     ) {
         if let Some(asr) = self.volcengine_asr.as_ref() {
+            // Body delivery removes the accepted leading activation. Keep
+            // that same source coordinate even when identity tracking is off.
+            asr.note_accepted_wake_phrase(&wake_phrase);
+            if asr.owner_activity_only() {
+                let verified_wake = enrolled_owner_matched.then(|| {
+                    let wake_end = ((wake_end_seconds.max(0.0) * 32_000.0) as usize)
+                        .min(wake_pcm.len()) & !1usize;
+                    wake_pcm[..wake_end].to_vec()
+                });
+                // The protected enrollment identifies the person independently
+                // of this command's identity result. Open KWS admission must
+                // not disable that detector. Only a verified wake may supply
+                // the fallback for a legacy profile without its own bank.
+                asr.start_personal_vad(verified_wake, &wake_phrase);
+                self.local_speaker_tracker = None;
+                return;
+            }
+            if asr.cloud_owner_enabled() {
+                self.local_speaker_tracker = None;
+                return;
+            }
             if enrolled_owner_matched {
                 asr.note_verified_local_speaker_tracking_started(&wake_phrase);
             } else {
@@ -760,6 +859,7 @@ impl EmbeddedAudioDictationSession {
             wake_end_seconds,
             wake_phrase,
             enrolled_owner_matched,
+            self.volcengine_asr.clone(),
         ));
     }
 
@@ -837,6 +937,11 @@ impl EmbeddedAudioDictationSession {
         } else {
             self.pipeline_observation.clone()
         };
+        self.retire_wake_source_for_input(
+            observation.as_ref().map(|observation| observation.capture_generation()),
+            segment_id,
+            collector_metadata,
+        );
         // The session-level observation owns destination coordinates. An
         // explicit source observation may be different (for mixed physical
         // sources), so it must not be the only place where destination bytes
@@ -1169,7 +1274,7 @@ impl EmbeddedAudioDictationSession {
                 .first_voiced_pcm_ms
                 .get_or_insert(source_pcm_offset_ms);
         }
-        let audio_end_ms = source_pcm_offset_ms.saturating_add(chunk_ms);
+        let audio_end_ms = audio_end_samples / 16;
         let local_speech_evidence = self.local_speech_activity.submit(
             source_pcm_offset_samples,
             audio_end_samples,
@@ -1195,16 +1300,20 @@ impl EmbeddedAudioDictationSession {
                 confirmed_speech_end_ms,
             );
             asr.note_local_speech_activity(local_speech_evidence);
+            asr.submit_personal_vad(pcm, audio_end_samples);
         }
         let stable_target_end_ms = self
             .volcengine_asr
             .as_ref()
             .and_then(|asr| asr.stable_target_speech_end_ms());
+        let identity_analysis_end_ms = confirmed_speech_end_ms.into_iter()
+            .chain(self.volcengine_asr.as_ref().and_then(|asr| asr.latest_timed_provider_speech_end_ms()))
+            .max();
         let local_speaker_evidence = self.local_speaker_tracker.as_mut().map(|tracker| {
             tracker.observe(
                 pcm,
-                source_pcm_offset_ms.saturating_add(chunk_ms),
-                confirmed_speech_end_ms,
+                audio_end_ms,
+                identity_analysis_end_ms,
                 stable_target_end_ms,
             )
         }).unwrap_or_default();
@@ -1215,9 +1324,16 @@ impl EmbeddedAudioDictationSession {
                 .and_then(LocalSessionSpeakerTracker::profile_is_adaptive),
         ) {
             asr.note_local_speaker_profile_adaptive(adaptive);
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            if let Some(profile) = self.local_speaker_tracker.as_ref().and_then(|tracker| tracker.profile.as_ref()) {
+                asr.set_target_speaker_source_profile(profile);
+            }
         }
         if let Some(asr) = self.volcengine_asr.as_ref() {
-            for (audio_start_ms, audio_end_ms, classification, transcript_speaker_evidence, signal_quality_sufficient) in local_speaker_evidence {
+            // Legacy/no-sink callers still consume returned evidence. The
+            // normal worker already published it; never count it twice.
+            for (audio_start_ms, audio_end_ms, classification, transcript_speaker_evidence, signal_quality_sufficient) in local_speaker_evidence.into_iter()
+                .filter(|_| self.local_speaker_tracker.as_ref().is_none_or(|tracker| tracker.evidence_sink.is_none())) {
                 asr.note_local_speaker_observation_with_audio_range(
                     audio_start_ms,
                     audio_end_ms,
@@ -1684,12 +1800,10 @@ fn schedule_default_wake_diagnostic_cleanup(directory: std::path::PathBuf) {
     }
 }
 
-fn next_wake_diagnostic_capture_count(is_default_directory: bool, current: usize) -> Option<usize> {
-    if is_default_directory || current < WAKE_DIAGNOSTIC_MAX_CANDIDATES {
-        current.checked_add(1)
-    } else {
-        None
-    }
+fn next_wake_diagnostic_capture_count(current: usize) -> Option<usize> {
+    // This is a filename sequence, not a remaining recording budget. The
+    // rolling retention worker bounds the explicitly selected directory.
+    current.checked_add(1)
 }
 
 fn explicit_wake_diagnostic_directory(value: Option<String>) -> Option<std::path::PathBuf> {
@@ -1731,7 +1845,7 @@ fn save_bounded_wake_diagnostic(embedded_session_id: u32, outcome: &'static str,
     };
     let Ok(index) =
         WAKE_DIAGNOSTIC_CAPTURE_COUNT.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-            next_wake_diagnostic_capture_count(false, current)
+            next_wake_diagnostic_capture_count(current)
         })
     else {
         return;
@@ -1791,7 +1905,7 @@ fn save_local_wake_confirmation_inputs(
     let Ok(index) = WAKE_DIAGNOSTIC_CAPTURE_COUNT.fetch_update(
         Ordering::SeqCst,
         Ordering::SeqCst,
-        |current| next_wake_diagnostic_capture_count(false, current),
+        next_wake_diagnostic_capture_count,
     ) else {
         return;
     };
@@ -1974,6 +2088,7 @@ pub(super) struct TerminalWakeContinuation {
 }
 
 struct TerminalWakeBody {
+    retained_verification_source: Option<RetainedWakeVerificationSource>,
     candidate_id: u64,
     pcm: Vec<u8>,
     candidate_range: Option<crate::observability::CandidateRange>,
@@ -2111,6 +2226,7 @@ fn terminal_wake_body_release_pieces(
 
 struct PrefetchedOwnerVerification {
     source_range: Option<crate::observability::CandidateRange>,
+    input: WakeVerifierSnapshot,
     task: tauri::async_runtime::JoinHandle<(
         Result<crate::speaker_verification::VerificationResult, String>,
         u64,
@@ -2154,6 +2270,7 @@ struct BufferedSpeakerCandidate {
     /// The PCM snapshot that supplied a complete local phrase. Later body
     /// growth cannot move that proof's identity boundary.
     owner_local_phrase_source_range: Option<crate::observability::CandidateRange>,
+    complete_local_wake_intent: Option<CompleteLocalWakeIntent>,
     /// Strong continuous Mandarin can hide the owner's phrase from both raw
     /// KWS and local ASR. Run one bounded, enrolled-owner extraction beside the
     /// established raw path; it may release only after the extracted output
@@ -2848,6 +2965,7 @@ impl BufferedSpeakerCandidate {
         let body_offset = post_wake_offset.min(self.pcm.len()) & !1usize;
         let body_pcm = self.pcm[body_offset..].to_vec();
         TerminalWakeBody {
+            retained_verification_source: None,
             candidate_id: self.candidate_id,
             pcm: body_pcm.clone(),
             candidate_range: candidate_slice_range(
@@ -2922,6 +3040,106 @@ struct LocalWakeConfirmation {
     inference_ms: u64,
     snapshot_pcm_ms: usize,
     recovered_keyword_end_seconds: Option<f32>,
+    // Exact PCM consumed by the selected primary/focus result, in the
+    // caller's candidate coordinate. Text timestamps remain a separate proof.
+    source_window: Option<LocalConfirmationCoverage>,
+}
+
+#[cfg(target_os = "windows")]
+fn local_confirmation_source_range(
+    result: &LocalWakeConfirmation,
+    input_source_range: Option<crate::observability::CandidateRange>,
+    input_origin_bytes: usize,
+) -> Option<crate::observability::CandidateRange> {
+    let source = result.source_window?;
+    let offset = source.start_bytes.checked_sub(input_origin_bytes)?;
+    let len = source.end_bytes.checked_sub(source.start_bytes)?;
+    if len == 0 || source.start_bytes % 2 != 0 || source.end_bytes % 2 != 0 {
+        return None;
+    }
+    slice_candidate_range(input_source_range, offset, len)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct LocalSpeakerIdentitySeed {
+    pcm: Vec<u8>,
+    profile_end_seconds: f32,
+}
+
+/// Select the PCM coordinate used only to prepare the in-session speaker
+/// profile. The activation boundary has separate semantics: a local-only
+/// `PresentLater` match deliberately keeps `wake_end_seconds == 0` so it cannot
+/// authorize cropping or wake-text removal. When that happens, use the frozen
+/// local-phrase source range only after typed owner access accepted the same
+/// candidate. Enrolled access may augment its session bank; open policies use
+/// the reference only for their ephemeral session profile. Missing, shifted or
+/// overflowed coordinates retain the original zero boundary, so speaker
+/// verification can fall back to the enrolled bank when one exists; they never
+/// invent a positive live anchor.
+fn local_speaker_identity_seed(
+    candidate_pcm: &[u8],
+    candidate_pcm_base_offset: Option<u64>,
+    wake_end_seconds: f32,
+    wake_end_is_proven: bool,
+    confirmed_owner_range: Option<crate::observability::CandidateRange>,
+    owner_access: crate::speech_decision_kernel::OwnerAccessEvidence,
+) -> LocalSpeakerIdentitySeed {
+    let wake_end_bytes = (wake_end_is_proven
+        && wake_end_seconds.is_finite()
+        && wake_end_seconds > 0.0)
+        .then(|| (wake_end_seconds as f64 * 32_000.0).round() as usize)
+        .filter(|end| *end > 0 && *end <= candidate_pcm.len());
+    if wake_end_bytes.is_some() {
+        return LocalSpeakerIdentitySeed {
+            pcm: candidate_pcm.to_vec(),
+            profile_end_seconds: wake_end_seconds,
+        };
+    }
+
+    let local_identity_seed_allowed = matches!(
+        owner_access,
+        crate::speech_decision_kernel::OwnerAccessEvidence::EnrolledMatch
+            | crate::speech_decision_kernel::OwnerAccessEvidence::OpenUnenrolled
+            | crate::speech_decision_kernel::OwnerAccessEvidence::OpenInactiveProfile
+    );
+    let traced = local_identity_seed_allowed
+        .then_some(confirmed_owner_range)
+        .flatten()
+        .and_then(|range| {
+            let base = candidate_pcm_base_offset?;
+            let candidate_len = u64::try_from(candidate_pcm.len()).ok()?;
+            let candidate_end = base.checked_add(candidate_len)?;
+            if range.start < base
+                || range.end > candidate_end
+                || range.start >= range.end
+                || range.start % 2 != 0
+                || range.end % 2 != 0
+            {
+                return None;
+            }
+            let start = usize::try_from(range.start.checked_sub(base)?).ok()?;
+            let end = usize::try_from(range.end.checked_sub(base)?).ok()?;
+            let pcm = candidate_pcm.get(start..end)?.to_vec();
+            if pcm.is_empty() {
+                return None;
+            }
+            log::info!(
+                "[speaker-verification] identity reference source=confirmed_local_window candidate_start={} candidate_end={} reference_start={} reference_end={} reference_pcm_ms={} activation_end_ms=unknown identity_only=true",
+                base,
+                candidate_end,
+                range.start,
+                range.end,
+                pcm.len() / 32,
+            );
+            Some(LocalSpeakerIdentitySeed {
+                profile_end_seconds: pcm.len() as f32 / 32_000.0,
+                pcm,
+            })
+        });
+    traced.unwrap_or_else(|| LocalSpeakerIdentitySeed {
+        pcm: candidate_pcm.to_vec(),
+        profile_end_seconds: 0.0,
+    })
 }
 
 #[cfg(all(target_os = "windows", test))]
@@ -3313,6 +3531,18 @@ fn terminal_local_confirmation_pcm(pcm: &[u8]) -> (Vec<u8>, usize) {
         .unwrap_or_else(|| (pcm.to_vec(), 0))
 }
 
+fn terminal_local_confirmation_candidate_range(
+    candidate_range: Option<crate::observability::CandidateRange>,
+    confirmation_origin_bytes: usize,
+    confirmation_bytes: usize,
+) -> Option<crate::observability::CandidateRange> {
+    slice_candidate_range(
+        candidate_range,
+        confirmation_origin_bytes,
+        confirmation_bytes,
+    )
+}
+
 fn terminal_local_confirmation_windows(pcm: &[u8]) -> Vec<(Vec<u8>, usize)> {
     if pcm.len() <= TERMINAL_LOCAL_TAIL_BYTES {
         return vec![(pcm.to_vec(), 0)];
@@ -3620,6 +3850,12 @@ fn run_local_wake_confirmation_once(
         inference_ms: result.inference_ms,
         snapshot_pcm_ms,
         recovered_keyword_end_seconds: None,
+        source_window: context.source_origin_bytes.checked_add(pcm.len()).map(|end_bytes| {
+            LocalConfirmationCoverage {
+                start_bytes: context.source_origin_bytes,
+                end_bytes,
+            }
+        }),
     })
 }
 
@@ -3697,9 +3933,10 @@ async fn confirm_terminal_local_windows(
     phrase: &str,
     local_confirmation_ms: &mut u64,
     embedded_session_id: u32,
-) -> Option<(LocalWakeConfirmation, usize)> {
+) -> Option<(LocalWakeConfirmation, usize, usize)> {
     let mut last = None;
     for (confirm_pcm, origin) in terminal_local_confirmation_windows(pcm) {
+        let confirmation_bytes = confirm_pcm.len();
         // 窗口边界让位（2026-09-23 569 实锤）：有活窗 stage2 正被 busy 拒绝
         // 饿着时，死窗的下一格推理等它先过——本窗已在轮出路上，晚一格
         // 只影响本来就慢的迟到激活，而活窗等的是用户眼前的胶囊。让位
@@ -3754,9 +3991,9 @@ async fn confirm_terminal_local_windows(
                     result.inference_ms
                 );
                 if terminal_local_result_can_activate(&result) {
-                    return Some((result, origin));
+                    return Some((result, origin, confirmation_bytes));
                 }
-                last = Some((result, origin));
+                last = Some((result, origin, confirmation_bytes));
             }
             Ok(Err(err)) => {
                 log::warn!(

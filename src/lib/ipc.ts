@@ -4,6 +4,7 @@
 // not mock server state; they require the Rust command layer.
 
 import type {
+  CloudAccountStatus,
   ComboBinding,
   CorrectionRule,
   CredentialsStatus,
@@ -98,9 +99,38 @@ const mockVoiceprintStatus: VoiceprintStatus = {
   threshold: 0.5,
   error: null,
   modelName: '3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx',
+  failureStage: null,
+  canRetrySave: false,
   runtimeVersion: '1.13.1',
   localOnly: true,
 };
+
+/** Email UI receives a verified account token; it never receives the shared model key. */
+export async function setCloudAccountSession(accessToken: string): Promise<CloudAccountStatus> {
+  if (!isTauri) throw new Error('cloudServiceUnavailable');
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke('set_cloud_account_session', { accessToken });
+}
+
+export async function clearCloudAccountSession(): Promise<void> {
+  if (!isTauri) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke('clear_cloud_account_session');
+}
+
+export async function getCloudAccountStatus(): Promise<CloudAccountStatus> {
+  return invokeOrMock('get_cloud_account_status', undefined, () => ({ configured: false,
+    signedIn: false, customer: null, managedEnabled: false, enrollmentState: null, error: null }));
+}
+
+/** Call only after the customer accepts the displayed cloud enrollment consent. */
+export async function startCloudVoiceprintEnrollment(route: 'managed' | 'byok',
+  consentVersion: 'voiceprint-cloud-v1'): Promise<VoiceprintStatus> {
+  if (!isTauri) throw new Error('cloudServiceUnavailable');
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('prepare_cloud_voiceprint_enrollment', { route, consentVersion });
+  return startVoiceprintEnrollment();
+}
 
 export async function getVoiceprintStatus(): Promise<VoiceprintStatus> {
   return invokeOrMock('get_voiceprint_status', undefined, () => mockVoiceprintStatus);
@@ -117,6 +147,12 @@ export async function startVoiceprintEnrollment(): Promise<VoiceprintStatus> {
 
 export async function cancelVoiceprintEnrollment(): Promise<VoiceprintStatus> {
   return invokeOrMock('cancel_voiceprint_enrollment', undefined, () => mockVoiceprintStatus);
+}
+
+export async function retryVoiceprintSave(): Promise<VoiceprintStatus> {
+  return invokeOrMock('retry_voiceprint_save', undefined, () => ({
+    ...mockVoiceprintStatus, state: 'complete', enrolled: true, progress: 100,
+  }));
 }
 
 export async function deleteVoiceprint(): Promise<VoiceprintStatus> {
@@ -166,6 +202,8 @@ let mockSettings: UserPreferences = {
   dictationInputSource: 'embeddedBle',
   dictationInputSourceUserOverridden: false,
   activeAsrProvider: 'volcengine',
+  cloudOwnerVoiceprint: null,
+  cloudModelRoute: 'byok',
   activeAsrProviderDefaultMigrated: true,
   activeLlmProvider: 'ark',
   llmThinkingEnabled: false,
@@ -796,6 +834,10 @@ const mockCorrectionRules: CorrectionRule[] = [
 // ── Settings ───────────────────────────────────────────────────────────
 export async function getSettings(): Promise<UserPreferences> {
   return normalizeUserPreferences(await invokeOrMock('get_settings', undefined, () => ({ ...mockSettings })));
+}
+
+export function resetCapsulePosition(): Promise<void> {
+  return invokeOrMock('reset_capsule_position', undefined, () => undefined);
 }
 
 export function listInstalledApplications(): Promise<InstalledApplication[]> {

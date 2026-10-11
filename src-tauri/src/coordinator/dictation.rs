@@ -81,12 +81,8 @@ const EMBEDDED_BLE_CONTROL_START_SIGNAL_ENV: &str =
     "LISTENER_TYPE_EMBEDDED_BLE_CONTROL_START_SIGNAL";
 const EMBEDDED_BLE_CONTROL_STOP_SIGNAL_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_CONTROL_STOP_SIGNAL";
 const WAKE_DIAGNOSTIC_DIR_ENV: &str = "LISTENER_WAKE_DIAGNOSTIC_DIR";
-// 2026-09-20: 128 per-process stage2 captures exhausted within one active
-// debugging day (live incident 2274297663 hit index 127), blinding exactly the
-// evenings that need forensics. 2026-09-21: 512 still died in ~3h of heavy
-// morning use (index 511 at 09:41, the 10:12-10:16 wake incidents had no WAV
-// forensics at all). Diagnostics-only caps; no product behavior.
-const WAKE_DIAGNOSTIC_MAX_CANDIDATES: usize = 2048;
+// Explicit diagnostic capture is a rolling archive. Bound retained files,
+// bytes and age, rather than disabling capture after a process-lifetime count.
 const WAKE_DIAGNOSTIC_MAX_PCM_BYTES: usize = 12 * 16_000 * 2;
 const WAKE_DIAGNOSTIC_RETENTION_MAX_FILES: usize = 2048;
 const WAKE_DIAGNOSTIC_RETENTION_MAX_BYTES: u64 = 512 * 1024 * 1024;
@@ -432,6 +428,7 @@ fn maybe_start_polish_prefetch(inner: &Arc<Inner>, session_id: SessionId) {
     if std::env::var("LISTENER_TYPE_FORCE_RAW_OUTPUT")
         .map(|value| value == "1")
         .unwrap_or(false)
+        || pause_early_ever_delivered(inner, session_id)
     {
         return;
     }
@@ -447,10 +444,8 @@ fn maybe_start_polish_prefetch(inner: &Arc<Inner>, session_id: SessionId) {
     if mode == PolishMode::Raw && !raw_uses_llm {
         return;
     }
-    let auth_blocked = current_llm_auth_fingerprint()
-        .ok()
-        .is_some_and(current_llm_auth_is_rejected);
-    if auth_blocked || llm_stall_circuit_open() {
+    let (auth_blocked, stall_blocked) = session_llm_circuit_state(inner, session_id);
+    if auth_blocked || stall_blocked {
         return;
     }
     let Some(preview) = current_embedded_audio_partial_preview(inner) else {
@@ -1128,6 +1123,7 @@ fn stage_terminal_wake_continuation(
         wake_phrase,
         enrolled_owner_matched,
         TerminalWakeBody {
+            retained_verification_source: None,
             candidate_id: 0,
             pcm: Vec::new(),
             candidate_range: None,
@@ -1155,6 +1151,7 @@ fn stage_terminal_wake_continuation_at(
         wake_phrase,
         enrolled_owner_matched,
         TerminalWakeBody {
+            retained_verification_source: None,
             candidate_id: 0,
             pcm: Vec::new(),
             candidate_range: None,
@@ -1428,7 +1425,15 @@ fn build_volcengine_asr(inner: &Arc<Inner>, session_id: SessionId) -> Arc<Volcen
     if record_embedded_audio_for_debug_enabled(inner) {
         asr_config.enable_diagnostic_trace();
     }
-    let asr = Arc::new(asr_config);
+    let prefs = inner.prefs.get();
+    let asr = Arc::new(asr_config.with_cloud_owner(prefs.cloud_owner_voiceprint)
+        .with_managed_cloud(prefs.cloud_model_route == crate::asr::cloud_gateway::CloudModelRoute::Managed)
+        .with_owner_activity_only(prefs.owner_activity_only)
+        .with_content_recovery_locale(prefs.owner_content_recovery_locale));
+    // Bind the capture generation synchronously. The local VAD worker is
+    // created immediately after this builder returns, while provider open is
+    // intentionally asynchronous and may complete much later.
+    asr.prepare_local_speech_quality_session();
     set_volcengine_preview_callbacks(&asr, inner, session_id);
     asr
 }
@@ -1466,8 +1471,11 @@ fn current_embedded_audio_endpoint_preview(inner: &Arc<Inner>) -> Option<String>
 }
 
 include!("dictation_preview.rs");
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+include!("dictation_content_probe.rs");
 include!("dictation_delivery_diagnostics.rs");
 include!("dictation_streaming_composition.rs");
+include!("dictation_native_composition.rs");
 
 async fn request_embedded_ble_recording_stop_from_host_for_endpoint(
     inner: &Arc<Inner>,
@@ -1616,12 +1624,24 @@ pub(super) async fn request_embedded_ble_recording_stop_from_host(
     inner: &Arc<Inner>,
     reason: &'static str,
 ) -> Result<bool, String> {
+    let session_id = inner.state.lock().session_id;
+    request_embedded_ble_recording_stop_from_host_for_session(inner, session_id, reason).await
+}
+
+async fn request_embedded_ble_recording_stop_from_host_for_session(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    reason: &'static str,
+) -> Result<bool, String> {
     if !embedded_ble_host_recording_control_context_active(inner) {
         return Ok(false);
     }
-    let (session_id, phase) = {
+    let phase = {
         let state = inner.state.lock();
-        (state.session_id, state.phase)
+        if state.session_id != session_id || state.cancelled {
+            return Ok(false);
+        }
+        state.phase
     };
     if !matches!(phase, SessionPhase::Starting | SessionPhase::Listening) {
         return Ok(false);
@@ -1773,6 +1793,7 @@ struct EmbeddedAudioDictationSession {
     streaming_agc: EmbeddedStreamingAgcState,
     local_speech_activity: LocalSpeechActivity,
     local_speaker_tracker: Option<LocalSessionSpeakerTracker>,
+    retained_wake_verification_source: Option<SessionWakeVerificationSource>,
     device_ai_processing_started: bool,
     // Proactive trailing-silence stop (改A) state. See
     // EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS and consume_prepared_streaming_pcm.
@@ -1809,6 +1830,7 @@ include!("dictation_wake_polish.rs");
 include!("dictation_wake_fusion.rs");
 include!("dictation_wake_prefix_retry.rs");
 include!("dictation_wake_owner_gate.rs");
+include!("dictation_wake_verification_source.rs");
 
 include!("dictation_session.rs");
 
@@ -1911,7 +1933,8 @@ async fn begin_embedded_audio_dictation_session(
         .map(|asr| {
             #[cfg(target_os = "windows")]
             {
-                LocalSpeechActivity::new(asr.local_speech_activity_sink())
+                LocalSpeechActivity::with_quality_timeline(
+                    asr.local_speech_activity_sink(), asr.local_speech_quality_sink())
             }
             #[cfg(not(target_os = "windows"))]
             {
@@ -1946,6 +1969,7 @@ async fn begin_embedded_audio_dictation_session(
         streaming_agc: EmbeddedStreamingAgcState::default(),
         local_speech_activity,
         local_speaker_tracker: None,
+        retained_wake_verification_source: None,
         device_ai_processing_started: false,
         proactive_stop_body_started: false,
         proactive_stop_silence_ms: 0,
@@ -3073,21 +3097,23 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                     (started, audio_ms, task)
                 })
         });
-    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     let mut target_speaker_filter_required = false;
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     let mut primary_mixture_rejected = false;
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     let mut primary_speaker_filtered_certified = false;
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    let mut separated_owner_exclusion_confirmed = false;
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     let mut separated_owner_candidate: Option<RawTranscript> = None;
     let mut verified_provider_owner_candidate: Option<RawTranscript> = None;
-    #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
-    let target_speaker_filter_required = false;
+    let mut verified_provider_owner_timing = None;
     #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
     let primary_mixture_rejected = false;
     #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
     let primary_speaker_filtered_certified = false;
+    #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
+    let separated_owner_exclusion_confirmed = false;
     #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
     let separated_owner_candidate: Option<RawTranscript> = None;
     // Quiet marks the end of capture, not completion of recognition. In
@@ -3097,6 +3123,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // 2026-09-22 跟手①：终稿侧改写恢复只认干净会话；标志在终稿落定后读
     // （干扰冻结多发生在 STOP 与终稿之间）。
     let mut pause_early_final_clean = false;
+    let mut primary_final_native_words = None;
     let raw = match asr {
         ActiveAsr::Volcengine(asr) => {
             debug_assert!(uses_global_timeout);
@@ -3158,7 +3185,10 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             };
             // 干净标志在终稿落定后读：见上方 pause_early_final_clean 注释。
             pause_early_final_clean = asr.pause_early_final_clean_session();
-            verified_provider_owner_candidate = asr.verified_provider_owner_final();
+            if let Some((candidate, timing)) = asr.verified_provider_owner_final_snapshot() {
+                verified_provider_owner_candidate = Some(candidate);
+                verified_provider_owner_timing = Some(timing);
+            }
             let primary_result = match primary {
                 Ok(result) => result,
                 Err((primary_error, _)) if primary_error.permits_full_audio_replay() => {
@@ -3264,16 +3294,20 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                     return Err(primary_error.to_string());
                 }
             };
+            primary_final_native_words = asr.final_native_word_snapshot_for(&primary_result.text)
+                .map(|timing| (primary_result.text.clone(), timing, asr.final_native_capture_identity()));
+            target_speaker_filter_required = asr.target_speaker_filter_was_required();
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             {
-                target_speaker_filter_required = asr.target_speaker_filter_was_required();
                 primary_mixture_rejected = asr.primary_mixture_was_rejected();
-                // r36：主轨终稿的封存认证。speaker_filtered 认证 = 干净本人
-                // 全文，产品仲裁据此把"分离稿截断成前缀"（r36 吞字形态）判为
-                // 劣化而非排除。
-                primary_speaker_filtered_certified = asr.primary_seal_speaker_filtered_certified();
+                // Only the exact sealed rendering with completed source-owner
+                // permissions may override a shorter independent owner view.
+                primary_speaker_filtered_certified = asr.primary_seal_speaker_filtered_certified_for(&primary_result.text);
                 separated_owner_candidate = match target_result {
                     Ok(Some(target)) if !target.text.trim().is_empty() => {
+                        separated_owner_exclusion_confirmed = asr.separated_prefix_excludes_confirmed_other(
+                            &primary_result.text, &target.text,
+                        );
                         log::info!(
                             "[target-speaker] owner-only final offered to product arbiter primary_chars={} target_chars={}",
                             primary_result.text.chars().count(),
@@ -3522,6 +3556,10 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         volcengine_for_empty_retry.as_ref()
             .and_then(|asr| asr.provider_timed_transcript_snapshot()),
     );
+    note_automatic_wake_transcript_timing(
+        inner, current_session_id,
+        volcengine_for_empty_retry.as_ref().and_then(|asr| asr.transcript_timing_snapshot_for(&raw.text)),
+    );
     let mut provider_primary = raw;
     let unfiltered_text = provider_primary.text.clone();
     provider_primary.text =
@@ -3546,8 +3584,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         inner,
         current_session_id,
         verified_provider_owner_candidate,
-        volcengine_for_empty_retry.as_ref()
-            .and_then(|asr| asr.verified_provider_owner_timing_snapshot()),
+        verified_provider_owner_timing,
     );
 
     #[cfg(any(debug_assertions, test))]
@@ -3707,6 +3744,32 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         }
     }
 
+    let mut content_supplement = None;
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    if !provider_primary.text.trim().is_empty() && !target_speaker_filter_required && !primary_mixture_rejected {
+        if let Some(asr) = volcengine_for_empty_retry.as_ref() {
+            match asr.recover_content_supplement_once().await {
+                Ok(Some(mut supplement)) => {
+                    supplement.auxiliary_cloud_text = filter_automatic_wake_text(
+                        inner,current_session_id,&supplement.auxiliary_cloud_text,false);
+                    for segment in &mut supplement.segments {
+                        segment.text = filter_automatic_wake_text(inner,current_session_id,&segment.text,false);
+                    }
+                    content_supplement = Some(supplement);
+                }
+                Ok(None) => {},
+                Err(error) => log::warn!("[content-recovery] unavailable; preserving primary session_id={current_session_id}: {error}"),
+            }
+        }
+    }
+    // Every asynchronous recovery still belongs to the old finalization. A
+    // cancelled/replaced session or revoked source cannot publish its result.
+    if { let state=inner.state.lock(); state.session_id != current_session_id || state.cancelled }
+        || source_integrity_must_stop(inner,current_session_id,source_integrity_ledger.as_ref(),"after_content_recovery_before_product_arbitration") {
+        restore_prepared_windows_ime_session(inner,current_session_id);
+        return Ok(());
+    }
+
     let product_final = arbitrate_product_final_transcript(
         ProductFinalCandidates {
             provider_primary,
@@ -3717,19 +3780,22 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             partial_preview: partial_preview_candidate,
             local_shadow: local_shadow_candidate,
             local_shadow_owner_end_aligned,
+            content_supplement,
             target_filter_required: target_speaker_filter_required,
             primary_mixture_rejected,
             primary_speaker_filtered_certified,
+            separated_owner_exclusion_confirmed,
         },
         &enabled_hotwords(inner),
         inner.prefs.get().remove_filler_words,
     );
     log::info!(
-        "[coord] product final sealed authority={} chars={} filter_required={} local_shadow_recovered={}",
+        "[coord] product final sealed authority={} chars={} filter_required={} local_shadow_recovered={} content_supplement_recovered={}",
         product_final.authority.label(),
         product_final.transcript.text.chars().count(),
         target_speaker_filter_required,
-        product_final.local_shadow_recovered
+        product_final.local_shadow_recovered,
+        product_final.content_supplement_recovered
     );
     let mut raw = product_final.transcript;
 
@@ -3814,6 +3880,13 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
 
     publish_embedded_ble_asr_final(inner, current_session_id, false, Some(raw.text.clone()));
 
+    // Retain only the exact primary selected by the product arbiter. Recovery,
+    // separation, shadow recognition and subsequent dictionary rewrites do
+    // not inherit another candidate's native-word authority.
+    let mut final_native_words = primary_final_native_words.filter(|(text, _, _)|
+        crate::transcript_boundary::content_key(&filter_automatic_wake_text(inner, current_session_id, text, false))
+            == crate::transcript_boundary::content_key(&raw.text)).map(|(_, timing, capture)| (timing, capture));
+
     let correction_rules = match inner.correction_rules.list() {
         Ok(rules) => rules,
         Err(e) => {
@@ -3825,6 +3898,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     if !correction_rules.is_empty() {
         let corrected = apply_correction_rules(&raw.text, &correction_rules);
         if corrected != raw.text {
+            final_native_words = None;
             log::info!(
                 "[coord] correction rules adjusted raw transcript ({} → {} chars)",
                 raw.text.chars().count(),
@@ -3834,11 +3908,16 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         }
     }
     let prefs = inner.prefs.get();
-    let force_raw_output = std::env::var("LISTENER_TYPE_FORCE_RAW_OUTPUT")
+    let force_raw_by_environment = std::env::var("LISTENER_TYPE_FORCE_RAW_OUTPUT")
         .map(|value| value == "1")
         .unwrap_or(false);
+    // Irreversible raw clauses already on screen fix this recording's output
+    // contract. A recovering LLM circuit or mid-recording style switch cannot
+    // rewrite that prefix and append an incompatible polished whole afterward.
+    let raw_body_committed = pause_early_ever_delivered(inner, current_session_id);
+    let force_raw_output = force_raw_by_environment || raw_body_committed;
     let pack = if force_raw_output {
-        log::info!("[coord] force raw output enabled by LISTENER_TYPE_FORCE_RAW_OUTPUT");
+        log::info!("[coord] raw output contract session_id={current_session_id} environment={force_raw_by_environment} committed_body={raw_body_committed}");
         crate::types::builtin_style_pack_for_mode(PolishMode::Raw)
     } else {
         match inner
@@ -3865,7 +3944,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         !force_raw_output && mode == PolishMode::Raw && super::raw_style_pack_uses_llm(&pack);
     let translation_target = prefs.translation_target_language.trim().to_string();
     let translation_active =
-        inner.translation_modifier_seen.load(Ordering::SeqCst) && !translation_target.is_empty();
+        inner.translation_modifier_seen.load(Ordering::SeqCst) && !translation_target.is_empty()
+        && !raw_body_committed;
     log::info!(
         "[style-pack] runtime dispatch session_id={} active_pack={} kind={:?} mode={:?} raw_chars={} prompt_chars={} raw_uses_llm={} translation_active={} hotwords={} working_languages={:?}",
         current_session_id,
@@ -3914,11 +3994,10 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // FAILED, typed 0 chars, then clipboard-pasted. Skip polish entirely when
     // the circuit is open so stop→Done stays snappy and the UX is quiet raw
     // insert (owner: "体验一般般").
-    let llm_auth_blocked = current_llm_auth_fingerprint()
-        .ok()
-        .is_some_and(current_llm_auth_is_rejected);
-    let llm_stall_blocked = llm_stall_circuit_open();
     let needs_llm_polish = mode != PolishMode::Raw || raw_uses_llm;
+    let (llm_auth_blocked, llm_stall_blocked) = if needs_llm_polish {
+        session_llm_circuit_state(inner, current_session_id)
+    } else { (false, false) };
     let streaming_eligible = streaming_insert_eligible(
         prefs.streaming_insert,
         translation_active,
@@ -4115,14 +4194,15 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             .map(|value| value == "1")
             .unwrap_or(false);
     let paste_shortcut = prefs.paste_shortcut;
-    // A stable clause pasted during recording is final for the editor. The
-    // provider's stop result can supply an unpasted tail, but cannot revise
-    // or replace any character already delivered to the current cursor.
+    // Delivered bytes remain immutable. The exact sealed native source may
+    // supplement holes, but only through the worker's receipted session range;
+    // a final full paste at the current cursor remains forbidden.
     // 粘滞底线在 take 之前读：本会话只要上屏过早期文本，就算可对账前缀
     // 丢失也绝不允许终稿整段重贴（2026-09-23 用户实锤"一毛一样粘贴两次"）。
     let pause_early_sticky = pause_early_ever_delivered(inner, current_session_id);
     let pause_early_paste = pause_early_paste_delivered(inner, current_session_id);
     let pause_early_source_key = pause_early_delivery_source_key(inner, current_session_id);
+    let pause_early_raw_consumption = pause_early_committed_body_consumption(inner, current_session_id);
     let pause_early_delivered = take_pause_early_delivery(inner, current_session_id);
     let pause_early_outcome = pause_early_delivered.as_ref().map(|(display, _)| {
         let key = &pause_early_source_key;
@@ -4148,7 +4228,33 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         };
         (display, remainder, recovery)
     });
-    let (insert_text, skip_dispatch) = match pause_early_outcome.as_ref() {
+    let final_source_delivery = if pause_early_paste && mode == PolishMode::Raw && !raw_uses_llm && !translation_active
+        && !streaming_composition_active(inner, current_session_id)
+        && !streaming_composition_contaminated(inner, current_session_id)
+        && crate::transcript_boundary::content_key(&polished) == crate::transcript_boundary::content_key(&raw.text) {
+        pause_early_delivered.as_ref().zip(final_native_words.as_ref()).and_then(|((display, _), (native, capture))| {
+            let body = filter_automatic_wake_text(inner, current_session_id, &native.text, false);
+            let boundary = pause_early_raw_consumption.as_ref().filter(|consumed|
+                (consumed.source.capture_stream_id, consumed.source.capture_generation) == *capture)
+                .and_then(|consumed| consumed.boundary.as_ref());
+            crate::transcript_boundary::final_delivery_after_consumption(display, native, &body, boundary)
+        })
+    } else { None };
+    let native_source_covered = matches!(final_source_delivery.as_ref(),
+        Some(crate::transcript_boundary::FinalSourceDelivery::Covered));
+    let final_supplement = match final_source_delivery.as_ref() {
+        Some(crate::transcript_boundary::FinalSourceDelivery::SupplementOwnedRange { body }) => Some(body.clone()),
+        _ => None,
+    };
+    let native_tail = match final_source_delivery.as_ref() {
+        Some(crate::transcript_boundary::FinalSourceDelivery::Append { suffix }) => Some(suffix.clone()),
+        _ => None,
+    };
+    let (insert_text, skip_dispatch) = if native_source_covered {
+        (String::new(), true)
+    } else if let Some(tail) = native_tail.as_ref() {
+        (tail.clone(), false)
+    } else { match pause_early_outcome.as_ref() {
         Some((_, Some(remainder), _)) if remainder.is_empty() => (String::new(), true),
         Some((_, Some(remainder), _)) => (remainder.clone(), false),
         Some((_, None, Some(recovery))) if !recovery.is_empty() => (recovery.clone(), false),
@@ -4157,7 +4263,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         // 保留在屏（用户拍板"完成那次可以取消"——双写比少交付更糟）。
         None if pause_early_sticky => (String::new(), true),
         None => (polished.clone(), false),
-    };
+    }};
     let terminal_suffix_expected = pause_early_delivered.as_ref()
         .filter(|_| pause_early_terminal_punctuation_only(&insert_text))
         .map(|(display, _)| display.as_str());
@@ -4166,6 +4272,15 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // stream_commit 落定(整段已覆盖传空串清残留;改写无恢复 → cancel 清组字,
     // 今日"早期文本保留,尾巴丢弃"语义)。失败则驱动已降级清场,落回常规
     // 派发。None = 本会话组字未启用/已结束,走原路径。
+    let native_final_body = final_supplement.clone().unwrap_or_else(|| {
+        let confirmed = pause_early_delivered.as_ref().map(|(text, _)| text.as_str()).unwrap_or("");
+        format!("{confirmed}{insert_text}")
+    });
+    let native_finalized = native_composition_finalize(inner, current_session_id,
+        pause_early_delivered.as_ref().map(|(text, _)| text.as_str()).unwrap_or(""),
+        &native_final_body).await;
+    let native_final_handled = native_finalized.is_some();
+    let native_final_confirmed = native_finalized.as_ref().is_some_and(|result| result.target_confirmed);
     let streaming_finalized = if streaming_composition_active(inner, current_session_id) {
         let mut op_text: Option<String> = match pause_early_outcome.as_ref() {
             Some((_, Some(remainder), _)) if remainder.is_empty() => Some(String::new()),
@@ -4221,7 +4336,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // 终稿宁可少交付也不双写(H 族教训)。
     let streaming_contaminated = streaming_finalized != Some(true)
         && streaming_composition_contaminated(inner, current_session_id);
-    let mut delivery_submission = if streaming_finalized == Some(true) {
+    let mut delivery_submission = if let Some(result) = native_finalized {
+        execute_delivery_submission(delivery_request.clone(), |_| async { result }).await
+    } else if streaming_finalized == Some(true) {
         log::info!(
             "[coord] streaming-composition finalized session_id={current_session_id} chars={} route=streaming",
             insert_text.chars().count()
@@ -4252,8 +4369,34 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                 .as_ref()
                 .map(|(display, _)| display.clone()),
         }
+    } else if let Some(supplement) = final_supplement.as_ref() {
+        // Exactly one range transaction. Never fall through to a full paste
+        // or Unicode typing if native ownership/readback is unavailable.
+        let expected = &pause_early_delivered.as_ref().expect("supplement has delivered body").0;
+        execute_delivery_submission(DeliveryRequest { text: supplement.clone(), ..delivery_request.clone() }, |_| async {
+            let mut submission = inner.inserter.insert_session_paste(supplement, paste_shortcut,
+                crate::insertion::SessionPasteScope { session_id: current_session_id,
+                    previous_body: expected.clone(), replace: true });
+            let confirmed = if let Some(receipt) = submission.receipt.as_mut() {
+                loop {
+                    match receipt.try_take() {
+                        crate::insertion::PasteReceiptPoll::Ready(done) => break matches!(done.outcome,
+                            crate::insertion::PasteReceiptOutcome::Confirmed(_)),
+                        crate::insertion::PasteReceiptPoll::Consumed => break false,
+                        crate::insertion::PasteReceiptPoll::Pending => tokio::time::sleep(Duration::from_millis(40)).await,
+                    }
+                }
+            } else { false };
+            log::info!("[coord] final source supplement session_id={current_session_id} previous_chars={} supplemented_chars={} status={:?} target_confirmed={confirmed}",
+                expected.chars().count(), supplement.chars().count(), submission.status);
+            DeliverySubmission { status: if confirmed { InsertStatus::Inserted } else { InsertStatus::SubmittedUnconfirmed },
+                target_confirmed: confirmed, route: DeliveryRoute::Paste,
+                submitted_text: Some(if confirmed { supplement.clone() } else { expected.clone() }) }
+        }).await
     } else if skip_dispatch {
-        if pause_early_outcome.is_none() && pause_early_sticky {
+        if native_source_covered {
+            log::info!("[coord] final native source already consumed session_id={current_session_id}; committed body retained without textual tail recovery");
+        } else if pause_early_outcome.is_none() && pause_early_sticky {
             log::warn!(
                 "[coord] pause-early-delivery final full-paste cancelled: ledger lost but early text is on screen (final_chars={}) — early text stays",
                 polished.chars().count()
@@ -4444,9 +4587,11 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         )
         .await
     };
+    let supplement_confirmed = final_supplement.is_some() && delivery_submission.target_confirmed;
     let final_payload_submitted = delivery_submission.submitted_text.is_some()
-        && !skip_dispatch && !streaming_contaminated && !terminal_suffix_skipped;
-    if streaming_finalized != Some(true) && !skip_dispatch && !streaming_contaminated {
+        && (if final_supplement.is_some() { supplement_confirmed } else { !skip_dispatch })
+        && !streaming_contaminated && !terminal_suffix_skipped;
+    if !native_final_handled && final_supplement.is_none() && streaming_finalized != Some(true) && !skip_dispatch && !streaming_contaminated {
         if let Some((display, _)) = pause_early_delivered.as_ref() {
             delivery_submission.submitted_text = pause_early_cumulative_submitted_text(
                 display,
@@ -4456,6 +4601,13 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     }
     let submitted_chars = delivery_submission.submitted_text.as_ref().map(|text| text.chars().count() as u32);
     let source_coverage = match pause_early_outcome.as_ref() {
+        _ if native_source_covered => "native_source_covered",
+        _ if native_final_confirmed => "revisable_range_confirmed",
+        _ if native_final_handled => "revisable_range_unconfirmed",
+        _ if supplement_confirmed => "source_supplement_confirmed",
+        _ if final_supplement.is_some() => "source_supplement_unconfirmed",
+        _ if native_tail.is_some() && final_payload_submitted => "native_source_tail_submitted",
+        _ if native_tail.is_some() => "native_source_tail_not_submitted",
         None if delivery_submission.status == InsertStatus::DeferredNoTarget => "clipboard_only",
         _ if terminal_suffix_skipped => "terminal_suffix_not_appended",
         Some((_, Some(remainder), _)) if remainder.is_empty() => "covered",
@@ -4476,7 +4628,15 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // Preserve the immutable text submitted during this logical recording.
     // A later provider rewrite must not silently make its clipboard differ
     // from the clauses the user saw arrive while speaking.
-    let clipboard_text = if pause_early_sticky && !streaming_contaminated {
+    let clipboard_text = if final_source_delivery.is_some() && !final_payload_submitted {
+        // A permission loss cannot discard recognized words from recovery.
+        // The source plan preserves every already delivered byte as well.
+        native_final_body.as_str()
+    } else if native_final_handled && !native_final_confirmed {
+        // Input permission can end before cloud confirmation. Retain the
+        // complete recognized result for recovery, never just its old draft.
+        polished.as_str()
+    } else if pause_early_sticky && !streaming_contaminated {
         delivery_submission.submitted_text.as_deref().unwrap_or(&polished)
     } else {
         &polished
@@ -4664,7 +4824,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         });
     debug_assert_eq!(delivery_fact.session_id, current_session_id);
     debug_assert_eq!(delivery_fact.status, status);
-    record_dictation_delivery_diagnostic(inner, &delivery_fact, &pause_early_source_key, source_coverage);
+    record_dictation_delivery_diagnostic(inner, &delivery_fact, &pause_early_source_key,
+        pause_early_raw_consumption.as_ref(), source_coverage);
     store_embedded_audio_final_result(
         inner,
         crate::embedded_audio::EmbeddedAudioTranscriptResult {
@@ -4900,6 +5061,7 @@ fn finish_cancel_session_after_transition(
     };
 
     stop_recorder_for_session(inner, session_id);
+    native_composition_retire(inner, session_id);
     cancel_asr_for_session(inner, session_id);
     restore_prepared_windows_ime_session(inner, session_id);
     let capture_cancelled = if embedded_ble_actor_owned {

@@ -9,6 +9,37 @@ use denzic_voice_activation_v1_core::{decide_gate, GateDecision, GateInput, Phra
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeywordPhraseEvidence {
+    Unobserved,
+    RecallCandidate,
+    Complete,
+}
+
+/// Phrase intent is independent of owner identity and recognizer latency.
+/// An absent secondary transcript is missing corroboration, not disproof of
+/// a complete native keyword. A deleted-phoneme candidate is not a phrase hit.
+pub(crate) fn wake_phrase_signal(
+    keyword: KeywordPhraseEvidence,
+    local_relation: Option<denzic_voice_activation_v1_core::LocalPhraseRelation>,
+) -> PhraseSignal {
+    use denzic_voice_activation_v1_core::LocalPhraseRelation;
+    if matches!(
+        local_relation,
+        Some(
+            LocalPhraseRelation::ExactStart
+                | LocalPhraseRelation::PhoneticStart
+                | LocalPhraseRelation::PresentLater
+        )
+    ) {
+        PhraseSignal::LocalTranscript
+    } else if keyword == KeywordPhraseEvidence::Complete {
+        PhraseSignal::KeywordModel
+    } else {
+        PhraseSignal::None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OwnerAccessEvidence {
     /// There is no persisted profile. Phrase evidence may open the product, but
     /// downstream owner-only filtering must stay disabled.
@@ -292,11 +323,10 @@ pub(crate) const fn open_session_wake_owned_body_can_recover(
         && evidence.provider_has_wake_anchored_body
 }
 
-/// Transcript ownership evidence is deliberately separate from the wake and
-/// endpoint classification. Short, high-energy windows are too small to erase
-/// text on their own, but two of them may corroborate a provider-final speaker
-/// change. This prevents changing the global endpoint sensitivity to solve a
-/// transcript-only failure.
+/// Qualified negative evidence stays separate from coarse wake/endpoint
+/// classification. Short hints may corroborate a provider-final speaker change;
+/// the strong tier may qualify original-window negative presence. Neither is
+/// independent permission to delete words or stop an unresolved owner body.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum TranscriptSpeakerEvidence {
     #[default]
@@ -311,6 +341,20 @@ impl TranscriptSpeakerEvidence {
             Self::Inconclusive => "inconclusive",
             Self::ForeignTailHint => "foreign_tail_hint",
             Self::HardNonTarget => "hard_non_target",
+        }
+    }
+
+    /// Restrict an already signal-qualified hint with independent, completed
+    /// speech coverage. This never upgrades a hint or grants identity by itself.
+    pub(crate) fn constrained_by_resolved_speech(self, speech_ms: usize) -> Self {
+        if speech_ms < TRANSCRIPT_SPEAKER_FOREIGN_HINT_MIN_MS {
+            Self::Inconclusive
+        } else if speech_ms < TRANSCRIPT_SPEAKER_HARD_NON_TARGET_MIN_MS
+            && self == Self::HardNonTarget
+        {
+            Self::ForeignTailHint
+        } else {
+            self
         }
     }
 }
@@ -400,7 +444,9 @@ impl TranscriptEvidenceLedger {
     /// the latest provider revision still contains unresolved content. This
     /// only vetoes early sealing; it never admits the raw text as owner text.
     pub(crate) fn has_unresolved_provider_content(&self, owner_candidate: &str) -> bool {
-        self.revisions.iter().rev()
+        self.revisions
+            .iter()
+            .rev()
             .find(|revision| !revision.text.trim().is_empty())
             .is_some_and(|revision| {
                 crate::transcript_boundary::content_key(&revision.text)
@@ -717,6 +763,37 @@ impl RecordingPreviewController {
         self.visible = Some(candidate.clone());
         self.last_visible_growth_at = Some(Instant::now());
         Some(candidate)
+    }
+
+    /// Later identity evidence may correct the reversible visible tail. It
+    /// cannot retract the independently admitted owner ledger, reopen a closed
+    /// session, or supply a final/delivery candidate.
+    pub(crate) fn reconcile_confirmed_owner_partition(
+        &mut self,
+        session_id: SessionId,
+        candidate: &str,
+    ) -> Option<String> {
+        if !self.admit(session_id) || self.authoritative_invalidated {
+            return None;
+        }
+        let candidate = candidate.trim();
+        let candidate_key = crate::transcript_boundary::content_key(candidate);
+        let protected = self.authoritative.as_deref().unwrap_or_default();
+        let protected_key = crate::transcript_boundary::content_key(protected);
+        // A conflicting/shorter owner view is not permission to remove body
+        // already admitted by another source. Retain that ledger as the floor.
+        let replacement = if candidate_key.starts_with(&protected_key) {
+            candidate
+        } else {
+            protected
+        };
+        if self.visible.as_deref() == Some(replacement) {
+            return None;
+        }
+        self.visible = Some(replacement.to_string());
+        // Identity correction is not new speech and must not restart any
+        // quiet/continuation clock, including a punctuation-only correction.
+        Some(replacement.to_string())
     }
 
     fn admit(&mut self, session_id: SessionId) -> bool {
@@ -1107,9 +1184,10 @@ impl OwnerEndpointController {
         now: Instant,
         catch_up_grace: Duration,
     ) -> EndpointDecision {
-        if self.owner_analysis_pending && self
-            .owner_analysis_deadline
-            .is_some_and(|deadline| now < deadline)
+        if self.owner_analysis_pending
+            && self
+                .owner_analysis_deadline
+                .is_some_and(|deadline| now < deadline)
         {
             return EndpointDecision::AwaitingOwnerAnalysis;
         }
@@ -1225,26 +1303,42 @@ pub(crate) struct ProviderOwnerCertificateEvidence {
 }
 
 pub(crate) const fn provider_owner_is_certified(e: ProviderOwnerCertificateEvidence) -> bool {
-    e.enrolled_owner_verified && e.distinct_foreign_track && e.all_owner_rows_supported
-        && !e.response_body_alias && e.complete_attributed_view
+    e.enrolled_owner_verified
+        && e.distinct_foreign_track
+        && e.all_owner_rows_supported
+        && !e.response_body_alias
+        && e.complete_attributed_view
 }
 
 /// A separator output without an observed identity remains pending. An ASR
 /// connection or successful model inference cannot certify a person's voice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SeparatedAudioOwnership { Owner, Other, Pending }
+pub(crate) enum SeparatedAudioOwnership {
+    Owner,
+    Other,
+    Pending,
+}
 
 pub(crate) const fn separated_audio_ownership(
-    usable_signal: bool, positive_owner: bool, explicit_other: bool,
+    usable_signal: bool,
+    positive_owner: bool,
+    explicit_other: bool,
 ) -> SeparatedAudioOwnership {
-    if !usable_signal { SeparatedAudioOwnership::Pending }
-    else if explicit_other { SeparatedAudioOwnership::Other }
-    else if positive_owner { SeparatedAudioOwnership::Owner }
-    else { SeparatedAudioOwnership::Pending }
+    if !usable_signal {
+        SeparatedAudioOwnership::Pending
+    } else if explicit_other {
+        SeparatedAudioOwnership::Other
+    } else if positive_owner {
+        SeparatedAudioOwnership::Owner
+    } else {
+        SeparatedAudioOwnership::Pending
+    }
 }
 
 pub(crate) const fn live_transcript_authority_with_certified_provider(
-    evidence: InterferenceEvidence, independent_owner_ready: bool, provider_owner_ready: bool,
+    evidence: InterferenceEvidence,
+    independent_owner_ready: bool,
+    provider_owner_ready: bool,
 ) -> LiveTranscriptAuthority {
     let authority = live_transcript_authority(evidence, independent_owner_ready);
     match authority {
@@ -1552,8 +1646,8 @@ pub(crate) const fn open_near_phrase_wake_can_activate(
     evidence: OpenNearPhraseWakeEvidence,
 ) -> bool {
     let body_text = evidence.transcript_chars > evidence.phrase_chars;
-    let phrase_only_terminal = evidence.terminal_window
-        && evidence.transcript_chars + 1 >= evidence.phrase_chars;
+    let phrase_only_terminal =
+        evidence.terminal_window && evidence.transcript_chars + 1 >= evidence.phrase_chars;
     evidence.best_distance > 0
         && evidence.best_distance <= OPEN_NEAR_PHRASE_MAX_DISTANCE
         && (evidence.best_distance < 2
@@ -1601,6 +1695,82 @@ pub(crate) const fn live_owner_near_wake_can_attempt(evidence: LiveOwnerNearWake
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn complete_keyword_survives_secondary_nonmatch_without_granting_owner_identity() {
+        use denzic_voice_activation_v1_core::LocalPhraseRelation;
+        for secondary in [None, Some(LocalPhraseRelation::Absent)] {
+            let signal =
+                super::wake_phrase_signal(super::KeywordPhraseEvidence::Complete, secondary);
+            assert_eq!(
+                signal,
+                denzic_voice_activation_v1_core::PhraseSignal::KeywordModel
+            );
+            for owner in [
+                super::OwnerAccessEvidence::OpenUnenrolled,
+                super::OwnerAccessEvidence::OpenInactiveProfile,
+                super::OwnerAccessEvidence::EnrolledMatch,
+                super::OwnerAccessEvidence::EnrolledNonMatch,
+            ] {
+                for terminal in [false, true] {
+                    let decision = super::arbitrate_wake(signal, owner, terminal);
+                    assert_eq!(
+                        decision.decision,
+                        denzic_voice_activation_v1_core::GateDecision::Accept
+                    );
+                    assert_eq!(
+                        decision.owner_access.enrolled_owner_verified(),
+                        owner == super::OwnerAccessEvidence::EnrolledMatch
+                    );
+                }
+            }
+            for terminal in [false, true] {
+                assert_ne!(
+                    super::arbitrate_wake(
+                        signal,
+                        super::OwnerAccessEvidence::Unavailable,
+                        terminal
+                    )
+                    .decision,
+                    denzic_voice_activation_v1_core::GateDecision::Accept
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn partial_keyword_and_owner_identity_cannot_manufacture_wake_intent() {
+        use denzic_voice_activation_v1_core::LocalPhraseRelation;
+        for keyword in [
+            super::KeywordPhraseEvidence::Unobserved,
+            super::KeywordPhraseEvidence::RecallCandidate,
+        ] {
+            for secondary in [None, Some(LocalPhraseRelation::Absent)] {
+                let signal = super::wake_phrase_signal(keyword, secondary);
+                assert_eq!(signal, denzic_voice_activation_v1_core::PhraseSignal::None);
+                for terminal in [false, true] {
+                    assert_ne!(
+                        super::arbitrate_wake(
+                            signal,
+                            super::OwnerAccessEvidence::EnrolledMatch,
+                            terminal
+                        )
+                        .decision,
+                        denzic_voice_activation_v1_core::GateDecision::Accept
+                    );
+                }
+            }
+            for relation in [
+                LocalPhraseRelation::ExactStart,
+                LocalPhraseRelation::PhoneticStart,
+                LocalPhraseRelation::PresentLater,
+            ] {
+                assert_eq!(
+                    super::wake_phrase_signal(keyword, Some(relation)),
+                    denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript
+                );
+            }
+        }
+    }
     use super::*;
 
     #[test]
@@ -1666,6 +1836,55 @@ mod tests {
             Some("主人第一句旁人尾巴"),
             "dictation must not retract a longer visible preview when owner-filtered text is shorter"
         );
+    }
+
+    #[test]
+    fn confirmed_foreign_visual_correction_preserves_owner_and_growth_clock() {
+        let session = uuid::Uuid::new_v4();
+        let stale = uuid::Uuid::new_v4();
+        let mut preview = RecordingPreviewController::default();
+        preview.begin_session(session);
+        preview.observe_authoritative(session, "本人第一句。", false);
+        preview.observe_provisional(session, "本人第一句。旁人台词");
+        let growth = preview.last_visible_growth_at(session);
+        assert_eq!(preview.reconcile_confirmed_owner_partition(stale, ""), None);
+        assert_eq!(
+            preview.reconcile_confirmed_owner_partition(session, "本人第一句。"),
+            Some("本人第一句。".into())
+        );
+        assert_eq!(
+            preview.authoritative(session).as_deref(),
+            Some("本人第一句。")
+        );
+        assert_eq!(preview.last_visible_growth_at(session), growth);
+        preview.observe_provisional(session, "本人第一句。又一段旁人话");
+        assert_eq!(
+            preview.reconcile_confirmed_owner_partition(session, "本人"),
+            Some("本人第一句。".into()),
+            "a shorter/conflicting owner view cannot erase admitted body"
+        );
+        assert_eq!(
+            preview.observe_provisional(session, "本人第一句。本人又继续说话。"),
+            Some("本人第一句。本人又继续说话。".into())
+        );
+        preview.clear_session(session);
+        assert_eq!(
+            preview.reconcile_confirmed_owner_partition(session, "过期正文"),
+            None
+        );
+    }
+
+    #[test]
+    fn confirmed_foreign_only_visual_can_clear_without_becoming_authoritative() {
+        let session = uuid::Uuid::new_v4();
+        let mut preview = RecordingPreviewController::default();
+        preview.begin_session(session);
+        preview.observe_provisional(session, "仅有旁人声");
+        assert_eq!(
+            preview.reconcile_confirmed_owner_partition(session, ""),
+            Some(String::new())
+        );
+        assert_eq!(preview.authoritative(session), None);
     }
 
     #[test]
@@ -2209,26 +2428,63 @@ mod tests {
         let mut endpoint = OwnerEndpointController::default();
         endpoint.arm(evidence);
         for ms in [0, 400, 800, 1_200, 1_600, 2_000, 2_400, 2_800, 3_200] {
-            endpoint.note_owner_analysis_pending(false, started + Duration::from_millis(ms), Duration::from_millis(3_000));
-            endpoint.note_owner_analysis_pending(true, started + Duration::from_millis(ms), Duration::from_millis(3_000));
+            endpoint.note_owner_analysis_pending(
+                false,
+                started + Duration::from_millis(ms),
+                Duration::from_millis(3_000),
+            );
+            endpoint.note_owner_analysis_pending(
+                true,
+                started + Duration::from_millis(ms),
+                Duration::from_millis(3_000),
+            );
         }
         assert_eq!(
-            endpoint.decide_stop(evidence, started + Duration::from_millis(3_201), Duration::from_millis(300)),
+            endpoint.decide_stop(
+                evidence,
+                started + Duration::from_millis(3_201),
+                Duration::from_millis(300)
+            ),
             EndpointDecision::Stop,
             "new background jobs cannot buy another wait after the original owner deadline",
         );
-        endpoint.arm(EndpointEvidence { owner_watermark_ms: None, ..evidence });
+        endpoint.arm(EndpointEvidence {
+            owner_watermark_ms: None,
+            ..evidence
+        });
         endpoint.arm(evidence);
-        endpoint.note_owner_analysis_pending(true, started + Duration::from_millis(3_500), Duration::from_millis(3_000));
+        endpoint.note_owner_analysis_pending(
+            true,
+            started + Duration::from_millis(3_500),
+            Duration::from_millis(3_000),
+        );
         assert_eq!(
-            endpoint.decide_stop(evidence, started + Duration::from_millis(3_501), Duration::from_millis(300)),
+            endpoint.decide_stop(
+                evidence,
+                started + Duration::from_millis(3_501),
+                Duration::from_millis(300)
+            ),
             EndpointDecision::Stop,
             "missing evidence followed by the old owner edge is not new owner activity",
         );
-        endpoint.arm(EndpointEvidence { owner_watermark_ms: Some(36_000), ..evidence });
-        endpoint.note_owner_analysis_pending(true, started + Duration::from_millis(4_000), Duration::from_millis(3_000));
+        endpoint.arm(EndpointEvidence {
+            owner_watermark_ms: Some(36_000),
+            ..evidence
+        });
+        endpoint.note_owner_analysis_pending(
+            true,
+            started + Duration::from_millis(4_000),
+            Duration::from_millis(3_000),
+        );
         assert_eq!(
-            endpoint.decide_stop(EndpointEvidence { owner_watermark_ms: Some(36_000), ..evidence }, started + Duration::from_millis(4_001), Duration::from_millis(300)),
+            endpoint.decide_stop(
+                EndpointEvidence {
+                    owner_watermark_ms: Some(36_000),
+                    ..evidence
+                },
+                started + Duration::from_millis(4_001),
+                Duration::from_millis(300)
+            ),
             EndpointDecision::AwaitingOwnerAnalysis,
             "a real owner return gets its own analysis budget",
         );
@@ -2733,11 +2989,21 @@ mod tests {
 
     #[test]
     fn live_near_phrase_requires_kws_owner_window_and_repeated_evidence() {
-        assert!(live_repeated_owner_near_phrase_can_verify(true, true, true, 2));
-        assert!(!live_repeated_owner_near_phrase_can_verify(false, true, true, 4));
-        assert!(!live_repeated_owner_near_phrase_can_verify(true, false, true, 4));
-        assert!(!live_repeated_owner_near_phrase_can_verify(true, true, false, 4));
-        assert!(!live_repeated_owner_near_phrase_can_verify(true, true, true, 1));
+        assert!(live_repeated_owner_near_phrase_can_verify(
+            true, true, true, 2
+        ));
+        assert!(!live_repeated_owner_near_phrase_can_verify(
+            false, true, true, 4
+        ));
+        assert!(!live_repeated_owner_near_phrase_can_verify(
+            true, false, true, 4
+        ));
+        assert!(!live_repeated_owner_near_phrase_can_verify(
+            true, true, false, 4
+        ));
+        assert!(!live_repeated_owner_near_phrase_can_verify(
+            true, true, true, 1
+        ));
         assert!(repeated_owner_near_phrase_wake_can_activate(true, 0.515, 2));
         assert!(!repeated_owner_near_phrase_wake_can_activate(false, 0.8, 4));
     }
@@ -2746,16 +3012,28 @@ mod tests {
     fn repeated_owner_near_phrase_excludes_buried_two_unit_neighbour() {
         // False wake 2356876213: four overlapping windows saw distance 2 at
         // window start 4 in ordinary speech, despite a valid owner voiceprint.
-        assert!(!owner_near_phrase_evidence_can_accumulate(true, 2, 4, 0, 0, 12, 4));
+        assert!(!owner_near_phrase_evidence_can_accumulate(
+            true, 2, 4, 0, 0, 12, 4
+        ));
         // A two-unit error at the beginning remains eligible for suffix crop.
-        assert!(owner_near_phrase_evidence_can_accumulate(true, 2, 0, 0, 2, 12, 4));
+        assert!(owner_near_phrase_evidence_can_accumulate(
+            true, 2, 0, 0, 2, 12, 4
+        ));
         // The installed false wake only retained "开始"; repeated rolling
         // windows must not launder the missing "录音" into phrase evidence.
-        assert!(!owner_near_phrase_evidence_can_accumulate(true, 2, 0, 2, 0, 24, 4));
+        assert!(!owner_near_phrase_evidence_can_accumulate(
+            true, 2, 0, 2, 0, 24, 4
+        ));
         // A stronger one-unit match may still follow firmware pre-roll.
-        assert!(owner_near_phrase_evidence_can_accumulate(true, 1, 4, 0, 0, 12, 4));
-        assert!(!owner_near_phrase_evidence_can_accumulate(false, 1, 0, 0, 0, 12, 4));
-        assert!(!owner_near_phrase_evidence_can_accumulate(true, 1, 0, 0, 0, 4, 4));
+        assert!(owner_near_phrase_evidence_can_accumulate(
+            true, 1, 4, 0, 0, 12, 4
+        ));
+        assert!(!owner_near_phrase_evidence_can_accumulate(
+            false, 1, 0, 0, 0, 12, 4
+        ));
+        assert!(!owner_near_phrase_evidence_can_accumulate(
+            true, 1, 0, 0, 0, 4, 4
+        ));
     }
 
     #[test]
@@ -3112,9 +3390,15 @@ mod tests {
             partial_preview_available: true,
             ..ProductFinalEvidence::default()
         };
-        assert_eq!(arbitrate_product_final(evidence), ProductFinalAuthority::Empty);
         assert_eq!(
-            arbitrate_product_final(ProductFinalEvidence { separated_owner_available: true, ..evidence }),
+            arbitrate_product_final(evidence),
+            ProductFinalAuthority::Empty
+        );
+        assert_eq!(
+            arbitrate_product_final(ProductFinalEvidence {
+                separated_owner_available: true,
+                ..evidence
+            }),
             ProductFinalAuthority::SeparatedOwner,
         );
     }

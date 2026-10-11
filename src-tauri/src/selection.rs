@@ -247,8 +247,61 @@ pub(crate) enum FocusedInputState {
     Unknown,
 }
 
+/// Predict an edit from native selection coordinates, preserving user line
+/// breaks and any provider-owned paragraph suffix as separate exact text.
+fn native_edit_result(document: &str, selected: &str, prefix: &str, suffix: &str,
+    payload: &str) -> Result<String, String> {
+    if format!("{prefix}{selected}{suffix}") != document {
+        return Err("native selection does not partition this document".into());
+    }
+    Ok(format!("{prefix}{payload}{suffix}"))
+}
+
+#[cfg(test)]
+mod native_edit_tests {
+    use super::native_edit_result;
+
+    #[test]
+    fn native_edit_preserves_existing_user_line_breaks_at_the_actual_caret() {
+        for newline in ["\n", "\r", "\r\n", "\n\n"] {
+            let prefix = format!("用户原有文字🔒：{newline}");
+            let payload = "明天上午9点。";
+            let result = native_edit_result(&prefix, "", &prefix, "", payload).unwrap();
+            assert_eq!(result, format!("{prefix}{payload}"));
+            assert_ne!(result, format!("{}{payload}", prefix.trim_end_matches(['\r','\n'])),
+                "trimming a real user newline would lose the receipted edit boundary");
+        }
+    }
+
+    #[test]
+    fn native_edit_preserves_native_paragraph_suffix_and_user_prefix_during_replacement() {
+        let prefix = "Already written.\r\nユーザー🔒\n";
+        let old = "我的首句。我的尾句。";
+        let replacement = "我的首句。补回的中间句。我的尾句。";
+        for suffix in ["", "\r", "\r\n"] {
+            let document = format!("{prefix}{old}{suffix}");
+            assert_eq!(native_edit_result(&document, old, prefix, suffix, replacement).unwrap(),
+                format!("{prefix}{replacement}{suffix}"));
+        }
+    }
+
+    #[test]
+    fn native_edit_rejects_stale_document_or_selection_without_guessing_a_seam() {
+        assert!(native_edit_result("first last", "last", "first ", "", "tail").is_ok());
+        for (document, selected, prefix, suffix) in [
+            ("first changed", "last", "first ", ""),
+            ("first last", "first", "first ", ""),
+            ("first last", "last", "other ", ""),
+            ("prompt for empty editor", "", "", ""),
+        ] {
+            assert!(native_edit_result(document, selected, prefix, suffix, "tail").is_err());
+        }
+    }
+}
+
 /// Read the editor captured before a paste, even if focus moves afterwards.
-/// It never selects text, copies, or activates an application.
+/// Selection is available only for an exact receipted session suffix. It never
+/// copies, activates an application, or selects the whole editor by shortcut.
 pub(crate) struct PasteReader {
     #[cfg(target_os = "windows")]
     reader: windows_uia::WindowsSelectionReader,
@@ -296,6 +349,68 @@ impl PasteReader {
         { Err("paste readback unavailable".into()) }
     }
 
+    pub(crate) fn expected_document_after_paste(&self, before: &(String, String), payload: &str) -> Result<String, String> {
+        #[cfg(target_os = "windows")]
+        { self.reader.expected_document_after_paste(before, payload) }
+        #[cfg(target_os = "macos")]
+        { self.reader.expected_document_after_paste(before, payload).ok_or_else(|| "native edit coordinates unavailable".into()) }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        { let _ = (before, payload); Err("native edit coordinates unavailable".into()) }
+    }
+
+    /// A reversible first write needs an actual document, not an accessible
+    /// placeholder exposed as text by an otherwise editable control.
+    pub(crate) fn revisable_document_agrees(&self, document: &str) -> Result<bool, String> {
+        #[cfg(target_os = "windows")]
+        { self.reader.revisable_document_agrees(document) }
+        #[cfg(target_os = "macos")]
+        { self.reader.document().map(|current| current == document)
+            .ok_or_else(|| "native document unavailable".into()) }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        { let _ = document; Err("native document unavailable".into()) }
+    }
+
+    pub(crate) fn is_current(&self) -> bool {
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        { self.reader.is_current() }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        { false }
+    }
+
+    pub(crate) fn current_observation(&self) -> Result<bool, String> {
+        #[cfg(target_os = "windows")]
+        { self.reader.current_observation() }
+        #[cfg(target_os = "macos")]
+        { self.reader.current_observation() }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        { Err("native editor identity unavailable".into()) }
+    }
+
+    pub(crate) fn same_target(&self, other: &Self) -> bool {
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        { self.reader.same_target(&other.reader) }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        { let _ = other; false }
+    }
+
+    pub(crate) fn same_target_observation(&self, other: &Self) -> Result<bool, String> {
+        #[cfg(target_os = "windows")]
+        { self.reader.same_target_observation(&other.reader) }
+        #[cfg(target_os = "macos")]
+        { Ok(self.reader.same_target(&other.reader)) }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        { let _ = other; Err("native editor identity unavailable".into()) }
+    }
+
+    pub(crate) fn select_owned_suffix(&self, document: &str, expected: &str) -> Result<(), String> {
+        #[cfg(target_os = "windows")]
+        { self.reader.select_owned_suffix(document, expected) }
+        #[cfg(target_os = "macos")]
+        { self.reader.select_owned_suffix(document, expected).ok_or_else(|| "session range unavailable".into()) }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        { let _ = (document, expected); Err("session range unavailable".into()) }
+    }
+
     pub(crate) fn caret_at_end(&self) -> Result<bool, String> {
         #[cfg(target_os = "windows")]
         { self.reader.caret_at_end() }
@@ -335,6 +450,8 @@ mod macos_ax {
             value: *mut CFTypeRef,
         ) -> AxError;
         fn AXUIElementSetMessagingTimeout(element: AxUiElementRef, timeout: f32) -> AxError;
+        fn AXUIElementSetAttributeValue(element: AxUiElementRef, attribute: CFStringRef, value: CFTypeRef) -> AxError;
+        fn AXValueCreate(kind: i32, value: *const c_void) -> CFTypeRef;
         fn AXValueGetType(value: CFTypeRef) -> i32;
         fn AXValueGetValue(value: CFTypeRef, kind: i32, output: *mut c_void) -> bool;
     }
@@ -342,6 +459,7 @@ mod macos_ax {
     #[link(name = "CoreFoundation", kind = "framework")]
     extern "C" {
         fn CFRelease(cf: CFTypeRef);
+        fn CFEqual(a: CFTypeRef, b: CFTypeRef) -> bool;
         fn CFGetTypeID(cf: CFTypeRef) -> usize;
         fn CFStringGetTypeID() -> usize;
         fn CFStringCreateWithCString(
@@ -425,8 +543,57 @@ mod macos_ax {
             self.string_attribute(b"AXValue\0")
         }
 
+        pub(super) fn expected_document_after_paste(&self, before: &(String, String), payload: &str) -> Option<String> {
+            let range = self.selected_range()?;
+            if range.location < 0 || range.length < 0 || self.before()? != *before { return None; }
+            let utf16: Vec<u16> = before.0.encode_utf16().collect();
+            let start = range.location as usize;
+            let end = start.checked_add(range.length as usize)?;
+            let prefix = String::from_utf16(utf16.get(..start)?).ok()?;
+            let selected = String::from_utf16(utf16.get(start..end)?).ok()?;
+            let suffix = String::from_utf16(utf16.get(end..)?).ok()?;
+            if selected != before.1 { return None; }
+            super::native_edit_result(&before.0, &before.1, &prefix, &suffix, payload).ok()
+        }
+
+        pub(super) fn same_target(&self, other: &Self) -> bool {
+            unsafe { CFEqual(self.0 as CFTypeRef, other.0 as CFTypeRef) }
+        }
+
+        pub(super) fn is_current(&self) -> bool {
+            Self::capture().is_some_and(|focused| self.same_target(&focused))
+        }
+
+        pub(super) fn current_observation(&self) -> Result<bool, String> {
+            Self::capture().map(|focused| self.same_target(&focused))
+                .ok_or_else(|| "native editor identity unavailable".into())
+        }
+
+        pub(super) fn select_owned_suffix(&self, document: &str, expected: &str) -> Option<()> {
+            if expected.is_empty() || !self.is_current() || self.before()? != (document.into(), String::new())
+                || !self.caret_at_end()? || !document.ends_with(expected) { return None; }
+            let range = CfRange { location: (document.encode_utf16().count() - expected.encode_utf16().count()) as isize,
+                length: expected.encode_utf16().count() as isize };
+            unsafe {
+                let attr = cfstring_from_static(b"AXSelectedTextRange\0")?;
+                let value = AXValueCreate(4, (&range as *const CfRange).cast());
+                if value.is_null() { CFRelease(attr); return None; }
+                let error = AXUIElementSetAttributeValue(self.0, attr, value);
+                CFRelease(value);
+                CFRelease(attr);
+                if error != AX_ERROR_SUCCESS { return None; }
+            }
+            (self.is_current() && self.before()? == (document.into(), expected.into())).then_some(())
+        }
+
         pub(super) fn caret_at_end(&self) -> Option<bool> {
             let document = self.document()?;
+            let range = self.selected_range()?;
+            Some(range.length == 0 && range.location >= 0
+                && range.location as usize == document.encode_utf16().count())
+        }
+
+        fn selected_range(&self) -> Option<CfRange> {
             unsafe {
                 let attr = cfstring_from_static(b"AXSelectedTextRange\0")?;
                 let mut value = std::ptr::null();
@@ -439,8 +606,7 @@ mod macos_ax {
                     && AXValueGetValue(value, 4, (&mut range as *mut CfRange).cast());
                 CFRelease(value);
                 if !read { return None; }
-                Some(range.length == 0 && range.location >= 0
-                    && range.location as usize == document.encode_utf16().count())
+                Some(range)
             }
         }
     }

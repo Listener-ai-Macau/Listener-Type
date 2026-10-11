@@ -1,0 +1,207 @@
+{
+  "provenance": "Six frozen public-recording cloud/native outputs; expected text is used only after the shared content decision.",
+  "cases": [
+    {
+      "id": "mixed",
+      "primary": "深交所副总经理周明指出",
+      "expected": "深交所副总经理周明指出 婉婉香",
+      "supplement": {
+        "locale": "zh-CN",
+        "source_pcm_sha256": "121add61f147dfe9c4e223d8fcb1d8943abb54ceeca0e2399b4d8fb22350ee46",
+        "decoded_pcm_sha256": "121add61f147dfe9c4e223d8fcb1d8943abb54ceeca0e2399b4d8fb22350ee46",
+        "input_samples": 79457,
+        "derivation_bound": true,
+        "auxiliary_cloud_text": "深交所副总婉婉香。",
+        "segments": [
+          {
+            "channel": 1,
+            "text": "山交所副总交明指出。"
+          },
+          {
+            "channel": 2,
+            "text": "晚晚箱。"
+          }
+        ],
+        "activity": [
+          {
+            "channel": 1,
+            "start_ms": 560,
+            "end_ms": 4480
+          },
+          {
+            "channel": 2,
+            "start_ms": 2640,
+            "end_ms": 3360
+          }
+        ]
+      },
+      "inferenceReused": true,
+      "originalResultSha256": "5d61e720cfaa8a288ce01f8c644c9164b0bc3824ac9c347129066edd879a2dd4",
+      "nativeResultSha256": "e9a000288a8b3cd868f6a78ad1e11dde6fef3ba52efca6c7d002c8db0e70934c"
+    },
+    {
+      "id": "clean",
+      "primary": "晚晚香",
+      "expected": "晚晚香",
+      "supplement": {
+        "locale": "zh-CN",
+        "source_pcm_sha256": "086d5c9f0c5680fd7e42f7d40c40b94ab9cc2e830d1528104e34d29d06e309f4",
+        "decoded_pcm_sha256": "086d5c9f0c5680fd7e42f7d40c40b94ab9cc2e830d1528104e34d29d06e309f4",
+        "input_samples": 23900,
+        "derivation_bound": true,
+        "auxiliary_cloud_text": "晚晚香。",
+        "segments": [
+          {
+            "channel": 1,
+            "text": "晚香。"
+          }
+        ],
+        "activity": [
+          {
+            "channel": 1,
+            "start_ms": 320,
+            "end_ms": 1120
+          }
+        ]
+      },
+      "inferenceReused": true,
+      "originalResultSha256": "5d61e720cfaa8a288ce01f8c644c9164b0bc3824ac9c347129066edd879a2dd4",
+      "nativeResultSha256": "2a3808362c3ddbffd929effc3fa1b7f57fa9c1d330992bfac99b73953d5e1499"
+    },
+    {
+      "id": "quiet",
+      "primary": "晚晚香。",
+      "expected": "晚晚香。",
+      "supplement": {
+        "locale": "zh-CN",
+        "source_pcm_sha256": "648a6c874e3b3be30a209eb817614e6d85665ff281adef7347db0ed0a2827d08",
+        "decoded_pcm_sha256": "648a6c874e3b3be30a209eb817614e6d85665ff281adef7347db0ed0a2827d08",
+        "input_samples": 23900,
+        "derivation_bound": true,
+        "auxiliary_cloud_text": "晚晚香。",
+        "segments": [
+          {
+            "channel": 1,
+            "text": "晚香。"
+          }
+        ],
+        "activity": [
+          {
+            "channel": 1,
+            "start_ms": 320,
+            "end_ms": 1120
+          }
+        ]
+      },
+      "inferenceReused": true,
+      "originalResultSha256": "5d61e720cfaa8a288ce01f8c644c9164b0bc3824ac9c347129066edd879a2dd4",
+      "nativeResultSha256": "c86e55bd376a17f01a80f73e3b8bdb8f5781d2d6d4177a0b385961ea47afbe69"
+    },
+    {
+      "id": "background_only",
+      "primary": "深交所副总经理周明指出",
+      "expected": "深交所副总经理周明指出",
+      "supplement": {
+        "locale": "zh-CN",
+        "source_pcm_sha256": "2fc0fb479c2e8b45b75164ef3001f7cd6b00de8c0a5daec53b23162b6844bd5a",
+        "decoded_pcm_sha256": "2fc0fb479c2e8b45b75164ef3001f7cd6b00de8c0a5daec53b23162b6844bd5a",
+        "input_samples": 79457,
+        "derivation_bound": true,
+        "auxiliary_cloud_text": "深交所副总经理周明指出。",
+        "segments": [
+          {
+            "channel": 1,
+            "text": "山交所副总经理周明指出。"
+          }
+        ],
+        "activity": [
+          {
+            "channel": 1,
+            "start_ms": 560,
+            "end_ms": 4480
+          }
+        ]
+      },
+      "inferenceReused": true,
+      "originalResultSha256": "5d61e720cfaa8a288ce01f8c644c9164b0bc3824ac9c347129066edd879a2dd4",
+      "nativeResultSha256": "d0c63ef501fe070e458e71716110aa6acae78c3b32366f2e21d3dfa43c6bb271"
+    },
+    {
+      "id": "novel_clean",
+      "primary": "羊城晚报5月8日报道，今年的母亲节5月10日。",
+      "expected": "羊城晚报5月8日报道，今年的母亲节5月10日。",
+      "supplement": {
+        "locale": "zh-CN",
+        "source_pcm_sha256": "7d92e8743c946cae2096756b27ef8293e771389946b5fc057d6bb39c0deee29d",
+        "decoded_pcm_sha256": "7d92e8743c946cae2096756b27ef8293e771389946b5fc057d6bb39c0deee29d",
+        "input_samples": 85241,
+        "derivation_bound": true,
+        "auxiliary_cloud_text": "羊城晚报5月8日报道今年的母亲节5月10日。",
+        "segments": [
+          {
+            "channel": 1,
+            "text": "杨重晚报五月八日报道今年的母亲节五月十日。"
+          }
+        ],
+        "activity": [
+          {
+            "channel": 1,
+            "start_ms": 320,
+            "end_ms": 3280
+          },
+          {
+            "channel": 1,
+            "start_ms": 3360,
+            "end_ms": 4960
+          }
+        ]
+      },
+      "inferenceReused": true,
+      "originalResultSha256": "cd6b2daf111ad6e175caf247b1e1af066ff73ab6a61c8914e3b0cc4df841a95c",
+      "nativeResultSha256": "6ec08a0ff67b9887908137ad7c738ab42c7a86097dff46d3629d65ac49551c2f"
+    },
+    {
+      "id": "novel_mixed",
+      "primary": "羊城晚报5月8日报道，今年的母亲节5月10日。",
+      "expected": "羊城晚报5月8日报道，今年的母亲节5月10日。",
+      "supplement": {
+        "locale": "zh-CN",
+        "source_pcm_sha256": "023b666d89e587ef6062d1eada57b7f20d2e8e9c4fb6850c6e1fbe26aac56adb",
+        "decoded_pcm_sha256": "023b666d89e587ef6062d1eada57b7f20d2e8e9c4fb6850c6e1fbe26aac56adb",
+        "input_samples": 85241,
+        "derivation_bound": true,
+        "auxiliary_cloud_text": "阳春晚报5月8日报导今年的母亲节5月10日。",
+        "segments": [
+          {
+            "channel": 1,
+            "text": "杨虫晚到五月八日报道今年等等清洁五月十日。"
+          },
+          {
+            "channel": 2,
+            "text": "当初晚造五月八日报道今年等清洁五月十日。"
+          }
+        ],
+        "activity": [
+          {
+            "channel": 1,
+            "start_ms": 320,
+            "end_ms": 3120
+          },
+          {
+            "channel": 1,
+            "start_ms": 3360,
+            "end_ms": 5040
+          },
+          {
+            "channel": 2,
+            "start_ms": 480,
+            "end_ms": 4480
+          }
+        ]
+      },
+      "inferenceReused": true,
+      "originalResultSha256": "cd6b2daf111ad6e175caf247b1e1af066ff73ab6a61c8914e3b0cc4df841a95c",
+      "nativeResultSha256": "9959264069e8608d6a9966e20641c013dd0c74f5a3f1051e51836c8d68dcb1f1"
+    }
+  ]
+}

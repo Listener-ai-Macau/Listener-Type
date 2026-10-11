@@ -14,6 +14,17 @@ pub enum VoiceProfileState {
     Unavailable,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnrollmentFailureStage {
+    Preparation,
+    Device,
+    Capture,
+    Phrase,
+    Features,
+    Storage,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceprintStatus {
@@ -36,6 +47,8 @@ pub struct VoiceprintStatus {
     pub score: Option<f32>,
     pub threshold: f32,
     pub error: Option<String>,
+    pub failure_stage: Option<EnrollmentFailureStage>,
+    pub can_retry_save: bool,
     pub model_name: &'static str,
     pub runtime_version: &'static str,
     pub local_only: bool,
@@ -82,6 +95,254 @@ impl SessionSpeakerProfile {
     pub fn is_adaptive(&self) -> bool {
         self.adaptive
     }
+
+    /// Re-score the same independently measured source, without a second
+    /// acoustic inference or weakening the existing speech-quality contract.
+    pub(crate) fn classify_observation(&self, observation: &SessionSpeakerObservation) -> SessionSpeakerClassification {
+        let score = self.embeddings.iter()
+            .filter_map(|reference| normalized_cosine(reference, &observation.embedding))
+            .max_by(f32::total_cmp).unwrap_or(f32::NAN);
+        if !score.is_finite() || !observation.signal_quality_sufficient {
+            SessionSpeakerClassification::Uncertain { score }
+        } else {
+            session_speaker_classification_for_evidence(score, observation.real_speech_ms)
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn diagnostic_verified_source_context(&self, observation: &SessionSpeakerObservation) -> Self {
+        let mut embeddings = self.embeddings.as_ref().clone();
+        if observation.signal_quality_sufficient && observation.is_adaptation_candidate() {
+            embeddings.push(observation.embedding.clone());
+        }
+        Self { embeddings: Arc::new(embeddings), adaptive: self.adaptive }
+    }
+}
+
+/// Word identity's extra natural-speech reference is distinct from both wake
+/// admission and endpoint absence. It lives in RAM, belongs to one protected
+/// enrollment, and can only be acquired by the immutable enrolled bank itself.
+#[cfg(target_os = "windows")]
+#[derive(Clone)]
+pub(crate) struct NativeWordSpeakerProfile {
+    key: [u8; 32],
+    base: SessionSpeakerProfile,
+    words: SessionSpeakerProfile,
+    pub(crate) has_qualified_reference: bool,
+}
+
+#[cfg(target_os = "windows")]
+impl NativeWordSpeakerProfile {
+    pub(crate) fn binding_key(&self) -> [u8; 32] { self.key }
+    pub(crate) fn observe(&self, pcm: &[u8]) -> Result<SessionSpeakerObservation, String> {
+        if pcm.len() > denzic_speaker_verification_v1_core::DEFAULT_MAX_CANDIDATE_MS as usize * 32 {
+            return Err("native source exceeds the identity model's complete-input contract".into());
+        }
+        observe_session_speaker(&self.base, pcm)
+    }
+
+    pub(crate) fn classify(&self, observation: &SessionSpeakerObservation) -> SessionSpeakerClassification {
+        self.words.classify_observation(observation)
+    }
+}
+
+/// A bounded, non-persistent reference for ORIGINAL source chunks. The immutable
+/// enrolled/wake profile remains the admission authority: context cannot enroll
+/// itself, and a negative original-profile observation always keeps its veto.
+/// This avoids both cross-phrase gaps and recursive learning of a room speaker.
+#[derive(Debug, Clone)]
+pub(crate) struct VerifiedOriginalSourceContext {
+    base: SessionSpeakerProfile,
+    body_embeddings: Vec<Vec<f32>>,
+}
+
+impl VerifiedOriginalSourceContext {
+    pub(crate) fn new(base: SessionSpeakerProfile) -> Option<Self> {
+        (!base.is_adaptive()).then_some(Self { base, body_embeddings: Vec::new() })
+    }
+
+    pub(crate) fn certifies_original_pcm(&mut self, pcm: &[u8]) -> bool {
+        self.certifies_original_pcm_with_quality(pcm, None)
+    }
+
+    pub(crate) fn certifies_original_pcm_with_quality(&mut self, pcm: &[u8], speech_upper_bound_ms: Option<usize>) -> bool {
+        let Ok(mut observation) = observe_session_speaker(&self.base, pcm) else { return false; };
+        observation.constrain_speech_duration(speech_upper_bound_ms);
+        self.certifies_observation(&observation)
+    }
+
+    fn certifies_observation(&mut self, observation: &SessionSpeakerObservation) -> bool {
+        if !observation.signal_quality_sufficient {
+            return false;
+        }
+        let owner = match observation.classification {
+            SessionSpeakerClassification::Target { .. } => true,
+            SessionSpeakerClassification::NonTarget { .. } => false,
+            SessionSpeakerClassification::Uncertain { .. } => self.body_embeddings.iter()
+                .filter_map(|reference| normalized_cosine(reference, &observation.embedding))
+                .any(|score| score >= SESSION_SPEAKER_CONFIDENT_TARGET_MIN_SCORE),
+        };
+        // Admission uses only this window's BASE observation. A context match
+        // never supplies a new reference, and no protected enrollment is written.
+        if observation.is_adaptation_candidate()
+            && self.body_embeddings.len() < SESSION_SPEAKER_ADAPT_CONFIRMATIONS
+            && self.body_embeddings.iter().all(|reference| {
+                normalized_cosine(reference, &observation.embedding)
+                    .is_none_or(|score| score < ADAPTIVE_BANK_REPRESENTED_MAX_SCORE)
+            })
+        {
+            self.body_embeddings.push(observation.embedding.clone());
+        }
+        owner
+    }
+}
+
+/// Separate ownership state for separated output. This can share the immutable
+/// enrolled profile, but can never inherit original-mixture body embeddings.
+pub(crate) struct VerifiedExtractedOutputContext {
+    evidence: VerifiedOriginalSourceContext,
+}
+
+impl VerifiedExtractedOutputContext {
+    pub(crate) fn new(base: SessionSpeakerProfile) -> Option<Self> {
+        VerifiedOriginalSourceContext::new(base).map(|evidence| Self { evidence })
+    }
+
+    pub(crate) fn observe(&self, pcm: &[u8]) -> Result<SessionSpeakerObservation, String> {
+        observe_session_speaker(&self.evidence.base, pcm)
+    }
+
+    pub(crate) fn classify(&mut self, observation: &SessionSpeakerObservation,
+        speech_upper_bound_ms: Option<usize>, quality_available: bool,
+    ) -> crate::speech_decision_kernel::SeparatedAudioOwnership {
+        use crate::speech_decision_kernel::SeparatedAudioOwnership::{Owner, Other, Pending};
+        if !quality_available { return Pending; }
+        let mut observation = observation.clone();
+        observation.constrain_speech_duration(speech_upper_bound_ms);
+        if !observation.signal_quality_sufficient { return Pending; }
+        if self.evidence.certifies_observation(&observation) { Owner }
+        else if matches!(observation.classification, SessionSpeakerClassification::NonTarget { .. }) { Other }
+        else { Pending }
+    }
+}
+
+#[cfg(test)]
+mod original_source_context_tests {
+    use super::*;
+
+    fn context() -> VerifiedOriginalSourceContext {
+        VerifiedOriginalSourceContext::new(SessionSpeakerProfile {
+            embeddings: Arc::new(vec![vec![1.0, 0.0]]), adaptive: false,
+        }).unwrap()
+    }
+
+    #[test]
+    fn extracted_context_cannot_borrow_original_body_or_seed_from_low_quality() {
+        use crate::speech_decision_kernel::SeparatedAudioOwnership::{Owner, Pending, Other};
+        let mut original = context();
+        let seed = observation(SessionSpeakerClassification::Target { score: 0.63 }, vec![1.0,0.0]);
+        original.certifies_observation(&seed);
+        let mut extracted = VerifiedExtractedOutputContext::new(original.base.clone()).unwrap();
+        let uncertain = observation(SessionSpeakerClassification::Uncertain { score: 0.36 }, vec![0.6,0.8]);
+        assert_eq!(extracted.classify(&uncertain, Some(2242), true), Pending);
+        assert_eq!(extracted.classify(&seed, Some(400), true), Pending);
+        assert_eq!(extracted.classify(&seed, Some(2700), false), Pending);
+        assert!(extracted.evidence.body_embeddings.is_empty());
+        assert_eq!(extracted.classify(&seed, Some(2770), true), Owner);
+        assert_eq!(extracted.classify(&uncertain, Some(2242), true), Owner);
+        assert_eq!(extracted.evidence.body_embeddings.len(), 1);
+        assert_eq!(extracted.classify(&seed, Some(0), true), Pending,
+            "no speech in extracted PCM must not inherit speech from the mixture");
+        let other = observation(SessionSpeakerClassification::NonTarget { score: 0.05 }, vec![1.0,0.0]);
+        assert_eq!(extracted.classify(&other, Some(1200), true), Other);
+    }
+
+    fn observation(classification: SessionSpeakerClassification, embedding: Vec<f32>) -> SessionSpeakerObservation {
+        SessionSpeakerObservation {
+            classification, embedding, real_speech_ms: 1_200,
+            signal_quality_sufficient: true,
+            transcript_speaker_evidence: crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive,
+        }
+    }
+
+    #[test]
+    fn independent_original_owner_context_covers_a_cross_phrase_gap() {
+        let mut context = context();
+        assert!(!context.certifies_observation(&observation(
+            SessionSpeakerClassification::Uncertain { score: 0.35 }, vec![0.6, 0.8])));
+        assert!(context.certifies_observation(&observation(
+            SessionSpeakerClassification::Target { score: 0.64 }, vec![1.0, 0.0])));
+        assert!(context.certifies_observation(&observation(
+            SessionSpeakerClassification::Uncertain { score: 0.35 }, vec![0.6, 0.8])));
+        assert_eq!(context.base.embeddings.len(), 1, "enrolled/wake authority remains immutable");
+    }
+
+    #[test]
+    fn context_matches_cannot_recursively_enroll_a_room_speaker() {
+        let mut context = context();
+        context.certifies_observation(&observation(
+            SessionSpeakerClassification::Target { score: 0.64 }, vec![1.0, 0.0]));
+        assert!(context.certifies_observation(&observation(
+            SessionSpeakerClassification::Uncertain { score: 0.35 }, vec![0.6, 0.8])));
+        assert_eq!(context.body_embeddings.len(), 1);
+        assert!(!context.certifies_observation(&observation(
+            SessionSpeakerClassification::Uncertain { score: 0.25 }, vec![0.0, 1.0])));
+    }
+
+    #[test]
+    fn base_negative_and_insufficient_signal_keep_their_veto_over_context() {
+        let mut context = context();
+        context.certifies_observation(&observation(
+            SessionSpeakerClassification::Target { score: 0.64 }, vec![1.0, 0.0]));
+        assert!(!context.certifies_observation(&observation(
+            SessionSpeakerClassification::NonTarget { score: 0.05 }, vec![1.0, 0.0])));
+        let mut weak = observation(SessionSpeakerClassification::Target { score: 0.93 }, vec![0.0, 1.0]);
+        weak.signal_quality_sufficient = false;
+        assert!(!context.certifies_observation(&weak));
+        assert_eq!(context.body_embeddings.len(), 1);
+    }
+
+    #[test]
+    fn continuous_speech_bound_removes_short_pause_identity_authority() {
+        let mut sample = observation(SessionSpeakerClassification::NonTarget { score: 0.093767904 }, vec![1.0, 0.0]);
+        sample.transcript_speaker_evidence = crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget;
+        sample.constrain_speech_duration(Some(898));
+        assert_eq!(sample.real_speech_ms, 898);
+        assert!(!sample.signal_quality_sufficient);
+        assert!(matches!(sample.classification, SessionSpeakerClassification::Uncertain { .. }));
+        assert_eq!(sample.transcript_speaker_evidence, crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive);
+
+        let mut owner = observation(SessionSpeakerClassification::Target { score: 0.8 }, vec![1.0, 0.0]);
+        owner.constrain_speech_duration(Some(400));
+        assert!(matches!(owner.classification, SessionSpeakerClassification::Target { .. }), "short owner evidence remains advisory, never Other");
+        assert!(!owner.signal_quality_sufficient);
+        assert!(!owner.is_adaptation_candidate());
+    }
+
+    #[test]
+    fn speech_bound_never_promotes_identity_or_invents_missing_silence() {
+        let mut foreign = observation(SessionSpeakerClassification::NonTarget { score: 0.05 }, vec![0.0, 1.0]);
+        foreign.constrain_speech_duration(Some(1200));
+        assert!(foreign.signal_quality_sufficient);
+        assert!(matches!(foreign.classification, SessionSpeakerClassification::NonTarget { .. }));
+        let mut uncertain = observation(SessionSpeakerClassification::Uncertain { score: 0.3 }, vec![1.0, 0.0]);
+        uncertain.constrain_speech_duration(None);
+        assert_eq!(uncertain.real_speech_ms, 1200);
+        assert!(matches!(uncertain.classification, SessionSpeakerClassification::Uncertain { .. }));
+    }
+
+    #[test]
+    fn source_context_is_bounded_and_open_wake_profiles_cannot_create_one() {
+        let mut context = context();
+        for embedding in [vec![1.0, 0.0], vec![0.7, 0.714], vec![0.0, 1.0]] {
+            context.certifies_observation(&observation(
+                SessionSpeakerClassification::Target { score: 0.64 }, embedding));
+        }
+        assert_eq!(context.body_embeddings.len(), SESSION_SPEAKER_ADAPT_CONFIRMATIONS);
+        assert!(VerifiedOriginalSourceContext::new(SessionSpeakerProfile {
+            embeddings: Arc::new(vec![vec![1.0, 0.0]]), adaptive: true,
+        }).is_none());
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -97,10 +358,10 @@ pub struct SessionSpeakerObservation {
     pub real_speech_ms: usize,
     /// Only adequately voiced windows may imply interference from score drift.
     pub signal_quality_sufficient: bool,
-    /// Transcript-only ownership evidence. It is intentionally typed rather
-    /// than folded into wake/endpoint classification: short foreign fragments
-    /// can corroborate provider diarization without independently deleting
-    /// owner text or changing recording lifetime.
+    /// Qualified negative evidence stays distinct from coarse classification.
+    /// Short hints can corroborate provider diarization; only the strong tier
+    /// can qualify negative original-window presence. Neither tier by itself
+    /// may erase owner text or override pending-body/receipt STOP protection.
     pub transcript_speaker_evidence: crate::speech_decision_kernel::TranscriptSpeakerEvidence,
     embedding: Vec<f32>,
 }
@@ -139,6 +400,39 @@ impl SessionSpeakerClassification {
 }
 
 impl SessionSpeakerObservation {
+    /// A coarse mismatch is a candidate, not confirmed foreign identity.
+    /// Keep the existing independently qualified negative-evidence tier at
+    /// this boundary; signal strength alone cannot upgrade an inconclusive
+    /// identity result. Recording still separately protects pending body text.
+    pub(crate) fn endpoint_presence_identity(&self) -> crate::personal_vad::PresenceState {
+        use crate::personal_vad::PresenceState;
+        match self.classification {
+            SessionSpeakerClassification::Target { .. } => PresenceState::Owner,
+            SessionSpeakerClassification::NonTarget { .. }
+                if self.signal_quality_sufficient
+                    && self.transcript_speaker_evidence
+                        == crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget =>
+            {
+                PresenceState::ConfirmedOther
+            }
+            _ => PresenceState::Unknown,
+        }
+    }
+
+    /// Continuous VAD may disprove the energy-only duration. Missing VAD is
+    /// not silence, and even a complete VAD interval cannot grant identity.
+    pub(crate) fn constrain_speech_duration(&mut self, upper_bound_ms: Option<usize>) {
+        let Some(upper_bound_ms) = upper_bound_ms else { return; };
+        self.real_speech_ms = self.real_speech_ms.min(upper_bound_ms);
+        if self.real_speech_ms < SESSION_SPEAKER_MIN_NON_TARGET_MS {
+            self.signal_quality_sufficient = false;
+            if let SessionSpeakerClassification::NonTarget { score } = self.classification {
+                self.classification = SessionSpeakerClassification::Uncertain { score };
+            }
+            self.transcript_speaker_evidence = crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive;
+        }
+    }
+
     fn is_adaptation_candidate(&self) -> bool {
         self.real_speech_ms >= SESSION_SPEAKER_MIN_NON_TARGET_MS
             && matches!(
@@ -480,7 +774,7 @@ mod platform {
     use super::{
         session_speaker_classification_for_signal, SessionSpeakerClassification,
         SessionSpeakerObservation, SessionSpeakerProfile, VerificationPolicy, VerificationResult,
-        VoiceProfileState, VoiceprintStatus,
+        EnrollmentFailureStage, VoiceProfileState, VoiceprintStatus,
     };
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     #[cfg(test)]
@@ -577,6 +871,10 @@ mod platform {
         capture: Option<CaptureState>,
         progress: u8,
         error: Option<String>,
+        failure_stage: Option<EnrollmentFailureStage>,
+        pending_template: Option<SpeakerTemplate>,
+        enrollment_generation: u64,
+        native_word_reference: Option<([u8; 32], Vec<f32>)>,
         last_score: Option<f32>,
         template: Option<SpeakerTemplate>,
         template_checked: bool,
@@ -611,6 +909,8 @@ mod platform {
         invalidated: bool,
         #[serde(default)]
         purpose: Option<TemplatePurpose>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        frontend_id: Option<String>,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -619,6 +919,7 @@ mod platform {
         WakePhrase,
         FreeSpeech,
         TargetSpeaker,
+        PersonalActivity,
     }
 
     #[derive(Debug, Clone)]
@@ -626,6 +927,7 @@ mod platform {
         wake_embeddings: Vec<Vec<f32>>,
         session_embeddings: Vec<Vec<f32>>,
         target_speaker_embedding: Option<Vec<f32>>,
+        personal_activity_reference: Option<crate::personal_vad::PersonalVadReference>,
         phrase: Option<String>,
         invalidated: bool,
     }
@@ -1299,7 +1601,29 @@ mod platform {
         keyring_entry_for(&format!("{KEYRING_SUPPLEMENTAL_ACCOUNT_PREFIX}{index}"))
     }
 
+    struct VoiceProfileStore;
+    impl crate::protected_voice_profile::CredentialStore for VoiceProfileStore {
+        fn get(&self, account: &str) -> Result<Option<String>, String> {
+            match keyring_entry_for(account)?.get_secret() {
+                Ok(value) => crate::protected_voice_profile::decode_windows_credential(&value).map(Some),
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(error) => Err(format!("read protected voice profile failed: {error}")),
+            }
+        }
+        fn set(&self, account: &str, value: &str) -> Result<(), String> {
+            let blob = crate::protected_voice_profile::encode_windows_credential(value)?;
+            keyring_entry_for(account)?.set_secret(&blob).map_err(|error| format!("save protected voice profile failed: {error}"))
+        }
+        fn delete(&self, account: &str) -> Result<(), String> {
+            match keyring_entry_for(account)?.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(error) => Err(format!("delete protected voice profile failed: {error}")),
+            }
+        }
+    }
+
     fn delete_stored_credentials() -> Result<(), String> {
+        crate::protected_voice_profile::delete(&VoiceProfileStore)?;
         match keyring_entry()?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => {}
             Err(err) => {
@@ -1319,14 +1643,6 @@ mod platform {
         Ok(())
     }
 
-    fn clear_stored_credentials_after_failed_enrollment() {
-        if let Err(err) = delete_stored_credentials() {
-            log::warn!(
-                "[speaker-verification] failed to clear partial enrollment credentials: {err}"
-            );
-        }
-    }
-
     fn encode_template(
         embedding: &[f32],
         phrase: &str,
@@ -1340,15 +1656,17 @@ mod platform {
         let model_sha256 = match purpose {
             TemplatePurpose::WakePhrase | TemplatePurpose::FreeSpeech => MODEL_SHA256,
             TemplatePurpose::TargetSpeaker => TARGET_SPEAKER_MODEL_SHA256,
+            TemplatePurpose::PersonalActivity => crate::personal_vad::ENCODER_SHA,
         };
         serde_json::to_string(&StoredTemplate {
-            version: 4,
+            version: 5,
             model_sha256: model_sha256.to_string(),
             dimension: embedding.len(),
             embedding_base64: BASE64.encode(bytes),
             phrase: Some(phrase.to_string()),
             invalidated,
             purpose: Some(purpose),
+            frontend_id: (purpose == TemplatePurpose::PersonalActivity).then(|| crate::speaker_identity_eres::FRONTEND_ID.to_string()),
         })
         .map_err(|err| format!("encode voiceprint template failed: {err}"))
     }
@@ -1356,11 +1674,12 @@ mod platform {
     fn decode_template(value: &str) -> Result<SpeakerTemplate, String> {
         let stored: StoredTemplate = serde_json::from_str(value)
             .map_err(|err| format!("voiceprint template damaged: {err}"))?;
-        if !matches!(stored.version, 1 | 2 | 3 | 4) {
+        if !matches!(stored.version, 1 | 2 | 3 | 4 | 5) {
             return Err("voiceprint template is incompatible with the current model".to_string());
         }
         let expected_model_sha256 = match stored.purpose {
             Some(TemplatePurpose::TargetSpeaker) => TARGET_SPEAKER_MODEL_SHA256,
+            Some(TemplatePurpose::PersonalActivity) => crate::personal_vad::ENCODER_SHA,
             _ => MODEL_SHA256,
         };
         if stored.model_sha256 != expected_model_sha256 {
@@ -1387,6 +1706,11 @@ mod platform {
         if embedding.iter().any(|value| !value.is_finite()) {
             return Err("voiceprint template contains a non-finite value".to_string());
         }
+        let personal_activity_reference = if stored.purpose == Some(TemplatePurpose::PersonalActivity) {
+            Some(crate::personal_vad::PersonalVadReference::from_bound_values(
+                &stored.model_sha256, stored.frontend_id.as_deref().unwrap_or_default(), embedding.clone(),
+            )?)
+        } else { None };
         if stored.purpose == Some(TemplatePurpose::TargetSpeaker) {
             if embedding.len() != TARGET_SPEAKER_EMBEDDING_DIMENSION {
                 return Err("target-speaker template dimension is invalid".to_string());
@@ -1398,6 +1722,7 @@ mod platform {
             Some(TemplatePurpose::WakePhrase) => (vec![embedding], Vec::new(), None),
             Some(TemplatePurpose::FreeSpeech) => (Vec::new(), vec![embedding], None),
             Some(TemplatePurpose::TargetSpeaker) => (Vec::new(), Vec::new(), Some(embedding)),
+            Some(TemplatePurpose::PersonalActivity) => (Vec::new(), Vec::new(), None),
             None => {
                 // v1/v2 had one undifferentiated bank. Preserve compatibility
                 // until the owner re-enrolls with the dual-template prompt.
@@ -1408,12 +1733,13 @@ mod platform {
             wake_embeddings,
             session_embeddings,
             target_speaker_embedding,
+            personal_activity_reference,
             phrase: stored.phrase,
             invalidated: stored.invalidated,
         })
     }
 
-    fn persist_template(template: &SpeakerTemplate) -> Result<(), String> {
+    fn encode_profile_entries(template: &SpeakerTemplate) -> Result<Vec<String>, String> {
         let phrase = template
             .phrase
             .as_deref()
@@ -1452,27 +1778,58 @@ mod platform {
                     TemplatePurpose::TargetSpeaker,
                 )
             }))
+            .chain(template.personal_activity_reference.iter().map(|reference| {
+                encode_template(reference.values(), phrase, template.invalidated, TemplatePurpose::PersonalActivity)
+            }))
             .collect::<Result<Vec<_>, _>>()?;
         if encoded.len() > MAX_SUPPLEMENTAL_TEMPLATES + 1 {
             return Err("voiceprint template contains too many protected entries".to_string());
         }
-        delete_stored_credentials()?;
-        for index in 0..MAX_SUPPLEMENTAL_TEMPLATES {
-            let entry = supplemental_keyring_entry(index)?;
-            if let Some(value) = encoded.get(index + 1) {
-                if let Err(err) = entry.set_password(value) {
-                    clear_stored_credentials_after_failed_enrollment();
-                    return Err(format!(
-                        "save supplemental system voiceprint credential failed: {err}"
-                    ));
+        // Check the actual binary representation before staging any entry.
+        for value in &encoded {
+            crate::protected_voice_profile::encode_windows_credential(value)?;
+        }
+        Ok(encoded)
+    }
+
+    fn persist_template(template: &SpeakerTemplate) -> Result<(), String> {
+        let encoded = encode_profile_entries(template)?;
+        // One commit publishes every model bank. A failed write retains the
+        // old generation; a save retry retains only derived features in RAM.
+        crate::protected_voice_profile::save(&VoiceProfileStore, &encoded)
+    }
+
+    fn current_processing_generation(state: &State, phrase: &str, generation: u64) -> bool {
+        state.enrollment_generation == generation
+            && state.capture == Some(CaptureState::Processing)
+            && state.enrollment_phrase.as_deref() == Some(phrase)
+    }
+
+    fn decode_committed_profile(values: &[String]) -> Result<SpeakerTemplate, String> {
+        let mut entries = values.iter();
+        let mut template = decode_template(entries.next().ok_or("protected voice profile is empty")?)?;
+        for value in entries {
+            let extra = decode_template(value)?;
+            if extra.phrase != template.phrase || extra.invalidated != template.invalidated {
+                return Err("protected voice profile generation has mixed phrase bindings".into());
+            }
+            template.wake_embeddings.extend(extra.wake_embeddings);
+            template.session_embeddings.extend(extra.session_embeddings);
+            if let Some(reference) = extra.personal_activity_reference {
+                if template.personal_activity_reference.replace(reference).is_some() {
+                    return Err("protected voice profile has duplicate personal activity references".into());
+                }
+            }
+            if let Some(reference) = extra.target_speaker_embedding {
+                if template.target_speaker_embedding.replace(reference).is_some() {
+                    return Err("protected voice profile has duplicate target speaker references".into());
                 }
             }
         }
-        if let Err(err) = keyring_entry()?.set_password(&encoded[0]) {
-            clear_stored_credentials_after_failed_enrollment();
-            return Err(format!("save system voiceprint credential failed: {err}"));
+        if template.wake_embeddings.is_empty() || template.session_embeddings.is_empty() {
+            return Err("protected voice profile is missing its wake or session bank".into());
         }
-        Ok(())
+        Ok(template)
     }
 
     fn load_template_locked(state: &mut State) {
@@ -1480,6 +1837,22 @@ mod platform {
             return;
         }
         state.template_checked = true;
+        match crate::protected_voice_profile::load(&VoiceProfileStore) {
+            Ok(Some(values)) => {
+                let result = decode_committed_profile(&values);
+                match result {
+                    Ok(template) => { state.template = Some(template); state.profile_state = VoiceProfileState::Ready; },
+                    Err(error) => { state.profile_state = VoiceProfileState::Corrupt; state.error = Some(error); },
+                }
+                return;
+            }
+            Err(error) => {
+                state.profile_state = VoiceProfileState::CredentialError;
+                state.error = Some(error);
+                return;
+            }
+            Ok(None) => {}
+        }
         let result = keyring_entry().and_then(|entry| match entry.get_password() {
             Ok(value) => Ok(Some(value)),
             Err(keyring::Error::NoEntry) => Ok(None),
@@ -1663,6 +2036,10 @@ mod platform {
             score: state.last_score,
             threshold: VERIFICATION_THRESHOLD,
             error: state.error.clone(),
+            failure_stage: state.failure_stage,
+            can_retry_save: state.capture == Some(CaptureState::Error)
+                && state.failure_stage == Some(EnrollmentFailureStage::Storage)
+                && state.pending_template.as_ref().is_some_and(|template| template_matches_phrase(template, &phrase)),
             model_name: MODEL_NAME,
             runtime_version: RUNTIME_VERSION,
             local_only: true,
@@ -1719,20 +2096,23 @@ mod platform {
             let mut state = STATE.lock();
             if matches!(
                 state.capture,
-                Some(CaptureState::Preparing | CaptureState::Armed | CaptureState::Capturing)
+                Some(CaptureState::Preparing | CaptureState::Armed | CaptureState::Capturing | CaptureState::Processing)
             ) {
                 return Err("voiceprint enrollment is already active".to_string());
             }
             state.capture = Some(CaptureState::Preparing);
             state.progress = 5;
             state.error = None;
+            state.failure_stage = None;
+            state.pending_template = None;
+            state.enrollment_generation = state.enrollment_generation.wrapping_add(1);
             state.last_score = None;
             state.enrollment_phrase = Some(wake_phrase.clone());
             state.enrollment_capture_started = None;
             state.enrollment_live = EnrollmentLiveState::default();
         }
         if let Err(err) = ensure_runtime() {
-            mark_error(&err);
+            mark_error(&err, EnrollmentFailureStage::Preparation);
             return Err(err);
         }
         {
@@ -1743,7 +2123,7 @@ mod platform {
         if let Err(err) =
             crate::embedded_ble::send_recording_control_enrollment(Duration::from_secs(4))
         {
-            mark_error(&err);
+            mark_error(&err, EnrollmentFailureStage::Device);
             return Err(err);
         }
         Ok(status_for_phrase(&wake_phrase))
@@ -1760,18 +2140,22 @@ mod platform {
                 state.capture = Some(CaptureState::Capturing);
                 state.progress = 35;
                 state.enrollment_capture_started = Some(std::time::Instant::now());
-                true
+                Some(state.enrollment_generation)
             } else {
-                false
+                None
             }
         };
-        if armed {
+        if let Some(generation) = armed {
             // The capture clock starts only after the dedicated device session
             // actually arrives. BLE recovery or hidden-candidate preemption in
             // the Preparing/Armed phase must not shorten the owner sample.
-            std::thread::spawn(|| {
+            std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_secs(ENROLLMENT_SECONDS));
-                let capture_still_active = enrollment_capture_needs_host_stop(STATE.lock().capture);
+                let capture_still_active = {
+                    let state = STATE.lock();
+                    state.enrollment_generation == generation
+                        && enrollment_capture_needs_host_stop(state.capture)
+                };
                 if !capture_still_active {
                     log::info!(
                         "[speaker-verification] enrollment stop timer skipped because device session already completed"
@@ -1781,14 +2165,14 @@ mod platform {
                 if let Err(err) =
                     crate::embedded_ble::send_recording_control_stop(Duration::from_secs(4))
                 {
-                    mark_error(&format!("stop voiceprint enrollment failed: {err}"));
+                    mark_error(&format!("stop voiceprint enrollment failed: {err}"), EnrollmentFailureStage::Device);
                 }
             });
         }
-        armed
+        armed.is_some()
     }
 
-    pub fn begin_enrollment_processing() {
+    pub fn begin_enrollment_processing() -> Option<u64> {
         let mut state = STATE.lock();
         if matches!(
             state.capture,
@@ -1797,36 +2181,83 @@ mod platform {
             state.capture = Some(CaptureState::Processing);
             state.progress = 70;
             state.enrollment_capture_started = None;
+            return Some(state.enrollment_generation);
         }
+        None
     }
 
-    pub fn finish_enrollment(pcm: &[u8], wake_phrase: &str) -> Result<VoiceprintStatus, String> {
+    fn publish_pending_template(
+        state: &mut State,
+        save: impl FnOnce(&SpeakerTemplate) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let template = state.pending_template.as_ref()
+            .ok_or_else(|| "没有可保存的声纹，请重新录入。".to_string())?;
+        if let Err(error) = save(template) {
+            state.capture = Some(CaptureState::Error);
+            state.error = Some(error.clone());
+            state.failure_stage = Some(EnrollmentFailureStage::Storage);
+            state.enrollment_capture_started = None;
+            // Keep derived features only, so a vault failure can be retried
+            // without recapturing speech or replacing the active owner bank.
+            return Err(error);
+        }
+        state.template = state.pending_template.take();
+        state.template_checked = true;
+        state.profile_state = VoiceProfileState::Ready;
+        state.capture = Some(CaptureState::Complete);
+        state.progress = 100;
+        state.last_score = None;
+        state.error = None;
+        state.failure_stage = None;
+        state.enrollment_phrase = None;
+        state.enrollment_capture_started = None;
+        Ok(())
+    }
+
+    pub fn retry_enrollment_save(wake_phrase: &str) -> Result<VoiceprintStatus, String> {
+        let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
+        let mut state = STATE.lock();
+        if state.capture != Some(CaptureState::Error)
+            || state.failure_stage != Some(EnrollmentFailureStage::Storage)
+            || !state.pending_template.as_ref().is_some_and(|template| template_matches_phrase(template, &phrase))
+        {
+            return Err("没有与当前唤醒词对应的待保存声纹。".into());
+        }
+        state.capture = Some(CaptureState::Processing);
+        state.progress = 95;
+        let result = publish_pending_template(&mut state, persist_template);
+        drop(state);
+        result?;
+        log::info!("[speaker-verification] enrollment saved from retained features without new audio");
+        Ok(status_for_phrase(&phrase))
+    }
+
+    pub fn finish_enrollment(pcm: &[u8], wake_phrase: &str, generation: u64) -> Result<VoiceprintStatus, String> {
         let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
         {
-            let mut state = STATE.lock();
-            if state.enrollment_phrase.as_deref() != Some(phrase.as_str()) {
-                return Err("录制期间唤醒词已改变，请重新录制声纹。".to_string());
+            let state = STATE.lock();
+            if !current_processing_generation(&state, &phrase, generation) {
+                return Err("这次声纹录制已取消或唤醒词已改变。".to_string());
             }
-            state.capture = Some(CaptureState::Processing);
-            state.progress = 70;
-            state.enrollment_capture_started = None;
         }
-        let result: Result<VoiceprintStatus, String> = (|| {
-            let runtime = ensure_runtime()?;
-            let windows = enrollment_template_windows(pcm)?;
+        let features_error = |message| (EnrollmentFailureStage::Features, message);
+        let capture_error = |message| (EnrollmentFailureStage::Capture, message);
+        let result: Result<SpeakerTemplate, (EnrollmentFailureStage, String)> = (|| {
+            let runtime = ensure_runtime().map_err(features_error)?;
+            let windows = enrollment_template_windows(pcm).map_err(capture_error)?;
             // Reject silence/short speech before invoking KWS, then validate the
             // phrase before persisting either template bank.
-            let wake_pcm = normalized_enrollment_wake_pcm(pcm)?;
-            for (index, step_pcm) in enrollment_wake_step_slices(wake_pcm.as_ref())?
+            let wake_pcm = normalized_enrollment_wake_pcm(pcm).map_err(capture_error)?;
+            for (index, step_pcm) in enrollment_wake_step_slices(wake_pcm.as_ref()).map_err(capture_error)?
                 .iter()
                 .enumerate()
             {
                 crate::wake_phrase::calibrate(step_pcm, &phrase).map_err(|_| {
-                    format!(
+                    (EnrollmentFailureStage::Phrase, format!(
                         "第 {} 次没有识别到“{}”，请按每一步提示清晰重录。",
                         index + 1,
                         phrase
-                    )
+                    ))
                 })?;
             }
             let wake_embeddings = windows
@@ -1837,7 +2268,7 @@ mod platform {
                         .embedding(speech)
                         .map_err(|err| format!("唤醒词声纹特征提取失败，请重新录制：{err}"))
                 })
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<Vec<_>, _>>().map_err(features_error)?;
             let session_embeddings = windows
                 .session
                 .iter()
@@ -1846,7 +2277,7 @@ mod platform {
                         .embedding(speech)
                         .map_err(|err| format!("会话声纹特征提取失败，请重新录制：{err}"))
                 })
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<Vec<_>, _>>().map_err(features_error)?;
             #[cfg(feature = "target-speaker-extraction")]
             let target_speaker_embedding = {
                 let target_enrollment_pcm = windows.wake.concat();
@@ -1854,36 +2285,39 @@ mod platform {
                     &target_enrollment_pcm,
                 )
                 .map(Some)
-                .map_err(|err| format!("多人隔离声纹特征提取失败，请重新录制：{err}"))?
+                .map_err(|err| features_error(format!("多人隔离声纹特征提取失败：{err}")))?
             };
             #[cfg(not(feature = "target-speaker-extraction"))]
             let target_speaker_embedding = None;
-            let template = SpeakerTemplate {
+            Ok(SpeakerTemplate {
                 wake_embeddings,
                 session_embeddings,
                 target_speaker_embedding,
+                personal_activity_reference: Some(crate::personal_vad::enrollment_reference(&windows.wake.concat())
+                    .map_err(|error| features_error(format!("本人活动声纹特征提取失败：{error}")))?),
                 phrase: Some(phrase.clone()),
                 invalidated: false,
-            };
-            persist_template(&template)?;
-            {
-                let mut state = STATE.lock();
-                state.template = Some(template);
-                state.template_checked = true;
-                state.profile_state = VoiceProfileState::Ready;
-                state.capture = Some(CaptureState::Complete);
-                state.progress = 100;
-                state.last_score = None;
-                state.error = None;
-                state.enrollment_phrase = None;
-                state.enrollment_capture_started = None;
-            }
-            Ok(status_for_phrase(&phrase))
+            })
         })();
-        if let Err(err) = &result {
-            mark_error(err);
+        let mut state = STATE.lock();
+        if !current_processing_generation(&state, &phrase, generation) {
+            return Err("这次声纹录制已取消或唤醒词已改变。".into());
         }
-        result
+        let result = match result {
+            Ok(template) => {
+                state.pending_template = Some(template);
+                publish_pending_template(&mut state, persist_template)
+            }
+            Err((stage, error)) => {
+                state.capture = Some(CaptureState::Error);
+                state.failure_stage = Some(stage);
+                state.error = Some(error.clone());
+                Err(error)
+            }
+        };
+        drop(state);
+        result?;
+        Ok(status_for_phrase(&phrase))
     }
 
     pub fn verify(pcm: &[u8], wake_phrase: &str) -> Result<VerificationResult, String> {
@@ -2003,6 +2437,17 @@ mod platform {
             .and_then(|template| template.target_speaker_embedding.clone()))
     }
 
+    pub(crate) fn personal_activity_reference_for_phrase(wake_phrase: &str) -> Result<Option<crate::personal_vad::PersonalVadReference>, String> {
+        let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
+        let mut state = STATE.lock();
+        load_template_for_phrase_locked(&mut state, &phrase);
+        if matches!(state.profile_state, VoiceProfileState::Corrupt | VoiceProfileState::CredentialError | VoiceProfileState::Incompatible) {
+            return Err("the protected personal activity profile is unavailable".into());
+        }
+        Ok(state.template.as_ref().filter(|template| template_matches_phrase(template, &phrase))
+            .and_then(|template| template.personal_activity_reference.clone()))
+    }
+
     // ---- 银行自适应 (persisted-bank adaptation) ----
 
     static ADAPTIVE_BANK_LAST_WRITE: Lazy<Mutex<Option<std::time::Instant>>> =
@@ -2108,11 +2553,168 @@ mod platform {
         adapt_owner_bank(wake_phrase, body_embedding, AdaptiveBankKind::Session)
     }
 
+    /// Read the protected session bank without learning from this recording or
+    /// treating an open wake as an identity match. Anonymous diarization binds
+    /// a channel only after independently comparing its audio with this bank.
+    pub(crate) fn enrolled_session_profile(
+        wake_phrase: &str,
+    ) -> Result<Option<SessionSpeakerProfile>, String> {
+        let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
+        let mut state = STATE.lock();
+        // Diagnostics may read an already-bound bank, but must not trigger the
+        // legacy phrase-binding path, which writes protected credentials.
+        load_template_locked(&mut state);
+        Ok(state.template.as_ref()
+            .filter(|template| template_matches_phrase(template, &phrase))
+            .map(|template| SessionSpeakerProfile {
+                embeddings: Arc::new(template.session_embeddings.clone()),
+                adaptive: false,
+            }))
+    }
+
+    fn native_word_profile_key(state: &State, phrase: &str) -> Option<[u8; 32]> {
+        let template = state.template.as_ref().filter(|t| template_matches_phrase(t, phrase) && !t.invalidated)?;
+        if template.session_embeddings.is_empty() { return None; }
+        let mut hash = Sha256::new();
+        hash.update(MODEL_SHA256.as_bytes());
+        hash.update(state.enrollment_generation.to_le_bytes());
+        hash.update(phrase.as_bytes());
+        for vector in &template.session_embeddings {
+            hash.update((vector.len() as u64).to_le_bytes());
+            for value in vector { hash.update(value.to_bits().to_le_bytes()); }
+        }
+        Some(hash.finalize().into())
+    }
+
+    #[test]
+    fn native_word_reference_binding_retires_on_enrollment_phrase_bank_and_deletion() {
+        let mut state=State {template:Some(SpeakerTemplate {
+            wake_embeddings:vec![vec![1.0,0.0]],session_embeddings:vec![vec![1.0,0.0]],
+            target_speaker_embedding:None,personal_activity_reference:None,phrase:Some("开始录音".into()),invalidated:false,
+        }),..Default::default()};
+        let original=native_word_profile_key(&state,"开始录音").unwrap();
+        state.native_word_reference=Some((original,vec![1.0,0.0]));
+        assert_eq!(native_word_profile_key(&state,"other phrase"),None);
+        state.template.as_mut().unwrap().session_embeddings[0][1]=0.5;
+        assert_ne!(native_word_profile_key(&state,"开始录音"),Some(original));
+        state.template.as_mut().unwrap().session_embeddings[0][1]=0.0;
+        retire_pending_enrollment(&mut state);
+        assert!(state.native_word_reference.is_none());
+        assert_ne!(native_word_profile_key(&state,"开始录音"),Some(original));
+        state.template=None;
+        assert_eq!(native_word_profile_key(&state,"开始录音"),None);
+    }
+
+    pub(crate) fn native_word_profile_for_phrase(wake_phrase: &str) -> Result<Option<super::NativeWordSpeakerProfile>, String> {
+        let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
+        let mut state = STATE.lock();
+        load_template_locked(&mut state);
+        let Some(key) = native_word_profile_key(&state, &phrase) else {
+            state.native_word_reference = None;
+            return Ok(None);
+        };
+        if state.native_word_reference.as_ref().is_some_and(|(bound, _)| bound != &key) {
+            state.native_word_reference = None;
+        }
+        let base = SessionSpeakerProfile {
+            embeddings: Arc::new(state.template.as_ref().unwrap().session_embeddings.clone()), adaptive: false,
+        };
+        let mut words = base.clone();
+        let has_qualified_reference = state.native_word_reference.as_ref().is_some_and(|(bound, vector)| {
+            if bound == &key { Arc::make_mut(&mut words.embeddings).push(vector.clone()); true } else { false }
+        });
+        Ok(Some(super::NativeWordSpeakerProfile { key, base, words, has_qualified_reference }))
+    }
+
+    pub(crate) fn native_word_profile_is_current(wake_phrase: &str, profile: &super::NativeWordSpeakerProfile) -> bool {
+        native_word_binding_is_current(wake_phrase, profile.key)
+    }
+
+    pub(crate) fn native_word_binding_is_current(wake_phrase: &str, key: [u8; 32]) -> bool {
+        let Ok(phrase) = crate::wake_phrase::normalize_configured_phrase(wake_phrase) else { return false; };
+        native_word_profile_key(&STATE.lock(), &phrase) == Some(key)
+    }
+
+    /// Source purity is established by the native-word caller, before this
+    /// independent base-bank admission. A reference match cannot learn again.
+    pub(crate) fn acquire_native_word_reference(wake_phrase: &str, profile: &super::NativeWordSpeakerProfile,
+        observation: &SessionSpeakerObservation) -> bool {
+        if profile.has_qualified_reference || !observation.signal_quality_sufficient
+            || !matches!(profile.base.classify_observation(observation), SessionSpeakerClassification::Target { .. }) {
+            return false;
+        }
+        let Ok(phrase) = crate::wake_phrase::normalize_configured_phrase(wake_phrase) else { return false; };
+        let mut state = STATE.lock();
+        if native_word_profile_key(&state, &phrase) != Some(profile.key) { return false; }
+        if state.native_word_reference.as_ref().is_some_and(|(key, _)| key == &profile.key) { return false; }
+        state.native_word_reference = Some((profile.key, observation.embedding.clone()));
+        true
+    }
+
+    pub(crate) fn endpoint_identity_verifier_for_phrase(
+        wake_phrase: &str,
+    ) -> Result<Option<crate::personal_vad::PresenceVerifier>, String> {
+        let Some(profile) = enrolled_session_profile(wake_phrase)? else { return Ok(None); };
+        Ok(Some(endpoint_identity_verifier(profile)))
+    }
+
+    /// Freeze both model-specific references under the same profile lock. A
+    /// concurrent enrollment/delete cannot pair different profile generations.
+    pub(crate) fn endpoint_presence_references_for_phrase(
+        wake_phrase: &str,
+    ) -> Result<(Option<crate::personal_vad::PersonalVadReference>, Option<crate::personal_vad::PresenceVerifier>, Option<(String, [u8; 32])>), String> {
+        let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
+        let mut state = STATE.lock();
+        load_template_for_phrase_locked(&mut state, &phrase);
+        if matches!(state.profile_state, VoiceProfileState::Corrupt | VoiceProfileState::CredentialError | VoiceProfileState::Incompatible) {
+            return Err("the protected endpoint identity profile is unavailable".into());
+        }
+        let Some(template) = state.template.as_ref().filter(|template| template_matches_phrase(template, &phrase)) else {
+            return Ok((None, None, None));
+        };
+        let reference = template.personal_activity_reference.clone();
+        let profile = SessionSpeakerProfile {
+            embeddings: Arc::new(template.session_embeddings.clone()),
+            adaptive: false,
+        };
+        let binding = native_word_profile_key(&state, &phrase).map(|key| (phrase, key));
+        Ok((reference, (!profile.embeddings.is_empty()).then(|| endpoint_identity_verifier(profile)), binding))
+    }
+
+    fn endpoint_identity_verifier(profile: SessionSpeakerProfile) -> crate::personal_vad::PresenceVerifier {
+        Box::new(move |pcm| {
+            use crate::personal_vad::{PresenceIdentityObservation, PresenceState};
+            let observation = observe_session_speaker(&profile, pcm)?;
+            Ok(PresenceIdentityObservation {
+                projection: match observation.classification {
+                    SessionSpeakerClassification::Target { .. } => PresenceState::Owner,
+                    SessionSpeakerClassification::NonTarget { .. } if observation.signal_quality_sufficient => PresenceState::ConfirmedOther,
+                    _ => PresenceState::Unknown,
+                },
+                endpoint: observation.endpoint_presence_identity(),
+            })
+        })
+    }
+
     pub fn session_profile_from_wake(
         pcm: &[u8],
         wake_end_seconds: f32,
         wake_phrase: &str,
         live_wake_matches_enrolled_owner: bool,
+    ) -> Result<SessionSpeakerProfile, String> {
+        session_profile_from_wake_impl(pcm, wake_end_seconds, wake_phrase, live_wake_matches_enrolled_owner, true)
+    }
+
+    #[cfg(test)]
+    pub fn session_profile_snapshot_from_wake(
+        pcm: &[u8], wake_end_seconds: f32, wake_phrase: &str, owner_verified: bool,
+    ) -> Result<SessionSpeakerProfile, String> {
+        session_profile_from_wake_impl(pcm, wake_end_seconds, wake_phrase, owner_verified, false)
+    }
+
+    fn session_profile_from_wake_impl(
+        pcm: &[u8], wake_end_seconds: f32, wake_phrase: &str,
+        live_wake_matches_enrolled_owner: bool, persist_adaptation: bool,
     ) -> Result<SessionSpeakerProfile, String> {
         let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
         let enrolled = {
@@ -2135,7 +2737,7 @@ mod platform {
                     // hardening established. Rate-limited and
                     // similarity-gated inside; failures never affect this
                     // session's profile.
-                    if live_wake_matches_enrolled_owner {
+                    if live_wake_matches_enrolled_owner && persist_adaptation {
                         let _ = adapt_owner_wake_bank(&phrase, &verified_wake_embedding);
                     }
                     let (embeddings, wake_anchor) = super::session_target_with_wake_anchor(
@@ -2184,6 +2786,15 @@ mod platform {
         pcm: &[u8],
         wake_end_seconds: f32,
     ) -> Result<(Vec<f32>, usize, usize, u128), String> {
+        // An unavailable activation boundary is not a zero-length wake. The
+        // caller may supply a separately confirmed identity window; otherwise
+        // retain the enrolled bank without inventing a 250 ms live exemplar.
+        if !wake_end_seconds.is_finite()
+            || wake_end_seconds <= 0.0
+            || wake_end_seconds as f64 * 32_000.0 > pcm.len() as f64 + 1.0
+        {
+            return Err("wake speaker reference has no valid audio boundary".into());
+        }
         let wake_end_bytes =
             ((wake_end_seconds.max(0.0) * 32_000.0).round() as usize).min(pcm.len()) & !1usize;
         let profile_end_bytes = wake_end_bytes.saturating_add(250 * 32).min(pcm.len()) & !1usize;
@@ -2261,6 +2872,28 @@ mod platform {
         observe_session_speaker(profile, pcm).map(|observation| observation.classification)
     }
 
+    fn invalidate_loaded_profile_for_phrase_change(
+        state: &mut State,
+        persist: impl FnOnce(&SpeakerTemplate) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if let Some(mut template) = state.template.clone() {
+            template.invalidated = true;
+            persist(&template)?;
+            state.template = Some(template);
+        }
+        // A failed first enrollment has a derived draft but no committed
+        // template. Phrase ownership must retire in that state as well.
+        state.capture = Some(CaptureState::Idle);
+        state.progress = 0;
+        state.last_score = None;
+        state.error = None;
+        state.enrollment_phrase = None;
+        state.enrollment_capture_started = None;
+        state.enrollment_live = EnrollmentLiveState::default();
+        retire_pending_enrollment(state);
+        Ok(())
+    }
+
     pub fn invalidate_for_phrase_change(
         previous_phrase: &str,
         next_phrase: &str,
@@ -2283,23 +2916,12 @@ mod platform {
             return Err("声纹录制进行中，完成或取消后才能更换唤醒词。".to_string());
         }
         load_template_for_phrase_locked(&mut state, &previous);
-        let Some(mut template) = state.template.clone() else {
-            return Ok(());
-        };
-        template.invalidated = true;
-        persist_template(&template)?;
-        state.template = Some(template);
-        state.capture = Some(CaptureState::Idle);
-        state.progress = 0;
-        state.last_score = None;
-        state.error = None;
-        state.enrollment_phrase = None;
-        state.enrollment_capture_started = None;
-        state.enrollment_live = EnrollmentLiveState::default();
+        invalidate_loaded_profile_for_phrase_change(&mut state, persist_template)?;
         log::info!(
-            "[speaker-verification] owner template invalidated after wake phrase change previous={} next={}; re-enrollment required",
+            "[speaker-verification] enrollment retired after wake phrase change previous={} next={} committed_profile_present={}; re-enrollment required",
             previous,
-            next
+            next,
+            state.template.is_some(),
         );
         Ok(())
     }
@@ -2322,6 +2944,7 @@ mod platform {
             state.enrollment_phrase = None;
             state.enrollment_capture_started = None;
             state.enrollment_live = EnrollmentLiveState::default();
+            retire_pending_enrollment(&mut state);
             should_stop
         };
         if should_stop {
@@ -2332,8 +2955,9 @@ mod platform {
     }
 
     pub fn delete_template() -> Result<VoiceprintStatus, String> {
-        delete_stored_credentials()?;
         let mut state = STATE.lock();
+        // Serialize deletion with a successful enrollment commit/retry.
+        delete_stored_credentials()?;
         state.template = None;
         state.template_checked = true;
         state.profile_state = VoiceProfileState::Unenrolled;
@@ -2344,19 +2968,28 @@ mod platform {
         state.enrollment_phrase = None;
         state.enrollment_capture_started = None;
         state.enrollment_live = EnrollmentLiveState::default();
+        retire_pending_enrollment(&mut state);
         drop(state);
         Ok(status())
     }
 
-    fn mark_error(error: &str) {
+    fn retire_pending_enrollment(state: &mut State) {
+        state.enrollment_generation = state.enrollment_generation.wrapping_add(1);
+        state.native_word_reference = None;
+        state.pending_template = None;
+        state.failure_stage = None;
+    }
+
+    fn mark_error(error: &str, stage: EnrollmentFailureStage) {
         let mut state = STATE.lock();
         state.capture = Some(CaptureState::Error);
         state.error = Some(error.to_string());
+        state.failure_stage = Some(stage);
         state.enrollment_capture_started = None;
     }
 
     pub fn fail_enrollment(error: &str) {
-        mark_error(error);
+        mark_error(error, EnrollmentFailureStage::Device);
     }
 
     #[cfg(test)]
@@ -2366,6 +2999,200 @@ mod platform {
             session_target_with_wake_anchor, SESSION_SPEAKER_CONFIDENT_TARGET_MIN_SCORE,
             SESSION_SPEAKER_MAX_EMBEDDINGS, SESSION_SPEAKER_NON_TARGET_MAX_SCORE,
         };
+
+        fn synthetic_complete_profile(phrase: &str) -> SpeakerTemplate {
+            SpeakerTemplate {
+                wake_embeddings: vec![vec![0.125; 192]; 3],
+                session_embeddings: vec![vec![0.25; 192]; 3],
+                target_speaker_embedding: Some(vec![0.5; 192]),
+                personal_activity_reference: Some(crate::personal_vad::PersonalVadReference::from_bound_values(
+                    crate::personal_vad::ENCODER_SHA,
+                    crate::speaker_identity_eres::FRONTEND_ID,
+                    vec![0.75; 192],
+                ).unwrap()),
+                phrase: Some(phrase.into()),
+                invalidated: false,
+            }
+        }
+
+        #[test]
+        fn enrollment_storage_every_model_bank_fits_the_windows_binary_capacity() {
+            for phrase in ["开始录音", "Start recording", "日本語 한국어 🎙️"] {
+                let values = encode_profile_entries(&synthetic_complete_profile(phrase)).unwrap();
+                assert_eq!(values.len(), 8);
+                let mut reproduces_old_failure = false;
+                for value in values {
+                    reproduces_old_failure |= value.encode_utf16().count() * 2 > 2560;
+                    let blob = crate::protected_voice_profile::encode_windows_credential(&value).unwrap();
+                    assert_eq!(crate::protected_voice_profile::decode_windows_credential(&blob).unwrap(), value);
+                }
+                assert!(reproduces_old_failure, "the realistic profile must exercise the reported password limit");
+            }
+        }
+
+        #[test]
+        fn enrollment_storage_failure_can_retry_features_without_losing_the_old_profile() {
+            let mut state = State {
+                template: Some(synthetic_complete_profile("old phrase")),
+                pending_template: Some(synthetic_complete_profile("开始录音")),
+                capture: Some(CaptureState::Processing),
+                ..State::default()
+            };
+            assert!(publish_pending_template(&mut state, |_| Err("vault unavailable".into())).is_err());
+            assert_eq!(state.template.as_ref().unwrap().phrase.as_deref(), Some("old phrase"));
+            assert!(state.pending_template.is_some());
+            assert_eq!(state.failure_stage, Some(EnrollmentFailureStage::Storage));
+            publish_pending_template(&mut state, |template| {
+                assert_eq!(template.phrase.as_deref(), Some("开始录音"));
+                Ok(())
+            }).unwrap();
+            assert_eq!(state.capture, Some(CaptureState::Complete));
+            assert_eq!(state.template.as_ref().unwrap().phrase.as_deref(), Some("开始录音"));
+            assert!(state.pending_template.is_none());
+            assert!(state.failure_stage.is_none());
+        }
+
+        #[test]
+        fn enrollment_phrase_change_retires_failed_first_enrollment_without_a_saved_profile() {
+            let mut state = State {
+                enrollment_generation: 7,
+                enrollment_phrase: Some("开始录音".into()),
+                capture: Some(CaptureState::Error),
+                failure_stage: Some(EnrollmentFailureStage::Storage),
+                error: Some("vault unavailable".into()),
+                pending_template: Some(synthetic_complete_profile("开始录音")),
+                ..State::default()
+            };
+            invalidate_loaded_profile_for_phrase_change(&mut state, |_| {
+                panic!("no committed profile needs persistence")
+            }).unwrap();
+            assert!(state.template.is_none());
+            assert!(state.pending_template.is_none());
+            assert!(state.enrollment_phrase.is_none());
+            assert!(state.failure_stage.is_none());
+            assert!(state.error.is_none());
+            assert_eq!(state.capture, Some(CaptureState::Idle));
+            assert_eq!(state.enrollment_generation, 8);
+        }
+
+        #[test]
+        fn enrollment_phrase_change_invalidates_committed_profile_and_retires_the_draft() {
+            let mut state = State {
+                enrollment_generation: 7,
+                template: Some(synthetic_complete_profile("开始录音")),
+                pending_template: Some(synthetic_complete_profile("开始录音")),
+                capture: Some(CaptureState::Error),
+                failure_stage: Some(EnrollmentFailureStage::Storage),
+                ..State::default()
+            };
+            let mut writes = 0;
+            invalidate_loaded_profile_for_phrase_change(&mut state, |profile| {
+                writes += 1;
+                assert!(profile.invalidated);
+                Ok(())
+            }).unwrap();
+            assert_eq!(writes, 1);
+            assert!(state.template.as_ref().unwrap().invalidated);
+            assert!(state.pending_template.is_none());
+            assert!(state.failure_stage.is_none());
+            assert_eq!(state.enrollment_generation, 8);
+        }
+
+        #[test]
+        fn enrollment_phrase_change_failed_invalidation_preserves_current_profile_and_draft() {
+            let mut state = State {
+                enrollment_generation: 7,
+                template: Some(synthetic_complete_profile("开始录音")),
+                pending_template: Some(synthetic_complete_profile("开始录音")),
+                capture: Some(CaptureState::Error),
+                failure_stage: Some(EnrollmentFailureStage::Storage),
+                ..State::default()
+            };
+            assert!(invalidate_loaded_profile_for_phrase_change(&mut state,
+                |_| Err("vault unavailable".into())).is_err());
+            assert!(!state.template.as_ref().unwrap().invalidated);
+            assert!(state.pending_template.is_some());
+            assert_eq!(state.failure_stage, Some(EnrollmentFailureStage::Storage));
+            assert_eq!(state.capture, Some(CaptureState::Error));
+            assert_eq!(state.enrollment_generation, 7);
+        }
+
+        #[test]
+        fn enrollment_storage_cancelled_generation_cannot_publish_or_reuse_retired_features() {
+            let mut state = State {
+                enrollment_generation: 7,
+                enrollment_phrase: Some("开始录音".into()),
+                capture: Some(CaptureState::Processing),
+                pending_template: Some(synthetic_complete_profile("开始录音")),
+                template: Some(synthetic_complete_profile("old phrase")),
+                ..State::default()
+            };
+            assert!(current_processing_generation(&state, "开始录音", 7));
+            retire_pending_enrollment(&mut state);
+            assert!(!current_processing_generation(&state, "开始录音", 7));
+            assert!(state.pending_template.is_none());
+            assert_eq!(state.template.as_ref().unwrap().phrase.as_deref(), Some("old phrase"));
+            assert!(!current_processing_generation(&state, "changed phrase", 8));
+        }
+
+        #[test]
+        #[ignore = "writes only synthetic profiles into unique temporary Windows credential names"]
+        fn enrollment_storage_real_windows_vault_roundtrip_and_legacy_password_compatibility() {
+            use crate::protected_voice_profile::CredentialStore;
+            use std::cell::RefCell;
+            struct ScopedStore { prefix: String, names: RefCell<std::collections::HashSet<String>> }
+            impl ScopedStore {
+                fn name(&self, account: &str) -> String {
+                    let name = format!("{}-{account}", self.prefix);
+                    self.names.borrow_mut().insert(name.clone());
+                    name
+                }
+            }
+            impl CredentialStore for ScopedStore {
+                fn get(&self, account: &str) -> Result<Option<String>, String> { VoiceProfileStore.get(&self.name(account)) }
+                fn set(&self, account: &str, value: &str) -> Result<(), String> { VoiceProfileStore.set(&self.name(account), value) }
+                fn delete(&self, account: &str) -> Result<(), String> { VoiceProfileStore.delete(&self.name(account)) }
+            }
+            impl Drop for ScopedStore {
+                fn drop(&mut self) {
+                    for name in self.names.get_mut().iter() { let _ = VoiceProfileStore.delete(name); }
+                }
+            }
+            let store = ScopedStore {
+                prefix: format!("enrollment-storage-repair-test-{}", uuid::Uuid::new_v4()),
+                names: RefCell::new(std::collections::HashSet::new()),
+            };
+            let legacy = r#"{"phrase":"旧声纹 日本語 한국어 🎙️"}"#;
+            keyring_entry_for(&store.name("legacy")).unwrap().set_password(legacy).unwrap();
+            assert_eq!(store.get("legacy").unwrap().as_deref(), Some(legacy));
+            let values = encode_profile_entries(&synthetic_complete_profile("开始录音")).unwrap();
+            let formerly_oversized = values.iter().find(|value| value.encode_utf16().count() * 2 > 2560).unwrap();
+            assert!(matches!(keyring_entry_for(&store.name("old-password-limit")).unwrap().set_password(formerly_oversized), Err(keyring::Error::TooLong(_, _))));
+            crate::protected_voice_profile::save(&store, &values).unwrap();
+            let loaded = crate::protected_voice_profile::load(&store).unwrap().unwrap();
+            assert_eq!(loaded, values);
+            let profile = decode_committed_profile(&loaded).unwrap();
+            assert_eq!(profile.wake_embeddings.len(), 3);
+            assert_eq!(profile.session_embeddings.len(), 3);
+            assert!(profile.personal_activity_reference.is_some());
+            let updated = encode_profile_entries(&synthetic_complete_profile("Start recording")).unwrap();
+            crate::protected_voice_profile::save(&store, &updated).unwrap();
+            assert_eq!(crate::protected_voice_profile::load(&store).unwrap().unwrap(), updated);
+            crate::protected_voice_profile::delete(&store).unwrap();
+            assert!(crate::protected_voice_profile::load(&store).unwrap().is_none());
+            for name in store.names.borrow().iter() { VoiceProfileStore.delete(name).unwrap(); }
+            assert!(store.names.borrow().iter().all(|name| VoiceProfileStore.get(name).unwrap().is_none()));
+            println!("Windows vault: old password limit reproduced; eight binary banks, commit, legacy Unicode read, upgrade, delete and cleanup passed");
+        }
+
+        #[test]
+        fn missing_or_invalid_wake_boundary_cannot_create_a_live_voice_exemplar() {
+            let pcm = vec![0u8; 3_000 * 32];
+            for end in [0.0, -1.0, f32::NAN, f32::INFINITY, 3.1] {
+                let error = verified_wake_session_embedding(&pcm, end).unwrap_err();
+                assert!(error.contains("no valid audio boundary"));
+            }
+        }
 
         /// Offline matrix: read a canonical 16 kHz mono s16le WAV (the diag
         /// writer and recordings both emit this shape).
@@ -2383,6 +3210,372 @@ mod platform {
                 bytes[data_at + 7],
             ]) as usize;
             bytes[data_at + 8..data_at + 8 + len].to_vec()
+        }
+
+        #[test]
+        #[ignore = "requires a fixed diarization-window manifest and protected enrolled voiceprint"]
+        fn recorded_diarization_identity_probe() {
+            let input = std::env::var("LISTENER_DIAR_IDENTITY_INPUT").unwrap();
+            let output = std::env::var("LISTENER_DIAR_IDENTITY_OUTPUT").unwrap();
+            let fixture: serde_json::Value = serde_json::from_slice(&std::fs::read(input).unwrap()).unwrap();
+            let phrase = fixture["wake_phrase"].as_str().unwrap();
+            let profile = enrolled_session_profile(phrase).unwrap().expect("protected enrolled profile");
+            assert!(!profile.is_adaptive());
+            let rows: Vec<_> = fixture["windows"].as_array().unwrap().iter().map(|window| {
+                let pcm = std::fs::read(window["pcm_path"].as_str().unwrap()).unwrap();
+                let start = window["start_ms"].as_u64().unwrap() as usize * 32;
+                let end = window["end_ms"].as_u64().unwrap() as usize * 32;
+                let observed = observe_session_speaker(&profile, &pcm[start..end]).unwrap();
+                serde_json::json!({
+                    "id": window["id"], "channel": window["channel"],
+                    "start_ms": window["start_ms"], "end_ms": window["end_ms"],
+                    "score": observed.classification.score(),
+                    "classification": format!("{:?}", observed.classification),
+                    "real_speech_ms": observed.real_speech_ms,
+                    "signal_quality_sufficient": observed.signal_quality_sufficient,
+                    "transcript_speaker_evidence": observed.transcript_speaker_evidence.label(),
+                })
+            }).collect();
+            // No embeddings or protected credential contents leave the process.
+            std::fs::write(output, serde_json::to_vec_pretty(&rows).unwrap()).unwrap();
+        }
+
+        #[test]
+        #[ignore = "requires selected native source intervals and current protected model-specific references; diagnostic only"]
+        fn recorded_native_row_protected_identity_probe() {
+            let fixture: serde_json::Value = serde_json::from_slice(&std::fs::read(
+                std::env::var("LISTENER_NATIVE_ROW_IDENTITY_INPUT").unwrap()).unwrap()).unwrap();
+            let phrase = crate::wake_phrase::normalize_configured_phrase(fixture["wake_phrase"].as_str().unwrap()).unwrap();
+            // Snapshot both references without the legacy phrase-binding write,
+            // adaptive bank updates, or exporting the protected vectors.
+            let (profile, reference) = {
+                let mut state = STATE.lock();
+                load_template_locked(&mut state);
+                let template = state.template.as_ref().filter(|template|
+                    template_matches_phrase(template, &phrase)).expect("already-bound protected profile");
+                (SessionSpeakerProfile {
+                    embeddings: Arc::new(template.session_embeddings.clone()), adaptive: false,
+                }, template.personal_activity_reference.clone().expect("protected activity reference"))
+            };
+            let qualified_profile = fixture["qualified_owner_reference_pcm_path"].as_str().map(|path| {
+                let pcm = std::fs::read(path).unwrap();
+                let observed = observe_session_speaker(&profile, &pcm).unwrap();
+                assert!(observed.signal_quality_sufficient
+                    && matches!(observed.classification, SessionSpeakerClassification::Target { .. }),
+                    "candidate reference must independently match the current protected bank with sufficient speech");
+                let mut candidate = profile.clone();
+                Arc::make_mut(&mut candidate.embeddings).push(observed.embedding);
+                candidate
+            });
+            let rows: Vec<_> = fixture["windows"].as_array().unwrap().iter().map(|window| {
+                let pcm = std::fs::read(window["pcm_path"].as_str().unwrap()).unwrap();
+                let start = window["start_ms"].as_u64().unwrap() as usize * 32;
+                let end = window["end_ms"].as_u64().unwrap() as usize * 32;
+                let mut row = serde_json::json!({"id":window["id"], "channel":window["channel"],
+                    "start_ms":window["start_ms"], "end_ms":window["end_ms"], "text":window["text"],
+                    "expected_source":window["expected_source"]});
+                if start >= end || end > pcm.len() {
+                    row["unavailable"] = serde_json::json!("exact source interval unavailable; no clamp or padding");
+                    return row;
+                }
+                let source = &pcm[start..end];
+                match observe_session_speaker(&profile, source) {
+                    Ok(observed) => {
+                        row["identity_score"] = serde_json::json!(observed.classification.score());
+                        row["identity_classification"] = serde_json::json!(format!("{:?}", observed.classification));
+                        row["real_speech_ms"] = serde_json::json!(observed.real_speech_ms);
+                        row["signal_quality_sufficient"] = serde_json::json!(observed.signal_quality_sufficient);
+                        row["transcript_speaker_evidence"] = serde_json::json!(observed.transcript_speaker_evidence.label());
+                    }
+                    Err(error) => { row["identity_unavailable"] = serde_json::json!(error); }
+                }
+                if let Some(candidate) = qualified_profile.as_ref() {
+                    match observe_session_speaker(candidate, source) {
+                        Ok(observed) => {
+                            row["qualified_reference_identity_score"] = serde_json::json!(observed.classification.score());
+                            row["qualified_reference_identity_classification"] = serde_json::json!(format!("{:?}", observed.classification));
+                            row["qualified_reference_signal_quality_sufficient"] = serde_json::json!(observed.signal_quality_sufficient);
+                        }
+                        Err(error) => { row["qualified_reference_identity_unavailable"] = serde_json::json!(error); }
+                    }
+                }
+                match crate::personal_vad::enrollment_reference(source) {
+                    Ok(candidate) => {
+                        let score: f32 = reference.values().iter().zip(candidate.values()).map(|(a,b)| a*b).sum();
+                        row["activity_encoder_cosine"] = serde_json::json!(score);
+                    }
+                    Err(error) => { row["activity_encoder_unavailable"] = serde_json::json!(error); }
+                }
+                row
+            }).collect();
+            std::fs::write(std::env::var("LISTENER_NATIVE_ROW_IDENTITY_OUTPUT").unwrap(),
+                serde_json::to_vec_pretty(&serde_json::json!({"rows":rows,
+                    "reference":"current immutable protected registration; model-specific vectors remain in process",
+                    "cloud_calls":0,"enrollment_writes":0,"editor_writes":0,"may_delete_text":false})).unwrap()).unwrap();
+        }
+
+        #[test]
+        #[ignore = "requires exact original verification PCM and current protected wake bank"]
+        fn recorded_current_wake_identity_probe() {
+            use sha2::{Digest,Sha256};
+            let fixture: serde_json::Value = serde_json::from_slice(&std::fs::read(
+                std::env::var("LISTENER_CURRENT_WAKE_INPUT").unwrap()).unwrap()).unwrap();
+            let phrase = crate::wake_phrase::normalize_configured_phrase(fixture["wake_phrase"].as_str().unwrap()).unwrap();
+            // Assert an already-bound template before calling production verify:
+            // this excludes its legacy phrase-binding persistence branch.
+            {
+                let mut state = STATE.lock();
+                load_template_locked(&mut state);
+                assert!(state.template.as_ref().is_some_and(|t|template_matches_phrase(t,&phrase)));
+            }
+            let pcm=std::fs::read(fixture["verification_pcm_path"].as_str().unwrap()).unwrap();
+            let hash=format!("{:x}",Sha256::digest(&pcm));
+            assert_eq!(hash,fixture["verification_pcm_sha256"].as_str().unwrap());
+            let result=verify(&pcm,&phrase).unwrap();
+            let enrolled=matches!(result.policy,VerificationPolicy::Enrolled);
+            let report=serde_json::json!({"schema":"listener.current-bank-exact-wake-replay.v1",
+                "pcm_sha256":hash,"pcm_ms":pcm.len()/32,"score":result.score,
+                "threshold":VERIFICATION_THRESHOLD,"matched":result.matched,
+                "owner_matched":result.owner_matched,"enrolled_policy":enrolled,
+                "scope":"Exact archived original verification input against current already-bound protected wake bank. No template mutation, adaptation, added reference or new enrollment."});
+            std::fs::write(std::env::var("LISTENER_CURRENT_WAKE_OUTPUT").unwrap(),serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+            assert!(enrolled,"open wake never proves Owner");
+        }
+
+        #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+        #[test]
+        #[ignore = "requires frozen source manifest and protected reference; no production routing"]
+        fn recorded_selective_overlap_audio_probe() {
+            use sha2::{Digest, Sha256};
+            use crate::asr::target_speaker_extraction::{TargetSpeakerExtractor, CHUNK_BYTES};
+            let input = std::env::var("LISTENER_SELECTIVE_AUDIO_INPUT").unwrap();
+            let output = std::env::var("LISTENER_SELECTIVE_AUDIO_OUTPUT").unwrap();
+            let fixture: serde_json::Value = serde_json::from_slice(&std::fs::read(input).unwrap()).unwrap();
+            let pcm = std::fs::read(fixture["pcm_path"].as_str().unwrap()).unwrap();
+            assert_eq!(format!("{:x}",Sha256::digest(&pcm)),fixture["pcm_sha256"].as_str().unwrap());
+            let phrase = crate::wake_phrase::normalize_configured_phrase(fixture["wake_phrase"].as_str().unwrap()).unwrap();
+            let selective = fixture["selective_extraction"].as_bool().unwrap();
+            let profile = enrolled_session_profile(&phrase).unwrap().unwrap();
+            assert!(!profile.is_adaptive());
+            let extractor = selective.then(|| {
+                let reference = {
+                    let mut state = STATE.lock();
+                    load_template_locked(&mut state);
+                    state.template.as_ref().filter(|t| template_matches_phrase(t,&phrase))
+                        .and_then(|t|t.target_speaker_embedding.clone()).expect("protected separator reference")
+                };
+                TargetSpeakerExtractor::from_embedding(reference).unwrap()
+            });
+            let overlaps = fixture["overlap_ranges_ms"].as_array().unwrap();
+            let directory = std::path::PathBuf::from(fixture["output_directory"].as_str().unwrap());
+            std::fs::create_dir_all(&directory).unwrap();
+            let mut quality = crate::speech_vad_windows::SourceSpeechQuality::new().unwrap();
+            let mut hybrid = Vec::with_capacity(pcm.len());
+            let mut chunks = Vec::new();
+            let mut first_resolved = vec![serde_json::Value::Null; fixture["quality_windows"].as_array().unwrap().len()];
+            for (index, chunk) in pcm.chunks(CHUNK_BYTES).enumerate() {
+                let start = index as u64 * 3000;
+                let end = start + chunk.len() as u64 / 32;
+                let extract = selective && overlaps.iter().any(|r|r[0].as_u64().unwrap()<end && start<r[1].as_u64().unwrap());
+                let started = std::time::Instant::now();
+                let (chosen, metrics) = if extract {
+                    let separated = extractor.as_ref().unwrap().extract_chunk_with_metrics(chunk).unwrap();
+                    let observation = observe_session_speaker(&profile,&separated.pcm).unwrap();
+                    let metrics = serde_json::json!({"classification":format!("{:?}",observation.classification),
+                        "score":observation.classification.score(),"energy_speech_ms":observation.real_speech_ms,
+                        "signal_quality_sufficient":observation.signal_quality_sufficient,
+                        "transcript_evidence":observation.transcript_speaker_evidence.label(),
+                        "separator_target_similarity":separated.target_similarity,
+                        "target_to_mix_energy":separated.target_to_mix_energy});
+                    (separated.pcm,metrics)
+                } else { (chunk.to_vec(),serde_json::Value::Null) };
+                assert_eq!(chosen.len(),chunk.len());
+                quality.accept(&chosen).unwrap();
+                for (i, window) in fixture["quality_windows"].as_array().unwrap().iter().enumerate() {
+                    if first_resolved[i].is_null() {
+                        if let Some(speech) = quality.resolved_speech_ms(window[0].as_u64().unwrap(),window[1].as_u64().unwrap()) {
+                            first_resolved[i]=serde_json::json!({"observed_input_ms":end,"resolved_speech_ms":speech});
+                        }
+                    }
+                }
+                if extract { std::fs::write(directory.join(format!("{start:06}-{end:06}-extracted.pcm")),&chosen).unwrap(); }
+                chunks.push(serde_json::json!({"start_ms":start,"end_ms":end,"extracted":extract,
+                    "wall_ms":started.elapsed().as_millis(),"pcm_sha256":format!("{:x}",Sha256::digest(&chosen)),"metrics":metrics}));
+                hybrid.extend_from_slice(&chosen);
+            }
+            quality.finish();
+            assert!(quality.is_valid(),"source quality must not rewrite finalized silence");
+            for row in &mut chunks {
+                row["resolved_speech_ms"]=serde_json::json!(quality.resolved_speech_ms(row["start_ms"].as_u64().unwrap(),row["end_ms"].as_u64().unwrap()));
+            }
+            let resolved: Vec<_> = fixture["quality_windows"].as_array().unwrap().iter().map(|w|
+                quality.resolved_speech_ms(w[0].as_u64().unwrap(),w[1].as_u64().unwrap())).collect();
+            let hybrid_path = directory.join("routed.pcm");
+            std::fs::write(&hybrid_path,&hybrid).unwrap();
+            let report=serde_json::json!({"schema":"listener.selective-overlap-audio.v1",
+                "source_pcm_sha256":fixture["pcm_sha256"],"selective_extraction":selective,
+                "routed_pcm_path":hybrid_path,"routed_pcm_sha256":format!("{:x}",Sha256::digest(&hybrid)),
+                "chunks":chunks,"quality_windows":fixture["quality_windows"],"final_resolved_speech_ms":resolved,
+                "first_resolved":first_resolved,"completed_speech_ranges_ms":quality.completed_speech_ranges_ms(),
+                "scope":"Frozen existing protected references; only fixed3s chunks intersecting native overlap are extracted. Final VAD flush is explicit. No new template, identity permission, provider or editor acceptance."});
+            std::fs::write(output,serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+        }
+
+        #[cfg(target_os = "windows")]
+        #[test]
+        #[ignore = "requires an explicit captured source window fixture and installed owner template"]
+        fn recorded_pending_source_window_probe() {
+            let input = std::env::var("LISTENER_SOURCE_WINDOW_INPUT").unwrap();
+            let output = std::env::var("LISTENER_SOURCE_WINDOW_OUTPUT").unwrap();
+            let fixture: serde_json::Value = serde_json::from_slice(&std::fs::read(input).unwrap()).unwrap();
+            let pcm = std::fs::read(fixture["pcm_path"].as_str().unwrap()).unwrap();
+            let identity_pcm = fixture.get("identity_pcm_path").and_then(serde_json::Value::as_str)
+                .map(|path| std::fs::read(path).unwrap()).unwrap_or_else(|| pcm.clone());
+            let profile = session_profile_snapshot_from_wake(&identity_pcm,
+                fixture["wake_end_ms"].as_u64().unwrap() as f32 / 1000.0,
+                fixture["wake_phrase"].as_str().unwrap(), true).unwrap();
+            assert!(!profile.is_adaptive());
+            let mut context = crate::speaker_verification::VerifiedOriginalSourceContext::new(profile.clone()).unwrap();
+            #[cfg(feature = "target-speaker-extraction")]
+            let separated_reference = target_speaker_embedding_for_phrase(fixture["wake_phrase"].as_str().unwrap()).unwrap();
+            #[cfg(feature = "target-speaker-extraction")]
+            let diagnostic_owner_reference_only =
+                fixture["probe_diagnostic_owner_reference_only"].as_bool() == Some(true);
+            #[cfg(feature = "target-speaker-extraction")]
+            let live_reference = (!diagnostic_owner_reference_only).then(|| {
+                crate::asr::target_speaker_extraction::speaker_embedding_from_enrollment_pcm(
+                    &crate::asr::target_speaker_extraction::wake_phrase_enrollment_pcm(
+                        &identity_pcm, fixture["wake_end_ms"].as_u64().unwrap() as f32 / 1000.0,
+                    ),
+                ).unwrap()
+            });
+            let rows: Vec<_> = pcm.chunks(3_000 * 32).enumerate().map(|(index, chunk)| {
+                let observation = observe_session_speaker(&profile, chunk).unwrap();
+                #[cfg(feature = "target-speaker-extraction")]
+                let (source_encoder_similarity, source_encoder_error) = match separated_reference.as_ref() {
+                    Some(reference) => match crate::asr::target_speaker_extraction::speaker_embedding_from_enrollment_pcm(chunk) {
+                        Ok(embedding) => match super::super::normalized_cosine(reference, &embedding) {
+                            Some(score) => (Some(score), None),
+                            None => (None, Some("incompatible or invalid reference/observation vectors".to_owned())),
+                        },
+                        Err(error) => (None, Some(error)),
+                    },
+                    None => (None, Some("no enrolled target-speaker extraction reference".to_owned())),
+                };
+                #[cfg(not(feature = "target-speaker-extraction"))]
+                let (source_encoder_similarity, source_encoder_error): (Option<f32>, Option<String>) =
+                    (None, Some("target-speaker-extraction feature disabled".to_owned()));
+                #[cfg(feature = "target-speaker-extraction")]
+                let separation = if fixture["compare_separator_references"].as_bool() == Some(true) {
+                    let mut observations = Vec::new();
+                    let mut references = Vec::new();
+                    if diagnostic_owner_reference_only {
+                        let path = fixture["diagnostic_owner_reference_pcm_path"].as_str()
+                            .expect("diagnostic owner reference path");
+                        let reference_pcm = std::fs::read(path).unwrap();
+                        references.push(("labelled_owner_body_diagnostic_only",
+                            crate::asr::target_speaker_extraction::speaker_embedding_from_enrollment_pcm(&reference_pcm).unwrap()));
+                    } else {
+                        if let Some(reference) = separated_reference.as_ref() {
+                            references.push(("persisted", reference.clone()));
+                        }
+                        if fixture["probe_persisted_separator_only"].as_bool() != Some(true) {
+                            references.push(("accepted_wake", live_reference.clone().unwrap()));
+                        }
+                    }
+                    // Diagnostic-only counterfactuals. Never save these references or
+                    // admit their output to a recording/provider/editor session.
+                    if !diagnostic_owner_reference_only
+                        && fixture["probe_reference_contract"].as_bool() == Some(true) {
+                        let wake = crate::asr::target_speaker_extraction::wake_phrase_enrollment_pcm(
+                            &identity_pcm, fixture["wake_end_ms"].as_u64().unwrap() as f32 / 1000.0);
+                        assert!(!wake.is_empty());
+                        let repeated: Vec<u8> = wake.iter().copied().cycle().take(3_000 * 32).collect();
+                        references.push(("accepted_wake_pcm_repeated",
+                            crate::asr::target_speaker_extraction::speaker_embedding_from_enrollment_pcm(&repeated).unwrap()));
+                        if let Some(path) = fixture["diagnostic_owner_reference_pcm_path"].as_str() {
+                            let reference_pcm = std::fs::read(path).unwrap();
+                            references.push(("labelled_owner_body_diagnostic_only",
+                                crate::asr::target_speaker_extraction::speaker_embedding_from_enrollment_pcm(&reference_pcm).unwrap()));
+                        }
+                        let normalized: Vec<_> = references.iter().take(2).map(|(label, reference)| {
+                            let norm = reference.iter().map(|v| v * v).sum::<f32>().sqrt();
+                            assert!(norm.is_finite() && norm > 0.0);
+                            (if *label == "persisted" { "persisted_unit_norm" } else { "accepted_wake_unit_norm" },
+                                reference.iter().map(|v| v / norm).collect::<Vec<_>>())
+                        }).collect();
+                        references.extend(normalized);
+                    }
+                    for (label, reference) in references {
+                        let reference_norm = reference.iter().map(|v| v * v).sum::<f32>().sqrt();
+                        let extracted = crate::asr::target_speaker_extraction::TargetSpeakerExtractor::from_embedding(reference.clone())
+                            .and_then(|extractor| extractor.extract_chunk_with_metrics(chunk));
+                        observations.push(match extracted {
+                            Ok(extracted) => {
+                                let observed = observe_session_speaker(&profile, &extracted.pcm);
+                                let extracted_pcm_sha256 =
+                                    crate::firmware_ota::sha256_hex(&extracted.pcm);
+                                let exported_pcm_path = std::env::var_os(
+                                    "LISTENER_TEST_SEPARATOR_WINDOW_EXPORT_DIR",
+                                )
+                                .filter(|_| label == "persisted"
+                                    || label == "labelled_owner_body_diagnostic_only")
+                                .map(|directory| {
+                                    let directory = std::path::PathBuf::from(directory);
+                                    std::fs::create_dir_all(&directory).unwrap();
+                                    let path = directory.join(format!(
+                                        "source-{:06}-{:06}-{}-extracted.pcm",
+                                        index * 3_000,
+                                        index * 3_000 + chunk.len() / 32,
+                                        label,
+                                    ));
+                                    std::fs::write(&path, &extracted.pcm).unwrap();
+                                    path.to_string_lossy().into_owned()
+                                });
+                                serde_json::json!({"reference":label,
+                                    "reference_l2_norm":reference_norm,
+                                    "target_to_mix_energy":extracted.target_to_mix_energy,
+                                    "separator_identity_similarity":extracted.target_similarity,
+                                    "residual_ratio":extracted.residual_energy / extracted.mixture_energy.max(1e-12),
+                                    "classification":observed.as_ref().ok().map(|o| format!("{:?}",o.classification)),
+                                    "quality":observed.as_ref().ok().map(|o| o.signal_quality_sufficient),
+                                    "speech_ms":observed.as_ref().ok().map(|o| o.real_speech_ms),
+                                    "extracted_pcm_path":exported_pcm_path,
+                                    "extracted_pcm_sha256":extracted_pcm_sha256,
+                                    "error":observed.err()})
+                            },
+                            Err(error) => serde_json::json!({"reference":label,"error":error}),
+                        });
+                    }
+                    observations
+                } else { Vec::new() };
+                #[cfg(not(feature = "target-speaker-extraction"))]
+                let separation: Vec<serde_json::Value> = Vec::new();
+                let context_scores: Vec<_> = context.body_embeddings.iter()
+                    .filter_map(|reference| super::super::normalized_cosine(reference, &observation.embedding))
+                    .collect();
+                let profile_scores: Vec<_> = profile.embeddings.iter()
+                    .filter_map(|reference| super::super::normalized_cosine(reference, &observation.embedding))
+                    .collect();
+                let owner = context.certifies_observation(&observation);
+                let subwindows: Vec<_> = (0..chunk.len()).step_by(600 * 32).filter_map(|start| {
+                    let end = (start + 1_200 * 32).min(chunk.len());
+                    if end - start < 600 * 32 { return None; }
+                    let observation = observe_session_speaker(&profile, &chunk[start..end]).unwrap();
+                    Some(serde_json::json!({"start_ms":index*3000+start/32,
+                        "end_ms":index*3000+end/32,"classification":format!("{:?}",observation.classification),
+                        "speech_ms":observation.real_speech_ms,"quality":observation.signal_quality_sufficient}))
+                }).collect();
+                serde_json::json!({"start_ms":index*3000,"end_ms":index*3000+chunk.len()/32,
+                    "classification":format!("{:?}",observation.classification),
+                    "speech_ms":observation.real_speech_ms,"quality":observation.signal_quality_sufficient,
+                    "profile_scores":profile_scores,"context_scores_before_admission":context_scores,
+                    "independent_source_encoder_similarity":source_encoder_similarity,
+                    "independent_source_encoder_error":source_encoder_error,
+                    "separator_reference_comparison":separation,
+                    "production_context_owner":owner,"subwindows":subwindows})
+            }).collect();
+            std::fs::write(output,serde_json::to_vec_pretty(&rows).unwrap()).unwrap();
         }
 
         /// 2026-09-23 71f64ac1 复现器（终端唤醒 + 干扰环境 → 全程
@@ -2534,6 +3727,38 @@ mod platform {
         }
 
         #[test]
+        fn committed_profile_keeps_personal_activity_out_of_the_wake_and_body_banks() {
+            let cam = vec![1.0, 2.0, 3.0];
+            let personal = vec![0.25; 192];
+            let wake = encode_template(&cam, "开始录音", false, TemplatePurpose::WakePhrase).unwrap();
+            let body = encode_template(&cam, "开始录音", false, TemplatePurpose::FreeSpeech).unwrap();
+            let activity = encode_template(&personal, "开始录音", false, TemplatePurpose::PersonalActivity).unwrap();
+            let profile = decode_committed_profile(&[wake.clone(), body.clone(), activity.clone()]).unwrap();
+            assert_eq!(profile.wake_embeddings.len(), 1);
+            assert_eq!(profile.session_embeddings.len(), 1);
+            assert_eq!(profile.personal_activity_reference.unwrap().values().len(), 192);
+            assert!(decode_committed_profile(&[wake.clone(), body.clone(), activity.clone(), activity]).is_err());
+            let other_phrase = encode_template(&personal, "start recording", false, TemplatePurpose::PersonalActivity).unwrap();
+            assert!(decode_committed_profile(&[wake.clone(), body.clone(), other_phrase]).is_err());
+            let legacy = decode_committed_profile(&[wake, body]).unwrap();
+            assert!(legacy.personal_activity_reference.is_none(), "old banks stay usable without reinterpreting their vectors");
+        }
+
+        #[test]
+        fn personal_activity_reference_rejects_same_size_other_models_and_missing_frontends() {
+            let activity = encode_template(&vec![0.25; 192], "开始录音", false, TemplatePurpose::PersonalActivity).unwrap();
+            let mut value: serde_json::Value = serde_json::from_str(&activity).unwrap();
+            value["model_sha256"] = serde_json::json!(TARGET_SPEAKER_MODEL_SHA256);
+            assert!(decode_template(&value.to_string()).is_err());
+            value["model_sha256"] = serde_json::json!(crate::personal_vad::ENCODER_SHA);
+            value["frontend_id"] = serde_json::Value::Null;
+            assert!(decode_template(&value.to_string()).is_err());
+            value["frontend_id"] = serde_json::json!(crate::speaker_identity_eres::FRONTEND_ID);
+            value["dimension"] = serde_json::json!(191);
+            assert!(decode_template(&value.to_string()).is_err());
+        }
+
+        #[test]
         fn template_purpose_separates_new_banks_and_maps_legacy_to_both() {
             let mut embedding = vec![1.0, 2.0, 3.0];
             normalize(&mut embedding).unwrap();
@@ -2572,6 +3797,7 @@ mod platform {
                 phrase: Some("开始录音".into()),
                 invalidated: false,
                 purpose: None,
+                frontend_id: None,
             })
             .unwrap();
             let legacy = decode_template(&legacy).unwrap();
@@ -2595,6 +3821,7 @@ mod platform {
                 phrase: Some("小爱同学".into()),
                 invalidated: false,
                 purpose: None,
+                frontend_id: None,
             })
             .unwrap();
             assert!(decode_template(&wrong).is_err());
@@ -2606,6 +3833,7 @@ mod platform {
                 wake_embeddings: vec![vec![1.0, 0.0]],
                 session_embeddings: vec![vec![1.0, 0.0]],
                 target_speaker_embedding: None,
+                personal_activity_reference: None,
                 phrase: Some("小爱同学".into()),
                 invalidated: false,
             };
@@ -3699,6 +4927,16 @@ mod platform {
 
 #[cfg(target_os = "windows")]
 pub(crate) use platform::prepare_runtime_assets;
+#[cfg(target_os = "windows")]
+pub(crate) use platform::personal_activity_reference_for_phrase;
+#[cfg(target_os = "windows")]
+pub(crate) use platform::endpoint_identity_verifier_for_phrase;
+#[cfg(target_os = "windows")]
+pub(crate) use platform::endpoint_presence_references_for_phrase;
+#[cfg(target_os = "windows")]
+pub(crate) use platform::{native_word_profile_for_phrase, native_word_profile_is_current, native_word_binding_is_current, acquire_native_word_reference};
+#[cfg(all(test, target_os = "windows"))]
+pub(crate) use platform::session_profile_snapshot_from_wake;
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 pub(crate) use platform::target_speaker_embedding_for_phrase;
 #[cfg(target_os = "windows")]
@@ -3706,7 +4944,7 @@ pub use platform::{
     adapt_owner_session_bank, begin_enrollment_processing, cancel_enrollment, delete_template,
     enrollment_should_process, fail_enrollment, finish_enrollment, invalidate_for_phrase_change,
     is_enrolled_for_phrase, observe_enrollment_capture, observe_session_speaker,
-    prepare_for_phrase, session_profile_from_wake, start_enrollment, status_for_phrase,
+    prepare_for_phrase, retry_enrollment_save, session_profile_from_wake, start_enrollment, status_for_phrase,
     take_enrollment_arm, verify,
 };
 
@@ -3732,6 +4970,8 @@ pub fn status() -> VoiceprintStatus {
         score: None,
         threshold: 0.5,
         error: None,
+        failure_stage: None,
+        can_retry_save: false,
         model_name: "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
         runtime_version: "1.13.1",
         local_only: true,
@@ -3749,7 +4989,7 @@ pub fn take_enrollment_arm() -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn begin_enrollment_processing() {}
+pub fn begin_enrollment_processing() -> Option<u64> { None }
 
 #[cfg(not(target_os = "windows"))]
 pub fn observe_enrollment_capture(_pcm: &[u8]) {}
@@ -3775,7 +5015,12 @@ pub fn delete_template() -> Result<VoiceprintStatus, String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn finish_enrollment(_pcm: &[u8], _wake_phrase: &str) -> Result<VoiceprintStatus, String> {
+pub fn finish_enrollment(_pcm: &[u8], _wake_phrase: &str, _generation: u64) -> Result<VoiceprintStatus, String> {
+    Err("voiceprint enrollment is currently available on Windows only".into())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn retry_enrollment_save(_wake_phrase: &str) -> Result<VoiceprintStatus, String> {
     Err("voiceprint enrollment is currently available on Windows only".into())
 }
 
@@ -3855,6 +5100,23 @@ pub(crate) fn prepare_runtime_assets() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn endpoint_identity_cannot_upgrade_an_inconclusive_mismatch() {
+        use crate::personal_vad::PresenceState;
+        use crate::speech_decision_kernel::TranscriptSpeakerEvidence;
+        let mut sample = observation(SessionSpeakerClassification::NonTarget { score: 0.17 }, 2_000, [1.0, 0.0]);
+        for evidence in [TranscriptSpeakerEvidence::Inconclusive, TranscriptSpeakerEvidence::ForeignTailHint] {
+            sample.transcript_speaker_evidence = evidence;
+            assert_eq!(sample.endpoint_presence_identity(), PresenceState::Unknown);
+        }
+        sample.transcript_speaker_evidence = TranscriptSpeakerEvidence::HardNonTarget;
+        assert_eq!(sample.endpoint_presence_identity(), PresenceState::ConfirmedOther);
+        sample.signal_quality_sufficient = false;
+        assert_eq!(sample.endpoint_presence_identity(), PresenceState::Unknown);
+        sample.classification = SessionSpeakerClassification::Target { score: 0.6 };
+        assert_eq!(sample.endpoint_presence_identity(), PresenceState::Owner);
+    }
 
     fn observation(
         classification: SessionSpeakerClassification,

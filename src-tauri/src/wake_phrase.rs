@@ -1,3 +1,11 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeywordEvidenceOrigin {
+    PrimaryDetector,
+    /// A retrospective search after the live detector missed. Its exact
+    /// model input must be independently confirmed, even for a full label.
+    RecallCascade { start_bytes: usize, end_bytes: usize },
+}
+
 #[derive(Debug, Clone)]
 pub struct Match {
     /// Absolute start of the keyword-bearing speech segment when the keyword
@@ -9,6 +17,59 @@ pub struct Match {
     /// fallback estimates cannot authorize transcript removal or identity reuse.
     pub audio_end_seconds: Option<f32>,
     pub matched_keyword: Option<String>,
+    pub origin: KeywordEvidenceOrigin,
+}
+
+impl Match {
+    pub(crate) fn phrase_evidence_for(
+        &self,
+        phrase: &str,
+    ) -> crate::speech_decision_kernel::KeywordPhraseEvidence {
+        use crate::speech_decision_kernel::KeywordPhraseEvidence;
+        let Some(label) = self.matched_keyword.as_deref() else {
+            return KeywordPhraseEvidence::Unobserved;
+        };
+        let Ok(phrase) = normalize_configured_phrase(phrase) else {
+            return KeywordPhraseEvidence::Unobserved;
+        };
+        if label == phrase {
+            if matches!(self.origin, KeywordEvidenceOrigin::RecallCascade { .. }) {
+                return KeywordPhraseEvidence::RecallCandidate;
+            }
+            return KeywordPhraseEvidence::Complete;
+        }
+        let units = phrase.chars().collect::<Vec<_>>();
+        let is_variant = units.iter().enumerate().any(|(deleted, _)| {
+            units
+                .iter()
+                .enumerate()
+                .filter_map(|(index, unit)| (index != deleted).then_some(*unit))
+                .collect::<String>()
+                == label
+        });
+        if is_variant {
+            KeywordPhraseEvidence::RecallCandidate
+        } else {
+            KeywordPhraseEvidence::Unobserved
+        }
+    }
+
+    pub(crate) fn complete_phrase_signal(
+        &self,
+        phrase: &str,
+    ) -> denzic_voice_activation_v1_core::PhraseSignal {
+        crate::speech_decision_kernel::wake_phrase_signal(self.phrase_evidence_for(phrase), None)
+    }
+
+    pub(crate) fn recall_confirmation_input<'a>(&self, pcm: &'a [u8]) -> Option<(&'a [u8], usize)> {
+        let KeywordEvidenceOrigin::RecallCascade { start_bytes, end_bytes } = self.origin else {
+            return None;
+        };
+        if start_bytes >= end_bytes || start_bytes % 2 != 0 || end_bytes % 2 != 0 {
+            return None;
+        }
+        Some((pcm.get(start_bytes..end_bytes)?, start_bytes))
+    }
 }
 
 pub fn normalize_configured_phrase(phrase: &str) -> Result<String, String> {
@@ -65,26 +126,117 @@ fn proven_keyword_audio_end_seconds(
     accepted_seconds: f32,
 ) -> Option<f32> {
     let token_end = token_end_seconds?;
-    if !segment_start_seconds.is_finite() || segment_start_seconds < 0.0
-        || !token_end.is_finite() || token_end < 0.0
-        || !accepted_seconds.is_finite() || accepted_seconds <= 0.0
+    if !segment_start_seconds.is_finite()
+        || segment_start_seconds < 0.0
+        || !token_end.is_finite()
+        || token_end < 0.0
+        || !accepted_seconds.is_finite()
+        || accepted_seconds <= 0.0
     {
         return None;
     }
     let end = segment_start_seconds + token_end;
-    (end.is_finite() && end > 0.0 && end <= accepted_seconds).then_some(end)
+    // A decoder-relative timestamp that needed the observation-clock repair
+    // is not an absolute audio certificate. Keep the complete source instead
+    // of using that ambiguous coordinate to remove words or reuse identity.
+    (end.is_finite()
+        && end > 0.0
+        && end <= accepted_seconds
+        && absolute_keyword_end_seconds(segment_start_seconds, Some(token_end), accepted_seconds)
+            == end)
+        .then_some(end)
 }
 
 #[cfg(test)]
 mod audio_boundary_tests {
     #[test]
+    fn delayed_decoder_coordinates_cannot_certify_wake_word_removal() {
+        assert_eq!(
+            super::proven_keyword_audio_end_seconds(0.0, Some(0.44), 5.94),
+            None
+        );
+        assert_eq!(
+            super::proven_keyword_audio_end_seconds(0.0, Some(1.04), 3.35),
+            None
+        );
+        assert_eq!(
+            super::proven_keyword_audio_end_seconds(0.0, Some(1.76), 1.896),
+            Some(1.76)
+        );
+    }
+
+    #[test]
+    fn model_labels_qualify_only_the_current_configured_phrase() {
+        use crate::speech_decision_kernel::KeywordPhraseEvidence;
+        for (label, expected) in [
+            (Some("开始录音"), KeywordPhraseEvidence::Complete),
+            (Some("始录音"), KeywordPhraseEvidence::RecallCandidate),
+            (Some("开始录"), KeywordPhraseEvidence::RecallCandidate),
+            (Some("开始录像"), KeywordPhraseEvidence::Unobserved),
+            (None, KeywordPhraseEvidence::Unobserved),
+        ] {
+            let found = super::Match {
+                start_seconds: Some(0.0),
+                end_seconds: 0.8,
+                audio_end_seconds: None,
+                matched_keyword: label.map(str::to_string),
+                origin: super::KeywordEvidenceOrigin::PrimaryDetector,
+            };
+            assert_eq!(found.phrase_evidence_for("开始录音"), expected);
+            assert_eq!(
+                found.phrase_evidence_for("结束录音"),
+                KeywordPhraseEvidence::Unobserved
+            );
+        }
+    }
+
+    #[test]
+    fn recorded_recall_full_label_keeps_its_hypothesis_grade_and_exact_input() {
+        let found = super::Match {
+            start_seconds: Some(0.0), end_seconds: 5.1, audio_end_seconds: None,
+            matched_keyword: Some("开始录音".into()),
+            origin: super::KeywordEvidenceOrigin::RecallCascade { start_bytes: 2, end_bytes: 8 },
+        };
+        assert_eq!(found.phrase_evidence_for("开始录音"), crate::speech_decision_kernel::KeywordPhraseEvidence::RecallCandidate);
+        assert_eq!(found.complete_phrase_signal("开始录音"), denzic_voice_activation_v1_core::PhraseSignal::None);
+        assert_eq!(found.recall_confirmation_input(&[0,1,2,3,4,5,6,7,8,9]), Some((&[2,3,4,5,6,7][..],2)));
+        assert!(found.recall_confirmation_input(&[0,1,2,3]).is_none());
+        for (start_bytes, end_bytes) in [(3,8),(2,7),(8,8),(10,8)] {
+            let mut malformed = found.clone();
+            malformed.origin = super::KeywordEvidenceOrigin::RecallCascade { start_bytes, end_bytes };
+            assert!(malformed.recall_confirmation_input(&[0;16]).is_none());
+        }
+        let mut primary = found;
+        primary.origin = super::KeywordEvidenceOrigin::PrimaryDetector;
+        assert_eq!(primary.complete_phrase_signal("开始录音"), denzic_voice_activation_v1_core::PhraseSignal::KeywordModel);
+        assert!(primary.recall_confirmation_input(&[0;16]).is_none());
+    }
+    #[test]
     fn only_actual_keyword_coordinates_authorize_word_removal() {
-        assert_eq!(super::proven_keyword_audio_end_seconds(2.14, Some(1.92), 4.6), Some(4.06));
-        assert_eq!(super::proven_keyword_audio_end_seconds(0.0, Some(1.68), 2.086), Some(1.68));
-        assert_eq!(super::proven_keyword_audio_end_seconds(2.14, None, 4.6), None);
-        assert_eq!(super::proven_keyword_audio_end_seconds(f32::NAN, Some(1.92), 4.6), None);
-        assert_eq!(super::proven_keyword_audio_end_seconds(0.0, Some(5.0), 4.6), None);
-        assert_eq!(super::proven_keyword_audio_end_seconds(0.0, Some(-1.0), 4.6), None);
+        assert_eq!(
+            super::proven_keyword_audio_end_seconds(2.14, Some(1.92), 4.6),
+            Some(4.06)
+        );
+        assert_eq!(
+            super::proven_keyword_audio_end_seconds(0.0, Some(1.68), 2.086),
+            Some(1.68)
+        );
+        assert_eq!(
+            super::proven_keyword_audio_end_seconds(2.14, None, 4.6),
+            None
+        );
+        assert_eq!(
+            super::proven_keyword_audio_end_seconds(f32::NAN, Some(1.92), 4.6),
+            None
+        );
+        assert_eq!(
+            super::proven_keyword_audio_end_seconds(0.0, Some(5.0), 4.6),
+            None
+        );
+        assert_eq!(
+            super::proven_keyword_audio_end_seconds(0.0, Some(-1.0), 4.6),
+            None
+        );
     }
 }
 
@@ -641,8 +793,8 @@ mod platform {
             // endpoint boundary.  Edge-only variants fixed "开始录音" →
             // "始录音"/"开始录" but still missed middle-character loss such
             // as "开录音".  Emit every one-character deletion variant; the
-            // label remains the configured full phrase and the local
-            // confirmation gate still decides whether recording activates.
+            // Preserve the actual recognized variant. A recall candidate must
+            // never masquerade as evidence of the complete configured phrase.
             let short_threshold = (threshold * 1.5).min(0.35);
             let chars = phrase.chars().collect::<Vec<_>>();
             let mut variants = Vec::<String>::new();
@@ -659,7 +811,7 @@ mod platform {
             for variant in variants {
                 keywords.push(keyword_entry(
                     &variant,
-                    &phrase,
+                    &variant,
                     score,
                     short_threshold,
                     true,
@@ -881,61 +1033,46 @@ mod platform {
                 return Err("唤醒词 PCM16 数据长度无效".into());
             }
             self.accepted_bytes = self.accepted_bytes.saturating_add(pcm.len());
-            if let Some(gain) = self.gain {
-                // Keep the current gain for each deterministic analysis window;
-                // never recompute directly from a BLE packet (packet boundaries
-                // are transport-dependent).  A later window may only increase
-                // gain when its robust p95 is materially higher than the gain
-                // locked on the pre-roll.  This recovers quiet owner speech after
-                // loud room noise without allowing a transient spike to lower or
-                // repeatedly oscillate the stream level.
-                let mut output = Vec::with_capacity(pcm.len() / 2);
-                let mut offset = 0usize;
-                while offset < pcm.len() {
-                    let remaining = pcm.len().saturating_sub(offset);
-                    let needed =
-                        STREAM_GAIN_REBASE_WINDOW_BYTES.saturating_sub(self.rebase_window.len());
-                    let take = remaining.min(needed.max(2));
-                    let end = offset.saturating_add(take).min(pcm.len());
-                    let segment = &pcm[offset..end];
-                    output.extend(samples_with_gain(segment, gain));
-                    self.rebase_window.extend_from_slice(segment);
-                    self.emitted_bytes = self.emitted_bytes.saturating_add(segment.len());
-                    offset = end;
-
-                    if self.rebase_window.len() >= STREAM_GAIN_REBASE_WINDOW_BYTES {
-                        let candidate_gain = normalization_gain(&self.rebase_window);
-                        let reference = NORMALIZATION_TARGET_P95 / candidate_gain.max(f32::EPSILON);
-                        if reference >= STREAM_GAIN_REBASE_MIN_REFERENCE
-                            && candidate_gain > gain * STREAM_GAIN_REBASE_RATIO
-                        {
-                            self.gain = Some(candidate_gain.min(NORMALIZATION_MAX_GAIN));
-                        }
-                        self.rebase_window.clear();
-                    }
+            let mut output = Vec::with_capacity((self.warmup.len() + pcm.len()) / 2);
+            let mut offset = 0usize;
+            if self.gain.is_none() {
+                let needed = STREAM_GAIN_WARMUP_BYTES.saturating_sub(self.warmup.len());
+                offset = needed.min(pcm.len());
+                self.warmup.extend_from_slice(&pcm[..offset]);
+                if self.warmup.len() < STREAM_GAIN_WARMUP_BYTES {
+                    return Ok(output);
                 }
-                return Ok(output);
+                let gain = normalization_gain(&self.warmup);
+                self.gain = Some(gain);
+                output.extend(samples_with_gain(&self.warmup, gain));
+                self.emitted_bytes = self.emitted_bytes.saturating_add(self.warmup.len());
+                self.warmup.clear();
             }
-
-            let needed = STREAM_GAIN_WARMUP_BYTES.saturating_sub(self.warmup.len());
-            let split = needed.min(pcm.len());
-            self.warmup.extend_from_slice(&pcm[..split]);
-            if self.warmup.len() < STREAM_GAIN_WARMUP_BYTES {
-                return Ok(Vec::new());
+            // Analysis and gain transitions belong to PCM coordinates. Every
+            // byte after warmup, including this call's remainder, joins the
+            // same fixed windows. A completed window affects the next sample
+            // even when both samples arrive inside one transport packet.
+            while offset < pcm.len() {
+                let needed = STREAM_GAIN_REBASE_WINDOW_BYTES - self.rebase_window.len();
+                let end = (offset + needed).min(pcm.len());
+                let segment = &pcm[offset..end];
+                let gain = self.gain.expect("warmup established gain");
+                output.extend(samples_with_gain(segment, gain));
+                self.rebase_window.extend_from_slice(segment);
+                self.emitted_bytes = self.emitted_bytes.saturating_add(segment.len());
+                offset = end;
+                if self.rebase_window.len() == STREAM_GAIN_REBASE_WINDOW_BYTES {
+                    let candidate_gain = normalization_gain(&self.rebase_window);
+                    let reference = NORMALIZATION_TARGET_P95 / candidate_gain.max(f32::EPSILON);
+                    if reference >= STREAM_GAIN_REBASE_MIN_REFERENCE
+                        && candidate_gain > gain * STREAM_GAIN_REBASE_RATIO
+                    {
+                        self.gain = Some(candidate_gain.min(NORMALIZATION_MAX_GAIN));
+                    }
+                    self.rebase_window.clear();
+                }
             }
-
-            let gain = normalization_gain(&self.warmup);
-            self.gain = Some(gain);
-            let mut samples = samples_with_gain(&self.warmup, gain);
-            self.emitted_bytes = self.emitted_bytes.saturating_add(self.warmup.len());
-            self.warmup.clear();
-            if split < pcm.len() {
-                samples.extend(samples_with_gain(&pcm[split..], gain));
-                self.emitted_bytes = self
-                    .emitted_bytes
-                    .saturating_add(pcm.len().saturating_sub(split));
-            }
-            Ok(samples)
+            Ok(output)
         }
 
         fn finish(&mut self) -> Vec<f32> {
@@ -958,12 +1095,25 @@ mod platform {
         normalizer: StreamingNormalizer,
         found: Option<Match>,
         finished: bool,
+        configured_phrase: String,
+        /// A recall hit freezes only its own stream. The complete-phrase
+        /// stream keeps consuming the same PCM until it can supersede it.
+        complete: Option<Box<StreamingDetector>>,
     }
 
     unsafe impl Send for StreamingDetector {}
 
     impl StreamingDetector {
         pub fn new(phrase: &str) -> Result<Self, String> {
+            let configured_phrase = super::normalize_configured_phrase(phrase)?;
+            let (score, threshold) = configured_keyword_values(phrase);
+            let complete = if configured_phrase.chars().count() >= 4 {
+                Some(Box::new(Self::new_with_config(
+                    phrase, score, threshold, false,
+                )?))
+            } else {
+                None
+            };
             let runtime = load(phrase)?;
             let stream = unsafe { (runtime.create_stream)(runtime.spotter) };
             if stream.is_null() {
@@ -975,6 +1125,8 @@ mod platform {
                 normalizer: StreamingNormalizer::default(),
                 found: None,
                 finished: false,
+                configured_phrase,
+                complete,
             })
         }
 
@@ -984,6 +1136,14 @@ mod platform {
             threshold: f32,
             emit_variants: bool,
         ) -> Result<Self, String> {
+            let configured_phrase = super::normalize_configured_phrase(phrase)?;
+            let complete = if emit_variants && configured_phrase.chars().count() >= 4 {
+                Some(Box::new(Self::new_with_config(
+                    phrase, score, threshold, false,
+                )?))
+            } else {
+                None
+            };
             let runtime = load_with_config(phrase, score, threshold, emit_variants)?;
             let stream = unsafe { (runtime.create_stream)(runtime.spotter) };
             if stream.is_null() {
@@ -995,6 +1155,8 @@ mod platform {
                 normalizer: StreamingNormalizer::default(),
                 found: None,
                 finished: false,
+                configured_phrase,
+                complete,
             })
         }
 
@@ -1005,23 +1167,17 @@ mod platform {
         /// 注:0/10 是 TTS(机械声)数据,真人连读/方言可能不同,上线前需实测。
         pub fn new_strict(phrase: &str) -> Result<Self, String> {
             let (score, threshold) = configured_keyword_values(phrase);
-            let runtime = load_with_config(phrase, score, threshold, false)?;
-            let stream = unsafe { (runtime.create_stream)(runtime.spotter) };
-            if stream.is_null() {
-                return Err("创建唤醒词流失败".into());
-            }
-            Ok(Self {
-                runtime,
-                stream,
-                normalizer: StreamingNormalizer::default(),
-                found: None,
-                finished: false,
-            })
+            Self::new_with_config(phrase, score, threshold, false)
         }
 
         pub fn accept_pcm(&mut self, pcm: &[u8]) -> Result<Option<Match>, String> {
             if self.finished {
                 return Err("唤醒词流已经结束".into());
+            }
+            if let Some(complete) = self.complete.as_mut() {
+                if let Some(found) = complete.accept_pcm(pcm)? {
+                    self.found = Some(found);
+                }
             }
             if self.found.is_some() {
                 return Ok(self.found.clone());
@@ -1034,6 +1190,12 @@ mod platform {
 
         /// Offline path: feed already gain-normalized samples (full-buffer p95).
         fn accept_pre_normalized_samples(&mut self, samples: &[f32]) {
+            if let Some(complete) = self.complete.as_mut() {
+                complete.accept_pre_normalized_samples(samples);
+                if let Some(found) = complete.found.clone() {
+                    self.found = Some(found);
+                }
+            }
             if self.finished || self.found.is_some() || samples.is_empty() {
                 return;
             }
@@ -1050,6 +1212,11 @@ mod platform {
             if self.finished {
                 return Ok(self.found.clone());
             }
+            if let Some(complete) = self.complete.as_mut() {
+                if let Some(found) = complete.finish_pre_normalized()? {
+                    self.found = Some(found);
+                }
+            }
             let padding = vec![0.0; FINAL_PADDING_SAMPLES];
             self.accept_samples(&padding);
             unsafe { (self.runtime.input_finished)(self.stream) };
@@ -1061,6 +1228,11 @@ mod platform {
         pub fn finish(&mut self) -> Result<Option<Match>, String> {
             if self.finished {
                 return Ok(self.found.clone());
+            }
+            if let Some(complete) = self.complete.as_mut() {
+                if let Some(found) = complete.finish()? {
+                    self.found = Some(found);
+                }
             }
             let samples = self.normalizer.finish();
             self.accept_samples(&samples);
@@ -1135,10 +1307,17 @@ mod platform {
                                 .is_finite()
                                 .then_some(value.start_time.max(0.0).min(end_seconds)),
                             end_seconds,
-                            audio_end_seconds: super::proven_keyword_audio_end_seconds(
-                                value.start_time, token_end_seconds, accepted_seconds,
-                            ),
+                            audio_end_seconds: (matched_keyword == self.configured_phrase)
+                                .then(|| {
+                                    super::proven_keyword_audio_end_seconds(
+                                        value.start_time,
+                                        token_end_seconds,
+                                        accepted_seconds,
+                                    )
+                                })
+                                .flatten(),
                             matched_keyword: Some(matched_keyword),
+                            origin: super::KeywordEvidenceOrigin::PrimaryDetector,
                         });
                     }
                     (self.runtime.destroy_result)(result);
@@ -1258,6 +1437,7 @@ mod platform {
                             end_seconds,
                             audio_end_seconds: found.audio_end_seconds.map(|end| end + offset_s),
                             matched_keyword: found.matched_keyword,
+                            origin: super::KeywordEvidenceOrigin::RecallCascade { start_bytes: start, end_bytes: end },
                         }));
                     }
                     None => {}
@@ -1318,7 +1498,8 @@ mod platform {
             score,
             threshold
         );
-        load(phrase).map(|_| ())
+        load(phrase)?;
+        load_with_config(phrase, score, threshold, false).map(|_| ())
     }
 
     #[cfg(test)]
@@ -1342,15 +1523,36 @@ mod platform {
                 concat!(
                     "k āi sh ǐ l ù y īn :1.5 #0.25 @开始录音\n",
                     "k ai sh i l u y in :1.5 #0.25 @开始录音\n",
-                    "sh ǐ l ù y īn :1.5 #0.35 @开始录音\n",
-                    "k āi l ù y īn :1.5 #0.35 @开始录音\n",
-                    "k āi sh ǐ y īn :1.5 #0.35 @开始录音\n",
-                    "k āi sh ǐ l ù :1.5 #0.35 @开始录音"
+                    "sh ǐ l ù y īn :1.5 #0.35 @始录音\n",
+                    "k āi l ù y īn :1.5 #0.35 @开录音\n",
+                    "k āi sh ǐ y īn :1.5 #0.35 @开始音\n",
+                    "k āi sh ǐ l ù :1.5 #0.35 @开始录"
                 )
             );
             assert_eq!(
                 keyword_tokens("录音", KEYWORD_SCORE, KEYWORD_THRESHOLD, true).expect("tokens"),
                 concat!("l ù y īn :1.5 #0.25 @录音\n", "l u y in :1.5 #0.25 @录音")
+            );
+        }
+
+        #[test]
+        fn keyword_entries_preserve_complete_and_deleted_phrase_evidence() {
+            let entries = keyword_tokens("开始录音", KEYWORD_SCORE, KEYWORD_THRESHOLD, true)
+                .expect("keyword entries");
+            let labels = entries
+                .lines()
+                .map(|line| line.rsplit_once('@').expect("keyword label").1)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                labels,
+                [
+                    "开始录音",
+                    "开始录音",
+                    "始录音",
+                    "开录音",
+                    "开始音",
+                    "开始录"
+                ]
             );
         }
 
@@ -1453,6 +1655,57 @@ mod platform {
             assert_eq!(whole.emitted_bytes, pcm.len());
             assert_eq!(chunked.accepted_bytes, pcm.len());
             assert_eq!(chunked.emitted_bytes, pcm.len());
+        }
+
+        #[test]
+        fn streaming_normalization_rebase_is_invariant_across_packet_partitions() {
+            // Loud pre-roll followed by changing quiet speech forces more than
+            // one gain transition. The previous constant-level fixture never
+            // exercised the skipped warmup remainder or stale per-call gain.
+            let pcm = (0..SAMPLE_RATE * 2)
+                .flat_map(|index| {
+                    let amplitude = match index / 3_200 {
+                        0 | 1 => 2_500,
+                        2 => 600,
+                        3 => 150,
+                        4 => 800,
+                        _ => 90,
+                    };
+                    let sample: i16 = if index % 2 == 0 { amplitude } else { -amplitude };
+                    sample.to_le_bytes()
+                })
+                .collect::<Vec<_>>();
+            let feed = |parts: &[usize]| {
+                let mut normalizer = StreamingNormalizer::default();
+                let mut output = Vec::new();
+                let mut offset = 0;
+                let mut part = 0;
+                while offset < pcm.len() {
+                    let end = (offset + parts[part % parts.len()]).min(pcm.len());
+                    output.extend(normalizer.accept(&pcm[offset..end]).expect("valid PCM"));
+                    offset = end;
+                    part += 1;
+                }
+                output.extend(normalizer.finish());
+                assert_eq!(normalizer.accepted_bytes, pcm.len());
+                assert_eq!(normalizer.emitted_bytes, pcm.len());
+                assert_eq!(output.len() * 2, pcm.len());
+                (output, normalizer.gain, normalizer.rebase_window)
+            };
+            let (reference, gain, remaining) = feed(&[1_600]);
+            for partition in [
+                vec![pcm.len()],
+                vec![320, 1_024, 640, 2_048],
+                vec![12_712, 41_600, 1_600, 256],
+                vec![2],
+                vec![STREAM_GAIN_WARMUP_BYTES + STREAM_GAIN_REBASE_WINDOW_BYTES + 2],
+            ] {
+                let (output, actual_gain, actual_remaining) = feed(&partition);
+                let mismatch = output.iter().zip(&reference).position(|(a, b)| a != b);
+                assert!(mismatch.is_none(), "partition={partition:?} first_mismatch={mismatch:?}");
+                assert_eq!(actual_gain, gain);
+                assert_eq!(actual_remaining, remaining);
+            }
         }
 
         #[test]
@@ -2096,6 +2349,55 @@ mod platform {
         }
 
         #[test]
+        #[ignore = "native packet-partition regression for one consented WAV; no cloud"]
+        fn native_packet_partitions_preserve_complete_keyword_evidence() {
+            let path = std::env::var("LISTENER_WAKE_DIAG_CLIP").expect("selected local WAV");
+            let expect_complete = std::env::var("LISTENER_WAKE_EXPECT_COMPLETE")
+                .expect("explicit phrase expectation") == "1";
+            let wav = fs::read(&path).expect("selected local waveform");
+            let pcm = wav_pcm(&wav);
+            let offline_complete = detect(pcm, "开始录音")
+                .expect("production full-buffer keyword path")
+                .filter(|found| found.complete_phrase_signal("开始录音")
+                    != denzic_voice_activation_v1_core::PhraseSignal::None);
+            let mut reference_streaming = None;
+            for parts in [vec![1_600], vec![pcm.len()], vec![320, 1_024, 640, 2_048],
+                vec![12_712, 41_600, 1_600, 256]] {
+                let mut detector = StreamingDetector::new("开始录音").expect("native detector");
+                let mut offset = 0usize;
+                let mut part = 0usize;
+                let mut complete = None;
+                while offset < pcm.len() {
+                    let end = (offset + parts[part % parts.len()]).min(pcm.len());
+                    if let Some(found) = detector.accept_pcm(&pcm[offset..end]).expect("valid PCM") {
+                        if found.complete_phrase_signal("开始录音")
+                            != denzic_voice_activation_v1_core::PhraseSignal::None {
+                            complete = Some(found);
+                        }
+                    }
+                    offset = end;
+                    part += 1;
+                }
+                if let Some(found) = detector.finish().expect("finish native stream") {
+                    if found.complete_phrase_signal("开始录音")
+                        != denzic_voice_activation_v1_core::PhraseSignal::None {
+                        complete = Some(found);
+                    }
+                }
+                let streaming_complete = complete.is_some();
+                if let Some(reference) = reference_streaming {
+                    assert_eq!(streaming_complete, reference,
+                        "native streaming evidence changed with packet boundaries: {path} {parts:?}");
+                } else {
+                    reference_streaming = Some(streaming_complete);
+                }
+                println!("native_packet_partition path={path} parts={parts:?} complete={complete:?} offline_complete={offline_complete:?}");
+                assert_eq!(streaming_complete || offline_complete.is_some(), expect_complete,
+                    "preserve intent across the existing live and full-buffer keyword paths: {path} {parts:?}");
+            }
+        }
+
+        #[test]
         #[ignore = "diagnostic: inspect full-buffer recall boundary for one WAV"]
         fn diagnostic_full_buffer_recall_clip() {
             let path = std::env::var("LISTENER_WAKE_DIAG_CLIP").expect("LISTENER_WAKE_DIAG_CLIP");
@@ -2109,16 +2411,35 @@ mod platform {
             let mut streaming_found = None;
             let mut streaming_observed_pcm_ms = None;
             let mut streamed_bytes = 0usize;
+            let mut first_model_hit = None;
             for chunk in pcm.chunks(1_600) {
                 streamed_bytes = streamed_bytes.saturating_add(chunk.len());
                 streaming_found = streaming.accept_pcm(chunk).expect("streaming PCM");
                 if streaming_found.is_some() {
-                    streaming_observed_pcm_ms = Some(streamed_bytes / 32);
-                    break;
+                    if first_model_hit.is_none() {
+                        first_model_hit = Some((streamed_bytes / 32, streaming_found.clone()));
+                    }
+                    if streaming_found.as_ref().is_some_and(|found| {
+                        found.complete_phrase_signal(&phrase)
+                            != denzic_voice_activation_v1_core::PhraseSignal::None
+                    }) {
+                        streaming_observed_pcm_ms = Some(streamed_bytes / 32);
+                        break;
+                    }
                 }
             }
             let streaming_gain = streaming.normalizer.gain;
             let streaming_finished = streaming.finish().expect("finish streaming detector");
+            let mut complete = StreamingDetector::new_strict(&phrase).expect("complete detector");
+            let mut complete_first_hit = None;
+            for (index, chunk) in pcm.chunks(1_600).enumerate() {
+                if let Some(found) = complete.accept_pcm(chunk).expect("complete PCM") {
+                    complete_first_hit = Some(((index + 1) * 50, found));
+                    break;
+                }
+            }
+            let complete_finished = complete.finish().expect("complete finish");
+            println!("full_buffer_recall_evidence default={default_found:?} cascade={found:?} first_model_hit={first_model_hit:?} streaming={streaming_found:?} complete_first_hit={complete_first_hit:?} complete_finished={complete_finished:?}");
             println!(
                 "full_buffer_recall path={} pcm_ms={} default_end_seconds={:?} cascade_end_seconds={:?} streaming_end_seconds={:?} streaming_observed_pcm_ms={:?} streaming_finished_end_seconds={:?} streaming_gain={:?}",
                 path,
@@ -2130,6 +2451,68 @@ mod platform {
                 streaming_finished.map(|value| value.end_seconds),
                 streaming_gain,
             );
+        }
+
+        #[test]
+        #[ignore = "native continuation regression; supplied local synthetic PCM, no cloud"]
+        fn native_recall_candidate_keeps_consuming_until_complete_phrase() {
+            use crate::speech_decision_kernel::KeywordPhraseEvidence;
+            let path =
+                std::env::var("LISTENER_WAKE_CONTINUATION_CLIP").expect("continuation fixture");
+            let wav = fs::read(path).expect("continuation waveform");
+            let pcm = wav_pcm(&wav);
+            let mut detector = StreamingDetector::new("开始录音").expect("native detector");
+            let mut first_recall = None;
+            let mut full = None;
+            for (index, chunk) in pcm.chunks(1_600).enumerate() {
+                if let Some(found) = detector.accept_pcm(chunk).expect("feed PCM") {
+                    match found.phrase_evidence_for("开始录音") {
+                        KeywordPhraseEvidence::RecallCandidate => {
+                            assert!(
+                                found.audio_end_seconds.is_none(),
+                                "partial phrase cannot remove complete wake text"
+                            );
+                            first_recall.get_or_insert((index, found));
+                        }
+                        KeywordPhraseEvidence::Complete => {
+                            full = Some((index, found));
+                            break;
+                        }
+                        KeywordPhraseEvidence::Unobserved => panic!("unqualified native keyword"),
+                    }
+                }
+            }
+            let (first_index, first) = first_recall.expect("early weak candidate");
+            let (full_index, full) =
+                full.expect("later complete phrase must supersede the recall candidate");
+            assert!(full_index > first_index);
+            assert!(full.end_seconds > first.end_seconds);
+            let finished = detector
+                .finish()
+                .expect("finish")
+                .expect("full phrase retained");
+            assert_eq!(finished.matched_keyword, full.matched_keyword);
+            assert_eq!(finished.end_seconds, full.end_seconds);
+            assert_eq!(
+                detector
+                    .finish()
+                    .expect("idempotent finish")
+                    .unwrap()
+                    .end_seconds,
+                full.end_seconds
+            );
+            assert!(
+                detector.accept_pcm(&[0, 0]).is_err(),
+                "finished capture cannot ingest another capture"
+            );
+            let mut next = StreamingDetector::new("开始录音").expect("fresh capture");
+            next.accept_pcm(&vec![0; 64_000])
+                .expect("silent new capture");
+            assert!(
+                next.finish().expect("new capture finish").is_none(),
+                "native proof cannot leak across captures"
+            );
+            println!("native_continuation first_pcm_ms={} complete_pcm_ms={} first={first:?} complete={full:?}", (first_index+1)*50, (full_index+1)*50);
         }
 
         #[test]

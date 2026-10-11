@@ -1,0 +1,5238 @@
+{
+  "publicAudioOnly": true,
+  "namesNormalized": true,
+  "scope": "Recorded provider text/identity replay; does not validate capture, endpoint clocks or editor insertion",
+  "trials": [
+    {
+      "label": "registered_reference_replay_protocol_control_only",
+      "sourceReport": "cloud-live-capability-result.json",
+      "sourcePcmSha256": "335256fe7501e0b8552c5d14338df54664fdc5206ac3b76beb20880d586242a0",
+      "frames": [
+        {
+          "observedAtMs": 250,
+          "final": false,
+          "result": {
+            "text": "",
+            "utterances": []
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 1187,
+          "final": false,
+          "result": {
+            "text": "其实",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 999,
+                "text": "其实",
+                "words": [
+                  {
+                    "end_time": 740,
+                    "start_time": 660,
+                    "text": "其实"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 1422,
+          "final": false,
+          "result": {
+            "text": "其实我觉得",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 1199,
+                "text": "其实我觉得",
+                "words": [
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "其实"
+                  },
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 980,
+                    "start_time": 900,
+                    "text": "觉得"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 1984,
+          "final": false,
+          "result": {
+            "text": "其实我觉得人",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 1799,
+                "text": "其实我觉得人",
+                "words": [
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "其实"
+                  },
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "觉得"
+                  },
+                  {
+                    "end_time": 1700,
+                    "start_time": 1620,
+                    "text": "人"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 2422,
+          "final": false,
+          "result": {
+            "text": "其实我觉得人是一",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 2199,
+                "text": "其实我觉得人是一",
+                "words": [
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "其实"
+                  },
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "觉得"
+                  },
+                  {
+                    "end_time": 1560,
+                    "start_time": 1480,
+                    "text": "人"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "是"
+                  },
+                  {
+                    "end_time": 1940,
+                    "start_time": 1860,
+                    "text": "一"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 2812,
+          "final": false,
+          "result": {
+            "text": "其实我觉得人是一个",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 2599,
+                "text": "其实我觉得人是一个",
+                "words": [
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "其实"
+                  },
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "觉得"
+                  },
+                  {
+                    "end_time": 1560,
+                    "start_time": 1480,
+                    "text": "人"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "是"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1720,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 2100,
+                    "start_time": 2020,
+                    "text": "个"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 2984,
+          "final": false,
+          "result": {
+            "text": "其实我觉得人是一个多",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 2799,
+                "text": "其实我觉得人是一个多",
+                "words": [
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "其实"
+                  },
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "觉得"
+                  },
+                  {
+                    "end_time": 1560,
+                    "start_time": 1480,
+                    "text": "人"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "是"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1720,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1880,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 2580,
+                    "start_time": 2500,
+                    "text": "多"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 3406,
+          "final": false,
+          "result": {
+            "text": "其实我觉得人是一个多重的",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 3199,
+                "text": "其实我觉得人是一个多重的",
+                "words": [
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "其实"
+                  },
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "觉得"
+                  },
+                  {
+                    "end_time": 1560,
+                    "start_time": 1480,
+                    "text": "人"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "是"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1720,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1880,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 2440,
+                    "start_time": 2360,
+                    "text": "多"
+                  },
+                  {
+                    "end_time": 2680,
+                    "start_time": 2600,
+                    "text": "重"
+                  },
+                  {
+                    "end_time": 2900,
+                    "start_time": 2820,
+                    "text": "的"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 3578,
+          "final": false,
+          "result": {
+            "text": "其实我觉得人是一个多重的社会",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 3399,
+                "text": "其实我觉得人是一个多重的社会",
+                "words": [
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "其实"
+                  },
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "觉得"
+                  },
+                  {
+                    "end_time": 1560,
+                    "start_time": 1480,
+                    "text": "人"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "是"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1720,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1880,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 2440,
+                    "start_time": 2360,
+                    "text": "多"
+                  },
+                  {
+                    "end_time": 2680,
+                    "start_time": 2600,
+                    "text": "重"
+                  },
+                  {
+                    "end_time": 2760,
+                    "start_time": 2680,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 3300,
+                    "start_time": 3220,
+                    "text": "社会"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 4390,
+          "final": false,
+          "result": {
+            "text": "其实我觉得人是一个多重的社会属性",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 4200,
+                "text": "其实我觉得人是一个多重的社会属性",
+                "words": [
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "其实"
+                  },
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "觉得"
+                  },
+                  {
+                    "end_time": 1560,
+                    "start_time": 1480,
+                    "text": "人"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "是"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1720,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1880,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 2440,
+                    "start_time": 2360,
+                    "text": "多"
+                  },
+                  {
+                    "end_time": 2680,
+                    "start_time": 2600,
+                    "text": "重"
+                  },
+                  {
+                    "end_time": 2760,
+                    "start_time": 2680,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 3160,
+                    "start_time": 3080,
+                    "text": "社会"
+                  },
+                  {
+                    "end_time": 3700,
+                    "start_time": 3620,
+                    "text": "属性"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 4625,
+          "final": false,
+          "result": {
+            "text": "其实我觉得人是一个多重的社会属性的",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 4400,
+                "text": "其实我觉得人是一个多重的社会属性的",
+                "words": [
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "其实"
+                  },
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "觉得"
+                  },
+                  {
+                    "end_time": 1560,
+                    "start_time": 1480,
+                    "text": "人"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "是"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1720,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1880,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 2440,
+                    "start_time": 2360,
+                    "text": "多"
+                  },
+                  {
+                    "end_time": 2680,
+                    "start_time": 2600,
+                    "text": "重"
+                  },
+                  {
+                    "end_time": 2760,
+                    "start_time": 2680,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 3160,
+                    "start_time": 3080,
+                    "text": "社会"
+                  },
+                  {
+                    "end_time": 3560,
+                    "start_time": 3480,
+                    "text": "属性"
+                  },
+                  {
+                    "end_time": 4020,
+                    "start_time": 3940,
+                    "text": "的"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 5219,
+          "final": false,
+          "result": {
+            "text": "其实我觉得人是一个多重的社会属性的动物",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 5000,
+                "text": "其实我觉得人是一个多重的社会属性的动物",
+                "words": [
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "其实"
+                  },
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "觉得"
+                  },
+                  {
+                    "end_time": 1560,
+                    "start_time": 1480,
+                    "text": "人"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "是"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1720,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1880,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 2440,
+                    "start_time": 2360,
+                    "text": "多"
+                  },
+                  {
+                    "end_time": 2680,
+                    "start_time": 2600,
+                    "text": "重"
+                  },
+                  {
+                    "end_time": 2760,
+                    "start_time": 2680,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 3160,
+                    "start_time": 3080,
+                    "text": "社会"
+                  },
+                  {
+                    "end_time": 3560,
+                    "start_time": 3480,
+                    "text": "属性"
+                  },
+                  {
+                    "end_time": 3880,
+                    "start_time": 3800,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 4740,
+                    "start_time": 4660,
+                    "text": "动物"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 6078,
+          "final": false,
+          "result": {
+            "text": "嗯，其实我觉得人是一个多重的社会属性的动物。",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "Billy",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.9907040538836216
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 5452,
+                "text": "嗯，其实我觉得人是一个多重的社会属性的动物。",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "嗯"
+                  },
+                  {
+                    "end_time": 520,
+                    "start_time": 320,
+                    "text": "其"
+                  },
+                  {
+                    "end_time": 640,
+                    "start_time": 520,
+                    "text": "实"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 640,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 840,
+                    "text": "觉"
+                  },
+                  {
+                    "end_time": 1160,
+                    "start_time": 1040,
+                    "text": "得"
+                  },
+                  {
+                    "end_time": 1520,
+                    "start_time": 1200,
+                    "text": "人"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1520,
+                    "text": "是"
+                  },
+                  {
+                    "end_time": 1920,
+                    "start_time": 1800,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 2160,
+                    "start_time": 1920,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 2480,
+                    "start_time": 2160,
+                    "text": "多"
+                  },
+                  {
+                    "end_time": 2720,
+                    "start_time": 2480,
+                    "text": "重"
+                  },
+                  {
+                    "end_time": 3000,
+                    "start_time": 2720,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 3320,
+                    "start_time": 3080,
+                    "text": "社"
+                  },
+                  {
+                    "end_time": 3480,
+                    "start_time": 3320,
+                    "text": "会"
+                  },
+                  {
+                    "end_time": 3720,
+                    "start_time": 3480,
+                    "text": "属"
+                  },
+                  {
+                    "end_time": 3920,
+                    "start_time": 3720,
+                    "text": "性"
+                  },
+                  {
+                    "end_time": 4240,
+                    "start_time": 3920,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 4680,
+                    "start_time": 4400,
+                    "text": "动"
+                  },
+                  {
+                    "end_time": 4880,
+                    "start_time": 4680,
+                    "text": "物"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "嗯，其实我觉得人是一个多重的社会属性的动物。",
+          "expectedPreview": "嗯，其实我觉得人是一个多重的社会属性的动物。"
+        },
+        {
+          "observedAtMs": 6094,
+          "final": true,
+          "result": {
+            "text": "嗯，其实我觉得人是一个多重的社会属性的动物。",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "Billy",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.9907040538836216
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 5452,
+                "text": "嗯，其实我觉得人是一个多重的社会属性的动物。",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "嗯"
+                  },
+                  {
+                    "end_time": 520,
+                    "start_time": 320,
+                    "text": "其"
+                  },
+                  {
+                    "end_time": 640,
+                    "start_time": 520,
+                    "text": "实"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 640,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 840,
+                    "text": "觉"
+                  },
+                  {
+                    "end_time": 1160,
+                    "start_time": 1040,
+                    "text": "得"
+                  },
+                  {
+                    "end_time": 1520,
+                    "start_time": 1200,
+                    "text": "人"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1520,
+                    "text": "是"
+                  },
+                  {
+                    "end_time": 1920,
+                    "start_time": 1800,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 2160,
+                    "start_time": 1920,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 2480,
+                    "start_time": 2160,
+                    "text": "多"
+                  },
+                  {
+                    "end_time": 2720,
+                    "start_time": 2480,
+                    "text": "重"
+                  },
+                  {
+                    "end_time": 3000,
+                    "start_time": 2720,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 3320,
+                    "start_time": 3080,
+                    "text": "社"
+                  },
+                  {
+                    "end_time": 3480,
+                    "start_time": 3320,
+                    "text": "会"
+                  },
+                  {
+                    "end_time": 3720,
+                    "start_time": 3480,
+                    "text": "属"
+                  },
+                  {
+                    "end_time": 3920,
+                    "start_time": 3720,
+                    "text": "性"
+                  },
+                  {
+                    "end_time": 4240,
+                    "start_time": 3920,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 4680,
+                    "start_time": 4400,
+                    "text": "动"
+                  },
+                  {
+                    "end_time": 4880,
+                    "start_time": 4680,
+                    "text": "物"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "嗯，其实我觉得人是一个多重的社会属性的动物。",
+          "expectedPreview": "嗯，其实我觉得人是一个多重的社会属性的动物。"
+        }
+      ],
+      "expectedFinal": "嗯，其实我觉得人是一个多重的社会属性的动物。"
+    },
+    {
+      "label": "domestic_different_speaker_control",
+      "sourceReport": "cloud-live-capability-result.json",
+      "sourcePcmSha256": "09d97c0d606ff891b9a3d1e29e3899f224eff2a261153b30855461c0f9d0f3a9",
+      "frames": [
+        {
+          "observedAtMs": 266,
+          "final": false,
+          "result": {
+            "text": "",
+            "utterances": []
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 813,
+          "final": false,
+          "result": {
+            "text": "充满",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 600,
+                "text": "充满",
+                "words": [
+                  {
+                    "end_time": 340,
+                    "start_time": 260,
+                    "text": "充满"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 1219,
+          "final": false,
+          "result": {
+            "text": "充满了营养",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 999,
+                "text": "充满了营养",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 740,
+                    "start_time": 660,
+                    "text": "营养"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 1406,
+          "final": false,
+          "result": {
+            "text": "充满了营养的",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 1199,
+                "text": "充满了营养的",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营养"
+                  },
+                  {
+                    "end_time": 980,
+                    "start_time": 900,
+                    "text": "的"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 1859,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 1599,
+                "text": "充满了营养的一个",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营养"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1000,
+                    "start_time": 920,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1220,
+                    "start_time": 1140,
+                    "text": "个"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 2438,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个大的作品",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 2199,
+                "text": "充满了营养的一个大的作品",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营养"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1000,
+                    "start_time": 920,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1080,
+                    "start_time": 1000,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1640,
+                    "start_time": 1560,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2020,
+                    "start_time": 1940,
+                    "text": "作品"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 2828,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个大的作品",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 2599,
+                "text": "充满了营养的一个大的作品",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营养"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1000,
+                    "start_time": 920,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1080,
+                    "start_time": 1000,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1640,
+                    "start_time": 1560,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2020,
+                    "start_time": 1940,
+                    "text": "作品"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 3391,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大的作品。",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.10276579256144329
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 2722,
+                "text": "充满了营养的一个一个大的作品。",
+                "words": [
+                  {
+                    "end_time": 240,
+                    "start_time": 80,
+                    "text": "充"
+                  },
+                  {
+                    "end_time": 320,
+                    "start_time": 240,
+                    "text": "满"
+                  },
+                  {
+                    "end_time": 480,
+                    "start_time": 320,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 640,
+                    "start_time": 520,
+                    "text": "营"
+                  },
+                  {
+                    "end_time": 800,
+                    "start_time": 640,
+                    "text": "养"
+                  },
+                  {
+                    "end_time": 920,
+                    "start_time": 840,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 920,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1160,
+                    "start_time": 1040,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1320,
+                    "start_time": 1200,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1440,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1680,
+                    "start_time": 1440,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1840,
+                    "start_time": 1680,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1840,
+                    "text": "作"
+                  },
+                  {
+                    "end_time": 2200,
+                    "start_time": 2040,
+                    "text": "品"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 3578,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大的作品。使得",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.10276579256144329
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 2722,
+                "text": "充满了营养的一个一个大的作品。",
+                "words": [
+                  {
+                    "end_time": 240,
+                    "start_time": 80,
+                    "text": "充"
+                  },
+                  {
+                    "end_time": 320,
+                    "start_time": 240,
+                    "text": "满"
+                  },
+                  {
+                    "end_time": 480,
+                    "start_time": 320,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 640,
+                    "start_time": 520,
+                    "text": "营"
+                  },
+                  {
+                    "end_time": 800,
+                    "start_time": 640,
+                    "text": "养"
+                  },
+                  {
+                    "end_time": 920,
+                    "start_time": 840,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 920,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1160,
+                    "start_time": 1040,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1320,
+                    "start_time": 1200,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1440,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1680,
+                    "start_time": 1440,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1840,
+                    "start_time": 1680,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1840,
+                    "text": "作"
+                  },
+                  {
+                    "end_time": 2200,
+                    "start_time": 2040,
+                    "text": "品"
+                  }
+                ]
+              },
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 3401,
+                "start_time": 2722,
+                "text": "使得",
+                "words": [
+                  {
+                    "end_time": 3401,
+                    "start_time": 2722,
+                    "text": "使得"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 3859,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大的作品。使得我们",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.10276579256144329
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 2722,
+                "text": "充满了营养的一个一个大的作品。",
+                "words": [
+                  {
+                    "end_time": 240,
+                    "start_time": 80,
+                    "text": "充"
+                  },
+                  {
+                    "end_time": 320,
+                    "start_time": 240,
+                    "text": "满"
+                  },
+                  {
+                    "end_time": 480,
+                    "start_time": 320,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 640,
+                    "start_time": 520,
+                    "text": "营"
+                  },
+                  {
+                    "end_time": 800,
+                    "start_time": 640,
+                    "text": "养"
+                  },
+                  {
+                    "end_time": 920,
+                    "start_time": 840,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 920,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1160,
+                    "start_time": 1040,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1320,
+                    "start_time": 1200,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1440,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1680,
+                    "start_time": 1440,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1840,
+                    "start_time": 1680,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1840,
+                    "text": "作"
+                  },
+                  {
+                    "end_time": 2200,
+                    "start_time": 2040,
+                    "text": "品"
+                  }
+                ]
+              },
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 3601,
+                "start_time": 2722,
+                "text": "使得我们",
+                "words": [
+                  {
+                    "end_time": 3002,
+                    "start_time": 2922,
+                    "text": "使得"
+                  },
+                  {
+                    "end_time": 3462,
+                    "start_time": 3382,
+                    "text": "我们"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 4203,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大的作品。使得我们能够",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.10276579256144329
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 2722,
+                "text": "充满了营养的一个一个大的作品。",
+                "words": [
+                  {
+                    "end_time": 240,
+                    "start_time": 80,
+                    "text": "充"
+                  },
+                  {
+                    "end_time": 320,
+                    "start_time": 240,
+                    "text": "满"
+                  },
+                  {
+                    "end_time": 480,
+                    "start_time": 320,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 640,
+                    "start_time": 520,
+                    "text": "营"
+                  },
+                  {
+                    "end_time": 800,
+                    "start_time": 640,
+                    "text": "养"
+                  },
+                  {
+                    "end_time": 920,
+                    "start_time": 840,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 920,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1160,
+                    "start_time": 1040,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1320,
+                    "start_time": 1200,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1440,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1680,
+                    "start_time": 1440,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1840,
+                    "start_time": 1680,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1840,
+                    "text": "作"
+                  },
+                  {
+                    "end_time": 2200,
+                    "start_time": 2040,
+                    "text": "品"
+                  }
+                ]
+              },
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 4001,
+                "start_time": 2722,
+                "text": "使得我们能够",
+                "words": [
+                  {
+                    "end_time": 3002,
+                    "start_time": 2922,
+                    "text": "使得"
+                  },
+                  {
+                    "end_time": 3322,
+                    "start_time": 3242,
+                    "text": "我们"
+                  },
+                  {
+                    "end_time": 3542,
+                    "start_time": 3462,
+                    "text": "能够"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 4406,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大的作品。使得我们能够也",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.10276579256144329
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 2722,
+                "text": "充满了营养的一个一个大的作品。",
+                "words": [
+                  {
+                    "end_time": 240,
+                    "start_time": 80,
+                    "text": "充"
+                  },
+                  {
+                    "end_time": 320,
+                    "start_time": 240,
+                    "text": "满"
+                  },
+                  {
+                    "end_time": 480,
+                    "start_time": 320,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 640,
+                    "start_time": 520,
+                    "text": "营"
+                  },
+                  {
+                    "end_time": 800,
+                    "start_time": 640,
+                    "text": "养"
+                  },
+                  {
+                    "end_time": 920,
+                    "start_time": 840,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 920,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1160,
+                    "start_time": 1040,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1320,
+                    "start_time": 1200,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1440,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1680,
+                    "start_time": 1440,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1840,
+                    "start_time": 1680,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1840,
+                    "text": "作"
+                  },
+                  {
+                    "end_time": 2200,
+                    "start_time": 2040,
+                    "text": "品"
+                  }
+                ]
+              },
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 4202,
+                "start_time": 2722,
+                "text": "使得我们能够也",
+                "words": [
+                  {
+                    "end_time": 3002,
+                    "start_time": 2922,
+                    "text": "使得"
+                  },
+                  {
+                    "end_time": 3322,
+                    "start_time": 3242,
+                    "text": "我们"
+                  },
+                  {
+                    "end_time": 3402,
+                    "start_time": 3322,
+                    "text": "能够"
+                  },
+                  {
+                    "end_time": 4021,
+                    "start_time": 3942,
+                    "text": "也"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 4828,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大的作品。使得我们能够也跟着成长",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.10276579256144329
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 2722,
+                "text": "充满了营养的一个一个大的作品。",
+                "words": [
+                  {
+                    "end_time": 240,
+                    "start_time": 80,
+                    "text": "充"
+                  },
+                  {
+                    "end_time": 320,
+                    "start_time": 240,
+                    "text": "满"
+                  },
+                  {
+                    "end_time": 480,
+                    "start_time": 320,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 640,
+                    "start_time": 520,
+                    "text": "营"
+                  },
+                  {
+                    "end_time": 800,
+                    "start_time": 640,
+                    "text": "养"
+                  },
+                  {
+                    "end_time": 920,
+                    "start_time": 840,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 920,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1160,
+                    "start_time": 1040,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1320,
+                    "start_time": 1200,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1440,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1680,
+                    "start_time": 1440,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1840,
+                    "start_time": 1680,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1840,
+                    "text": "作"
+                  },
+                  {
+                    "end_time": 2200,
+                    "start_time": 2040,
+                    "text": "品"
+                  }
+                ]
+              },
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 4602,
+                "start_time": 2722,
+                "text": "使得我们能够也跟着成长",
+                "words": [
+                  {
+                    "end_time": 3002,
+                    "start_time": 2922,
+                    "text": "使得"
+                  },
+                  {
+                    "end_time": 3322,
+                    "start_time": 3242,
+                    "text": "我们"
+                  },
+                  {
+                    "end_time": 3402,
+                    "start_time": 3322,
+                    "text": "能够"
+                  },
+                  {
+                    "end_time": 3882,
+                    "start_time": 3802,
+                    "text": "也"
+                  },
+                  {
+                    "end_time": 4122,
+                    "start_time": 4041,
+                    "text": "跟着"
+                  },
+                  {
+                    "end_time": 4422,
+                    "start_time": 4342,
+                    "text": "成长"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 5219,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大的作品。使得我们能够也跟着成长",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.10276579256144329
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 2722,
+                "text": "充满了营养的一个一个大的作品。",
+                "words": [
+                  {
+                    "end_time": 240,
+                    "start_time": 80,
+                    "text": "充"
+                  },
+                  {
+                    "end_time": 320,
+                    "start_time": 240,
+                    "text": "满"
+                  },
+                  {
+                    "end_time": 480,
+                    "start_time": 320,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 640,
+                    "start_time": 520,
+                    "text": "营"
+                  },
+                  {
+                    "end_time": 800,
+                    "start_time": 640,
+                    "text": "养"
+                  },
+                  {
+                    "end_time": 920,
+                    "start_time": 840,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 920,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1160,
+                    "start_time": 1040,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1320,
+                    "start_time": 1200,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1440,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1680,
+                    "start_time": 1440,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1840,
+                    "start_time": 1680,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1840,
+                    "text": "作"
+                  },
+                  {
+                    "end_time": 2200,
+                    "start_time": 2040,
+                    "text": "品"
+                  }
+                ]
+              },
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 5002,
+                "start_time": 2722,
+                "text": "使得我们能够也跟着成长",
+                "words": [
+                  {
+                    "end_time": 3002,
+                    "start_time": 2922,
+                    "text": "使得"
+                  },
+                  {
+                    "end_time": 3322,
+                    "start_time": 3242,
+                    "text": "我们"
+                  },
+                  {
+                    "end_time": 3402,
+                    "start_time": 3322,
+                    "text": "能够"
+                  },
+                  {
+                    "end_time": 3882,
+                    "start_time": 3802,
+                    "text": "也"
+                  },
+                  {
+                    "end_time": 4122,
+                    "start_time": 4041,
+                    "text": "跟着"
+                  },
+                  {
+                    "end_time": 4422,
+                    "start_time": 4342,
+                    "text": "成长"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 5563,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大的作品。使得我们能够也跟着成长。",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.10276579256144329
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 2722,
+                "text": "充满了营养的一个一个大的作品。",
+                "words": [
+                  {
+                    "end_time": 240,
+                    "start_time": 80,
+                    "text": "充"
+                  },
+                  {
+                    "end_time": 320,
+                    "start_time": 240,
+                    "text": "满"
+                  },
+                  {
+                    "end_time": 480,
+                    "start_time": 320,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 640,
+                    "start_time": 520,
+                    "text": "营"
+                  },
+                  {
+                    "end_time": 800,
+                    "start_time": 640,
+                    "text": "养"
+                  },
+                  {
+                    "end_time": 920,
+                    "start_time": 840,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 920,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1160,
+                    "start_time": 1040,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1320,
+                    "start_time": 1200,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1440,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1680,
+                    "start_time": 1440,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1840,
+                    "start_time": 1680,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1840,
+                    "text": "作"
+                  },
+                  {
+                    "end_time": 2200,
+                    "start_time": 2040,
+                    "text": "品"
+                  }
+                ]
+              },
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.15660402739690432
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 5032,
+                "start_time": 2722,
+                "text": "使得我们能够也跟着成长。",
+                "words": [
+                  {
+                    "end_time": 2962,
+                    "start_time": 2802,
+                    "text": "使"
+                  },
+                  {
+                    "end_time": 3042,
+                    "start_time": 2962,
+                    "text": "得"
+                  },
+                  {
+                    "end_time": 3162,
+                    "start_time": 3082,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 3282,
+                    "start_time": 3162,
+                    "text": "们"
+                  },
+                  {
+                    "end_time": 3402,
+                    "start_time": 3282,
+                    "text": "能"
+                  },
+                  {
+                    "end_time": 3522,
+                    "start_time": 3402,
+                    "text": "够"
+                  },
+                  {
+                    "end_time": 3842,
+                    "start_time": 3562,
+                    "text": "也"
+                  },
+                  {
+                    "end_time": 4002,
+                    "start_time": 3842,
+                    "text": "跟"
+                  },
+                  {
+                    "end_time": 4122,
+                    "start_time": 4002,
+                    "text": "着"
+                  },
+                  {
+                    "end_time": 4322,
+                    "start_time": 4162,
+                    "text": "成"
+                  },
+                  {
+                    "end_time": 4522,
+                    "start_time": 4322,
+                    "text": "长"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 5703,
+          "final": true,
+          "result": {
+            "text": "充满了营养的一个一个大的作品。使得我们能够也跟着成长。",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.10276579256144329
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 2722,
+                "text": "充满了营养的一个一个大的作品。",
+                "words": [
+                  {
+                    "end_time": 240,
+                    "start_time": 80,
+                    "text": "充"
+                  },
+                  {
+                    "end_time": 320,
+                    "start_time": 240,
+                    "text": "满"
+                  },
+                  {
+                    "end_time": 480,
+                    "start_time": 320,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 640,
+                    "start_time": 520,
+                    "text": "营"
+                  },
+                  {
+                    "end_time": 800,
+                    "start_time": 640,
+                    "text": "养"
+                  },
+                  {
+                    "end_time": 920,
+                    "start_time": 840,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 920,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1160,
+                    "start_time": 1040,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1320,
+                    "start_time": 1200,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1440,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1680,
+                    "start_time": 1440,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1840,
+                    "start_time": 1680,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1840,
+                    "text": "作"
+                  },
+                  {
+                    "end_time": 2200,
+                    "start_time": 2040,
+                    "text": "品"
+                  }
+                ]
+              },
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.15660402739690432
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 5032,
+                "start_time": 2722,
+                "text": "使得我们能够也跟着成长。",
+                "words": [
+                  {
+                    "end_time": 2962,
+                    "start_time": 2802,
+                    "text": "使"
+                  },
+                  {
+                    "end_time": 3042,
+                    "start_time": 2962,
+                    "text": "得"
+                  },
+                  {
+                    "end_time": 3162,
+                    "start_time": 3082,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 3282,
+                    "start_time": 3162,
+                    "text": "们"
+                  },
+                  {
+                    "end_time": 3402,
+                    "start_time": 3282,
+                    "text": "能"
+                  },
+                  {
+                    "end_time": 3522,
+                    "start_time": 3402,
+                    "text": "够"
+                  },
+                  {
+                    "end_time": 3842,
+                    "start_time": 3562,
+                    "text": "也"
+                  },
+                  {
+                    "end_time": 4002,
+                    "start_time": 3842,
+                    "text": "跟"
+                  },
+                  {
+                    "end_time": 4122,
+                    "start_time": 4002,
+                    "text": "着"
+                  },
+                  {
+                    "end_time": 4322,
+                    "start_time": 4162,
+                    "text": "成"
+                  },
+                  {
+                    "end_time": 4522,
+                    "start_time": 4322,
+                    "text": "长"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        }
+      ],
+      "expectedFinal": ""
+    },
+    {
+      "label": "overlap_equal_rms_registered_reference_counterexample",
+      "sourceReport": "cloud-live-capability-result.json",
+      "sourcePcmSha256": "04abbf5a13e267384e9b62194cc69245dd723d1d03b89d4137704444c854758f",
+      "frames": [
+        {
+          "observedAtMs": 281,
+          "final": false,
+          "result": {
+            "text": "",
+            "utterances": []
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 844,
+          "final": false,
+          "result": {
+            "text": "充满",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 600,
+                "text": "充满",
+                "words": [
+                  {
+                    "end_time": 340,
+                    "start_time": 260,
+                    "text": "充满"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 1250,
+          "final": false,
+          "result": {
+            "text": "充满了营养",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 999,
+                "text": "充满了营养",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 740,
+                    "start_time": 660,
+                    "text": "营养"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 1406,
+          "final": false,
+          "result": {
+            "text": "充满了营养",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 1199,
+                "text": "充满了营养",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 740,
+                    "start_time": 660,
+                    "text": "营养"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 1797,
+          "final": false,
+          "result": {
+            "text": "充满了营养的",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 1599,
+                "text": "充满了营养的",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营养"
+                  },
+                  {
+                    "end_time": 1220,
+                    "start_time": 1140,
+                    "text": "的"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 2016,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个1",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 1799,
+                "text": "充满了营养的一个1",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营养"
+                  },
+                  {
+                    "end_time": 1080,
+                    "start_time": 1000,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1240,
+                    "start_time": 1160,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1620,
+                    "start_time": 1540,
+                    "text": "1"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 2453,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 2199,
+                "text": "充满了营养的一个一个大",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营养"
+                  },
+                  {
+                    "end_time": 1080,
+                    "start_time": 1000,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1240,
+                    "start_time": 1160,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1400,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1640,
+                    "start_time": 1560,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1940,
+                    "start_time": 1860,
+                    "text": "大"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 2859,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大的作品",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 2599,
+                "text": "充满了营养的一个一个大的作品",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营养"
+                  },
+                  {
+                    "end_time": 1080,
+                    "start_time": 1000,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1240,
+                    "start_time": 1160,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1400,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1640,
+                    "start_time": 1560,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1720,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1880,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2180,
+                    "start_time": 2100,
+                    "text": "作品"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 3875,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大的作品，使得",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 3399,
+                "text": "充满了营养的一个一个大的作品，使得",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营养"
+                  },
+                  {
+                    "end_time": 1080,
+                    "start_time": 1000,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1240,
+                    "start_time": 1160,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1400,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1640,
+                    "start_time": 1560,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1720,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1880,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1960,
+                    "text": "作品"
+                  },
+                  {
+                    "end_time": 3220,
+                    "start_time": 3140,
+                    "text": "使得"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 4078,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大的作品，使得我们能够",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 3799,
+                "text": "充满了营养的一个一个大的作品，使得我们能够",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营养"
+                  },
+                  {
+                    "end_time": 1080,
+                    "start_time": 1000,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1240,
+                    "start_time": 1160,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1400,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1640,
+                    "start_time": 1560,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1720,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1880,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1960,
+                    "text": "作品"
+                  },
+                  {
+                    "end_time": 3080,
+                    "start_time": 3000,
+                    "text": "使得"
+                  },
+                  {
+                    "end_time": 3240,
+                    "start_time": 3160,
+                    "text": "我们"
+                  },
+                  {
+                    "end_time": 3540,
+                    "start_time": 3460,
+                    "text": "能够"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 4375,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大的作品，使得我们能够有",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 4200,
+                "text": "充满了营养的一个一个大的作品，使得我们能够有",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营养"
+                  },
+                  {
+                    "end_time": 1080,
+                    "start_time": 1000,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1240,
+                    "start_time": 1160,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1400,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1640,
+                    "start_time": 1560,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1720,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1880,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1960,
+                    "text": "作品"
+                  },
+                  {
+                    "end_time": 3080,
+                    "start_time": 3000,
+                    "text": "使得"
+                  },
+                  {
+                    "end_time": 3240,
+                    "start_time": 3160,
+                    "text": "我们"
+                  },
+                  {
+                    "end_time": 3400,
+                    "start_time": 3320,
+                    "text": "能够"
+                  },
+                  {
+                    "end_time": 3780,
+                    "start_time": 3700,
+                    "text": "有"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 4609,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大的作品，使得我们能够有也跟着",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 4400,
+                "text": "充满了营养的一个一个大的作品，使得我们能够有也跟着",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营养"
+                  },
+                  {
+                    "end_time": 1080,
+                    "start_time": 1000,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1240,
+                    "start_time": 1160,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1400,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1640,
+                    "start_time": 1560,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1720,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1880,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1960,
+                    "text": "作品"
+                  },
+                  {
+                    "end_time": 3080,
+                    "start_time": 3000,
+                    "text": "使得"
+                  },
+                  {
+                    "end_time": 3240,
+                    "start_time": 3160,
+                    "text": "我们"
+                  },
+                  {
+                    "end_time": 3400,
+                    "start_time": 3320,
+                    "text": "能够"
+                  },
+                  {
+                    "end_time": 3640,
+                    "start_time": 3560,
+                    "text": "有"
+                  },
+                  {
+                    "end_time": 3880,
+                    "start_time": 3800,
+                    "text": "也"
+                  },
+                  {
+                    "end_time": 4260,
+                    "start_time": 4180,
+                    "text": "跟着"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 5031,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个一个大的作品，使得我们能够也跟着成长",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 4800,
+                "text": "充满了营养的一个一个大的作品，使得我们能够也跟着成长",
+                "words": [
+                  {
+                    "end_time": 200,
+                    "start_time": 120,
+                    "text": "充满"
+                  },
+                  {
+                    "end_time": 440,
+                    "start_time": 360,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营养"
+                  },
+                  {
+                    "end_time": 1080,
+                    "start_time": 1000,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1240,
+                    "start_time": 1160,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1400,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 1640,
+                    "start_time": 1560,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1800,
+                    "start_time": 1720,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1880,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1960,
+                    "text": "作品"
+                  },
+                  {
+                    "end_time": 3080,
+                    "start_time": 3000,
+                    "text": "使得"
+                  },
+                  {
+                    "end_time": 3240,
+                    "start_time": 3160,
+                    "text": "我们"
+                  },
+                  {
+                    "end_time": 3400,
+                    "start_time": 3320,
+                    "text": "能够"
+                  },
+                  {
+                    "end_time": 3880,
+                    "start_time": 3800,
+                    "text": "也"
+                  },
+                  {
+                    "end_time": 4120,
+                    "start_time": 4040,
+                    "text": "跟着"
+                  },
+                  {
+                    "end_time": 4420,
+                    "start_time": 4340,
+                    "text": "成长"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 6094,
+          "final": false,
+          "result": {
+            "text": "充满了营养的一个大的作品。其实我觉得人是一个多重的社会属性的动物。",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.5781065964812528
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 1120,
+                "text": "充满了营养的一个大的作品。",
+                "words": [
+                  {
+                    "end_time": 160,
+                    "start_time": 80,
+                    "text": "充"
+                  },
+                  {
+                    "end_time": 240,
+                    "start_time": 160,
+                    "text": "满"
+                  },
+                  {
+                    "end_time": 360,
+                    "start_time": 240,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营"
+                  },
+                  {
+                    "end_time": 720,
+                    "start_time": 640,
+                    "text": "养"
+                  },
+                  {
+                    "end_time": 880,
+                    "start_time": 840,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 920,
+                    "start_time": 880,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 960,
+                    "start_time": 920,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1000,
+                    "start_time": 960,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 1000,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1080,
+                    "start_time": 1040,
+                    "text": "作"
+                  },
+                  {
+                    "end_time": 1120,
+                    "start_time": 1080,
+                    "text": "品"
+                  }
+                ]
+              },
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "Billy",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.5781065964812528
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 5372,
+                "start_time": 1120,
+                "text": "其实我觉得人是一个多重的社会属性的动物。",
+                "words": [
+                  {
+                    "end_time": 1160,
+                    "start_time": 1120,
+                    "text": "其"
+                  },
+                  {
+                    "end_time": 1200,
+                    "start_time": 1160,
+                    "text": "实"
+                  },
+                  {
+                    "end_time": 1240,
+                    "start_time": 1200,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 1280,
+                    "start_time": 1240,
+                    "text": "觉"
+                  },
+                  {
+                    "end_time": 1320,
+                    "start_time": 1280,
+                    "text": "得"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1320,
+                    "text": "人"
+                  },
+                  {
+                    "end_time": 1760,
+                    "start_time": 1640,
+                    "text": "是"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1760,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 2240,
+                    "start_time": 2040,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 2480,
+                    "start_time": 2360,
+                    "text": "多"
+                  },
+                  {
+                    "end_time": 2640,
+                    "start_time": 2520,
+                    "text": "重"
+                  },
+                  {
+                    "end_time": 2800,
+                    "start_time": 2640,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 3320,
+                    "start_time": 3240,
+                    "text": "社"
+                  },
+                  {
+                    "end_time": 3440,
+                    "start_time": 3360,
+                    "text": "会"
+                  },
+                  {
+                    "end_time": 3600,
+                    "start_time": 3520,
+                    "text": "属"
+                  },
+                  {
+                    "end_time": 3680,
+                    "start_time": 3600,
+                    "text": "性"
+                  },
+                  {
+                    "end_time": 4160,
+                    "start_time": 4000,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 4720,
+                    "start_time": 4600,
+                    "text": "动"
+                  },
+                  {
+                    "end_time": 4840,
+                    "start_time": 4720,
+                    "text": "物"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "其实我觉得人是一个多重的社会属性的动物。",
+          "expectedPreview": "其实我觉得人是一个多重的社会属性的动物。"
+        },
+        {
+          "observedAtMs": 6109,
+          "final": true,
+          "result": {
+            "text": "充满了营养的一个大的作品。其实我觉得人是一个多重的社会属性的动物。",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.5781065964812528
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 1120,
+                "text": "充满了营养的一个大的作品。",
+                "words": [
+                  {
+                    "end_time": 160,
+                    "start_time": 80,
+                    "text": "充"
+                  },
+                  {
+                    "end_time": 240,
+                    "start_time": 160,
+                    "text": "满"
+                  },
+                  {
+                    "end_time": 360,
+                    "start_time": 240,
+                    "text": "了"
+                  },
+                  {
+                    "end_time": 600,
+                    "start_time": 520,
+                    "text": "营"
+                  },
+                  {
+                    "end_time": 720,
+                    "start_time": 640,
+                    "text": "养"
+                  },
+                  {
+                    "end_time": 880,
+                    "start_time": 840,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 920,
+                    "start_time": 880,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 960,
+                    "start_time": 920,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 1000,
+                    "start_time": 960,
+                    "text": "大"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 1000,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 1080,
+                    "start_time": 1040,
+                    "text": "作"
+                  },
+                  {
+                    "end_time": 1120,
+                    "start_time": 1080,
+                    "text": "品"
+                  }
+                ]
+              },
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "Billy",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.5781065964812528
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 5372,
+                "start_time": 1120,
+                "text": "其实我觉得人是一个多重的社会属性的动物。",
+                "words": [
+                  {
+                    "end_time": 1160,
+                    "start_time": 1120,
+                    "text": "其"
+                  },
+                  {
+                    "end_time": 1200,
+                    "start_time": 1160,
+                    "text": "实"
+                  },
+                  {
+                    "end_time": 1240,
+                    "start_time": 1200,
+                    "text": "我"
+                  },
+                  {
+                    "end_time": 1280,
+                    "start_time": 1240,
+                    "text": "觉"
+                  },
+                  {
+                    "end_time": 1320,
+                    "start_time": 1280,
+                    "text": "得"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1320,
+                    "text": "人"
+                  },
+                  {
+                    "end_time": 1760,
+                    "start_time": 1640,
+                    "text": "是"
+                  },
+                  {
+                    "end_time": 2040,
+                    "start_time": 1760,
+                    "text": "一"
+                  },
+                  {
+                    "end_time": 2240,
+                    "start_time": 2040,
+                    "text": "个"
+                  },
+                  {
+                    "end_time": 2480,
+                    "start_time": 2360,
+                    "text": "多"
+                  },
+                  {
+                    "end_time": 2640,
+                    "start_time": 2520,
+                    "text": "重"
+                  },
+                  {
+                    "end_time": 2800,
+                    "start_time": 2640,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 3320,
+                    "start_time": 3240,
+                    "text": "社"
+                  },
+                  {
+                    "end_time": 3440,
+                    "start_time": 3360,
+                    "text": "会"
+                  },
+                  {
+                    "end_time": 3600,
+                    "start_time": 3520,
+                    "text": "属"
+                  },
+                  {
+                    "end_time": 3680,
+                    "start_time": 3600,
+                    "text": "性"
+                  },
+                  {
+                    "end_time": 4160,
+                    "start_time": 4000,
+                    "text": "的"
+                  },
+                  {
+                    "end_time": 4720,
+                    "start_time": 4600,
+                    "text": "动"
+                  },
+                  {
+                    "end_time": 4840,
+                    "start_time": 4720,
+                    "text": "物"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "其实我觉得人是一个多重的社会属性的动物。",
+          "expectedPreview": "其实我觉得人是一个多重的社会属性的动物。"
+        }
+      ],
+      "expectedFinal": "其实我觉得人是一个多重的社会属性的动物。"
+    },
+    {
+      "label": "independent_short_owner_named",
+      "sourceReport": "cloud-owner-loss-trace-fixed-result.json",
+      "sourcePcmSha256": "086d5c9f0c5680fd7e42f7d40c40b94ab9cc2e830d1528104e34d29d06e309f4",
+      "frames": [
+        {
+          "observedAtMs": 329,
+          "final": false,
+          "result": {
+            "text": "",
+            "utterances": []
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 1485,
+          "final": false,
+          "result": {
+            "text": "晚",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 1199,
+                "text": "晚",
+                "words": [
+                  {
+                    "end_time": 980,
+                    "start_time": 900,
+                    "text": "晚"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 1860,
+          "final": false,
+          "result": {
+            "text": "晚晚香",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 1602,
+                "text": "晚晚香",
+                "words": [
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 1000,
+                    "start_time": 920,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 1300,
+                    "start_time": 1220,
+                    "text": "香"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 2047,
+          "final": false,
+          "result": {
+            "text": "碗碗香",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "Billy",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.6698149053732588
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 1602,
+                "text": "碗碗香",
+                "words": [
+                  {
+                    "end_time": 360,
+                    "start_time": 320,
+                    "text": "碗"
+                  },
+                  {
+                    "end_time": 560,
+                    "start_time": 520,
+                    "text": "碗"
+                  },
+                  {
+                    "end_time": 880,
+                    "start_time": 840,
+                    "text": "香"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "碗碗香",
+          "expectedPreview": "碗碗香"
+        },
+        {
+          "observedAtMs": 2360,
+          "final": true,
+          "result": {
+            "text": "碗碗香",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "Billy",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.6698149053732588
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 1602,
+                "text": "碗碗香",
+                "words": [
+                  {
+                    "end_time": 360,
+                    "start_time": 320,
+                    "text": "碗"
+                  },
+                  {
+                    "end_time": 560,
+                    "start_time": 520,
+                    "text": "碗"
+                  },
+                  {
+                    "end_time": 880,
+                    "start_time": 840,
+                    "text": "香"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "碗碗香",
+          "expectedPreview": "碗碗香"
+        }
+      ],
+      "expectedFinal": "碗碗香"
+    },
+    {
+      "label": "independent_foreign_control",
+      "sourceReport": "cloud-owner-loss-trace-fixed-result.json",
+      "sourcePcmSha256": "2fc0fb479c2e8b45b75164ef3001f7cd6b00de8c0a5daec53b23162b6844bd5a",
+      "frames": [
+        {
+          "observedAtMs": 359,
+          "final": false,
+          "result": {
+            "text": "",
+            "utterances": []
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 2078,
+          "final": false,
+          "result": {
+            "text": "深交",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 1799,
+                "text": "深交",
+                "words": [
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "深"
+                  },
+                  {
+                    "end_time": 1620,
+                    "start_time": 1540,
+                    "text": "交"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 2484,
+          "final": false,
+          "result": {
+            "text": "深交所",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 2199,
+                "text": "深交所",
+                "words": [
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "深"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1400,
+                    "text": "交"
+                  },
+                  {
+                    "end_time": 1860,
+                    "start_time": 1780,
+                    "text": "所"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 3094,
+          "final": false,
+          "result": {
+            "text": "深交所副",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 2799,
+                "text": "深交所副",
+                "words": [
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "深"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1400,
+                    "text": "交"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "所"
+                  },
+                  {
+                    "end_time": 2580,
+                    "start_time": 2500,
+                    "text": "副"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 3469,
+          "final": false,
+          "result": {
+            "text": "深交所副总经理",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 3199,
+                "text": "深交所副总经理",
+                "words": [
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "深"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1400,
+                    "text": "交"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "所"
+                  },
+                  {
+                    "end_time": 2440,
+                    "start_time": 2360,
+                    "text": "副"
+                  },
+                  {
+                    "end_time": 2900,
+                    "start_time": 2820,
+                    "text": "总经理"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 4109,
+          "final": false,
+          "result": {
+            "text": "深交所副总经理周",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 3799,
+                "text": "深交所副总经理周",
+                "words": [
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "深"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1400,
+                    "text": "交"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "所"
+                  },
+                  {
+                    "end_time": 2440,
+                    "start_time": 2360,
+                    "text": "副"
+                  },
+                  {
+                    "end_time": 2760,
+                    "start_time": 2680,
+                    "text": "总经理"
+                  },
+                  {
+                    "end_time": 3460,
+                    "start_time": 3380,
+                    "text": "周"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 4500,
+          "final": false,
+          "result": {
+            "text": "深交所副总经理周明",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 4200,
+                "text": "深交所副总经理周明",
+                "words": [
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "深"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1400,
+                    "text": "交"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "所"
+                  },
+                  {
+                    "end_time": 2440,
+                    "start_time": 2360,
+                    "text": "副"
+                  },
+                  {
+                    "end_time": 2760,
+                    "start_time": 2680,
+                    "text": "总经理"
+                  },
+                  {
+                    "end_time": 3320,
+                    "start_time": 3240,
+                    "text": "周"
+                  },
+                  {
+                    "end_time": 3860,
+                    "start_time": 3780,
+                    "text": "明"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 4766,
+          "final": false,
+          "result": {
+            "text": "深交所副总经理周明指出",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 4400,
+                "text": "深交所副总经理周明指出",
+                "words": [
+                  {
+                    "end_time": 1400,
+                    "start_time": 1320,
+                    "text": "深"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1400,
+                    "text": "交"
+                  },
+                  {
+                    "end_time": 1720,
+                    "start_time": 1640,
+                    "text": "所"
+                  },
+                  {
+                    "end_time": 2440,
+                    "start_time": 2360,
+                    "text": "副"
+                  },
+                  {
+                    "end_time": 2760,
+                    "start_time": 2680,
+                    "text": "总经理"
+                  },
+                  {
+                    "end_time": 3320,
+                    "start_time": 3240,
+                    "text": "周"
+                  },
+                  {
+                    "end_time": 3720,
+                    "start_time": 3640,
+                    "text": "明"
+                  },
+                  {
+                    "end_time": 4100,
+                    "start_time": 4020,
+                    "text": "指出"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 5500,
+          "final": false,
+          "result": {
+            "text": "深交所副总经理周明指出",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.0722753089493151
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 4942,
+                "text": "深交所副总经理周明指出",
+                "words": [
+                  {
+                    "end_time": 680,
+                    "start_time": 640,
+                    "text": "深"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 1000,
+                    "text": "交"
+                  },
+                  {
+                    "end_time": 1440,
+                    "start_time": 1200,
+                    "text": "所"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1600,
+                    "text": "副"
+                  },
+                  {
+                    "end_time": 2400,
+                    "start_time": 2040,
+                    "text": "总"
+                  },
+                  {
+                    "end_time": 2680,
+                    "start_time": 2400,
+                    "text": "经"
+                  },
+                  {
+                    "end_time": 2920,
+                    "start_time": 2680,
+                    "text": "理"
+                  },
+                  {
+                    "end_time": 3240,
+                    "start_time": 3080,
+                    "text": "周"
+                  },
+                  {
+                    "end_time": 3520,
+                    "start_time": 3480,
+                    "text": "明"
+                  },
+                  {
+                    "end_time": 3920,
+                    "start_time": 3720,
+                    "text": "指"
+                  },
+                  {
+                    "end_time": 4280,
+                    "start_time": 3920,
+                    "text": "出"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 5844,
+          "final": true,
+          "result": {
+            "text": "深交所副总经理周明指出",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.0722753089493151
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 4942,
+                "text": "深交所副总经理周明指出",
+                "words": [
+                  {
+                    "end_time": 680,
+                    "start_time": 640,
+                    "text": "深"
+                  },
+                  {
+                    "end_time": 1040,
+                    "start_time": 1000,
+                    "text": "交"
+                  },
+                  {
+                    "end_time": 1440,
+                    "start_time": 1200,
+                    "text": "所"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1600,
+                    "text": "副"
+                  },
+                  {
+                    "end_time": 2400,
+                    "start_time": 2040,
+                    "text": "总"
+                  },
+                  {
+                    "end_time": 2680,
+                    "start_time": 2400,
+                    "text": "经"
+                  },
+                  {
+                    "end_time": 2920,
+                    "start_time": 2680,
+                    "text": "理"
+                  },
+                  {
+                    "end_time": 3240,
+                    "start_time": 3080,
+                    "text": "周"
+                  },
+                  {
+                    "end_time": 3520,
+                    "start_time": 3480,
+                    "text": "明"
+                  },
+                  {
+                    "end_time": 3920,
+                    "start_time": 3720,
+                    "text": "指"
+                  },
+                  {
+                    "end_time": 4280,
+                    "start_time": 3920,
+                    "text": "出"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        }
+      ],
+      "expectedFinal": ""
+    },
+    {
+      "label": "independent_short_owner_equal_rms_overlap",
+      "sourceReport": "cloud-owner-loss-trace-fixed-result.json",
+      "sourcePcmSha256": "274cfcb66000327e06e30f95e0cc4c70c6a688f2f4b21cf3e7e811ec75a5b276",
+      "frames": [
+        {
+          "observedAtMs": 359,
+          "final": false,
+          "result": {
+            "text": "",
+            "utterances": []
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 1219,
+          "final": false,
+          "result": {
+            "text": "婉",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 999,
+                "text": "婉",
+                "words": [
+                  {
+                    "end_time": 999,
+                    "text": "婉"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 1515,
+          "final": false,
+          "result": {
+            "text": "晚晚",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 1199,
+                "text": "晚晚",
+                "words": [
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 980,
+                    "start_time": 900,
+                    "text": "晚"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 1844,
+          "final": false,
+          "result": {
+            "text": "晚晚香",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 1599,
+                "text": "晚晚香",
+                "words": [
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 1140,
+                    "start_time": 1060,
+                    "text": "香"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 2469,
+          "final": false,
+          "result": {
+            "text": "晚晚香所",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 2199,
+                "text": "晚晚香所",
+                "words": [
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 1000,
+                    "start_time": 920,
+                    "text": "香"
+                  },
+                  {
+                    "end_time": 2020,
+                    "start_time": 1940,
+                    "text": "所"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 3047,
+          "final": false,
+          "result": {
+            "text": "晚晚香所副",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 2799,
+                "text": "晚晚香所副",
+                "words": [
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 1000,
+                    "start_time": 920,
+                    "text": "香"
+                  },
+                  {
+                    "end_time": 1880,
+                    "start_time": 1800,
+                    "text": "所"
+                  },
+                  {
+                    "end_time": 2660,
+                    "start_time": 2580,
+                    "text": "副"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 3515,
+          "final": false,
+          "result": {
+            "text": "晚晚香所副总经理",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 3199,
+                "text": "晚晚香所副总经理",
+                "words": [
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 1000,
+                    "start_time": 920,
+                    "text": "香"
+                  },
+                  {
+                    "end_time": 1880,
+                    "start_time": 1800,
+                    "text": "所"
+                  },
+                  {
+                    "end_time": 2520,
+                    "start_time": 2440,
+                    "text": "副"
+                  },
+                  {
+                    "end_time": 2900,
+                    "start_time": 2820,
+                    "text": "总经理"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 4015,
+          "final": false,
+          "result": {
+            "text": "晚晚香所副总经理周",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 3799,
+                "text": "晚晚香所副总经理周",
+                "words": [
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 1000,
+                    "start_time": 920,
+                    "text": "香"
+                  },
+                  {
+                    "end_time": 1880,
+                    "start_time": 1800,
+                    "text": "所"
+                  },
+                  {
+                    "end_time": 2520,
+                    "start_time": 2440,
+                    "text": "副"
+                  },
+                  {
+                    "end_time": 2760,
+                    "start_time": 2680,
+                    "text": "总经理"
+                  },
+                  {
+                    "end_time": 3460,
+                    "start_time": 3380,
+                    "text": "周"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 4469,
+          "final": false,
+          "result": {
+            "text": "晚晚香所副总经理周明",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 4200,
+                "text": "晚晚香所副总经理周明",
+                "words": [
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 1000,
+                    "start_time": 920,
+                    "text": "香"
+                  },
+                  {
+                    "end_time": 1880,
+                    "start_time": 1800,
+                    "text": "所"
+                  },
+                  {
+                    "end_time": 2520,
+                    "start_time": 2440,
+                    "text": "副"
+                  },
+                  {
+                    "end_time": 2760,
+                    "start_time": 2680,
+                    "text": "总经理"
+                  },
+                  {
+                    "end_time": 3320,
+                    "start_time": 3240,
+                    "text": "周"
+                  },
+                  {
+                    "end_time": 3860,
+                    "start_time": 3780,
+                    "text": "明"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 4656,
+          "final": false,
+          "result": {
+            "text": "晚晚香所副总经理周明指出",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "source": "stream"
+                },
+                "definite": false,
+                "end_time": 4400,
+                "text": "晚晚香所副总经理周明指出",
+                "words": [
+                  {
+                    "end_time": 760,
+                    "start_time": 680,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 840,
+                    "start_time": 760,
+                    "text": "晚"
+                  },
+                  {
+                    "end_time": 1000,
+                    "start_time": 920,
+                    "text": "香"
+                  },
+                  {
+                    "end_time": 1880,
+                    "start_time": 1800,
+                    "text": "所"
+                  },
+                  {
+                    "end_time": 2520,
+                    "start_time": 2440,
+                    "text": "副"
+                  },
+                  {
+                    "end_time": 2760,
+                    "start_time": 2680,
+                    "text": "总经理"
+                  },
+                  {
+                    "end_time": 3320,
+                    "start_time": 3240,
+                    "text": "周"
+                  },
+                  {
+                    "end_time": 3720,
+                    "start_time": 3640,
+                    "text": "明"
+                  },
+                  {
+                    "end_time": 4100,
+                    "start_time": 4020,
+                    "text": "指出"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 5547,
+          "final": false,
+          "result": {
+            "text": "深交所副总经理周明指出",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.264406158727616
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 4942,
+                "text": "深交所副总经理周明指出",
+                "words": [
+                  {
+                    "end_time": 800,
+                    "start_time": 720,
+                    "text": "深"
+                  },
+                  {
+                    "end_time": 1160,
+                    "start_time": 1120,
+                    "text": "交"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1280,
+                    "text": "所"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1640,
+                    "text": "副"
+                  },
+                  {
+                    "end_time": 2400,
+                    "start_time": 2040,
+                    "text": "总"
+                  },
+                  {
+                    "end_time": 2680,
+                    "start_time": 2400,
+                    "text": "经"
+                  },
+                  {
+                    "end_time": 2920,
+                    "start_time": 2680,
+                    "text": "理"
+                  },
+                  {
+                    "end_time": 3240,
+                    "start_time": 3080,
+                    "text": "周"
+                  },
+                  {
+                    "end_time": 3520,
+                    "start_time": 3480,
+                    "text": "明"
+                  },
+                  {
+                    "end_time": 3960,
+                    "start_time": 3720,
+                    "text": "指"
+                  },
+                  {
+                    "end_time": 4280,
+                    "start_time": 3960,
+                    "text": "出"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        },
+        {
+          "observedAtMs": 5812,
+          "final": true,
+          "result": {
+            "text": "深交所副总经理周明指出",
+            "utterances": [
+              {
+                "additions": {
+                  "all_matched_hotwords": "",
+                  "fixed_prefix_result": "",
+                  "invoke_type": "hard_vad",
+                  "source": "two_pass",
+                  "speaker_id": "0",
+                  "use_bigasr_post_process": "true"
+                },
+                "attributes": {
+                  "voiceprint_matches": [
+                    {
+                      "id": "a3ee18be-6113-4b9a-8bc1-55fbb9f88f71",
+                      "name": "Billy",
+                      "similarity": 0.264406158727616
+                    }
+                  ]
+                },
+                "definite": true,
+                "end_time": 4942,
+                "text": "深交所副总经理周明指出",
+                "words": [
+                  {
+                    "end_time": 800,
+                    "start_time": 720,
+                    "text": "深"
+                  },
+                  {
+                    "end_time": 1160,
+                    "start_time": 1120,
+                    "text": "交"
+                  },
+                  {
+                    "end_time": 1480,
+                    "start_time": 1280,
+                    "text": "所"
+                  },
+                  {
+                    "end_time": 1960,
+                    "start_time": 1640,
+                    "text": "副"
+                  },
+                  {
+                    "end_time": 2400,
+                    "start_time": 2040,
+                    "text": "总"
+                  },
+                  {
+                    "end_time": 2680,
+                    "start_time": 2400,
+                    "text": "经"
+                  },
+                  {
+                    "end_time": 2920,
+                    "start_time": 2680,
+                    "text": "理"
+                  },
+                  {
+                    "end_time": 3240,
+                    "start_time": 3080,
+                    "text": "周"
+                  },
+                  {
+                    "end_time": 3520,
+                    "start_time": 3480,
+                    "text": "明"
+                  },
+                  {
+                    "end_time": 3960,
+                    "start_time": 3720,
+                    "text": "指"
+                  },
+                  {
+                    "end_time": 4280,
+                    "start_time": 3960,
+                    "text": "出"
+                  }
+                ]
+              }
+            ]
+          },
+          "expectedOwner": "",
+          "expectedPreview": ""
+        }
+      ],
+      "expectedFinal": ""
+    }
+  ]
+}

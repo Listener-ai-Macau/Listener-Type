@@ -1,7 +1,7 @@
 {
   "name": "listener-type",
   "private": true,
-  "version": "1.0.6-beta.24",
+  "version": "1.0.6-rc1",
   "type": "module",
   "scripts": {
     "dev": "vite",

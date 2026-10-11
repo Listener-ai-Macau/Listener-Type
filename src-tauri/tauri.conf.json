@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Listener Type",
-  "version": "1.0.6-beta.24",
+  "version": "1.0.6-rc1",
   "identifier": "com.listener.type",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -15,6 +15,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "url": "index.html",
         "title": "Listener Type",
         "width": 1240,
@@ -69,6 +70,7 @@
       },
       {
         "label": "acceptance",
+        "create": false,
         "url": "index.html?window=acceptance",
         "title": "Listener Type 验收",
         "width": 460,
@@ -103,11 +105,19 @@
   "bundle": {
     "active": true,
     "resources": [
+      "resources/models/nomo-pvad-2.4s-fp32.onnx",
+      "resources/models/eres2netv2-nomo-enrollment-fp32.onnx",
+      "resources/models/nomo-pvad.LICENSE.txt",
       "resources/models/wesep-bsrnn-voicefilter-3s-int8.onnx",
       "resources/models/wesep-speaker-encoder-int8.onnx",
       "resources/models/wesep-bsrnn-voicefilter-3s-int8.LICENSE.txt",
       "resources/models/silero_vad.onnx",
       "resources/models/silero_vad.onnx.LICENSE.txt",
+      "resources/models/ps4-ecapa-fp32.onnx",
+      "resources/models/ps4-bsrnn-fp32.onnx",
+      "resources/models/ps4-mel-257x80.f32",
+      "resources/models/ps4-content-manifest.json",
+      "resources/content-recovery/**/*",
       "resources/windows-ime/x64/ListenerTypeIme.dll",
       "resources/windows-ime/x86/ListenerTypeIme.dll"
     ],

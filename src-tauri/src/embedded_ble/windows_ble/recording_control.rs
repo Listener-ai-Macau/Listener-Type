@@ -196,6 +196,15 @@ pub fn send_recording_control_ensure_wake_capture(
     let command = format!(
         "VREC:ENSURE:{request_id:08X}:{previous_segment_id:08X}\n"
     );
+    if let Some(active) = active_audio_control_sender() {
+        remember_accepted_wake_capture_owner(request_id, active.capture_id);
+        return send_audio_control_via_sender(
+            active,
+            command.as_bytes(),
+            timeout,
+            "accepted wake capture ensure",
+        );
+    }
     send_recording_control_command(
         command.as_bytes(),
         timeout,
@@ -209,11 +218,28 @@ pub fn send_recording_control_abort_wake_capture(
     timeout: Duration,
 ) -> Result<(), String> {
     let command = format!("VREC:ABORT:{request_id:08X}\n");
-    send_recording_control_command(
+    let owner = take_accepted_wake_capture_owner(request_id).ok_or_else(|| {
+        format!(
+            "accepted wake capture abort has no live capture owner request_id={request_id}"
+        )
+    })?;
+    let active = active_audio_control_sender().ok_or_else(|| {
+        format!(
+            "accepted wake capture abort owner capture #{} is no longer active",
+            owner.capture_id
+        )
+    })?;
+    if active.capture_id != owner.capture_id {
+        return Err(format!(
+            "accepted wake capture abort owner changed old_capture={} active_capture={}",
+            owner.capture_id, active.capture_id
+        ));
+    }
+    send_audio_control_via_sender(
+        active,
         command.as_bytes(),
         timeout,
         "accepted wake capture abort",
-        ActiveControlTransientFallback::TryFreshGatt,
     )
 }
 

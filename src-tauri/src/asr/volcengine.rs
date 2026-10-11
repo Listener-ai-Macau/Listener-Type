@@ -104,12 +104,13 @@ fn next_volcengine_asr_stream_id() -> u64 {
     NEXT_VOLCENGINE_ASR_STREAM_ID.fetch_add(1, Ordering::Relaxed)
 }
 // Keep streamed preview acceleration independent of second-pass segmentation.
-// Aggressive 500 ms hard-VAD boundaries repeatedly returned empty completed
-// clauses on full captured speech. A one-second boundary preserves those
-// clauses without delaying the stream's first-character callbacks.
-const SECOND_PASS_END_WINDOW_MS: u32 = 1_000;
-// The provider documents a minimum of 1 and recommends 1000 ms. Zero is
-// outside that contract and delayed initial callbacks in paced PCM probes.
+// Keep the established 500 ms boundary while evaluating shorter provider
+// segmentation. A 300 ms candidate improved clause latency but confirmed an
+// omitted spoken particle on a neighboring recording. Provider confirmation
+// cannot repair that recognition omission; faster callbacks are insufficient
+// grounds to change this default. The editor's three-second window is separate.
+const SECOND_PASS_END_WINDOW_MS: u32 = 500;
+// Preserve the provider's recommended one-second initial voice protection.
 const SECOND_PASS_FORCE_TO_SPEECH_MS: u32 = 1_000;
 
 #[derive(Clone, Debug)]
@@ -134,6 +135,8 @@ impl VolcengineCredentials {
 pub enum VolcengineASRError {
     #[error("credentials missing")]
     CredentialsMissing,
+    #[error("{0}")]
+    CloudOwnerUnavailable(String),
     #[error("connection failed: {0}")]
     ConnectionFailed(String),
     /// WebSocket 握手阶段服务端返回 401 / 403：凭据被拒。
@@ -422,7 +425,23 @@ fn bounded_empty_final_replay_pcm(pcm: &[u8]) -> (Vec<u8>, f64, u16, u16) {
 type WsSink = futures_util::stream::SplitSink<WsStream, Message>;
 type SharedWriter = Arc<AsyncMutex<Option<WsSink>>>;
 type PartialTranscriptCallback = Arc<dyn Fn(String) + Send + Sync>;
-type VisualPartialTranscriptCallback = Arc<dyn Fn(String) + Send + Sync>;
+type VisualPartialTranscriptCallback = Arc<dyn Fn(VisualTranscriptUpdate) + Send + Sync>;
+
+/// A reversible display update never supplies editor/final/endpoint text.
+/// Only an explicit ownership correction may shorten a provisional preview.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VisualTranscriptUpdate {
+    Provisional(String),
+    ConfirmedOwnerPartition(String),
+}
+
+impl VisualTranscriptUpdate {
+    pub fn text(&self) -> &str {
+        match self {
+            Self::Provisional(text) | Self::ConfirmedOwnerPartition(text) => text,
+        }
+    }
+}
 type FinalIntermediateTranscriptCallback = Arc<dyn Fn(FinalIntermediateTranscript) + Send + Sync>;
 type TargetSpeakerUpdateCallback = Arc<dyn Fn(TargetSpeakerUpdate) + Send + Sync>;
 type StreamingEventCallback = Arc<dyn Fn(VolcengineStreamingEvent) + Send + Sync>;
@@ -441,6 +460,10 @@ pub struct VolcengineDiagnosticTraceEntry {
     pub stage: &'static str,
     pub text: String,
     pub text_truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker_projection: Option<Value>,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -677,6 +700,24 @@ use super::volcengine_untimed_merge::{
 #[derive(Default)]
 struct SyncState {
     provider_timed_transcript: Option<crate::transcript_boundary::TimedTranscript>,
+    sealed_native_word_timing: Option<crate::transcript_boundary::TimedTranscript>,
+    /// The normalized final candidate before any pending-identity preview
+    /// ceiling. This retains its exact word occurrence for delayed proof.
+    pending_source_owner_final: Option<crate::transcript_boundary::TimedTranscript>,
+    recognition_boundary: super::volcengine_transcript::RecognitionBoundary,
+    owner_delivery_generation: u64,
+    pause_early_stability_source: Option<OwnerDeliveryStabilitySource>,
+    pause_early_stability_floor: Option<Instant>,
+    latest_visual_provider_result: Option<Value>,
+    source_owner_projection_stability: Option<SourceOwnerProjectionStability>,
+    /// Prefix admitted while the original stream still had live authority.
+    /// After independent rejection this is an immutable occurrence anchor;
+    /// later parent ledger growth must earn word-level source ownership.
+    primary_admitted_owner_anchor: Option<String>,
+    speaker_filtered_timed_transcript: Option<crate::transcript_boundary::TimedTranscript>,
+    /// Exact source coordinates for the accepted primary candidate, independent
+    /// of the shorter contiguous live insertion prefix.
+    best_transcript_timing: Option<crate::transcript_boundary::TimedTranscript>,
     /// Insertion authority is independent of the longer reversible preview.
     live_owner_delivery: Option<TranscriptCandidate>,
     live_owner_delivery_timing: Option<crate::transcript_boundary::TimedTranscript>,
@@ -724,6 +765,7 @@ struct SyncState {
     /// tail must not reset the age of an unchanged earlier clause.
     pause_early_recent_revisions: VecDeque<(Instant, String)>,
     best_untimed_window: String,
+    conservative_speaker_ledger: super::volcengine_speaker_ledger::ConservativeSpeakerLedger,
     /// Speaker attribution lags behind the provider's streaming text. Keep a
     /// display-only merge here so the capsule can advance without promoting
     /// provisional words into the authoritative/final transcript.
@@ -817,6 +859,14 @@ struct SyncState {
     /// not advance the owner endpoint. Two consecutive Target windows clear it.
     local_owner_handoff_suspected: bool,
     local_owner_handoff_recovery_targets: u8,
+    /// Exact PCM ranges of consecutive Target observations currently proving
+    /// that a reversible provider/local handoff was the owner returning. They
+    /// remain pending until the existing multi-window recovery gate succeeds.
+    local_owner_handoff_recovery_ranges: Vec<(u64, u64)>,
+    /// Last exact observation range in the recovery chain, including a
+    /// low-quality observation whose raw identity classification remained
+    /// Target. It can prove continuity but is never itself published as owner.
+    local_owner_handoff_recovery_last_range: Option<(u64, u64)>,
     /// Session voiceprint negatives are advisory for transcript ownership. Two
     /// very-low-score windows may still mark current speech as another person
     /// for endpointing, but must never freeze/delete provider-recognized text.
@@ -900,6 +950,8 @@ struct OwnerContinuitySnapshot {
     preview_foreign_hint_end_ms: Option<u64>,
     owner_handoff_suspected: bool,
     owner_handoff_recovery_targets: u8,
+    owner_handoff_recovery_ranges: Vec<(u64, u64)>,
+    owner_handoff_recovery_last_range: Option<(u64, u64)>,
     consecutive_strong_non_target: u8,
     owner_absence_run_started_ms: Option<u64>,
     owner_absence_run_confirmed: bool,
@@ -945,6 +997,8 @@ impl OwnerContinuitySnapshot {
             preview_foreign_hint_end_ms: state.local_preview_foreign_hint_end_ms,
             owner_handoff_suspected: state.local_owner_handoff_suspected,
             owner_handoff_recovery_targets: state.local_owner_handoff_recovery_targets,
+            owner_handoff_recovery_ranges: state.local_owner_handoff_recovery_ranges.clone(),
+            owner_handoff_recovery_last_range: state.local_owner_handoff_recovery_last_range,
             confirmed_transcript_foreign_hint_end_ms: state
                 .local_confirmed_transcript_foreign_hint_end_ms,
             consecutive_strong_non_target: state.local_consecutive_strong_non_target,
@@ -995,6 +1049,8 @@ impl OwnerContinuitySnapshot {
         state.local_preview_foreign_hint_end_ms = self.preview_foreign_hint_end_ms;
         state.local_owner_handoff_suspected = self.owner_handoff_suspected;
         state.local_owner_handoff_recovery_targets = self.owner_handoff_recovery_targets;
+        state.local_owner_handoff_recovery_ranges = self.owner_handoff_recovery_ranges;
+        state.local_owner_handoff_recovery_last_range = self.owner_handoff_recovery_last_range;
         state.local_confirmed_transcript_foreign_hint_end_ms =
             self.confirmed_transcript_foreign_hint_end_ms;
         state.local_consecutive_strong_non_target = self.consecutive_strong_non_target;
@@ -1266,7 +1322,15 @@ fn refresh_local_target_from_owner_preview_activity(state: &mut SyncState) -> bo
     {
         return false;
     }
-    let Some(audio_ms) = latest_audio_duration_ms(state) else {
+    // A provider revision can arrive while local analysis is delayed. Its
+    // arrival/capture time is not a fresh positive identity observation.
+    if !matches!(state.local_speaker_classification,
+        Some(crate::speaker_verification::SessionSpeakerClassification::Target { .. }))
+        || state.local_speaker_signal_quality_sufficient != Some(true)
+    {
+        return false;
+    }
+    let Some(audio_ms) = state.local_speaker_observation_end_ms else {
         return false;
     };
     let previous = state.local_target_speech_end_ms.unwrap_or_default();
@@ -1448,7 +1512,9 @@ fn owner_scoped_live_candidate(state: &SyncState, filtered: &SpeakerFilteredResu
                 accepted_key = phrase_key;
             }
         }
-        let prefix = timing.owner_supported_prefix(&accepted_key, &state.local_owner_pcm_intervals);
+        let prefix = timing.owner_supported_prefix(&accepted_key, &state.local_owner_pcm_intervals,
+            &state.provider_non_owner_audio_ranges.iter()
+                .chain(&state.provider_distinct_foreign_audio_ranges).copied().collect::<Vec<_>>());
         let prefix_key = crate::transcript_boundary::content_key(&prefix);
         if !prefix_key.is_empty() {
             let mut owned = row.clone();
@@ -1477,13 +1543,815 @@ fn note_live_owner_delivery(state: &mut SyncState, filtered: &SpeakerFilteredRes
     if !state.local_speaker_tracking_enabled { return; }
     let (supported, timing) = owner_scoped_live_candidate(state, filtered, raw);
     let previous = state.live_owner_delivery.clone().unwrap_or_default();
+    let previous_timing = state.live_owner_delivery_timing.clone();
     let (text, timed_segments, _) = merge_filtered_streaming_candidate_with_untimed_window(
         &previous.text, &previous.timed_segments, "", supported, None,
     );
     if previous.text != text { state.live_owner_delivery_updated_at = Some(Instant::now()); }
-    state.live_owner_delivery_timing = (crate::transcript_boundary::content_key(&timing.text)
-        == crate::transcript_boundary::content_key(&text)).then_some(timing);
+    let merged_key = crate::transcript_boundary::content_key(&text);
+    state.live_owner_delivery_timing = matching_merged_timing(&merged_key, timing, previous_timing);
     state.live_owner_delivery = Some(TranscriptCandidate { text, timed_segments, authoritative_cumulative:false });
+}
+
+fn matching_merged_timing(
+    merged_key: &str,
+    current: crate::transcript_boundary::TimedTranscript,
+    previous: Option<crate::transcript_boundary::TimedTranscript>,
+) -> Option<crate::transcript_boundary::TimedTranscript> {
+    if crate::transcript_boundary::content_key(&current.text) == merged_key {
+        Some(current)
+    } else {
+        previous.filter(|prior| crate::transcript_boundary::content_key(&prior.text) == merged_key)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SourceOwnerProjectionSignature {
+    independent_anchor_key: Option<String>,
+    key: String,
+    words: Vec<(String, Option<u64>, Option<u64>)>,
+}
+
+#[derive(Clone, Debug)]
+struct SourceOwnerProjectionStability {
+    signature: SourceOwnerProjectionSignature,
+    updated_at: Instant,
+}
+
+fn source_owner_projection_signature(
+    timing: &crate::transcript_boundary::TimedTranscript,
+    projected_text: &str,
+) -> Option<SourceOwnerProjectionSignature> {
+    let source_key = crate::transcript_boundary::content_key(&timing.text);
+    let projected_key = crate::transcript_boundary::content_key(projected_text);
+    if projected_key.is_empty() || !source_key.starts_with(&projected_key) {
+        return None;
+    }
+    let mut through = String::new();
+    let mut words = Vec::new();
+    for word in &timing.words {
+        let key = crate::transcript_boundary::content_key(&word.text);
+        if key.is_empty() {
+            continue;
+        }
+        if !source_key[through.len()..].starts_with(&key) {
+            return None;
+        }
+        through.push_str(&key);
+        words.push((key, word.start_ms, word.end_ms));
+        if through.len() >= projected_key.len() {
+            break;
+        }
+    }
+    (through == projected_key).then_some(SourceOwnerProjectionSignature {
+        independent_anchor_key: None,
+        key: projected_key,
+        words,
+    })
+}
+
+fn source_owner_projection_updated_at(
+    state: &mut SyncState,
+    signature: Option<SourceOwnerProjectionSignature>,
+    now: Instant,
+) -> Option<Instant> {
+    let Some(signature) = signature else {
+        if state.source_owner_projection_stability.is_some() {
+            // A physical/provider veto removed the certified projection. Old
+            // revisions must not survive that evidence boundary and make the
+            // same text immediately mature when the veto later disappears.
+            state.pause_early_recent_revisions.clear();
+        }
+        state.source_owner_projection_stability = None;
+        return None;
+    };
+    if state
+        .source_owner_projection_stability
+        .as_ref()
+        .is_some_and(|previous| previous.signature == signature)
+    {
+        return state
+            .source_owner_projection_stability
+            .as_ref()
+            .map(|previous| previous.updated_at);
+    }
+    let must_restart_rolling_stability = state
+        .source_owner_projection_stability
+        .as_ref()
+        .is_some_and(|previous| {
+            previous.signature.independent_anchor_key != signature.independent_anchor_key
+                || !signature
+                    .words
+                    .as_slice()
+                    .starts_with(previous.signature.words.as_slice())
+        });
+    if must_restart_rolling_stability {
+        // Authority/anchor changes, word-coordinate rewrites and evidence
+        // retractions are new ownership generations. Keep revision history
+        // only for monotonic word growth under the same anchor so the already
+        // stable prefix remains responsive while new words earn their age.
+        state.pause_early_recent_revisions.clear();
+    }
+    state.source_owner_projection_stability = Some(SourceOwnerProjectionStability {
+        signature,
+        updated_at: now,
+    });
+    Some(now)
+}
+
+/// Map the already admitted owner prefix into the current provider revision.
+///
+/// The editor keeps the old words immutable, while the provider can revise a
+/// word inside that prefix before adding more speech (for example 天天 -> 今天).
+/// Exact matching remains the common path. The fallback uses the shared
+/// bounded, unique revised-prefix seam; it only chooses the current source
+/// coordinate. Every word after that seam still needs positive owner audio in
+/// `owner_supported_prefix`, and every known foreign interval still vetoes it.
+fn source_owner_projection_anchor_key(
+    timing: &crate::transcript_boundary::TimedTranscript,
+    accepted_key: &str,
+) -> Option<String> {
+    if accepted_key.is_empty() {
+        return Some(String::new());
+    }
+    let timing_key = crate::transcript_boundary::content_key(&timing.text);
+    if timing_key.starts_with(accepted_key) {
+        return Some(accepted_key.to_string());
+    }
+    let boundary = crate::transcript_boundary::revised_prefix_end(&timing.text, accepted_key)?;
+    let mapped = crate::transcript_boundary::content_key(&timing.text[..boundary]);
+    (!mapped.is_empty()).then_some(mapped)
+}
+
+fn primary_source_owner_supported_candidate(
+    state: &SyncState,
+    source_owner_ranges: &[(u64, u64)],
+    physical_interference_ranges: &[(u64, u64)],
+) -> Option<(TranscriptCandidate, SourceOwnerProjectionSignature)> {
+    if (source_owner_ranges.is_empty() && state.local_owner_pcm_intervals.is_empty())
+        || (!enrolled_owner_identity_verified(state) && state.local_owner_pcm_intervals.is_empty()) {
+        return None;
+    }
+    // A same-speaker provider ledger is still a recognition candidate. It
+    // cannot waive the audio permission of words already present in that
+    // candidate. Reprove the complete primary rendering on every revision.
+    let coordinate_anchor = crate::transcript_boundary::content_key(
+        state.live_owner_delivery.as_ref().map(|candidate| candidate.text.as_str()).unwrap_or_default(),
+    );
+    source_owner_supported_candidate_with_anchor(
+        state, &coordinate_anchor, source_owner_ranges, physical_interference_ranges, true,
+    )
+}
+
+fn source_owner_supported_candidate_after(
+    state: &SyncState,
+    accepted_key: &str,
+    source_owner_ranges: &[(u64, u64)],
+    physical_interference_ranges: &[(u64, u64)],
+) -> Option<(TranscriptCandidate, SourceOwnerProjectionSignature)> {
+    source_owner_supported_candidate_with_anchor(state,accepted_key,source_owner_ranges,physical_interference_ranges,false)
+}
+
+fn source_owner_supported_candidate_with_anchor(
+    state: &SyncState,
+    accepted_key: &str,
+    source_owner_ranges: &[(u64,u64)],
+    physical_interference_ranges: &[(u64,u64)],
+    reprove_prefix: bool,
+) -> Option<(TranscriptCandidate,SourceOwnerProjectionSignature)> {
+    if (source_owner_ranges.is_empty() && state.local_owner_pcm_intervals.is_empty())
+        || (!enrolled_owner_identity_verified(state) && state.local_owner_pcm_intervals.is_empty()) {
+        return None;
+    }
+    let (owner_ranges, foreign_ranges) = source_projection_audio_permissions(
+        state, source_owner_ranges, physical_interference_ranges,
+    );
+
+    // The filtered live ledger can stop before an asynchronous original-source
+    // Owner proof arrives. Keep that already admitted prefix as the occurrence
+    // anchor, but project the proof over the retained full provider timing as
+    // well as the shorter filtered timing. Every new word retains the same veto.
+    let best_key = crate::transcript_boundary::content_key(&state.best_transcript_text);
+    let mut selected: Option<(String, String, SourceOwnerProjectionSignature)> = None;
+    for (timing, allow_empty_anchor) in [
+        state.best_transcript_timing.as_ref().filter(|timing| {
+            crate::transcript_boundary::content_key(&timing.text) == best_key
+        }).map(|timing| (timing, true)),
+        state.provider_timed_transcript.as_ref().map(|timing| (timing, reprove_prefix)),
+        state.live_owner_delivery_timing.as_ref().filter(|timing|
+            state.live_owner_delivery.as_ref().is_some_and(|candidate|
+                crate::transcript_boundary::content_key(&timing.text) == crate::transcript_boundary::content_key(&candidate.text)))
+            .map(|timing| (timing,true)),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if accepted_key.is_empty() && !allow_empty_anchor {
+            continue;
+        }
+        let Some(mapped_accepted_key) = source_owner_projection_anchor_key(timing, &accepted_key)
+        else {
+            continue;
+        };
+        let text = timing.owner_supported_prefix(
+            if reprove_prefix { "" } else { &mapped_accepted_key },
+            &owner_ranges,
+            &foreign_ranges,
+        );
+        let key = crate::transcript_boundary::content_key(&text);
+        if key.is_empty() || (!reprove_prefix && key.len() <= mapped_accepted_key.len()) {
+            continue;
+        }
+        // A revised already-consumed prefix supplies no appendable new body.
+        // A literal shorter prefix is different: it is the still-owned part
+        // before an unobserved/foreign word in the provider candidate.
+        if reprove_prefix && key.len() <= mapped_accepted_key.len()
+            && !accepted_key.starts_with(&key) {
+            continue;
+        }
+        let signature = source_owner_projection_signature(timing, &text)?;
+        match selected.as_ref() {
+            None => selected = Some((text, key, signature)),
+            Some((_, prior_key, _)) if key.len() > prior_key.len() => {
+                selected = Some((text, key, signature));
+            }
+            Some((_, prior_key, _))
+                if key.len() == prior_key.len() && key.as_str() != prior_key.as_str() =>
+            {
+                return None;
+            }
+            _ => {}
+        }
+    }
+    let (text, _, signature) = selected?;
+    Some((
+        TranscriptCandidate {
+            text,
+            timed_segments: Vec::new(),
+            authoritative_cumulative: false,
+        },
+        signature,
+    ))
+}
+
+fn timed_candidate_source_owner_projection(
+    state: &SyncState,
+    timing: &crate::transcript_boundary::TimedTranscript,
+    source_owner_ranges: &[(u64,u64)],
+    physical_interference_ranges: &[(u64,u64)],
+) -> Option<(TranscriptCandidate,SourceOwnerProjectionSignature)> {
+    // Local ranges come from the current wake/session profile's positive
+    // identity observations. They also work without a persistent enrollment;
+    // a mere adaptive-session flag still supplies no audio permission.
+    if !enrolled_owner_identity_verified(state) && state.local_owner_pcm_intervals.is_empty() { return None; }
+    let (owner,foreign) = source_projection_audio_permissions(state,source_owner_ranges,physical_interference_ranges);
+    let text = timing.owner_supported_prefix("",&owner,&foreign);
+    if text.trim().is_empty() { return None; }
+    let signature = source_owner_projection_signature(timing,&text)?;
+    Some((TranscriptCandidate { text,timed_segments:Vec::new(),authoritative_cumulative:false },signature))
+}
+
+/// A provider rendering is an owner candidate until the same audio occurrence
+/// has the permissions used by live delivery. Neither a final packet nor an
+/// unchanged provider speaker id can fill an unobserved word interval.
+fn entire_candidate_has_source_owner_permission(
+    state: &SyncState,
+    text: &str,
+    timing: Option<&crate::transcript_boundary::TimedTranscript>,
+    source_owner_ranges: &[(u64, u64)],
+    physical_interference_ranges: &[(u64, u64)],
+) -> bool {
+    let key = crate::transcript_boundary::content_key(text);
+    let Some(timing) = timing.filter(|timing|
+        !key.is_empty() && crate::transcript_boundary::content_key(&timing.text) == key)
+    else { return false; };
+    timed_candidate_source_owner_projection(state, timing, source_owner_ranges, physical_interference_ranges)
+        .is_some_and(|(projected, _)| crate::transcript_boundary::content_key(&projected.text) == key)
+}
+
+fn source_owner_final_recovery_candidate(
+    text: &str,
+    timing: &crate::transcript_boundary::TimedTranscript,
+) -> Option<crate::transcript_boundary::TimedTranscript> {
+    if crate::transcript_boundary::content_key(text) != crate::transcript_boundary::content_key(&timing.text) {
+        return None;
+    }
+    // Match the deterministic normalization before the primary seal. A late
+    // identity proof may restore a capped clause, never a removed echo.
+    let normalized = trim_repeated_short_final_tail(&normalize_cjk_final_spacing_and_echoes(
+        &trim_repeated_short_streaming_tail(text),
+    ));
+    let key = crate::transcript_boundary::content_key(&normalized);
+    if key.is_empty() { return None; }
+    let mut candidate = snapshot_timed_prefix(timing, &key)?;
+    candidate.text = normalized;
+    Some(candidate)
+}
+
+/// Retain permissions, not the worker or its PCM, through product arbitration.
+/// An empty completed snapshot is Pending ownership, not confirmed Other.
+#[derive(Clone)]
+struct CompletedSourceOwnerEvidence {
+    decoder_stream_id: u64,
+    owner_ranges: Vec<(u64, u64)>,
+    physical_interference_ranges: Vec<(u64, u64)>,
+    updated_at: Option<Instant>,
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+struct TargetSpeakerFinalTask {
+    decoder_stream_id: u64,
+    stream: Arc<super::target_speaker_extraction::TargetSpeakerStream>,
+    task: tauri::async_runtime::JoinHandle<Result<super::target_speaker_extraction::TargetSpeakerFinishOutcome, String>>,
+}
+
+/// Both primary and a separately finalized view of the same original PCM use
+/// these current permissions. A lexical certificate never grants ownership.
+fn source_projection_audio_permissions(
+    state: &SyncState,
+    source_owner_ranges: &[(u64, u64)],
+    physical_interference_ranges: &[(u64, u64)],
+) -> (Vec<(u64, u64)>, Vec<(u64, u64)>) {
+    let mut owner_ranges = state.local_owner_pcm_intervals.clone();
+    owner_ranges.extend_from_slice(source_owner_ranges);
+    let mut foreign_ranges = state.provider_non_owner_audio_ranges.clone();
+    foreign_ranges.extend_from_slice(&state.provider_distinct_foreign_audio_ranges);
+    foreign_ranges.extend_from_slice(physical_interference_ranges);
+    // A later source-profile match cannot overrule a confirmed local foreign
+    // observation at the same word. Keep its precise physical center; applying
+    // the whole rolling analysis window would erase neighboring owner words.
+    // Uncertain/advisory single samples intentionally add no exclusion.
+    for end in [state.local_confirmed_transcript_non_target_end_ms,
+        state.local_confirmed_transcript_foreign_hint_end_ms].into_iter().flatten()
+    {
+        let center = end.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+        foreign_ranges.push((center, center.saturating_add(1)));
+    }
+
+    (owner_ranges, foreign_ranges)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LiveOwnerPermission {
+    /// Text may be displayed reversibly; speaker ownership is not established.
+    Unobserved,
+    /// Untracked/manual input has no enrolled-speaker restriction. Tracked
+    /// provider continuity never supplies this permission.
+    Admitted,
+    /// Exact original-source audio proves the projected words; age this proof.
+    SourceProjection,
+}
+
+#[derive(Clone)]
+struct SelectedLiveOwnerCandidate {
+    text: String,
+    /// Captured with the selected rendering. Another decoder's equal text
+    /// cannot recover the occurrence or word times of this candidate.
+    timing: Option<crate::transcript_boundary::TimedTranscript>,
+    /// Same decoder and occurrence as `text`; only irreversible delivery uses
+    /// this cap. Preview and endpoint pending-body accounting retain all text.
+    recognition_confirmed_prefix: Option<String>,
+    recognition_requires_confirmation: bool,
+    owner_permission: LiveOwnerPermission,
+    stability_source: OwnerDeliveryStabilitySource,
+    updated_at: Instant,
+    branch: &'static str,
+    certified_continuation: bool,
+}
+
+impl SelectedLiveOwnerCandidate {
+    /// Recognition finality and owner permission belong to this same selected
+    /// occurrence. Every irreversible path must require both, including an
+    /// early final which would otherwise cancel the remaining source analysis.
+    fn confirmed_owner_prefix(&self) -> Option<&str> {
+        if self.owner_permission == LiveOwnerPermission::Unobserved {
+            return None;
+        }
+        self.recognition_confirmed_prefix.as_deref()
+            .filter(|text| !text.trim().is_empty())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct OwnerDeliveryStabilitySource {
+    decoder: u64,
+    generation: u64,
+    authority: &'static str,
+}
+
+/// Capture identity survives decoder changes within a recording, but never
+/// transport reopen on the same ASR object. Decoder identity is retained for
+/// auditing the exact rendering that supplied a submitted word boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LiveDeliverySource {
+    pub capture_stream_id: u64,
+    pub capture_generation: u64,
+    pub decoder_stream_id: u64,
+    pub owner_generation: u64,
+}
+
+impl LiveDeliverySource {
+    pub(crate) fn same_capture(self, other: Self) -> bool {
+        self.capture_stream_id == other.capture_stream_id
+            && self.capture_generation == other.capture_generation
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct LiveDeliveryTiming {
+    pub timing: crate::transcript_boundary::TimedTranscript,
+    pub source: LiveDeliverySource,
+}
+
+/// An irreversible delivery view. Preview and final arbitration continue to
+/// own their independent candidate selection; neither is changed by this view.
+pub(crate) struct LiveDeliverySnapshot {
+    pub text: String,
+    pub duration_ms: u64,
+    pub source: LiveDeliverySource,
+    pub timing: Option<LiveDeliveryTiming>,
+    pub stability: LiveDeliveryStability,
+}
+
+/// Recognition evidence of this exact admitted prefix, after owner permission
+/// and lifecycle checks. A provider-confirmed boundary needs no second local
+/// punctuation, character-count or quiet-time heuristic before submission.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LiveDeliveryStability {
+    ProviderConfirmed,
+    RollingStable,
+}
+
+/// A permitted rendering that may still change. It cannot advance the
+/// irreversible delivery ledger or the endpoint's body receipt clock.
+pub(crate) struct RevisableOwnerSnapshot {
+    pub text: String,
+    pub source: LiveDeliverySource,
+}
+
+/// Waiting for native recognition is distinct from lexical/paste settling.
+/// A settling timeout cannot certify or discard an unconfirmed body.
+pub(crate) struct PendingBodyDelivery {
+    pub key: String,
+    pub updated_at: Instant,
+    pub recognition_pending: bool,
+}
+
+/// The immutable raw prefix consumed by one successful body submission.
+/// `rendered_key` belongs to display reconciliation; raw_prefix and its optional
+/// occurrence boundary belong to provider/endpoint accounting. A display rule
+/// never supplies native word timing or enrolled-speaker identity.
+#[derive(Clone, Debug)]
+pub(crate) struct LiveBodyConsumption {
+    pub raw_prefix: String,
+    pub body_start: usize,
+    pub rendered_key: String,
+    pub source: LiveDeliverySource,
+    pub boundary: Option<crate::transcript_boundary::TimedDeliveryBoundary>,
+}
+
+/// A successful submission's raw source bookmark. The committed prefix is an
+/// occurrence anchor, never recognition evidence for a later decoder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LiveLedgerAnchor {
+    pub source: LiveDeliverySource,
+    pub generation: u64,
+    pub source_key: String,
+    pub source_text: String,
+    pub boundary: crate::transcript_boundary::TimedDeliveryBoundary,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct LiveLedgerContinuation {
+    pub anchor: LiveLedgerAnchor,
+    pub suffix: LiveDeliveryTiming,
+    pub owner_caught_up: bool,
+    pub(crate) lifecycle_generation: u64,
+}
+
+impl LiveLedgerContinuation {
+    pub(crate) fn source_text(&self) -> String {
+        format!("{}{}", self.anchor.source_text, self.suffix.timing.text)
+    }
+
+    pub(crate) fn advance(&self, suffix_key: &str, source_key: &str) -> Option<LiveLedgerAnchor> {
+        let prefix = snapshot_timed_prefix(&self.suffix.timing, suffix_key)?;
+        let boundary = prefix.delivery_boundary(suffix_key)?;
+        Some(LiveLedgerAnchor {
+            source: self.suffix.source,
+            generation: self.anchor.generation.checked_add(1)?,
+            source_key: source_key.into(),
+            source_text: format!("{}{}", self.anchor.source_text, prefix.text),
+            boundary,
+        })
+    }
+}
+
+fn revoke_owner_delivery_stability(state: &mut SyncState) {
+    state.owner_delivery_generation = state.owner_delivery_generation.wrapping_add(1);
+    state.pause_early_recent_revisions.clear();
+    state.pause_early_stability_source = None;
+    state.pause_early_stability_floor = Some(Instant::now());
+}
+
+fn reset_provider_confirmation(state: &mut SyncState) {
+    state.recognition_boundary = super::volcengine_transcript::RecognitionBoundary::default();
+    revoke_owner_delivery_stability(state);
+    state.latest_visual_provider_result = None;
+}
+
+/// Use the common proved prefix as the source-coordinate anchor. A longer
+/// parent projection may have been observed by an endpoint query before the
+/// independent decoder catches up; its extra words must earn permission in
+/// this authority again rather than being skipped as already consumed.
+fn compatible_live_owner_anchor(admitted: Option<&str>, independent: Option<&str>) -> Option<String> {
+    use crate::transcript_boundary::{content_key, revised_prefix_end};
+    let admitted = admitted.filter(|text| !content_key(text).is_empty());
+    let independent = independent.filter(|text| !content_key(text).is_empty());
+    match (admitted, independent) {
+        (Some(a), Some(b)) => {
+            let (a_key, b_key) = (content_key(a), content_key(b));
+            if a_key == b_key { return Some(b_key); }
+            if a_key.len() > b_key.len()
+                && (a_key.starts_with(&b_key) || revised_prefix_end(a, &b_key).is_some())
+            { Some(b_key) }
+            else if b_key.len() > a_key.len()
+                && (b_key.starts_with(&a_key) || revised_prefix_end(b, &a_key).is_some())
+            { Some(a_key) }
+            else { None }
+        }
+        (Some(a), None) => Some(content_key(a)),
+        (None, Some(b)) => Some(content_key(b)),
+        (None, None) => None,
+    }
+}
+
+#[derive(Clone)]
+struct CertifiedTimedToken {
+    text: String,
+    start_ms: u64,
+    end_ms: u64,
+}
+
+fn aligned_timed_tokens(
+    timing: &crate::transcript_boundary::TimedTranscript,
+) -> Option<Vec<CertifiedTimedToken>> {
+    let source_key = crate::transcript_boundary::content_key(&timing.text);
+    let mut through_key = String::new();
+    let mut tokens = Vec::new();
+    for word in &timing.words {
+        let key = crate::transcript_boundary::content_key(&word.text);
+        if key.is_empty() {
+            continue;
+        }
+        if !source_key[through_key.len()..].starts_with(&key) {
+            return None;
+        }
+        let text_start = crate::transcript_boundary::consumed_prefix_end(
+            &timing.text,
+            &through_key,
+        )?;
+        through_key.push_str(&key);
+        let text_end = crate::transcript_boundary::consumed_prefix_end(
+            &timing.text,
+            &through_key,
+        )?;
+        let (Some(start_ms), Some(end_ms)) = (word.start_ms, word.end_ms) else {
+            return None;
+        };
+        if start_ms >= end_ms {
+            return None;
+        }
+        tokens.push(CertifiedTimedToken {
+            text: timing.text[text_start..text_end].to_string(),
+            start_ms,
+            end_ms,
+        });
+    }
+    (through_key == source_key).then_some(tokens)
+}
+
+fn audio_range_overlaps(range: (u64, u64), other: (u64, u64)) -> bool {
+    range.0 < other.1 && other.0 < range.1
+}
+
+fn audio_range_is_covered(range: (u64, u64), intervals: &[(u64, u64)]) -> bool {
+    if range.0 >= range.1 {
+        return false;
+    }
+    let mut through = range.0;
+    for &(start, end) in intervals {
+        if start > through {
+            break;
+        }
+        if end > through {
+            through = end;
+            if through >= range.1 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Locate omissions between the same timed word occurrences in two decoders.
+/// A nonempty secondary span is an alternative recognition, not a gap. Only
+/// primary words entirely before or after its audio span may still be missing;
+/// adding the primary alternative inside it would turn one utterance into two answers.
+/// Ownership is deliberately checked by the caller for every proposed word.
+fn missing_primary_word_ranges(
+    primary: &[CertifiedTimedToken],
+    secondary: &[CertifiedTimedToken],
+) -> Vec<(Option<(usize, usize)>, std::ops::Range<usize>)> {
+    use crate::transcript_boundary::content_key;
+    let primary_keys = primary.iter().map(|token| content_key(&token.text)).collect::<Vec<_>>();
+    let secondary_keys = secondary.iter().map(|token| content_key(&token.text)).collect::<Vec<_>>();
+    let matches = primary.iter().enumerate().map(|(i, token)| {
+        secondary.iter().enumerate().filter_map(|(j, other)| {
+            (primary_keys[i] == secondary_keys[j]
+                && audio_range_overlaps((token.start_ms, token.end_ms), (other.start_ms, other.end_ms)))
+                .then_some(j)
+        }).collect::<Vec<_>>()
+    }).collect::<Vec<_>>();
+    let mut anchors = Vec::new();
+    for (i, candidates) in matches.iter().enumerate() {
+        if candidates.len() != 1 { continue; }
+        let j = candidates[0];
+        if matches.iter().filter(|other| other.contains(&j)).count() != 1 { continue; }
+        if anchors.last().is_some_and(|&(_, previous_j)| previous_j >= j) {
+            // Conflicting occurrence order cannot certify a splice.
+            return Vec::new();
+        }
+        anchors.push((i, j));
+    }
+    if anchors.is_empty() { return Vec::new(); }
+    let mut gaps = Vec::new();
+    let mut previous = None;
+    let (mut primary_start, mut secondary_start) = (0, 0);
+    for (i, j) in anchors.into_iter().chain(std::iter::once((primary.len(), secondary.len()))) {
+        if primary_start < i && secondary_start == j {
+            gaps.push((previous, primary_start..i));
+        } else if primary_start < i && secondary_start < j {
+            let span_start = secondary[secondary_start..j].iter().map(|token| token.start_ms).min().unwrap();
+            let span_end = secondary[secondary_start..j].iter().map(|token| token.end_ms).max().unwrap();
+            // Retain independent missing clauses around a changed secondary
+            // clause. Its entire timed span (including internal word gaps)
+            // stays secondary-owned, so short alternative tokens cannot be
+            // interleaved merely because provider boundaries differ.
+            let prefix_end = (primary_start..i).take_while(|&index| primary[index].end_ms <= span_start)
+                .last().map_or(primary_start, |index| index + 1);
+            if primary_start < prefix_end { gaps.push((previous, primary_start..prefix_end)); }
+            let suffix_start = (prefix_end..i).rev().take_while(|&index| primary[index].start_ms >= span_end)
+                .last().unwrap_or(i);
+            // The alternative secondary clause lies between this suffix and
+            // the preceding common anchor. Its punctuation cannot be borrowed.
+            if suffix_start < i { gaps.push((None, suffix_start..i)); }
+        }
+        previous = Some((i, j));
+        primary_start = i + 1;
+        secondary_start = j + 1;
+    }
+    gaps
+}
+
+/// A rejected raw mixture cannot be restored as one block. Reuse only main
+/// provider words whose exact PCM intervals have positive local owner evidence,
+/// whose midpoint is outside coarse overlap chunks and whose full range avoids
+/// explicit foreign intervals, then place the
+/// independently separated owner words back into their original clock slots.
+fn recover_rejected_mixture_from_nonoverlap_owner_ledger(
+    state: &SyncState,
+    separated: Result<Option<RawTranscript>, String>,
+    separated_timing: Option<crate::transcript_boundary::TimedTranscript>,
+    separated_owner_ranges: &[(u64, u64)],
+    physical_interference_ranges: &[(u64, u64)],
+    source_owner_ranges: &[(u64, u64)],
+) -> Result<Option<RawTranscript>, String> {
+    #[cfg(test)]
+    {
+        let timing_json = |timing: &crate::transcript_boundary::TimedTranscript| json!({
+            "text": timing.text, "words": timing.words.iter().map(|word| json!({
+                "text": word.text, "start": word.start_ms, "end": word.end_ms,
+            })).collect::<Vec<_>>()
+        });
+        eprintln!("RECOVERY_DIAGNOSTICS {}", json!({
+            "physical": physical_interference_ranges, "separator_owner": separated_owner_ranges,
+            "source_owner": source_owner_ranges,
+            "best_text": state.best_transcript_text,
+            "best_timing": state.best_transcript_timing.as_ref().map(timing_json),
+            "local_owner": state.local_owner_pcm_intervals,
+            "provider_foreign": state.provider_non_owner_audio_ranges,
+            "provider_distinct_foreign": state.provider_distinct_foreign_audio_ranges,
+            "tracking": state.local_speaker_tracking_enabled,
+            "enrolled": enrolled_owner_identity_verified(state),
+            "handoff": state.local_owner_handoff_suspected,
+            "live_text": state.live_owner_delivery.as_ref().map(|v| &v.text),
+            "live_timing": state.live_owner_delivery_timing.as_ref().map(timing_json),
+            "separated_text": separated.as_ref().ok().and_then(Option::as_ref).map(|v| &v.text),
+            "separated_timing": separated_timing.as_ref().map(timing_json),
+        }));
+    }
+    let Some(separated_result) = separated.as_ref().ok().and_then(Option::as_ref) else {
+        return separated;
+    };
+    if physical_interference_ranges.is_empty()
+        || !state.local_speaker_tracking_enabled
+        || !enrolled_owner_identity_verified(state)
+        || state.local_owner_handoff_suspected
+    {
+        return separated;
+    }
+    let (primary_text, primary_timing) = if let Some(timing) = state.best_transcript_timing.as_ref()
+        .filter(|timing| crate::transcript_boundary::content_key(&timing.text)
+            == crate::transcript_boundary::content_key(&state.best_transcript_text)) {
+        (state.best_transcript_text.as_str(), timing)
+    } else if let (Some(live), Some(timing)) = (&state.live_owner_delivery, &state.live_owner_delivery_timing) {
+        (live.text.as_str(), timing)
+    } else { return separated; };
+    let Some(separated_timing) = separated_timing.as_ref() else { return separated; };
+    if crate::transcript_boundary::content_key(primary_text)
+            != crate::transcript_boundary::content_key(&primary_timing.text)
+        || crate::transcript_boundary::content_key(&separated_result.text)
+            != crate::transcript_boundary::content_key(&separated_timing.text)
+    {
+        return separated;
+    }
+    let Some(primary_tokens) = aligned_timed_tokens(primary_timing) else { return separated; };
+    let Some(mut separated_tokens) = aligned_timed_tokens(separated_timing) else { return separated; };
+    separated_tokens.retain(|token| {
+        let center = token.start_ms + (token.end_ms - token.start_ms) / 2;
+        separated_owner_ranges
+            .iter()
+            .any(|&(start, end)| center >= start && center < end)
+    });
+    let separated_key = crate::transcript_boundary::content_key(&separated_result.text);
+    let retained_separated_key = crate::transcript_boundary::content_key(
+        &separated_tokens.iter().map(|token| token.text.as_str()).collect::<String>(),
+    );
+    if separated_tokens.is_empty() || retained_separated_key != separated_key {
+        return separated;
+    }
+    let mut combined = separated_tokens.clone();
+    for (previous_anchor, gap) in missing_primary_word_ranges(&primary_tokens, &separated_tokens) {
+        let mut added = false;
+        for index in gap {
+            let token = &primary_tokens[index];
+            let range = (token.start_ms, token.end_ms);
+            let center = range.0 + (range.1 - range.0) / 2;
+            // Fine original-source owner evidence can stand on its own.
+            // A coarse source chunk cannot license a missing tail when the
+            // independently extracted output has no Owner evidence there.
+            let owner = audio_range_is_covered(range, &state.local_owner_pcm_intervals)
+                || (audio_range_is_covered(range, source_owner_ranges)
+                    && audio_range_is_covered(range, separated_owner_ranges));
+            let eligible = owner
+                && !physical_interference_ranges.iter().any(|&(start, end)| center >= start && center < end)
+                && !state.provider_non_owner_audio_ranges.iter()
+                    .chain(&state.provider_distinct_foreign_audio_ranges)
+                    .any(|excluded| audio_range_overlaps(range, *excluded))
+                && !local_non_target_vetoes_split_utterance(state, token.start_ms, token.end_ms);
+            if eligible {
+                if !added {
+                    if let Some((primary_index, secondary_index)) = previous_anchor {
+                        // Reuse punctuation from the same confirmed anchor
+                        // occurrence. An ASR omission may have closed that
+                        // incomplete word with a premature full stop.
+                        if index == primary_index + 1 {
+                            combined[secondary_index].text = primary_tokens[primary_index].text.clone();
+                        }
+                    }
+                }
+                combined.push(token.clone());
+                added = true;
+            }
+        }
+    }
+    combined.sort_by_key(|token| (token.start_ms, token.end_ms));
+    let text = combined
+        .iter()
+        .map(|token| token.text.as_str())
+        .collect::<String>()
+        .trim()
+        .to_string();
+    let combined_key = crate::transcript_boundary::content_key(&text);
+    if combined_key.len() <= separated_key.len() {
+        return separated;
+    }
+    log::info!(
+        "[target-speaker] recovered certified non-overlap owner ledger around physical interference separated_chars={} recovered_chars={} physical_ranges={:?}",
+        separated_result.text.chars().count(),
+        text.chars().count(),
+        physical_interference_ranges,
+    );
+    Ok(Some(RawTranscript {
+        text,
+        duration_ms: combined
+            .iter()
+            .map(|token| token.end_ms)
+            .max()
+            .unwrap_or(separated_result.duration_ms)
+            .max(separated_result.duration_ms),
+    }))
 }
 
 fn display_only_provisional_preview_candidate(
@@ -1704,6 +2572,100 @@ fn update_local_preview_exclusion(
         provider_has_locally_excluded_later_utterance_with_stability(state, result, true);
     provider_has_locally_excluded_later_utterance(state, result)
         || state.local_preview_exclusion_seen
+}
+
+/// Keep a response-local, reversibly displayed tail inside the same owner
+/// partition as delivery when an independently confirmed local mismatch
+/// overlaps the provider row that the speaker filter removed. A provisional
+/// row and low/Uncertain scores alone intentionally do not enter this path:
+/// those still use the fast raw visual preview while identity is pending.
+fn confirmed_local_foreign_tail_requires_owner_visual(
+    state: &SyncState,
+    provider: &Value,
+    owner_view: &Value,
+) -> bool {
+    if !state.local_speaker_tracking_enabled {
+        return false;
+    }
+    let provider_text = provider
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let owner_text = owner_view
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if spoken_content_len(provider_text) <= spoken_content_len(owner_text) {
+        return false;
+    }
+    let (Some(provider_rows), Some(owner_rows)) = (
+        provider.get("utterances").and_then(Value::as_array),
+        owner_view.get("utterances").and_then(Value::as_array),
+    ) else {
+        return false;
+    };
+    let confirmed_centers = state
+        .local_confirmed_transcript_non_target_end_ms
+        .into_iter()
+        .chain(state.local_confirmed_transcript_foreign_hint_end_ms)
+        .map(|end_ms| end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2))
+        .collect::<Vec<_>>();
+    !confirmed_centers.is_empty()
+        && provider_rows.iter().any(|row| {
+            if owner_rows.contains(row) {
+                return false;
+            }
+            utterance_start_ms(row)
+                .zip(utterance_end_ms(row))
+                .is_some_and(|(start_ms, end_ms)| {
+                    end_ms > start_ms
+                        && confirmed_centers
+                            .iter()
+                            .any(|center_ms| *center_ms >= start_ms && *center_ms <= end_ms)
+                })
+        })
+}
+
+fn response_visual_result<'a>(
+    state: &SyncState,
+    provider: &'a Value,
+    owner_view: &'a Value,
+) -> &'a Value {
+    if state.verified_provider_owner.is_some()
+        || confirmed_local_foreign_tail_requires_owner_visual(state, provider, owner_view)
+    {
+        owner_view
+    } else {
+        provider
+    }
+}
+
+fn reconcile_confirmed_foreign_visual(
+    state: &mut SyncState,
+    provider: &Value,
+    owner_view: &Value,
+) -> Option<VisualTranscriptUpdate> {
+    if state.verified_provider_owner.is_none()
+        && !confirmed_local_foreign_tail_requires_owner_visual(state, provider, owner_view)
+    {
+        return None;
+    }
+    let proposed = owner_view.get("text").and_then(Value::as_str).unwrap_or_default().trim();
+    let protected = state.live_owner_delivery.as_ref().map(|owner| owner.text.as_str()).unwrap_or_default();
+    let replacement = if crate::transcript_boundary::content_key(proposed)
+        .starts_with(&crate::transcript_boundary::content_key(protected))
+    { proposed } else { protected };
+    if state.last_emitted_visual_preview_text == replacement {
+        return None;
+    }
+    let replacement = replacement.to_string();
+    state.last_emitted_visual_preview_text = replacement.clone();
+    // This high-water mark describes display, not the protected owner ledger.
+    // Remove a revoked provisional floor so later owner speech can grow again.
+    if spoken_content_len(&state.last_emitted_preview_text) > spoken_content_len(&replacement) {
+        state.last_emitted_preview_text = replacement.clone();
+    }
+    Some(VisualTranscriptUpdate::ConfirmedOwnerPartition(replacement))
 }
 
 /// A retained foreign row describes its own audio interval, not every later
@@ -2229,6 +3191,8 @@ fn observe_provider_owner_handoff_candidate(state: &mut SyncState, result: &Valu
     }
     state.local_owner_handoff_suspected = true;
     state.local_owner_handoff_recovery_targets = 0;
+    state.local_owner_handoff_recovery_ranges.clear();
+    state.local_owner_handoff_recovery_last_range = None;
     log::info!(
         "[asr] owner handoff candidate froze endpoint renewal local_speech_end_ms={:?} owner_end_ms={:?}",
         state.local_speech_end_ms,
@@ -2240,27 +3204,87 @@ fn observe_provider_owner_handoff_candidate(state: &mut SyncState, result: &Valu
 /// A correlated handoff candidate is deliberately reversible. Require two new
 /// consecutive Target windows so one mixed/overlapping frame cannot hand the
 /// endpoint back to a room speaker that happens to resemble the owner.
+fn remember_local_owner_pcm_range(state: &mut SyncState, range: (u64, u64)) {
+    if range.0 >= range.1 || state.local_owner_pcm_intervals.contains(&range) {
+        return;
+    }
+    state.local_owner_pcm_intervals.push(range);
+    state.local_owner_pcm_intervals.sort_unstable();
+    while state.local_owner_pcm_intervals.len() > 2048 {
+        state.local_owner_pcm_intervals.remove(0);
+    }
+}
+
 fn observe_owner_handoff_recovery(
     state: &mut SyncState,
     classification: crate::speaker_verification::SessionSpeakerClassification,
+    source_range: Option<(u64, u64)>,
+    signal_quality_sufficient: bool,
 ) -> bool {
     if !state.local_owner_handoff_suspected {
         return false;
     }
-    if matches!(
+    let Some(range) = source_range.filter(|(start, end)| start < end) else {
+        state.local_owner_handoff_recovery_targets = 0;
+        state.local_owner_handoff_recovery_ranges.clear();
+        state.local_owner_handoff_recovery_last_range = None;
+        return false;
+    };
+    if state.local_owner_handoff_recovery_last_range == Some(range) {
+        return false;
+    }
+    if state.local_owner_handoff_recovery_last_range.is_some_and(|previous| {
+        range.1 <= previous.1 || range.0 > previous.1
+    }) {
+        state.local_owner_handoff_recovery_targets = 0;
+        state.local_owner_handoff_recovery_ranges.clear();
+        state.local_owner_handoff_recovery_last_range = None;
+    }
+    state.local_owner_handoff_recovery_last_range = Some(range);
+    if !matches!(
         classification,
         crate::speaker_verification::SessionSpeakerClassification::Target { .. }
     ) {
-        state.local_owner_handoff_recovery_targets =
-            state.local_owner_handoff_recovery_targets.saturating_add(1);
-    } else {
         state.local_owner_handoff_recovery_targets = 0;
+        state.local_owner_handoff_recovery_ranges.clear();
+        state.local_owner_handoff_recovery_last_range = None;
+        return false;
     }
+    if !signal_quality_sufficient {
+        state.local_owner_handoff_recovery_targets = 0;
+        if state.local_owner_handoff_recovery_ranges.len() > 1 {
+            let predecessor = *state.local_owner_handoff_recovery_ranges.last().unwrap();
+            state.local_owner_handoff_recovery_ranges.clear();
+            state.local_owner_handoff_recovery_ranges.push(predecessor);
+        }
+        return false;
+    }
+    if state.local_owner_handoff_recovery_targets == 0
+        && state.local_owner_handoff_recovery_ranges.len() > 1
+    {
+        let predecessor = *state.local_owner_handoff_recovery_ranges.last().unwrap();
+        state.local_owner_handoff_recovery_ranges.clear();
+        state.local_owner_handoff_recovery_ranges.push(predecessor);
+    }
+    state.local_owner_handoff_recovery_ranges.push(range);
+    let maximum = usize::from(LOCAL_SPEAKER_SWITCH_CONFIRMATIONS) + 1;
+    if state.local_owner_handoff_recovery_ranges.len() > maximum {
+        state.local_owner_handoff_recovery_ranges.remove(0);
+    }
+    state.local_owner_handoff_recovery_targets =
+        state.local_owner_handoff_recovery_targets.saturating_add(1);
     if state.local_owner_handoff_recovery_targets < LOCAL_SPEAKER_SWITCH_CONFIRMATIONS {
         return false;
     }
     state.local_owner_handoff_suspected = false;
     state.local_owner_handoff_recovery_targets = 0;
+    state.local_owner_handoff_recovery_last_range = None;
+    let exact_ranges = std::mem::take(&mut state.local_owner_handoff_recovery_ranges);
+    if exact_ranges.len() >= usize::from(LOCAL_SPEAKER_SWITCH_CONFIRMATIONS) {
+        for range in exact_ranges {
+            remember_local_owner_pcm_range(state, range);
+        }
+    }
     log::info!("[asr] consecutive owner evidence released endpoint handoff candidate");
     true
 }
@@ -2327,10 +3351,8 @@ fn owner_preview_safety_ceiling(
         || spoken_content_len(merged) <= spoken_content_len(&state.last_emitted_preview_text)
         || state.wake_bound_single_speaker_final_text.is_some()
         || state.distinct_speaker_target_final_text.is_some()
-        // The speaker filter has independently accepted every sealed cloud
-        // row as the anchored owner. The visual preview is not an ownership
-        // boundary: it can lag behind that final verdict by an entire clause
-        // while local voiceprint windows are inconclusive after a pause.
+        // The exact final rendering has the same source permissions as live
+        // owner delivery. Preview length alone cannot revoke that proof.
         || (fully_attributed_owner_final && !explicit_non_owner_tail)
     {
         return None;
@@ -2412,43 +3434,6 @@ fn owner_preview_safety_ceiling(
         explicit_non_owner_tail,
     );
     Some(corrected_owner_prefix)
-}
-
-/// A sealed owner transcript must not be shortened merely because the live
-/// preview waited for diarization. The speaker filter is the ownership
-/// authority; this check only recognizes the case where it retained every
-/// stable row from the already anchored cloud speaker, with local owner
-/// continuity still intact. Any rejected, unresolved, or foreign row keeps
-/// the stop-boundary ceiling active.
-fn fully_attributed_owner_final(
-    state: &SyncState,
-    provider_result: &Value,
-    filtered_result: &Value,
-) -> bool {
-    if !state.local_speaker_stable_target
-        || !state.local_target_confirmed
-        || state.owner_isolation_frozen
-        || state.local_owner_handoff_suspected
-        || state.local_preview_exclusion_seen
-    {
-        return false;
-    }
-    let Some(target) = state.target_speaker_id.as_deref() else {
-        return false;
-    };
-    let (Some(provider_rows), Some(filtered_rows)) = (
-        provider_result.get("utterances").and_then(Value::as_array),
-        filtered_result.get("utterances").and_then(Value::as_array),
-    ) else {
-        return false;
-    };
-    !provider_rows.is_empty()
-        && provider_rows.len() == filtered_rows.len()
-        && provider_rows.iter().all(|row| {
-            utterance_is_stable(row)
-                && utterance_speaker_id(row).as_deref() == Some(target)
-                && filtered_rows.contains(row)
-        })
 }
 
 fn final_wake_only_provider_gap_is_owner_safe(
@@ -3014,6 +3999,84 @@ fn session_committed_transcript(state: &SyncState) -> Option<(String, Vec<Transc
         .map(|(text, segments)| (text.to_string(), segments.clone()))
 }
 
+/// Apply source retractions before any preview, fallback or final arbiter can
+/// recover the old longer hypothesis. This changes ASR caches only; an actual
+/// editor receipt remains owned by the coordinator and is never deleted here.
+fn apply_explicit_empty_source_revision(
+    state: &mut SyncState, result: &Value,
+    local: &super::volcengine_speaker_ledger::LocalSpeakerTimeline,
+) -> bool {
+    use crate::transcript_boundary::{content_key, consumed_prefix_end, TimedTranscript};
+    let protected_owner_audio: Vec<_> = local.identity.iter().chain(&local.presence)
+        .filter(|span| span.kind == super::volcengine_speaker_ledger::EvidenceKind::Owner)
+        .map(|span| (span.start_ms, span.end_ms)).chain(state.local_owner_pcm_intervals.iter().copied()).collect();
+    let revise = |text: &str| {
+        let body_key = content_key(text);
+        if body_key.is_empty() { return None; }
+        [state.best_transcript_timing.as_ref(), state.provider_timed_transcript.as_ref(),
+            state.speaker_filtered_timed_transcript.as_ref(), state.live_owner_delivery_timing.as_ref()]
+            .into_iter().flatten().find_map(|timing| {
+                if !content_key(&timing.text).starts_with(&body_key) { return None; }
+                let mut key = String::new();
+                let mut words = Vec::new();
+                for word in &timing.words {
+                    key.push_str(&content_key(&word.text));
+                    if !body_key.starts_with(&key) { return None; }
+                    words.push(word.clone());
+                    if key == body_key { break; }
+                }
+                if key != body_key { return None; }
+                state.recognition_boundary.retract_explicit_empty_words(result,
+                    &TimedTranscript { text: text.to_string(), words }, &protected_owner_audio)
+            })
+    };
+    let segments = |timing: &TimedTranscript| {
+        let mut key = String::new();
+        let mut cursor = 0;
+        let mut segments = Vec::new();
+        for word in &timing.words {
+            key.push_str(&content_key(&word.text));
+            let through = consumed_prefix_end(&timing.text, &key).expect("retracted rendering is word aligned");
+            segments.push(TranscriptSegment {
+                start_ms: word.start_ms.unwrap() as i64,
+                end_ms: word.end_ms.map(|end| end as i64),
+                text: timing.text[cursor..through].to_string(),
+            });
+            cursor = through;
+        }
+        segments
+    };
+    let best = revise(&state.best_transcript_text);
+    let partial = revise(&state.last_partial_text);
+    let optimistic = revise(&state.optimistic_preview_text);
+    let emitted = revise(&state.last_emitted_preview_text);
+    let visual = revise(&state.last_emitted_visual_preview_text);
+    let live = state.live_owner_delivery.as_ref().and_then(|candidate| revise(&candidate.text));
+    let changed = best.is_some() || partial.is_some() || optimistic.is_some()
+        || emitted.is_some() || visual.is_some() || live.is_some();
+    if let Some(timing) = best {
+        state.best_transcript_text = timing.text.clone();
+        state.best_transcript_segments = segments(&timing);
+        state.best_transcript_timing = Some(timing);
+        state.best_untimed_window.clear();
+    }
+    if let Some(timing) = partial { state.last_partial_text = timing.text; }
+    if let Some(timing) = optimistic {
+        state.optimistic_preview_text = timing.text.clone();
+        state.optimistic_preview_segments = segments(&timing);
+        state.optimistic_untimed_window.clear();
+    }
+    if let Some(timing) = emitted { state.last_emitted_preview_text = timing.text; }
+    if let Some(timing) = visual { state.last_emitted_visual_preview_text = timing.text; }
+    if let Some(timing) = live {
+        state.live_owner_delivery = Some(TranscriptCandidate {
+            text: timing.text.clone(), timed_segments: segments(&timing), authoritative_cumulative: false,
+        });
+        state.live_owner_delivery_timing = Some(timing);
+    }
+    changed
+}
+
 fn commit_session_transcript_if_stronger(
     state: &mut SyncState,
     text: &str,
@@ -3294,6 +4357,19 @@ struct SpeakerFilteredResult {
     wake_target_speech_end_ms: Option<u64>,
     stable_attributed_speech_end_ms: Option<u64>,
     pending_unattributed_text: String,
+}
+
+/// Ordinary dictation permission is distinct from verified-owner permission.
+/// Preserve all provider content without inventing any speaker activity edge.
+fn all_source_dictation_result(result: &Value) -> SpeakerFilteredResult {
+    SpeakerFilteredResult {
+        result: result.clone(), optimistic_result: result.clone(),
+        speaker_info_present: false, response_local_body_alias_present: false,
+        stable_non_target_utterance_present: false, stable_other_speaker_present: false,
+        stable_unresolved_speaker_present: false, target_speech_end_ms: None,
+        wake_target_speech_end_ms: None, stable_attributed_speech_end_ms: None,
+        pending_unattributed_text: String::new(),
+    }
 }
 
 /// Certify a filtered subset from its own attributed audio intervals. A
@@ -3579,6 +4655,7 @@ fn utterance_speaker_id(utterance: &Value) -> Option<String> {
                 .get("speaker")
                 .or_else(|| additions.get("speaker_id"))
         })
+        .or_else(|| utterance.get("speaker_id"))
         .or_else(|| utterance.get("speaker"))?;
     if let Some(value) = value
         .as_str()
@@ -4171,7 +5248,7 @@ fn freeze_owner_isolation_ledger(state: &mut SyncState) {
     state.owner_isolation_ceiling_text = text;
     state.owner_isolation_ceiling_segments = segments;
     state.owner_isolation_frozen = true;
-    state.pause_early_recent_revisions.clear();
+    revoke_owner_delivery_stability(state);
     log::info!(
         "[asr] owner isolation freeze ceiling_chars={} best_chars={} optimistic_chars={}",
         state.owner_isolation_ceiling_text.chars().count(),
@@ -4195,7 +5272,7 @@ fn freeze_owner_isolation_at_filtered_result(state: &mut SyncState, filtered_res
     state.owner_isolation_ceiling_text = candidate.text.clone();
     state.owner_isolation_ceiling_segments = candidate.timed_segments.clone();
     state.owner_isolation_frozen = true;
-    state.pause_early_recent_revisions.clear();
+    revoke_owner_delivery_stability(state);
 
     // A provisional preview may already contain the other person's words while
     // diarization was pending. Replace every committed/display ledger with the
@@ -5099,9 +6176,19 @@ fn provider_response_metadata(
     })
 }
 
+include!("volcengine_snapshot_confirmation.rs");
+include!("volcengine_source_snapshot.rs");
+
+#[path = "volcengine_cloud_owner.rs"]
+mod cloud_owner;
+
 pub struct VolcengineStreamingASR {
     asr_stream_id: AtomicU64,
+    transport_opened: AtomicBool,
     credentials: VolcengineCredentials,
+    cloud_owner: ParkingMutex<Option<super::cloud_voiceprint::CloudOwnerVoiceprint>>,
+    managed_cloud: bool,
+    managed_account_epoch: AtomicU64,
     hotwords: Vec<DictionaryHotword>,
     session_options: VolcengineSessionOptions,
     proxy_config: ProviderProxyConfig,
@@ -5147,9 +6234,13 @@ pub struct VolcengineStreamingASR {
     /// small for dictation sessions and does not affect device memory.
     retained_pcm: ParkingMutex<Vec<u8>>,
     recovery_replay_started: AtomicBool,
+    source_snapshot: Arc<ParkingMutex<SourceSnapshotState>>,
+    completed_source_owner_evidence: ParkingMutex<Option<CompletedSourceOwnerEvidence>>,
     diagnostic_trace_enabled: bool,
-    diagnostic_trace: ParkingMutex<Vec<VolcengineDiagnosticTraceEntry>>,
+    diagnostic_trace: ParkingMutex<VecDeque<VolcengineDiagnosticTraceEntry>>,
     diagnostic_trace_entries_dropped: AtomicUsize,
+    #[cfg(test)]
+    saved_local_timeline_for_test: ParkingMutex<Option<super::volcengine_speaker_ledger::LocalSpeakerTimeline>>,
     /// Audio that reached the transport worker without a source registry entry.
     /// Keep this diagnostic on the ASR instance: attributing it to the current
     /// capture would make a cross-session bookkeeping bug look like valid data.
@@ -5163,15 +6254,30 @@ pub struct VolcengineStreamingASR {
     /// provider transport recovery cannot accidentally reset the VAD stream or
     /// make a stale provider snapshot look like fresh microphone speech.
     local_speech_activity: Arc<ParkingMutex<LocalSpeechEvidence>>,
+    local_speech_quality: ParkingMutex<Arc<ParkingMutex<crate::speech_signal_quality::SpeechSignalTimeline>>>,
     /// Exact local PCM edge paired with the VAD sample clock. `SyncState` keeps
     /// millisecond telemetry for legacy callers; this atomic prevents a
     /// provider timestamp from widening the local VAD coverage claim.
     local_audio_samples: AtomicU64,
+    owner_activity_only: bool,
+    owner_content_recovery_locale: String,
+    personal_vad: ParkingMutex<Option<crate::personal_vad::PersonalVadStream>>,
+    #[cfg(target_os = "windows")]
+    native_source_identity: Arc<ParkingMutex<super::volcengine_native_identity::NativeSourceIdentity>>,
+    #[cfg(target_os = "windows")]
+    native_word_identity: ParkingMutex<super::volcengine_native_identity::NativeWordIdentity>,
+    #[cfg(target_os = "windows")]
+    pending_source_identity: super::volcengine_pending_source::PendingSourceIdentity,
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    owner_content_reference_pcm: ParkingMutex<Option<Vec<u8>>>,
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     target_speaker_stream:
         ParkingMutex<Option<Arc<super::target_speaker_extraction::TargetSpeakerStream>>>,
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     target_speaker_filter_required: AtomicBool,
+    /// A projected source exclusion vetoes raw final recovery. It does not
+    /// reject the remaining live source or require a separated owner decoder.
+    source_filter_required: AtomicBool,
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     primary_mixture_rejected: AtomicBool,
     /// r36：最后一次终判封存的 authority 标签（None=尚未封存）。供协调层
@@ -5184,14 +6290,7 @@ pub struct VolcengineStreamingASR {
     /// 证据/主轨终稿已切尾）保持原判定点（主轨终稿之后），只是结果改为丢弃而
     /// 不是避免计算，产物语义不变。
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-    target_speaker_final_task: ParkingMutex<
-        Option<(
-            Arc<super::target_speaker_extraction::TargetSpeakerStream>,
-            tauri::async_runtime::JoinHandle<
-                Result<Option<crate::asr::RawTranscript>, String>,
-            >,
-        )>,
-    >,
+    target_speaker_final_task: ParkingMutex<Option<TargetSpeakerFinalTask>>,
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -5240,8 +6339,7 @@ fn target_speaker_filter_required_after_finish(
     filter_required && !clean_primary_certified
 }
 
-#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-fn target_speaker_filter_required_after_final(
+fn source_filter_required_after_projection(
     filter_required: bool,
     explicit_non_owner_tail: bool,
 ) -> bool {
@@ -5336,7 +6434,7 @@ fn spoken_char_equivalence_class(ch: char) -> char {
 /// r23 2026-09-18 921fe510（TTS 旁人干扰轮）：产品终稿走 separated_owner 通道，
 /// 该文本来自"分离后音频的第二次云解码"——归属内容正确，但没有标点、数字写成
 /// 汉字（"1秒"→"一秒"）。既有仲裁只比 spoken_content_len，看不出这种格式损失。
-/// 这里以分离轨内容为归属边界：把它作为近似前缀对齐到 provider 说话人过滤原文
+/// 这里以分离轨内容为归属边界：只允许等价正文前缀对齐到 provider 说话人过滤原文
 /// （带标点、原数字写法），命中则把边界映射回原文下标并切片返回；对不齐时返回
 /// None（调用方保持分离轨原文，不引入新文本来源）。边界仍由分离轨决定，provider
 /// 原文里未被分离轨覆盖的尾巴（旁人内容）不会进入切片。
@@ -5365,32 +6463,15 @@ fn punctuated_provider_slice_for_separated_final(
         return None;
     }
 
-    // 编辑距离 D[i][j] = pattern[..i] 对 text[..j]。取 D[m][j] 最小的 j 作为
-    // 分离轨确认的归属边界；并列时取更大的 j（优先覆盖 pattern 对得上的原文）。
-    let mut previous: Vec<usize> = (0..=text.len()).collect();
-    let mut current = vec![0usize; text.len() + 1];
-    for (index, pattern_ch) in pattern.iter().enumerate() {
-        current[0] = index + 1;
-        for (offset, text_ch) in text.iter().enumerate() {
-            let substitution = previous[offset] + usize::from(pattern_ch != text_ch);
-            current[offset + 1] = (previous[offset + 1] + 1)
-                .min(current[offset] + 1)
-                .min(substitution);
-        }
-        std::mem::swap(&mut previous, &mut current);
-    }
-    let mut boundary_units = 0usize;
-    let mut best_distance = previous[0];
-    for (units, distance) in previous.iter().enumerate().skip(1) {
-        if *distance <= best_distance {
-            best_distance = *distance;
-            boundary_units = units;
-        }
-    }
-    let tolerance = (pattern.len() / 8).clamp(1, 8);
-    if best_distance > tolerance || boundary_units == 0 {
+    // Formatting has no lexical or speaker authority. A fuzzy prefix can
+    // substitute rejected primary words, or consume a short foreign tail,
+    // after the owner arbiter has already chosen another decoder's words.
+    // Keep existing punctuation/digit rendering equivalence, but allow no
+    // insertion, deletion or substitution of ordinary spoken characters.
+    if !text.starts_with(&pattern) {
         return None;
     }
+    let boundary_units = pattern.len();
 
     // 边界后的紧跟标点（句末"。"等）属于该句的终止符，保留；下一个说出字符
     // 之前停止，未确认的内容不进入切片。
@@ -5551,7 +6632,11 @@ impl VolcengineStreamingASR {
     ) -> Self {
         Self {
             asr_stream_id: AtomicU64::new(next_volcengine_asr_stream_id()),
+            transport_opened: AtomicBool::new(false),
             credentials,
+            cloud_owner: ParkingMutex::new(None),
+            managed_cloud: false,
+            managed_account_epoch: AtomicU64::new(u64::MAX),
             hotwords,
             session_options,
             proxy_config,
@@ -5577,18 +6662,35 @@ impl VolcengineStreamingASR {
             test_final_wait_barrier: ParkingMutex::new(None),
             retained_pcm: ParkingMutex::new(Vec::new()),
             recovery_replay_started: AtomicBool::new(false),
+            source_snapshot: Arc::new(ParkingMutex::new(SourceSnapshotState::default())),
+            completed_source_owner_evidence: ParkingMutex::new(None),
             diagnostic_trace_enabled: false,
-            diagnostic_trace: ParkingMutex::new(Vec::new()),
+            diagnostic_trace: ParkingMutex::new(VecDeque::new()),
             diagnostic_trace_entries_dropped: AtomicUsize::new(0),
+            #[cfg(test)]
+            saved_local_timeline_for_test: ParkingMutex::new(None),
             unassociated_audio_frame_count: AtomicUsize::new(0),
             unassociated_audio_pcm_bytes: AtomicUsize::new(0),
             local_speaker_analysis_pending: AtomicBool::new(false),
             local_speech_activity: Arc::new(ParkingMutex::new(LocalSpeechEvidence::default())),
+            local_speech_quality: ParkingMutex::new(Arc::new(ParkingMutex::new(crate::speech_signal_quality::SpeechSignalTimeline::default()))),
             local_audio_samples: AtomicU64::new(0),
+            owner_activity_only: false,
+            owner_content_recovery_locale: String::new(),
+            personal_vad: ParkingMutex::new(None),
+            #[cfg(target_os = "windows")]
+            native_source_identity: Arc::new(ParkingMutex::new(Default::default())),
+            #[cfg(target_os = "windows")]
+            native_word_identity: ParkingMutex::new(Default::default()),
+            #[cfg(target_os = "windows")]
+            pending_source_identity: Default::default(),
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            owner_content_reference_pcm: ParkingMutex::new(None),
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             target_speaker_stream: ParkingMutex::new(None),
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             target_speaker_filter_required: AtomicBool::new(false),
+            source_filter_required: AtomicBool::new(false),
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             primary_mixture_rejected: AtomicBool::new(false),
             last_final_seal_authority_label: ParkingMutex::new(None),
@@ -5601,9 +6703,129 @@ impl VolcengineStreamingASR {
         self.diagnostic_trace_enabled = true;
     }
 
+    pub(crate) fn with_owner_activity_only(mut self, enabled: bool) -> Self {
+        // The current hosted gateway requires its bound cloud identity. Its
+        // ordinary-ASR route must be implemented before enabling this mode
+        // there; never silently send a different hosted permission contract.
+        self.owner_activity_only = enabled && cfg!(target_os = "windows") && !self.managed_cloud;
+        if self.owner_activity_only {
+            *self.cloud_owner.lock() = None;
+            self.state.get_mut().target_speaker_id = None;
+        }
+        self
+    }
+
+    pub(crate) fn owner_activity_only(&self) -> bool { self.owner_activity_only }
+
+    pub(crate) fn with_content_recovery_locale(mut self, locale: String) -> Self {
+        self.owner_content_recovery_locale = locale;
+        self
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    pub(crate) fn set_verified_capture_content_reference(&self, reference: Option<Vec<u8>>) {
+        // Only the exact direct verifier receipt can set this slot. Personal
+        // VAD's cropped seed and an anonymous speaker label cannot supply it.
+        *self.owner_content_reference_pcm.lock() = reference.filter(|pcm| {
+            self.owner_activity_only && pcm.len() % 2 == 0
+                && (1026..=super::owner_content_extraction::MAX_RECOVERY_PCM_BYTES).contains(&pcm.len())
+        });
+    }
+
+    pub(crate) fn start_personal_vad(&self, independently_verified_wake_pcm: Option<Vec<u8>>, wake_phrase: &str) {
+        let mut slot = self.personal_vad.lock();
+        if self.owner_activity_only && slot.is_none() {
+            #[cfg(target_os = "windows")]
+            {
+            // Prefer the detector's protected enrollment. An accepted mixed
+            // wake is not a clean owner-only reference. Legacy profiles lack
+            // this bank; preserve their established path until re-enrollment.
+            let (reference, verifier, binding) = match crate::speaker_verification::endpoint_presence_references_for_phrase(wake_phrase) {
+                Ok(reference) => reference,
+                Err(error) => {
+                    log::warn!("[owner-activity] enrollment unavailable: {error}");
+                    return;
+                }
+            };
+            let reference_pcm = if reference.is_some() {
+                // Enrollment owns the reference. Do not encode or retain the
+                // current wake, even if that separate identity check matched.
+                Vec::new()
+            } else {
+                let Some(pcm) = independently_verified_wake_pcm
+                    .filter(|pcm| pcm.len() >= 35*32 && pcm.len() % 2 == 0) else {
+                    log::info!("[owner-activity] not started: no protected enrollment or independently verified wake");
+                    return;
+                };
+                pcm
+            };
+            *slot = Some(crate::personal_vad::PersonalVadStream::start(reference_pcm, reference, verifier).with_profile_binding(binding));
+            }
+            #[cfg(not(target_os = "windows"))]
+            let _ = (independently_verified_wake_pcm, wake_phrase);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    async fn prepare_native_word_identity(&self, data: &[u8]) {
+        use super::volcengine_native_identity::NativeWordIdentity;
+        *self.native_word_identity.lock() = NativeWordIdentity::default();
+        if !self.owner_activity_only { return; }
+        let Some(parsed) = frame::parse(data) else { return; };
+        if parsed.message_type != Some(MessageType::FullServerResponse) { return; }
+        let Ok(json) = serde_json::from_slice::<Value>(&parsed.payload) else { return; };
+        let Some(raw_result) = normalized_result(&json) else { return; };
+        let (phrase, result) = {
+            let state = self.state.lock();
+            let Some(phrase) = state.wake_speaker_phrase.clone() else { return; };
+            (phrase, super::volcengine_transcript::reconcile_missing_row_renderings(
+                raw_result, state.latest_visual_provider_result.as_ref()).into_owned())
+        };
+        if !super::volcengine_speaker_ledger::aligned_rows(&result).is_some_and(|rows| rows.iter().any(|row| row.definite)) { return; }
+        let (local, raw) = {
+            let slot = self.personal_vad.lock();
+            let Some(stream) = slot.as_ref() else { return; };
+            (stream.speaker_timeline(), stream.raw_activity_timeline())
+        };
+        let generation = self.source_snapshot.lock().capture_generation;
+        let pcm = self.retained_pcm_snapshot();
+        let worker = Arc::clone(&self.native_source_identity);
+        let began = Instant::now();
+        // The receive actor waits for one bounded, cached source job. BLE
+        // audio ingestion and endpoint models continue independently; model
+        // work is never executed on the async runtime or capture callback.
+        let output = tokio::task::spawn_blocking(move || worker.lock().analyze(&phrase, &result, &pcm, &local, raw)).await;
+        if self.source_snapshot.lock().capture_generation != generation { return; }
+        if let Ok(output) = output {
+            log::debug!("[native-word-identity] qualified_reference={} source_rows={} decision_ms={}",
+                output.qualified_reference, output.rows.len(), began.elapsed().as_millis());
+            *self.native_word_identity.lock() = output;
+        }
+    }
+
+    pub(crate) fn submit_personal_vad(&self, pcm: &[u8], source_end_samples: u64) {
+        if let Some(stream) = self.personal_vad.lock().as_ref() { stream.submit(pcm, source_end_samples); }
+    }
+
+    pub(crate) fn personal_vad_started(&self) -> bool { self.personal_vad.lock().is_some() }
+
+    #[cfg(all(test, target_os = "windows"))]
+    pub(crate) fn personal_speaker_timeline_for_test(&self) -> super::volcengine_speaker_ledger::LocalSpeakerTimeline {
+        self.personal_vad.lock().as_ref().unwrap().speaker_timeline()
+    }
+
+    #[cfg(all(test, target_os = "windows"))]
+    pub(crate) fn personal_raw_activity_timeline_for_test(&self) -> super::volcengine_speaker_ledger::LocalSpeakerTimeline {
+        self.personal_vad.lock().as_ref().unwrap().raw_activity_timeline()
+    }
+
+    pub(crate) fn personal_vad_snapshot(&self) -> Option<crate::personal_vad::PresenceObservation> {
+        self.personal_vad.lock().as_ref().and_then(|stream| stream.snapshot())
+    }
+
     pub fn take_diagnostic_trace(&self) -> VolcengineDiagnosticTrace {
         VolcengineDiagnosticTrace {
-            entries: std::mem::take(&mut *self.diagnostic_trace.lock()),
+            entries: self.diagnostic_trace.lock().drain(..).collect(),
             entries_dropped: self
                 .diagnostic_trace_entries_dropped
                 .swap(0, Ordering::Relaxed),
@@ -5650,28 +6872,43 @@ impl VolcengineStreamingASR {
             .unwrap_or(0);
         let mut trace = self.diagnostic_trace.lock();
         if trace.len() >= DIAGNOSTIC_TRACE_MAX_ENTRIES {
+            // Preserve terminal native revisions and speaker facts in long
+            // captures while keeping the existing memory/entry bound.
+            trace.pop_front();
             self.diagnostic_trace_entries_dropped
                 .fetch_add(1, Ordering::Relaxed);
-            return;
         }
         let text_truncated = text.chars().count() > DIAGNOSTIC_TRACE_MAX_CHARS;
-        trace.push(VolcengineDiagnosticTraceEntry {
+        trace.push_back(VolcengineDiagnosticTraceEntry {
             frame,
             elapsed_ms,
             final_frame,
             stage,
             text: text.chars().take(DIAGNOSTIC_TRACE_MAX_CHARS).collect(),
             text_truncated,
+            provider_result: None,
+            speaker_projection: None,
         });
     }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     pub fn start_target_speaker_extraction(
-        &self,
+        self: &Arc<Self>,
         wake_phrase: &str,
         wake_pcm: &[u8],
         wake_end_seconds: f32,
     ) {
+        if self.owner_activity_only || self.cloud_owner_enabled() { return; }
+        // Open wake still records and transcribes normally. Strict separation
+        // needs the immutable enrolled identity also required by
+        // set_target_speaker_source_profile; otherwise every output packet
+        // would remain Pending and an optional worker could block final text.
+        if !enrolled_owner_identity_verified(&self.state.lock()) {
+            log::info!(
+                "[target-speaker] strict extraction not armed: wake has no verified enrolled identity"
+            );
+            return;
+        }
         let embedding = match crate::speaker_verification::target_speaker_embedding_for_phrase(
             wake_phrase,
         ) {
@@ -5710,7 +6947,8 @@ impl VolcengineStreamingASR {
     }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-    fn start_target_speaker_extraction_with_embedding(&self, embedding: Vec<f32>) {
+    fn start_target_speaker_extraction_with_embedding(self: &Arc<Self>, embedding: Vec<f32>) {
+        let _delivery_queue_guard = self.delivery_queue_lock.lock();
         let mut slot = self.target_speaker_stream.lock();
         if slot.is_some() {
             return;
@@ -5718,21 +6956,42 @@ impl VolcengineStreamingASR {
         let partial_slot = Arc::clone(&self.partial_callback);
         let event_slot = Arc::clone(&self.streaming_event_callback);
         let final_intermediate_slot = Arc::clone(&self.final_intermediate_callback);
+        let partial_parent = Arc::downgrade(self);
+        let event_parent = Arc::downgrade(self);
+        let final_parent = Arc::downgrade(self);
         *slot = Some(
             super::target_speaker_extraction::TargetSpeakerStream::start(
                 self.credentials.clone(),
                 self.hotwords.clone(),
                 embedding,
                 self.proxy_config.clone(),
+                self.local_speech_quality_sink(),
                 Arc::new(move |text| {
+                    let Some(parent) = partial_parent.upgrade() else { return; };
+                    let Some(text) = parent.independent_callback_text(text) else { return; };
                     let callback = partial_slot.lock().clone();
                     if let Some(callback) = callback { callback(text); }
                 }),
                 Arc::new(move |event| {
+                    let Some(parent) = event_parent.upgrade() else { return; };
+                    let event = match event {
+                        VolcengineStreamingEvent::Partial(text) => {
+                            let Some(text) = parent.independent_callback_text(text) else { return; };
+                            VolcengineStreamingEvent::Partial(text)
+                        }
+                        VolcengineStreamingEvent::Final(text) => {
+                            let Some(text) = parent.independent_callback_text(text) else { return; };
+                            VolcengineStreamingEvent::Final(text)
+                        }
+                        event => event,
+                    };
                     let callback = event_slot.lock().clone();
                     if let Some(callback) = callback { callback(event); }
                 }),
-                Arc::new(move |update| {
+                Arc::new(move |mut update| {
+                    let Some(parent) = final_parent.upgrade() else { return; };
+                    let Some(text) = parent.independent_callback_text(update.text) else { return; };
+                    update.text = text;
                     let callback = final_intermediate_slot.lock().clone();
                     if let Some(callback) = callback { callback(update); }
                 }),
@@ -5745,13 +7004,27 @@ impl VolcengineStreamingASR {
         );
     }
 
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    pub(crate) fn set_target_speaker_source_profile(&self, profile: &crate::speaker_verification::SessionSpeakerProfile) {
+        if !enrolled_owner_identity_verified(&self.state.lock()) { return; }
+        let stream = self.target_speaker_stream.lock().clone().or_else(|| {
+            self.target_speaker_final_task
+                .lock()
+                .as_ref()
+                .filter(|pending| pending.decoder_stream_id == self.asr_stream_id()).map(|pending| Arc::clone(&pending.stream))
+        });
+        if let Some(stream) = stream {
+            stream.set_source_profile(profile);
+        }
+    }
+
     /// The extractor is an evidence producer. Shared product policy selects
     /// the live source; a longer mixture is never an ownership certificate.
     fn live_transcript_source(&self) -> (crate::speech_decision_kernel::LiveTranscriptAuthority, Option<Arc<Self>>) {
         #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
         {
             let stream = self.target_speaker_stream.lock().clone().or_else(|| {
-                self.target_speaker_final_task.lock().as_ref().map(|(stream, _)| Arc::clone(stream))
+                self.target_speaker_final_task.lock().as_ref().filter(|pending| pending.decoder_stream_id == self.asr_stream_id()).map(|pending| Arc::clone(&pending.stream))
             });
             if let Some(stream) = stream {
                 let owner = stream.live_owner_asr();
@@ -5789,9 +7062,301 @@ impl VolcengineStreamingASR {
         (crate::speech_decision_kernel::LiveTranscriptAuthority::Primary, None)
     }
 
+    /// One selection for live callbacks, delivery stability, and endpoint
+    /// pending-body accounting. A rejected mixture stays rejected: only a
+    /// contiguous, word-timed extension of an admitted owner anchor is added.
+    fn selected_live_owner_candidate(&self) -> Option<SelectedLiveOwnerCandidate> {
+        if self.cloud_owner_enabled() {
+            let state = self.state.lock();
+            if state.best_transcript_text.is_empty() { return None; }
+            return Some(SelectedLiveOwnerCandidate {
+                text: state.best_transcript_text.clone(), timing: state.best_transcript_timing.clone(),
+                recognition_confirmed_prefix: None, recognition_requires_confirmation: false,
+                owner_permission: LiveOwnerPermission::Admitted, stability_source: OwnerDeliveryStabilitySource::default(),
+                updated_at: state.best_transcript_committed_at?, branch: "cloud_owner", certified_continuation: true,
+            });
+        }
+        use crate::speech_decision_kernel::LiveTranscriptAuthority;
+        let (authority, independent) = self.live_transcript_source();
+        let independent = if authority == LiveTranscriptAuthority::IndependentOwner {
+            independent.and_then(|owner| owner.selected_live_owner_candidate())
+        } else { None };
+        let (source_owner, physical, _) = self.source_owner_evidence_snapshot();
+        let mut st = self.state.lock();
+        let (selection, fallback) = match authority {
+            LiveTranscriptAuthority::OwnerEvidencePending => (None, None),
+            LiveTranscriptAuthority::VerifiedProviderOwner => {
+                let selection = st.verified_provider_owner_timing.as_ref()
+                    .filter(|timing| st.verified_provider_owner.as_ref().is_some_and(|candidate|
+                        crate::transcript_boundary::content_key(&candidate.text) == crate::transcript_boundary::content_key(&timing.text)))
+                    .and_then(|timing| timed_candidate_source_owner_projection(&st,timing,&source_owner,&physical));
+                let candidate = st.verified_provider_owner.as_ref().zip(st.verified_provider_owner_updated_at)
+                    .map(|(candidate, at)| SelectedLiveOwnerCandidate {
+                        timing: st.verified_provider_owner_timing.clone(),
+                        text: candidate.text.clone(), recognition_confirmed_prefix: None, recognition_requires_confirmation: false,
+                        owner_permission: if st.local_speaker_tracking_enabled { LiveOwnerPermission::Unobserved } else { LiveOwnerPermission::Admitted },
+                        stability_source: OwnerDeliveryStabilitySource::default(), updated_at: at,
+                        branch: "verified_provider_owner", certified_continuation: true,
+                    });
+                (selection, candidate)
+            }
+            LiveTranscriptAuthority::Primary if st.owner_isolation_frozen => (None, None),
+            LiveTranscriptAuthority::Primary => {
+                let selection = primary_source_owner_supported_candidate(&st, &source_owner, &physical);
+                let fallback = if let Some(candidate) = st.live_owner_delivery.as_ref() {
+                    st.live_owner_delivery_updated_at.map(|at| SelectedLiveOwnerCandidate {
+                        timing: st.live_owner_delivery_timing.clone(),
+                        text: candidate.text.clone(), recognition_confirmed_prefix: None, recognition_requires_confirmation: false,
+                        owner_permission: if st.local_speaker_tracking_enabled { LiveOwnerPermission::Unobserved } else { LiveOwnerPermission::Admitted },
+                        stability_source: OwnerDeliveryStabilitySource::default(), updated_at: at,
+                        branch: "live_owner_delivery", certified_continuation: false,
+                    })
+                } else {
+                    st.best_transcript_committed_at.map(|at| SelectedLiveOwnerCandidate {
+                        timing: st.best_transcript_timing.clone(),
+                        text: st.best_transcript_text.clone(), recognition_confirmed_prefix: None, recognition_requires_confirmation: false,
+                        owner_permission: if st.local_speaker_tracking_enabled { LiveOwnerPermission::Unobserved } else { LiveOwnerPermission::Admitted },
+                        stability_source: OwnerDeliveryStabilitySource::default(), updated_at: at,
+                        branch: "best_transcript", certified_continuation: false,
+                    })
+                };
+                (selection, fallback)
+            }
+            LiveTranscriptAuthority::IndependentOwner => {
+                let anchor = compatible_live_owner_anchor(
+                    st.primary_admitted_owner_anchor.as_deref(),
+                    independent.as_ref().map(|candidate| candidate.text.as_str()),
+                );
+                let selection = anchor.and_then(|anchor| {
+                    let (candidate, mut signature) = source_owner_supported_candidate_after(
+                        &st, &anchor, &source_owner, &physical,
+                    )?;
+                    // Keep a valid independent view when the main provider
+                    // cannot map it into this same occurrence/revision.
+                    if let Some(owner) = independent.as_ref() {
+                        let owner_key = crate::transcript_boundary::content_key(&owner.text);
+                        let boundary = source_owner_projection_anchor_key(
+                            &crate::transcript_boundary::TimedTranscript {
+                                text: candidate.text.clone(), words: Vec::new(),
+                            }, &owner_key,
+                        )?;
+                        if signature.key.len() <= boundary.len() { return None; }
+                    }
+                    signature.independent_anchor_key = Some(anchor);
+                    Some((candidate, signature))
+                });
+                let fallback = independent.map(|mut candidate| {
+                    candidate.branch = "independent_owner";
+                    candidate.certified_continuation = true;
+                    candidate
+                });
+                (selection, fallback)
+            }
+        };
+        let updated_at = source_owner_projection_updated_at(
+            &mut st, selection.as_ref().map(|(_, signature)| signature.clone()), Instant::now(),
+        );
+        let selected = selection.and_then(|(candidate, signature)| updated_at.map(|at| SelectedLiveOwnerCandidate {
+            timing: Some(crate::transcript_boundary::TimedTranscript {
+                text: candidate.text.clone(),
+                words: signature.words.into_iter().map(|(text, start_ms, end_ms)|
+                    crate::transcript_boundary::TimedTranscriptWord { text, start_ms, end_ms }).collect(),
+            }),
+            text: candidate.text, recognition_confirmed_prefix: None, recognition_requires_confirmation: false, owner_permission: LiveOwnerPermission::SourceProjection, stability_source: OwnerDeliveryStabilitySource::default(), updated_at: at,
+            branch: "source_owner_projection", certified_continuation: true,
+        })).or(fallback).filter(|candidate| !candidate.text.trim().is_empty()).map(|mut candidate| {
+            if candidate.branch != "independent_owner" {
+                // Independent fallback already carries its child decoder's
+                // certificate. A parent source projection uses parent words.
+                candidate.recognition_confirmed_prefix = if candidate.owner_permission == LiveOwnerPermission::Admitted {
+                    st.recognition_boundary.confirmed_admitted_prefix(&candidate.text, candidate.timing.as_ref())
+                } else {
+                    st.recognition_boundary.confirmed_prefix(&candidate.text, candidate.timing.as_ref())
+                };
+                candidate.recognition_requires_confirmation = st.recognition_boundary.requires_confirmation();
+                candidate.stability_source = OwnerDeliveryStabilitySource {
+                    decoder: self.asr_stream_id.load(Ordering::SeqCst),
+                    generation: st.owner_delivery_generation,
+                    authority: match authority {
+                        LiveTranscriptAuthority::Primary => "primary",
+                        LiveTranscriptAuthority::VerifiedProviderOwner => "verified_provider_owner",
+                        LiveTranscriptAuthority::IndependentOwner => "independent_owner",
+                        LiveTranscriptAuthority::OwnerEvidencePending => unreachable!(),
+                    },
+                };
+            }
+            candidate
+        });
+        if selected.is_none() {
+            revoke_owner_delivery_stability(&mut st);
+        }
+        if let Some(candidate) = selected.as_ref().filter(|candidate|
+            candidate.owner_permission == LiveOwnerPermission::SourceProjection
+                && authority != LiveTranscriptAuthority::IndependentOwner)
+        {
+            st.primary_admitted_owner_anchor = Some(candidate.text.clone());
+        }
+        selected
+    }
+
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    fn source_owner_evidence_snapshot(
+        &self,
+    ) -> (Vec<(u64, u64)>, Vec<(u64, u64)>, Option<Instant>) {
+        let stream = self.target_speaker_stream.lock().clone().or_else(|| {
+            self.target_speaker_final_task
+                .lock()
+                .as_ref()
+                .filter(|pending| pending.decoder_stream_id == self.asr_stream_id()).map(|pending| Arc::clone(&pending.stream))
+        });
+        stream.map_or_else(
+            || self.completed_source_owner_evidence_snapshot().map_or_else(
+                || (Vec::new(), Vec::new(), None),
+                |evidence| (evidence.owner_ranges, evidence.physical_interference_ranges, evidence.updated_at),
+            ),
+            |stream| {
+                (
+                    stream.source_owner_audio_ranges(),
+                    stream.physical_interference_ranges(),
+                    stream.source_owner_audio_ranges_updated_at(),
+                )
+            },
+        )
+    }
+
+    /// Fuse the independently verified original-source ranges into the endpoint
+    /// owner watermark, while preserving every physical/provider/local foreign
+    /// veto used by irreversible source projection. Separator ownership is not
+    /// consulted: a separator `Other` and an original-source `Owner` are
+    /// deliberately separate evidence channels.
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    fn source_owner_endpoint_evidence(&self) -> (Option<u64>, bool) {
+        let stream = self.target_speaker_stream.lock().clone().or_else(|| {
+            self.target_speaker_final_task
+                .lock()
+                .as_ref()
+                .filter(|pending| pending.decoder_stream_id == self.asr_stream_id()).map(|pending| Arc::clone(&pending.stream))
+        });
+        let Some(stream) = stream else { return (None, false); };
+        let source_owner_ranges = stream.source_owner_audio_ranges();
+        let physical_interference_ranges = stream.physical_interference_ranges();
+        let state = self.state.lock();
+        let (_, foreign_ranges) = source_projection_audio_permissions(
+            &state,
+            &source_owner_ranges,
+            &physical_interference_ranges,
+        );
+        let latest_foreign_end_ms = foreign_ranges.iter().map(|(_, end)| *end).max();
+        let owner_end_ms = source_owner_ranges
+            .iter()
+            .copied()
+            .filter(|range| {
+                range.0 < range.1
+                    && !foreign_ranges
+                        .iter()
+                        .copied()
+                        .any(|foreign| audio_range_overlaps(*range, foreign))
+            })
+            .map(|(_, end)| end)
+            .max()
+            // A late proof for audio before a confirmed foreign turn cannot
+            // re-arm the current endpoint. A real owner return publishes a
+            // newer exact range and naturally crosses this boundary.
+            .filter(|owner_end| {
+                latest_foreign_end_ms.is_none_or(|foreign_end| *owner_end > foreign_end)
+            });
+        let captured_audio_ms = state.local_audio_duration_ms.unwrap_or_default();
+        let speech_end_ms = state.local_speech_end_ms.unwrap_or_default();
+        let latest_speech_is_known_foreign = speech_end_ms > 0
+            && foreign_ranges.iter().any(|&(start, end)| {
+                let latest_sample_ms = speech_end_ms - 1;
+                latest_sample_ms >= start && latest_sample_ms < end
+            });
+        let analysis_pending = !latest_speech_is_known_foreign
+            && stream.source_owner_analysis_pending(captured_audio_ms, speech_end_ms);
+        (owner_end_ms, analysis_pending)
+    }
+
+    #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
+    fn source_owner_endpoint_evidence(&self) -> (Option<u64>, bool) {
+        (None, false)
+    }
+
+    fn apply_source_owner_endpoint_evidence(
+        &self,
+        mut update: TargetSpeakerUpdate,
+    ) -> TargetSpeakerUpdate {
+        let (source_owner_end_ms, _) = self.source_owner_endpoint_evidence();
+        if let Some(source_owner_end_ms) = source_owner_end_ms {
+            update.qualified_owner_speech_end_ms = Some(
+                update
+                    .qualified_owner_speech_end_ms
+                    .unwrap_or_default()
+                    .max(source_owner_end_ms),
+            );
+        }
+        update
+    }
+
+    /// Background analysis is a bounded STOP barrier, never owner permission.
+    /// Combining the local one-window classifier with the original-source chunk
+    /// frontier prevents either asynchronous worker from finishing after STOP.
+    pub fn owner_analysis_pending_for_endpoint(&self) -> bool {
+        let (_, source_pending) = self.source_owner_endpoint_evidence();
+        self.local_speaker_analysis_pending() || source_pending
+    }
+
+    #[cfg(all(test, target_os = "windows", feature = "target-speaker-extraction"))]
+    pub(crate) fn source_owner_evidence_ranges_for_test(
+        &self,
+    ) -> (Vec<(u64, u64)>, Vec<(u64, u64)>) {
+        let (owner, physical, _) = self.source_owner_evidence_snapshot();
+        (owner, physical)
+    }
+
+    #[cfg(all(test, target_os = "windows", feature = "target-speaker-extraction"))]
+    pub(crate) fn separator_owner_audio_ranges_for_test(&self) -> Vec<(u64, u64)> {
+        let stream = self.target_speaker_stream.lock().clone().or_else(|| {
+            self.target_speaker_final_task
+                .lock()
+                .as_ref()
+                .filter(|pending| pending.decoder_stream_id == self.asr_stream_id()).map(|pending| Arc::clone(&pending.stream))
+        });
+        stream.map_or_else(Vec::new, |stream| stream.owner_audio_ranges())
+    }
+
+    #[cfg(all(test, target_os = "windows", feature = "target-speaker-extraction"))]
+    pub(crate) fn target_speaker_stream_for_test(
+        &self,
+    ) -> Option<Arc<super::target_speaker_extraction::TargetSpeakerStream>> {
+        self.target_speaker_stream.lock().clone().or_else(|| {
+            self.target_speaker_final_task
+                .lock()
+                .as_ref()
+                .filter(|pending| pending.decoder_stream_id == self.asr_stream_id()).map(|pending| Arc::clone(&pending.stream))
+        })
+    }
+
+    #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
+    fn source_owner_evidence_snapshot(
+        &self,
+    ) -> (Vec<(u64, u64)>, Vec<(u64, u64)>, Option<Instant>) {
+        (Vec::new(), Vec::new(), None)
+    }
+
+    fn completed_source_owner_evidence_snapshot(&self) -> Option<CompletedSourceOwnerEvidence> {
+        self.completed_source_owner_evidence.lock().as_ref()
+            .filter(|evidence| evidence.decoder_stream_id == self.asr_stream_id())
+            .cloned()
+    }
+
     pub fn target_speaker_filter_was_required(&self) -> bool {
-        self.target_speaker_filter_required.load(Ordering::SeqCst)
+        if self.cloud_owner_enabled() { return true; }
+        if self.source_filter_required.load(Ordering::SeqCst) { return true; }
+        #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+        { return self.target_speaker_filter_required.load(Ordering::SeqCst); }
+        #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
+        { false }
     }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -5799,22 +7364,103 @@ impl VolcengineStreamingASR {
         self.primary_mixture_rejected.load(Ordering::SeqCst)
     }
 
-    /// r36：主轨终稿是否以 speaker_filtered 认证封存（说话人过滤已切尾的
-    /// 干净本人全文）。产品仲裁据此区分"分离稿在做排除"与"分离稿截断丢正文"。
+    /// A provider's filtering label is not a source certificate. Only the
+    /// exact sealed candidate, backed by completed source evidence, may
+    /// overrule a shorter independent owner result.
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-    pub fn primary_seal_speaker_filtered_certified(&self) -> bool {
-        self.last_final_seal_authority_label
-            .lock()
-            .is_some_and(|label| label == "speaker_filtered")
+    pub fn primary_seal_speaker_filtered_certified_for(&self, text: &str) -> bool {
+        if !self.last_final_seal_authority_label.lock()
+            .is_some_and(|label| label == "speaker_filtered") { return false; }
+        let Some(evidence) = self.completed_source_owner_evidence_snapshot() else { return false; };
+        let state = self.state.lock();
+        if evidence.decoder_stream_id != self.asr_stream_id() { return false; }
+        entire_candidate_has_source_owner_permission(&state, text, state.best_transcript_timing.as_ref(),
+            &evidence.owner_ranges, &evidence.physical_interference_ranges)
+    }
+
+    /// A shorter separator prefix is not proof that the removed suffix was
+    /// another person. Require explicit, timed Other evidence for every
+    /// omitted word; Pending or physical residual alone proves no exclusion.
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    pub(crate) fn separated_prefix_excludes_confirmed_other(&self, primary: &str, separated: &str) -> bool {
+        use crate::transcript_boundary::content_key;
+        let primary_key = content_key(primary);
+        let mut selected_key = content_key(separated);
+        let state = self.state.lock();
+        if !primary_key.starts_with(&selected_key) && state.local_wake_owner_verified {
+            if let Some(phrase) = state.wake_speaker_phrase.as_deref() {
+                selected_key = format!("{}{selected_key}", content_key(phrase));
+            }
+        }
+        if selected_key.is_empty() || !primary_key.starts_with(&selected_key) || selected_key == primary_key {
+            return false;
+        }
+        let Some(timing) = state.best_transcript_timing.as_ref()
+            .filter(|timing| content_key(&timing.text) == primary_key) else { return false; };
+        let (_, foreign) = source_projection_audio_permissions(&state, &[], &[]);
+        let mut through = String::new();
+        let mut previous_end = None;
+        for word in &timing.words {
+            let key = content_key(&word.text);
+            if key.is_empty() { continue; }
+            if !primary_key[through.len()..].starts_with(&key) { return false; }
+            let start_offset = through.len();
+            through.push_str(&key);
+            let (Some(start),Some(end)) = (word.start_ms,word.end_ms) else { return false; };
+            if start >= end || previous_end.is_some_and(|prior| start < prior) { return false; }
+            previous_end = Some(end);
+            if through.len() > selected_key.len() {
+                if start_offset < selected_key.len() || !foreign.iter().any(|&(a,b)| start < b && end > a) {
+                    return false;
+                }
+            }
+        }
+        through == primary_key
+    }
+
+    pub(crate) fn verified_provider_owner_final_snapshot(&self) -> Option<(RawTranscript, crate::transcript_boundary::TimedTranscript)> {
+        if self.cloud_owner_enabled() {
+            let state = self.state.lock();
+            if !state.verified_provider_owner_is_final { return None; }
+            return Some((state.verified_provider_owner.clone()?, state.verified_provider_owner_timing.clone()?));
+        }
+        let evidence = self.completed_source_owner_evidence_snapshot()?;
+        let state = self.state.lock();
+        if evidence.decoder_stream_id != self.asr_stream_id() { return None; }
+        if !state.verified_provider_owner_is_final { return None; }
+        let candidate = state.verified_provider_owner.as_ref()?;
+        let timing = state.verified_provider_owner_timing.as_ref()?;
+        entire_candidate_has_source_owner_permission(&state, &candidate.text,
+            Some(timing), &evidence.owner_ranges,
+            &evidence.physical_interference_ranges).then(|| (candidate.clone(), timing.clone()))
     }
 
     pub(crate) fn verified_provider_owner_final(&self) -> Option<RawTranscript> {
-        let state = self.state.lock();
-        state.verified_provider_owner_is_final.then(|| state.verified_provider_owner.clone()).flatten()
+        self.verified_provider_owner_final_snapshot().map(|(candidate, _)| candidate)
     }
 
+    #[cfg(test)]
     pub(crate) fn verified_provider_owner_timing_snapshot(&self) -> Option<crate::transcript_boundary::TimedTranscript> {
-        self.state.lock().verified_provider_owner_timing.clone()
+        self.verified_provider_owner_final_snapshot().map(|(_, timing)| timing)
+    }
+
+    /// A provider final can precede source analysis. Retain its original
+    /// words while pending, then recover the complete rendering once the
+    /// source permissions arrive; never append an unproved remainder.
+    fn recover_completed_source_owner_final(&self) {
+        let Some(evidence) = self.completed_source_owner_evidence_snapshot() else { return; };
+        if self.last_final_seal_authority_label.lock().is_none() { return; }
+        let mut state = self.state.lock();
+        if evidence.decoder_stream_id != self.asr_stream_id() { return; }
+        let Some(timing) = state.pending_source_owner_final.as_ref().filter(|timing|
+            entire_candidate_has_source_owner_permission(&state, &timing.text, Some(timing),
+                &evidence.owner_ranges, &evidence.physical_interference_ranges)).cloned()
+        else { return; };
+        let duration_ms = timing.words.iter().filter_map(|word| word.end_ms).max().unwrap_or_default();
+        state.verified_provider_owner = Some(RawTranscript { text: timing.text.clone(), duration_ms });
+        state.verified_provider_owner_timing = Some(timing);
+        state.verified_provider_owner_is_final = true;
+        state.verified_provider_owner_updated_at = Some(Instant::now());
     }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -5822,24 +7468,8 @@ impl VolcengineStreamingASR {
     /// has been delivered, overlapping its tail inference with the primary
     /// provider final. The primary final still decides whether to use it.
     pub fn begin_target_speaker_final_early(&self) {
-        // A clean session does not need its final separator chunk. Do not
-        // compete with the primary provider unless capture has already shown
-        // owner/foreign ambiguity. Evidence discovered in the trailing chunk
-        // still takes the normal serial path after the primary final.
-        let evidence_seen = {
-            let state = self.state.lock();
-            state.local_sustained_non_target_speech_end_ms.is_some()
-                || degraded_owner_tail_suggests_interference_with_quality(
-                    &state.local_speaker_evidence,
-                    &state.local_unreliable_speaker_evidence_end_ms,
-                )
-        };
-        let physical_overlap = self
-            .target_speaker_stream
-            .lock()
-            .as_ref()
-            .is_some_and(|stream| stream.interference_detected());
-        if !evidence_seen && !physical_overlap {
+        let _delivery_queue_guard = self.delivery_queue_lock.lock();
+        if self.target_speaker_final_task.lock().is_some() {
             return;
         }
         let stream = self.target_speaker_stream.lock().take();
@@ -5852,32 +7482,96 @@ impl VolcengineStreamingASR {
                 async move { stream.finish().await }
             });
         log::info!(
-            "[target-speaker] parallel final started after primary audio drain physical_overlap={physical_overlap} local_interference={evidence_seen}"
+            "[target-speaker] complete drain started after trailing device PCM delivery"
         );
         let mut slot = self.target_speaker_final_task.lock();
-        if let Some((_, previous)) = slot.replace((stream, task)) {
-            previous.abort();
-        }
+        debug_assert!(slot.is_none());
+        *slot = Some(TargetSpeakerFinalTask { decoder_stream_id:self.asr_stream_id(), stream, task });
     }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     pub async fn await_target_speaker_final(&self) -> Result<Option<RawTranscript>, String> {
-        // r29 延迟优化：早启动时 finish 已在跑，这里保留流的 Arc 句柄供证据读取
-        // 与取消使用，结果从后台任务 join；未早启动则保持原串行语义。
-        // 跳过分支（无干扰证据/主轨终稿已切尾）判定点不变（主轨终稿之后），
-        // 早启动场景下取消 = 尽早掐掉分离 ASR 并丢弃其结果，产物语义不变。
+        let (decoder_stream_id, stream, mut finish_task) = {
+        let _delivery_queue_guard = self.delivery_queue_lock.lock();
         let early = self.target_speaker_final_task.lock().take();
-        let (early_task, stream) = match early {
-            Some((stream, task)) => (Some(task), Some(stream)),
-            None => (None, self.target_speaker_stream.lock().take()),
+        let pending = match early {
+            Some(pending) => (pending.decoder_stream_id, pending.stream, pending.task),
+            None => {
+                let decoder_stream_id = self.asr_stream_id();
+                let Some(stream) = self.target_speaker_stream.lock().take() else {
+                    return Ok(None);
+                };
+                let task = tauri::async_runtime::spawn({
+                    let stream = Arc::clone(&stream);
+                    async move { stream.finish().await }
+                });
+                (decoder_stream_id, stream, task)
+            }
         };
-        let Some(stream) = stream else {
-            return Ok(None);
+        if pending.0 != self.asr_stream_id() {
+            pending.1.cancel();
+            pending.2.abort();
+            return Err("target-speaker final belongs to a replaced decoder session".to_string());
+        }
+        pending
         };
-        if self.verified_provider_owner_final().is_some() {
+        // STOP is a source-coverage boundary. Close the input and join the
+        // worker before reading any final interference/ownership evidence.
+        let waited = tokio::time::timeout(
+            TARGET_SPEAKER_FINAL_WAIT,
+            &mut finish_task,
+        )
+        .await;
+        // Reopening a decoder may happen while the worker drains. Serialize
+        // every terminal outcome, including timeout/error flags, with reopen.
+        // This guard is acquired after the last await in this method.
+        let _delivery_queue_guard = self.delivery_queue_lock.lock();
+        if self.asr_stream_id() != decoder_stream_id {
+            finish_task.abort();
             stream.cancel();
-            if let Some(task) = early_task.as_ref() { task.abort(); }
-            log::info!("[target-speaker] locally supported distinct provider owner final certified; cancelling redundant separator wait, rejected mixture remains excluded");
+            return Err("target-speaker final belongs to a replaced decoder session".to_string());
+        }
+        let joined = match waited {
+            Ok(joined) => joined,
+            Err(_) => {
+                finish_task.abort();
+                stream.cancel();
+                self.target_speaker_filter_required
+                    .store(true, Ordering::SeqCst);
+                return Err("target-speaker owner-only stream timed out".to_string());
+            }
+        };
+        let finish_outcome = match joined {
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(err)) => {
+                self.target_speaker_filter_required
+                    .store(true, Ordering::SeqCst);
+                return Err(err);
+            }
+            Err(err) => {
+                self.target_speaker_filter_required
+                    .store(true, Ordering::SeqCst);
+                return Err(format!("target-speaker finish join failed: {err}"));
+            }
+        };
+        log::info!(
+            "[target-speaker] complete drain joined reason={:?} enqueued_bytes={} processed_bytes={} complete={}",
+            finish_outcome.reason,
+            finish_outcome.enqueued_bytes,
+            finish_outcome.processed_bytes,
+            finish_outcome.is_complete(),
+        );
+        if finish_outcome.is_complete() {
+            *self.completed_source_owner_evidence.lock() = Some(CompletedSourceOwnerEvidence {
+                decoder_stream_id,
+                owner_ranges: stream.source_owner_audio_ranges(),
+                physical_interference_ranges: stream.physical_interference_ranges(),
+                updated_at: stream.source_owner_audio_ranges_updated_at(),
+            });
+            self.recover_completed_source_owner_final();
+        }
+        if self.verified_provider_owner_final().is_some() {
+            log::info!("[target-speaker] complete same-source owner final certified after separator drain; discarded redundant separator candidate");
             return Ok(None);
         }
         let (
@@ -5914,12 +7608,9 @@ impl VolcengineStreamingASR {
             sustained_non_target_seen,
             degraded_owner_tail_seen,
         ) {
-            stream.cancel();
-            if let Some(task) = early_task.as_ref() {
-                task.abort();
-            }
             log::info!(
-                "[target-speaker] no explicit non-owner identity evidence; preserving low-latency certified primary final physical_overlap={physical_interference_detected}"
+                "[target-speaker] no explicit non-owner identity evidence after complete drain; preserving low-latency primary final physical_overlap={physical_interference_detected} finish_reason={:?}",
+                finish_outcome.reason,
             );
             return Ok(None);
         }
@@ -5930,12 +7621,8 @@ impl VolcengineStreamingASR {
                 local_non_target_end_ms,
             )
         {
-            stream.cancel();
-            if let Some(task) = early_task.as_ref() {
-                task.abort();
-            }
             log::info!(
-                "[target-speaker] provider final ended before the confirmed non-target tail; skipping redundant owner-only wait provider_owner_end_ms={provider_owner_end_ms:?} local_non_target_end_ms={local_non_target_end_ms:?}"
+                "[target-speaker] provider final ended before the confirmed non-target tail; discarded drained owner-only candidate provider_owner_end_ms={provider_owner_end_ms:?} local_non_target_end_ms={local_non_target_end_ms:?}"
             );
             return Ok(None);
         }
@@ -5947,86 +7634,71 @@ impl VolcengineStreamingASR {
             sustained_non_target_seen,
             degraded_owner_tail_seen
         );
-        let mut early_task = early_task;
-        let finish_fut = async {
-            match early_task.as_mut() {
-                Some(task) => task
-                    .await
-                    .map_err(|err| format!("target-speaker early finish join failed: {err}"))
-                    .and_then(|result| result),
-                None => stream.finish().await,
-            }
-        };
-        match tokio::time::timeout(TARGET_SPEAKER_FINAL_WAIT, finish_fut).await {
-            Ok(result) => {
-                // `TargetSpeakerStream::finish()` returns `Ok(None)` only when
-                // the separator measured a clean owner stream and deliberately
-                // kept the low-latency primary ASR. A degraded tail score can
-                // trigger this final check in an otherwise clean session; do
-                // not leave `filter_required` armed and erase that certified
-                // primary transcript in the coordinator.
-                if stream.interference_detected() && stream.non_target_speech_detected() {
-                    self.primary_mixture_rejected.store(true, Ordering::SeqCst);
-                }
-                let clean_primary_certified = matches!(&result, Ok(None))
-                    && !self.primary_mixture_was_rejected();
-                let filter_required =
-                    target_speaker_filter_required_after_finish(true, clean_primary_certified);
-                self.target_speaker_filter_required
-                    .store(filter_required, Ordering::SeqCst);
-                if clean_primary_certified {
-                    log::info!(
-                        "[target-speaker] clean primary certified by separator; preserving primary final"
-                    );
-                }
-                let (distinct_provider_target, certified_primary) = {
-                    let state = self.state.lock();
-                    let duration_ms = state
-                        .start
-                        .map(|start| start.elapsed().as_millis() as u64)
-                        .unwrap_or_default();
-                    (
-                        state
-                            .distinct_speaker_target_final_text
-                            .clone()
-                            .map(|text| RawTranscript { text, duration_ms }),
-                        state
-                            .wake_bound_single_speaker_final_text
-                            .clone()
-                            .map(|text| RawTranscript { text, duration_ms }),
-                    )
-                };
-                let recovered = if self.primary_mixture_was_rejected() {
-                    // A longer primary track can cover the same rejected
-                    // mixture. Length alone cannot revoke explicit independent
-                    // identity evidence after live delivery changed source.
-                    result
-                } else {
-                    recover_incomplete_separator_final_from_distinct_provider_track(
-                        result,
-                        distinct_provider_target.clone(),
-                    )
-                };
-                let recovered = recover_noise_only_separator_collapse_from_certified_primary(
-                    recovered,
-                    certified_primary.clone(),
-                    interference,
-                );
-                // 分离轨只决定归属边界；上屏字符一律取 provider 说话人过滤原文的
-                // 带标点切片，避免"分离后二次解码"的格式损失进入终稿。
-                restore_separated_owner_final_punctuation_from_provider_track(
-                    recovered,
-                    distinct_provider_target.or(certified_primary),
-                )
-            }
-            Err(_) => {
-                stream.cancel();
-                if let Some(task) = early_task.as_ref() {
-                    task.abort();
-                }
-                Err("target-speaker owner-only stream timed out".to_string())
-            }
+        if stream.interference_detected() && stream.non_target_speech_detected() {
+            self.primary_mixture_rejected.store(true, Ordering::SeqCst);
         }
+        let clean_primary_certified = finish_outcome.certifies_clean_primary()
+            && !self.primary_mixture_was_rejected();
+        let filter_required =
+            target_speaker_filter_required_after_finish(true, clean_primary_certified);
+        self.target_speaker_filter_required
+            .store(filter_required, Ordering::SeqCst);
+        if clean_primary_certified {
+            log::info!(
+                "[target-speaker] clean primary certified by separator; preserving primary final"
+            );
+        }
+        let result: Result<Option<RawTranscript>, String> = Ok(finish_outcome.into_owner_candidate());
+        let (distinct_provider_target, certified_primary) = {
+            let state = self.state.lock();
+            let duration_ms = state
+                .start
+                .map(|start| start.elapsed().as_millis() as u64)
+                .unwrap_or_default();
+            (
+                state
+                    .distinct_speaker_target_final_text
+                    .clone()
+                    .map(|text| RawTranscript { text, duration_ms }),
+                state
+                    .wake_bound_single_speaker_final_text
+                    .clone()
+                    .map(|text| RawTranscript { text, duration_ms }),
+            )
+        };
+        let recovered = if self.primary_mixture_was_rejected() {
+            // A longer primary track can cover the same rejected
+            // mixture. Length alone cannot revoke explicit independent
+            // identity evidence after live delivery changed source.
+            // Recover only time-certified owner words outside the
+            // measured overlap, using the separated owner decode inside
+            // that interval.
+            let state = self.state.lock();
+            recover_rejected_mixture_from_nonoverlap_owner_ledger(
+                &state,
+                result,
+                stream.final_timing_snapshot(),
+                &stream.owner_audio_ranges(),
+                &stream.physical_interference_ranges(),
+                &stream.source_owner_audio_ranges(),
+            )
+        } else {
+            recover_incomplete_separator_final_from_distinct_provider_track(
+                result,
+                distinct_provider_target.clone(),
+            )
+        };
+        let recovered = recover_noise_only_separator_collapse_from_certified_primary(
+            recovered,
+            certified_primary.clone(),
+            interference,
+        );
+        // 分离轨只决定归属边界；上屏字符一律取 provider 说话人过滤原文的
+        // 带标点切片，避免"分离后二次解码"的格式损失进入终稿。
+        restore_separated_owner_final_punctuation_from_provider_track(
+            recovered,
+            distinct_provider_target.or(certified_primary),
+        )
     }
 
     fn recovery_speaker_snapshot(&self) -> RecoverySpeakerSnapshot {
@@ -6059,6 +7731,19 @@ impl VolcengineStreamingASR {
         &self,
     ) -> Result<RawTranscript, VolcengineASRError> {
         let (pcm, speaker_snapshot) = self.claim_retained_audio_for_replay()?;
+        #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+        let pcm = if self.owner_activity_only
+            && pcm.len() <= super::owner_content_extraction::MAX_RECOVERY_PCM_BYTES
+            && self.owner_content_reference_pcm.lock().is_some()
+        {
+            let reference = self.owner_content_reference_pcm.lock().clone().expect("checked reference");
+            // Model loading is isolated too; cancellation/drop kills the child.
+            let original = pcm.clone();
+            match super::content_recovery_worker::recover(reference, pcm, false).await {
+                Ok(recovered) => recovered.pcm,
+                Err(error) => { log::warn!("[asr] isolated content recovery unavailable; retaining original PCM: {error}"); original }
+            }
+        } else { pcm };
         let (pcm, gain, peak_before, peak_after) = bounded_empty_final_replay_pcm(&pcm);
         log::warn!(
             "[asr] empty-final recovery representation pcm_bytes={} gain={gain:.4} peak_before={peak_before} peak_after={peak_after}",
@@ -6068,6 +7753,77 @@ impl VolcengineStreamingASR {
             .await
     }
 
+    fn new_recovery_session(&self, reason: &'static str) -> Self {
+        let mut options = self.session_options;
+        // Keep ordinary two-pass correction on the live route. If that route
+        // returns an empty final, the one allowed replay must not repeat the
+        // same correction that can erase a usable first-pass transcript.
+        if self.owner_activity_only && matches!(reason, "empty-final" | "content-supplement") {
+            options.enable_nonstream = false;
+        }
+        Self::new_with_session_options_and_proxy(
+            self.credentials.clone(),
+            self.hotwords.clone(),
+            options,
+            self.proxy_config.clone(),
+        )
+        .with_cloud_owner(self.cloud_owner.lock().clone())
+        .with_managed_cloud(self.managed_cloud)
+        .with_owner_activity_only(self.owner_activity_only)
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    pub(crate) async fn recover_content_supplement_once(
+        &self,
+    ) -> Result<Option<super::content_consensus::ContentSupplement>, String> {
+        use sha2::{Digest, Sha256};
+        if !self.owner_activity_only || self.owner_content_recovery_locale != "zh-CN"
+            || self.recovery_replay_started.load(Ordering::Acquire)
+            || !self.final_frame_result.get().is_some_and(Result::is_ok)
+            || self.pending_sends.load(Ordering::Acquire) != 0 {
+            return Ok(None);
+        }
+        let reference = self.owner_content_reference_pcm.lock().clone();
+        let Some(reference) = reference else { return Ok(None); };
+        let reference_hash = Sha256::digest(&reference);
+        let pcm = self.retained_pcm_snapshot();
+        if pcm.len() > super::owner_content_extraction::MAX_RECOVERY_PCM_BYTES || pcm.len() < 1026 {
+            return Ok(None); // Do not crop a longer recording.
+        }
+        let recovered = super::content_recovery_worker::recover(reference, pcm, true).await?;
+        let still_bound = self.owner_content_reference_pcm.lock().as_ref()
+            .is_some_and(|reference| Sha256::digest(reference) == reference_hash);
+        if !still_bound { return Err("content reference capture was retired".into()); }
+        let channels: std::collections::BTreeSet<_> = recovered.segments.iter().filter_map(|row| row.channel).collect();
+        let valid_activity = recovered.activity.iter().all(|span| {
+            span.channel.is_some() && span.start_ms >= 0 && span.end_ms > span.start_ms
+                && span.end_ms as u64 * 16 <= recovered.input_samples as u64
+        });
+        let overlapping = recovered.activity.iter().any(|a| recovered.activity.iter().any(|b| {
+            a.channel != b.channel && a.start_ms.max(b.start_ms) < a.end_ms.min(b.end_ms)
+        }));
+        if channels.len() < 2 || !valid_activity || !overlapping { return Ok(None); }
+        // Spend the existing single replay budget only after local evidence is
+        // ready. Never create an extra empty-final or correction retry.
+        let (original, snapshot) = self.claim_retained_audio_for_replay().map_err(|e|e.to_string())?;
+        if format!("{:x}",Sha256::digest(&original)) != recovered.source_sha256 {
+            return Err("content original capture changed after worker input".into());
+        }
+        let auxiliary = tokio::time::timeout(Duration::from_secs(30),
+            self.replay_claimed_audio(recovered.pcm,snapshot,"content-supplement",1.0)).await
+            .map_err(|_| "content auxiliary cloud deadline")?.map_err(|e|e.to_string())?;
+        if !self.owner_content_reference_pcm.lock().as_ref()
+            .is_some_and(|reference| Sha256::digest(reference) == reference_hash)
+            || format!("{:x}",Sha256::digest(self.retained_pcm_snapshot())) != recovered.source_sha256 {
+            return Err("content derivation no longer belongs to current capture".into());
+        }
+        Ok(Some(super::content_consensus::ContentSupplement {
+            locale:self.owner_content_recovery_locale.clone(), source_pcm_sha256:recovered.source_sha256.clone(),
+            decoded_pcm_sha256:recovered.source_sha256,input_samples:recovered.input_samples,
+            derivation_bound:true,auxiliary_cloud_text:auxiliary.text,segments:recovered.segments,activity:recovered.activity,
+        }))
+    }
+
     async fn replay_claimed_audio(
         &self,
         pcm: Vec<u8>,
@@ -6075,12 +7831,10 @@ impl VolcengineStreamingASR {
         reason: &'static str,
         gain: f64,
     ) -> Result<RawTranscript, VolcengineASRError> {
-        let replay = Arc::new(Self::new_with_session_options_and_proxy(
-            self.credentials.clone(),
-            self.hotwords.clone(),
-            self.session_options,
-            self.proxy_config.clone(),
-        ));
+        if self.managed_cloud && !self.managed_account_is_current() {
+            return Err(VolcengineASRError::CloudOwnerUnavailable("邮箱账号已改变，未重放旧账号录音".into()));
+        }
+        let replay = Arc::new(self.new_recovery_session(reason));
         log::warn!(
             "[asr] starting one bounded full-audio recovery replay reason={reason} gain={gain:.4} pcm_bytes={} audio_ms={}",
             pcm.len(),
@@ -6389,17 +8143,49 @@ impl VolcengineStreamingASR {
         self.state.lock().provider_timed_transcript.clone()
     }
 
+    /// This is a rendering view, not aligned source coordinates or identity.
+    /// Only the current sealed, speaker-policy-selected provider result may
+    /// supply tokens; a preview or an unfiltered same-length candidate may not.
+    pub(crate) fn final_native_word_snapshot_for(&self, text: &str) -> Option<crate::transcript_boundary::TimedTranscript> {
+        let state = self.state.lock();
+        state.sealed_native_word_timing.as_ref()
+            .filter(|timing| crate::transcript_boundary::content_key(&timing.text)
+                == crate::transcript_boundary::content_key(text))
+            .and_then(|timing| timing.native_word_rendering_view())
+    }
+
+    /// Final native coordinates remain attached to their original capture,
+    /// including after the live source worker closes at STOP.
+    pub(crate) fn final_native_capture_identity(&self) -> (u64, u64) {
+        (self.asr_stream_id(), self.source_snapshot.lock().capture_generation)
+    }
+
     pub(crate) fn transcript_timing_snapshot_for(&self, text: &str) -> Option<crate::transcript_boundary::TimedTranscript> {
-        let key=crate::transcript_boundary::content_key(text);
-        let state=self.state.lock();
-        let selected = [&state.live_owner_delivery_timing,&state.verified_provider_owner_timing,&state.provider_timed_transcript]
-            .into_iter().flatten().find(|timing| crate::transcript_boundary::content_key(&timing.text)==key).cloned();
+        let key = crate::transcript_boundary::content_key(text);
+        let state = self.state.lock();
+        let selected = [
+            &state.live_owner_delivery_timing,
+            &state.verified_provider_owner_timing,
+            &state.best_transcript_timing,
+            &state.speaker_filtered_timed_transcript,
+            &state.provider_timed_transcript,
+        ]
+        .into_iter()
+        .flatten()
+        .find(|timing| {
+            // A preview snapshot can retain the final text while its word list
+            // still covers only an earlier provider prefix. Text equality does
+            // not make that prefix safe source-timed evidence.
+            crate::transcript_boundary::content_key(&timing.text) == key
+                && aligned_timed_tokens(timing).is_some()
+        })
+        .cloned();
         selected
     }
 
     pub fn set_visual_partial_transcript_callback(
         &self,
-        callback: Option<Arc<dyn Fn(String) + Send + Sync>>,
+        callback: Option<VisualPartialTranscriptCallback>,
     ) {
         *self.visual_partial_callback.lock() = callback;
     }
@@ -6428,7 +8214,21 @@ impl VolcengineStreamingASR {
     /// instead of falling back to room energy.
     pub fn endpoint_update_snapshot(&self) -> TargetSpeakerUpdate {
         let state = self.state.lock();
-        target_speaker_update_from_state(&state, false, false, false)
+        let update = target_speaker_update_from_state(&state, false, false, false);
+        drop(state);
+        self.apply_source_owner_endpoint_evidence(update)
+    }
+
+    /// Timed words prove that this covered source audio deserves identity
+    /// analysis, even if local VAD missed it. They do not identify the speaker
+    /// and never advance an owner/endpoint watermark by themselves.
+    pub(crate) fn latest_timed_provider_speech_end_ms(&self) -> Option<u64> {
+        let state = self.state.lock();
+        let captured_ms = state.local_audio_duration_ms?;
+        state.provider_timed_transcript.as_ref()?.words.iter().filter_map(|word| {
+            let (start, end) = word.start_ms.zip(word.end_ms)?;
+            (start < end && end <= captured_ms && !word.text.trim().is_empty()).then_some(end)
+        }).max()
     }
 
     /// Endpoint-only snapshot with the independent local VAD sidecar applied.
@@ -6456,7 +8256,7 @@ impl VolcengineStreamingASR {
             *self.local_speech_activity.lock(),
             captured_audio_samples,
         );
-        update
+        self.apply_source_owner_endpoint_evidence(update)
     }
 
     /// Apply the endpoint-only local VAD overlay to a provider callback. The
@@ -6484,7 +8284,7 @@ impl VolcengineStreamingASR {
             evidence,
             captured_audio_samples,
         );
-        update
+        self.apply_source_owner_endpoint_evidence(update)
     }
 
     pub fn endpoint_update_with_local_speech_evidence(
@@ -6510,10 +8310,39 @@ impl VolcengineStreamingASR {
         Arc::clone(&self.local_speech_activity)
     }
 
+    pub(crate) fn local_speech_quality_sink(&self) -> Arc<ParkingMutex<crate::speech_signal_quality::SpeechSignalTimeline>> {
+        Arc::clone(&self.local_speech_quality.lock())
+    }
+
+    /// Start a new capture generation before any local VAD worker binds its
+    /// sink. Network open is asynchronous and must not rotate this Arc after
+    /// the capture-side worker has started publishing evidence.
+    pub(crate) fn prepare_local_speech_quality_session(
+        &self,
+    ) -> Arc<ParkingMutex<crate::speech_signal_quality::SpeechSignalTimeline>> {
+        let sink = Arc::new(ParkingMutex::new(
+            crate::speech_signal_quality::SpeechSignalTimeline::default(),
+        ));
+        *self.local_speech_quality.lock() = Arc::clone(&sink);
+        sink
+    }
+
+    pub(crate) fn constrain_local_speaker_quality(&self, start_ms: u64, end_ms: u64,
+        observation: &mut crate::speaker_verification::SessionSpeakerObservation) {
+        let upper_bound = self.local_speech_quality_sink().lock().speech_upper_bound_ms(start_ms, end_ms);
+        let previous_ms = observation.real_speech_ms;
+        observation.constrain_speech_duration(upper_bound);
+        if observation.real_speech_ms != previous_ms {
+            log::info!("[speaker-verification] continuous VAD constrained sample start_ms={start_ms} end_ms={end_ms} energy_active_ms={previous_ms} possible_speech_ms={} quality={} classification={:?}",
+                observation.real_speech_ms, observation.signal_quality_sufficient, observation.classification);
+        }
+    }
+
     /// Publish the lifecycle of the single-flight local speaker job without
     /// pretending that it is owner activity.  The endpoint controller may
     /// wait for this evidence, but the job itself never renews an owner clock.
     pub fn note_local_speaker_analysis_pending(&self, pending: bool) {
+        if self.cloud_owner_enabled() { return; }
         self.local_speaker_analysis_pending
             .store(pending, Ordering::SeqCst);
     }
@@ -6697,20 +8526,37 @@ impl VolcengineStreamingASR {
         signal_quality_sufficient: bool,
         source_range: Option<(u64, u64)>,
     ) {
+        if self.cloud_owner_enabled() { return; }
         let (update, stable_target, effective_classification, endpoint_strong_non_target) = {
             let mut state = self.state.lock();
-            observe_owner_handoff_recovery(&mut state, if signal_quality_sufficient {
-                classification
-            } else {
-                crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: classification.score() }
+            let recovery_observation_is_new = state.local_speaker_observation_end_ms
+                .is_none_or(|previous_ms| audio_duration_ms > previous_ms);
+            let recovery_range = source_range.filter(|(start, end)| {
+                start < end
+                    && *end == audio_duration_ms
+                    && recovery_observation_is_new
             });
-            let endpoint_strong_non_target = matches!(
-                classification,
-                crate::speaker_verification::SessionSpeakerClassification::NonTarget { score }
-                    if score <= LOCAL_ENDPOINT_STRONG_NON_TARGET_MAX_SCORE
-            );
-            let owner_absence_band =
-                classification.score() <= LOCAL_ENDPOINT_OWNER_ABSENCE_CONTINUATION_MAX_SCORE;
+            // A duplicate or delayed older observation is not a new break in
+            // the live sequence and must neither advance nor clear recovery.
+            // A current observation without exact provenance cannot prove a
+            // Target window, so it deliberately clears the pending proof.
+            if recovery_observation_is_new {
+                observe_owner_handoff_recovery(
+                    &mut state,
+                    classification,
+                    recovery_range,
+                    signal_quality_sufficient,
+                );
+            }
+            let endpoint_strong_non_target = signal_quality_sufficient
+                && matches!(
+                    classification,
+                    crate::speaker_verification::SessionSpeakerClassification::NonTarget { score }
+                        if score <= LOCAL_ENDPOINT_STRONG_NON_TARGET_MAX_SCORE
+                );
+            let owner_absence_band = signal_quality_sufficient
+                && classification.score()
+                    <= LOCAL_ENDPOINT_OWNER_ABSENCE_CONTINUATION_MAX_SCORE;
             if endpoint_strong_non_target {
                 if state.local_consecutive_strong_non_target == 0
                     && !state.local_owner_absence_run_confirmed
@@ -6800,15 +8646,17 @@ impl VolcengineStreamingASR {
                     audio_end_ms: audio_duration_ms, classification, stable_target,
                 });
             }
-            let transcript_hard_non_target_applies = matches!(
-                transcript_speaker_evidence,
-                crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget
-            );
-            let transcript_foreign_hint_applies = matches!(
-                transcript_speaker_evidence,
-                crate::speech_decision_kernel::TranscriptSpeakerEvidence::ForeignTailHint
-                    | crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget
-            );
+            let transcript_hard_non_target_applies = signal_quality_sufficient
+                && matches!(
+                    transcript_speaker_evidence,
+                    crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget
+                );
+            let transcript_foreign_hint_applies = signal_quality_sufficient
+                && matches!(
+                    transcript_speaker_evidence,
+                    crate::speech_decision_kernel::TranscriptSpeakerEvidence::ForeignTailHint
+                        | crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget
+                );
             if transcript_foreign_hint_applies {
                 if signal_quality_sufficient && matches!(classification,
                     crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. })
@@ -6947,11 +8795,7 @@ impl VolcengineStreamingASR {
                 && matches!(effective_classification, crate::speaker_verification::SessionSpeakerClassification::Target { .. });
             if positive_owner_observation {
                 if let Some(range) = source_range {
-                    state.local_owner_pcm_intervals.push(range);
-                    state.local_owner_pcm_intervals.sort_unstable();
-                    if state.local_owner_pcm_intervals.len() > 2048 {
-                        state.local_owner_pcm_intervals.remove(0);
-                    }
+                    remember_local_owner_pcm_range(&mut state, range);
                 }
             }
             if qualified_owner_observation {
@@ -7049,9 +8893,11 @@ impl VolcengineStreamingASR {
         if update.speaker_id.is_some() || update.local_speaker_tracking_enabled {
             self.emit_target_speaker_update(update);
         }
+        self.reconcile_live_visual_after_identity();
     }
 
     pub fn note_local_speaker_profile_adaptive(&self, adaptive: bool) {
+        if self.cloud_owner_enabled() { return; }
         let mut state = self.state.lock();
         if state.local_speaker_profile_adaptive == adaptive {
             return;
@@ -7060,6 +8906,12 @@ impl VolcengineStreamingASR {
         log::info!(
             "[asr] local session-speaker profile mode adaptive={adaptive} (wake-derived profiles are advisory for final recovery)"
         );
+    }
+
+    /// Accepted control-prefix coordinates are shared by every transcript
+    /// mode. This metadata grants neither enrollment nor speaker identity.
+    pub(crate) fn note_accepted_wake_phrase(&self, phrase: &str) {
+        self.state.lock().wake_speaker_phrase = Some(phrase.to_string());
     }
 
     pub fn note_local_speaker_tracking_started(&self, wake_phrase: &str) {
@@ -7075,7 +8927,12 @@ impl VolcengineStreamingASR {
         wake_phrase: &str,
         wake_owner_verified: bool,
     ) {
+        if self.owner_activity_only { return; }
+        if self.cloud_owner_enabled() { self.note_accepted_wake_phrase(wake_phrase); return; }
+        *self.completed_source_owner_evidence.lock() = None;
+        *self.last_final_seal_authority_label.lock() = None;
         let mut state = self.state.lock();
+        state.pending_source_owner_final = None;
         state.live_owner_delivery = None;
         state.live_owner_delivery_timing = None;
         state.live_owner_delivery_updated_at = None;
@@ -7098,6 +8955,8 @@ impl VolcengineStreamingASR {
         state.local_preview_foreign_hint_end_ms = None;
         state.local_owner_handoff_suspected = false;
         state.local_owner_handoff_recovery_targets = 0;
+        state.local_owner_handoff_recovery_ranges.clear();
+        state.local_owner_handoff_recovery_last_range = None;
         state.local_consecutive_strong_non_target = 0;
         state.local_owner_absence_run_started_ms = None;
         state.local_owner_absence_run_confirmed = false;
@@ -7291,17 +9150,35 @@ impl VolcengineStreamingASR {
     }
 
     fn primary_output_text(&self, text: &str) -> Option<String> {
+        if self.cloud_owner_enabled() {
+            let state = self.state.lock();
+            return (!text.is_empty() && text == state.best_transcript_text).then(|| text.to_string());
+        }
         use crate::speech_decision_kernel::LiveTranscriptAuthority;
-        match self.live_transcript_source().0 {
-            LiveTranscriptAuthority::Primary => {
-                let state = self.state.lock();
-                let text = if state.local_speaker_tracking_enabled {
-                    state.live_owner_delivery.as_ref().map(|candidate| candidate.text.as_str()).unwrap_or("")
-                } else { text };
-                (!text.trim().is_empty()).then(|| text.to_string())
+        if let Some(selected) = self.selected_live_owner_candidate() {
+            if selected.branch == "best_transcript" && self.state.lock().local_speaker_tracking_enabled {
+                return None;
             }
-            LiveTranscriptAuthority::VerifiedProviderOwner => self.state.lock().verified_provider_owner.as_ref().map(|candidate| candidate.text.clone()),
-            _ => None,
+            return Some(selected.text);
+        }
+        // Preserve the original untracked/known-prefix callback behavior.
+        // Independent rejection never falls back to the caller's raw text.
+        if self.live_transcript_source().0 != LiveTranscriptAuthority::Primary { return None; }
+        let state = self.state.lock();
+        let text = if state.local_speaker_tracking_enabled {
+            state.live_owner_delivery.as_ref().map(|candidate| candidate.text.as_str()).unwrap_or("")
+        } else { text };
+        (!text.trim().is_empty()).then(|| text.to_string())
+    }
+
+    fn independent_callback_text(&self, text: String) -> Option<String> {
+        if self.live_transcript_source().0 == crate::speech_decision_kernel::LiveTranscriptAuthority::Primary {
+            // Before a mixture rejection, keep the independently verified fast
+            // path. Once rejected, both workers publish the shared selection so
+            // a delayed short secondary response cannot undo a source extension.
+            Some(text)
+        } else {
+            self.selected_live_owner_candidate().map(|candidate| candidate.text)
         }
     }
 
@@ -7322,7 +9199,7 @@ impl VolcengineStreamingASR {
         };
         let callback = self.visual_partial_callback.lock().clone();
         if let Some(callback) = callback {
-            callback(text);
+            callback(VisualTranscriptUpdate::Provisional(text));
         }
     }
 
@@ -7333,6 +9210,31 @@ impl VolcengineStreamingASR {
         if let Some(callback) = callback {
             callback(update);
         }
+    }
+
+    fn reconcile_live_visual_after_identity(&self) {
+        let update = {
+            let mut state = self.state.lock();
+            // Historical foreign intervals still protect final filtering, but
+            // an owner return cannot replay their old visual revocation over
+            // newer provisional owner words.
+            if local_owner_continuity(&state) != LocalOwnerContinuity::Other { return; }
+            let Some(provider) = state.latest_visual_provider_result.clone() else { return; };
+            let owner_text = state.verified_provider_owner.as_ref().map(|owner| owner.text.clone())
+                .or_else(|| state.live_owner_delivery.as_ref().map(|owner| owner.text.clone()))
+                .unwrap_or_default();
+            let owner_view = json!({"text":owner_text,"utterances":[]});
+            reconcile_confirmed_foreign_visual(&mut state, &provider, &owner_view)
+        };
+        if let Some(update) = update { self.emit_visual_owner_partition(update); }
+    }
+
+    fn emit_visual_owner_partition(&self, update: VisualTranscriptUpdate) {
+        let frame = self.state.lock().response_frames_seen;
+        self.record_diagnostic_trace(frame, false, "visual_owner_correction", update.text());
+        log::info!("[asr] confirmed owner visual corrected chars={} endpoint_refresh=false final_ledger=false", update.text().chars().count());
+        let callback = self.visual_partial_callback.lock().clone();
+        if let Some(callback) = callback { callback(update); }
     }
 
     fn emit_target_speaker_update(&self, update: TargetSpeakerUpdate) {
@@ -7379,56 +9281,79 @@ impl VolcengineStreamingASR {
     pub(crate) async fn open_session_for_deferred_audio(
         self: &Arc<Self>,
     ) -> Result<(), VolcengineASRError> {
+        self.reset_source_snapshot();
         self.mark_audio_delivery_opening();
         self.open_session_inner().await
     }
 
-    async fn open_session_inner(self: &Arc<Self>) -> Result<(), VolcengineASRError> {
-        if self.credentials.app_id.is_empty()
-            || self.credentials.access_token.is_empty()
-            || self.credentials.resource_id.is_empty()
+    /// Called under delivery_queue_lock after a successful connection. The
+    /// first cloud open belongs to the already-prepared capture: its extractor
+    /// and local identity profile can be armed before the network completes.
+    /// A later open is a new decoder and must retire the previous workers.
+    fn begin_connected_decoder(&self) {
+        let previous_stream_id = self.asr_stream_id();
+        self.abandon_queued_audio_observations(previous_stream_id);
+        let reopening = self.transport_opened.swap(true, Ordering::SeqCst);
+        #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
         {
-            return Err(VolcengineASRError::CredentialsMissing);
+            if reopening {
+                if let Some(stream) = self.target_speaker_stream.lock().take() { stream.cancel(); }
+            }
+            if let Some(pending) = self.target_speaker_final_task.lock().take() {
+                pending.stream.cancel();
+                pending.task.abort();
+            }
         }
+        #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
+        let _ = reopening;
+        self.asr_stream_id.store(next_volcengine_asr_stream_id(), Ordering::Relaxed);
+        *self.completed_source_owner_evidence.lock() = None;
+        *self.last_final_seal_authority_label.lock() = None;
+        self.source_filter_required.store(false, Ordering::SeqCst);
+    }
 
-        let connect_id = Uuid::new_v4().to_string();
-        log::info!(
-            "[asr] opening Volcengine {} session endpoint={} resource_id={} model=bigmodel enable_nonstream={} result_type={} end_window_size={:?} force_to_speech_time={:?}",
-            self.session_options.endpoint.label(),
-            self.session_options.endpoint.endpoint(),
-            self.credentials.resource_id,
-            self.session_options.enable_nonstream,
-            self.session_options.result_type.as_str(),
-            self.session_options.end_window_size_ms,
-            self.session_options.force_to_speech_time_ms,
-        );
-        let mut request = self
-            .session_options
-            .endpoint
-            .endpoint()
-            .into_client_request()
-            .map_err(|e| VolcengineASRError::ConnectionFailed(e.to_string()))?;
+    async fn open_session_inner(self: &Arc<Self>) -> Result<(), VolcengineASRError> {
+        if self.managed_cloud && !self.managed_account_is_current() {
+            return Err(VolcengineASRError::CloudOwnerUnavailable("邮箱账号已改变，请重新开始录音".into()));
+        }
+        let managed = if self.managed_cloud {
+            let client = super::cloud_gateway::CloudGatewayClient::saved()
+                .map_err(VolcengineASRError::CloudOwnerUnavailable)?;
+            let ticket = client.create_session().await.map_err(VolcengineASRError::CloudOwnerUnavailable)?;
+            if !self.managed_account_is_current() { return Err(VolcengineASRError::CloudOwnerUnavailable("邮箱账号已改变，请重新开始录音".into())); }
+            *self.cloud_owner.lock() = Some(ticket.profile.clone());
+            Some((client, ticket))
+        } else {
+            self.verify_cloud_owner_configuration().await?;
+            if self.credentials.app_id.is_empty() || self.credentials.access_token.is_empty() || self.credentials.resource_id.is_empty() {
+                return Err(VolcengineASRError::CredentialsMissing);
+            }
+            None
+        };
+        let connect_id = managed.as_ref().map(|(_,ticket)|ticket.id.clone()).unwrap_or_else(||Uuid::new_v4().to_string());
+        let endpoint = managed.as_ref().map(|(_,ticket)|ticket.websocket_url.as_str())
+            .unwrap_or(self.session_options.endpoint.endpoint());
+        log::info!("[asr] opening {} session model=bigmodel enable_nonstream={} result_type={}",
+            if self.managed_cloud {"managed cloud"} else {self.session_options.endpoint.label()},
+            self.session_options.enable_nonstream,self.session_options.result_type.as_str());
+        let mut request = endpoint.into_client_request()
+            .map_err(|_| VolcengineASRError::ConnectionFailed("invalid ASR endpoint".into()))?;
         let headers = request.headers_mut();
-        headers.insert(
-            "X-Api-App-Key",
-            HeaderValue::from_str(&self.credentials.app_id)
-                .map_err(|e| VolcengineASRError::ConnectionFailed(e.to_string()))?,
-        );
-        headers.insert(
-            "X-Api-Access-Key",
-            HeaderValue::from_str(&self.credentials.access_token)
-                .map_err(|e| VolcengineASRError::ConnectionFailed(e.to_string()))?,
-        );
-        headers.insert(
-            "X-Api-Resource-Id",
-            HeaderValue::from_str(&self.credentials.resource_id)
-                .map_err(|e| VolcengineASRError::ConnectionFailed(e.to_string()))?,
-        );
-        headers.insert(
-            "X-Api-Connect-Id",
-            HeaderValue::from_str(&connect_id)
-                .map_err(|e| VolcengineASRError::ConnectionFailed(e.to_string()))?,
-        );
+        if let Some((client,ticket)) = managed.as_ref() {
+            headers.insert("Authorization",HeaderValue::from_str(&client.authorization())
+                .map_err(|_|VolcengineASRError::CloudOwnerUnavailable("邮箱登录凭据无效".into()))?);
+            headers.insert("X-Listener-Session-Token",HeaderValue::from_str(&ticket.session_token)
+                .map_err(|_|VolcengineASRError::CloudOwnerUnavailable("托管会话凭据无效".into()))?);
+        } else {
+            headers.insert("X-Api-App-Key",HeaderValue::from_str(&self.credentials.app_id)
+                .map_err(|e|VolcengineASRError::ConnectionFailed(e.to_string()))?);
+            headers.insert("X-Api-Access-Key",HeaderValue::from_str(&self.credentials.access_token)
+                .map_err(|e|VolcengineASRError::ConnectionFailed(e.to_string()))?);
+            headers.insert("X-Api-Resource-Id",HeaderValue::from_str(&self.credentials.resource_id)
+                .map_err(|e|VolcengineASRError::ConnectionFailed(e.to_string()))?);
+        }
+        headers.insert("X-Api-Connect-Id",HeaderValue::from_str(&connect_id)
+            .map_err(|e|VolcengineASRError::ConnectionFailed(e.to_string()))?);
 
         let (ws, _resp) = tokio::time::timeout(
             WEBSOCKET_CONNECT_TIMEOUT,
@@ -7452,10 +9377,7 @@ impl VolcengineStreamingASR {
         // new stream, or publish old entries after the cleanup pass.
         {
             let _delivery_queue_guard = self.delivery_queue_lock.lock();
-            let previous_stream_id = self.asr_stream_id();
-            self.abandon_queued_audio_observations(previous_stream_id);
-            self.asr_stream_id
-                .store(next_volcengine_asr_stream_id(), Ordering::Relaxed);
+            self.begin_connected_decoder();
             let mut st = self.state.lock();
             // Automatic wake configures the verified owner anchor immediately
             // before opening the cloud stream. Preserve that pending-session
@@ -7484,6 +9406,14 @@ impl VolcengineStreamingASR {
             st.finishing = false;
             st.last_partial_text.clear();
             st.best_transcript_text.clear();
+            st.best_transcript_timing = None;
+            st.speaker_filtered_timed_transcript = None;
+            st.provider_timed_transcript = None;
+            st.sealed_native_word_timing = None;
+            st.pending_source_owner_final = None;
+            reset_provider_confirmation(&mut st);
+            st.source_owner_projection_stability = None;
+            st.primary_admitted_owner_anchor = None;
             st.best_transcript_committed_at = None;
             st.live_owner_delivery = None;
             st.live_owner_delivery_timing = None;
@@ -7495,6 +9425,7 @@ impl VolcengineStreamingASR {
             st.pause_early_recent_revisions.clear();
             st.best_transcript_segments.clear();
             st.best_untimed_window.clear();
+            st.conservative_speaker_ledger.reset();
             st.optimistic_preview_text.clear();
             st.optimistic_preview_segments.clear();
             st.optimistic_untimed_window.clear();
@@ -7505,7 +9436,7 @@ impl VolcengineStreamingASR {
             st.last_server_response_at = None;
             st.bytes_sent_since_response = 0;
             st.post_response_gap_logged = false;
-            st.target_speaker_id = None;
+            st.target_speaker_id = self.cloud_owner.lock().as_ref().map(|owner| owner.speaker_name.clone());
             st.target_speech_end_ms = None;
             st.wake_target_speech_end_ms = None;
             st.stable_attributed_speech_end_ms = None;
@@ -7529,6 +9460,8 @@ impl VolcengineStreamingASR {
             st.local_preview_foreign_hint_end_ms = None;
             st.local_owner_handoff_suspected = false;
             st.local_owner_handoff_recovery_targets = 0;
+            st.local_owner_handoff_recovery_ranges.clear();
+            st.local_owner_handoff_recovery_last_range = None;
             st.local_consecutive_strong_non_target = 0;
             st.local_owner_absence_run_started_ms = None;
             st.local_owner_absence_run_confirmed = false;
@@ -7583,6 +9516,10 @@ impl VolcengineStreamingASR {
                 let Some(asr) = failed_delivery.upgrade() else {
                     break;
                 };
+                if asr.managed_cloud && !asr.managed_account_is_current() {
+                    asr.cancel();
+                    break;
+                }
                 // Claim the source before the first await. Cancellation only
                 // abandons entries that remain queued; the claimed frame owns
                 // its eventual success/failure settlement in this worker.
@@ -7700,6 +9637,8 @@ impl VolcengineStreamingASR {
                 };
                 match msg {
                     Some(Ok(Message::Binary(data))) => {
+                        #[cfg(target_os = "windows")]
+                        this.prepare_native_word_identity(&data).await;
                         if !this.handle_frame(&data) {
                             break;
                         }
@@ -7746,10 +9685,16 @@ impl VolcengineStreamingASR {
             }
         });
 
+        {
+            let mut snapshot = self.source_snapshot.lock();
+            snapshot.parent_stream_id = Some(self.asr_stream_id());
+            snapshot.closed = false;
+        }
         Ok(())
     }
 
     pub async fn send_last_frame(&self) -> Result<(), VolcengineASRError> {
+        self.seal_source_snapshot();
         let result = self.final_frame_result
             .get_or_init(|| self.send_last_frame_once())
             .await
@@ -8100,6 +10045,16 @@ impl VolcengineStreamingASR {
         if self.live_transcript_source().0 != crate::speech_decision_kernel::LiveTranscriptAuthority::Primary {
             return None;
         }
+        {
+            let st = self.state.lock();
+            if !st.finishing || st.best_transcript_text.trim().is_empty() {
+                // An eligibility probe before finishing must not revoke or
+                // refresh delivery stability while no final is being sealed.
+                return None;
+            }
+        }
+        let selected = self.selected_live_owner_candidate()?;
+        let confirmed = selected.confirmed_owner_prefix()?;
         let st = self.state.lock();
         if !st.finishing || st.owner_isolation_frozen || st.local_non_target_speech_end_ms.is_some()
         {
@@ -8109,11 +10064,17 @@ impl VolcengineStreamingASR {
         if st.best_transcript_text.trim().is_empty() {
             return None;
         }
-        if st.local_speaker_tracking_enabled && st.live_owner_delivery.as_ref().is_none_or(|candidate|
-            crate::transcript_boundary::content_key(&candidate.text)
-                != crate::transcript_boundary::content_key(&st.best_transcript_text)) {
-            // A stable raw preview cannot cancel attribution/finalization of
-            // the audio whose irreversible delivery is still pending.
+        let full_key = crate::transcript_boundary::content_key(&st.best_transcript_text);
+        if crate::transcript_boundary::content_key(&selected.text) != full_key
+            || crate::transcript_boundary::content_key(confirmed) != full_key
+            || selected.stability_source.decoder != self.asr_stream_id()
+            || selected.stability_source.generation != st.owner_delivery_generation
+            || selected.updated_at.elapsed() < min_stable
+            || st.pause_early_stability_floor.is_some_and(|at| at.elapsed() < min_stable)
+        {
+            // Early finalization requires the whole same-source owner and
+            // recognition prefix. Neither equality with the provider ledger
+            // nor its old text age may fill an unresolved ownership hole.
             return None;
         }
         let pending_key = crate::transcript_boundary::content_key(&st.pending_unattributed_text);
@@ -8167,45 +10128,261 @@ impl VolcengineStreamingASR {
         self.pause_early_delivery_ledger_snapshot_after(min_stable, "")
     }
 
+    pub(crate) fn revisable_owner_snapshot(&self) -> Option<RevisableOwnerSnapshot> {
+        let capture_stream_id = self.asr_stream_id();
+        let (capture_generation, lifecycle_generation) = {
+            let slot = self.source_snapshot.lock();
+            if slot.closed { return None; }
+            (slot.capture_generation, slot.lifecycle_generation)
+        };
+        let selected = self.selected_live_owner_candidate()?;
+        if selected.owner_permission == LiveOwnerPermission::Unobserved
+            || selected.text.trim().is_empty() { return None; }
+        let state = self.state.lock();
+        if state.finishing || !state.is_connected || state.owner_isolation_frozen {
+            return None;
+        }
+        // Source-projected ownership retains its existing maturity contract.
+        // Reversible input does not turn an absent identity into owner proof.
+        if selected.owner_permission == LiveOwnerPermission::SourceProjection
+            && selected.updated_at.elapsed() < Duration::from_millis(1_000) {
+            return None;
+        }
+        let slot = self.source_snapshot.lock();
+        if slot.closed || slot.capture_generation != capture_generation
+            || slot.lifecycle_generation != lifecycle_generation
+            || self.asr_stream_id() != capture_stream_id { return None; }
+        Some(RevisableOwnerSnapshot {
+            text: selected.text,
+            source: LiveDeliverySource { capture_stream_id, capture_generation,
+                decoder_stream_id: selected.stability_source.decoder,
+                owner_generation: selected.stability_source.generation },
+        })
+    }
+
+    /// Approved body still waiting for native recognition or live delivery.
+    /// This read must not prune the rolling stability history or borrow raw
+    /// preview text. Native finality remains an explicit unresolved obligation.
+    pub(crate) fn pending_body_delivery_after(&self, consumed_source_key: &str) -> Option<PendingBodyDelivery> {
+        use crate::transcript_boundary::{content_key, consumed_prefix_end};
+        let selected = self.selected_live_owner_candidate()?;
+        if selected.owner_permission == LiveOwnerPermission::Unobserved {
+            // Fresh raw words are not an Owner settling hold. Unresolved audio
+            // is protected separately by bounded VAD/identity-analysis guards.
+            return None;
+        }
+        let recognition_pending = selected.recognition_requires_confirmation
+            && selected.confirmed_owner_prefix().is_none_or(|confirmed|
+                content_key(confirmed) != content_key(&selected.text));
+        let (text, at) = (selected.text, selected.updated_at);
+        let st = self.state.lock();
+        let mut key = content_key(&text);
+        let phrase = content_key(st.wake_speaker_phrase.as_deref().unwrap_or_default());
+        if !phrase.is_empty() && key.starts_with(&phrase) {
+            let body_key = &key[phrase.len()..];
+            let consumed_matches_full = consumed_prefix_end(&key, consumed_source_key).is_some();
+            let consumed_matches_body = consumed_prefix_end(body_key, consumed_source_key).is_some();
+            // The candidate already passed the selected authority's owner gate.
+            // Normalize only its control-prefix coordinate: coordinator source
+            // keys omit the accepted leading wake, while an IndependentOwner
+            // recursion may deliberately pass phrase+body. A later literal
+            // wake phrase remains inside `body_key` and is never stripped again.
+            if consumed_source_key.is_empty()
+                || (!consumed_matches_full && consumed_matches_body)
+            {
+                key = body_key.to_string();
+            }
+        }
+        if key.is_empty() { return None; }
+        let end = consumed_prefix_end(&key, consumed_source_key)?;
+        let remaining = &key[end..];
+        (!remaining.is_empty()).then(|| PendingBodyDelivery {
+            key: remaining.to_string(), updated_at: at, recognition_pending,
+        })
+    }
+
+    /// Read the same admitted source using its committed raw/audio occurrence.
+    /// A provider revision of already delivered words cannot erase a newer
+    /// obligation. Unmappable admitted content remains pending; missing source
+    /// correspondence is not proof that the body has already been consumed.
+    pub(crate) fn pending_body_delivery_from_consumption(
+        &self, consumed: &LiveBodyConsumption,
+    ) -> Option<PendingBodyDelivery> {
+        self.pending_body_delivery_from_consumption_impl(consumed, true)
+    }
+
+    fn pending_body_delivery_from_consumption_impl(
+        &self, consumed: &LiveBodyConsumption, resolve_draft_source: bool,
+    ) -> Option<PendingBodyDelivery> {
+        #[cfg(not(target_os = "windows"))]
+        let _ = resolve_draft_source;
+        use crate::transcript_boundary::{content_key, consumed_prefix_end};
+        let capture_stream_id = self.asr_stream_id();
+        let binding = {
+            let slot = self.source_snapshot.lock();
+            if slot.closed { return None; }
+            (slot.capture_generation, slot.lifecycle_generation)
+        };
+        if consumed.source.capture_stream_id != capture_stream_id
+            || consumed.source.capture_generation != binding.0 { return None; }
+        let primary = self.selected_live_owner_candidate()?;
+        let selected = self.source_snapshot_delivery_candidate(&primary).unwrap_or(primary);
+        if selected.owner_permission == LiveOwnerPermission::Unobserved { return None; }
+        {
+            let slot = self.source_snapshot.lock();
+            if slot.closed || (slot.capture_generation, slot.lifecycle_generation) != binding
+                || self.asr_stream_id() != capture_stream_id { return None; }
+        }
+        let current_key = content_key(&selected.text);
+        if current_key.is_empty() { return None; }
+        let remaining = if let Some(end) = consumed_prefix_end(&selected.text, &content_key(&consumed.raw_prefix)) {
+            content_key(&selected.text[end..])
+        } else if let Some(tail) = selected.timing.as_ref().zip(consumed.boundary.as_ref())
+            .and_then(|(timing, boundary)| timing.body_suffix_after_delivery(&selected.text, boundary)) {
+            content_key(tail)
+        } else {
+            // A complete same-source native partition wholly before the
+            // submitted PCM edge is only a revision of delivered speech.
+            let no_new_timed_words = selected.timing.as_ref().zip(consumed.boundary.as_ref())
+                .is_some_and(|(timing, boundary)| timing.native_word_view().is_some_and(|native|
+                    content_key(&native.text) == current_key
+                        && native.words.last().and_then(|word| word.end_ms)
+                            .is_some_and(|end| end <= boundary.range_ms().1)));
+            if no_new_timed_words { return None; }
+            current_key.clone()
+        };
+        if remaining.is_empty() { return None; }
+        let recognition_pending = selected.recognition_requires_confirmation
+            && selected.confirmed_owner_prefix().is_none_or(|confirmed| content_key(confirmed) != current_key);
+        // Ordinary text admission preserves uncertain speech; it is not proof
+        // that a newly unconfirmed suffix belongs to the owner. Only that exact
+        // suffix's independently qualified audio may resolve its obligation.
+        #[cfg(target_os = "windows")]
+        if resolve_draft_source && recognition_pending && self.pending_suffix_is_confirmed_other(&selected, &remaining, consumed, binding) {
+            return None;
+        }
+        Some(PendingBodyDelivery { key: remaining, updated_at: selected.updated_at, recognition_pending })
+    }
+
+    #[cfg(target_os = "windows")]
+    fn pending_suffix_is_confirmed_other(&self, selected: &SelectedLiveOwnerCandidate, remaining: &str,
+        consumed: &LiveBodyConsumption, binding: (u64, u64)) -> bool {
+        use crate::transcript_boundary::content_key;
+        if !self.owner_activity_only || selected.owner_permission != LiveOwnerPermission::Admitted
+            || !matches!(selected.branch, "live_owner_delivery" | "best_transcript") {
+            return false;
+        }
+        let Some(timing) = selected.timing.as_ref().filter(|timing| content_key(&timing.text) == content_key(&selected.text)) else { return false; };
+        let Some(suffix) = consumed.boundary.as_ref().and_then(|boundary| timing.timed_suffix_after_delivery(boundary)) else { return false; };
+        if content_key(&suffix.text) != remaining { return false; }
+        let Some(native) = suffix.native_word_view() else { return false; };
+        let Some((start, end)) = native.words.first().and_then(|first| first.start_ms)
+            .zip(native.words.last().and_then(|last| last.end_ms)) else { return false; };
+        if end.saturating_sub(start) < crate::speaker_verification::SESSION_SPEAKER_MIN_NON_TARGET_MS as u64
+            || end.saturating_sub(start) > denzic_speaker_verification_v1_core::DEFAULT_MAX_CANDIDATE_MS as u64 { return false; }
+        // Re-read current detector coverage on every query: a later rolling
+        // positive at these original coordinates must revoke a cached negative.
+        let raw = {
+            let slot = self.personal_vad.lock();
+            let Some(stream) = slot.as_ref() else { return false; };
+            stream.raw_activity_timeline()
+        };
+        if !super::volcengine_native_identity::detector_observed_without_owner(&raw, start, end) { return false; }
+        let phrase = self.state.lock().wake_speaker_phrase.clone().unwrap_or_default();
+        let Ok(Some(profile)) = crate::speaker_verification::native_word_profile_for_phrase(&phrase) else { return false; };
+        // Reuse complete strong-grade worker evidence at these exact source
+        // coordinates. It is not the word tracker's coarse Other timeline.
+        let worker_other = self.personal_vad.lock().as_ref().is_some_and(|stream|
+            stream.endpoint_confirms_other(&phrase, profile.binding_key(), start, end));
+        if worker_other {
+            let slot = self.source_snapshot.lock();
+            return !slot.closed && (slot.capture_generation, slot.lifecycle_generation) == binding
+                && self.asr_stream_id() == consumed.source.capture_stream_id
+                && crate::speaker_verification::native_word_profile_is_current(&phrase, &profile);
+        }
+        let pcm = self.retained_pcm_snapshot();
+        let Some(source) = usize::try_from(start).ok().and_then(|start| start.checked_mul(32))
+            .zip(usize::try_from(end).ok().and_then(|end| end.checked_mul(32)))
+            .and_then(|(start,end)| pcm.get(start..end)) else { return false; };
+        let key = super::volcengine_pending_source::PendingSourceKey {
+            capture:self.asr_stream_id(), capture_generation:binding.0, lifecycle_generation:binding.1,
+            profile:profile.binding_key(), phrase, key:remaining.into(), start_ms:start, end_ms:end,
+        };
+        if !self.pending_source_identity.confirmed_other(key, source.to_vec(), profile) { return false; }
+        let slot = self.source_snapshot.lock();
+        !slot.closed && (slot.capture_generation, slot.lifecycle_generation) == binding
+            && self.asr_stream_id() == consumed.source.capture_stream_id
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_owner_delivery_after(&self, consumed_source_key: &str) -> Option<(String, Instant)> {
+        self.pending_body_delivery_after(consumed_source_key)
+            .map(|pending| (pending.key, pending.updated_at))
+    }
+
     pub fn pause_early_delivery_ledger_snapshot_after(
         &self,
         min_stable: Duration,
         consumed_source_key: &str,
     ) -> Option<RawTranscript> {
-        let authority = self.live_transcript_source();
-        let certified_provider = authority.0 == crate::speech_decision_kernel::LiveTranscriptAuthority::VerifiedProviderOwner;
-        match authority {
-            (crate::speech_decision_kernel::LiveTranscriptAuthority::OwnerEvidencePending, _) => return None,
-            (crate::speech_decision_kernel::LiveTranscriptAuthority::IndependentOwner, Some(owner)) => {
-                let mut provider_key = consumed_source_key.to_string();
-                let owner_text = owner.state.lock().best_transcript_text.clone();
-                if !provider_key.is_empty()
-                    && crate::transcript_boundary::consumed_prefix_end(&owner_text, &provider_key).is_none()
-                {
-                    if let Some(phrase) = self.state.lock().wake_speaker_phrase.as_deref() {
-                        provider_key = format!("{}{provider_key}", crate::transcript_boundary::content_key(phrase));
-                    }
-                }
-                return owner.pause_early_delivery_ledger_snapshot_after(min_stable, &provider_key);
-            }
-            (crate::speech_decision_kernel::LiveTranscriptAuthority::IndependentOwner, None) => return None,
-            (crate::speech_decision_kernel::LiveTranscriptAuthority::Primary, _) => {}
-            (crate::speech_decision_kernel::LiveTranscriptAuthority::VerifiedProviderOwner, _) => {}
-        }
+        self.pause_early_delivery_evidence_after(min_stable, consumed_source_key)
+            .map(|snapshot| RawTranscript { text: snapshot.text, duration_ms: snapshot.duration_ms })
+    }
+
+    pub(crate) fn pause_early_delivery_evidence_after(
+        &self,
+        min_stable: Duration,
+        consumed_source_key: &str,
+    ) -> Option<LiveDeliverySnapshot> {
+        let capture_generation = self.source_snapshot.lock().capture_generation;
+        let capture_stream_id = self.asr_stream_id();
+        let primary = self.selected_live_owner_candidate()?;
+        self.maybe_start_source_snapshot(&primary);
+        // Starting/cancelling a worker may legitimately change this value.
+        // Capture it afterwards, before cloning the selected child result.
+        let lifecycle_generation = self.source_snapshot.lock().lifecycle_generation;
+        let selected = self.source_snapshot_delivery_candidate(&primary).unwrap_or(primary);
+        self.delivery_evidence_from_selected(min_stable, consumed_source_key, selected,
+            (capture_stream_id, capture_generation, lifecycle_generation))
+    }
+
+    fn delivery_evidence_from_selected(
+        &self,
+        min_stable: Duration,
+        consumed_source_key: &str,
+        selected: SelectedLiveOwnerCandidate,
+        binding: (u64, u64, u64),
+    ) -> Option<LiveDeliverySnapshot> {
+        let (capture_stream_id, capture_generation, lifecycle_generation) = binding;
         let mut st = self.state.lock();
-        if st.owner_isolation_frozen && !certified_provider {
+        {
+            let slot = self.source_snapshot.lock();
+            if slot.closed || slot.lifecycle_generation != lifecycle_generation
+                || slot.capture_generation != capture_generation || self.asr_stream_id() != capture_stream_id {
+                return None;
+            }
+        }
+        if selected.owner_permission == LiveOwnerPermission::Unobserved {
+            // Preserve reversible preview, but neither elapsed time nor
+            // definite can grant speaker ownership or an Owner settling hold.
+            revoke_owner_delivery_stability(&mut st);
             return None;
         }
-        let (current, committed_at) = if certified_provider {
-            (st.verified_provider_owner.as_ref()?.text.clone(), st.verified_provider_owner_updated_at?)
-        } else if let Some(candidate) = st.live_owner_delivery.as_ref() {
-            (candidate.text.clone(), st.live_owner_delivery_updated_at?)
-        } else {
-            (st.best_transcript_text.clone(), st.best_transcript_committed_at?)
-        };
+        let confirmed_prefix = selected.confirmed_owner_prefix().map(str::to_string);
+        let certified_continuation = selected.certified_continuation;
+        let current = selected.text;
         if current.trim().is_empty() {
             return None;
         }
+        if st.pause_early_stability_source.is_some_and(|source| source != selected.stability_source) {
+            // A different decoder or permission generation must earn its own
+            // age, even when it happens to recognize identical words.
+            st.pause_early_recent_revisions.clear();
+            st.pause_early_stability_floor = Some(Instant::now());
+        }
+        st.pause_early_stability_source = Some(selected.stability_source);
+        let committed_at = st.pause_early_stability_floor
+            .map_or(selected.updated_at, |at| at.max(selected.updated_at));
         // The coordinator consumes body text after stripping automatic wake.
         // Include the explicit wake anchor only when that complete prefix is
         // present. Correction/filler transforms that cannot map exactly use
@@ -8218,16 +10395,36 @@ impl VolcengineStreamingASR {
                 provider_key = format!("{}{provider_key}", crate::transcript_boundary::content_key(phrase));
             }
         }
-        let stable_prefix = rolling_stable_transcript_prefix_after(
+        // Lexical stability and permission maturity are distinct. Definite
+        // words already have a provider stability certificate; only a fresh
+        // source/authority permission still needs a local maturity window.
+        let rolling_prefix = rolling_stable_transcript_prefix_after(
             &mut st.pause_early_recent_revisions,
             &current,
             committed_at,
             Instant::now(),
             min_stable,
             &provider_key,
-        )?;
+        );
+        let confirmed_prefix = confirmed_prefix?;
+        let confirmed_key = crate::transcript_boundary::content_key(&confirmed_prefix);
+        let stable_prefix = if selected.recognition_requires_confirmation
+            && selected.owner_permission == LiveOwnerPermission::Admitted
+        {
+            if st.pause_early_stability_floor.is_some_and(|at| at.elapsed() < min_stable) {
+                return None;
+            }
+            confirmed_prefix
+        } else {
+            // A newly projected owner range still earns permission age; the
+            // same decoder's recognition certificate alone cannot grant it.
+            crate::transcript_boundary::stable_content_prefix(
+                &rolling_prefix?, std::iter::once(confirmed_prefix.as_str()),
+            )
+        };
+        if stable_prefix.is_empty() { return None; }
         if stable_prefix.len() < current.len()
-            && !certified_provider
+            && !certified_continuation
             && st.local_speaker_tracking_enabled
             && (st.local_owner_handoff_suspected
                 || !matches!(
@@ -8248,10 +10445,180 @@ impl VolcengineStreamingASR {
             .max()
             .and_then(|end_ms| u64::try_from(end_ms).ok())
             .unwrap_or_else(|| (st.bytes_sent as f64 / BYTES_PER_MS) as u64);
-        Some(RawTranscript {
+        let slot = self.source_snapshot.lock();
+        if slot.closed || slot.lifecycle_generation != lifecycle_generation
+            || slot.capture_generation != capture_generation || self.asr_stream_id() != capture_stream_id {
+            return None;
+        }
+        let timing = selected.timing.as_ref().and_then(|timing| {
+            // Even an equal-looking rendering from a different state slot
+            // must never fill missing coordinates. Whole-token clipping is
+            // deliberately conservative when stability stops inside a word.
+            let mut timing = snapshot_timed_prefix(timing, &crate::transcript_boundary::content_key(&stable_prefix))?;
+            timing.text = stable_prefix.clone();
+            Some(LiveDeliveryTiming {
+                timing,
+                source: LiveDeliverySource {
+                    capture_stream_id, capture_generation,
+                    decoder_stream_id: selected.stability_source.decoder,
+                    owner_generation: selected.stability_source.generation,
+                },
+            })
+        });
+        Some(LiveDeliverySnapshot {
+            source: LiveDeliverySource { capture_stream_id, capture_generation,
+                decoder_stream_id: selected.stability_source.decoder,
+                owner_generation: selected.stability_source.generation },
+            stability: if selected.recognition_requires_confirmation
+                && (crate::transcript_boundary::content_key(&stable_prefix) == confirmed_key
+                    || timing.is_some())
+            {
+                // A permission-aged prefix must still end at either the exact
+                // confirmed rendering or a complete confirmed timed word.
+                LiveDeliveryStability::ProviderConfirmed
+            } else {
+                LiveDeliveryStability::RollingStable
+            },
             text: stable_prefix,
             duration_ms,
+            timing,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn diagnostic_provider_responses(&self) -> Vec<Value> {
+        self.state.lock().diagnostic_provider_responses.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn apply_saved_native_result_for_test(&self, result: &Value, final_frame: bool) {
+        // The native editor regression supplies recorded provider data. It
+        // opens no socket and runs no audio/identity model.
+        self.state.lock().is_connected = true;
+        let packet = frame::build(MessageType::FullServerResponse,
+            if final_frame { Flags::LastPacket } else { Flags::None }, Serialization::Json,
+            &serde_json::to_vec(&json!({"result":result})).unwrap(), None);
+        let _ = self.handle_frame(&packet);
+    }
+
+    #[cfg(all(test, target_os = "windows"))]
+    pub(crate) fn install_native_word_identity_for_test(&self, identity: super::volcengine_native_identity::NativeWordIdentity) {
+        *self.native_word_identity.lock() = identity;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn apply_saved_native_result_with_local_timeline_for_test(
+        &self, result: &Value, final_frame: bool,
+        timeline: &super::volcengine_speaker_ledger::LocalSpeakerTimeline,
+    ) -> Option<RawTranscript> {
+        let final_rx = final_frame.then(|| {
+            let (tx, rx) = oneshot::channel();
+            let mut state = self.state.lock();
+            state.finishing = true;
+            state.final_tx = Some(tx);
+            rx
+        });
+        *self.saved_local_timeline_for_test.lock() = Some(timeline.clone());
+        self.apply_saved_native_result_for_test(result, final_frame);
+        *self.saved_local_timeline_for_test.lock() = None;
+        final_rx.map(|mut rx| rx.try_recv().expect("protocol final resolves its receiver")
+            .expect("recorded protocol final succeeds"))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pause_early_delivery_snapshot_diagnostics(
+        &self,
+        consumed_source_key: &str,
+    ) -> Value {
+        use crate::transcript_boundary::{content_key, consumed_prefix_end};
+        let authority = self.live_transcript_source().0;
+        let selected = self.selected_live_owner_candidate();
+        let snapshot_delivery = selected.as_ref().and_then(|primary|self.source_snapshot_delivery_candidate(primary));
+        let source_snapshot = self.source_snapshot_diagnostics();
+        let source_evidence = Some(self.source_owner_evidence_snapshot());
+        let st = self.state.lock();
+        let selected_branch = selected.as_ref().map(|value| value.branch).unwrap_or("none");
+        let source_stability_matches = selected_branch == "source_owner_projection";
+        let current_updated_at = selected.as_ref().map(|value| value.updated_at);
+        let confirmed_prefix = selected.as_ref().and_then(|value| value.recognition_confirmed_prefix.clone());
+        let recognition_requires_confirmation = selected.as_ref().map(|value| value.recognition_requires_confirmation);
+        let owner_permission = selected.as_ref().map(|value| format!("{:?}", value.owner_permission));
+        let selected_stability_source = selected.as_ref().map(|value| value.stability_source);
+        let current = selected.map(|value| value.text).unwrap_or_default();
+        let mut provider_key = consumed_source_key.to_string();
+        let consumed_matches_current = consumed_prefix_end(&current, consumed_source_key).is_some();
+        if !provider_key.is_empty() && !consumed_matches_current {
+            if let Some(phrase) = st.wake_speaker_phrase.as_deref() {
+                provider_key = format!("{}{provider_key}", content_key(phrase));
+            }
+        }
+        let revision_seams = st.pause_early_recent_revisions.iter().map(|(at, text)| {
+            json!({
+                "age_ms": at.elapsed().as_millis(),
+                "chars": text.chars().count(),
+                "key_chars": content_key(text).chars().count(),
+                "consumed_end": consumed_prefix_end(text, &provider_key),
+            })
+        }).collect::<Vec<_>>();
+        let (source_owner_ranges, physical_interference_ranges, source_updated_at) =
+            source_evidence.unwrap_or_default();
+        let mut diagnostics = json!({
+            "authority": format!("{authority:?}"),
+            "selected_branch": selected_branch,
+            "selected_text": current,
+            "selected_chars": current.chars().count(),
+            "selected_age_ms": current_updated_at.map(|at| at.elapsed().as_millis()),
+            "recognition_requires_confirmation": recognition_requires_confirmation,
+            "owner_permission": owner_permission,
+            "recognition_confirmed_prefix": confirmed_prefix,
+            "recognition_confirmed_chars": confirmed_prefix.as_ref().map(|text| text.chars().count()),
+            "selected_decoder": selected_stability_source.map(|source| source.decoder),
+            "selected_authority_generation": selected_stability_source.map(|source| source.generation),
+            "stability_floor_age_ms": st.pause_early_stability_floor.map(|at| at.elapsed().as_millis()),
+            "best_text": st.best_transcript_text,
+            "best_chars": st.best_transcript_text.chars().count(),
+            "best_age_ms": st.best_transcript_committed_at.map(|at| at.elapsed().as_millis()),
+            "live_text": st.live_owner_delivery.as_ref().map(|value| value.text.clone()),
+            "live_chars": st.live_owner_delivery.as_ref().map(|value| value.text.chars().count()),
+            "live_age_ms": st.live_owner_delivery_updated_at.map(|at| at.elapsed().as_millis()),
+            "source_text": source_stability_matches.then_some(&current),
+            "source_chars": source_stability_matches.then_some(current.chars().count()),
+            "source_stability_matches": source_stability_matches,
+            "source_age_ms": source_updated_at.map(|at| at.elapsed().as_millis()),
+            "provider_timing_chars": st.provider_timed_transcript.as_ref().map(|value| value.text.chars().count()),
+            "provider_timing_words": st.provider_timed_transcript.as_ref().map(|value| value.words.len()),
+            "live_timing_chars": st.live_owner_delivery_timing.as_ref().map(|value| value.text.chars().count()),
+            "live_timing_words": st.live_owner_delivery_timing.as_ref().map(|value| value.words.len()),
+            "live_timing_end_ms": st.live_owner_delivery_timing.as_ref()
+                .and_then(|value| value.words.iter().filter_map(|word| word.end_ms).max()),
+            "speaker_filtered_timing_chars": st.speaker_filtered_timed_transcript.as_ref().map(|value| value.text.chars().count()),
+            "speaker_filtered_timing_words": st.speaker_filtered_timed_transcript.as_ref().map(|value| value.words.len()),
+            "speaker_filtered_timing_end_ms": st.speaker_filtered_timed_transcript.as_ref()
+                .and_then(|value| value.words.iter().filter_map(|word| word.end_ms).max()),
+            "provider_timing_end_ms": st.provider_timed_transcript.as_ref()
+                .and_then(|value| value.words.iter().filter_map(|word| word.end_ms).max()),
+            "local_owner_ranges": st.local_owner_pcm_intervals,
+            "source_owner_ranges": source_owner_ranges,
+            "physical_interference_ranges": physical_interference_ranges,
+            "provider_foreign_ranges": st.provider_non_owner_audio_ranges,
+            "provider_distinct_foreign_ranges": st.provider_distinct_foreign_audio_ranges,
+            "consumed_source_key": consumed_source_key,
+            "provider_key": provider_key,
+            "consumed_matches_current": consumed_matches_current,
+            "revision_seams": revision_seams,
+        });
+        diagnostics["source_snapshot"] = source_snapshot;
+        diagnostics["sealed_native"] = json!({
+            "text": st.sealed_native_word_timing.as_ref().map(|value| &value.text),
+            "words": st.sealed_native_word_timing.as_ref().map(|value| value.words.len()),
+            "valid_word_view": st.sealed_native_word_timing.as_ref().map(|value| value.native_word_view().is_some()),
+        });
+        diagnostics["snapshot_delivery_text"] = json!(snapshot_delivery.as_ref().map(|candidate| &candidate.text));
+        diagnostics["snapshot_delivery_age_ms"] = json!(snapshot_delivery.as_ref().map(|candidate| candidate.updated_at.elapsed().as_millis()));
+        diagnostics["retained_pcm_bytes"] = json!(self.retained_pcm.lock().len());
+        diagnostics["destination_bytes"] = json!(st.next_input_destination_offset);
+        diagnostics["destination_ledger_incomplete"] = json!(st.destination_ledger_incomplete);
+        diagnostics
     }
 
     /// Persistent pause-early blocker reason for gate diagnostics. `None`
@@ -8347,14 +10714,15 @@ impl VolcengineStreamingASR {
     }
 
     pub fn cancel(&self) {
+        self.seal_source_snapshot();
         #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
         if let Some(stream) = self.target_speaker_stream.lock().take() {
             stream.cancel();
         }
         #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-        if let Some((stream, task)) = self.target_speaker_final_task.lock().take() {
-            stream.cancel();
-            task.abort();
+        if let Some(pending) = self.target_speaker_final_task.lock().take() {
+            pending.stream.cancel();
+            pending.task.abort();
         }
         let (runtime, pending_audio) = {
             // Do not remove queued source entries here. The worker owns the
@@ -8495,6 +10863,10 @@ impl VolcengineStreamingASR {
             "ssd_version": "200",
             "result_type": self.session_options.result_type.as_str(),
         });
+        if let Some(profile) = self.cloud_owner.lock().as_ref() {
+            request["ssd_mode"] = json!(2);
+            request["voiceprints"] = json!([{ "id": profile.id }]);
+        }
         if let Some(end_window_size_ms) = self.session_options.end_window_size_ms {
             request["end_window_size"] = Value::from(end_window_size_ms);
         }
@@ -8532,6 +10904,7 @@ impl VolcengineStreamingASR {
 
     /// Returns `false` once the session has terminated (caller should stop reading).
     fn handle_frame(&self, data: &[u8]) -> bool {
+        if self.managed_cloud && !self.managed_account_is_current() { self.cancel();return false; }
         let Some(parsed) = frame::parse(data) else {
             log::error!("[asr] 帧解析失败 raw={}", hex_prefix(data, 32));
             return true;
@@ -8583,15 +10956,40 @@ impl VolcengineStreamingASR {
                     .max(duration_ms),
             );
         }
-        let Some(result) = normalized_result(&json) else {
+        let Some(raw_result) = normalized_result(&json) else {
             return true;
         };
+        let reconciled_result = {
+            let state = self.state.lock();
+            super::volcengine_transcript::reconcile_missing_row_renderings(
+                raw_result, state.latest_visual_provider_result.as_ref(),
+            )
+        };
+        let result = reconciled_result.as_ref();
+        let local_timeline = {
+            #[cfg(target_os = "windows")]
+            { self.personal_vad.lock().as_ref().map(|stream| stream.speaker_timeline()).unwrap_or_default() }
+            #[cfg(not(target_os = "windows"))]
+            { super::volcengine_speaker_ledger::LocalSpeakerTimeline::default() }
+        };
+        #[cfg(test)]
+        let local_timeline = self.saved_local_timeline_for_test.lock().clone().unwrap_or(local_timeline);
 
         // Install raw word coordinates before either preview callback runs.
         // Ownership filtering keeps its original provider input unchanged.
-        self.state.lock().provider_timed_transcript = Some(
-            super::volcengine_transcript::timed_transcript_from_result(result),
-        );
+        {
+            let mut state = self.state.lock();
+            // The old word certificate is required: installing the new empty
+            // row first would lose the distinction between provisional speech,
+            // confirmed speech, and an occurrence never observed at all.
+            if apply_explicit_empty_source_revision(&mut state, result, &local_timeline) {
+                log::info!("[asr] explicit empty source revision retracted provisional occurrences from session caches");
+            }
+            state.provider_timed_transcript = Some(
+                super::volcengine_transcript::timed_transcript_from_result(result),
+            );
+            state.recognition_boundary.update(result);
+        }
 
         #[cfg(test)]
         self.state
@@ -8600,16 +10998,24 @@ impl VolcengineStreamingASR {
             .push(json.clone());
 
         let has_final = parsed.is_final();
+        self.state.lock().latest_visual_provider_result = (!has_final).then(|| result.clone());
         let trace_frame = self.state.lock().response_frames_seen;
         self.record_diagnostic_trace(
             trace_frame,
             has_final,
             "provider_raw_result",
-            result
+            raw_result
                 .get("text")
                 .and_then(Value::as_str)
                 .unwrap_or_default(),
         );
+        if self.diagnostic_trace_enabled && matches!(reconciled_result, std::borrow::Cow::Owned(_)) {
+            if let Some(entry) = self.diagnostic_trace.lock().back_mut() {
+                if raw_result.to_string().len() <= 64 * 1024 {
+                    entry.provider_result = Some(raw_result.clone());
+                }
+            }
+        }
         self.record_diagnostic_trace(
             trace_frame,
             has_final,
@@ -8641,6 +11047,24 @@ impl VolcengineStreamingASR {
                 has_final,
             );
         }
+        if self.cloud_owner_enabled() {
+            return self.process_cloud_owner_result(result, has_final, trace_frame);
+        }
+        // Keep the exact provider rendering/coordinates for the existing
+        // private session trace. Text-only traces cannot distinguish a
+        // spelling revision from a new occurrence of the same sentence.
+        if self.diagnostic_trace_enabled {
+            if let Some(entry) = self.diagnostic_trace.lock().back_mut().filter(|entry|
+                entry.frame == trace_frame && entry.stage == "normalized_result")
+            {
+                if result.to_string().len() <= 64 * 1024 { entry.provider_result = Some(result.clone()); }
+            }
+        }
+        let mut ordinary_source_revision: Option<(String, Vec<TranscriptSegment>)> = None;
+        // A current source exclusion can be in the middle of the response.
+        // This word permission must travel through live drafts as well as
+        // final arbitration; it is not endpoint/owner-absence evidence.
+        let mut ordinary_source_excluded = false;
         let (speaker_filtered_result, target_speaker_update, provisional_holds_endpoint) = {
             let mut state = self.state.lock();
             correlate_advisory_foreign_evidence(&mut state, result);
@@ -8662,7 +11086,73 @@ impl VolcengineStreamingASR {
                 .into_iter()
                 .chain(state.local_confirmed_transcript_non_target_end_ms)
                 .max();
-            let mut filtered = filter_result_to_target_speaker_with_local_evidence_and_anchor(
+            let mut filtered = if self.owner_activity_only {
+                #[cfg(target_os = "windows")]
+                {
+                    let mut native = self.native_word_identity.lock().clone();
+                    native.invalidate_if_profile_changed();
+                    // Word projection cannot promote this whole recording to
+                    // a stricter owner-only delivery source. Unknown own words
+                    // retain the established ordinary-ASR admission contract.
+                    state.conservative_speaker_ledger.set_native_word_identity(native);
+                }
+                let old_text = state.best_transcript_text.clone();
+                let projection = match self.session_options.result_type {
+                    VolcengineResultType::Full => state.conservative_speaker_ledger.project_full_capture(result, &local_timeline, &old_text),
+                    VolcengineResultType::Single => state.conservative_speaker_ledger.project(result, &local_timeline, &old_text),
+                };
+                if projection.revised_ledger.is_some() {
+                    state.recognition_boundary.update(&projection.result);
+                }
+                ordinary_source_excluded = projection.excluded_rows > 0;
+                if self.diagnostic_trace_enabled {
+                    if let Some(entry) = self.diagnostic_trace.lock().back_mut().filter(|entry|
+                        entry.frame == trace_frame && entry.stage == "normalized_result")
+                    { entry.speaker_projection = Some(serde_json::json!({
+                        "speaker_ids": projection.speaker_ids, "owner_id": projection.owner_id,
+                        "owner_ids": projection.owner_ids,
+                        "activity_protected_ids": projection.activity_protected_ids,
+                        "coordinates_aligned": projection.coordinates_aligned,
+                        "excluded_rows": projection.excluded_rows,
+                        "source_revision": projection.revised_ledger.is_some(),
+                        "native_word_identity": state.conservative_speaker_ledger.native_word_identity_diagnostics(),
+                        "local_identity_newest_first": local_timeline.identity.iter().rev().take(24)
+                            .map(|span| serde_json::json!([span.start_ms, span.end_ms, format!("{:?}", span.kind)]))
+                            .collect::<Vec<_>>(),
+                        "local_presence_newest_first": local_timeline.presence.iter().rev().take(24)
+                            .map(|span| serde_json::json!([span.start_ms, span.end_ms, format!("{:?}", span.kind)]))
+                            .collect::<Vec<_>>(),
+                    })); }
+                }
+                if has_final || projection.excluded_rows > 0 {
+                    log::info!("[speaker-tail] ids={:?} owner={:?} aligned={} excluded_rows={} source_revision={}",
+                        projection.speaker_ids, projection.owner_id, projection.coordinates_aligned,
+                        projection.excluded_rows, projection.revised_ledger.is_some());
+                }
+                if let Some(text) = projection.revised_ledger {
+                    let incoming = transcript_candidate_from_result(&projection.result).timed_segments;
+                    let mut segments: Vec<_> = state.best_transcript_segments.iter().filter(|old|
+                        !incoming.iter().any(|new| old.end_ms.zip(new.end_ms).is_some_and(|(old_end,new_end)|
+                            old.start_ms < new_end && new.start_ms < old_end)))
+                        .cloned().collect();
+                    segments.extend(incoming);
+                    segments.sort_by_key(|segment| segment.start_ms);
+                    // Both final arbitration and preview consume this same
+                    // revised occurrence. The old longer view is no authority.
+                    if state.best_transcript_text != text {
+                        state.best_transcript_committed_at = Some(Instant::now());
+                    }
+                    state.best_transcript_text = text.clone();
+                    state.best_transcript_segments = segments.clone();
+                    state.best_transcript_timing = None;
+                    state.optimistic_preview_text = text.clone();
+                    state.optimistic_preview_segments = segments.clone();
+                    state.optimistic_untimed_window = projection.result.get("text")
+                        .and_then(Value::as_str).unwrap_or_default().to_string();
+                    ordinary_source_revision = Some((text, segments));
+                }
+                all_source_dictation_result(&projection.result)
+            } else { filter_result_to_target_speaker_with_local_evidence_and_anchor(
                 result,
                 &mut state.target_speaker_id,
                 local_speaker_tracking_enabled,
@@ -8673,7 +11163,7 @@ impl VolcengineStreamingASR {
                 local_speaker_profile_adaptive,
                 confirmed_non_target_speech_end_ms,
                 confirmed_foreign_hint_end_ms,
-            );
+            ) };
             recover_locally_supported_owner_prefix(&state, result, &mut filtered);
             speaker_partition::preserve_source_partition(&mut state, result, &mut filtered);
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -8683,21 +11173,37 @@ impl VolcengineStreamingASR {
             if let Some(wake_end_ms) = filtered.wake_target_speech_end_ms {
                 state.wake_target_speech_end_ms = Some(wake_end_ms);
             }
-            let verified_owner = verified_provider_owner_candidate(&state, &filtered, result, has_final);
+            state.speaker_filtered_timed_transcript = Some(
+                super::volcengine_transcript::timed_transcript_from_result(&filtered.result),
+            );
+            let mut verified_owner = verified_provider_owner_candidate(&state, &filtered, result, has_final);
+            let mut verified_timing = verified_owner.as_ref().and_then(|candidate| {
+                let timing = super::volcengine_transcript::timed_transcript_from_result(&filtered.result);
+                (crate::transcript_boundary::content_key(&timing.text)
+                    == crate::transcript_boundary::content_key(&candidate.text)).then_some(timing)
+            });
+            if has_final {
+                // The provisional owner candidate is another possible final
+                // authority. Normalize it with its own occurrence too, so it
+                // cannot reintroduce an echo removed from the primary seal.
+                verified_timing = verified_owner.as_mut().zip(verified_timing.as_ref())
+                    .and_then(|(candidate,timing)| {
+                        let normalized = source_owner_final_recovery_candidate(&candidate.text,timing)?;
+                        candidate.text = normalized.text.clone();
+                        candidate.duration_ms = normalized.words.iter().filter_map(|word| word.end_ms).max().unwrap_or_default();
+                        Some(normalized)
+                    });
+            }
             if verified_owner.as_ref().map(|candidate| &candidate.text)
                 != state.verified_provider_owner.as_ref().map(|candidate| &candidate.text)
             {
                 state.verified_provider_owner_updated_at = verified_owner.as_ref().map(|_| Instant::now());
                 if let Some(candidate) = verified_owner.as_ref() {
-                    log::info!("[target-speaker] distinct provider owner certified chars={} final={has_final}", candidate.text.chars().count());
+                    log::info!("[target-speaker] distinct provider owner candidate chars={} final={has_final}", candidate.text.chars().count());
                 }
             }
             state.verified_provider_owner_is_final = has_final && verified_owner.is_some();
-            state.verified_provider_owner_timing = verified_owner.as_ref().and_then(|candidate| {
-                let timing = super::volcengine_transcript::timed_transcript_from_result(&filtered.result);
-                (crate::transcript_boundary::content_key(&timing.text)
-                    == crate::transcript_boundary::content_key(&candidate.text)).then_some(timing)
-            });
+            state.verified_provider_owner_timing = verified_timing;
             state.verified_provider_owner = verified_owner;
             if filtered.stable_non_target_utterance_present {
                 freeze_owner_isolation_at_filtered_result(&mut state, &filtered.result);
@@ -8854,6 +11360,7 @@ impl VolcengineStreamingASR {
             log::info!("[asr] later provider row excluded from raw preview by sustained local owner absence; preserving visible text");
         }
         let owner_safe_provider_split_preview = !has_final
+            && !ordinary_source_excluded
             && !provider_tail_excluded_from_preview
             && !speaker_filtered_result.stable_non_target_utterance_present
             && {
@@ -8867,6 +11374,21 @@ impl VolcengineStreamingASR {
             };
         let pending_unattributed_speech = owner_safe_provider_split_preview
             || !speaker_filtered_result.pending_unattributed_text.is_empty();
+        let confirmed_local_foreign_visual_partition = {
+            let state = self.state.lock();
+            confirmed_local_foreign_tail_requires_owner_visual(
+                &state,
+                result,
+                &speaker_filtered_result.optimistic_result,
+            )
+        };
+        if !has_final {
+            let correction = {
+                let mut state = self.state.lock();
+                reconcile_confirmed_foreign_visual(&mut state, result, &speaker_filtered_result.optimistic_result)
+            };
+            if let Some(correction) = correction { self.emit_visual_owner_partition(correction); }
+        }
         // A provider packet can first expose a safe target prefix while a
         // foreign/provisional tail is pending, then seal that tail as another
         // speaker. The target prefix is already in the protected session
@@ -8894,23 +11416,29 @@ impl VolcengineStreamingASR {
                 .to_string();
             let settled_preview = {
                 let mut state = self.state.lock();
-                // Dictation live preview follows the growing provider transcript.
-                // Sentence-level speaker rows must not retract it (69→19 swallow).
-                // Isolation is WeSep waveform extraction + owner clock.
+                // Unknown speaker rows keep the growing provider draft. Only
+                // the source ledger's exact revision may refine that draft;
+                // sentence speaker labels alone must not retract own words.
                 let filtered = if filtered_target_preview.trim().is_empty() {
                     state.best_transcript_text.clone()
                 } else {
                     filtered_target_preview
                 };
                 let visible_len = spoken_content_len(&state.last_emitted_preview_text);
-                // High priority: never retract shown owner text.
-                // Low priority G: if a stable other-speaker row is present,
-                // refuse to ADD that longer raw tail. Do not shrink.
-                let new_tail_is_foreign = provider_tail_excluded_from_preview
+                // Legacy speaker hints cannot shrink the protected draft.
+                // Exact current source exclusions share the ledger revision
+                // already used by committed snapshots and final arbitration.
+                let new_tail_is_foreign = state.verified_provider_owner.is_some()
+                    || confirmed_local_foreign_visual_partition
+                    || provider_tail_excluded_from_preview
                     || speaker_filtered_result.stable_non_target_utterance_present
                     || (speaker_filtered_result.stable_other_speaker_present
                         && local_owner_continuity(&state) == LocalOwnerContinuity::Other);
-                let best = if new_tail_is_foreign
+                let best = if ordinary_source_excluded {
+                    // The source ledger already rejected exact words in this
+                    // response. A longer provider draft cannot restore them.
+                    filtered
+                } else if new_tail_is_foreign
                     && spoken_content_len(&raw_provider_preview) > spoken_content_len(&filtered)
                 {
                     if spoken_content_len(&filtered) >= visible_len && !filtered.trim().is_empty() {
@@ -8928,7 +11456,8 @@ impl VolcengineStreamingASR {
                 let best_len = spoken_content_len(&best);
                 if !best.trim().is_empty()
                     && best != state.last_emitted_preview_text
-                    && best_len >= visible_len
+                    && (best_len >= visible_len
+                        || (ordinary_source_excluded && ordinary_source_revision.is_some()))
                 {
                     state.last_emitted_preview_text = best.clone();
                     state.partial_updates_seen += 1;
@@ -8977,9 +11506,24 @@ impl VolcengineStreamingASR {
         {
             let visual_preview = {
                 let mut state = self.state.lock();
+                // This certificate is recomputed (and cleared if absent) for
+                // every response above. A positively identified owner subset
+                // with a distinct foreign track is already partitioned data:
+                // the visual channel must not reintroduce the rejected raw
+                // track. Pending identity without that certificate retains
+                // the existing fast, reversible provider preview.
+                let visual_result = if ordinary_source_excluded {
+                    &speaker_filtered_result.optimistic_result
+                } else {
+                    response_visual_result(
+                        &state,
+                        result,
+                        &speaker_filtered_result.optimistic_result,
+                    )
+                };
                 display_only_provisional_preview_candidate(
                     &mut state,
-                    result,
+                    visual_result,
                     pending_unattributed_speech,
                 )
             };
@@ -9002,7 +11546,7 @@ impl VolcengineStreamingASR {
             // Use the existing owner-continuation exceptions as well as the
             // foreign veto. A cloud speaker-id split alone must not authorize
             // discarding a locally supported owner branch.
-            final_explicit_non_owner_tail(&state, &speaker_filtered_result, result)
+            (ordinary_source_excluded || final_explicit_non_owner_tail(&state, &speaker_filtered_result, result))
                 .then(|| transcript_candidate_from_result(result))
         };
         let mut accepted_live_owner_result = None;
@@ -9018,7 +11562,7 @@ impl VolcengineStreamingASR {
                 .endpoint
                 .emits_stream_preview_before_final()
         {
-            let optimistic_result = if owner_safe_provider_split_preview {
+            let optimistic_result = if owner_safe_provider_split_preview && !ordinary_source_excluded {
                     result
                 } else {
                     &speaker_filtered_result.optimistic_result
@@ -9033,14 +11577,15 @@ impl VolcengineStreamingASR {
                         optimistic_candidate.text.clone(),
                     )
                 });
-                let (mut merged, segments, untimed_window) =
-                    merge_optimistic_cumulative_view(
+                let (mut merged, segments, untimed_window) = if let Some((text, segments)) = &ordinary_source_revision {
+                    (text.clone(), segments.clone(), optimistic_candidate.text.clone())
+                } else { merge_optimistic_cumulative_view(
                         &state.optimistic_preview_text,
                         &state.optimistic_preview_segments,
                         &state.optimistic_untimed_window,
                         optimistic_candidate,
                         excluded_tail_provider_coverage.as_ref(),
-                    );
+                    ) };
                 merged = trim_repeated_short_streaming_tail(&merged);
                 // A rolling owner window may legitimately exceed the current
                 // provider packet. Preserve the exact inputs only when that
@@ -9178,9 +11723,14 @@ impl VolcengineStreamingASR {
                 .get("text")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            let explicit_non_owner_tail =
-                final_explicit_non_owner_tail(&state, &speaker_filtered_result, result);
+            // Ordinary projection owns its exclusion decision even when the
+            // protected track has no absolute owner identity. Carry that
+            // exact-source veto into the sole final arbiter; otherwise an old
+            // longer preview/ledger can resurrect the excluded occurrence.
+            let explicit_non_owner_tail = ordinary_source_excluded
+                || final_explicit_non_owner_tail(&state, &speaker_filtered_result, result);
             let provider_raw_recovery_safe = has_final
+                && !ordinary_source_excluded
                 && final_unfiltered_provider_recovery_allowed(
                     &state,
                     &speaker_filtered_result,
@@ -9199,6 +11749,7 @@ impl VolcengineStreamingASR {
                 );
             }
             let provider_owner_recovery_safe = has_final
+                && !ordinary_source_excluded
                 && (open_session_body_recovery
                     || (!speaker_filtered_result.stable_non_target_utterance_present
                         && (final_wake_only_provider_gap_is_owner_safe(&state, result, target_text)
@@ -9256,11 +11807,10 @@ impl VolcengineStreamingASR {
             // Propagate its foreign-tail veto to the coordinator before the
             // final oneshot resolves; otherwise product arbitration can see
             // `filter_required=false` and select the raw provider text again.
-            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             if explicit_non_owner_tail {
-                self.target_speaker_filter_required.store(
-                    target_speaker_filter_required_after_final(
-                        self.target_speaker_filter_required.load(Ordering::SeqCst),
+                self.source_filter_required.store(
+                    source_filter_required_after_projection(
+                        self.source_filter_required.load(Ordering::SeqCst),
                         true,
                     ),
                     Ordering::SeqCst,
@@ -9340,7 +11890,7 @@ impl VolcengineStreamingASR {
         // wake phrase. Live case 7f3955c2 (2026-09-22 10:08): provider 86 chars,
         // filtered 4 ("开始录音。") -> "没有识别到语音" after 18 s of dictation.
         // Deliver the provider text instead. Kill-switch env for rollout.
-        let arbitration_floor_applied = Self::arbitration_floor_should_override(
+        let arbitration_floor_applied = !ordinary_source_excluded && Self::arbitration_floor_should_override(
             &final_authority,
             self.state.lock().local_speaker_tracking_enabled,
             result
@@ -9431,7 +11981,13 @@ impl VolcengineStreamingASR {
         let candidate_before_stop_ceiling = candidate.text.clone();
         let mut stop_ceiling_applied = false;
         if has_final {
-            let state = self.state.lock();
+            let (source_owner_ranges, physical_interference_ranges, _) = self.source_owner_evidence_snapshot();
+            let mut state = self.state.lock();
+            state.pending_source_owner_final = selected_result
+                .map(super::volcengine_transcript::timed_transcript_from_result)
+                .or_else(|| state.best_transcript_timing.clone())
+                .and_then(|timing| source_owner_final_recovery_candidate(&candidate.text, &timing));
+            let final_timing = super::volcengine_transcript::timed_transcript_from_result(&speaker_filtered_result.result);
             if let Some(ceiling) = owner_preview_safety_ceiling(
                 &state,
                 &candidate.text,
@@ -9439,10 +11995,12 @@ impl VolcengineStreamingASR {
                 matches!(
                     final_authority,
                     crate::speech_decision_kernel::FinalTranscriptAuthority::SpeakerFiltered
-                ) && fully_attributed_owner_final(
+                ) && entire_candidate_has_source_owner_permission(
                     &state,
-                    result,
-                    &speaker_filtered_result.result,
+                    &candidate.text,
+                    Some(&final_timing),
+                    &source_owner_ranges,
+                    &physical_interference_ranges,
                 ),
             ) {
                 stop_ceiling_applied = true;
@@ -9540,6 +12098,18 @@ impl VolcengineStreamingASR {
                     candidate.timed_segments.clone(),
                     String::new(),
                 )
+            } else if let Some((text, segments)) = &ordinary_source_revision {
+                (text.clone(), segments.clone(), candidate.text.clone())
+            } else if candidate.authoritative_cumulative
+                && state.recognition_boundary.complete_rendering_matches(&candidate.text)
+                && super::volcengine_transcript::authoritative_segments_cover_previous(
+                    &state.best_transcript_segments, &candidate.timed_segments)
+            {
+                // Text and confirmation must describe this same response.
+                // Keeping the longer old hypothesis here left its timing
+                // incompatible with the new definite rows and withheld the
+                // corrected last clause until protocol-final STOP.
+                (candidate.text.clone(), candidate.timed_segments.clone(), String::new())
             } else {
                 merge_filtered_streaming_candidate_with_untimed_window(
                     &state.best_transcript_text,
@@ -9587,6 +12157,14 @@ impl VolcengineStreamingASR {
                     merged = trimmed;
                 }
             }
+            if has_final {
+                // The final arbiter can normalize/project the filtered result
+                // after the preview cache was installed. Bind the word view
+                // to that actual final result, not the earlier preview cache.
+                let native = super::volcengine_transcript::timed_transcript_from_result(&speaker_filtered_result.result);
+                state.sealed_native_word_timing = (crate::transcript_boundary::content_key(&native.text)
+                    == crate::transcript_boundary::content_key(&merged)).then_some(native);
+            }
             let changed = !merged.is_empty() && state.last_partial_text != merged;
             let spoken_content_changed = crate::transcript_boundary::content_key(&state.best_transcript_text)
                 != crate::transcript_boundary::content_key(&merged);
@@ -9596,6 +12174,15 @@ impl VolcengineStreamingASR {
                 }
                 state.best_transcript_text = merged.clone();
                 state.best_transcript_segments = segments;
+                let best_timing = [
+                    &state.speaker_filtered_timed_transcript,
+                    &state.provider_timed_transcript,
+                    &state.best_transcript_timing,
+                ].into_iter().flatten().find(|timing|
+                    crate::transcript_boundary::content_key(&timing.text)
+                        == crate::transcript_boundary::content_key(&merged)
+                ).cloned();
+                state.best_transcript_timing = best_timing;
                 state.last_partial_text = merged.clone();
             }
             // Never let an incomplete authoritative intermediate (or an
@@ -9814,12 +12401,13 @@ impl VolcengineStreamingASR {
     /// 服务端 close / 网络中断时调用：提交本轮会话账本里最长的已确认文本。
     fn fallback_to_partial_or_error(&self, err: VolcengineASRError) {
         let delivery_error = err.clone();
+        let cloud_owner_enabled = self.cloud_owner_enabled();
         let (commit, duration_ms) = {
             let mut st = self.state.lock();
-            let owner_candidate = session_committed_transcript(&st)
-                .map(|(text, _)| text)
-                .unwrap_or_default();
-            let allow_raw_fallback = provider_raw_fallback_allowed(&st);
+            let owner_candidate = if cloud_owner_enabled { st.best_transcript_text.clone() } else {
+                session_committed_transcript(&st).map(|(text, _)| text).unwrap_or_default()
+            };
+            let allow_raw_fallback = !cloud_owner_enabled && provider_raw_fallback_allowed(&st);
             let commit = st
                 .transcript_evidence
                 .commit_once(&owner_candidate, allow_raw_fallback);
@@ -10217,7 +12805,851 @@ fn hotword_context(entries: &[DictionaryHotword]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn revisable_editor_requires_current_owner_permission_and_capture_lifecycle() {
+        let asr = uplink_stall_test_asr();
+        {
+            let mut state = asr.state.lock();
+            state.is_connected = true;
+            state.best_transcript_text = "Only permitted words may enter the editor".into();
+            state.best_transcript_committed_at = Some(Instant::now());
+            state.local_speaker_tracking_enabled = true;
+        }
+        assert!(asr.revisable_owner_snapshot().is_none(), "unobserved raw speech is not an owner draft");
+        asr.state.lock().local_speaker_tracking_enabled = false;
+        assert!(asr.revisable_owner_snapshot().is_some(), "ordinary admitted mode can revise a draft");
+        asr.state.lock().finishing = true;
+        assert!(asr.revisable_owner_snapshot().is_none(), "finalization owns the editor after capture ends");
+        asr.state.lock().finishing = false;
+        asr.source_snapshot.lock().closed = true;
+        assert!(asr.revisable_owner_snapshot().is_none(), "closed capture cannot publish an old draft");
+    }
+
+    #[test]
+    #[ignore = "explicit saved native response archive; no audio capture, models or cloud requests"]
+    fn recorded_long_unconfirmed_clause_reaches_revisable_editor_before_confirmation() {
+        let root = std::path::PathBuf::from(std::env::var_os("LISTENER_REVISABLE_REPLAY").unwrap());
+        let archive: Value = serde_json::from_slice(&std::fs::read(root.join("source.asr-trace.json")).unwrap()).unwrap();
+        let asr = uplink_stall_test_asr().with_owner_activity_only(true);
+        asr.state.lock().is_connected = true;
+        let phrase = "开始录音";
+        let mut frames = Vec::new();
+        let mut first_revisable = None;
+        let mut first_confirmed = None;
+        for entry in archive["trace"]["entries"].as_array().unwrap().iter()
+            .filter(|entry| entry["stage"] == "normalized_result") {
+            let packet = frame::build(MessageType::FullServerResponse,
+                if entry["final_frame"] == true { Flags::LastPacket } else { Flags::None }, Serialization::Json,
+                &serde_json::to_vec(&json!({"result":entry["provider_result"]})).unwrap(), None);
+            let _ = asr.handle_frame(&packet);
+            let revisable = asr.revisable_owner_snapshot().map(|snapshot| snapshot.text);
+            let confirmed = asr.pause_early_delivery_ledger_snapshot(Duration::ZERO).map(|snapshot| snapshot.text);
+            let has_body = |text: &str| text.strip_prefix(phrase)
+                .is_some_and(|body| !crate::transcript_boundary::content_key(body).is_empty());
+            if revisable.as_deref().is_some_and(has_body) { first_revisable.get_or_insert(entry["elapsed_ms"].as_u64().unwrap()); }
+            if confirmed.as_deref().is_some_and(has_body) { first_confirmed.get_or_insert(entry["elapsed_ms"].as_u64().unwrap()); }
+            if first_confirmed.is_none() {
+                assert!(confirmed.as_deref().is_none_or(|text| !has_body(text)),
+                    "a draft cannot waive native recognition finality");
+            }
+            frames.push(json!({"frame":entry["frame"], "elapsedMs":entry["elapsed_ms"],
+                "final":entry["final_frame"], "revisable":revisable, "confirmed":confirmed}));
+        }
+        assert_eq!(frames.len(), 66, "replay the complete original session, not a selected passing frame");
+        assert_eq!(first_confirmed, Some(16_504));
+        assert!(first_revisable.is_some_and(|elapsed| elapsed < first_confirmed.unwrap()),
+            "owner draft must no longer wait for the first confirmed clause");
+        std::fs::write(root.join("source-replay.json"), serde_json::to_vec_pretty(&json!({
+            "sourceSessionId":archive["sessionId"], "firstRevisableBodyMs":first_revisable,
+            "firstConfirmedBodyMs":first_confirmed, "cloudCalls":0, "modelRuns":0,
+            "actualEditor":false, "frames":frames,
+        })).unwrap()).unwrap();
+    }
+
+    #[test]
+    #[ignore = "selected private native archives; no capture, models or cloud requests"]
+    fn recorded_missing_rows_reach_live_delivery_and_final_without_loss_or_duplication() {
+        use crate::transcript_boundary::content_key;
+        let root = std::path::PathBuf::from(std::env::var_os("LISTENER_BOUNDARY_REPLAY_ROOT").unwrap());
+        let protocol: Value = serde_json::from_slice(&std::fs::read(root.join("native-protocol.json")).unwrap()).unwrap();
+        let mut output = Vec::new();
+        for case in protocol["cases"].as_array().unwrap() {
+            let archive: Value = serde_json::from_slice(&std::fs::read(root.join(case["archive"].as_str().unwrap())).unwrap()).unwrap();
+            let asr = uplink_stall_test_asr().with_owner_activity_only(true);
+            asr.state.lock().is_connected = true;
+            let mut snapshots = Vec::new();
+            for entry in archive["trace"]["entries"].as_array().unwrap().iter().filter(|entry| entry["stage"] == "normalized_result") {
+                let packet = frame::build(MessageType::FullServerResponse,
+                    if entry["final_frame"] == true { Flags::LastPacket } else { Flags::None }, Serialization::Json,
+                    &serde_json::to_vec(&json!({"result":entry["provider_result"]})).unwrap(), None);
+                let _ = asr.handle_frame(&packet);
+                let text = asr.state.lock().best_transcript_text.clone();
+                let deliverable = asr.pause_early_delivery_ledger_snapshot(Duration::ZERO).map(|snapshot|snapshot.text);
+                snapshots.push(json!({"frame":entry["frame"],"final":entry["final_frame"],"text":text,"deliverable":deliverable}));
+            }
+            let expected = case["expected"].as_str().unwrap();
+            let live_eligible = case["liveEligible"].as_str().unwrap_or(expected);
+            assert_eq!(content_key(&asr.state.lock().best_transcript_text), content_key(expected), "case={}", case["archive"]);
+            assert!(snapshots.iter().any(|snapshot| snapshot["final"] == false
+                && snapshot["deliverable"].as_str().is_some_and(|text| content_key(text).starts_with(&content_key(live_eligible)))),
+                "confirmed words must be eligible before STOP: case={}", case["archive"]);
+            output.push(json!({"archive":case["archive"],"snapshots":snapshots}));
+        }
+        std::fs::write(root.join("native-replay.json"),serde_json::to_vec_pretty(&json!({"cloudCalls":0,
+            "localModelRuns":0,"actualEditor":false,"cases":output})).unwrap()).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires an explicitly selected saved native response archive; no capture or cloud"]
+    fn recorded_pending_body_keeps_native_finality_separate_from_settling() {
+        let root = std::path::PathBuf::from(std::env::var_os("LISTENER_PENDING_BODY_REPLAY").unwrap());
+        let protocol: Value = serde_json::from_slice(&std::fs::read(root.join("protocol.json")).unwrap()).unwrap();
+        let mut output = Vec::new();
+        for case in protocol["cases"].as_array().unwrap().iter().filter(|case| case["archive"].is_string()) {
+            let archive: Value = serde_json::from_slice(&std::fs::read(case["archive"].as_str().unwrap()).unwrap()).unwrap();
+            let asr = uplink_stall_test_asr().with_owner_activity_only(true);
+            asr.state.lock().is_connected = true;
+            let mut rows = Vec::new();
+            for entry in archive["trace"]["entries"].as_array().unwrap().iter().filter(|entry| entry["stage"] == "normalized_result") {
+                let packet = frame::build(MessageType::FullServerResponse, Flags::None, Serialization::Json,
+                    &serde_json::to_vec(&json!({"result":entry["provider_result"]})).unwrap(), None);
+                assert!(asr.handle_frame(&packet));
+                let pending = asr.pending_body_delivery_after("");
+                if case["id"] == "premature_beta45_with_video" && entry["frame"].as_u64().unwrap() < 40
+                    && !crate::transcript_boundary::content_key(entry["text"].as_str().unwrap_or("")).is_empty() {
+                    assert!(pending.as_ref().is_some_and(|pending| pending.recognition_pending),
+                        "the body before STOP is awaiting recognition, not a settling timeout: frame={}", entry["frame"]);
+                }
+                rows.push(json!({"frame":entry["frame"],"elapsedMs":entry["elapsed_ms"],
+                    "pending":pending.map(|pending|json!({"key":pending.key,"recognitionPending":pending.recognition_pending}))}));
+            }
+            if case["id"] == "premature_beta45_with_video" {
+                assert!(rows.last().unwrap()["pending"]["recognitionPending"] == false,
+                    "native second pass resolves the obligation, including punctuation changes");
+                let consumed = asr.pending_body_delivery_after("").unwrap().key;
+                assert!(asr.pending_body_delivery_after(&consumed).is_none(), "consumed body must release its obligation");
+            }
+            output.push(json!({"id":case["id"],"frames":rows}));
+        }
+        std::fs::write(root.join("native-pending-body.json"),serde_json::to_vec_pretty(&json!({"cases":output,"cloudCalls":0,"actualEditor":false})).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn admitted_corrected_last_clause_streams_before_protocol_final() {
+        let asr = uplink_stall_test_asr().with_owner_activity_only(true);
+        asr.state.lock().is_connected = true;
+        let opening = "我先整理文件。";
+        let old_tail = "明天在检查设备。";
+        let corrected = "我先整理文件。明天再检查设备。";
+        let row = |text: &str, start: u64, end: u64, definite: bool| json!({
+            "text":text, "definite":definite, "start_time":start, "end_time":end,
+            "additions":{"source":if definite { "two_pass" } else { "stream" }, "speaker_id":"0"},
+            "words":[{"text":text,"start_time":start,"end_time":end}]
+        });
+        let packet = |text: &str, rows: Vec<Value>| frame::build(
+            MessageType::FullServerResponse, Flags::None, Serialization::Json,
+            &serde_json::to_vec(&json!({"audio_info":{"duration":4000},
+                "result":{"text":text,"utterances":rows}})).unwrap(), None);
+        assert!(asr.handle_frame(&packet(&format!("{opening}{old_tail}"), vec![
+            row(opening, 100, 1000, true), row(old_tail, 1200, 2500, false)])));
+        // The latest second-pass rendering and its utterance/word rendering
+        // can differ. This reproduces the observed 再/在 and 三/3 handoff;
+        // timings are constructed, not a claimed raw provider recording.
+        assert!(asr.handle_frame(&packet(corrected, vec![
+            row(opening, 100, 1000, true), row(old_tail, 1250, 2450, true)])));
+        assert_eq!(asr.state.lock().best_transcript_text, corrected);
+        assert_eq!(asr.pause_early_delivery_ledger_snapshot(Duration::ZERO).unwrap().text,
+            corrected, "the confirmed tail must not wait for STOP to correct its source rendering");
+        asr.state.lock().local_speaker_tracking_enabled = true;
+        assert!(asr.pause_early_delivery_ledger_snapshot(Duration::ZERO).is_none(),
+            "whole-response recognition confirmation must not manufacture enrolled owner permission");
+    }
+
+    #[test]
+    fn owner_activity_only_recovery_retains_a_later_speaker_without_granting_owner_identity() {
+        let primary = uplink_stall_test_asr().with_owner_activity_only(true);
+        let replay = primary.new_recovery_session("uplink-stall");
+        replay.state.lock().is_connected = true;
+        let packet = |rows: Vec<Value>, text: &str, final_packet: bool| {
+            let json = json!({"audio_info": {"duration": 4_000},
+                "result": {"text": text, "utterances": rows}});
+            frame::build(MessageType::FullServerResponse,
+                if final_packet { Flags::LastPacket } else { Flags::None },
+                Serialization::Json, &serde_json::to_vec(&json).unwrap(), None)
+        };
+        let first = json!({"text":"旁人先说。", "definite":true, "start_time":100, "end_time":1_500,
+                           "additions":{"speaker_id":"0", "source":"two_pass"}});
+        let later = json!({"text":"本人继续说。", "definite":true, "start_time":2_000, "end_time":3_500,
+                           "additions":{"speaker_id":"1", "source":"two_pass"}});
+        assert!(replay.handle_frame(&packet(vec![first.clone()], "旁人先说。", false)));
+        let (tx, mut rx) = oneshot::channel();
+        replay.state.lock().final_tx = Some(tx);
+        assert!(!replay.handle_frame(&packet(vec![first, later], "旁人先说。本人继续说。", true)));
+        let delivered = rx.try_recv().unwrap().unwrap();
+        assert_eq!(delivered.text, "旁人先说。本人继续说。");
+        let state = replay.state.lock();
+        assert!(!state.local_speaker_tracking_enabled);
+        assert!(state.qualified_owner_speech_end_ms.is_none());
+        assert!(state.verified_provider_owner.is_none());
+    }
+
+    #[test]
+    fn owner_activity_only_empty_recovery_uses_first_pass_and_leaves_live_correction_enabled() {
+        let primary = uplink_stall_test_asr().with_owner_activity_only(true);
+        let request = primary.build_first_frame_payload("live");
+        assert_eq!(request["request"]["enable_nonstream"], true);
+        let empty_replay = primary.new_recovery_session("empty-final");
+        let request = empty_replay.build_first_frame_payload("empty-replay");
+        assert_eq!(request["request"]["enable_nonstream"], false);
+        assert!(request["request"].get("voiceprints").is_none());
+        assert!(empty_replay.owner_activity_only());
+        assert_eq!(primary.new_recovery_session("uplink-stall").build_first_frame_payload("stall")
+            ["request"]["enable_nonstream"], true);
+        let strict = uplink_stall_test_asr().new_recovery_session("empty-final");
+        assert_eq!(strict.build_first_frame_payload("strict")["request"]["enable_nonstream"], true);
+        assert!(!strict.owner_activity_only());
+    }
+
+    #[test]
+    fn owner_activity_only_preserves_unattributed_words_without_owner_permission() {
+        let asr = uplink_stall_test_asr().with_owner_activity_only(true);
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        let response = |text: &str, final_packet: bool| {
+            let result = json!({"audio_info": {"duration": 3_000}, "result": {
+                "text": text, "utterances": [{"text": text, "definite": true,
+                    "start_time": 100, "end_time": 2_500,
+                    "additions": {"source": "two_pass"}}]}});
+            frame::build(MessageType::FullServerResponse,
+                if final_packet { Flags::LastPacket } else { Flags::None },
+                Serialization::Json, &serde_json::to_vec(&result).unwrap(), None)
+        };
+        asr.state.lock().is_connected = true;
+        assert!(asr.handle_frame(&response("旁人说话。碗碗香。", false)));
+        assert!(asr.state.lock().best_transcript_text.contains("碗碗香"));
+        let (tx, mut rx) = oneshot::channel();
+        asr.state.lock().final_tx = Some(tx);
+        assert!(!asr.handle_frame(&response("旁人说话。碗碗香，继续。", true)));
+        assert_eq!(rx.try_recv().unwrap().unwrap().text, "旁人说话。碗碗香，继续。");
+        let state = asr.state.lock();
+        assert!(!state.local_speaker_tracking_enabled);
+        assert_eq!(state.qualified_owner_speech_end_ms, None);
+        assert!(state.verified_provider_owner.is_none());
+    }
     use super::*;
+
+    include!("volcengine_snapshot_probe.rs");
+    include!("volcengine_snapshot_runtime_tests.rs");
+
+    #[test]
+    fn speech_quality_sink_rotates_before_binding_and_old_worker_cannot_pollute_reopen() {
+        let asr = uplink_stall_test_asr();
+
+        // Production prepares synchronously, then the capture-side VAD binds
+        // this exact Arc before asynchronous provider open starts.
+        let first_generation = asr.prepare_local_speech_quality_session();
+        let first_tracker_sink = asr.local_speech_quality_sink();
+        assert!(Arc::ptr_eq(&first_generation, &first_tracker_sink));
+        first_tracker_sink.lock().complete_speech(0, 16_000);
+        first_tracker_sink.lock().advance_known_through(16_000);
+        assert_eq!(
+            asr.local_speech_quality_sink()
+                .lock()
+                .speech_upper_bound_ms(0, 1_000),
+            Some(1_000)
+        );
+
+        // A same-object reopen rotates only at its next synchronous prepare.
+        // A delayed old worker may keep its Arc, but can no longer affect the
+        // generation observed by ASR/source-owner consumers.
+        let second_generation = asr.prepare_local_speech_quality_session();
+        let second_tracker_sink = asr.local_speech_quality_sink();
+        assert!(Arc::ptr_eq(&second_generation, &second_tracker_sink));
+        assert!(!Arc::ptr_eq(&first_tracker_sink, &second_tracker_sink));
+        first_tracker_sink.lock().complete_speech(16_000, 32_000);
+        first_tracker_sink.lock().advance_known_through(32_000);
+        assert_eq!(
+            second_tracker_sink.lock().speech_upper_bound_ms(0, 1_000),
+            None,
+            "old capture evidence must remain isolated from the reopened generation"
+        );
+        second_tracker_sink.lock().complete_speech(16_000, 32_000);
+        second_tracker_sink.lock().advance_known_through(32_000);
+        assert_eq!(
+            asr.local_speech_quality_sink()
+                .lock()
+                .speech_upper_bound_ms(1_000, 2_000),
+            Some(1_000)
+        );
+    }
+
+    #[test]
+    fn one_quality_non_target_window_cannot_delete_same_track_owner_text() {
+        use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Target, Uncertain};
+        use crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive;
+
+        // Physical Beta35 quiet session ee0c35c1: the enrolled owner produced
+        // a quality-qualified 5400..6600 NonTarget (0.093767904) between an
+        // Uncertain predecessor and a fresh Target successor. The final 55
+        // owner characters were correct. One local dip is therefore advisory,
+        // even with exact PCM coordinates.
+        let asr = uplink_stall_test_asr();
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        for (start, end, classification) in [
+            (3_800, 5_000, Target { score: 0.58 }),
+            (5_000, 6_200, Uncertain { score: 0.2856 }),
+            (5_400, 6_600, NonTarget { score: 0.093767904 }),
+            (5_800, 7_000, Target { score: 0.548 }),
+        ] {
+            asr.note_local_speaker_observation_with_audio_range(
+                start, end, classification, Inconclusive, true,
+            );
+        }
+        let provider = json!({
+            "text": "开始录音。这是本人安静环境下的完整正文。",
+            "utterances": [{
+                "text": "开始录音。这是本人安静环境下的完整正文。",
+                "start_time": 0,
+                "end_time": 8_000,
+                "definite": true,
+                "additions": {"speaker_id": "0"},
+                "words": [
+                    {"text": "开始录音", "start_time": 0, "end_time": 1_800},
+                    {"text": "这是本人安静环境下的完整正文", "start_time": 1_900, "end_time": 8_000}
+                ]
+            }]
+        });
+        let mut state = asr.state.lock();
+        assert!(state.provider_non_owner_audio_ranges.is_empty(),
+            "one local voiceprint dip must not mint a hard source/final veto");
+        assert_eq!(state.local_advisory_foreign_evidence.len(), 1);
+        let mut filtered = SpeakerFilteredResult {
+            result: provider.clone(), optimistic_result: provider.clone(),
+            speaker_info_present: true, response_local_body_alias_present: false,
+            stable_non_target_utterance_present: false, stable_other_speaker_present: false,
+            stable_unresolved_speaker_present: false, target_speech_end_ms: Some(8_000),
+            wake_target_speech_end_ms: Some(1_800), stable_attributed_speech_end_ms: Some(8_000),
+            pending_unattributed_text: String::new(),
+        };
+        speaker_partition::preserve_source_partition(&mut state, &provider, &mut filtered);
+        assert_eq!(filtered.result["text"], provider["text"]);
+        assert!(!state.provider_source_exclusion_applied);
+    }
+
+    #[test]
+    fn independently_confirmed_provider_foreign_range_still_clips_same_track_words() {
+        let provider = json!({
+            "text": "本人前段。旁人短句。本人回来。",
+            "utterances": [{
+                "text": "本人前段。旁人短句。本人回来。",
+                "start_time": 34_000, "end_time": 50_000, "definite": true,
+                "additions": {"speaker_id": "0"},
+                "words": [
+                    {"text": "本人前段", "start_time": 34_000, "end_time": 45_700},
+                    {"text": "旁人短句", "start_time": 45_800, "end_time": 47_000},
+                    {"text": "本人回来", "start_time": 47_100, "end_time": 50_000}
+                ]
+            }]
+        });
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true,
+            provider_non_owner_audio_ranges: vec![(45_800, 47_000)],
+            ..SyncState::default()
+        };
+        let mut filtered = SpeakerFilteredResult {
+            result: provider.clone(), optimistic_result: provider.clone(),
+            speaker_info_present: true, response_local_body_alias_present: false,
+            stable_non_target_utterance_present: false, stable_other_speaker_present: false,
+            stable_unresolved_speaker_present: false, target_speech_end_ms: Some(50_000),
+            wake_target_speech_end_ms: Some(1_800), stable_attributed_speech_end_ms: Some(50_000),
+            pending_unattributed_text: String::new(),
+        };
+        speaker_partition::preserve_source_partition(&mut state, &provider, &mut filtered);
+        assert_eq!(filtered.result["text"], "本人前段。本人回来。");
+        assert!(state.provider_source_exclusion_applied);
+        assert!(final_explicit_non_owner_tail(&state, &filtered, &provider));
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn source_owner_endpoint_watermark_advances_only_across_unvetoed_original_pcm() {
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        let stream =
+            super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(
+                None, false, false,
+            );
+        let old = Instant::now() - Duration::from_secs(1);
+        stream.test_set_source_owner_evidence(
+            vec![(0, 3_000), (3_000, 6_000), (6_000, 9_000)],
+            old,
+        );
+        *asr.target_speaker_stream.lock() = Some(Arc::clone(&stream));
+
+        assert_eq!(
+            asr.endpoint_update_snapshot().qualified_owner_speech_end_ms,
+            Some(9_000),
+            "independent original-source Owner proof is endpoint owner evidence",
+        );
+
+        stream.test_set_physical_interference_ranges(vec![(6_000, 9_000)]);
+        assert_eq!(
+            asr.endpoint_update_snapshot().qualified_owner_speech_end_ms,
+            None,
+            "a late owner range before current physical overlap cannot re-arm the endpoint",
+        );
+
+        stream.test_set_physical_interference_ranges(Vec::new());
+        asr.state.lock().provider_distinct_foreign_audio_ranges = vec![(6_000, 9_000)];
+        assert_eq!(
+            asr.endpoint_update_snapshot().qualified_owner_speech_end_ms,
+            None,
+            "confirmed provider foreign audio cannot be displaced by an older owner proof",
+        );
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn independent_owner_uses_only_anchored_contiguous_source_owner_growth() {
+        use crate::speech_decision_kernel::LiveTranscriptAuthority;
+        use crate::transcript_boundary::{content_key, TimedTranscript, TimedTranscriptWord};
+
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        let old = Instant::now() - Duration::from_secs(2);
+        let anchor = "开始录音。这是本人前段。";
+        let through_first = "开始录音。这是本人前段。本人继续说明。";
+        let full = "开始录音。这是本人前段。本人继续说明。最后一句完成。";
+        let timing = TimedTranscript {
+            text: full.into(),
+            words: vec![
+                TimedTranscriptWord {
+                    text: "开始录音。这是本人前段。".into(),
+                    start_ms: Some(0),
+                    end_ms: Some(2_900),
+                },
+                TimedTranscriptWord {
+                    text: "本人继续说明。".into(),
+                    start_ms: Some(3_100),
+                    end_ms: Some(5_900),
+                },
+                TimedTranscriptWord {
+                    text: "最后一句完成。".into(),
+                    start_ms: Some(6_200),
+                    end_ms: Some(8_800),
+                },
+            ],
+        };
+        {
+            let mut state = asr.state.lock();
+            state.local_body_owner_verified = true;
+            state.live_owner_delivery = Some(TranscriptCandidate {
+                text: anchor.into(),
+                ..Default::default()
+            });
+            state.live_owner_delivery_updated_at = Some(old);
+            bind_test_owner_occurrence(&mut state,anchor,(0,2900),old);
+            state.best_transcript_text = full.into();
+            state.best_transcript_timing = Some(timing.clone());
+            state.provider_timed_transcript = Some(timing);
+        }
+        assert_eq!(
+            asr.primary_output_text(anchor).as_deref(),
+            Some(anchor),
+            "the Primary callback path records the only admitted source anchor",
+        );
+        let consumed = content_key(anchor.strip_prefix("开始录音").unwrap());
+        let primary_stream =
+            super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(
+                None,
+                false,
+                false,
+            );
+        primary_stream.test_set_source_owner_evidence(vec![(3_000, 9_000)], old);
+        *asr.target_speaker_stream.lock() = Some(primary_stream);
+        assert_eq!(
+            asr.pending_owner_delivery_after(&consumed)
+                .map(|pending| pending.0),
+            Some(content_key("本人继续说明。最后一句完成。")),
+        );
+        assert_eq!(
+            asr.pause_early_delivery_ledger_snapshot_after(Duration::ZERO, &consumed)
+                .expect("Primary projection enters the real rolling snapshot path")
+                .text,
+            full,
+        );
+        {
+            let mut state = asr.state.lock();
+            state
+                .source_owner_projection_stability
+                .as_mut()
+                .unwrap()
+                .updated_at = old;
+            for (at, _) in &mut state.pause_early_recent_revisions {
+                *at = old;
+            }
+        }
+        assert!(
+            asr.pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &consumed)
+                .is_some(),
+            "the Primary projection is mature before the authority switch",
+        );
+        let primary_projection_at = asr
+            .state
+            .lock()
+            .source_owner_projection_stability
+            .as_ref()
+            .map(|stable| stable.updated_at)
+            .expect("Primary source projection records its own stability generation");
+
+        let owner = Arc::new(uplink_stall_test_asr());
+        {
+            let mut state = owner.state.lock();
+            state.best_transcript_text = anchor.into();
+            state.best_transcript_committed_at = Some(old);
+        }
+        let stream =
+            super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(
+                Some(owner),
+                true,
+                true,
+            );
+        stream.test_set_physical_interference_ranges(vec![(0, 3_000)]);
+        stream.test_set_source_owner_evidence(vec![(3_000, 6_000), (6_000, 9_000)], old);
+        *asr.target_speaker_stream.lock() = Some(Arc::clone(&stream));
+        assert_eq!(asr.live_transcript_source().0, LiveTranscriptAuthority::IndependentOwner);
+        assert_eq!(
+            asr.pending_owner_delivery_after(&consumed)
+                .map(|pending| pending.0),
+            Some(content_key("本人继续说明。最后一句完成。")),
+        );
+        let independent_projection_at = asr
+            .state
+            .lock()
+            .source_owner_projection_stability
+            .as_ref()
+            .map(|stable| stable.updated_at)
+            .expect("Independent source projection records its own stability generation");
+        assert!(
+            independent_projection_at > primary_projection_at,
+            "the same timed projection must re-earn stability after Primary becomes IndependentOwner",
+        );
+        assert!(
+            asr.pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &consumed)
+                .is_none(),
+            "old Primary rolling revisions cannot mature the same text under IndependentOwner",
+        );
+
+        stream.test_set_source_owner_evidence(vec![(3_000, 6_000), (8_000, 9_000)], old);
+        assert_eq!(
+            asr.pending_owner_delivery_after(&consumed)
+                .map(|pending| pending.0),
+            Some(content_key("本人继续说明。")),
+            "a later Owner range cannot jump the unsupported word midpoint before 8.0 seconds",
+        );
+        assert_eq!(
+            asr.pause_early_delivery_ledger_snapshot_after(Duration::ZERO, &consumed)
+                .expect("the contiguous first source-owned word remains eligible")
+                .text,
+            through_first,
+        );
+
+        stream.test_set_source_owner_evidence(vec![(3_000, 9_000)], old);
+        assert_eq!(
+            asr.pending_owner_delivery_after(&consumed)
+                .map(|pending| pending.0),
+            Some(content_key("本人继续说明。最后一句完成。")),
+            "filling the exact hole releases the contiguous owner suffix",
+        );
+        assert_eq!(asr.primary_output_text("raw mixture").as_deref(), Some(full));
+        assert_eq!(
+            asr.independent_callback_text(anchor.to_string()).as_deref(),
+            Some(full),
+            "a delayed short secondary callback must publish the same longer shared source candidate",
+        );
+
+        // Positive original-source evidence cannot erase an independently
+        // confirmed local mismatch at the new middle word. Later words remain
+        // pending behind it even before the cloud publishes a foreign row.
+        for use_hint in [false, true] {
+            {
+                let mut state = asr.state.lock();
+                if use_hint {
+                    state.local_confirmed_transcript_foreign_hint_end_ms = Some(4_500 + LOCAL_SPEAKER_WINDOW_MS / 2);
+                } else {
+                    state.local_confirmed_transcript_non_target_end_ms = Some(4_500 + LOCAL_SPEAKER_WINDOW_MS / 2);
+                }
+            }
+            assert!(asr.pending_owner_delivery_after(&consumed).is_none());
+            assert_eq!(asr.primary_output_text("raw mixture").as_deref(), Some(anchor));
+            let mut state = asr.state.lock();
+            state.local_confirmed_transcript_non_target_end_ms = None;
+            state.local_confirmed_transcript_foreign_hint_end_ms = None;
+        }
+        assert_eq!(asr.primary_output_text("raw mixture").as_deref(), Some(full));
+
+        {
+            let mut state = asr.state.lock();
+            state.provider_distinct_foreign_audio_ranges = vec![(6_000, 9_000)];
+        }
+        assert_eq!(
+            asr.pause_early_delivery_ledger_snapshot_after(Duration::ZERO, &consumed)
+                .expect("the admitted prefix before foreign audio remains available")
+                .text,
+            through_first,
+            "source ownership cannot cross a provider-certified foreign interval",
+        );
+        assert_eq!(
+            asr.pending_owner_delivery_after(&consumed)
+                .map(|pending| pending.0),
+            Some(content_key("本人继续说明。")),
+        );
+        let vetoed_at = asr
+            .state
+            .lock()
+            .source_owner_projection_stability
+            .as_ref()
+            .map(|stable| stable.updated_at)
+            .expect("the vetoed shorter projection has its own stability generation");
+        asr.state.lock().provider_distinct_foreign_audio_ranges.clear();
+        assert!(
+            asr.pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &consumed)
+                .is_none(),
+            "a projection returning after the foreign veto must earn stability again",
+        );
+        let restored_at = asr
+            .state
+            .lock()
+            .source_owner_projection_stability
+            .as_ref()
+            .map(|stable| stable.updated_at)
+            .expect("the restored projection starts a new stability generation");
+        assert!(restored_at > vetoed_at);
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn source_projection_word_timing_change_restarts_real_snapshot_stability() {
+        use crate::transcript_boundary::{content_key, TimedTranscript, TimedTranscriptWord};
+
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        let old = Instant::now() - Duration::from_secs(2);
+        let anchor = "开始录音。这是本人前段。";
+        let full = "开始录音。这是本人前段。本人继续说明。";
+        let confirmation = |tail_start| json!({"text":full,"utterances":[
+            {"text":full,"definite":true,"words":[
+                {"text":anchor,"start_time":0,"end_time":2900},
+                {"text":"本人继续说明。","start_time":tail_start,"end_time":5900}
+            ]}
+        ]});
+        {
+            let mut state = asr.state.lock();
+            state.local_body_owner_verified = true;
+            state.live_owner_delivery = Some(TranscriptCandidate {
+                text: anchor.into(),
+                ..Default::default()
+            });
+            state.live_owner_delivery_updated_at = Some(old);
+            bind_test_owner_occurrence(&mut state,anchor,(0,2900),old);
+            state.best_transcript_text = full.into();
+            state.best_transcript_timing = Some(TimedTranscript {
+                text: full.into(),
+                words: vec![
+                    TimedTranscriptWord {
+                        text: anchor.into(),
+                        start_ms: Some(0),
+                        end_ms: Some(2_900),
+                    },
+                    TimedTranscriptWord {
+                        text: "本人继续说明。".into(),
+                        start_ms: Some(3_100),
+                        end_ms: Some(5_900),
+                    },
+                ],
+            });
+            state.recognition_boundary.update(&confirmation(3100));
+        }
+        assert_eq!(asr.primary_output_text(anchor).as_deref(), Some(anchor));
+        let stream =
+            super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(
+                None,
+                false,
+                false,
+            );
+        stream.test_set_source_owner_evidence(vec![(3_000, 6_000)], old);
+        *asr.target_speaker_stream.lock() = Some(stream);
+        let consumed = content_key(anchor.strip_prefix("开始录音").unwrap());
+        assert!(asr.pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &consumed).is_none(),
+            "definite words cannot bypass a newly projected ownership permission");
+        assert_eq!(
+            asr.pause_early_delivery_ledger_snapshot_after(Duration::ZERO, &consumed)
+                .unwrap()
+                .text,
+            full,
+        );
+        {
+            let mut state = asr.state.lock();
+            state
+                .source_owner_projection_stability
+                .as_mut()
+                .unwrap()
+                .updated_at = old;
+            for (at, _) in &mut state.pause_early_recent_revisions {
+                *at = old;
+            }
+        }
+        assert!(
+            asr.pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &consumed)
+                .is_some(),
+            "the original timed occurrence is mature",
+        );
+
+        asr.state
+            .lock()
+            .best_transcript_timing
+            .as_mut()
+            .unwrap()
+            .words[1]
+            .start_ms = Some(3_300);
+        asr.state.lock().recognition_boundary.update(&confirmation(3300));
+        assert!(
+            asr.pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &consumed)
+                .is_none(),
+            "the same words at a different audio occurrence cannot borrow rolling age",
+        );
+        let state = asr.state.lock();
+        assert_eq!(state.pause_early_recent_revisions.len(), 1);
+        assert!(state
+            .source_owner_projection_stability
+            .as_ref()
+            .unwrap()
+            .updated_at
+            > old);
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn independent_owner_wins_over_a_conflicting_primary_source_projection() {
+        use crate::speech_decision_kernel::LiveTranscriptAuthority;
+        use crate::transcript_boundary::{content_key, TimedTranscript, TimedTranscriptWord};
+
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        let old = Instant::now() - Duration::from_secs(2);
+        let anchor = "开始录音。这是本人前段。";
+        {
+            let mut state = asr.state.lock();
+            state.local_body_owner_verified = true;
+            state.live_owner_delivery = Some(TranscriptCandidate {
+                text: anchor.into(),
+                ..Default::default()
+            });
+            state.live_owner_delivery_updated_at = Some(old);
+        }
+        assert_eq!(asr.primary_output_text(anchor).as_deref(), Some(anchor));
+
+        let independent = "开始录音。这是本人前段。独立流已确认本人继续。";
+        let conflicting = "开始录音。这是本人前段。来源流给出冲突改写。";
+        let owner = Arc::new(uplink_stall_test_asr());
+        {
+            let mut state = owner.state.lock();
+            state.best_transcript_text = independent.into();
+            state.best_transcript_committed_at = Some(old);
+        }
+        {
+            let mut state = asr.state.lock();
+            state.best_transcript_text = conflicting.into();
+            state.best_transcript_timing = Some(TimedTranscript {
+                text: conflicting.into(),
+                words: vec![
+                    TimedTranscriptWord {
+                        text: anchor.into(),
+                        start_ms: Some(0),
+                        end_ms: Some(2_900),
+                    },
+                    TimedTranscriptWord {
+                        text: "来源流给出冲突改写。".into(),
+                        start_ms: Some(3_100),
+                        end_ms: Some(5_900),
+                    },
+                ],
+            });
+        }
+        let stream =
+            super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(
+                Some(owner),
+                true,
+                true,
+            );
+        stream.test_set_source_owner_evidence(vec![(3_000, 6_000)], old);
+        *asr.target_speaker_stream.lock() = Some(Arc::clone(&stream));
+        assert_eq!(asr.live_transcript_source().0, LiveTranscriptAuthority::IndependentOwner);
+
+        let consumed = content_key(anchor.strip_prefix("开始录音").unwrap());
+        assert_eq!(
+            asr.pending_owner_delivery_after(&consumed)
+                .map(|pending| pending.0),
+            Some(content_key("独立流已确认本人继续。")),
+            "a conflicting source projection cannot replace a longer valid independent owner",
+        );
+        assert_eq!(
+            asr.pause_early_delivery_ledger_snapshot_after(Duration::ZERO, &consumed)
+                .expect("the independent owner remains the selected live authority")
+                .text,
+            independent,
+        );
+        assert_eq!(asr.primary_output_text("raw mixture").as_deref(), Some(independent));
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn independent_source_projection_requires_a_pre_switch_primary_anchor() {
+        use crate::speech_decision_kernel::LiveTranscriptAuthority;
+        use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        let old = Instant::now() - Duration::from_secs(2);
+        let full = "开始录音。这是切换后才出现的正文。";
+        {
+            let mut state = asr.state.lock();
+            state.local_body_owner_verified = true;
+            state.best_transcript_text = full.into();
+            state.best_transcript_timing = Some(TimedTranscript {
+                text: full.into(),
+                words: vec![TimedTranscriptWord {
+                    text: full.into(),
+                    start_ms: Some(0),
+                    end_ms: Some(5_900),
+                }],
+            });
+        }
+        assert!(asr.primary_output_text(full).is_none(), "no Primary text was admitted");
+
+        let owner = Arc::new(uplink_stall_test_asr());
+        let stream =
+            super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(
+                Some(owner),
+                true,
+                true,
+            );
+        stream.test_set_source_owner_evidence(vec![(0, 6_000)], old);
+        *asr.target_speaker_stream.lock() = Some(stream);
+        assert_eq!(asr.live_transcript_source().0, LiveTranscriptAuthority::IndependentOwner);
+
+        asr.state.lock().live_owner_delivery = Some(TranscriptCandidate {
+            text: full.into(),
+            ..Default::default()
+        });
+        assert!(
+            asr.pending_owner_delivery_after("").is_none()
+                && asr
+                    .pause_early_delivery_ledger_snapshot_after(Duration::ZERO, "")
+                    .is_none()
+                && asr.primary_output_text("raw mixture").is_none(),
+            "post-switch parent text cannot manufacture the missing admitted anchor",
+        );
+    }
 
     #[test]
     fn confirmed_owner_continuation_after_a_foreign_row_reaches_the_live_ledger() {
@@ -10312,6 +13744,734 @@ mod tests {
         assert!(rolling_stable_transcript_prefix_after(
             &mut VecDeque::new(), revised, fresh, fresh, Duration::from_secs(1), "").is_none(),
             "a provider revision without a consumed source cannot bypass word stability");
+    }
+
+    #[test]
+    fn pending_owner_delivery_never_borrows_raw_preview_or_rearms_on_punctuation() {
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        let at = Instant::now();
+        {
+            let mut st = asr.state.lock();
+            st.live_owner_delivery = Some(TranscriptCandidate {
+                text:"开始录音。本人正文。".into(), ..Default::default()
+            });
+            st.live_owner_delivery_updated_at = Some(at);
+            bind_test_owner_occurrence(&mut st,"开始录音。本人正文。",(0,5000),at);
+            st.last_emitted_preview_text = "开始录音。本人正文。尚未确认的声音".into();
+        }
+        assert_eq!(asr.pending_owner_delivery_after(""), Some(("本人正文".into(), at)));
+        assert!(asr.pending_owner_delivery_after("本人正文").is_none());
+        {
+            let mut st = asr.state.lock();
+            st.live_owner_delivery.as_mut().unwrap().text.push('！');
+        }
+        assert!(asr.pending_owner_delivery_after("本人正文").is_none());
+        assert!(asr.pending_owner_delivery_after("另一修订").is_none());
+        assert!(asr.state.lock().pause_early_recent_revisions.is_empty(), "endpoint read must not mutate stability history");
+        asr.state.lock().owner_isolation_frozen = true;
+        assert!(asr.pending_owner_delivery_after("").is_none());
+
+        // Beta32 quiet replay: the one-second rolling ledger and capsule both
+        // still exposed "最后一", although the current owner-approved provider
+        // revision had already reached "最后一句话". Querying after the stable
+        // snapshot source key must expose that newer body without borrowing raw
+        // preview text.
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        let old = Instant::now() - Duration::from_secs(2);
+        let fresh = Instant::now();
+        let short = "开始录音。这就是最后一";
+        let full = "开始录音。这就是最后一句话";
+        {
+            let mut st = asr.state.lock();
+            st.local_target_confirmed = true;
+            st.live_owner_delivery = Some(TranscriptCandidate {
+                text: full.into(),
+                ..Default::default()
+            });
+            st.live_owner_delivery_updated_at = Some(fresh);
+            bind_test_owner_occurrence(&mut st,full,(0,5000),fresh);
+            st.pause_early_recent_revisions = VecDeque::from([
+                (old, short.into()),
+                (fresh, full.into()),
+            ]);
+        }
+        let stable = asr
+            .pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), "")
+            .expect("the older common owner prefix is stable");
+        assert_eq!(stable.text, short);
+        let stable_body_key = crate::transcript_boundary::content_key("这就是最后一");
+        assert_eq!(
+            asr.pending_owner_delivery_after(&stable_body_key)
+                .map(|pending| pending.0),
+            Some(crate::transcript_boundary::content_key("句话")),
+            "a newer approved owner revision must keep the shorter stable prefix reversible",
+        );
+
+        {
+            let mut st = asr.state.lock();
+            st.live_owner_delivery_updated_at = Some(old);
+            st.source_owner_projection_stability.as_mut().unwrap().updated_at = old;
+            st.pause_early_recent_revisions.clear();
+        }
+        let stable = asr
+            .pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), "")
+            .expect("the complete owner revision becomes eligible after its own stability window");
+        assert_eq!(stable.text, full);
+        let full_body_key = crate::transcript_boundary::content_key("这就是最后一句话");
+        assert!(asr.pending_owner_delivery_after(&full_body_key).is_none());
+        asr.state
+            .lock()
+            .live_owner_delivery
+            .as_mut()
+            .unwrap()
+            .text
+            .push('。');
+        assert!(asr.pending_owner_delivery_after(&full_body_key).is_none(),
+            "terminal punctuation cannot create pending body or restart the quiet wait");
+
+        // Real Beta32 provider source retained a bounded hesitation before the
+        // accepted wake. The stable snapshot and current owner candidate share
+        // that raw coordinate; querying it must still expose the newer tail.
+        let filler_short = "呃，开始录音，这就是最后一";
+        let filler_full = "呃，开始录音，这就是最后一句话";
+        {
+            let mut st = asr.state.lock();
+            st.live_owner_delivery = Some(TranscriptCandidate {
+                text: filler_full.into(),
+                ..Default::default()
+            });
+            st.live_owner_delivery_updated_at = Some(fresh);
+            bind_test_owner_occurrence(&mut st,filler_full,(0,5000),fresh);
+        }
+        assert_eq!(
+            asr.pending_owner_delivery_after(
+                &crate::transcript_boundary::content_key(filler_short),
+            ).map(|pending| pending.0),
+            Some(crate::transcript_boundary::content_key("句话")),
+            "a pre-wake hesitation in the shared ASR source coordinate cannot hide the newer owner tail",
+        );
+    }
+
+    #[test]
+    fn accepted_activation_maps_activity_only_delivery_without_granting_identity() {
+        let asr = uplink_stall_test_asr().with_owner_activity_only(true);
+        let result = serde_json::json!({"text":"开始录音，已经提交。新的续句！","utterances":[{
+            "text":"开始录音，已经提交。新的续句！","definite":true,"start_time":0,"end_time":1500,
+            "additions":{"source":"two_pass","speaker_id":"0"},
+            "words":[{"text":"开始录音","start_time":0,"end_time":500},
+                {"text":"已经提交","start_time":500,"end_time":1000},
+                {"text":"新的续句","start_time":1000,"end_time":1500}]
+        }]});
+        asr.apply_saved_native_result_for_test(&result,false);
+        let consumed = crate::transcript_boundary::content_key("已经提交。");
+        assert!(asr.pending_body_delivery_after(&consumed).is_none(),
+            "the unqualified body coordinate reproduces the activity-only metadata gap");
+        asr.note_accepted_wake_phrase("开始录音");
+        assert_eq!(asr.pending_body_delivery_after(&consumed).map(|value| value.key),
+            Some(crate::transcript_boundary::content_key("新的续句")));
+        assert!(asr.pause_early_delivery_evidence_after(Duration::ZERO,&consumed).is_some());
+        assert!(!asr.cloud_owner_enabled());
+        let state = asr.state.lock();
+        assert!(!state.local_speaker_tracking_enabled);
+        assert!(!state.local_wake_owner_verified);
+        assert!(!state.local_body_owner_verified,
+            "accepted control metadata cannot manufacture enrolled voice identity");
+    }
+
+    #[test]
+    fn raw_body_consumption_uses_audio_occurrence_after_provider_revision() {
+        use crate::transcript_boundary::content_key;
+        let asr = uplink_stall_test_asr().with_owner_activity_only(true);
+        let packet = |text: &str, words: serde_json::Value| serde_json::json!({"text":text,"utterances":[{
+            "text":text,"definite":true,"start_time":0,"end_time":2000,
+            "additions":{"source":"two_pass","speaker_id":"0"},"words":words}]});
+        asr.apply_saved_native_result_for_test(&packet("开始录音，今天检查设备。", serde_json::json!([
+            {"text":"开始录音","start_time":0,"end_time":500},
+            {"text":"今天检查","start_time":500,"end_time":900},
+            {"text":"设备","start_time":900,"end_time":1200}])), false);
+        let snapshot = asr.pause_early_delivery_evidence_after(Duration::ZERO, "").unwrap();
+        let timing = snapshot.timing.unwrap();
+        let consumed = LiveBodyConsumption { raw_prefix: snapshot.text.clone(), body_start: "开始录音，".len(), rendered_key: content_key("今天检查设备"),
+            source: snapshot.source, boundary: timing.timing.delivery_boundary(&content_key(&snapshot.text)) };
+        assert!(consumed.boundary.is_some());
+        assert!(asr.pending_body_delivery_from_consumption(&consumed).is_none());
+        asr.apply_saved_native_result_for_test(&packet("开始录音，今天检查这台设备，然后继续说完。", serde_json::json!([
+            {"text":"开始录音","start_time":0,"end_time":500},
+            {"text":"今天检查这台","start_time":500,"end_time":900},
+            {"text":"设备","start_time":900,"end_time":1200},
+            {"text":"然后继续说完","start_time":1200,"end_time":2000}])), false);
+        assert_eq!(asr.pending_body_delivery_from_consumption(&consumed).unwrap().key, content_key("然后继续说完"),
+            "a revised earlier word cannot erase the unsent owner-approved suffix");
+        let missing_times = uplink_stall_test_asr().with_owner_activity_only(true);
+        missing_times.apply_saved_native_result_for_test(&packet("旧词修订后仍有新续句。", serde_json::json!([])), false);
+        let mut untimed_consumed = consumed.clone();
+        untimed_consumed.source.capture_stream_id = missing_times.asr_stream_id();
+        untimed_consumed.source.capture_generation = missing_times.source_snapshot.lock().capture_generation;
+        assert!(missing_times.pending_body_delivery_from_consumption(&untimed_consumed).is_some(),
+            "unmappable admitted words are pending, not evidence of consumption");
+        assert!(missing_times.pending_body_delivery_from_consumption(&consumed).is_none(),
+            "another capture cannot borrow equal text or audio coordinates");
+        let revised_old = uplink_stall_test_asr().with_owner_activity_only(true);
+        revised_old.apply_saved_native_result_for_test(&packet("开始录音，今天检查这台设备。", serde_json::json!([
+            {"text":"开始录音","start_time":0,"end_time":500},
+            {"text":"今天检查这台","start_time":500,"end_time":900},
+            {"text":"设备","start_time":900,"end_time":1200}])), false);
+        let mut old_consumed = consumed.clone();
+        old_consumed.source.capture_stream_id = revised_old.asr_stream_id();
+        old_consumed.source.capture_generation = revised_old.source_snapshot.lock().capture_generation;
+        assert!(revised_old.pending_body_delivery_from_consumption(&old_consumed).is_none(),
+            "a complete timed revision wholly before the submitted audio edge adds no new body");
+        let state = asr.state.lock();
+        assert!(!state.local_body_owner_verified);
+        assert!(!state.local_speaker_tracking_enabled, "audio coordinates supply no enrolled speaker identity");
+        drop(state);
+        asr.seal_source_snapshot();
+        assert!(asr.pending_body_delivery_from_consumption(&consumed).is_none());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "explicit saved native/PCM and protected enrollment; real pending-source worker, no cloud/editor"]
+    fn recorded_pending_suffix_identity_keeps_owner_and_releases_known_foreign() {
+        use crate::transcript_boundary::content_key;
+        let root = std::path::PathBuf::from(std::env::var_os("LISTENER_PENDING_SOURCE_REPLAY").unwrap());
+        let protocol: Value = serde_json::from_slice(&std::fs::read(root.join("protocol.json")).unwrap()).unwrap();
+        let phrase = protocol["phrase"].as_str().unwrap();
+        let mut reports = Vec::new();
+        for case in protocol["cases"].as_array().unwrap() {
+            let pcm = std::fs::read(case["pcm"].as_str().unwrap()).unwrap();
+            let archive: Value = serde_json::from_slice(&std::fs::read(case["trace"].as_str().unwrap()).unwrap()).unwrap();
+            let asr = uplink_stall_test_asr().with_owner_activity_only(true);
+            asr.note_accepted_wake_phrase(phrase);
+            asr.start_personal_vad(None, phrase);
+            asr.consume_pcm_chunk(&pcm);
+            asr.submit_personal_vad(&pcm, (pcm.len()/2) as u64);
+            let began = Instant::now();
+            let through = (pcm.len()/5120*160) as u64;
+            while asr.personal_vad_snapshot().is_none_or(|frame| frame.analyzed_end_ms < through) {
+                assert!(began.elapsed() < Duration::from_secs(40));
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let mut consumed = None;
+            let mut frames = Vec::new();
+            for entry in archive["trace"]["entries"].as_array().unwrap().iter().filter(|entry| entry["stage"] == "normalized_result") {
+                asr.apply_saved_native_result_for_test(&entry["provider_result"], false);
+                if consumed.is_none() && case["consumeAtFrame"].as_u64().is_none_or(|frame| entry["frame"].as_u64() == Some(frame)) {
+                    if let Some(snapshot) = asr.pause_early_delivery_evidence_after(Duration::ZERO, "") {
+                        consumed = snapshot.timing.as_ref().map(|timing| LiveBodyConsumption {
+                            raw_prefix:snapshot.text.clone(), body_start:0, rendered_key:content_key(&snapshot.text),
+                            source:snapshot.source, boundary:timing.timing.delivery_boundary(&content_key(&snapshot.text)),
+                        });
+                    }
+                }
+                let Some(consumed) = consumed.as_ref() else { continue; };
+                let before = asr.pending_body_delivery_from_consumption_impl(consumed, false);
+                let began = Instant::now();
+                let mut pending = asr.pending_body_delivery_from_consumption(consumed);
+                while asr.pending_source_identity.is_busy_for_test() {
+                    assert!(began.elapsed() < Duration::from_secs(5), "bounded source identity did not finish");
+                    std::thread::sleep(Duration::from_millis(10));
+                    pending = asr.pending_body_delivery_from_consumption(consumed);
+                }
+                frames.push(json!({"frame":entry["frame"],"elapsedMs":entry["elapsed_ms"],
+                    "sourcePending":before.as_ref().map(|body|&body.key),
+                    "recognitionPending":before.as_ref().map(|body|body.recognition_pending),
+                    "candidatePending":pending.map(|body|body.key),"analysisMs":began.elapsed().as_millis(),
+                    "selected":asr.pause_early_delivery_snapshot_diagnostics(&content_key(&consumed.raw_prefix))}));
+            }
+            assert!(consumed.is_some(), "saved confirmed source never acquired a consumption boundary");
+            reports.push(json!({"id":case["session"],"frames":frames}));
+        }
+        let report = json!({"cases":reports,"actualEditor":false,"actualStop":false,"cloudCalls":0,
+            "profileModified":false,"scope":"saved exact native/PCM through actual enrollment-backed activity and pending-source workers; complete saved detector timeline, simulated consumption, no real-time STOP claim"});
+        std::fs::write(root.join("saved-pending-chain.json"),serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+        for case in report["cases"].as_array().unwrap().iter().skip(1).filter(|case| !case["id"].as_str().unwrap().starts_with("c8491de9")) {
+            assert!(case["frames"].as_array().unwrap().iter().all(|frame| frame["sourcePending"] == frame["candidatePending"]),
+                "source check must not retire an archived own-body obligation: {}",case["id"]);
+        }
+        assert!(report["cases"][0]["frames"].as_array().unwrap().iter().any(|frame|
+            frame["frame"] == 82 && !frame["sourcePending"].is_null() && frame["candidatePending"].is_null()),
+            "the growing draft at the original three-second deadline remains unresolved");
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn pending_owner_source_coordinate_is_shared_by_all_live_authorities() {
+        use crate::speech_decision_kernel::LiveTranscriptAuthority;
+        let at = Instant::now();
+        let phrase = "开始录音";
+        let full = "开始录音。这就是最后一句话";
+        let body_prefix = crate::transcript_boundary::content_key("这就是最后一");
+        let phrase_prefix = crate::transcript_boundary::content_key("开始录音。这就是最后一");
+        let remaining = crate::transcript_boundary::content_key("句话");
+        let raw_consumed = |asr: &VolcengineStreamingASR, prefix: &str| LiveBodyConsumption {
+            raw_prefix: prefix.into(), body_start: "开始录音。".len(),
+            rendered_key: body_prefix.clone(), boundary: None,
+            source: LiveDeliverySource { capture_stream_id: asr.asr_stream_id(),
+                capture_generation: asr.source_snapshot.lock().capture_generation,
+                decoder_stream_id: asr.asr_stream_id(), owner_generation: 0 },
+        };
+
+        let primary = uplink_stall_test_asr();
+        primary.note_local_speaker_tracking_started_with_owner(phrase, false);
+        {
+            let mut st = primary.state.lock();
+            st.local_body_owner_verified = true;
+            st.live_owner_delivery = Some(TranscriptCandidate {
+                text: full.into(),
+                ..Default::default()
+            });
+            st.live_owner_delivery_updated_at = Some(at);
+            bind_test_owner_occurrence(&mut st,full,(0,5000),at);
+        }
+        assert_eq!(primary.live_transcript_source().0, LiveTranscriptAuthority::Primary);
+        assert_eq!(primary.pending_body_delivery_from_consumption(&raw_consumed(&primary, "开始录音。这就是最后一")).map(|pending| pending.key),
+            Some(remaining.clone()));
+        assert_eq!(
+            primary.pending_owner_delivery_after(&body_prefix).map(|pending| pending.0),
+            Some(remaining.clone()),
+            "a body-verified Primary candidate accepts the coordinator's body-only source coordinate",
+        );
+        assert_eq!(
+            primary.pending_owner_delivery_after(&phrase_prefix).map(|pending| pending.0),
+            Some(remaining.clone()),
+            "an already phrase-qualified coordinate is not stripped a second time",
+        );
+        {
+            let mut st = primary.state.lock();
+            st.live_owner_delivery.as_mut().unwrap().text =
+                "开始录音。正文里再次说开始录音，尾句".into();
+            bind_test_owner_occurrence(&mut st,"开始录音。正文里再次说开始录音，尾句",(0,5000),at);
+        }
+        let repeated_body_prefix =
+            crate::transcript_boundary::content_key("正文里再次说开始录音");
+        assert_eq!(
+            primary
+                .pending_owner_delivery_after(&repeated_body_prefix)
+                .map(|pending| pending.0),
+            Some(crate::transcript_boundary::content_key("尾句")),
+            "a literal wake phrase inside the body remains part of the consumed body coordinate",
+        );
+
+        let certified = uplink_stall_test_asr();
+        certified.note_local_speaker_tracking_started_with_owner(phrase, false);
+        {
+            let mut st = certified.state.lock();
+            st.local_body_owner_verified = true;
+            st.verified_provider_owner = Some(RawTranscript {
+                text: full.into(),
+                duration_ms: 5_000,
+            });
+            st.verified_provider_owner_updated_at = Some(at);
+            bind_test_owner_occurrence(&mut st,full,(0,5000),at);
+            st.verified_provider_owner_timing = st.live_owner_delivery_timing.clone();
+        }
+        certified.target_speaker_filter_required.store(true, Ordering::SeqCst);
+        assert_eq!(certified.pending_body_delivery_from_consumption(&raw_consumed(&certified, "开始录音。这就是最后一")).map(|pending| pending.key),
+            Some(remaining.clone()));
+        assert_eq!(
+            certified.live_transcript_source().0,
+            LiveTranscriptAuthority::VerifiedProviderOwner,
+        );
+        assert_eq!(
+            certified.pending_owner_delivery_after(&body_prefix).map(|pending| pending.0),
+            Some(remaining.clone()),
+            "a provider owner certified by later body identity uses the same body-only coordinate",
+        );
+
+        let independent_primary = uplink_stall_test_asr();
+        independent_primary.note_local_speaker_tracking_started_with_owner(phrase, false);
+        let owner = Arc::new(uplink_stall_test_asr());
+        {
+            let mut st = owner.state.lock();
+            st.best_transcript_text = full.into();
+            st.best_transcript_committed_at = Some(at);
+        }
+        *independent_primary.target_speaker_stream.lock() = Some(
+            super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(
+                Some(owner),
+                true,
+                true,
+            ),
+        );
+        assert_eq!(
+            independent_primary.live_transcript_source().0,
+            LiveTranscriptAuthority::IndependentOwner,
+        );
+        assert_eq!(independent_primary.pending_body_delivery_from_consumption(&raw_consumed(&independent_primary, "开始录音。这就是最后一")).map(|pending| pending.key),
+            Some(remaining.clone()));
+        assert_eq!(
+            independent_primary
+                .pending_owner_delivery_after(&body_prefix)
+                .map(|pending| pending.0),
+            Some(remaining),
+            "IndependentOwner keeps its explicit phrase+body recursion coordinate",
+        );
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn original_source_owner_evidence_releases_streaming_tail_when_separator_is_other() {
+        use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        let old = Instant::now() - Duration::from_secs(2);
+        {
+            let mut st = asr.state.lock();
+            st.best_transcript_text = "开始录音。本人前段。本人尾句。旁人尾段。".into();
+            st.best_transcript_committed_at = Some(old);
+            st.best_transcript_timing = Some(TimedTranscript {
+                text: st.best_transcript_text.clone(),
+                words: vec![
+                    ("开始录音。", 200, 1_000),
+                    ("本人前段。", 1_400, 3_000),
+                    ("本人尾句。", 6_400, 8_800),
+                    ("旁人尾段。", 10_000, 11_500),
+                ]
+                .into_iter()
+                .map(|(text, start_ms, end_ms)| TimedTranscriptWord {
+                    text: text.into(),
+                    start_ms: Some(start_ms),
+                    end_ms: Some(end_ms),
+                })
+                .collect(),
+            });
+            st.live_owner_delivery = Some(TranscriptCandidate {
+                text: "开始录音。本人前段。".into(),
+                ..Default::default()
+            });
+            st.live_owner_delivery_updated_at = Some(old);
+            st.provider_distinct_foreign_audio_ranges = vec![(9_500, 12_000)];
+        }
+        let stream = super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(
+            None, false, false,
+        );
+        stream.test_set_source_owner_evidence(vec![(0, 9_000)], Instant::now());
+        *asr.target_speaker_stream.lock() = Some(Arc::clone(&stream));
+
+        assert!(asr
+            .pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), "")
+            .is_none(), "late source identity proof cannot bypass live stability");
+        assert_eq!(
+            asr.pending_owner_delivery_after(&crate::transcript_boundary::content_key("本人前段。"))
+                .map(|pending| pending.0),
+            Some(crate::transcript_boundary::content_key("本人尾句。")),
+            "fresh source proof may hold endpoint while the paste path still waits for stability",
+        );
+
+        asr.state.lock().pause_early_recent_revisions.clear();
+        stream.test_set_source_owner_evidence(vec![(0, 9_000)], old);
+
+        let snapshot = asr
+            .pause_early_delivery_ledger_snapshot_after(Duration::ZERO, "")
+            .unwrap();
+        assert_eq!(snapshot.text, "开始录音。本人前段。本人尾句。");
+        assert_eq!(
+            asr.pending_owner_delivery_after(&crate::transcript_boundary::content_key("本人前段。"))
+                .map(|pending| pending.0),
+            Some(crate::transcript_boundary::content_key("本人尾句。")),
+        );
+        assert!(!snapshot.text.contains("旁人尾段"),
+            "a retained provider foreign interval still vetoes original-source owner recovery");
+
+        stream.test_set_physical_interference_ranges(vec![(6_000, 9_000)]);
+        let overlap_vetoed = asr
+            .pause_early_delivery_ledger_snapshot_after(Duration::ZERO, "")
+            .unwrap();
+        assert_eq!(overlap_vetoed.text, "开始录音。本人前段。",
+            "physical overlap still vetoes a source-profile Target range");
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn late_source_owner_proof_extends_a_short_filtered_ledger_without_another_provider_frame() {
+        use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        let old = Instant::now() - Duration::from_secs(2);
+        let filtered = "开始录音。我把今天的事情说明完了，需要保留的内容是整理文件，再";
+        let full = "开始录音。我把今天的事情说明完了，需要保留的内容是整理文件，再检查设备，最后确认会议时间。这就是本段最后一句话。旁人尾段。";
+        {
+            let mut st = asr.state.lock();
+            st.best_transcript_text = filtered.into();
+            st.best_transcript_committed_at = Some(old);
+            st.best_transcript_timing = Some(TimedTranscript {
+                text: filtered.into(),
+                words: vec![
+                    ("开始录音。", 200, 1_000),
+                    ("我把今天的事情说明完了，需要保留的内容是整理文件，再", 1_200, 5_800),
+                ]
+                .into_iter()
+                .map(|(text, start_ms, end_ms)| TimedTranscriptWord {
+                    text: text.into(), start_ms: Some(start_ms), end_ms: Some(end_ms),
+                })
+                .collect(),
+            });
+            st.provider_timed_transcript = Some(TimedTranscript {
+                text: full.into(),
+                words: vec![
+                    ("开始录音。", 200, 1_000),
+                    ("我把今天的事情说明完了，需要保留的内容是整理文件，再", 1_200, 5_800),
+                    ("检查设备，最后确认会议时间。这就是本段最后一句话。", 6_100, 8_900),
+                    ("旁人尾段。", 10_000, 11_500),
+                ]
+                .into_iter()
+                .map(|(text, start_ms, end_ms)| TimedTranscriptWord {
+                    text: text.into(), start_ms: Some(start_ms), end_ms: Some(end_ms),
+                })
+                .collect(),
+            });
+            st.live_owner_delivery = Some(TranscriptCandidate {
+                text: filtered.into(), ..Default::default()
+            });
+            st.live_owner_delivery_updated_at = Some(old);
+            st.provider_distinct_foreign_audio_ranges = vec![(9_500, 12_000)];
+        }
+        let stream = super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(
+            None, false, false,
+        );
+        // The provider has stopped revising. Only this later original-source
+        // proof changes; the watchdog must still be able to observe the tail.
+        stream.test_set_source_owner_evidence(vec![(0, 9_000)], old);
+        *asr.target_speaker_stream.lock() = Some(Arc::clone(&stream));
+
+        let consumed = crate::transcript_boundary::content_key(
+            "我把今天的事情说明完了，需要保留的内容是整理文件，再",
+        );
+        assert!(asr
+            .pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &consumed)
+            .is_none(), "a newly revised provider timing must earn its own stability interval");
+        assert!(asr.pending_owner_delivery_after(&consumed).is_some(),
+            "fresh owner-approved provider growth still holds endpoint while it settles");
+        asr.state
+            .lock()
+            .source_owner_projection_stability
+            .as_mut()
+            .expect("pending query records the exact source projection")
+            .updated_at = old;
+        let snapshot = asr
+            .pause_early_delivery_ledger_snapshot_after(Duration::ZERO, &consumed)
+            .expect("late source proof should project the retained timed provider revision");
+        assert_eq!(
+            snapshot.text,
+            "开始录音。我把今天的事情说明完了，需要保留的内容是整理文件，再检查设备，最后确认会议时间。这就是本段最后一句话。"
+        );
+        assert_eq!(
+            asr.pending_owner_delivery_after(&consumed).map(|pending| pending.0),
+            Some(crate::transcript_boundary::content_key(
+                "检查设备，最后确认会议时间。这就是本段最后一句话。"
+            )),
+        );
+        assert!(!snapshot.text.contains("旁人尾段"));
+
+        let projection_stable_at = asr
+            .state
+            .lock()
+            .source_owner_projection_stability
+            .as_ref()
+            .unwrap()
+            .updated_at;
+        {
+            let mut state = asr.state.lock();
+            let timing = state.provider_timed_transcript.as_mut().unwrap();
+            timing.text = timing.text.replace("旁人尾段", "旁人继续增长的另一段");
+            timing.words.last_mut().unwrap().text = "旁人继续增长的另一段。".into();
+        }
+        assert!(asr
+            .pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &consumed)
+            .is_some(), "foreign-only provider growth cannot restart owner projection stability");
+        assert_eq!(
+            asr.state.lock().source_owner_projection_stability.as_ref().unwrap().updated_at,
+            projection_stable_at,
+        );
+        {
+            let mut state = asr.state.lock();
+            let timing = state.provider_timed_transcript.as_mut().unwrap();
+            timing.text = timing.text.replace("最后一句话。", "最后一句话！");
+            timing.words[2].text = timing.words[2].text.replace("最后一句话。", "最后一句话！");
+        }
+        assert!(asr
+            .pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &consumed)
+            .is_some(), "punctuation-only owner rendering cannot restart body stability");
+        assert_eq!(
+            asr.state.lock().source_owner_projection_stability.as_ref().unwrap().updated_at,
+            projection_stable_at,
+        );
+
+        stream.test_set_physical_interference_ranges(vec![(6_000, 9_000)]);
+        let overlap_vetoed = asr
+            .pause_early_delivery_ledger_snapshot_after(Duration::ZERO, &consumed)
+            .expect("the already accepted owner prefix remains valid");
+        assert_eq!(overlap_vetoed.text, filtered,
+            "physical overlap must veto only the unsubmitted source-projected tail");
+        assert!(asr.pending_owner_delivery_after(&consumed).is_none(),
+            "a physically overlapped source tail cannot hold endpoint as pending owner text");
+        stream.test_set_physical_interference_ranges(Vec::new());
+        let restored = asr
+            .pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &consumed);
+        // None means no new paste; it does not clear the editor's already
+        // submitted body. Returning that consumed prefix is also harmless,
+        // but neither form may expose restored or foreign unsubmitted words.
+        if let Some(restored) = restored {
+            assert_eq!(restored.text, filtered,
+                "restoring a revoked projection cannot reuse its old tail's age");
+        }
+        assert!(asr.pending_owner_delivery_after(&consumed).is_some(),
+            "the fresh owner-approved tail remains visible only to the bounded endpoint settling hold");
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn source_owner_proof_cannot_turn_an_unrelated_revision_into_a_live_tail() {
+        use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        let mut state = asr.state.lock();
+        state.live_owner_delivery = Some(TranscriptCandidate {
+            text: "本人前段".into(), ..Default::default()
+        });
+        state.best_transcript_text = "另一个完全不同的更长修订".into();
+        state.best_transcript_timing = Some(TimedTranscript {
+            text: state.best_transcript_text.clone(),
+            words: vec![TimedTranscriptWord { text: state.best_transcript_text.clone(),
+                start_ms: Some(0), end_ms: Some(5000) }],
+        });
+        assert!(primary_source_owner_supported_candidate(&state, &[(0, 6000)], &[]).is_none());
+    }
+
+    #[test]
+    fn revised_admitted_owner_prefix_can_project_only_new_owner_timed_words() {
+        use crate::transcript_boundary::{content_key, TimedTranscript, TimedTranscriptWord};
+
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        let old = "嗯，开始录音，然后天天的安排已经确认，资料放在左边，设备放在右边。";
+        let revised = "嗯，开始录音，然后今天的安排已经确认，资料放在左边，设备放在右边。我在3秒以内继续说话。";
+        let timing = TimedTranscript {
+            text: revised.into(),
+            words: vec![
+                ("嗯，开始录音，", 200, 2_400),
+                ("然后今天的安排已经确认，资料放在左边，设备放在右边。", 2_600, 8_200),
+                ("我在3秒以内继续说话。", 9_800, 11_400),
+            ]
+            .into_iter()
+            .map(|(text, start_ms, end_ms)| TimedTranscriptWord {
+                text: text.into(),
+                start_ms: Some(start_ms),
+                end_ms: Some(end_ms),
+            })
+            .collect(),
+        };
+        {
+            let mut state = asr.state.lock();
+            state.live_owner_delivery = Some(TranscriptCandidate {
+                text: old.into(),
+                ..Default::default()
+            });
+            state.provider_timed_transcript = Some(timing.clone());
+        }
+
+        let state = asr.state.lock();
+        let (projected, _) = primary_source_owner_supported_candidate(
+            &state,
+            &[(0, 8_400), (9_600, 11_600)],
+            &[],
+        )
+        .expect("a unique bounded 天天-to-今天 seam must expose later owner words");
+        assert_eq!(projected.text, revised);
+        assert_eq!(
+            source_owner_projection_anchor_key(&timing, &content_key(old)),
+            Some(content_key("嗯，开始录音，然后今天的安排已经确认，资料放在左边，设备放在右边。")),
+        );
+        assert!(
+            primary_source_owner_supported_candidate(
+                &state,
+                &[(0, 8_400), (9_600, 11_600)],
+                &[(9_800, 11_400)],
+            )
+            .is_none(),
+            "known foreign overlap still vetoes every newly projected word",
+        );
+    }
+
+    #[test]
+    fn revised_owner_projection_rejects_ambiguous_or_internal_only_growth() {
+        use crate::transcript_boundary::{content_key, TimedTranscript, TimedTranscriptWord};
+
+        let timed = |text: &str| TimedTranscript {
+            text: text.into(),
+            words: vec![TimedTranscriptWord {
+                text: text.into(),
+                start_ms: Some(0),
+                end_ms: Some(5_000),
+            }],
+        };
+        let ambiguous = timed("甲乙丙戊戊继续正文");
+        assert!(
+            source_owner_projection_anchor_key(&ambiguous, &content_key("甲乙丙丁戊")).is_none(),
+            "equal-cost revised seams cannot choose an owner source occurrence",
+        );
+
+        let accepted = "开始录音。资料放在右边";
+        let internal_only = timed("开始录音。资料现在放在右边");
+        assert!(
+            source_owner_projection_anchor_key(&internal_only, &content_key(accepted)).is_none(),
+            "an insertion inside the old body is not a new continuation",
+        );
+
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        let mut state = asr.state.lock();
+        state.live_owner_delivery = Some(TranscriptCandidate {
+            text: accepted.into(),
+            ..Default::default()
+        });
+        state.provider_timed_transcript = Some(internal_only);
+        assert!(
+            primary_source_owner_supported_candidate(&state, &[(0, 6_000)], &[]).is_none(),
+            "source Owner coverage cannot turn an internal rewrite into appendable text",
+        );
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn separator_other_without_original_source_owner_proof_cannot_release_raw_tail() {
+        use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        let old = Instant::now() - Duration::from_secs(2);
+        {
+            let mut st = asr.state.lock();
+            st.best_transcript_text = "开始录音。本人前段。未知尾段。".into();
+            st.best_transcript_committed_at = Some(old);
+            st.best_transcript_timing = Some(TimedTranscript {
+                text: st.best_transcript_text.clone(),
+                words: vec![TimedTranscriptWord {
+                    text: st.best_transcript_text.clone(),
+                    start_ms: Some(0),
+                    end_ms: Some(8_000),
+                }],
+            });
+            st.live_owner_delivery = Some(TranscriptCandidate {
+                text: "开始录音。本人前段。".into(),
+                ..Default::default()
+            });
+            st.live_owner_delivery_updated_at = Some(old);
+            bind_test_owner_occurrence(&mut st,"开始录音。本人前段。",(0,3000),old);
+        }
+        *asr.target_speaker_stream.lock() = Some(
+            super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(
+                None, false, false,
+            ),
+        );
+
+        let snapshot = asr
+            .pause_early_delivery_ledger_snapshot_after(Duration::ZERO, "")
+            .unwrap();
+        assert_eq!(snapshot.text, "开始录音。本人前段。");
+        assert!(!snapshot.text.contains("未知尾段"));
     }
 
     #[test]
@@ -10496,7 +14656,7 @@ mod tests {
     }
 
     #[test]
-    fn pause_early_rolling_snapshot_requires_current_owner_after_a_speaker_dip() {
+    fn proved_owner_prefix_survives_a_later_unscoped_speaker_dip() {
         use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Target};
         let asr = VolcengineStreamingASR::new(
             VolcengineCredentials {
@@ -10513,6 +14673,12 @@ mod tests {
             let mut state = asr.state.lock();
             state.best_transcript_text = growing.into();
             state.best_transcript_committed_at = Some(now);
+            // The prefix was admitted before the transient speaker dip. Raw
+            // best text alone no longer grants irreversible Owner permission.
+            state.live_owner_delivery = Some(TranscriptCandidate {
+                text: growing.into(), ..Default::default()
+            });
+            state.live_owner_delivery_updated_at = Some(now);
             state.pause_early_recent_revisions.push_back((
                 now - Duration::from_secs(2),
                 first.into(),
@@ -10522,16 +14688,331 @@ mod tests {
             state.local_speaker_stable_target = true;
             state.local_target_confirmed = true;
             state.local_speaker_classification = Some(NonTarget { score: 0.04 });
+            bind_test_owner_occurrence(&mut state,growing,(0,5000),now);
         }
-        assert!(asr
-            .pause_early_delivery_ledger_snapshot(Duration::from_secs(1))
-            .is_none());
+        assert_eq!(asr.pause_early_delivery_ledger_snapshot(Duration::from_secs(1))
+                .map(|snapshot| snapshot.text),Some(first.into()),
+            "an unscoped current speaker flag cannot revoke an earlier timed Owner occurrence");
         asr.state.lock().local_speaker_classification = Some(Target { score: 0.48 });
         assert_eq!(
             asr.pause_early_delivery_ledger_snapshot(Duration::from_secs(1))
                 .map(|snapshot| snapshot.text),
             Some(first.into())
         );
+    }
+
+    #[test]
+    fn rejected_middle_mixture_recovers_only_timed_owner_words_around_separated_audio() {
+        use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+        let timed = |text: &str, words: Vec<(&str, u64, u64)>| TimedTranscript {
+            text: text.into(),
+            words: words
+                .into_iter()
+                .map(|(text, start_ms, end_ms)| TimedTranscriptWord {
+                    text: text.into(),
+                    start_ms: Some(start_ms),
+                    end_ms: Some(end_ms),
+                })
+                .collect(),
+        };
+        let live_text = "开始录音。本人前段。旁人中段。本人尾段。";
+        let separated_text = "开始录音。分离本人中段。";
+        let mut state = SyncState::default();
+        state.local_speaker_tracking_enabled = true;
+        state.local_wake_owner_verified = true;
+        state.local_owner_pcm_intervals = vec![(0, 6_000), (12_000, 16_000)];
+        state.live_owner_delivery = Some(TranscriptCandidate {
+            text: live_text.into(),
+            timed_segments: Vec::new(),
+            authoritative_cumulative: false,
+        });
+        state.live_owner_delivery_timing = Some(timed(
+            live_text,
+            vec![
+                ("开始录音", 1_000, 2_000),
+                ("本人前段", 3_000, 5_000),
+                ("旁人中段", 9_500, 10_500),
+                ("本人尾段", 13_000, 15_000),
+            ],
+        ));
+        let separated_timing = timed(
+            separated_text,
+            vec![("开始录音", 1_000, 2_000), ("分离本人中段", 9_300, 11_300)],
+        );
+        let separated = || {
+            Ok(Some(RawTranscript {
+                text: separated_text.into(),
+                duration_ms: 16_000,
+            }))
+        };
+        let recovered = recover_rejected_mixture_from_nonoverlap_owner_ledger(
+            &state,
+            separated(),
+            Some(separated_timing.clone()),
+            &[(0, 3_000), (9_000, 12_000)],
+            &[(9_000, 12_000)],
+            &[],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            recovered.text,
+            "开始录音。本人前段。分离本人中段。本人尾段。"
+        );
+        assert!(!recovered.text.contains("旁人中段"));
+
+        state.provider_non_owner_audio_ranges.push((12_500, 15_500));
+        let retained_filter = recover_rejected_mixture_from_nonoverlap_owner_ledger(
+            &state,
+            separated(),
+            Some(separated_timing),
+            &[(0, 3_000), (9_000, 12_000)],
+            &[(9_000, 12_000)],
+            &[],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            retained_filter.text,
+            "开始录音。本人前段。分离本人中段。",
+            "a known foreign interval retains authority over a longer raw ledger"
+        );
+    }
+
+    #[test]
+    fn source_owner_recovery_preserves_crossing_words_without_erasing_foreign_vetoes() {
+        use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+        let timed = |text: &str, words: Vec<(&str, u64, u64)>| TimedTranscript {
+            text: text.into(), words: words.into_iter().map(|(text, start, end)| TimedTranscriptWord {
+                text: text.into(), start_ms: Some(start), end_ms: Some(end),
+            }).collect(),
+        };
+        let primary = timed("前段。旁人插话。今天先整理文件。尾段。",
+            vec![("前段",1000,1800),("旁人插话",9500,9800),("今天",11492,11572),
+                ("先",11732,11812),("整理",11972,12052),("文件",12212,12292),("尾段",16000,17000)]);
+        let secondary = timed("前段。今天先。",
+            vec![("前段",1020,1820),("今天",11422,11742),("先",11742,12022)]);
+        let mut state = SyncState::default();
+        state.local_speaker_tracking_enabled = true;
+        state.local_wake_owner_verified = true;
+        state.best_transcript_text = primary.text.clone();
+        state.best_transcript_timing = Some(primary);
+        // No contiguous live prefix or fine-window Owner bridge exists. Only
+        // the independently observed original input may authorize recovery.
+        let recover = |state: &SyncState, source: &[(u64,u64)]| {
+            recover_rejected_mixture_from_nonoverlap_owner_ledger(state,
+                Ok(Some(RawTranscript { text: secondary.text.clone(), duration_ms: 18000 })),
+                Some(secondary.clone()), &[(0,3000),(9000,15000)], &[(9000,12000)], source)
+                .unwrap().unwrap().text
+        };
+        assert_eq!(recover(&state,&[(0,18000)]), "前段。今天先整理文件。",
+            "coarse source ownership cannot restore an unsupported tail outside extracted Owner audio");
+        assert_eq!(recover(&state,&[]),secondary.text,"Pending source cannot fill gaps");
+        state.provider_distinct_foreign_audio_ranges = vec![(12030,12060),(15900,18000)];
+        assert_eq!(recover(&state,&[(0,18000)]), "前段。今天先。文件。",
+            "a known foreign interval vetoes even a seam word with its center outside the interval");
+        state.best_transcript_timing = None;
+        assert_eq!(recover(&state,&[(0,18000)]), secondary.text,"untimed text cannot be reconstructed");
+    }
+
+    #[test]
+    fn timed_decoder_gap_recovery_fills_recorded_omission_without_combining_alternatives() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "volcengine_owner_gap_fixture.json"
+        )).unwrap();
+        let primary = super::super::volcengine_transcript::timed_transcript_from_result(&fixture["primary"]);
+        let secondary = super::super::volcengine_transcript::timed_transcript_from_result(&fixture["secondary"]);
+        let ranges = |key: &str| fixture[key].as_array().unwrap().iter().map(|range| (
+            range[0].as_u64().unwrap(), range[1].as_u64().unwrap(),
+        )).collect::<Vec<_>>();
+        let mut state = SyncState::default();
+        state.local_speaker_tracking_enabled = true;
+        state.local_wake_owner_verified = true;
+        state.best_transcript_text = primary.text.clone();
+        state.best_transcript_timing = Some(primary);
+        let recovered = recover_rejected_mixture_from_nonoverlap_owner_ledger(
+            &state,
+            Ok(Some(RawTranscript { text: secondary.text.clone(), duration_ms: 64011 })),
+            Some(secondary.clone()), &ranges("extracted_owner"), &ranges("physical"), &ranges("source_owner"),
+        ).unwrap().unwrap();
+        assert_eq!(recovered.duration_ms, 64011, "word recovery must not shorten the processed audio duration");
+        let recovered = recovered.text;
+        assert!(recovered.contains("安排到原来的安排里面。然后"), "{recovered}");
+        assert!(recovered.contains("如果时间充足，就"), "secondary alternative must not become two answers: {recovered}");
+        assert!(!recovered.contains("冲突"), "primary conflict is not a missing span");
+        assert!(!recovered.contains("执行律师"), "coarse primary Owner cannot recover background after output Owner ends");
+        assert!(!recovered.contains("查询"), "the still-damaged tail has not gained output Owner proof");
+        let rendered = restore_separated_owner_final_punctuation_from_provider_track(
+            Ok(Some(RawTranscript { text: recovered.clone(), duration_ms: 64011 })),
+            Some(RawTranscript { text: state.best_transcript_text.clone(), duration_ms: 64011 }),
+        ).unwrap().unwrap().text;
+        assert_eq!(rendered, recovered, "the subsequent formatting stage cannot put the primary alternatives back");
+        state.provider_non_owner_audio_ranges = vec![(31962,33322)];
+        let vetoed = recover_rejected_mixture_from_nonoverlap_owner_ledger(
+            &state,
+            Ok(Some(RawTranscript { text: secondary.text.clone(), duration_ms: 64011 })),
+            Some(secondary.clone()), &ranges("extracted_owner"), &ranges("physical"), &ranges("source_owner"),
+        ).unwrap().unwrap().text;
+        assert!(!vetoed.contains("排到原来的安排里面"));
+    }
+
+    #[test]
+    fn timed_decoder_gap_matching_preserves_distinct_repeats_and_rejects_ambiguous_occurrences() {
+        let token = |text: &str, start_ms, end_ms| CertifiedTimedToken { text: text.into(), start_ms, end_ms };
+        let primary = vec![token("再",100,200), token("再",300,400), token("说",500,600)];
+        let secondary = vec![token("再",100,200), token("说",500,600)];
+        assert_eq!(missing_primary_word_ranges(&primary, &secondary), vec![(Some((0,0)),1..2)]);
+        let conflicting = vec![token("再",100,200), token("次",300,400), token("说",500,600)];
+        assert!(missing_primary_word_ranges(&primary, &conflicting).is_empty());
+        let repeated_ambiguous = vec![token("再",100,200), token("再",100,200)];
+        assert!(missing_primary_word_ranges(&repeated_ambiguous, &[token("再",100,200)]).is_empty());
+        assert!(missing_primary_word_ranges(&primary, &[token("另一句话",100,600)]).is_empty());
+    }
+
+    #[test]
+    fn collapsed_terminal_revision_keeps_matching_long_owner_timing() {
+        use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+        let timed = |text: &str, start_ms, end_ms| TimedTranscript {
+            text: text.into(),
+            words: vec![TimedTranscriptWord {
+                text: text.into(),
+                start_ms: Some(start_ms),
+                end_ms: Some(end_ms),
+            }],
+        };
+        let merged = "开始录音本人保留的长正文";
+        let previous = timed("开始录音。本人保留的长正文。", 100, 5_000);
+        let collapsed = timed("开始录音。", 100, 900);
+        let retained = matching_merged_timing(merged, collapsed, Some(previous.clone())).unwrap();
+        assert_eq!(retained.text, previous.text);
+        assert_eq!(retained.words.len(), previous.words.len());
+        assert_eq!(retained.words[0].start_ms, previous.words[0].start_ms);
+        assert_eq!(retained.words[0].end_ms, previous.words[0].end_ms);
+
+        let unrelated = timed("另一段正文。", 5_100, 6_000);
+        assert!(matching_merged_timing(merged, unrelated, None).is_none());
+    }
+
+
+    #[test]
+    #[ignore = "uses the saved real response selected explicitly by the repair runner"]
+    fn final_supplement_saved_1325_flows_from_actual_protocol_final_not_preview() {
+        let fixture:Value=serde_json::from_slice(&std::fs::read(std::env::var("LISTENER_FINAL_SUPPLEMENT_FIXTURE").unwrap()).unwrap()).unwrap();
+        let response=json!({"audio_info":{"duration":39862},"result":fixture["response"].clone()});
+        let asr=uplink_stall_test_asr();
+        // Saved session's provider/editor contract used elected cluster 1.
+        // This tests delivery, not the independent identity election quality.
+        asr.state.lock().target_speaker_id=Some("1".into());
+        let bytes=serde_json::to_vec(&response).unwrap();
+        assert!(asr.handle_frame(&frame::build(MessageType::FullServerResponse,Flags::None,Serialization::Json,&bytes,None)));
+        let preview=asr.state.lock().best_transcript_text.clone();
+        assert!(asr.final_native_word_snapshot_for(&preview).is_none());
+        let (tx,mut rx)=oneshot::channel();
+        { let mut st=asr.state.lock(); st.finishing=true; st.final_tx=Some(tx); }
+        assert!(!asr.handle_frame(&frame::build(MessageType::FullServerResponse,Flags::LastPacket,Serialization::Json,&bytes,None)));
+        let final_text=rx.try_recv().unwrap().unwrap().text;
+        let native=asr.final_native_word_snapshot_for(&final_text).unwrap_or_else(|| {
+            let state=asr.state.lock();
+            panic!("sealed primary word view unavailable: final={final_text:?}, sealed={:?}, filtered={:?}",
+                state.sealed_native_word_timing.as_ref().map(|t| (&t.text,t.words.len())),
+                state.speaker_filtered_timed_transcript.as_ref().map(|t| (&t.text,t.words.len())));
+        });
+        assert!(asr.final_native_word_snapshot_for("another provider's final").is_none());
+        let result=crate::transcript_boundary::lossless_final_supplement(fixture["delivered"].as_str().unwrap(),&native,
+            native.text.strip_prefix("开始录音").unwrap()).unwrap();
+        assert_eq!(result.replace("已经要完成的内容要保留时间就这么",""),fixture["delivered"].as_str().unwrap());
+        assert!(asr.transcript_timing_snapshot_for(&final_text).is_none(),
+            "native ITN word rendering must not masquerade as aligned display coordinates");
+        let unbound=uplink_stall_test_asr();
+        let (tx,mut rx)=oneshot::channel();
+        { let mut state=unbound.state.lock(); state.finishing=true; state.final_tx=Some(tx); }
+        assert!(!unbound.handle_frame(&frame::build(MessageType::FullServerResponse,Flags::LastPacket,Serialization::Json,&bytes,None)));
+        let unbound_final=rx.try_recv().unwrap().unwrap().text;
+        assert!(unbound.final_native_word_snapshot_for(&unbound_final).is_none(),
+            "a raw recovery final must not inherit filtered native-word permissions");
+    }
+
+    #[test]
+    fn timing_snapshot_skips_same_text_owner_snapshot_with_prefix_only_words() {
+        use crate::transcript_boundary::TimedTranscript;
+
+        let fixture: Value = serde_json::from_str(include_str!(
+            "volcengine_secondary_timing_empty_row_fixture.json"
+        ))
+        .unwrap();
+        let response = &fixture["response"];
+        let result = &response["result"];
+        let text = result["text"].as_str().unwrap();
+        let complete = super::super::volcengine_transcript::timed_transcript_from_result(result);
+        assert_eq!(complete.words.len(), 236);
+        let prefix_only = TimedTranscript {
+            text: text.into(),
+            words: complete.words[..134].to_vec(),
+        };
+        assert_eq!(prefix_only.words.last().unwrap().text, "安");
+        let asr = uplink_stall_test_asr();
+        asr.state.lock().live_owner_delivery_timing = Some(prefix_only);
+        let payload = serde_json::to_vec(response).unwrap();
+        assert!(asr.handle_frame(&frame::build(
+            MessageType::FullServerResponse,
+            Flags::None,
+            Serialization::Json,
+            &payload,
+            None,
+        )));
+        let provider_timing = asr.provider_timed_transcript_snapshot().unwrap();
+        assert_eq!(provider_timing.words.len(), 236);
+        assert_eq!(
+            crate::transcript_boundary::content_key(&provider_timing.text),
+            crate::transcript_boundary::content_key(text),
+        );
+
+        let selected = asr.transcript_timing_snapshot_for(text).unwrap();
+        assert_eq!(selected.words.len(), provider_timing.words.len());
+        assert_eq!(selected.words.last().unwrap().end_ms, Some(59_972));
+    }
+
+    #[test]
+    fn timing_snapshot_returns_none_when_every_same_text_snapshot_is_incomplete() {
+        use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+
+        let text = "本人前段。本人后段。";
+        let incomplete = TimedTranscript {
+            text: text.into(),
+            words: vec![TimedTranscriptWord {
+                text: "本人前段。".into(),
+                start_ms: Some(1_000),
+                end_ms: Some(2_000),
+            }],
+        };
+        let asr = uplink_stall_test_asr();
+        {
+            let mut state = asr.state.lock();
+            state.live_owner_delivery_timing = Some(incomplete.clone());
+            state.best_transcript_timing = Some(incomplete);
+        }
+
+        assert!(asr.transcript_timing_snapshot_for(text).is_none());
+    }
+
+    #[test]
+    fn timing_snapshot_rejects_same_content_with_invalid_word_coordinates() {
+        use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+
+        let requested = "本人前段。本人后段。";
+        for (start_ms, end_ms) in [(None, Some(2_000)), (Some(3_000), Some(2_000))] {
+            let asr = uplink_stall_test_asr();
+            asr.state.lock().provider_timed_transcript = Some(TimedTranscript {
+                // Punctuation differs while the spoken content key is equal.
+                text: "本人前段，本人后段".into(),
+                words: vec![TimedTranscriptWord {
+                    text: "本人前段本人后段".into(),
+                    start_ms,
+                    end_ms,
+                }],
+            });
+            assert!(asr.transcript_timing_snapshot_for(requested).is_none());
+        }
     }
 
     #[test]
@@ -10545,7 +15026,7 @@ mod tests {
         asr.set_partial_transcript_callback(Some(Arc::new(move |text| partials.lock().push(text))));
         let visible = Arc::new(ParkingMutex::new(Vec::new()));
         let visuals = Arc::clone(&visible);
-        asr.set_visual_partial_transcript_callback(Some(Arc::new(move |text| visuals.lock().push(text))));
+        asr.set_visual_partial_transcript_callback(Some(Arc::new(move |update| visuals.lock().push(update.text().to_string()))));
         asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
         for end in [16_992, 17_472] {
             asr.note_local_speaker_observation(end, Target { score: 0.48 },
@@ -10556,8 +15037,11 @@ mod tests {
             asr.handle_frame(&frame::build(MessageType::FullServerResponse, Flags::None, Serialization::Json, &payload, None))
         };
         assert!(feed(json!({"text":owner,"utterances":[
-            {"text":owner,"start_time":80,"end_time":17760,"definite":true,"additions":{"speaker":"0","source":"two_pass"}}
+            {"text":owner,"start_time":80,"end_time":17760,"definite":true,"additions":{"speaker":"0","source":"two_pass"},"words":[{"text":owner,"start_time":80,"end_time":17760}]}
         ]}), 17_760));
+        // The old prefix is explicitly proved in this fixture. Two late
+        // scalar scores alone cannot certify its entire seventeen seconds.
+        asr.state.lock().local_owner_pcm_intervals.push((80,17760));
         // f2ba63dc: the last positive owner observation ends at 17472 ms.
         // New stream-only text later grows through an inconclusive interval;
         // neither its length nor its age proves that the owner spoke it.
@@ -10586,10 +15070,11 @@ mod tests {
             asr.note_local_speaker_observation(end, Target { score: 0.51 },
                 crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive);
         }
+        asr.state.lock().local_owner_pcm_intervals.push((22400,24500));
         assert!(feed(json!({"text":format!("{owner}{foreign}{resumed}"),"utterances":[
-            {"text":owner,"start_time":80,"end_time":17760,"definite":true,"additions":{"speaker":"0","source":"two_pass"}},
-            {"text":foreign,"start_time":18280,"end_time":20271,"definite":true,"additions":{"speaker":"1","source":"two_pass"}},
-            {"text":resumed,"start_time":22400,"end_time":24500,"definite":true,"additions":{"speaker":"0","source":"two_pass"}}
+            {"text":owner,"start_time":80,"end_time":17760,"definite":true,"additions":{"speaker":"0","source":"two_pass"},"words":[{"text":owner,"start_time":80,"end_time":17760}]},
+            {"text":foreign,"start_time":18280,"end_time":20271,"definite":true,"additions":{"speaker":"1","source":"two_pass"},"words":[{"text":foreign,"start_time":18280,"end_time":20271}]},
+            {"text":resumed,"start_time":22400,"end_time":24500,"definite":true,"additions":{"speaker":"0","source":"two_pass"},"words":[{"text":resumed,"start_time":22400,"end_time":24500}]}
         ]}),25_000));
         assert!(committed.lock().iter().all(|text| !text.contains(foreign)));
         assert_eq!(asr.pause_early_delivery_ledger_snapshot_after(Duration::ZERO,"" ).unwrap().text,format!("{owner}{resumed}"));
@@ -10641,6 +15126,9 @@ mod tests {
         asr.note_local_speaker_observation_with_audio_range(400,1600,
             crate::speaker_verification::SessionSpeakerClassification::Target {score:0.68},
             crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive,false);
+        // This fixture's activation was verified at these actual word times.
+        // A wake-verified session flag alone is not a body PCM permission.
+        asr.state.lock().local_owner_pcm_intervals.push((120,520));
         let text="开始录音，我现在";
         let payload=serde_json::to_vec(&json!({"audio_info":{"duration":1600},"result":{"text":text,"utterances":[
             {"text":text,"end_time":1499,"definite":false,"additions":{"source":"stream"},"words":[
@@ -10656,8 +15144,14 @@ mod tests {
         assert!(asr.state.lock().qualified_owner_speech_end_ms.is_none(),"streaming must not lower the endpoint quality floor");
         let timing=asr.transcript_timing_snapshot_for(&output).unwrap();
         assert_eq!(timing.activation_prefix(800,"开始录音").unwrap().body(&output),Some("我现在"));
-        let snapshot=asr.pause_early_delivery_ledger_snapshot_after(Duration::ZERO,"").unwrap();
-        assert_eq!(snapshot.text,text);
+        assert!(asr.pending_owner_delivery_after("").is_some());
+        assert!(asr.pause_early_delivery_ledger_snapshot_after(Duration::ZERO,"").is_none(),
+            "fast owner preview does not authorize an unfinished recognition clause");
+        let mut confirmed: Value = serde_json::from_slice(&payload).unwrap();
+        confirmed["result"]["utterances"][0]["definite"] = json!(true);
+        let confirmed_payload = serde_json::to_vec(&confirmed).unwrap();
+        assert!(asr.handle_frame(&frame::build(MessageType::FullServerResponse,Flags::None,Serialization::Json,&confirmed_payload,None)));
+        assert_eq!(asr.pause_early_delivery_ledger_snapshot_after(Duration::ZERO,"").unwrap().text,text);
     }
 
     #[test]
@@ -10709,8 +15203,10 @@ mod tests {
         assert!(!asr.handle_frame(&frame::build(MessageType::FullServerResponse, Flags::LastPacket,
             Serialization::Json, &serde_json::to_vec(&final_result).unwrap(), None)));
         assert_eq!(rx.try_recv().unwrap().unwrap().text, "开始录音本人正文已完成。");
-        assert!(asr.verified_provider_owner_final().is_some(),
-            "confirmed source partition must also retain the independent owner-final certificate");
+        assert!(asr.verified_provider_owner_final().is_none(),
+            "a provider partition remains a candidate until completed source permissions are available");
+        assert_eq!(asr.state.lock().verified_provider_owner.as_ref().unwrap().text,
+            "开始录音本人正文已完成。", "pending certification must retain the owner candidate");
     }
 
     #[test]
@@ -10769,7 +15265,12 @@ mod tests {
         let observed = Arc::clone(&seen);
         primary.set_partial_transcript_callback(Some(Arc::new(move |text| { observed.lock().push(text); })));
         primary.emit_partial_transcript(&mixture);
-        assert!(seen.lock().is_empty(), "the mixture must not regain product partial authority through another callback");
+        assert_eq!(
+            seen.lock().as_slice(),
+            &[owner_text.to_string()],
+            "the callback publishes the selected independent owner while the longer mixture stays rejected",
+        );
+        assert!(seen.lock().iter().all(|text| !text.contains("预算被砍")));
         let final_seen = Arc::new(ParkingMutex::new(Vec::new()));
         let final_observed = Arc::clone(&final_seen);
         primary.set_final_intermediate_transcript_callback(Some(Arc::new(move |update| {
@@ -10779,7 +15280,13 @@ mod tests {
             text: mixture.clone(),
             authoritative_two_pass: true,
         });
-        assert!(final_seen.lock().is_empty(), "two-pass supplementation cannot bypass independent ownership");
+        assert_eq!(
+            final_seen.lock().as_slice(),
+            &[owner_text.to_string()],
+            "final-intermediate callbacks share the same selected independent owner",
+        );
+        assert!(final_seen.lock().iter().all(|text| !text.contains("预算被砍")),
+            "two-pass supplementation cannot bypass independent ownership");
         primary.state.lock().finishing = true;
         assert!(primary.stable_ledger_final_snapshot(Duration::ZERO).is_none(), "a mixture early seal must not cancel the pending owner worker");
         assert!(!primary.pause_early_final_clean_session(), "independent rejection vetoes raw final rewrite recovery");
@@ -10793,6 +15300,504 @@ mod tests {
         let consumed = crate::transcript_boundary::content_key("现在播放干扰，请检查这段测试。");
         let resumed = primary.pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), &consumed).unwrap();
         assert_eq!(resumed.text, resumed_owner, "owner return stays streamable without reintroducing the mixture");
+        assert_eq!(primary.pending_owner_delivery_after(&consumed).unwrap().0, "现在我本人继续说话");
+        assert!(primary.pending_owner_delivery_after(&crate::transcript_boundary::content_key(
+            "现在播放干扰，请检查这段测试。现在我本人继续说话。")).is_none());
+    }
+
+    #[test]
+    fn certified_owner_partition_also_bounds_visual_preview_and_expires_per_response() {
+        use crate::speaker_verification::SessionSpeakerClassification::Target;
+        for (wake, prefix, owner, foreign, resumed) in [
+            ("开始录音", "开始录音，这是本人正文。", "开始录音，这是本人正文，最后请再确认这些信息。",
+             "拥有一位很棒的母亲了，硬是把这栋最高。", "现在本人继续下一句话。"),
+            ("start recording", "start recording. This is my text.",
+             "start recording. This is my text. Please confirm the details.",
+             "Another speaker is reading a story.", "Now I continue my next sentence."),
+        ] {
+            let asr = uplink_stall_test_asr();
+            *asr.state.lock() = SyncState {
+                local_speaker_tracking_enabled: true,
+                local_wake_owner_verified: true,
+                local_body_owner_verified: true,
+                local_speaker_stable_target: true,
+                local_target_confirmed: true,
+                // 0d19683b frame 49: the current local classification was
+                // None, but this response had an independently certified
+                // owner subset and a distinct foreign provider track.
+                local_speaker_classification: None,
+                target_speaker_id: Some("0".into()),
+                wake_speaker_phrase: Some(wake.into()),
+                last_emitted_preview_text: prefix.into(),
+                last_emitted_visual_preview_text: prefix.into(),
+                best_transcript_text: prefix.into(),
+                local_speaker_evidence: vec![
+                    LocalSpeakerEvidence { audio_end_ms: 3000, classification: Target { score: 0.48 }, stable_target: true },
+                    LocalSpeakerEvidence { audio_end_ms: 4500, classification: Target { score: 0.52 }, stable_target: true },
+                ],
+                ..Default::default()
+            };
+            let observed = Arc::new(ParkingMutex::new(Vec::new()));
+            let visuals = Arc::clone(&observed);
+            asr.set_visual_partial_transcript_callback(Some(Arc::new(move |update| visuals.lock().push(update.text().to_string()))));
+            let partials = Arc::clone(&observed);
+            asr.set_partial_transcript_callback(Some(Arc::new(move |text| partials.lock().push(text))));
+            let feed = |result: Value, duration| {
+                let payload = serde_json::to_vec(&json!({"audio_info":{"duration":duration},"result":result})).unwrap();
+                assert!(asr.handle_frame(&frame::build(MessageType::FullServerResponse, Flags::None,
+                    Serialization::Json, &payload, None)));
+            };
+            feed(json!({"text":format!("{owner}{foreign}"), "utterances":[
+                {"text":owner,"start_time":200,"end_time":5000,"definite":true,"additions":{"speaker_id":"0","source":"two_pass"}},
+                {"text":foreign,"start_time":5500,"end_time":9000,"definite":true,"additions":{"speaker_id":"1","source":"two_pass"}}
+            ]}), 9000);
+            assert_eq!(asr.state.lock().verified_provider_owner.as_ref().unwrap().text, owner);
+            assert!(observed.lock().iter().all(|text| !text.contains(foreign)),
+                "a response already partitioned as owner/foreign must not bypass that partition in the visual callback");
+            assert!(observed.lock().iter().any(|text| text == owner),
+                "newly accepted owner text must remain visible in the same frame");
+
+            // The provider's previous raw cumulative branch also contained the
+            // foreign row. Make the next speakerless branch longer than that
+            // prior raw clock so this specifically exercises new reversible
+            // growth instead of asking the monotonic preview to retract first.
+            let return_text = format!("{owner}{resumed}{resumed}{resumed}");
+            for (start, end, score) in [
+                (9_500, 10_700, 0.55),
+                (9_900, 11_100, 0.57),
+                (10_300, 11_500, 0.59),
+            ] {
+                asr.note_local_speaker_observation_with_audio_range(
+                    start,
+                    end,
+                    Target { score },
+                    crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive,
+                    true,
+                );
+            }
+            feed(json!({"text":return_text}), 12000);
+            let (certificate_expired, visual_preview) = {
+                let state = asr.state.lock();
+                (
+                    state.verified_provider_owner.is_none(),
+                    state.last_emitted_visual_preview_text.clone(),
+                )
+            };
+            assert!(certificate_expired, "the certificate belongs to one response");
+            assert_eq!(visual_preview, return_text,
+                "a later provider-unclassified owner return keeps the existing reversible visual path; callback routing is covered by the established uncertain-preview tests");
+        }
+    }
+
+    #[test]
+    fn confirmed_local_foreign_interval_bounds_only_the_overlapping_visual_tail() {
+        use crate::speaker_verification::SessionSpeakerClassification::Uncertain;
+
+        let owner = "开始录音，我把今天的事情说明完了。这就是本段的最后一句话。";
+        let foreign = "了不是一直说找手艺两口子吗";
+        let owner_row = json!({
+            "text": owner,
+            "start_time": 200,
+            "end_time": 10600,
+            "definite": true,
+            "additions": {"speaker_id": "0", "source": "two_pass"}
+        });
+        let provider = json!({
+            "text": format!("{owner}{foreign}"),
+            "utterances": [
+                owner_row.clone(),
+                {"text":foreign,"start_time":11000,"end_time":12800,"definite":false}
+            ]
+        });
+        let owner_view = json!({"text": owner, "utterances": [owner_row.clone()]});
+        let mut confirmed = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_speaker_stable_target: true,
+            local_speaker_classification: Some(Uncertain { score: 0.22 }),
+            local_confirmed_transcript_non_target_end_ms: Some(12_200),
+            last_emitted_preview_text: owner.into(),
+            last_emitted_visual_preview_text: owner.into(),
+            ..SyncState::default()
+        };
+
+        assert!(confirmed_local_foreign_tail_requires_owner_visual(
+            &confirmed,
+            &provider,
+            &owner_view,
+        ));
+        let selected = response_visual_result(&confirmed, &provider, &owner_view);
+        assert!(
+            display_only_provisional_preview_candidate(&mut confirmed, selected, true).is_none(),
+            "an overlapping confirmed mismatch must preserve the already visible owner partition"
+        );
+        assert_eq!(confirmed.last_emitted_visual_preview_text, owner);
+
+        let mut uncertain_only = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_speaker_stable_target: true,
+            local_speaker_classification: Some(Uncertain { score: 0.22 }),
+            local_preview_foreign_hint_end_ms: Some(12_200),
+            last_emitted_preview_text: owner.into(),
+            last_emitted_visual_preview_text: owner.into(),
+            ..SyncState::default()
+        };
+        assert!(!confirmed_local_foreign_tail_requires_owner_visual(
+            &uncertain_only,
+            &provider,
+            &owner_view,
+        ));
+        assert!(std::ptr::eq(
+            response_visual_result(&uncertain_only, &provider, &owner_view),
+            &provider,
+        ));
+        assert_eq!(
+            display_only_provisional_preview_candidate(&mut uncertain_only, &provider, true),
+            Some(format!("{owner}{foreign}")),
+            "an unconfirmed hint retains the existing reversible preview cadence"
+        );
+
+        let owner_return = json!({
+            "text": format!("{owner}现在本人继续下一句话"),
+            "utterances": [
+                owner_row,
+                {"text":"现在本人继续下一句话","start_time":13000,"end_time":14800,"definite":false}
+            ]
+        });
+        assert!(!confirmed_local_foreign_tail_requires_owner_visual(
+            &confirmed,
+            &owner_return,
+            &owner_view,
+        ), "an old confirmed interval cannot suppress a disjoint later owner return");
+        assert!(std::ptr::eq(
+            response_visual_result(&confirmed, &owner_return, &owner_view),
+            &owner_return,
+        ));
+    }
+
+    #[test]
+    fn confirmed_foreign_evidence_retracts_only_the_provisional_visual_tail() {
+        let owner = "开始录音，今天的安排已经确认。";
+        let foreign = "日子总得继续过下去";
+        let owner_row = json!({"text":owner,"start_time":200,"end_time":10000,
+            "definite":true,"additions":{"speaker_id":"0"}});
+        let provider = json!({"text":format!("{owner}{foreign}"),"utterances":[
+            owner_row.clone(),{"text":foreign,"start_time":11000,"end_time":14000,"definite":false}]});
+        let owner_view = json!({"text":owner,"utterances":[owner_row]});
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            local_speaker_classification: Some(crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: 0.22 }),
+            last_emitted_preview_text: owner.into(),
+            last_emitted_visual_preview_text: format!("{owner}{foreign}"),
+            local_confirmed_transcript_non_target_end_ms: Some(13000),
+            ..SyncState::default()
+        };
+        assert!(confirmed_local_foreign_tail_requires_owner_visual(&state, &provider, &owner_view));
+        assert_eq!(reconcile_confirmed_foreign_visual(&mut state, &provider, &owner_view),
+            Some(VisualTranscriptUpdate::ConfirmedOwnerPartition(owner.into())),
+            "later identity evidence must remove an already shown foreign provisional tail");
+        assert_eq!(state.last_emitted_preview_text, owner, "confirmed owner content stays protected");
+    }
+
+    #[test]
+    fn owner_provisional_stays_pending_but_cannot_age_into_irreversible_delivery() {
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+            app_id: "test".into(), access_token: "test".into(),
+            resource_id: VolcengineCredentials::default_resource_id().into(),
+        }, Vec::new());
+        let provisional = "需要保留内容。";
+        let corrected = "需要保留的内容。";
+        let provider = |text: &str, definite| json!({"text":text,"utterances":[
+            {"text":text,"definite":definite,"words":[{"text":text,"start_time":0,"end_time":1000}]}]});
+        let old = Instant::now() - Duration::from_secs(5);
+        {
+            let mut state = asr.state.lock();
+            state.best_transcript_text = provisional.into();
+            state.best_transcript_committed_at = Some(old);
+            let result = provider(provisional, false);
+            state.provider_timed_transcript = Some(super::super::volcengine_transcript::timed_transcript_from_result(&result));
+            state.best_transcript_timing = state.provider_timed_transcript.clone();
+            state.recognition_boundary.update(&result);
+        }
+        assert_eq!(asr.pending_owner_delivery_after("").unwrap().0,
+            crate::transcript_boundary::content_key(provisional));
+        assert!(asr.pause_early_delivery_ledger_snapshot(Duration::from_millis(1000)).is_none());
+        assert_eq!(asr.state.lock().pause_early_recent_revisions.len(), 1,
+            "provisional history records lexical stability without granting delivery");
+        let fresh = Instant::now();
+        {
+            let mut state = asr.state.lock();
+            state.best_transcript_text = corrected.into();
+            state.best_transcript_committed_at = Some(fresh);
+            let result = provider(corrected, true);
+            state.provider_timed_transcript = Some(super::super::volcengine_transcript::timed_transcript_from_result(&result));
+            state.best_transcript_timing = state.provider_timed_transcript.clone();
+            state.recognition_boundary.update(&result);
+        }
+        assert_eq!(asr.pause_early_delivery_ledger_snapshot(Duration::from_millis(1000)).unwrap().text,
+            corrected, "definite corrects provisional words and certifies their lexical stability; it does not need a second word-age wait");
+        assert_eq!(asr.pending_owner_delivery_after("").unwrap().1, fresh,
+            "recognition confirmation must not refresh the endpoint owner clock");
+        assert_eq!(asr.pause_early_delivery_ledger_snapshot(Duration::ZERO).unwrap().text, corrected);
+    }
+
+    #[test]
+    fn unchanged_owner_prefix_uses_its_existing_age_when_recognition_confirms() {
+        let asr = uplink_stall_test_asr();
+        let text = "这句话已经稳定。";
+        let result = |definite| json!({"text":text,"utterances":[{"text":text,"definite":definite,
+            "words":[{"text":text,"start_time":0,"end_time":1000}]}]});
+        let old = Instant::now() - Duration::from_secs(5);
+        {
+            let mut state = asr.state.lock();
+            state.best_transcript_text = text.into();
+            state.best_transcript_committed_at = Some(old);
+            state.provider_timed_transcript = Some(super::super::volcengine_transcript::timed_transcript_from_result(&result(false)));
+            state.best_transcript_timing = state.provider_timed_transcript.clone();
+            state.recognition_boundary.update(&result(false));
+        }
+        assert!(asr.pause_early_delivery_ledger_snapshot(Duration::from_secs(1)).is_none());
+        asr.state.lock().recognition_boundary.update(&result(true));
+        assert_eq!(asr.pause_early_delivery_ledger_snapshot(Duration::from_secs(1)).unwrap().text, text,
+            "unchanged words already stable under this decoder need no second confirmation-age wait");
+        assert_eq!(asr.pending_owner_delivery_after("").unwrap().1, old);
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn independent_owner_cannot_borrow_identical_primary_stability() {
+        let primary = Arc::new(uplink_stall_test_asr());
+        let child = Arc::new(uplink_stall_test_asr());
+        let text = "本人同样的正文。";
+        let result = json!({"text":text,"utterances":[{"text":text,"definite":true,
+            "words":[{"text":text,"start_time":0,"end_time":1000}]}]});
+        for asr in [&primary, &child] {
+            let mut state = asr.state.lock();
+            state.best_transcript_text = text.into();
+            state.best_transcript_committed_at = Some(Instant::now() - Duration::from_secs(5));
+            state.provider_timed_transcript = Some(super::super::volcengine_transcript::timed_transcript_from_result(&result));
+            state.best_transcript_timing = state.provider_timed_transcript.clone();
+            state.recognition_boundary.update(&result);
+        }
+        assert_eq!(primary.pause_early_delivery_ledger_snapshot(Duration::from_secs(1)).unwrap().text, text);
+        *primary.target_speaker_stream.lock() = Some(super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(Some(Arc::clone(&child)), true, true));
+        assert!(primary.pause_early_delivery_ledger_snapshot(Duration::from_secs(1)).is_none(),
+            "child confirmation and identical old text cannot reuse the parent's stability");
+        assert_eq!(primary.pause_early_delivery_ledger_snapshot(Duration::ZERO).unwrap().text, text);
+    }
+
+    #[test]
+    fn revoked_owner_candidate_cannot_restore_its_old_stability() {
+        let asr = uplink_stall_test_asr();
+        let text = "本人回来继续说明。";
+        let result = json!({"text":text,"utterances":[{"text":text,"definite":true,
+            "words":[{"text":text,"start_time":0,"end_time":1000}]}]});
+        {
+            let mut state = asr.state.lock();
+            state.best_transcript_text = text.into();
+            state.best_transcript_committed_at = Some(Instant::now() - Duration::from_secs(5));
+            state.provider_timed_transcript = Some(super::super::volcengine_transcript::timed_transcript_from_result(&result));
+            state.best_transcript_timing = state.provider_timed_transcript.clone();
+            state.recognition_boundary.update(&result);
+        }
+        assert!(asr.pause_early_delivery_ledger_snapshot(Duration::from_secs(1)).is_some());
+        asr.state.lock().owner_isolation_frozen = true;
+        assert!(asr.pause_early_delivery_ledger_snapshot(Duration::from_secs(1)).is_none());
+        asr.state.lock().owner_isolation_frozen = false;
+        assert!(asr.pause_early_delivery_ledger_snapshot(Duration::from_secs(1)).is_none(),
+            "restored authority must earn new stability even if text and its old timestamp are unchanged");
+        assert_eq!(asr.pause_early_delivery_ledger_snapshot(Duration::ZERO).unwrap().text, text);
+    }
+
+    #[test]
+    fn confirmed_owner_prefix_does_not_promote_its_provisional_tail() {
+        let asr = uplink_stall_test_asr();
+        let prefix = "已经确认的本人正文。";
+        let full = format!("{prefix}这句仍在修改。");
+        let result = json!({"text":full,"utterances":[
+            {"text":prefix,"definite":true,"words":[{"text":prefix,"start_time":0,"end_time":1000}]},
+            {"text":"这句仍在修改。","definite":false,"words":[{"text":"这句仍在修改。","start_time":1200,"end_time":2000}]}
+        ]});
+        {
+            let mut state = asr.state.lock();
+            state.best_transcript_text = full.clone();
+            state.best_transcript_committed_at = Some(Instant::now());
+            state.provider_timed_transcript = Some(super::super::volcengine_transcript::timed_transcript_from_result(&result));
+            state.best_transcript_timing = state.provider_timed_transcript.clone();
+            state.recognition_boundary.update(&result);
+        }
+        assert_eq!(asr.pause_early_delivery_ledger_snapshot(Duration::from_secs(1)).unwrap().text, prefix,
+            "only the same-decoder definite clause is immediately stable");
+        assert!(asr.pending_owner_delivery_after(&crate::transcript_boundary::content_key(prefix)).is_some(),
+            "unconfirmed owner tail remains pending for endpoint accounting");
+    }
+
+    #[test]
+    fn definite_primary_waits_for_owner_permission_and_keeps_foreign_tail_out() {
+        let asr = uplink_stall_test_asr();
+        let owner = "本人已经确认的正文。";
+        let full = format!("{owner}旁人在继续说话。");
+        let result = json!({"text":full,"utterances":[
+            {"text":owner,"definite":true,"words":[{"text":owner,"start_time":0,"end_time":1000}]},
+            {"text":"旁人在继续说话。","definite":true,"words":[{"text":"旁人在继续说话。","start_time":1200,"end_time":2000}]}
+        ]});
+        {
+            let mut state = asr.state.lock();
+            state.local_speaker_tracking_enabled = true;
+            state.best_transcript_text = full.clone();
+            state.best_transcript_committed_at = Some(Instant::now() - Duration::from_secs(5));
+            state.provider_timed_transcript = Some(super::super::volcengine_transcript::timed_transcript_from_result(&result));
+            state.recognition_boundary.update(&result);
+        }
+        assert!(asr.pending_owner_delivery_after("").is_none(),
+            "unclassified raw text cannot create an Owner settling hold");
+        assert!(asr.pause_early_delivery_ledger_snapshot(Duration::ZERO).is_none(),
+            "Primary identifies a transport, not positively classified owner audio");
+        for tail in ["旁人还在继续。", "旁人一直继续说着另一句话。"] {
+            let mut state = asr.state.lock();
+            state.best_transcript_text = format!("{full}{tail}");
+            state.best_transcript_committed_at = Some(Instant::now());
+            drop(state);
+            assert!(asr.pending_owner_delivery_after("").is_none(),
+                "raw text growth must not repeatedly renew the endpoint settling budget");
+        }
+        {
+            let mut state = asr.state.lock();
+            state.live_owner_delivery = Some(TranscriptCandidate { text: owner.into(), ..Default::default() });
+            // Match the production owner-row constructor: the admitted text
+            // and its words are extracted from the same filtered response.
+            state.live_owner_delivery_timing = Some(super::super::volcengine_transcript::timed_transcript_from_result(
+                &json!({"text":owner,"utterances":[result["utterances"][0].clone()]})));
+            state.live_owner_delivery_updated_at = Some(Instant::now());
+            let proof_at = Instant::now();
+            bind_test_owner_occurrence(&mut state,owner,(0,1000),proof_at);
+        }
+        assert!(asr.pause_early_delivery_ledger_snapshot(Duration::from_secs(1)).is_none(),
+            "new owner permission cannot reuse the unclassified text's age");
+        assert_eq!(asr.pause_early_delivery_ledger_snapshot(Duration::ZERO).unwrap().text, owner,
+            "even definite foreign words cannot extend the admitted owner prefix");
+    }
+
+    #[test]
+    fn reopen_clears_recognition_contract_and_cached_visual_partition() {
+        let result = json!({"text":"上一段", "utterances":[{"text":"上一段", "definite":true,
+            "words":[{"text":"上一段", "start_time":0, "end_time":1000}]}]});
+        let mut state = SyncState::default();
+        state.recognition_boundary.update(&result);
+        state.provider_timed_transcript = Some(super::super::volcengine_transcript::timed_transcript_from_result(&result));
+        state.latest_visual_provider_result = Some(result);
+        assert!(state.recognition_boundary.confirmed_prefix("上一段", state.provider_timed_transcript.as_ref()).is_some());
+        reset_provider_confirmation(&mut state);
+        assert!(state.latest_visual_provider_result.is_none());
+        assert!(state.pause_early_stability_source.is_none());
+        assert!(!state.recognition_boundary.requires_confirmation());
+        let next = json!({"text":"新一段"});
+        state.recognition_boundary.update(&next);
+        assert_eq!(state.recognition_boundary.confirmed_prefix("新一段", state.provider_timed_transcript.as_ref()), Some("新一段".into()));
+        state.recognition_boundary.update(&json!({"text":"上一段", "utterances":[
+            {"text":"上一段", "definite":false,"words":[{"text":"上一段","start_time":0,"end_time":1000}]}]}));
+        assert!(state.recognition_boundary.confirmed_prefix("上一段", state.provider_timed_transcript.as_ref()).is_none(), "prior session coordinates confer no permission");
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn independent_delivery_uses_child_recognition_confirmation_only() {
+        let primary = Arc::new(uplink_stall_test_asr());
+        let child = Arc::new(uplink_stall_test_asr());
+        let text = "开始录音。这是本人正文。";
+        let provider = |definite| json!({"text":text,"utterances":[{"text":text,"definite":definite,
+            "words":[{"text":text,"start_time":0,"end_time":2000}]}]});
+        for (asr, definite) in [(&primary, true), (&child, false)] {
+            let mut state = asr.state.lock();
+            state.best_transcript_text = text.into();
+            state.best_transcript_committed_at = Some(Instant::now() - Duration::from_secs(5));
+            state.provider_timed_transcript = Some(super::super::volcengine_transcript::timed_transcript_from_result(&provider(definite)));
+            state.best_transcript_timing = state.provider_timed_transcript.clone();
+            state.recognition_boundary.update(&provider(definite));
+        }
+        *primary.target_speaker_stream.lock() = Some(super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(Some(Arc::clone(&child)), true, true));
+        assert!(primary.pause_early_delivery_ledger_snapshot(Duration::ZERO).is_none(),
+            "parent definite cannot authorize the selected child's provisional words");
+        assert!(primary.pending_owner_delivery_after("").is_some());
+        child.state.lock().recognition_boundary.update(&provider(true));
+        primary.state.lock().recognition_boundary.update(&provider(false));
+        assert_eq!(primary.pause_early_delivery_ledger_snapshot(Duration::ZERO).unwrap().text, text,
+            "child definite is not vetoed by unrelated parent provisional metadata");
+    }
+
+    #[test]
+    fn unclassified_provider_growth_cannot_mint_a_positive_owner_audio_clock() {
+        let mut state = SyncState {
+            local_speaker_tracking_enabled: true,
+            local_speaker_stable_target: true,
+            local_target_confirmed: true,
+            local_target_speech_end_ms: Some(11800),
+            local_speech_end_ms: Some(16500),
+            local_audio_duration_ms: Some(16500),
+            ..SyncState::default()
+        };
+        assert!(!refresh_local_target_from_owner_preview_activity(&mut state),
+            "reversible unclassified preview growth is not a new owner observation");
+        assert_eq!(state.local_target_speech_end_ms, Some(11800));
+    }
+
+    #[test]
+    fn completed_owner_return_does_not_revoke_new_words_from_historical_foreign_evidence() {
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+            app_id: "test".into(), access_token: "test".into(),
+            resource_id: VolcengineCredentials::default_resource_id().into(),
+        }, Vec::new());
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        let owner = "开始录音，这是我的正文。";
+        let returned = format!("{owner}现在我继续说自己的话。");
+        {
+            let mut state = asr.state.lock();
+            state.local_speaker_stable_target = true;
+            state.local_target_confirmed = true;
+            state.local_confirmed_transcript_non_target_end_ms = Some(13000);
+            state.latest_visual_provider_result = Some(json!({"text":format!("{owner}旁人话。现在我继续说自己的话。"),"utterances":[
+                {"text":owner,"start_time":0,"end_time":10000},
+                {"text":"旁人话。","start_time":11000,"end_time":14000},
+                {"text":"现在我继续说自己的话。","start_time":15000,"end_time":18000}
+            ]}));
+            state.last_emitted_visual_preview_text = returned.clone();
+            state.live_owner_delivery = Some(TranscriptCandidate { text: owner.into(), ..Default::default() });
+        }
+        asr.note_local_speaker_observation_with_audio_range(16800, 18000,
+            crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.61 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true);
+        assert_eq!(asr.state.lock().last_emitted_visual_preview_text, returned);
+    }
+
+    #[test]
+    fn provider_word_coordinates_schedule_identity_without_becoming_owner_evidence() {
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+            app_id: "test".into(), access_token: "test".into(),
+            resource_id: VolcengineCredentials::default_resource_id().into(),
+        }, Vec::new());
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        {
+            let mut state = asr.state.lock();
+            state.local_audio_duration_ms = Some(15000);
+            state.local_target_speech_end_ms = Some(11800);
+            state.provider_timed_transcript = Some(crate::transcript_boundary::TimedTranscript {
+                text: "已识别的待判断人声".into(),
+                words: [
+                    ("人声", Some(13000), Some(14000)),
+                    ("未知坐标", None, None),
+                    ("未来坐标", Some(16000), Some(17000)),
+                    ("倒置坐标", Some(14000), Some(13000)),
+                ].into_iter().map(|(text,start_ms,end_ms)| crate::transcript_boundary::TimedTranscriptWord {
+                    text:text.into(),start_ms,end_ms,
+                }).collect(),
+            });
+        }
+        let before = asr.endpoint_update_snapshot();
+        assert_eq!(asr.latest_timed_provider_speech_end_ms(), Some(14000));
+        assert_eq!(asr.endpoint_update_snapshot(), before);
+        assert_eq!(before.qualified_owner_speech_end_ms, None);
+        assert_eq!(before.local_target_speech_end_ms, Some(11800));
     }
 
     #[test]
@@ -11058,7 +16063,10 @@ mod tests {
         result["text"] = json!(format!("{owner}{foreign}{resumed}"));
         send(&result, Flags::LastPacket);
         assert_eq!(asr.state.lock().last_partial_text, format!("{owner}{resumed}"));
-        assert_eq!(asr.verified_provider_owner_final().unwrap().text, format!("{owner}{resumed}"));
+        assert!(asr.verified_provider_owner_final().is_none(),
+            "provider/local row continuity is not a completed same-source certificate");
+        assert_eq!(asr.state.lock().verified_provider_owner.as_ref().unwrap().text,
+            format!("{owner}{resumed}"), "the complete resumed candidate remains available for late proof");
         assert_eq!(asr.state.lock().local_transcript_foreign_evidence.len(), 1);
         asr.note_verified_local_speaker_tracking_started("开始录音");
         let state = asr.state.lock();
@@ -11124,6 +16132,243 @@ mod tests {
         assert_eq!(noise_only.pause_early_delivery_ledger_snapshot_after(Duration::ZERO, "").unwrap().text, text, "a noise-only residual must not suppress the clean primary stream");
     }
 
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    fn final_permission_test_asr() -> VolcengineStreamingASR {
+        let asr = uplink_stall_test_asr();
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        let result = json!({"text":"本人前句。本人续句。", "utterances":[
+            {"text":"本人前句。本人续句。","definite":true,"additions":{"speaker_id":"0"},
+             "words":[{"text":"本人前句","start_time":200,"end_time":1000},
+                      {"text":"本人续句","start_time":2200,"end_time":3000}]}
+        ]});
+        let timing = super::super::volcengine_transcript::timed_transcript_from_result(&result);
+        {
+            let mut state = asr.state.lock();
+            state.finishing = true;
+            state.best_transcript_text = timing.text.clone();
+            state.best_transcript_timing = Some(timing.clone());
+            state.provider_timed_transcript = Some(timing.clone());
+            state.pending_source_owner_final = Some(timing.clone());
+            state.verified_provider_owner = Some(RawTranscript { text: timing.text.clone(), duration_ms:3000 });
+            state.verified_provider_owner_timing = Some(timing);
+            state.verified_provider_owner_is_final = true;
+        }
+        *asr.last_final_seal_authority_label.lock() = Some("speaker_filtered");
+        asr
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    fn install_completed_source_test_task(
+        asr: &VolcengineStreamingASR,
+        owner: Vec<(u64,u64)>,
+        physical: Vec<(u64,u64)>,
+    ) {
+        use super::super::target_speaker_extraction::{TargetSpeakerStream, TargetSpeakerFinishOutcome, TargetSpeakerFinishReason};
+        let stream = TargetSpeakerStream::test_live_owner(None, false, false);
+        stream.test_set_source_owner_evidence(owner, Instant::now());
+        stream.test_set_physical_interference_ranges(physical);
+        let task = tauri::async_runtime::spawn(async {
+            Ok(TargetSpeakerFinishOutcome { transcript:None, reason:TargetSpeakerFinishReason::Unresolved,
+                enqueued_bytes:3000*32, processed_bytes:3000*32 })
+        });
+        *asr.target_speaker_final_task.lock() = Some(TargetSpeakerFinalTask {
+            decoder_stream_id:asr.asr_stream_id(), stream, task,
+        });
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[tokio::test]
+    async fn completed_source_permissions_recover_owner_tail_after_task_slot_is_taken() {
+        let asr = final_permission_test_asr();
+        let full = "本人前句。本人续句。";
+        {
+            let mut state = asr.state.lock();
+            // The provider final was capped while source analysis was still
+            // pending. Its full original timed rendering remains available.
+            state.best_transcript_text = "本人前句。".into();
+            state.best_transcript_timing = None;
+            state.verified_provider_owner = None;
+            state.verified_provider_owner_timing = None;
+            state.verified_provider_owner_is_final = false;
+        }
+        install_completed_source_test_task(&asr, vec![(200,1000),(2200,3000)], vec![]);
+        assert!(asr.verified_provider_owner_final().is_none());
+        assert!(asr.await_target_speaker_final().await.unwrap().is_none());
+        assert!(asr.target_speaker_final_task.lock().is_none());
+        assert!(asr.target_speaker_stream.lock().is_none());
+        assert_eq!(asr.verified_provider_owner_final().unwrap().text, full,
+            "late same-source evidence restores the owner clause despite the prior preview cap");
+        assert_eq!(asr.verified_provider_owner_timing_snapshot().unwrap().words.len(), 2);
+        assert_eq!(asr.source_owner_evidence_snapshot().0, vec![(200,1000),(2200,3000)],
+            "product arbitration retains the completed permissions after taking the task slot");
+        asr.asr_stream_id.store(next_volcengine_asr_stream_id(), Ordering::SeqCst);
+        assert!(asr.completed_source_owner_evidence_snapshot().is_none());
+        assert!(asr.verified_provider_owner_final().is_none(),
+            "another decoder occurrence cannot borrow an identical old rendering's audio proof");
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[tokio::test]
+    async fn completed_final_permissions_preserve_pending_candidate_without_certifying_it() {
+        let full = "本人前句。本人续句。";
+        for (owner, physical) in [
+            (vec![],vec![]),
+            (vec![(200,1000)],vec![]),
+            (vec![(200,1000),(2200,3000)],vec![(2400,2600)]),
+        ] {
+            let asr = final_permission_test_asr();
+            assert!(asr.verified_provider_owner_final().is_none(),
+                "a final packet and provider candidate do not establish source completion");
+            install_completed_source_test_task(&asr, owner, physical);
+            asr.await_target_speaker_final().await.unwrap();
+            assert!(asr.completed_source_owner_evidence_snapshot().is_some());
+            assert!(asr.verified_provider_owner_final().is_none());
+            assert!(asr.verified_provider_owner_timing_snapshot().is_none());
+            assert!(!asr.primary_seal_speaker_filtered_certified_for(full));
+            assert!(!asr.primary_mixture_was_rejected(), "unresolved ownership is not Other");
+            let state = asr.state.lock();
+            assert_eq!(state.verified_provider_owner.as_ref().unwrap().text, full);
+            assert_eq!(state.provider_timed_transcript.as_ref().unwrap().text, full,
+                "withholding a certificate must not discard the recovery input");
+        }
+        let asr = final_permission_test_asr();
+        install_completed_source_test_task(&asr, vec![(200,1000),(2200,3000)],vec![]);
+        asr.await_target_speaker_final().await.unwrap();
+        assert_eq!(asr.verified_provider_owner_final().unwrap().text, full);
+        assert!(asr.primary_seal_speaker_filtered_certified_for(full));
+        assert!(!asr.primary_seal_speaker_filtered_certified_for("本人前句。本人续句。额外文字。"));
+        assert!(!asr.separated_prefix_excludes_confirmed_other(full, "本人前句。"));
+        asr.state.lock().provider_distinct_foreign_audio_ranges.push((2400,2600));
+        assert!(asr.separated_prefix_excludes_confirmed_other(full, "本人前句。"));
+        assert!(asr.verified_provider_owner_final().is_none(), "later same-source foreign evidence revokes certification");
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        assert!(asr.completed_source_owner_evidence_snapshot().is_none());
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[tokio::test]
+    async fn first_transport_preserves_prepared_extractor_but_reopen_retires_it() {
+        use super::super::target_speaker_extraction::TargetSpeakerStream;
+        let asr = final_permission_test_asr();
+        let prepared = TargetSpeakerStream::test_live_owner(None, false, false);
+        prepared.test_set_source_owner_evidence(vec![(200,1000)], Instant::now());
+        *asr.target_speaker_stream.lock() = Some(Arc::clone(&prepared));
+        let prepared_quality = asr.local_speech_quality_sink();
+        let before_open = asr.asr_stream_id();
+        {
+            let _guard = asr.delivery_queue_lock.lock();
+            asr.begin_connected_decoder();
+        }
+        assert_ne!(asr.asr_stream_id(), before_open);
+        assert!(Arc::ptr_eq(asr.target_speaker_stream.lock().as_ref().unwrap(), &prepared),
+            "automatic wake arms the extractor before asynchronous first cloud open");
+        assert!(Arc::ptr_eq(&asr.local_speech_quality_sink(), &prepared_quality));
+        assert_eq!(asr.source_owner_evidence_snapshot().0, vec![(200,1000)]);
+        let first_decoder = asr.asr_stream_id();
+        install_completed_source_test_task(&asr, vec![(200,1000),(2200,3000)], vec![]);
+        {
+            let _guard = asr.delivery_queue_lock.lock();
+            asr.begin_connected_decoder();
+        }
+        assert_ne!(asr.asr_stream_id(), first_decoder);
+        assert!(asr.target_speaker_stream.lock().is_none());
+        assert!(asr.target_speaker_final_task.lock().is_none());
+        assert!(asr.completed_source_owner_evidence_snapshot().is_none());
+        assert!(asr.source_owner_evidence_snapshot().0.is_empty());
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[tokio::test]
+    async fn decoder_replaced_during_final_join_cannot_receive_old_success_or_failure() {
+        use super::super::target_speaker_extraction::{TargetSpeakerStream, TargetSpeakerFinishOutcome, TargetSpeakerFinishReason};
+        for worker_error in [false, true] {
+            let asr = Arc::new(final_permission_test_asr());
+            {
+                let _guard = asr.delivery_queue_lock.lock();
+                asr.begin_connected_decoder();
+            }
+            let old_stream = TargetSpeakerStream::test_live_owner(None, true, true);
+            old_stream.test_set_source_owner_evidence(vec![(200,3000)], Instant::now());
+            let (release, wait) = tokio::sync::oneshot::channel();
+            let task = tauri::async_runtime::spawn(async move {
+                wait.await.unwrap();
+                if worker_error { Err("old worker failed".into()) }
+                else { Ok(TargetSpeakerFinishOutcome { transcript:None,
+                    reason:TargetSpeakerFinishReason::Unresolved,
+                    enqueued_bytes:3000*32, processed_bytes:3000*32 }) }
+            });
+            *asr.target_speaker_final_task.lock() = Some(TargetSpeakerFinalTask {
+                decoder_stream_id:asr.asr_stream_id(), stream:old_stream, task,
+            });
+            let finishing = Arc::clone(&asr);
+            let awaited = tokio::spawn(async move { finishing.await_target_speaker_final().await });
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while asr.target_speaker_final_task.lock().is_some() {
+                    tokio::task::yield_now().await;
+                }
+            }).await.expect("finalizer took the old task before reopening");
+            let new_stream = TargetSpeakerStream::test_live_owner(None, false, false);
+            {
+                let _guard = asr.delivery_queue_lock.lock();
+                asr.begin_connected_decoder();
+                *asr.target_speaker_stream.lock() = Some(Arc::clone(&new_stream));
+                asr.target_speaker_filter_required.store(false, Ordering::SeqCst);
+                asr.primary_mixture_rejected.store(false, Ordering::SeqCst);
+                asr.state.lock().best_transcript_text = "新会话正文。".into();
+            }
+            release.send(()).unwrap();
+            assert!(awaited.await.unwrap().unwrap_err().contains("replaced decoder"));
+            assert!(!asr.target_speaker_filter_was_required());
+            assert!(!asr.primary_mixture_was_rejected());
+            assert!(asr.completed_source_owner_evidence_snapshot().is_none());
+            assert_eq!(asr.state.lock().best_transcript_text, "新会话正文。");
+            assert!(Arc::ptr_eq(asr.target_speaker_stream.lock().as_ref().unwrap(), &new_stream));
+        }
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[tokio::test]
+    async fn stale_final_task_cannot_rebind_its_source_proof_to_a_new_decoder() {
+        let asr = final_permission_test_asr();
+        install_completed_source_test_task(&asr, vec![(200,1000),(2200,3000)],vec![]);
+        asr.asr_stream_id.store(next_volcengine_asr_stream_id(),Ordering::SeqCst);
+        let new_stream = super::super::target_speaker_extraction::TargetSpeakerStream::test_live_owner(None,false,false);
+        *asr.target_speaker_stream.lock() = Some(Arc::clone(&new_stream));
+        assert!(asr.await_target_speaker_final().await.unwrap_err().contains("replaced decoder"));
+        assert!(asr.completed_source_owner_evidence_snapshot().is_none());
+        assert!(asr.verified_provider_owner_final().is_none());
+        assert!(Arc::ptr_eq(asr.target_speaker_stream.lock().as_ref().unwrap(), &new_stream),
+            "rejecting an old task must leave the new session's stream intact");
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[tokio::test]
+    async fn delayed_final_identity_does_not_restore_a_normalized_away_echo() {
+        let asr = final_permission_test_asr();
+        let clean = "测试报告里要记录蓝牙包数和识别准确率。再观察识别完成后文字是否立即进入当前光标。最后确认这段文字没有明显缺句，再结束测试。";
+        let raw = format!("{clean} 再观察");
+        let timing = crate::transcript_boundary::TimedTranscript { text:raw.clone(),words:vec![
+            crate::transcript_boundary::TimedTranscriptWord {text:clean.into(),start_ms:Some(200),end_ms:Some(2500)},
+            crate::transcript_boundary::TimedTranscriptWord {text:"再观察".into(),start_ms:Some(2600),end_ms:Some(3000)},
+        ]};
+        {
+            let mut state = asr.state.lock();
+            state.pending_source_owner_final = source_owner_final_recovery_candidate(&raw,&timing);
+            state.provider_timed_transcript = Some(timing);
+            state.verified_provider_owner = None;
+            state.verified_provider_owner_timing = None;
+            state.verified_provider_owner_is_final = false;
+        }
+        install_completed_source_test_task(&asr,vec![(0,3000)],vec![]);
+        asr.await_target_speaker_final().await.unwrap();
+        assert_eq!(asr.verified_provider_owner_final().unwrap().text, clean);
+        let certified = asr.verified_provider_owner_timing_snapshot().unwrap();
+        assert_eq!(certified.words.len(),1);
+        assert_eq!(certified.words[0].end_ms,Some(2500),"the discarded echo's later occurrence grants no authority");
+        assert_eq!(asr.state.lock().provider_timed_transcript.as_ref().unwrap().text,raw,
+            "raw provider evidence stays available without becoming the recovered rendering");
+    }
+
     #[test]
     fn stable_ledger_cannot_seal_a_recorded_unresolved_owner_tail() {
         let asr = VolcengineStreamingASR::new(
@@ -11185,6 +16430,71 @@ mod tests {
         });
         assert_eq!(asr.await_final_result_with_early_seal().await.unwrap().text, full);
         provider.await.unwrap();
+    }
+
+    #[test]
+    fn early_final_owner_permission_must_cover_and_age_the_complete_occurrence() {
+        let asr = uplink_stall_test_asr();
+        let old = Instant::now() - Duration::from_secs(5);
+        let text = "本人前句。待确认的续句。";
+        let provider = json!({"text":text,"utterances":[
+            {"text":"本人前句。","definite":true,"additions":{"speaker":"0"},
+             "words":[{"text":"本人前句","start_time":0,"end_time":1000}]},
+            {"text":"待确认的续句。","definite":true,"additions":{"speaker":"0"},
+             "words":[{"text":"待确认的续句","start_time":1200,"end_time":2000}]}
+        ]});
+        {
+            let mut state = asr.state.lock();
+            state.finishing = true;
+            state.local_speaker_tracking_enabled = true;
+            state.local_wake_owner_verified = true;
+            state.local_speaker_stable_target = true;
+            state.local_target_confirmed = true;
+            state.target_speaker_id = Some("0".into());
+            state.best_transcript_text = text.into();
+            state.best_transcript_committed_at = Some(old);
+            state.live_owner_delivery = Some(TranscriptCandidate { text:text.into(), ..Default::default() });
+            state.live_owner_delivery_updated_at = Some(old);
+            let timing = super::super::volcengine_transcript::timed_transcript_from_result(&provider);
+            state.best_transcript_timing = Some(timing.clone());
+            state.live_owner_delivery_timing = Some(timing);
+            state.recognition_boundary.update(&provider);
+        }
+        assert!(asr.stable_ledger_final_snapshot(Duration::ZERO).is_none(),
+            "aged definite speaker-0 text is not owner evidence and must not cancel analysis");
+        asr.state.lock().local_owner_pcm_intervals.push((0,1000));
+        assert!(asr.stable_ledger_final_snapshot(Duration::ZERO).is_none(),
+            "a proved owner prefix cannot finalize over the pending continuation");
+        asr.state.lock().local_owner_pcm_intervals.push((1200,2000));
+        assert!(asr.stable_ledger_final_snapshot(Duration::from_secs(1)).is_none(),
+            "newly complete ownership cannot reuse the provider text's old age");
+        asr.state.lock().source_owner_projection_stability.as_mut().unwrap().updated_at = old;
+        assert_eq!(asr.stable_ledger_final_snapshot(Duration::from_secs(1)).unwrap().text, text,
+            "the complete proved continuation remains eligible once its own permission is mature");
+    }
+
+    #[test]
+    fn early_final_cannot_seal_an_unconfirmed_recognition_tail() {
+        let asr = uplink_stall_test_asr();
+        let text = "已确认前句。尚未确认续句。";
+        let provider = |definite| json!({"text":text,"utterances":[
+            {"text":"已确认前句。","definite":true,
+             "words":[{"text":"已确认前句","start_time":0,"end_time":1000}]},
+            {"text":"尚未确认续句。","definite":definite,
+             "words":[{"text":"尚未确认续句","start_time":1200,"end_time":2000}]}
+        ]});
+        {
+            let mut state = asr.state.lock();
+            state.finishing = true;
+            state.best_transcript_text = text.into();
+            state.best_transcript_committed_at = Some(Instant::now() - Duration::from_secs(5));
+            state.best_transcript_timing = Some(super::super::volcengine_transcript::timed_transcript_from_result(&provider(false)));
+            state.recognition_boundary.update(&provider(false));
+        }
+        assert!(asr.stable_ledger_final_snapshot(Duration::ZERO).is_none(),
+            "manual-input permission does not turn provisional recognition into a final");
+        asr.state.lock().recognition_boundary.update(&provider(true));
+        assert_eq!(asr.stable_ledger_final_snapshot(Duration::ZERO).unwrap().text, text);
     }
 
     #[test]
@@ -11368,6 +16678,7 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 
+    #[test]
     fn diagnostic_trace_is_opt_in_bounded_and_unicode_safe() {
         let mut asr = VolcengineStreamingASR::new(
             VolcengineCredentials {
@@ -11382,11 +16693,19 @@ mod tests {
         asr.enable_diagnostic_trace();
         let long_text = "你😀".repeat(DIAGNOSTIC_TRACE_MAX_CHARS);
         for frame in 0..DIAGNOSTIC_TRACE_MAX_ENTRIES + 2 {
-            asr.record_diagnostic_trace(frame, false, "test", &long_text);
+            let final_frame = frame == DIAGNOSTIC_TRACE_MAX_ENTRIES + 1;
+            asr.record_diagnostic_trace(frame, final_frame, "test", &long_text);
         }
+        asr.diagnostic_trace.lock().back_mut().unwrap().provider_result = Some(
+            serde_json::json!({"text":"末尾原始返回", "utterances":[]}),
+        );
         let snapshot = asr.take_diagnostic_trace();
         assert_eq!(snapshot.entries.len(), DIAGNOSTIC_TRACE_MAX_ENTRIES);
         assert_eq!(snapshot.entries_dropped, 2);
+        assert_eq!(snapshot.entries.first().unwrap().frame, 2);
+        assert_eq!(snapshot.entries.last().unwrap().frame, DIAGNOSTIC_TRACE_MAX_ENTRIES + 1);
+        assert!(snapshot.entries.last().unwrap().final_frame);
+        assert_eq!(snapshot.entries.last().unwrap().provider_result.as_ref().unwrap()["text"], "末尾原始返回");
         assert_eq!(
             snapshot.entries[0].text.chars().count(),
             DIAGNOSTIC_TRACE_MAX_CHARS
@@ -11420,13 +16739,12 @@ mod tests {
         assert!(target_speaker_final_required(true, true, false));
     }
 
-    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     #[test]
     fn explicit_final_foreign_tail_forces_product_filter_requirement() {
-        assert!(!target_speaker_filter_required_after_final(false, false));
-        assert!(target_speaker_filter_required_after_final(false, true));
-        assert!(target_speaker_filter_required_after_final(true, false));
-        assert!(target_speaker_filter_required_after_final(true, true));
+        assert!(!source_filter_required_after_projection(false, false));
+        assert!(source_filter_required_after_projection(false, true));
+        assert!(source_filter_required_after_projection(true, false));
+        assert!(source_filter_required_after_projection(true, true));
     }
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -11633,6 +16951,20 @@ mod tests {
 
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     #[test]
+    fn separated_punctuation_cannot_substitute_words_or_consume_foreign_body() {
+        assert!(punctuated_provider_slice_for_separated_final(
+            "今天我们确认时间充足", "今天我们确认时间冲突。"
+        ).is_none(), "one lexical alternative cannot be restored as punctuation");
+        assert_eq!(punctuated_provider_slice_for_separated_final(
+            "今天我们确认安排", "今天我们确认安排。旁人。"
+        ).as_deref(), Some("今天我们确认安排。"));
+        assert!(punctuated_provider_slice_for_separated_final(
+            "今天我们确认安排", "今天我们旁人确认安排。"
+        ).is_none(), "a short inserted foreign span cannot fit in an edit budget");
+    }
+
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
     fn sustained_tail_score_collapse_triggers_late_overlap_filter_only() {
         fn timeline(scores: &[f32]) -> Vec<LocalSpeakerEvidence> {
             scores
@@ -11791,6 +17123,22 @@ mod tests {
         )
     }
 
+    /// Coordinate/stability fixtures model an already proved Owner occurrence.
+    /// They must supply its timed PCM scope; setting only a text ledger or a
+    /// session-level owner flag would reproduce the admission bypass instead.
+    fn bind_test_owner_occurrence(state: &mut SyncState,text: &str,range: (u64,u64),at: Instant) {
+        use crate::transcript_boundary::{TimedTranscript,TimedTranscriptWord};
+        let timing = TimedTranscript { text:text.into(),words:vec![TimedTranscriptWord {
+            text:text.into(),start_ms:Some(range.0),end_ms:Some(range.1),
+        }] };
+        state.local_body_owner_verified = true;
+        state.local_owner_pcm_intervals.push(range);
+        state.live_owner_delivery_timing = Some(timing.clone());
+        state.source_owner_projection_stability = Some(SourceOwnerProjectionStability {
+            signature:source_owner_projection_signature(&timing,text).unwrap(),updated_at:at,
+        });
+    }
+
     #[test]
     fn open_wake_body_verification_keeps_foreign_rows_out_of_final() {
         use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Target, Uncertain};
@@ -11897,21 +17245,72 @@ mod tests {
         }
     }
 
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    #[test]
+    fn target_speaker_open_wake_does_not_arm_an_unverifiable_output_worker() {
+        for adaptive in [false, true] {
+            let asr = Arc::new(uplink_stall_test_asr());
+            asr.note_local_speaker_tracking_started("开始录音");
+            asr.note_local_speaker_profile_adaptive(adaptive);
+            // No models, template lookup, runtime or provider should be needed
+            // for the open-wake path. An empty reference must return here.
+            asr.start_target_speaker_extraction("开始录音", &[], 0.0);
+            assert!(asr.target_speaker_stream.lock().is_none());
+            assert!(asr.target_speaker_final_task.lock().is_none());
+            assert!(!asr.target_speaker_filter_required.load(Ordering::SeqCst));
+            assert!(!asr.primary_mixture_was_rejected());
+            assert!(asr.state.lock().local_speaker_tracking_enabled);
+        }
+    }
+
     #[test]
     fn open_wake_foreign_handoff_resumes_only_after_quality_owner_return() {
         use crate::speaker_verification::SessionSpeakerClassification::Target;
         use crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive;
         let asr = uplink_stall_test_asr();
         asr.note_local_speaker_tracking_started("开始录音");
-        for end in [8_000, 8_480] {
-            asr.note_local_speaker_observation(end, Target { score: 0.45 }, Inconclusive);
+        for (start, end) in [(6_800, 8_000), (7_280, 8_480)] {
+            asr.note_local_speaker_observation_with_audio_range(
+                start,
+                end,
+                Target { score: 0.45 },
+                Inconclusive,
+                true,
+            );
         }
         asr.state.lock().local_owner_handoff_suspected = true;
-        asr.note_local_speaker_observation_with_quality(20_000, Target { score: 0.45 }, Inconclusive, false);
-        asr.note_local_speaker_observation(20_480, Target { score: 0.46 }, Inconclusive);
+        asr.note_local_speaker_observation_with_audio_range(
+            18_800,
+            20_000,
+            Target { score: 0.45 },
+            Inconclusive,
+            false,
+        );
+        asr.note_local_speaker_observation(
+            20_240,
+            Target { score: 0.455 },
+            Inconclusive,
+        );
+        assert!(
+            asr.state.lock().local_owner_handoff_suspected,
+            "a Target observation without its exact audio range cannot authorize handoff recovery",
+        );
+        asr.note_local_speaker_observation_with_audio_range(
+            19_280,
+            20_480,
+            Target { score: 0.46 },
+            Inconclusive,
+            true,
+        );
         assert!(asr.state.lock().local_owner_handoff_suspected,
             "an unreliable positive plus one owner match cannot resume capture identity");
-        asr.note_local_speaker_observation(20_960, Target { score: 0.47 }, Inconclusive);
+        asr.note_local_speaker_observation_with_audio_range(
+            19_760,
+            20_960,
+            Target { score: 0.47 },
+            Inconclusive,
+            true,
+        );
         let state = asr.state.lock();
         assert!(!state.local_owner_handoff_suspected);
         assert_eq!(state.qualified_owner_speech_end_ms, Some(20_960));
@@ -12774,6 +18173,81 @@ mod tests {
                 "end_time": 1
             }]
         })));
+    }
+
+    #[test]
+    fn mixed_empty_final_cannot_recover_retracted_draft_as_committed_speech() {
+        for owner_activity_only in [true] {
+            let asr = uplink_stall_test_asr().with_owner_activity_only(owner_activity_only);
+            let previous = json!({"text":"本人正文完整保留。暂存干扰", "utterances":[
+                {"text":"本人正文完整保留。", "start_time":0,"end_time":1000,
+                 "definite":true,"additions":{"source":"two_pass","speaker_id":"0"},
+                 "words":[{"text":"本人正文完整保留","start_time":100,"end_time":900}]},
+                {"text":"暂存干扰","start_time":1200,"end_time":2000,
+                 "definite":false,"additions":{"source":"stream"},
+                 "words":[{"text":"暂存干扰","start_time":1300,"end_time":1900}]}
+            ]});
+            asr.apply_saved_native_result_for_test(&previous, false);
+            assert!(asr.state.lock().best_transcript_text.contains("暂存干扰"));
+            let final_result = json!({"text":"本人正文完整保留。","utterances":[
+                previous["utterances"][0].clone(),
+                {"start_time":1200,"end_time":2000,"definite":true,
+                 "additions":{"source":"two_pass","two_pass_empty":"true"}}
+            ]});
+            let (tx, mut rx) = oneshot::channel();
+            asr.state.lock().final_tx = Some(tx);
+            asr.apply_saved_native_result_for_test(&final_result, true);
+            let transcript = rx.try_recv().unwrap().unwrap();
+            assert_eq!(transcript.text, "本人正文完整保留。");
+            let state = asr.state.lock();
+            assert_eq!(state.best_transcript_text, transcript.text);
+            assert!(!state.optimistic_preview_text.contains("暂存干扰"));
+            assert!(!state.last_emitted_preview_text.contains("暂存干扰"));
+        }
+    }
+
+    #[test]
+    #[ignore = "private saved provider frames; file-only replay with explicit paths"]
+    fn explicit_empty_recorded_native_replay() {
+        let paths = std::env::var("LISTENER_EMPTY_REVISION_TRACES").expect("saved trace paths");
+        let mut report = Vec::new();
+        for path in paths.split(';') {
+            let trace: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            let asr = uplink_stall_test_asr().with_owner_activity_only(true);
+            let mut count = 0;
+            let mut expected = String::new();
+            let (tx, mut rx) = oneshot::channel();
+            asr.state.lock().final_tx = Some(tx);
+            for entry in trace["trace"]["entries"].as_array().unwrap().iter()
+                .filter(|entry| entry["stage"] == "normalized_result")
+            {
+                let result = &entry["provider_result"];
+                if !result.is_object() { continue; }
+                // Replay the saved positive owner scopes as a deletion veto;
+                // no inference, enrollment or fabricated identity is used.
+                if let Some(spans) = entry.pointer("/speaker_projection/local_presence_newest_first").and_then(Value::as_array) {
+                    let mut state = asr.state.lock();
+                    for span in spans.iter().filter(|span| span[2] == "Owner") {
+                        if let (Some(start), Some(end)) = (span[0].as_u64(), span[1].as_u64()) {
+                            if start < end { state.local_owner_pcm_intervals.push((start, end)); }
+                        }
+                    }
+                }
+                let final_frame = entry["final_frame"] == true;
+                if final_frame { expected = result["text"].as_str().unwrap_or_default().to_string(); }
+                asr.apply_saved_native_result_for_test(result, final_frame);
+                count += 1;
+            }
+            let transcript = rx.try_recv().unwrap().unwrap();
+            assert_eq!(crate::transcript_boundary::content_key(&transcript.text),
+                crate::transcript_boundary::content_key(&expected),
+                "provider-retracted provisional content must not be recovered; retained native body remains");
+            report.push(json!({"sessionId":trace["sessionId"],"frames":count,
+                "finalText":transcript.text,"nativeFinalText":expected,
+                "scope":"saved provider frames through production finalization; no native editor or audio/model replay"}));
+        }
+        std::fs::write(std::env::var("LISTENER_EMPTY_REVISION_REPORT").unwrap(),
+            serde_json::to_vec_pretty(&report).unwrap()).unwrap();
     }
 
     #[test]
@@ -13764,7 +19238,8 @@ mod tests {
                 partials.lock().push(text)
             })));
             let visuals = Arc::clone(&visible);
-            asr.set_visual_partial_transcript_callback(Some(Arc::new(move |text| {
+            asr.set_visual_partial_transcript_callback(Some(Arc::new(move |update| {
+                let text = update.text().to_string();
                 visuals.lock().push(text)
             })));
             let payload =
@@ -13912,6 +19387,245 @@ mod tests {
     }
 
     #[test]
+    fn confirmed_handoff_recovery_promotes_bounded_exact_target_provenance() {
+        use crate::speaker_verification::SessionSpeakerClassification::{Target, NonTarget};
+        use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+
+        let asr = uplink_stall_test_asr();
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        {
+            let mut state = asr.state.lock();
+            state.local_target_confirmed = true;
+            state.local_speaker_stable_target = true;
+            state.local_owner_handoff_suspected = true;
+            state.local_owner_pcm_intervals.push((6_200, 7_400));
+        }
+
+        // Recorded quiet replay order: a first good return was followed by a
+        // quality-insufficient observation whose raw identity was still
+        // Target. It resets the two-window counter but does not contradict the
+        // exact qualified predecessor. Two later fresh Targets confirm all
+        // three qualified ranges; the low-quality range itself stays absent.
+        asr.note_local_speaker_observation_with_audio_range(
+            7_400, 8_600, Target { score: 0.489 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        assert!(!asr.state.lock().local_owner_pcm_intervals.contains(&(7_400, 8_600)));
+        asr.note_local_speaker_observation_with_audio_range(
+            7_800, 9_000, Target { score: 0.574 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, false,
+        );
+        {
+            let state = asr.state.lock();
+            assert_eq!(state.local_owner_handoff_recovery_targets, 0);
+            assert_eq!(state.local_owner_handoff_recovery_ranges, vec![(7_400, 8_600)]);
+            assert_eq!(state.local_owner_handoff_recovery_last_range, Some((7_800, 9_000)));
+        }
+        asr.note_local_speaker_observation_with_audio_range(
+            8_200, 9_400, Target { score: 0.636 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        {
+            let state = asr.state.lock();
+            assert!(state.local_owner_handoff_suspected);
+            assert!(!state.local_owner_pcm_intervals.contains(&(8_200, 9_400)),
+                "one qualified return window remains reversible");
+        }
+        asr.note_local_speaker_observation_with_audio_range(
+            8_600, 9_800, Target { score: 0.657 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        let owner_ranges = {
+            let state = asr.state.lock();
+            assert!(!state.local_owner_handoff_suspected);
+            assert!(state.local_owner_handoff_recovery_ranges.is_empty());
+            assert!(state.local_owner_pcm_intervals.contains(&(7_400, 8_600)));
+            assert!(!state.local_owner_pcm_intervals.contains(&(7_800, 9_000)));
+            assert!(state.local_owner_pcm_intervals.contains(&(8_200, 9_400)));
+            assert!(state.local_owner_pcm_intervals.contains(&(8_600, 9_800)));
+            state.local_owner_pcm_intervals.clone()
+        };
+
+        let continuation = TimedTranscript {
+            text: "然后我在".into(),
+            words: vec![
+                TimedTranscriptWord { text: "然后".into(), start_ms: Some(8_212), end_ms: Some(8_292) },
+                TimedTranscriptWord { text: "我".into(), start_ms: Some(8_372), end_ms: Some(8_452) },
+                TimedTranscriptWord { text: "在".into(), start_ms: Some(8_852), end_ms: Some(8_932) },
+            ],
+        };
+        assert_eq!(
+            continuation.owner_supported_prefix("", &owner_ranges, &[]),
+            "然后我在",
+            "the exact two-window recovery must release the recorded first resumed word",
+        );
+        let shifted_earlier = TimedTranscript {
+            text: "然后我在".into(),
+            words: vec![
+                TimedTranscriptWord { text: "然后".into(), start_ms: Some(8_132), end_ms: Some(8_212) },
+                TimedTranscriptWord { text: "我".into(), start_ms: Some(8_432), end_ms: Some(8_512) },
+                TimedTranscriptWord { text: "在".into(), start_ms: Some(8_912), end_ms: Some(8_992) },
+            ],
+        };
+        assert_eq!(
+            shifted_earlier.owner_supported_prefix("", &owner_ranges, &[]),
+            "然后我在",
+            "the captured 80 ms provider-word revision keeps the qualified predecessor occurrence",
+        );
+        assert!(
+            shifted_earlier.owner_supported_prefix(
+                "",
+                &[(8_200, 9_400), (8_600, 9_800)],
+                &[],
+            ).is_empty(),
+            "without the exact predecessor, the earlier midpoint remains pending",
+        );
+
+        // The opposite real callback order admitted the same exact predecessor
+        // just before the provider handoff latch. It must produce the same
+        // word authority as delayed two-window recovery.
+        let before_handoff = uplink_stall_test_asr();
+        before_handoff.note_verified_local_speaker_tracking_started("开始录音");
+        {
+            let mut state = before_handoff.state.lock();
+            state.local_target_confirmed = true;
+            state.local_speaker_stable_target = true;
+        }
+        before_handoff.note_local_speaker_observation_with_audio_range(
+            7_400, 8_600, Target { score: 0.489 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        before_handoff.state.lock().local_owner_handoff_suspected = true;
+        assert_eq!(
+            shifted_earlier.owner_supported_prefix(
+                "",
+                &before_handoff.state.lock().local_owner_pcm_intervals,
+                &[],
+            ),
+            "然后我",
+            "before later audio arrives, the exact predecessor cannot authorize a future word",
+        );
+        before_handoff.note_local_speaker_observation_with_audio_range(
+            7_800, 9_000, Target { score: 0.574 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, false,
+        );
+        before_handoff.note_local_speaker_observation_with_audio_range(
+            8_200, 9_400, Target { score: 0.636 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        before_handoff.note_local_speaker_observation_with_audio_range(
+            8_600, 9_800, Target { score: 0.657 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        let before_handoff_ranges = before_handoff.state.lock().local_owner_pcm_intervals.clone();
+        assert!(before_handoff_ranges.contains(&(7_400, 8_600)));
+        assert!(!before_handoff_ranges.contains(&(7_800, 9_000)));
+        assert!(before_handoff_ranges.contains(&(8_200, 9_400)));
+        assert!(before_handoff_ranges.contains(&(8_600, 9_800)));
+        assert_eq!(
+            shifted_earlier.owner_supported_prefix("", &before_handoff_ranges, &[]),
+            "然后我在",
+            "at the same audio horizon, Target-before-handoff and handoff-before-Target callback orders converge",
+        );
+        assert!(
+            continuation.owner_supported_prefix("", &owner_ranges, &[(8_212, 8_292)]).is_empty(),
+            "an independently known foreign overlap keeps its existing veto",
+        );
+        assert!(
+            shifted_earlier.owner_supported_prefix("", &owner_ranges, &[(8_132, 8_212)]).is_empty(),
+            "retained predecessor provenance cannot override foreign overlap on the shifted word",
+        );
+
+        // Replaying the same callback, or delivering an older different
+        // range, cannot manufacture the second recovery observation.
+        asr.state.lock().local_owner_handoff_suspected = true;
+        asr.note_local_speaker_observation_with_audio_range(
+            9_000, 10_200, Target { score: 0.61 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        asr.note_local_speaker_observation_with_audio_range(
+            9_000, 10_200, Target { score: 0.61 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        asr.note_local_speaker_observation_with_audio_range(
+            8_800, 10_000, Target { score: 0.62 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        {
+            let state = asr.state.lock();
+            assert!(state.local_owner_handoff_suspected);
+            assert_eq!(state.local_owner_handoff_recovery_targets, 1);
+            assert_eq!(state.local_owner_handoff_recovery_ranges, vec![(9_000, 10_200)]);
+        }
+        asr.note_local_speaker_observation_with_audio_range(
+            9_400, 10_600, Target { score: 0.63 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        assert!(!asr.state.lock().local_owner_handoff_suspected);
+
+        // A real negative clears pending recovery provenance as well as the
+        // counter; a later pair must prove itself from fresh exact ranges.
+        asr.state.lock().local_owner_handoff_suspected = true;
+        asr.note_local_speaker_observation_with_audio_range(
+            9_800, 11_000, Target { score: 0.61 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        asr.note_local_speaker_observation_with_audio_range(
+            10_200, 11_400, NonTarget { score: 0.04 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget, true,
+        );
+        {
+            let state = asr.state.lock();
+            assert!(state.local_owner_handoff_suspected);
+            assert_eq!(state.local_owner_handoff_recovery_targets, 0);
+            assert!(state.local_owner_handoff_recovery_ranges.is_empty());
+            assert!(state.local_owner_handoff_recovery_last_range.is_none());
+        }
+
+        // A true Uncertain also destroys predecessor provenance. A later
+        // Target begins a new proof instead of reviving the old range.
+        asr.note_local_speaker_observation_with_audio_range(
+            10_600, 11_800, Target { score: 0.61 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        asr.note_local_speaker_observation_with_audio_range(
+            11_000, 12_200,
+            crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: 0.31 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        {
+            let state = asr.state.lock();
+            assert_eq!(state.local_owner_handoff_recovery_targets, 0);
+            assert!(state.local_owner_handoff_recovery_ranges.is_empty());
+            assert!(state.local_owner_handoff_recovery_last_range.is_none());
+        }
+
+        // A missing range clears proof, and a discontinuity starts a bounded
+        // fresh proof from the current exact observation only.
+        asr.note_local_speaker_observation_with_audio_range(
+            11_400, 12_600, Target { score: 0.62 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        asr.note_local_speaker_observation(
+            12_800, Target { score: 0.63 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive,
+        );
+        assert!(asr.state.lock().local_owner_handoff_recovery_ranges.is_empty());
+        asr.note_local_speaker_observation_with_audio_range(
+            12_000, 13_200, Target { score: 0.64 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        asr.note_local_speaker_observation_with_audio_range(
+            14_000, 15_200, Target { score: 0.65 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive, true,
+        );
+        let state = asr.state.lock();
+        assert!(state.local_owner_handoff_suspected);
+        assert_eq!(state.local_owner_handoff_recovery_targets, 1);
+        assert_eq!(state.local_owner_handoff_recovery_ranges, vec![(14_000, 15_200)]);
+    }
+
+    #[test]
     fn unresolved_provider_handoff_is_not_confirmed_other_for_endpoint() {
         use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Uncertain};
         // Installed Beta.23 cc267192: owner-only dictation had a pending
@@ -13990,18 +19704,28 @@ mod tests {
 
         assert!(!observe_owner_handoff_recovery(
             &mut state,
-            Uncertain { score: 0.49 }
+            Uncertain { score: 0.49 },
+            None,
+            true,
         ));
         assert!(!observe_owner_handoff_recovery(
             &mut state,
-            Target { score: 0.59 }
+            Target { score: 0.59 },
+            Some((22_100, 23_300)),
+            true,
         ));
         assert!(state.local_owner_handoff_suspected);
         assert!(observe_owner_handoff_recovery(
             &mut state,
-            Target { score: 0.61 }
+            Target { score: 0.61 },
+            Some((22_500, 23_700)),
+            true,
         ));
         assert!(!state.local_owner_handoff_suspected);
+        state.local_speaker_classification = Some(Target { score: 0.61 });
+        state.local_speaker_signal_quality_sufficient = Some(true);
+        state.local_speaker_observation_end_ms = Some(23_700);
+        state.local_audio_duration_ms = Some(23_700);
         assert!(refresh_local_target_from_owner_preview_activity(&mut state));
     }
 
@@ -14048,7 +19772,8 @@ mod tests {
                 partials.lock().push(text)
             })));
             let visuals = Arc::clone(&visible);
-            asr.set_visual_partial_transcript_callback(Some(Arc::new(move |text| {
+            asr.set_visual_partial_transcript_callback(Some(Arc::new(move |update| {
+                let text = update.text().to_string();
                 visuals.lock().push(text)
             })));
             // Phrase-accepted sessions may have a weak enrollment match.
@@ -14232,6 +19957,8 @@ mod tests {
             local_audio_duration_ms: Some(1_900),
             local_speech_end_ms: Some(1_900),
             local_target_speech_end_ms: Some(1_900),
+            local_speaker_observation_end_ms: Some(1_900),
+            local_speaker_signal_quality_sufficient: Some(true),
             local_speaker_classification: Some(
                 crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.57 },
             ),
@@ -14253,6 +19980,10 @@ mod tests {
         );
         assert_eq!(before.local_target_speech_end_ms, Some(1_900));
         before.local_audio_duration_ms = Some(2_400);
+        assert!(!refresh_local_target_from_owner_preview_activity(&mut before));
+        assert_eq!(before.local_target_speech_end_ms, Some(1_900));
+        // Only a fresh covered positive window can advance the retained clock.
+        before.local_speaker_observation_end_ms = Some(2_400);
         assert!(refresh_local_target_from_owner_preview_activity(
             &mut before
         ));
@@ -14603,16 +20334,16 @@ mod tests {
     }
 
     #[test]
-    fn sealed_same_owner_clause_is_not_cut_to_stalled_preview_length() {
-        // Installed session 32762960: every final cloud row was stable
-        // speaker 0, the speaker filter retained all rows, and the local
-        // identity never changed. The independent preview-length ceiling
-        // nevertheless removed the final clause after a pause.
-        let state = SyncState {
+    fn sealed_owner_clause_requires_source_permission_to_exceed_stalled_preview() {
+        // A stable same-ID final may contain a real owner continuation or a
+        // collapsed foreign tail. Keep the rendering fixed; vary only the
+        // positive source coverage and explicit interference evidence.
+        let mut state = SyncState {
             finishing: true,
             local_speaker_tracking_enabled: true,
             local_speaker_stable_target: true,
             local_target_confirmed: true,
+            local_wake_owner_verified: true,
             target_speaker_id: Some("0".into()),
             last_emitted_preview_text: "开始录音。第一段话。接上的一句话。".into(),
             stop_boundary_server_audio_ms: Some(35_800),
@@ -14627,23 +20358,43 @@ mod tests {
             {"text": "最后再说一段。", "start_time": 31_042, "end_time": 35_882,
              "definite": true, "additions": {"speaker": "0"}}
         ]});
-        assert!(fully_attributed_owner_final(&state, &provider, &provider));
+        let text = provider["text"].as_str().unwrap();
+        let untimed = super::super::volcengine_transcript::timed_transcript_from_result(&provider);
+        assert!(!entire_candidate_has_source_owner_permission(&state, text, Some(&untimed),
+            &[(0,36000)], &[]), "utterance timing cannot invent missing word occurrences");
+        // Explicit synthetic token coordinates for this permission regression;
+        // these are not claimed as recovered words from the old session.
+        let timing = crate::transcript_boundary::TimedTranscript {
+            text: text.into(),
+            words: provider["utterances"].as_array().unwrap().iter().map(|row|
+                crate::transcript_boundary::TimedTranscriptWord {
+                    text: row["text"].as_str().unwrap().into(),
+                    start_ms: row["start_time"].as_u64(), end_ms: row["end_time"].as_u64(),
+                }).collect(),
+        };
+        let permitted = |state: &SyncState, owner: &[(u64,u64)], physical: &[(u64,u64)]|
+            entire_candidate_has_source_owner_permission(state, text, Some(&timing), owner, physical);
+        assert!(!permitted(&state, &[], &[]), "same speaker ID is not ownership evidence");
+        let prefix_ranges = [(1280,15872),(20672,27841)];
+        assert!(!permitted(&state, &prefix_ranges, &[]), "a pending final clause cannot borrow the prefix's proof");
+        let all_ranges = [(1280,15872),(20672,27841),(31042,35882)];
+        assert!(permitted(&state, &all_ranges, &[]));
         assert!(owner_preview_safety_ceiling(
             &state,
-            provider["text"].as_str().unwrap(),
+            text,
             false,
-            fully_attributed_owner_final(&state, &provider, &provider),
+            permitted(&state, &all_ranges, &[]),
         )
         .is_none());
 
-        let mut filtered = provider.clone();
-        filtered["utterances"].as_array_mut().unwrap().pop();
-        assert!(!fully_attributed_owner_final(&state, &provider, &filtered));
+        assert!(!permitted(&state, &all_ranges, &[(31042,35882)]));
+        state.provider_distinct_foreign_audio_ranges.push((31042,35882));
+        assert!(!permitted(&state, &all_ranges, &[]), "source proof must obey the same foreign veto as live delivery");
         assert!(owner_preview_safety_ceiling(
             &state,
-            provider["text"].as_str().unwrap(),
+            text,
             false,
-            fully_attributed_owner_final(&state, &provider, &filtered),
+            permitted(&state, &all_ranges, &[]),
         )
         .is_some());
         assert!(owner_preview_safety_ceiling(
@@ -15798,8 +21549,9 @@ mod tests {
             ..SyncState::default()
         };
         assert_eq!(local_owner_continuity(&state), LocalOwnerContinuity::Compatible);
-        assert!(refresh_local_target_from_owner_preview_activity(&mut state));
-        assert_eq!(state.local_target_speech_end_ms, Some(43_100));
+        assert!(local_speaker_allows_optimistic_preview(&state));
+        assert!(!refresh_local_target_from_owner_preview_activity(&mut state));
+        assert_eq!(state.local_target_speech_end_ms, Some(37_000));
     }
 
     #[test]
@@ -16728,6 +22480,8 @@ mod tests {
             local_speaker_classification: Some(
                 crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.6 },
             ),
+            local_speaker_signal_quality_sufficient: Some(true),
+            local_speaker_observation_end_ms: Some(2_800),
             local_target_speech_end_ms: Some(1_800),
             local_audio_duration_ms: Some(2_800),
             last_server_audio_duration_ms: Some(2_600),
@@ -16749,7 +22503,8 @@ mod tests {
         // Installed session 417 exposed the inverse split: the preview admitted
         // a debounced Uncertain owner revision but endpointing called it Quiet
         // and stopped before the provider attributed the same words. Both
-        // consumers now read one continuity verdict.
+        // consumers share the continuity verdict, but uncertain visual growth
+        // cannot manufacture a new positively classified PCM watermark.
         let mut state = SyncState {
             local_speaker_tracking_enabled: true,
             local_wake_owner_verified: true,
@@ -16767,10 +22522,10 @@ mod tests {
         };
 
         assert!(local_speaker_allows_optimistic_preview(&state));
-        assert!(refresh_local_target_from_owner_safe_provider_split(
+        assert!(!refresh_local_target_from_owner_safe_provider_split(
             &mut state
         ));
-        assert_eq!(state.local_target_speech_end_ms, Some(8_940));
+        assert_eq!(state.local_target_speech_end_ms, Some(4_922));
 
         state.local_audio_duration_ms = Some(9_340);
         state.local_speaker_classification = Some(
@@ -16780,7 +22535,7 @@ mod tests {
         assert!(!refresh_local_target_from_owner_safe_provider_split(
             &mut state
         ));
-        assert_eq!(state.local_target_speech_end_ms, Some(8_940));
+        assert_eq!(state.local_target_speech_end_ms, Some(4_922));
     }
 
     #[test]
@@ -18199,8 +23954,9 @@ mod tests {
                 .local_non_target_speech_end_ms,
             None,
         );
-        assert!(refresh_local_target_from_owner_preview_activity(&mut state));
-        assert_eq!(state.local_target_speech_end_ms, Some(21_800));
+        assert!(local_speaker_allows_optimistic_preview(&state));
+        assert!(!refresh_local_target_from_owner_preview_activity(&mut state));
+        assert_eq!(state.local_target_speech_end_ms, Some(19_000));
 
         state.local_speaker_classification = Some(NonTarget { score: 0.08 });
         assert_eq!(local_owner_continuity(&state), LocalOwnerContinuity::Other);
@@ -19681,6 +25437,131 @@ mod tests {
         assert!(state.local_speaker_stable_target);
         assert!(!state.owner_isolation_frozen);
         assert_eq!(state.best_transcript_text, "本人完整正文");
+    }
+
+    #[test]
+    fn insufficient_quality_strong_negative_cannot_advance_endpoint_or_transcript_foreign_runs() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        {
+            let mut state = asr.state.lock();
+            state.local_speaker_stable_target = true;
+            state.local_target_confirmed = true;
+            state.best_transcript_text = "安静本人完整正文".into();
+        }
+        use crate::speaker_verification::SessionSpeakerClassification as Classification;
+        asr.note_local_speaker_observation_with_quality(
+            6_600,
+            Classification::NonTarget { score: 0.05 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget,
+            false,
+        );
+
+        let state = asr.state.lock();
+        assert_eq!(state.local_consecutive_strong_non_target, 0);
+        assert!(!state.local_owner_absence_run_confirmed);
+        assert!(state.local_non_target_speech_end_ms.is_none());
+        assert_eq!(state.local_consecutive_transcript_foreign_hint, 0);
+        assert_eq!(state.local_consecutive_transcript_hard_non_target, 0);
+        assert!(state.local_confirmed_transcript_foreign_hint_end_ms.is_none());
+        assert!(state.local_confirmed_transcript_non_target_end_ms.is_none());
+        assert!(matches!(
+            state.local_speaker_evidence.last().map(|evidence| evidence.classification),
+            Some(Classification::Uncertain { .. })
+        ));
+        assert_eq!(state.best_transcript_text, "安静本人完整正文");
+    }
+
+    #[test]
+    fn insufficient_quality_observation_breaks_consecutive_foreign_confirmation() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        {
+            let mut state = asr.state.lock();
+            state.local_speaker_stable_target = true;
+            state.local_target_confirmed = true;
+        }
+        use crate::speaker_verification::SessionSpeakerClassification as Classification;
+        use crate::speech_decision_kernel::TranscriptSpeakerEvidence;
+        let observe = |end_ms, quality| {
+            asr.note_local_speaker_observation_with_quality(
+                end_ms,
+                Classification::NonTarget { score: 0.05 },
+                TranscriptSpeakerEvidence::HardNonTarget,
+                quality,
+            );
+        };
+        observe(4_000, true);
+        {
+            let state = asr.state.lock();
+            assert_eq!(state.local_consecutive_strong_non_target, 1);
+            assert_eq!(state.local_consecutive_transcript_foreign_hint, 1);
+            assert_eq!(state.local_consecutive_transcript_hard_non_target, 1);
+        }
+        observe(4_400, false);
+        {
+            let state = asr.state.lock();
+            assert_eq!(state.local_consecutive_strong_non_target, 0);
+            assert_eq!(state.local_consecutive_transcript_foreign_hint, 0);
+            assert_eq!(state.local_consecutive_transcript_hard_non_target, 0);
+            assert!(!state.local_owner_absence_run_confirmed);
+            assert!(state.local_confirmed_transcript_non_target_end_ms.is_none());
+        }
+        observe(4_800, true);
+        let state = asr.state.lock();
+        assert_eq!(state.local_consecutive_strong_non_target, 1);
+        assert_eq!(state.local_consecutive_transcript_foreign_hint, 1);
+        assert_eq!(state.local_consecutive_transcript_hard_non_target, 1);
+        assert!(!state.local_owner_absence_run_confirmed);
+        assert!(state.local_confirmed_transcript_non_target_end_ms.is_none());
+    }
+
+    #[test]
+    fn consecutive_qualified_strong_negatives_still_confirm_foreign_run() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_verified_local_speaker_tracking_started("开始录音");
+        {
+            let mut state = asr.state.lock();
+            state.local_speaker_stable_target = true;
+            state.local_target_confirmed = true;
+        }
+        use crate::speaker_verification::SessionSpeakerClassification as Classification;
+        use crate::speech_decision_kernel::TranscriptSpeakerEvidence;
+        for end_ms in [4_000, 4_400] {
+            asr.note_local_speaker_observation_with_quality(
+                end_ms,
+                Classification::NonTarget { score: 0.05 },
+                TranscriptSpeakerEvidence::HardNonTarget,
+                true,
+            );
+        }
+
+        let state = asr.state.lock();
+        assert!(state.local_owner_absence_run_confirmed);
+        assert_eq!(state.local_non_target_speech_end_ms, Some(4_400));
+        assert_eq!(state.local_confirmed_transcript_foreign_hint_end_ms, Some(4_400));
+        assert_eq!(state.local_confirmed_transcript_non_target_end_ms, Some(4_400));
     }
 
     #[test]
@@ -21626,12 +27507,20 @@ mod tests {
         let run = async {
             asr.open_session().await?;
             asr.mark_audio_delivery_ready();
+            // Reproduce the wake-time buffered upload when the input fixture
+            // supplies it. All comparison arms use the same send cadence.
+            let buffered_startup_ms = std::env::var("LISTENER_PROVIDER_CADENCE_BUFFERED_STARTUP_MS")
+                .ok().map(|value| value.parse::<u64>().expect("numeric buffered startup"))
+                .unwrap_or(0);
+            assert!(buffered_startup_ms <= 5_000);
+            let mut sent_ms = 0;
             for chunk in pcm.chunks(TARGET_AUDIO_CHUNK_BYTES) {
                 asr.consume_pcm_chunk(chunk);
-                tokio::time::sleep(Duration::from_millis(
-                    (chunk.len() as f64 / BYTES_PER_MS).round() as u64,
-                ))
-                .await;
+                let duration_ms = (chunk.len() as f64 / BYTES_PER_MS).round() as u64;
+                sent_ms += duration_ms;
+                if sent_ms > buffered_startup_ms {
+                    tokio::time::sleep(Duration::from_millis(duration_ms)).await;
+                }
             }
             // The provider may finalize a speech-complete stream before the
             // harness reaches its explicit stop. Keep reading the final result
@@ -21728,7 +27617,15 @@ mod tests {
         };
 
         let variants =
-            if std::env::var_os("LISTENER_PROVIDER_CADENCE_COMPARE_SEGMENTATION").is_some() {
+            if std::env::var_os("LISTENER_PROVIDER_CADENCE_COMPARE_SHORT_PAUSES").is_some() {
+                // Diagnostic comparison only. Production defaults are unchanged;
+                // All arms retain initial speech protection and second pass.
+                [500, 400, 300].into_iter().map(|end_window_size_ms| VolcengineSessionOptions {
+                    force_to_speech_time_ms: Some(1_000),
+                    end_window_size_ms: Some(end_window_size_ms),
+                    ..Default::default()
+                }).collect()
+            } else if std::env::var_os("LISTENER_PROVIDER_CADENCE_COMPARE_SEGMENTATION").is_some() {
                 vec![
                     VolcengineSessionOptions {
                         force_to_speech_time_ms: Some(0),
@@ -21790,6 +27687,131 @@ mod tests {
             "provider_cadence_probe_status={}",
             if all_succeeded { "PASS" } else { "NO_GO" }
         );
+    }
+
+    #[test]
+    fn tracked_provider_continuity_is_visual_until_source_permission_arrives() {
+        // a6ff: a stable wake-bound speaker-0 row put the independently
+        // labelled 46022..46782 background phrase into the paste ledger before
+        // original-source analysis. The original provider word packet was
+        // dropped, so this reproduces that decision state, not the missing packet.
+        let asr = uplink_stall_test_asr();
+        let text = "本人前句。白菜长得水灵。";
+        {
+            let mut state = asr.state.lock();
+            state.local_speaker_tracking_enabled = true;
+            state.local_wake_owner_verified = true;
+            state.local_speaker_stable_target = true;
+            state.local_target_confirmed = true;
+            state.target_speaker_id = Some("0".into());
+            state.live_owner_delivery = Some(TranscriptCandidate {
+                text:text.into(),timed_segments:Vec::new(),authoritative_cumulative:false,
+            });
+            state.live_owner_delivery_updated_at = Some(Instant::now()-Duration::from_secs(2));
+        }
+        let selected = asr.selected_live_owner_candidate().unwrap();
+        assert_eq!(selected.owner_permission,LiveOwnerPermission::Unobserved);
+        assert_eq!(asr.primary_output_text(text).as_deref(),Some(text));
+        assert!(asr.pause_early_delivery_ledger_snapshot_after(Duration::ZERO,"").is_none());
+        assert!(asr.pending_owner_delivery_after("").is_none());
+        assert!(asr.state.lock().primary_admitted_owner_anchor.is_none());
+
+        // An unenrolled current-wake profile also uses actual PCM scope.
+        {
+            use crate::transcript_boundary::{TimedTranscript,TimedTranscriptWord};
+            let mut state = asr.state.lock();
+            state.local_speaker_profile_adaptive = true;
+            state.local_wake_owner_verified = false;
+            state.local_body_owner_verified = false;
+            state.live_owner_delivery_timing = Some(TimedTranscript { text:text.into(),words:vec![
+                TimedTranscriptWord {text:"本人前句".into(),start_ms:Some(43000),end_ms:Some(45000)},
+                TimedTranscriptWord {text:"白菜长得水灵".into(),start_ms:Some(46022),end_ms:Some(46782)},
+            ] });
+            state.local_owner_pcm_intervals = vec![(42000,45500)];
+        }
+        let selected = asr.selected_live_owner_candidate().unwrap();
+        assert_eq!(selected.owner_permission,LiveOwnerPermission::SourceProjection);
+        assert_eq!(selected.text,"本人前句。");
+
+        // Manual/untracked dictation retains its existing source policy.
+        {
+            let mut state = asr.state.lock();
+            state.local_speaker_tracking_enabled = false;
+            state.local_owner_pcm_intervals.clear();
+            state.live_owner_delivery_timing = None;
+        }
+        assert_eq!(asr.selected_live_owner_candidate().unwrap().owner_permission,LiveOwnerPermission::Admitted);
+    }
+
+    #[test]
+    fn primary_source_projection_rechecks_the_provider_ledger_instead_of_borrowing_it() {
+        use crate::transcript_boundary::{TimedTranscript,TimedTranscriptWord};
+        let text = "本人前句。白菜长得水灵。";
+        let timing = TimedTranscript { text:text.into(),words:vec![
+            TimedTranscriptWord { text:"本人前句".into(),start_ms:Some(43000),end_ms:Some(45000) },
+            TimedTranscriptWord { text:"白菜长得水灵".into(),start_ms:Some(46022),end_ms:Some(46782) },
+        ] };
+        let mut state = SyncState {
+            local_speaker_tracking_enabled:true,local_wake_owner_verified:true,
+            provider_timed_transcript:Some(timing),
+            live_owner_delivery:Some(TranscriptCandidate { text:text.into(),timed_segments:Vec::new(),authoritative_cumulative:false }),
+            ..SyncState::default()
+        };
+        let candidate = primary_source_owner_supported_candidate(&state,&[(42000,45500)],&[]).unwrap();
+        assert_eq!(candidate.0.text,"本人前句。");
+        assert_eq!(candidate.1.words.len(),1);
+        // A confirmed precise foreign point also vetoes a later broad owner
+        // context. The previously displayed ledger cannot waive this check.
+        state.local_confirmed_transcript_non_target_end_ms = Some(47000);
+        let candidate = primary_source_owner_supported_candidate(&state,&[(42000,48000)],&[]).unwrap();
+        assert_eq!(candidate.0.text,"本人前句。");
+        assert!(primary_source_owner_supported_candidate(&state,&[],&[]).is_none());
+    }
+
+    #[test]
+    #[ignore = "requires private recorded provider packets and captured identity windows"]
+    fn captured_owner_window_streaming_replay() {
+        use crate::speaker_verification::SessionSpeakerClassification;
+        let fixture: Value = serde_json::from_slice(&std::fs::read(
+            std::env::var("LISTENER_OWNER_WINDOW_REPLAY_INPUT").unwrap()).unwrap()).unwrap();
+        let asr = uplink_stall_test_asr();
+        asr.note_local_speaker_tracking_started_with_owner("开始录音", true);
+        let observations = fixture["observations"].as_array().unwrap();
+        let mut next = 0;
+        let mut outputs = Vec::new();
+        let mut first_resumed_ms = None;
+        for response in fixture["responses"].as_array().unwrap() {
+            let end = response["audio_info"]["duration"].as_u64().unwrap_or_default();
+            asr.note_local_audio_activity(end, true);
+            while next < observations.len() && observations[next]["end_ms"].as_u64().unwrap() <= end {
+                let row = &observations[next];
+                let score = row["score"].as_f64().unwrap() as f32;
+                let kind = match row["kind"].as_str().unwrap() {
+                    "Target" => SessionSpeakerClassification::Target {score},
+                    "NonTarget" => SessionSpeakerClassification::NonTarget {score},
+                    "Uncertain" => SessionSpeakerClassification::Uncertain {score},
+                    _ => panic!("unknown captured classification"),
+                };
+                asr.note_local_speaker_observation_with_audio_range(
+                    row["audio_start_ms"].as_u64().unwrap(), row["end_ms"].as_u64().unwrap(), kind,
+                    crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive,
+                    row["quality"].as_bool().unwrap());
+                next += 1;
+            }
+            assert!(asr.handle_frame(&frame::build(MessageType::FullServerResponse, Flags::None,
+                Serialization::Json, &serde_json::to_vec(response).unwrap(), None)));
+            if let Some(candidate) = asr.state.lock().live_owner_delivery.as_ref() {
+                if candidate.text.contains("然后") { first_resumed_ms.get_or_insert(end); }
+                outputs.push(json!({"audio_ms":end,"owner_candidate":candidate.text}));
+            }
+        }
+        let passed = first_resumed_ms.is_some_and(|ms| ms <= fixture["maximum_resumed_audio_ms"].as_u64().unwrap());
+        std::fs::write(std::env::var("LISTENER_OWNER_WINDOW_REPLAY_OUTPUT").unwrap(),
+            serde_json::to_vec_pretty(&json!({"status":if passed {"PASS"} else {"FAIL"},
+                "scope":"recorded provider packets plus captured PCM identity windows; no fresh device or editor acceptance",
+                "source_session_id":fixture["source_session_id"], "source_pcm_sha256":fixture["pcm_sha256"],
+                "first_resumed_candidate_audio_ms":first_resumed_ms, "outputs":outputs})).unwrap()).unwrap();
+        assert!(passed, "an owner word crossing a local PCM-window edge must not wait for the final row");
     }
 
     /// Reprocess the exact failed provider revisions and captured identity
@@ -22101,9 +28123,11 @@ mod tests {
         // mark the ASR-side policy as verified/non-adaptive for this probe.
         asr.note_verified_local_speaker_tracking_started(&wake_phrase);
         asr.note_local_speaker_profile_adaptive(false);
-        asr.start_target_speaker_extraction_with_embedding(target_embedding);
         asr.open_session().await.expect("open provider session");
         asr.mark_audio_delivery_ready();
+        // open_session resets a previous extraction stream; match production
+        // ordering so this probe really exercises the secondary track.
+        asr.start_target_speaker_extraction_with_embedding(target_embedding);
 
         let mut rolling = Vec::<u8>::with_capacity((LOCAL_SPEAKER_WINDOW_MS * 32) as usize);
         let mut next_observation_ms = 1_000u64;

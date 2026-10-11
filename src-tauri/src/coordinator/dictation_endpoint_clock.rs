@@ -30,6 +30,32 @@ struct EndpointStopDispatchState {
     ticket: Option<(EndpointStopPhase, EndpointStopTicket)>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BodySubmissionSequence(u64);
+
+#[derive(Debug)]
+struct PendingBodyDispatch {
+    sequence: BodySubmissionSequence,
+    dispatched_at: Instant,
+    audio_boundary_ms: Option<u64>,
+    owner_boundary_ms: Option<u64>,
+    personal_continuation_boundary_ms: Option<u64>,
+}
+
+#[derive(Debug)]
+struct PendingBodyReceipt {
+    sequence: BodySubmissionSequence,
+    ticket: crate::insertion::ClipboardTicket,
+    receipt: crate::insertion::PasteReceiptHandle,
+    personal_continuation_boundary_ms: Option<u64>,
+}
+
+#[derive(Debug)]
+struct PendingOwnerDeliveryHold {
+    key: String,
+    recognition_pending: bool,
+}
+
 impl EndpointStopDispatchState {
     fn propose(
         &mut self,
@@ -106,6 +132,18 @@ struct SettledTargetEndpointClock {
     /// continuation window starts here, rather than at the preceding VAD
     /// silence edge or at a later provider preview revision.
     last_body_delivery_at: Option<Instant>,
+    /// Each receipt stays paired with the body dispatch that created it. A
+    /// newer dispatch cannot consume an older completion, and punctuation
+    /// cannot create a sequence or rearm the continuation clock.
+    next_body_submission_sequence: u64,
+    last_body_submission_sequence: Option<BodySubmissionSequence>,
+    pending_body_dispatch: Option<PendingBodyDispatch>,
+    pending_body_receipts: Vec<PendingBodyReceipt>,
+    /// A permitted body candidate can reach the endpoint before delivery. In
+    /// personal mode its settling allowance belongs to observed owner audio,
+    /// not to every changing raw provider key (which may be background speech).
+    pending_owner_delivery: Option<PendingOwnerDeliveryHold>,
+    last_pending_personal_continuation_end_ms: Option<u64>,
     last_body_delivery_audio_ms: Option<u64>,
     /// A local Target decision for post-delivery audio whose signal quality
     /// has not yet qualified it as owner speech. It can briefly veto STOP
@@ -187,6 +225,9 @@ struct SettledTargetEndpointClock {
     /// enrolled-speaker sessions until those paths have their own evidence.
     manual_vad_guard: bool,
     latest_local_vad_evidence: Option<crate::asr::volcengine::LocalSpeechEvidence>,
+    /// Fresh, monotonic silence proof for the personal-worker failure path.
+    /// Re-reading the same snapshot cannot refresh its observation timestamp.
+    local_vad_stop_observation: Option<LocalVadStopObservation>,
     canonical_speech_serial: u64,
     last_visible_body_signature: Option<(bool, usize)>,
     /// Last local speech edge used to renew the firmware endpoint.  Provider
@@ -202,6 +243,82 @@ struct SettledTargetEndpointClock {
     /// endpoint distinguishable from an actively growing owner utterance.
     pending_due_hold_diagnostic: Option<(u64, &'static str)>,
     last_reported_due_hold_diagnostic: Option<(u64, &'static str)>,
+    /// Independent presence controls stop only; it cannot authenticate text.
+    personal_presence_endpoint: Option<crate::personal_vad::PresenceEndpoint>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LocalVadStopObservation {
+    evidence: crate::asr::volcengine::LocalSpeechEvidence,
+    observed_at: Instant,
+    silence_since_ms: u64,
+    valid: bool,
+}
+
+impl LocalVadStopObservation {
+    fn new(evidence: crate::asr::volcengine::LocalSpeechEvidence, observed_at: Instant) -> Self {
+        use crate::asr::volcengine::LocalSpeechActivityState;
+        Self {
+            evidence,
+            observed_at,
+            silence_since_ms: if evidence.state == LocalSpeechActivityState::NonSpeech
+                && evidence.activity_epoch == 0
+            {
+                evidence.last_detected_speech_end_ms.unwrap_or_default()
+            } else {
+                evidence.analyzed_through_ms
+            },
+            valid: evidence.revision > 0 && evidence.state != LocalSpeechActivityState::Unknown,
+        }
+    }
+
+    fn observe(&mut self, evidence: crate::asr::volcengine::LocalSpeechEvidence, observed_at: Instant) {
+        use crate::asr::volcengine::LocalSpeechActivityState;
+        if evidence == self.evidence {
+            return;
+        }
+        if evidence.revision <= self.evidence.revision
+            || evidence.analyzed_through_ms < self.evidence.analyzed_through_ms
+        {
+            // An out-of-order callback cannot revive old quiet evidence after
+            // a speech onset. Retain the high-water revision until fresh input.
+            self.valid = false;
+            return;
+        }
+        self.silence_since_ms = self.silence_since_ms.max(
+            if evidence.state == LocalSpeechActivityState::NonSpeech {
+                if evidence.activity_epoch > self.evidence.activity_epoch
+                    || matches!(self.evidence.state, LocalSpeechActivityState::PendingSpeech | LocalSpeechActivityState::Unknown)
+                {
+                    // Snapshot consumers can miss an entire short onset. Its
+                    // epoch still advances even if canonical Speech never did.
+                    // Start proven quiet at the first completed negative; do
+                    // not backdate it to the previous long utterance's end.
+                    evidence.analyzed_through_ms
+                } else {
+                    evidence.last_detected_speech_end_ms.unwrap_or_default()
+                }
+            } else {
+                // PendingSpeech and Unknown also break a proven quiet span.
+                // A short onset need not meet canonical VAD's duration gate.
+                evidence.analyzed_through_ms
+            },
+        );
+        self.evidence = evidence;
+        self.observed_at = observed_at;
+        self.valid = evidence.state != LocalSpeechActivityState::Unknown;
+    }
+
+    fn confirmed_silence(&self) -> Option<crate::personal_vad::ConfirmedSilenceObservation> {
+        (self.valid
+            && self.evidence.state == crate::asr::volcengine::LocalSpeechActivityState::NonSpeech
+            && self.evidence.pending_speech_start_ms.is_none())
+            .then_some(crate::personal_vad::ConfirmedSilenceObservation {
+                analyzed_end_ms: self.evidence.analyzed_through_ms,
+                silence_since_ms: self.silence_since_ms,
+                observed_at: self.observed_at,
+            })
+    }
 }
 
 const RECENT_STRONG_NON_TARGET_WINDOW_MS: u64 = 900;
@@ -352,6 +469,227 @@ fn owner_endpoint_boundary_with_uncertain_tail(
 }
 
 impl SettledTargetEndpointClock {
+    fn note_personal_presence(
+        &mut self,
+        observation: Option<crate::personal_vad::PresenceObservation>,
+        now: Instant,
+    ) -> bool {
+        let endpoint = self.personal_presence_endpoint.get_or_insert_with(Default::default);
+        let owner_advanced = match observation {
+            Some(frame) => endpoint.observe(frame),
+            None => { endpoint.invalidate(); false }
+        };
+        if owner_advanced {
+            self.generation = self.generation.wrapping_add(1);
+            self.stop_proposed = false;
+            self.armed_at = Some(now);
+            self.clear_paused_arm();
+        }
+        owner_advanced
+    }
+
+    fn personal_presence_stop_due(&self, captured_ms: u64, now: Instant, timeout_ms: u64) -> bool {
+        // STOP admission calls this again after a proposal was scheduled. A
+        // newly dispatched paste must hold it until its actual receipt arrives.
+        if self.pending_body_dispatch.is_some() || !self.pending_body_receipts.is_empty()
+            || self.pending_owner_delivery_active(now)
+        {
+            return false;
+        }
+        let Some(endpoint) = self.personal_presence_endpoint.as_ref() else { return false; };
+        if endpoint.due(captured_ms, now, timeout_ms) {
+            return true;
+        }
+        // Missing/stalled personal analysis is not silence. Only a separate
+        // completed VAD quiet span may release it, and actual editor delivery
+        // still retains the full continuation window in this fallback.
+        if self.last_body_delivery_at.is_some_and(|at| {
+            now.saturating_duration_since(at) < Duration::from_millis(timeout_ms)
+        }) {
+            return false;
+        }
+        self.local_vad_stop_observation.as_ref()
+            .and_then(LocalVadStopObservation::confirmed_silence)
+            .is_some_and(|silence| endpoint.due_on_confirmed_silence(silence, captured_ms, now, timeout_ms))
+    }
+
+    fn begin_text_submission(
+        &mut self,
+        now: Instant,
+        text: &str,
+    ) -> Option<BodySubmissionSequence> {
+        if embedded_audio_partial_preview_stability_key(text).is_empty()
+            || !self.automatic_wake_session
+            || self.automatic_no_body_armed
+        {
+            return None;
+        }
+        self.poll_body_receipts();
+        self.next_body_submission_sequence =
+            self.next_body_submission_sequence.wrapping_add(1).max(1);
+        let sequence = BodySubmissionSequence(self.next_body_submission_sequence);
+        let audio_boundary_ms = self
+            .latest_update
+            .as_ref()
+            .and_then(|update| update.audio_duration_ms);
+        let owner_boundary_ms = self
+            .latest_update
+            .as_ref()
+            .and_then(endpoint_owner_watermark);
+        let personal_continuation_boundary_ms = self.personal_presence_endpoint.as_ref()
+            .and_then(crate::personal_vad::PresenceEndpoint::continuation_activity_end_ms);
+        self.pending_body_dispatch = Some(PendingBodyDispatch {
+            sequence,
+            dispatched_at: now,
+            audio_boundary_ms,
+            owner_boundary_ms,
+            personal_continuation_boundary_ms,
+        });
+        Some(sequence)
+    }
+
+    fn settle_text_submission(
+        &mut self,
+        sequence: Option<BodySubmissionSequence>,
+        submitted: bool,
+        receipt: Option<crate::insertion::PasteReceiptHandle>,
+    ) {
+        let Some(sequence) = sequence else { return; };
+        if !self
+            .pending_body_dispatch
+            .as_ref()
+            .is_some_and(|dispatch| dispatch.sequence == sequence)
+        {
+            return;
+        }
+        let dispatch = self.pending_body_dispatch.take().expect("matching dispatch");
+        if !submitted {
+            return;
+        }
+        let owner_boundary_now = self
+            .latest_update
+            .as_ref()
+            .and_then(endpoint_owner_watermark);
+        let owner_advanced_after_dispatch = owner_boundary_now.is_some_and(|owner_ms| {
+            dispatch.audio_boundary_ms.map_or_else(
+                || dispatch.owner_boundary_ms.is_none_or(|prior| owner_ms > prior),
+                |audio_ms| owner_ms > audio_ms,
+            )
+        }) || self
+            .tentative_owner_continuation_at
+            .is_some_and(|at| at > dispatch.dispatched_at)
+            || self.tentative_owner_continuation_audio_ms.is_some_and(|audio_ms| {
+                dispatch
+                    .audio_boundary_ms
+                    .is_some_and(|boundary| audio_ms > boundary)
+            });
+        self.note_body_delivery_at(
+            dispatch.dispatched_at,
+            dispatch.audio_boundary_ms,
+            owner_advanced_after_dispatch,
+            dispatch.personal_continuation_boundary_ms,
+            receipt.is_some(),
+        );
+        self.last_body_submission_sequence = Some(sequence);
+        // A successful newer body makes every older receipt irrelevant to the
+        // current continuation clock. If the newer dispatch fails, this clear
+        // is never reached and the prior receipt keeps its ownership.
+        self.pending_body_receipts.clear();
+        if let Some(receipt) = receipt {
+            let ticket = receipt.ticket();
+            self.pending_body_receipts.push(PendingBodyReceipt {
+                sequence,
+                ticket,
+                receipt,
+                personal_continuation_boundary_ms: dispatch.personal_continuation_boundary_ms,
+            });
+        }
+    }
+
+    fn poll_body_receipts(&mut self) {
+        use crate::insertion::{PasteReceiptPoll, PasteReceiptOutcome};
+        let mut index = 0;
+        while index < self.pending_body_receipts.len() {
+            let poll = self.pending_body_receipts[index].receipt.try_take();
+            match poll {
+                PasteReceiptPoll::Pending => index += 1,
+                PasteReceiptPoll::Ready(completion) => {
+                    let pending = self.pending_body_receipts.remove(index);
+                    if completion.ticket != pending.ticket {
+                        continue;
+                    }
+                    // Only a positive editor observation moves the public
+                    // continuation clock. A delayed receipt cannot erase PCM
+                    // or VAD evidence recorded after dispatch.
+                    if self.last_body_submission_sequence == Some(pending.sequence)
+                        && matches!(completion.outcome, PasteReceiptOutcome::Confirmed(_))
+                    {
+                        if let Some(dispatched_at) = self.last_body_delivery_at {
+                            self.last_body_delivery_at =
+                                Some(dispatched_at.max(completion.observed_at));
+                        }
+                        if let Some(endpoint) = self.personal_presence_endpoint.as_mut() {
+                            endpoint.confirm_delivery(
+                                completion.observed_at,
+                                pending.personal_continuation_boundary_ms,
+                            );
+                        }
+                    }
+                    log::info!(
+                        "[asr] endpoint body receipt sequence={} ticket={:?} confirmed={} outcome={:?} continuation_ms={}",
+                        pending.sequence.0,
+                        pending.ticket,
+                        matches!(completion.outcome, PasteReceiptOutcome::Confirmed(_)),
+                        completion.outcome,
+                        EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+                    );
+                }
+                PasteReceiptPoll::Consumed => {
+                    self.pending_body_receipts.remove(index);
+                }
+            }
+        }
+    }
+
+    fn refresh_pending_body_delivery(
+        &mut self,
+        candidate: Option<crate::asr::volcengine::PendingBodyDelivery>,
+        _now: Instant,
+    ) {
+        if self.automatic_no_body_armed {
+            // A pre-wake/command-only preview has not entered the product's
+            // body lifecycle and cannot create a delivery obligation.
+            self.pending_owner_delivery = None;
+            return;
+        }
+        let Some(crate::asr::volcengine::PendingBodyDelivery { key, recognition_pending, .. }) = candidate else {
+            self.pending_owner_delivery = None;
+            return;
+        };
+        if embedded_audio_partial_preview_stability_key(&key).is_empty() {
+            return;
+        }
+        if let Some(endpoint) = self.personal_presence_endpoint.as_ref() {
+            self.last_pending_personal_continuation_end_ms = self.last_pending_personal_continuation_end_ms
+                .max(endpoint.continuation_activity_end_ms());
+        }
+        self.pending_owner_delivery = Some(PendingOwnerDeliveryHold { key, recognition_pending });
+    }
+
+    fn pending_owner_delivery_active(&self, _now: Instant) -> bool {
+        // Recognition, lexical maturity and editor submission are separate
+        // responsibilities. A deadline cannot resolve any approved body.
+        // Consumption/retraction clears this obligation; dispatch and matching
+        // editor receipts then own the existing three-second continuation.
+        self.pending_owner_delivery.is_some()
+    }
+
+    #[cfg(test)]
+    fn refresh_pending_owner_delivery(&mut self, candidate: Option<(String, Instant)>, now: Instant) {
+        self.refresh_pending_body_delivery(candidate.map(|(key, updated_at)|
+            crate::asr::volcengine::PendingBodyDelivery { key, updated_at, recognition_pending: false }), now);
+    }
+
     fn note_text_delivery(&mut self, now: Instant, text: &str) {
         // Punctuation-only revisions do not represent the owner speaking or
         // new body delivery. They cannot postpone the three-second deadline.
@@ -361,35 +699,66 @@ impl SettledTargetEndpointClock {
     }
 
     fn note_body_delivery(&mut self, now: Instant) {
-        if !self.automatic_wake_session || self.automatic_no_body_armed {
-            return;
-        }
-        self.last_body_delivery_at = Some(now);
-        self.last_body_delivery_audio_ms = self
+        // A synchronous/TSF commit is a new body generation without a paste
+        // receipt. Older clipboard tickets no longer own its continuation
+        // clock. Punctuation never reaches this method through text delivery.
+        self.pending_body_receipts.clear();
+        self.last_body_submission_sequence = None;
+        let audio_boundary_ms = self
             .latest_update
             .as_ref()
             .and_then(|update| update.audio_duration_ms);
-        self.tentative_owner_continuation_at = None;
-        self.tentative_owner_continuation_audio_ms = None;
-        self.tentative_owner_vad_epoch = None;
-        self.tentative_owner_quiet_audio_ms = None;
-        if self.latest_local_vad_evidence.is_some_and(|evidence| {
-            matches!(
-                evidence.state,
-                crate::asr::volcengine::LocalSpeechActivityState::PendingSpeech
-                    | crate::asr::volcengine::LocalSpeechActivityState::Speech
-            )
-        }) && self.latest_update.as_ref().is_some_and(|update| {
-            !update_has_recent_strong_non_target(update)
-        }) {
-            self.tentative_owner_vad_epoch =
-                self.latest_local_vad_evidence.map(|evidence| evidence.activity_epoch);
+        let personal_continuation_boundary_ms = self.personal_presence_endpoint.as_ref()
+            .and_then(crate::personal_vad::PresenceEndpoint::continuation_activity_end_ms);
+        self.note_body_delivery_at(now, audio_boundary_ms, false, personal_continuation_boundary_ms, false);
+    }
+
+    fn note_body_delivery_at(
+        &mut self,
+        now: Instant,
+        audio_boundary_ms: Option<u64>,
+        preserve_post_dispatch_owner: bool,
+        personal_continuation_boundary_ms: Option<u64>,
+        personal_receipt_pending: bool,
+    ) {
+        if !self.automatic_wake_session || self.automatic_no_body_armed {
+            return;
+        }
+        if let Some(endpoint) = self.personal_presence_endpoint.as_mut() {
+            endpoint.note_submission(now, personal_continuation_boundary_ms, personal_receipt_pending);
+            // A delivered possible-owner range cannot buy another hold for
+            // a later background key. Newer captured activity stays separate.
+            self.last_pending_personal_continuation_end_ms = self.last_pending_personal_continuation_end_ms
+                .max(personal_continuation_boundary_ms);
+        }
+        self.pending_owner_delivery = None;
+        self.last_body_delivery_at = Some(now);
+        self.last_body_delivery_audio_ms = audio_boundary_ms;
+        if !preserve_post_dispatch_owner {
+            self.tentative_owner_continuation_at = None;
+            self.tentative_owner_continuation_audio_ms = None;
+            self.tentative_owner_vad_epoch = None;
+            self.tentative_owner_quiet_audio_ms = None;
+            if self.latest_local_vad_evidence.is_some_and(|evidence| {
+                matches!(
+                    evidence.state,
+                    crate::asr::volcengine::LocalSpeechActivityState::PendingSpeech
+                        | crate::asr::volcengine::LocalSpeechActivityState::Speech
+                )
+            }) && self.latest_update.as_ref().is_some_and(|update| {
+                !update_has_recent_strong_non_target(update)
+            }) {
+                self.tentative_owner_vad_epoch =
+                    self.latest_local_vad_evidence.map(|evidence| evidence.activity_epoch);
+            }
         }
         self.manual_terminal_bridge_until = None;
         self.manual_terminal_bridge_rearm_pending = false;
         // A committed chunk is the start of the public continuation window.
         // A later provider revision of that same audio is not a new utterance.
-        self.reset_continuation_tracking();
+        if !preserve_post_dispatch_owner {
+            self.reset_continuation_tracking();
+        }
         log::info!(
             "[asr] endpoint body_delivery window_ms={} audio_ms={:?} generation={}",
             EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
@@ -530,6 +899,11 @@ impl SettledTargetEndpointClock {
         update: &crate::asr::volcengine::TargetSpeakerUpdate,
         body_started: bool,
     ) -> bool {
+        if self.personal_presence_endpoint.is_some() {
+            // Personal-VAD positives renew this lease at the observation site.
+            // Generic speech and provider words carry no owner activity here.
+            return false;
+        }
         let unresolved_owner_tail = has_unresolved_recent_owner_speech(
             update, EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
         );
@@ -572,6 +946,9 @@ impl SettledTargetEndpointClock {
         last_visible_growth_at: Option<Instant>,
         now: Instant,
     ) -> bool {
+        if self.personal_presence_endpoint.is_some() {
+            return false;
+        }
         if self.continuation_cutoff_reached {
             return false;
         }
@@ -621,6 +998,10 @@ impl SettledTargetEndpointClock {
         evidence: crate::asr::volcengine::LocalSpeechEvidence,
         observed_at: Instant,
     ) {
+        match self.local_vad_stop_observation.as_mut() {
+            Some(observation) => observation.observe(evidence, observed_at),
+            None => self.local_vad_stop_observation = Some(LocalVadStopObservation::new(evidence, observed_at)),
+        }
         use crate::asr::volcengine::LocalSpeechActivityState;
         if matches!(evidence.state, LocalSpeechActivityState::PendingSpeech | LocalSpeechActivityState::Speech)
             && self.latest_local_vad_evidence.is_none_or(|previous| {
@@ -1070,6 +1451,12 @@ impl SettledTargetEndpointClock {
         now: Instant,
         local_vad_revision: Option<u64>,
     ) -> Option<u64> {
+        if self.personal_presence_endpoint.is_some() {
+            self.latest_update = Some(update.clone());
+            self.latest_update_at = Some(now);
+            if body_started && self.automatic_no_body_armed { self.leave_automatic_no_body_mode(); }
+            return None;
+        }
         if local_vad_revision.is_some() {
             self.manual_vad_guard = true;
         }
@@ -1486,6 +1873,11 @@ impl SettledTargetEndpointClock {
         if !body_started {
             return None;
         }
+        if self.personal_presence_endpoint.is_some() {
+            // A preview may contain only background words. The independent
+            // presence clock already owns endpointing, including first body.
+            return None;
+        }
         self.leave_automatic_no_body_mode();
         let update = self.latest_update.clone()?;
         // The delivered body is the user's clock. A delayed preview revision
@@ -1629,8 +2021,27 @@ impl SettledTargetEndpointClock {
     }
 
     fn is_due(&mut self, now: Instant, timeout_ms: u64) -> bool {
+        self.poll_body_receipts();
+        if self.pending_body_dispatch.is_some() || !self.pending_body_receipts.is_empty() {
+            self.note_due_hold_diagnostic(self.generation, "body_receipt_pending");
+            return false;
+        }
+        if self.pending_owner_delivery_active(now) {
+            let reason = if self.pending_owner_delivery.as_ref().is_some_and(|pending| pending.recognition_pending) {
+                "body_recognition_pending"
+            } else { "body_delivery_pending" };
+            self.note_due_hold_diagnostic(self.generation, reason);
+            return false;
+        }
         if self.stop_proposed {
             return false;
+        }
+        if self.personal_presence_endpoint.is_some() {
+            let captured_ms = self.latest_update.as_ref()
+                .and_then(|update| update.audio_duration_ms).unwrap_or_default();
+            let due = self.personal_presence_stop_due(captured_ms, now, timeout_ms);
+            if !due { self.note_due_hold_diagnostic(self.generation, "personal_owner_activity_pending"); }
+            return due;
         }
         let Some(armed_at) = self.armed_at else {
             if self.paused_armed_at.is_some() {
@@ -1850,8 +2261,12 @@ impl SettledTargetEndpointClock {
         // No body exists for a classifier to protect. An in-flight analysis
         // belongs to the already accepted wake phrase and must not create a
         // second post-window wait.
-        let owner_analysis_pending =
-            owner_analysis_pending && policy.automatic_no_body_started_at.is_none();
+        let owner_analysis_pending = owner_analysis_pending
+            && policy.automatic_no_body_started_at.is_none()
+            // A sustained, current Other decision resolves this turn. A
+            // background source chunk may still be running for diagnostics,
+            // but it cannot keep a confirmed foreign tail alive.
+            && !update_has_recent_strong_non_target(decision_snapshot);
         self.latest_due_update_after_owner_analysis(
             now,
             policy.wall_clock_timeout_ms,
@@ -2030,8 +2445,13 @@ fn start_settled_target_endpoint_watchdog(
             } else {
                 raw_decision_snapshot
             };
-            let (update, hold_diagnostic) = {
+            let pending_owner_delivery =
+                pause_early_pending_body_delivery(&inner, session_id, &asr);
+            let (update, hold_diagnostic, personal_owner_advanced) = {
                 let mut clock = endpoint_clock.lock();
+                let personal_observation = asr.personal_vad_snapshot();
+                let personal_owner_advanced = asr.personal_vad_started()
+                    && clock.note_personal_presence(personal_observation, Instant::now());
                 clock.note_local_vad_evidence_at(local_vad_evidence, Instant::now());
                 // If the provider never opened, keep feeding the reducer from
                 // the local owner clock. This preserves the same single
@@ -2063,7 +2483,8 @@ fn start_settled_target_endpoint_watchdog(
                     );
                 }
                 let now = Instant::now();
-                let owner_analysis_pending = asr.local_speaker_analysis_pending();
+                let owner_analysis_pending = asr.owner_analysis_pending_for_endpoint();
+                clock.refresh_pending_body_delivery(pending_owner_delivery, now);
                 let update = clock.reduce_session_policy_with_local_vad_revision(
                     now,
                     endpoint_policy,
@@ -2072,8 +2493,9 @@ fn start_settled_target_endpoint_watchdog(
                     local_vad_revision,
                 );
                 let hold_diagnostic = clock.take_due_hold_diagnostic();
-                (update, hold_diagnostic)
+                (update, hold_diagnostic, personal_owner_advanced)
             };
+            if personal_owner_advanced { note_embedded_asr_speech_activity(&inner, session_id); }
             if let Some((generation, reason)) = hold_diagnostic {
                 let lifecycle = endpoint_clock.lock().lifecycle();
                 log::info!(
@@ -2159,7 +2581,7 @@ fn start_settled_target_endpoint_watchdog(
                     provider_audio_ms,
                     local_speech_end_ms,
                     qualified_owner_end_ms,
-                    asr.local_speaker_analysis_pending(),
+                    asr.owner_analysis_pending_for_endpoint(),
                 );
             }
             if update.is_none() && endpoint_policy.body_started {
@@ -2205,12 +2627,24 @@ fn start_settled_target_endpoint_watchdog(
                 if endpoint_policy.body_started {
                     // 跟手②组字流式:先喂增量(update),再评估停顿落定(commit),
                     // 同一拍内顺序保证 commit 前组字内容最新。
-                    streaming_composition_update_tick(&inner, session_id, &asr).await;
-                    pause_early_delivery_tick(&inner, session_id, &asr, &endpoint_clock).await;
+                    update_live_body_delivery(&inner, session_id, &asr, &endpoint_clock).await;
                 }
             }
         }
     });
+}
+
+// This boundary owns editor delivery only. Receipt failure cannot grant
+// recording-stop permission; the activity/confirmed-body endpoint owns STOP.
+async fn update_live_body_delivery(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    asr: &Arc<crate::asr::volcengine::VolcengineStreamingASR>,
+    endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
+) {
+    streaming_composition_update_tick(inner, session_id, asr).await;
+    native_composition_update_tick(inner, session_id, asr).await;
+    pause_early_delivery_tick(inner, session_id, asr, endpoint_clock).await;
 }
 
 fn arm_settled_target_endpoint_for_visible_body(
@@ -2230,5 +2664,556 @@ fn arm_settled_target_endpoint_for_visible_body(
         let mut clock = endpoint_clock.lock();
         clock.note_visible_body_boundary(preview_ends_terminal, preview_chars, now);
         clock.arm_latest_for_visible_body(now, body_started);
+    }
+}
+
+#[cfg(test)]
+mod endpoint_clock_submission_tests {
+    use super::*;
+    use crate::insertion::{
+        pending_receipt_handle_for_test, PasteReceiptCompletion, PasteReceiptOutcome,
+        PasteReceiptProof,
+    };
+
+    #[test]
+    #[ignore = "requires selected saved model/native-response evidence; no capture, editor or cloud"]
+    fn recorded_unfinished_owner_body_cannot_authorize_physical_stop() {
+        use crate::asr::volcengine::PendingBodyDelivery;
+        use crate::asr::volcengine_speaker_ledger::LocalSpeakerTimeline;
+        use crate::personal_vad::{fuse_presence, latest_target_source_end, publish_scored_window,
+            PresenceObservation, PresenceState};
+        use serde_json::{json, Value};
+        let root = std::path::PathBuf::from(std::env::var_os("LISTENER_PENDING_BODY_REPLAY").unwrap());
+        let read = |name| serde_json::from_slice::<Value>(&std::fs::read(root.join(name)).unwrap()).unwrap();
+        let protocol = read("protocol.json");
+        let models = read("model-windows.json");
+        let bodies = read("native-pending-body.json");
+        let state = |value: &Value| match value.as_str().unwrap() {
+            "Owner" => PresenceState::Owner, "ConfirmedOther" => PresenceState::ConfirmedOther,
+            "Unknown" => PresenceState::Unknown, value => panic!("unknown state {value}"),
+        };
+        let mut output = Vec::new();
+        for case in protocol["cases"].as_array().unwrap().iter().filter(|case| case["ownerStillSpeaking"] == true) {
+            let archive: Value = serde_json::from_slice(&std::fs::read(case["archive"].as_str().unwrap()).unwrap()).unwrap();
+            let native: Vec<_> = archive["trace"]["entries"].as_array().unwrap().iter()
+                .filter(|entry| entry["stage"] == "normalized_result").collect();
+            let pending = &bodies["cases"].as_array().unwrap().iter().find(|row|row["id"] == case["id"]).unwrap()["frames"];
+            let windows = &models["cases"].as_array().unwrap().iter().find(|row|row["id"] == case["id"]).unwrap()["windows"];
+            let base = Instant::now();
+            let mut clock = automatic_body_clock();
+            let mut history = LocalSpeakerTimeline::default();
+            let mut owner_end = 0;
+            let mut native_index = 0;
+            let mut points = Vec::new();
+            for window in windows.as_array().unwrap() {
+                let chunks = window["chunks"].as_array().unwrap();
+                let scores: Vec<f32> = chunks.iter().map(|chunk|chunk["probability"].as_f64().unwrap() as f32).collect();
+                let count = window["newChunks"].as_u64().unwrap() as usize;
+                let first = chunks[chunks.len()-count]["endMs"].as_u64().unwrap()*16;
+                let identity = state(window.get("endpointIdentity").unwrap_or(&window["identity"]));
+                publish_scored_window(&mut history, &scores, first, count, Some(identity)).unwrap();
+                owner_end = owner_end.max(latest_target_source_end(&scores, first, count).unwrap_or(0)/16);
+                for chunk in &chunks[chunks.len()-count..] {
+                    if fuse_presence(chunk["probability"].as_f64().unwrap() as f32, Some(identity)) == PresenceState::Owner {
+                        owner_end = owner_end.max(chunk["endMs"].as_u64().unwrap());
+                    }
+                }
+                let audio_ms = window["endMs"].as_u64().unwrap();
+                let now = base + Duration::from_millis(audio_ms);
+                clock.latest_update = Some(owner_update(audio_ms, owner_end));
+                clock.note_personal_presence(Some(PresenceObservation {
+                    analyzed_end_ms: audio_ms, last_positive_end_ms: Some(owner_end),
+                    last_unresolved_end_ms: history.unresolved_activity_end_ms_after(owner_end),
+                    source_history_complete: true, state: fuse_presence(*scores.last().unwrap(), Some(identity)), observed_at:now,
+                }), now);
+                while native_index < native.len() {
+                    let entry = native[native_index];
+                    let projection = &entry["speaker_projection"];
+                    let source_frontier = ["local_identity_newest_first", "local_presence_newest_first"].iter()
+                        .filter_map(|key|projection[*key].as_array()).flatten().filter_map(|span|span[1].as_u64()).max().unwrap_or(0);
+                    let word_end = entry["provider_result"]["utterances"].as_array().into_iter().flatten()
+                        .filter_map(|row|row["words"].as_array()).flatten().filter_map(|word|word["end_time"].as_u64()).max().unwrap_or(0);
+                    if source_frontier.max(word_end) > audio_ms { break; }
+                    let body = &pending.as_array().unwrap()[native_index]["pending"];
+                    clock.refresh_pending_body_delivery(body["key"].as_str().map(|key| PendingBodyDelivery {
+                        key:key.into(), updated_at:base, recognition_pending:body["recognitionPending"].as_bool().unwrap(),
+                    }), now);
+                    native_index += 1;
+                }
+                let due = clock.is_due(now, 3_000);
+                assert!(!due, "saved unfinished owner capture allowed STOP at {audio_ms}ms");
+                points.push(json!({"audioMs":audio_ms,"ownerEndMs":owner_end,"pendingBody":clock.pending_owner_delivery.is_some(),"stopDue":due}));
+            }
+            output.push(json!({"id":case["id"],"points":points,"nativeFramesUsed":native_index}));
+        }
+        assert!(!output.is_empty());
+        std::fs::write(root.join("production-stop-clock-replay.json"),serde_json::to_vec_pretty(&json!({
+            "cases":output,"cloudCalls":0,"actualEditor":false,"actualHardwareStop":false,
+            "schedule":"model source clock and recorded native source/word frontiers; real receipts covered separately",
+        })).unwrap()).unwrap();
+    }
+
+    fn automatic_body_clock() -> SettledTargetEndpointClock {
+        SettledTargetEndpointClock {
+            automatic_wake_session: true,
+            ..Default::default()
+        }
+    }
+
+    fn owner_update(audio_ms: u64, owner_ms: u64) -> crate::asr::volcengine::TargetSpeakerUpdate {
+        crate::asr::volcengine::TargetSpeakerUpdate {
+            speaker_id: Some("owner".to_string()),
+            target_speech_end_ms: Some(owner_ms),
+            provider_audio_duration_ms: Some(audio_ms),
+            audio_duration_ms: Some(audio_ms),
+            local_speech_end_ms: Some(owner_ms),
+            qualified_owner_speech_end_ms: Some(owner_ms),
+            qualified_owner_activity_advanced: true,
+            local_speaker_classification_kind: Some(
+                crate::asr::volcengine::LocalSpeakerClassificationKind::Target,
+            ),
+            local_speaker_signal_quality_sufficient: Some(true),
+            local_speaker_observation_end_ms: Some(owner_ms),
+            local_tentative_owner_speech_end_ms: None,
+            local_target_speech_end_ms: Some(owner_ms),
+            local_non_target_speech_end_ms: None,
+            local_speaker_tracking_enabled: true,
+            stable_attributed_speech_end_ms: Some(owner_ms),
+            target_activity_advanced: true,
+            pending_unattributed_speech: false,
+            pending_activity_advanced: false,
+            speaker_info_present: true,
+        }
+    }
+
+    #[test]
+    fn only_the_matching_dispatch_can_settle_its_in_flight_hold() {
+        let started = Instant::now();
+        let mut clock = automatic_body_clock();
+        let first = clock
+            .begin_text_submission(started, "第一段正文")
+            .expect("first dispatch");
+        let second = clock
+            .begin_text_submission(started + Duration::from_millis(10), "第二段正文")
+            .expect("second dispatch");
+
+        clock.settle_text_submission(Some(first), true, None);
+        assert_eq!(
+            clock.pending_body_dispatch.as_ref().map(|dispatch| dispatch.sequence),
+            Some(second)
+        );
+        assert_eq!(clock.last_body_delivery_at, None);
+
+        clock.settle_text_submission(Some(second), false, None);
+        assert!(clock.pending_body_dispatch.is_none());
+        assert_eq!(clock.last_body_delivery_at, None);
+    }
+
+    #[test]
+    fn confirmed_receipt_moves_only_the_wall_clock_and_negative_outcomes_do_not() {
+        let started = Instant::now();
+        let mut clock = automatic_body_clock();
+        let sequence = clock
+            .begin_text_submission(started, "已经提交的正文")
+            .expect("dispatch");
+        let (handle, completion) = pending_receipt_handle_for_test(701);
+        let ticket = handle.ticket();
+        clock.settle_text_submission(Some(sequence), true, Some(handle));
+
+        let continued_at = started + Duration::from_millis(15);
+        clock.tentative_owner_continuation_at = Some(continued_at);
+        clock.tentative_owner_continuation_audio_ms = Some(4_200);
+        let observed_at = started + Duration::from_millis(23);
+        completion
+            .send(PasteReceiptCompletion {
+                ticket,
+                observed_at,
+                outcome: PasteReceiptOutcome::Confirmed(PasteReceiptProof::ExactEdit),
+            })
+            .expect("receipt receiver");
+        clock.poll_body_receipts();
+        assert_eq!(clock.last_body_delivery_at, Some(observed_at));
+        assert_eq!(clock.tentative_owner_continuation_at, Some(continued_at));
+        assert_eq!(clock.tentative_owner_continuation_audio_ms, Some(4_200));
+
+        let second_dispatch = started + Duration::from_millis(100);
+        let sequence = clock
+            .begin_text_submission(second_dispatch, "下一段正文")
+            .expect("second dispatch");
+        let (handle, completion) = pending_receipt_handle_for_test(702);
+        let ticket = handle.ticket();
+        clock.settle_text_submission(Some(sequence), true, Some(handle));
+        completion
+            .send(PasteReceiptCompletion {
+                ticket,
+                observed_at: second_dispatch + Duration::from_secs(2),
+                outcome: PasteReceiptOutcome::Unsupported,
+            })
+            .expect("receipt receiver");
+        clock.poll_body_receipts();
+        assert_eq!(clock.last_body_delivery_at, Some(second_dispatch));
+        assert!(clock.pending_body_receipts.is_empty());
+    }
+
+    #[test]
+    fn settle_uses_the_begin_audio_boundary_and_preserves_later_owner_evidence() {
+        let started = Instant::now();
+        let mut clock = automatic_body_clock();
+        clock.latest_update = Some(owner_update(3_000, 2_900));
+        let sequence = clock
+            .begin_text_submission(started, "先提交这一段")
+            .expect("dispatch");
+
+        clock.latest_update = Some(owner_update(3_600, 3_500));
+        clock.tentative_owner_continuation_at = Some(started + Duration::from_millis(20));
+        clock.tentative_owner_continuation_audio_ms = Some(3_500);
+        clock.tentative_owner_vad_epoch = Some(9);
+        clock.settle_text_submission(Some(sequence), true, None);
+
+        assert_eq!(clock.last_body_delivery_audio_ms, Some(3_000));
+        assert_eq!(
+            clock.tentative_owner_continuation_at,
+            Some(started + Duration::from_millis(20))
+        );
+        assert_eq!(clock.tentative_owner_continuation_audio_ms, Some(3_500));
+        assert_eq!(clock.tentative_owner_vad_epoch, Some(9));
+    }
+
+    #[test]
+    fn an_old_confirmed_ticket_cannot_move_a_newer_body_clock() {
+        let started = Instant::now();
+        let mut clock = automatic_body_clock();
+        let first = clock
+            .begin_text_submission(started, "第一段正文")
+            .expect("first dispatch");
+        let (old_handle, old_completion) = pending_receipt_handle_for_test(711);
+        let old_ticket = old_handle.ticket();
+        clock.settle_text_submission(Some(first), true, Some(old_handle));
+
+        let second_at = started + Duration::from_millis(100);
+        let second = clock
+            .begin_text_submission(second_at, "第二段正文")
+            .expect("second dispatch");
+        clock.settle_text_submission(Some(second), true, None);
+        assert!(old_completion
+            .send(PasteReceiptCompletion {
+                ticket: old_ticket,
+                observed_at: started + Duration::from_secs(10),
+                outcome: PasteReceiptOutcome::Confirmed(PasteReceiptProof::ExactEdit),
+            })
+            .is_err());
+        clock.poll_body_receipts();
+
+        assert_eq!(clock.last_body_submission_sequence, Some(second));
+        assert_eq!(clock.last_body_delivery_at, Some(second_at));
+        assert!(clock.pending_body_receipts.is_empty());
+    }
+
+    #[test]
+    fn synchronous_body_commit_invalidates_an_older_paste_ticket() {
+        let started = Instant::now();
+        let mut clock = automatic_body_clock();
+        let first = clock
+            .begin_text_submission(started, "剪贴板正文")
+            .expect("paste dispatch");
+        let (old_handle, old_completion) = pending_receipt_handle_for_test(712);
+        let old_ticket = old_handle.ticket();
+        clock.settle_text_submission(Some(first), true, Some(old_handle));
+
+        let synchronous_at = started + Duration::from_millis(80);
+        clock.note_text_delivery(synchronous_at, "后来的TSF正文");
+        assert!(old_completion
+            .send(PasteReceiptCompletion {
+                ticket: old_ticket,
+                observed_at: started + Duration::from_secs(10),
+                outcome: PasteReceiptOutcome::Confirmed(PasteReceiptProof::ExactEdit),
+            })
+            .is_err());
+        assert_eq!(clock.last_body_submission_sequence, None);
+        assert_eq!(clock.last_body_delivery_at, Some(synchronous_at));
+        assert!(clock.pending_body_receipts.is_empty());
+    }
+
+    #[test]
+    fn approved_body_survives_age_and_punctuation_until_consumed_or_retracted() {
+        let started = Instant::now();
+        let mut clock = automatic_body_clock();
+        clock.refresh_pending_owner_delivery(
+            Some(("等待提交正文".to_string(), started)),
+            started,
+        );
+        let first_key = clock
+            .pending_owner_delivery
+            .as_ref()
+            .expect("hold")
+            .key.clone();
+
+        clock.refresh_pending_owner_delivery(
+            Some(("等待提交正文".to_string(), started + Duration::from_secs(1))),
+            started + Duration::from_secs(1),
+        );
+        clock.refresh_pending_owner_delivery(
+            Some(("。".to_string(), started + Duration::from_secs(1))),
+            started + Duration::from_secs(1),
+        );
+        assert_eq!(
+            clock.pending_owner_delivery.as_ref().map(|hold| hold.key.as_str()),
+            Some(first_key.as_str())
+        );
+        let after_expiry = started + Duration::from_secs(30);
+        clock.refresh_pending_owner_delivery(
+            Some(("等待提交正文".to_string(), after_expiry)), after_expiry,
+        );
+        assert!(clock.pending_owner_delivery_active(after_expiry));
+
+        let next = started + Duration::from_secs(2);
+        clock.refresh_pending_owner_delivery(Some(("新的正文".to_string(), next)), next);
+        assert!(clock.pending_owner_delivery_active(next));
+        clock.refresh_pending_owner_delivery(None, next + Duration::from_millis(1));
+        assert!(clock.pending_owner_delivery.is_none());
+    }
+
+    #[test]
+    fn unconfirmed_body_cannot_expire_into_permission_to_stop() {
+        use crate::asr::volcengine::PendingBodyDelivery;
+        use crate::personal_vad::{PresenceObservation, PresenceState};
+        let started = Instant::now();
+        let mut clock = automatic_body_clock();
+        for (offset, key) in [(0, "Still speaking"), (4_000, "Still speaking, with more words"), (7_000, "Still speaking, with more words.")] {
+            let now = started + Duration::from_millis(offset);
+            let audio_ms = 10_000 + offset;
+            clock.latest_update = Some(owner_update(audio_ms, 4_000));
+            clock.note_personal_presence(Some(PresenceObservation {
+                analyzed_end_ms: audio_ms, last_positive_end_ms: Some(4_000),
+                last_unresolved_end_ms: None, source_history_complete: true,
+                state: PresenceState::ConfirmedOther, observed_at: now,
+            }), now);
+            clock.refresh_pending_body_delivery(Some(PendingBodyDelivery {
+                key: key.into(), updated_at: started - Duration::from_secs(2), recognition_pending: true,
+            }), now);
+            assert!(clock.pending_owner_delivery_active(now));
+            assert!(!clock.personal_presence_stop_due(audio_ms, now, 3_000),
+                "model mismatch, stale text age and an expired settling deadline cannot complete native recognition");
+            assert!(!clock.is_due(now, 3_000));
+        }
+        let resolved = started + Duration::from_secs(8);
+        clock.refresh_pending_body_delivery(None, resolved);
+        let sequence = clock.begin_text_submission(resolved, "The completed body.").unwrap();
+        let (handle, completion) = pending_receipt_handle_for_test(746);
+        let ticket = handle.ticket();
+        clock.settle_text_submission(Some(sequence), true, Some(handle));
+        let received = resolved + Duration::from_millis(500);
+        completion.send(PasteReceiptCompletion { ticket, observed_at: received,
+            outcome: PasteReceiptOutcome::Confirmed(PasteReceiptProof::ExactEdit),
+        }).unwrap();
+        clock.poll_body_receipts();
+        for offset in [2_999, 3_000] {
+            let now = received + Duration::from_millis(offset);
+            let audio_ms = 18_500 + offset;
+            clock.latest_update = Some(owner_update(audio_ms, 4_000));
+            clock.note_personal_presence(Some(PresenceObservation {
+                analyzed_end_ms: audio_ms, last_positive_end_ms: Some(4_000),
+                last_unresolved_end_ms: None, source_history_complete: true,
+                state: PresenceState::ConfirmedOther, observed_at: now,
+            }), now);
+            assert_eq!(clock.personal_presence_stop_due(audio_ms, now, 3_000), offset == 3_000);
+        }
+    }
+
+    #[test]
+    fn recognition_resolution_and_retraction_release_only_their_own_obligation() {
+        use crate::asr::volcengine::PendingBodyDelivery;
+        let started = Instant::now();
+        let mut clock = automatic_body_clock();
+        clock.refresh_pending_body_delivery(Some(PendingBodyDelivery {
+            key: "body".into(), updated_at: started - Duration::from_secs(3), recognition_pending: true,
+        }), started);
+        assert!(clock.pending_owner_delivery_active(started));
+        clock.refresh_pending_body_delivery(Some(PendingBodyDelivery {
+            key: "body".into(), updated_at: started, recognition_pending: false,
+        }), started);
+        assert!(clock.pending_owner_delivery_active(started), "native finality alone cannot replace actual editor submission");
+        clock.refresh_pending_body_delivery(Some(PendingBodyDelivery {
+            key: "corrected body".into(), updated_at: started, recognition_pending: true,
+        }), started);
+        clock.refresh_pending_body_delivery(None, started);
+        assert!(!clock.pending_owner_delivery_active(started), "consumption or authority retraction retires the pending occurrence");
+    }
+
+    #[test]
+    fn command_only_capture_cannot_inherit_a_pre_body_delivery_obligation() {
+        let started = Instant::now();
+        let mut clock = automatic_body_clock();
+        clock.automatic_no_body_armed = true;
+        clock.refresh_pending_body_delivery(Some(crate::asr::volcengine::PendingBodyDelivery {
+            key: "background before the accepted command".into(), updated_at: started, recognition_pending: true,
+        }), started);
+        assert!(!clock.pending_owner_delivery_active(started));
+        clock.automatic_no_body_armed = false;
+        clock.refresh_pending_body_delivery(Some(crate::asr::volcengine::PendingBodyDelivery {
+            key: "actual body after the accepted command".into(), updated_at: started, recognition_pending: true,
+        }), started);
+        assert!(clock.pending_owner_delivery_active(started));
+    }
+
+    #[test]
+    fn personal_receipt_starts_three_seconds_once_and_background_receipts_do_not_rearm_it() {
+        use crate::personal_vad::PresenceObservation;
+        let started = Instant::now();
+        let mut clock = automatic_body_clock();
+        clock.latest_update = Some(owner_update(4_000, 4_000));
+        clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+            analyzed_end_ms: 4_000, last_positive_end_ms: Some(4_000),
+            last_unresolved_end_ms: None,
+            state: crate::personal_vad::PresenceState::Owner, observed_at: started,
+        }), started);
+        let sequence = clock.begin_text_submission(started, "The owner's actual body.").unwrap();
+        let (handle, completion) = pending_receipt_handle_for_test(741);
+        let ticket = handle.ticket();
+        clock.settle_text_submission(Some(sequence), true, Some(handle));
+        let polled_at = started + Duration::from_millis(3_200);
+        clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+            analyzed_end_ms: 7_200, last_positive_end_ms: Some(4_000),
+            last_unresolved_end_ms: None,
+            state: crate::personal_vad::PresenceState::ConfirmedOther, observed_at: polled_at,
+        }), polled_at);
+        assert!(!clock.personal_presence_stop_due(7_200, polled_at, 3_000),
+            "the physical STOP must wait for the actual editor receipt");
+        let received_at = started + Duration::from_millis(2_500);
+        completion.send(PasteReceiptCompletion {
+            ticket, observed_at: received_at,
+            outcome: PasteReceiptOutcome::Confirmed(PasteReceiptProof::ExactEdit),
+        }).unwrap();
+        clock.poll_body_receipts();
+        assert!(!clock.personal_presence_stop_due(7_200, polled_at, 3_000),
+            "dispatch time cannot start the owner's three-second receipt window");
+        for offset in [4_000, 5_000] {
+            let now = started + Duration::from_millis(offset);
+            clock.latest_update = Some(owner_update(4_000 + offset, 4_000));
+            clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+                analyzed_end_ms: 4_000 + offset, last_positive_end_ms: Some(4_000),
+                last_unresolved_end_ms: None,
+                state: crate::personal_vad::PresenceState::ConfirmedOther, observed_at: now,
+            }), now);
+            let sequence = clock.begin_text_submission(now, "The phone's continuing words.").unwrap();
+            let (handle, completion) = pending_receipt_handle_for_test(741 + offset);
+            let ticket = handle.ticket();
+            clock.settle_text_submission(Some(sequence), true, Some(handle));
+            completion.send(PasteReceiptCompletion {
+                ticket, observed_at: now,
+                outcome: PasteReceiptOutcome::Confirmed(PasteReceiptProof::ExactEdit),
+            }).unwrap();
+            clock.poll_body_receipts();
+            assert!(!clock.personal_presence_stop_due(4_000 + offset, now, 3_000));
+        }
+        for offset in [5_499, 5_500] {
+            let now = started + Duration::from_millis(offset);
+            clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+                analyzed_end_ms: 4_000 + offset, last_positive_end_ms: Some(4_000),
+                last_unresolved_end_ms: None,
+                state: crate::personal_vad::PresenceState::ConfirmedOther, observed_at: now,
+            }), now);
+            assert_eq!(clock.personal_presence_stop_due(4_000 + offset, now, 3_000), offset == 5_500,
+                "only the owner's confirmed receipt owns the full continuation window");
+        }
+    }
+
+    #[test]
+    fn personal_receipt_preserves_uncertain_tail_without_background_rearming() {
+        use crate::personal_vad::{PresenceObservation, PresenceState};
+        let started = Instant::now();
+        let mut clock = automatic_body_clock();
+        clock.latest_update = Some(owner_update(4_000, 4_000));
+        clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+            analyzed_end_ms: 4_000, last_positive_end_ms: Some(4_000),
+            last_unresolved_end_ms: None, state: PresenceState::Owner, observed_at: started,
+        }), started);
+        clock.note_body_delivery(started);
+        let dispatched = started + Duration::from_millis(6_000);
+        clock.latest_update = Some(owner_update(10_000, 4_000));
+        clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+            analyzed_end_ms: 10_000, last_positive_end_ms: Some(4_000),
+            last_unresolved_end_ms: Some(10_000), state: PresenceState::Unknown,
+            observed_at: dispatched,
+        }), dispatched);
+        let sequence = clock.begin_text_submission(dispatched, "The remaining uncertain sentence.").unwrap();
+        let (handle, completion) = pending_receipt_handle_for_test(761);
+        let ticket = handle.ticket();
+        clock.settle_text_submission(Some(sequence), true, Some(handle));
+        assert_eq!(clock.last_pending_personal_continuation_end_ms, Some(10_000));
+        let received = dispatched + Duration::from_millis(400);
+        completion.send(PasteReceiptCompletion {
+            ticket, observed_at: received,
+            outcome: PasteReceiptOutcome::Confirmed(PasteReceiptProof::ExactEdit),
+        }).unwrap();
+        clock.poll_body_receipts();
+        let before = received + Duration::from_millis(2_900);
+        clock.latest_update = Some(owner_update(13_200, 4_000));
+        clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+            analyzed_end_ms: 13_200, last_positive_end_ms: Some(4_000),
+            last_unresolved_end_ms: Some(10_000), state: PresenceState::ConfirmedOther,
+            observed_at: before,
+        }), before);
+        // This later, already-confirmed background body has no new possible-
+        // owner source range and therefore cannot replace the matching receipt.
+        clock.note_body_delivery(before);
+        assert!(!clock.personal_presence_stop_due(13_300, before, 3_000));
+        assert!(clock.personal_presence_stop_due(13_400, received + Duration::from_millis(3_000), 3_000));
+    }
+
+    #[test]
+    fn personal_dispatch_does_not_spend_owner_activity_captured_after_it() {
+        use crate::personal_vad::PresenceObservation;
+        for state in [crate::personal_vad::PresenceState::Owner, crate::personal_vad::PresenceState::Unknown] {
+            let started = Instant::now();
+            let mut clock = automatic_body_clock();
+            clock.latest_update = Some(owner_update(4_000, 4_000));
+            clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+                analyzed_end_ms: 4_000, last_positive_end_ms: Some(4_000),
+                last_unresolved_end_ms: None,
+                state: crate::personal_vad::PresenceState::Owner, observed_at: started,
+            }), started);
+            let sequence = clock.begin_text_submission(started, "Earlier words.").unwrap();
+            let returned_at = started + Duration::from_millis(400);
+            clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+                analyzed_end_ms: 4_400,
+                last_positive_end_ms: Some(if state == crate::personal_vad::PresenceState::Owner { 4_400 } else { 4_000 }),
+                last_unresolved_end_ms: (state == crate::personal_vad::PresenceState::Unknown).then_some(4_400),
+                state, observed_at: returned_at,
+            }), returned_at);
+            clock.latest_update = Some(owner_update(4_400, 4_400));
+            let (handle, completion) = pending_receipt_handle_for_test(751);
+            let ticket = handle.ticket();
+            clock.settle_text_submission(Some(sequence), true, Some(handle));
+            assert_eq!(clock.last_pending_personal_continuation_end_ms, Some(4_000));
+            completion.send(PasteReceiptCompletion {
+                ticket, observed_at: returned_at,
+                outcome: PasteReceiptOutcome::Confirmed(PasteReceiptProof::ExactEdit),
+            }).unwrap();
+            clock.poll_body_receipts();
+            clock.refresh_pending_owner_delivery(Some(("Actual owner continuation.".into(), returned_at)), returned_at);
+            assert!(clock.pending_owner_delivery_active(returned_at),
+                "an older receipt cannot consume the new owner's delivery opportunity");
+            assert_eq!(clock.last_pending_personal_continuation_end_ms, Some(4_400));
+            clock.note_personal_presence(None, returned_at);
+            assert!(!clock.personal_presence_stop_due(8_000, returned_at + Duration::from_secs(4), 3_000),
+                "missing personal analysis never becomes completed owner absence");
+        }
+    }
+
+    #[test]
+    fn punctuation_does_not_create_a_submission_sequence() {
+        let mut clock = automatic_body_clock();
+        assert_eq!(clock.begin_text_submission(Instant::now(), "。"), None);
+        assert!(clock.pending_body_dispatch.is_none());
     }
 }

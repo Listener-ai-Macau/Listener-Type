@@ -1,6 +1,6 @@
 [package]
 name = "listener-type"
-version = "1.0.6-beta.24"
+version = "1.0.6-rc1"
 description = "Listener Type — local voice input that types where your cursor is"
 authors = ["Listener Type"]
 edition = "2021"
@@ -120,6 +120,9 @@ windows = { version = "0.58", features = [
   "Win32_System_DataExchange",
   "Win32_System_Ole",
   "Win32_System_Registry",
+  "Win32_System_ProcessStatus",
+  "Win32_System_JobObjects",
+  "Win32_System_SystemInformation",
   "Win32_System_Threading",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Accessibility",
@@ -138,7 +141,14 @@ default = ["custom-protocol", "target-speaker-extraction"]
 custom-protocol = ["tauri/custom-protocol"]
 target-speaker-extraction = []
 
+# Full debug symbols and accumulated incremental variants previously used over
+# 140 GiB locally. Keep useful line information without retaining those caches.
+[profile.dev]
+debug = 1
+incremental = false
+
 # release 编译在这个 23GB 机器上单 rustc LLVM 阶段会 OOM（STATUS_STACK_BUFFER_OVERRUN）。
 # 提高 codegen-units 把单 crate 拆成更小的 LLVM 模块，降低峰值内存，代价是极小的跨单元优化损失。
 [profile.release]
 codegen-units = 32
+incremental = false

@@ -5,10 +5,7 @@ use std::io::Write;
 
 const BLE_CANDIDATE_INGRESS_DIAGNOSTIC_CHANNEL_CAPACITY: usize = 512;
 
-fn wake_anchor_mode(
-    wake_start_seconds: Option<f32>,
-    wake_end_seconds: f32,
-) -> &'static str {
+fn wake_anchor_mode(wake_start_seconds: Option<f32>, wake_end_seconds: f32) -> &'static str {
     match wake_start_seconds {
         None => "fallback_missing_start",
         Some(start) if start.is_finite() && start >= 0.0 && start <= wake_end_seconds => {
@@ -87,9 +84,8 @@ struct BleCandidateIngressDiagnosticSink {
 
 impl BleCandidateIngressDiagnosticSink {
     fn for_capture_generation(capture_generation: u64) -> Option<Self> {
-        let directory = explicit_wake_diagnostic_directory(
-            std::env::var(WAKE_DIAGNOSTIC_DIR_ENV).ok(),
-        )?;
+        let directory =
+            explicit_wake_diagnostic_directory(std::env::var(WAKE_DIAGNOSTIC_DIR_ENV).ok())?;
         let timestamp_ms = ble_candidate_ingress_diagnostic_unix_ms();
         let stem = format!(
             "ble-ingress-candidate-capture-{capture_generation}-{}-{timestamp_ms}",
@@ -97,9 +93,8 @@ impl BleCandidateIngressDiagnosticSink {
         );
         let events_path = directory.join(format!("{stem}-events.jsonl"));
         let pcm_path = directory.join(format!("{stem}.pcm"));
-        let (tx, rx) = std::sync::mpsc::sync_channel(
-            BLE_CANDIDATE_INGRESS_DIAGNOSTIC_CHANNEL_CAPACITY,
-        );
+        let (tx, rx) =
+            std::sync::mpsc::sync_channel(BLE_CANDIDATE_INGRESS_DIAGNOSTIC_CHANNEL_CAPACITY);
         let dropped_count = Arc::new(AtomicUsize::new(0));
         let dropped_count_for_worker = Arc::clone(&dropped_count);
         let spawn = std::thread::Builder::new()
@@ -170,13 +165,9 @@ fn ble_candidate_ingress_diagnostic_unix_ms() -> u64 {
 }
 
 fn ble_candidate_ingress_diagnostic_sinks(
-) -> &'static std::sync::Mutex<
-    std::collections::BTreeMap<u64, BleCandidateIngressDiagnosticSink>,
-> {
+) -> &'static std::sync::Mutex<std::collections::BTreeMap<u64, BleCandidateIngressDiagnosticSink>> {
     static SINKS: OnceLock<
-        std::sync::Mutex<
-            std::collections::BTreeMap<u64, BleCandidateIngressDiagnosticSink>,
-        >,
+        std::sync::Mutex<std::collections::BTreeMap<u64, BleCandidateIngressDiagnosticSink>>,
     > = OnceLock::new();
     SINKS.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
 }
@@ -360,9 +351,7 @@ impl EmbeddedStreamingDictation {
         &mut self,
         inner: &Arc<Inner>,
         event: crate::embedded_audio::StreamingSessionEvent,
-        source_observation: Option<
-            Arc<crate::observability::EmbeddedAudioPipelineObservation>,
-        >,
+        source_observation: Option<Arc<crate::observability::EmbeddedAudioPipelineObservation>>,
         source_observation_is_explicit: bool,
         source_admission_context: Option<CaptureAdmissionSourceContext>,
     ) -> Result<bool, String> {
@@ -395,9 +384,7 @@ impl EmbeddedStreamingDictation {
                 if !recording_gate::try_admit_arc(
                     inner,
                     RecordIntent::BleSessionStart,
-                    &format!(
-                        "embedded start embedded_session_id={session_id} origin={origin:?}"
-                    ),
+                    &format!("embedded start embedded_session_id={session_id} origin={origin:?}"),
                 ) {
                     return Ok(false);
                 }
@@ -484,13 +471,14 @@ impl EmbeddedStreamingDictation {
                         );
                         return Err("声纹候选录音超过安全缓冲上限".to_string());
                     }
-                    let candidate_range = candidate
-                        .candidate_cursor
-                        .append(chunk.pcm.len())
-                        .map(|range| crate::observability::CandidateRange {
-                            start: range.start,
-                            end: range.end,
-                        });
+                    let candidate_range =
+                        candidate
+                            .candidate_cursor
+                            .append(chunk.pcm.len())
+                            .map(|range| crate::observability::CandidateRange {
+                                start: range.start,
+                                end: range.end,
+                            });
                     record_ble_candidate_ingress_append(
                         source_admission_context.as_ref(),
                         candidate.candidate_id,
@@ -557,15 +545,13 @@ impl EmbeddedStreamingDictation {
                         chunk.pcm.len(),
                         source_admission_operation_id,
                     );
-                    if candidate.kind == BufferedSpeakerCandidateKind::Enrollment { crate::speaker_verification::observe_enrollment_capture(&candidate.pcm); }
+                    if candidate.kind == BufferedSpeakerCandidateKind::Enrollment {
+                        crate::speaker_verification::observe_enrollment_capture(&candidate.pcm);
+                    }
                     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
                     if candidate.kind == BufferedSpeakerCandidateKind::Verification {
                         let phrase = inner.prefs.get().voice_wake_phrase;
-                        maybe_start_target_wake_extraction(
-                            candidate,
-                            &phrase,
-                            chunk_session_id,
-                        );
+                        maybe_start_target_wake_extraction(candidate, &phrase, chunk_session_id);
                     }
                     if self
                         .promote_hidden_candidate_if_requested(inner, chunk_session_id)
@@ -628,12 +614,13 @@ impl EmbeddedStreamingDictation {
                             chunk.pcm.len()
                         );
                         self.orphan_recovery_quarantine_session_id = Some(chunk.session_id);
-                        match self.begin_candidate_or_session(
-                            inner,
-                            chunk.session_id,
-                            crate::embedded_audio::SessionStartOrigin::VoiceActivation,
-                        )
-                        .await
+                        match self
+                            .begin_candidate_or_session(
+                                inner,
+                                chunk.session_id,
+                                crate::embedded_audio::SessionStartOrigin::VoiceActivation,
+                            )
+                            .await
                         {
                             Ok(()) => {
                                 // Recovery was admitted. The quarantine is no
@@ -697,21 +684,21 @@ impl EmbeddedStreamingDictation {
                         }
                     }
                 }
-                    if embedded_streaming_chunk_is_asr_input(&chunk) {
-                        self.begin_session_if_needed(inner, chunk.session_id)
-                            .await?;
-                        let proactive_stop_due = {
-                            let session = self
-                                .session
-                                .as_mut()
-                                .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
-                            let accepted_destination_start = session.accepted_pcm_cursor.position();
-                            let streamed_pcm_bytes_before = session.streamed_pcm_bytes;
-                            crate::observability::record_embedded_audio_first_packet(
-                                session.session_id,
-                            );
-                            let accepted_source_interval = session
-                                .consume_streaming_pcm_from_segment_with_collector_metadata(
+                if embedded_streaming_chunk_is_asr_input(&chunk) {
+                    self.begin_session_if_needed(inner, chunk.session_id)
+                        .await?;
+                    let proactive_stop_due = {
+                        let session = self
+                            .session
+                            .as_mut()
+                            .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
+                        let accepted_destination_start = session.accepted_pcm_cursor.position();
+                        let streamed_pcm_bytes_before = session.streamed_pcm_bytes;
+                        crate::observability::record_embedded_audio_first_packet(
+                            session.session_id,
+                        );
+                        let accepted_source_interval = session
+                            .consume_streaming_pcm_from_segment_with_collector_metadata(
                                 inner,
                                 &chunk.pcm,
                                 chunk.raw_input_level_percent,
@@ -720,59 +707,55 @@ impl EmbeddedStreamingDictation {
                                 source_observation_is_explicit,
                                 chunk.metadata,
                             )?;
-                            // This method returns Ok(()) for inactive or
-                            // stop-rejected sessions. The accepted-byte
-                            // boundary is the product fact; diagnostic
-                            // cursors are not an acceptance signal.
-                            let accepted_bytes = session
-                                .streamed_pcm_bytes
-                                .saturating_sub(streamed_pcm_bytes_before);
-                            self.last_actor_pcm_consumed = accepted_bytes > 0;
-                            if accepted_bytes > 0 {
-                                let source_admission_operation_id =
-                                    session.next_source_admission_operation_id();
-                                let accepted_destination_range = accepted_destination_start
-                                    .zip(session.accepted_pcm_cursor.position())
-                                    .and_then(|(start, end)| {
-                                        (end >= start
-                                            && end - start == accepted_bytes as u64)
-                                            .then_some(crate::observability::PcmRange {
-                                                start,
-                                                end,
-                                            })
-                                    });
-                                record_source_admission_dependency(
-                                    &session.source_admission_ledger,
-                                    source_admission_context.as_ref(),
-                                    SourceAdmissionOperationOwner::Session {
-                                        session_id: session.session_id,
-                                    },
-                                    SourceAdmissionUse::SessionBodyInput,
-                                    accepted_destination_range.map(|range| {
-                                        SourceAdmissionOwnerRange::Session {
-                                            start: range.start,
-                                            end: range.end,
-                                        }
-                                    }),
-                                    accepted_source_interval,
-                                    accepted_bytes,
-                                    source_admission_operation_id,
-                                );
-                            }
-                            // Normally endpointing is content-aware and driven by
-                            // ASR/speaker callbacks. If the provider failed, use
-                            // only the local safety fallback to avoid an endless
-                            // recording with no output path.
-                            let asr_delivery_failed = session
-                                .volcengine_asr
-                                .as_ref()
-                                .is_some_and(|asr| asr.audio_delivery_failed());
-                            let silence_threshold_ms =
-                                proactive_stop_silence_threshold_ms(asr_delivery_failed);
-                            session.proactive_stop_body_started
-                                && session.proactive_stop_silence_ms >= silence_threshold_ms
-                                && !session.proactive_stop_dispatched
-                        };
+                        // This method returns Ok(()) for inactive or
+                        // stop-rejected sessions. The accepted-byte
+                        // boundary is the product fact; diagnostic
+                        // cursors are not an acceptance signal.
+                        let accepted_bytes = session
+                            .streamed_pcm_bytes
+                            .saturating_sub(streamed_pcm_bytes_before);
+                        self.last_actor_pcm_consumed = accepted_bytes > 0;
+                        if accepted_bytes > 0 {
+                            let source_admission_operation_id =
+                                session.next_source_admission_operation_id();
+                            let accepted_destination_range = accepted_destination_start
+                                .zip(session.accepted_pcm_cursor.position())
+                                .and_then(|(start, end)| {
+                                    (end >= start && end - start == accepted_bytes as u64)
+                                        .then_some(crate::observability::PcmRange { start, end })
+                                });
+                            record_source_admission_dependency(
+                                &session.source_admission_ledger,
+                                source_admission_context.as_ref(),
+                                SourceAdmissionOperationOwner::Session {
+                                    session_id: session.session_id,
+                                },
+                                SourceAdmissionUse::SessionBodyInput,
+                                accepted_destination_range.map(|range| {
+                                    SourceAdmissionOwnerRange::Session {
+                                        start: range.start,
+                                        end: range.end,
+                                    }
+                                }),
+                                accepted_source_interval,
+                                accepted_bytes,
+                                source_admission_operation_id,
+                            );
+                        }
+                        // Normally endpointing is content-aware and driven by
+                        // ASR/speaker callbacks. If the provider failed, use
+                        // only the local safety fallback to avoid an endless
+                        // recording with no output path.
+                        let asr_delivery_failed = session
+                            .volcengine_asr
+                            .as_ref()
+                            .is_some_and(|asr| asr.audio_delivery_failed());
+                        let silence_threshold_ms =
+                            proactive_stop_silence_threshold_ms(asr_delivery_failed);
+                        session.proactive_stop_body_started
+                            && session.proactive_stop_silence_ms >= silence_threshold_ms
+                            && !session.proactive_stop_dispatched
+                    };
                     if proactive_stop_due {
                         // Mirror stop_dictation: ask the firmware to cut the session
                         // short. The device then emits Stopped, which drives the normal
@@ -852,17 +835,16 @@ impl EmbeddedStreamingDictation {
                 // STOP is its real terminal boundary, not a request for a
                 // second segment.  If a different segment was bound, the old
                 // predecessor STOP is stale and must be ignored.
-                let ensure_confirmed_same_segment = self
-                    .accepted_wake_capture_ensure
-                    .is_some_and(|ensure| {
+                let ensure_confirmed_same_segment =
+                    self.accepted_wake_capture_ensure.is_some_and(|ensure| {
                         ensure.confirmed_segment_id == Some(session_id)
                             && ensure.previous_segment_id == session_id
                     });
-                let ensure_confirmed_replacement = self
-                    .accepted_wake_capture_ensure
-                    .is_some_and(|ensure| {
+                let ensure_confirmed_replacement =
+                    self.accepted_wake_capture_ensure.is_some_and(|ensure| {
                         ensure.confirmed_segment_id.is_some_and(|actual| {
-                            actual != ensure.previous_segment_id && session_id == ensure.previous_segment_id
+                            actual != ensure.previous_segment_id
+                                && session_id == ensure.previous_segment_id
                         })
                     });
                 if ensure_confirmed_replacement {
@@ -875,63 +857,63 @@ impl EmbeddedStreamingDictation {
                 // 只含 1845ms 唤醒词——此时 finalize 必空稿。竞态窗口内且正文未开始
                 // 时，旧段 STOP 视为段 rotation：不 finalize，绑定激活后的新设备段.
                 if !ensure_confirmed_same_segment {
-                    if let Some((pre_segment_id, activated_at)) = self.activation_segment_race_guard {
+                    if let Some((pre_segment_id, activated_at)) = self.activation_segment_race_guard
+                    {
                         if self.session.is_some() && session_id == pre_segment_id {
-                        let body_started = self
-                            .session
-                            .as_ref()
-                            .map(|session| session.session_id)
-                            .is_some_and(|coordinator_session_id| {
-                                automatic_wake_body_started(inner, coordinator_session_id)
-                                    || current_embedded_audio_partial_preview(inner)
-                                        .as_deref()
-                                        .is_some_and(|text| !text.trim().is_empty())
-                            });
-                        let hidden_timeout = origin
-                            == crate::embedded_audio::SessionStopOrigin::VoiceActivationMaxDuration;
-                        let automatic_stop = matches!(origin,
+                            let body_started = self
+                                .session
+                                .as_ref()
+                                .map(|session| session.session_id)
+                                .is_some_and(|coordinator_session_id| {
+                                    automatic_wake_body_started(inner, coordinator_session_id)
+                                        || current_embedded_audio_partial_preview(inner)
+                                            .as_deref()
+                                            .is_some_and(|text| !text.trim().is_empty())
+                                });
+                            let automatic_stop = matches!(origin,
                             crate::embedded_audio::SessionStopOrigin::VoiceActivation
                                 | crate::embedded_audio::SessionStopOrigin::VoiceActivationMaxDuration);
-                        if automatic_stop && (!body_started || hidden_timeout)
-                            && !embedded_audio_stop_feedback_latched(inner)
-                            && activated_at.elapsed() <= EMBEDDED_ACTIVATION_SEGMENT_RACE_WINDOW
-                        {
-                            log::info!(
+                            if automatic_stop
+                                && !embedded_audio_stop_feedback_latched(inner)
+                                && activated_at.elapsed() <= EMBEDDED_ACTIVATION_SEGMENT_RACE_WINDOW
+                            {
+                                log::info!(
                                 "[coord] pre-activation embedded segment {session_id} stopped {}ms after wake activation origin={origin:?} body_started={body_started}; dictation session stays open for the post-activation segment",
                                 activated_at.elapsed().as_millis()
                             );
-                            if let Some(coordinator_session_id) =
-                                self.session.as_ref().map(|session| session.session_id)
-                            {
-                                if let Some(ensure) = self.accepted_wake_capture_ensure.as_mut() {
-                                    ensure.replacement_wait_started_at = Some(Instant::now());
-                                    log::info!(
+                                if let Some(coordinator_session_id) =
+                                    self.session.as_ref().map(|session| session.session_id)
+                                {
+                                    if let Some(ensure) = self.accepted_wake_capture_ensure.as_mut()
+                                    {
+                                        ensure.replacement_wait_started_at = Some(Instant::now());
+                                        log::info!(
                                         "[wake-phrase] accepted wake capture predecessor stopped; awaiting ENSURE continuation marker request_id={} previous_segment_id={} embedded_session_id={session_id}",
                                         ensure.request_id,
                                         ensure.previous_segment_id
                                     );
+                                    }
+                                    mark_embedded_ble_awaiting_post_activation_segment(
+                                        inner,
+                                        coordinator_session_id,
+                                    );
                                 }
-                                mark_embedded_ble_awaiting_post_activation_segment(
-                                    inner,
-                                    coordinator_session_id,
-                                );
+                                self.collector.reset();
+                                self.embedded_session_id = None;
+                                self.pending_stop_expected_packet_count = None;
+                                // This STOP completed only the pre-activation wake
+                                // segment, not the live dictation. `true` tells the
+                                // continuous actor that the whole pipeline is done;
+                                // it then calls submission_result(), sees
+                                // terminal_received=false, and discards the session
+                                // as "尚未收到结束包". Keep the actor pending until the
+                                // post-activation segment arrives.
+                                return Ok(false);
                             }
-                            self.collector.reset();
-                            self.embedded_session_id = None;
-                            self.pending_stop_expected_packet_count = None;
-                            // This STOP completed only the pre-activation wake
-                            // segment, not the live dictation. `true` tells the
-                            // continuous actor that the whole pipeline is done;
-                            // it then calls submission_result(), sees
-                            // terminal_received=false, and discards the session
-                            // as "尚未收到结束包". Keep the actor pending until the
-                            // post-activation segment arrives.
-                            return Ok(false);
                         }
+                        // 窗口外或正文已开始：正常 finalize，竞态守卫使命结束。
+                        self.activation_segment_race_guard = None;
                     }
-                    // 窗口外或正文已开始：正常 finalize，竞态守卫使命结束。
-                    self.activation_segment_race_guard = None;
-                }
                 }
                 if let Some(session) = self.session.as_ref() {
                     crate::observability::record_embedded_audio_stop(session.session_id);
@@ -1040,13 +1022,11 @@ impl EmbeddedStreamingDictation {
             }
         }
     }
-
 }
 
 include!("dictation_embedded_candidate_begin.rs");
 
 impl EmbeddedStreamingDictation {
-
     async fn finish_streaming_session(
         &mut self,
         inner: &Arc<Inner>,
@@ -1182,8 +1162,12 @@ impl EmbeddedStreamingDictation {
             if let Some(asr) = session.volcengine_asr.as_ref() {
                 let trace = asr.take_diagnostic_trace();
                 if let (Ok(wav), Ok(path)) = (
-                    crate::persistence::recording_path_for_session(&coordinator_session_id.to_string()),
-                    crate::persistence::asr_trace_path_for_session(&coordinator_session_id.to_string()),
+                    crate::persistence::recording_path_for_session(
+                        &coordinator_session_id.to_string(),
+                    ),
+                    crate::persistence::asr_trace_path_for_session(
+                        &coordinator_session_id.to_string(),
+                    ),
                 ) {
                     if wav.exists() {
                         let final_text = self.transcript.as_ref().map(|t| t.final_text.as_str());
@@ -1217,13 +1201,11 @@ impl EmbeddedStreamingDictation {
         }
         end_result
     }
-
 }
 
 include!("dictation_embedded_detector_init.rs");
 
 impl EmbeddedStreamingDictation {
-
     async fn finish_buffered_speaker_candidate(
         &mut self,
         inner: &Arc<Inner>,
@@ -1252,7 +1234,7 @@ impl EmbeddedStreamingDictation {
             return Ok(true);
         }
         if candidate.kind == BufferedSpeakerCandidateKind::Enrollment {
-            if !crate::speaker_verification::enrollment_should_process() {
+            let Some(enrollment_generation) = crate::speaker_verification::begin_enrollment_processing() else {
                 log::info!("[speaker-verification] discarded cancelled enrollment candidate embedded_session_id={embedded_session_id}");
                 let discarded_bytes = candidate.pcm.len();
                 candidate.record_outcome_fact(
@@ -1270,20 +1252,30 @@ impl EmbeddedStreamingDictation {
                 self.preserve_candidate_fact_ledger(&mut candidate);
                 complete_voiceprint_enrollment_candidate("voiceprint_enrollment_cancelled");
                 return Ok(true);
-            }
+            };
             let pcm = std::mem::take(&mut candidate.pcm);
             let phrase = inner.prefs.get().voice_wake_phrase;
-            crate::speaker_verification::begin_enrollment_processing();
-            let result = tauri::async_runtime::spawn_blocking(move || {
-                crate::speaker_verification::finish_enrollment(&pcm, &phrase)
+            // Freeze the account/route before local processing. A newer enrollment cannot
+            // take ownership of an older capture while the blocking work is running.
+            let cloud_capture = crate::asr::cloud_gateway::take_enrollment_capture();
+            let local_phrase = phrase.clone();
+            let local = tauri::async_runtime::spawn_blocking(move || {
+                let result = crate::speaker_verification::finish_enrollment(&pcm, &local_phrase, enrollment_generation);
+                (pcm, result)
             })
-            .await
-            .map_err(|err| format!("声纹登记处理任务失败: {err}"))
-            .and_then(|result| result);
+            .await;
+            let (cloud_pcm, result) = match local {
+                Ok((pcm, result)) => (pcm, result),
+                Err(err) => {
+                    let error = format!("声纹登记处理任务失败: {err}");
+                    crate::speaker_verification::fail_enrollment(&error);
+                    (Vec::new(), Err(error))
+                },
+            };
             let status = match result {
                 Ok(status) => status,
                 Err(err) => {
-                    crate::speaker_verification::fail_enrollment(&err);
+                    crate::asr::cloud_gateway::discard_enrollment_capture(cloud_capture).await;
                     log::warn!(
                         "[speaker-verification] enrollment failed embedded_session_id={embedded_session_id}: {err}"
                     );
@@ -1304,6 +1296,25 @@ impl EmbeddedStreamingDictation {
                     return Ok(true);
                 }
             };
+            if let Some(cloud_result) =
+                crate::asr::cloud_gateway::finish_enrollment(cloud_capture, cloud_pcm, &phrase)
+                    .await
+            {
+                match cloud_result {
+                    Ok((route, profile)) => {
+                        let mut prefs = inner.prefs.get();
+                        prefs.cloud_model_route = route;
+                        // Managed identity is fetched per authenticated session. Keep BYOK separate.
+                        if route == crate::asr::cloud_gateway::CloudModelRoute::Byok {
+                            prefs.cloud_owner_voiceprint = Some(profile);
+                        }
+                        if let Err(err) = inner.prefs.set(prefs) {
+                            log::warn!("[cloud] failed to save enrollment route: {err}");
+                        }
+                    }
+                    Err(err) => log::warn!("[cloud] enrollment remains unconfirmed: {err}"),
+                }
+            }
             log::info!(
                 "[speaker-verification] enrollment complete embedded_session_id={} enrolled={} score={:?}",
                 embedded_session_id,
@@ -1361,81 +1372,6 @@ impl EmbeddedStreamingDictation {
                     }
                 }
             }
-            // STOP can arrive a few milliseconds after the final rolling window
-            // schedules its local confirmation. Dropping that already-running
-            // task made late wake phrases deterministically lose their last
-            // evidence, while the blocking helper continued in the background.
-            // Wait only the remainder of the fixed budget already charged from
-            // task start; do not launch any additional work here.
-            #[cfg(target_os = "windows")]
-            let mut terminal_completed_local_confirmation = None;
-            #[cfg(target_os = "windows")]
-            if let Some(task) = candidate.local_confirmation_task.take() {
-                let task_origin_bytes = candidate.local_confirmation_task_origin_bytes;
-                let task_has_keyword_model_hit =
-                    candidate.local_confirmation_task_has_keyword_model_hit;
-                let elapsed_ms = candidate
-                    .local_confirmation_task_started_at
-                    .take()
-                    .map(|started| started.elapsed().as_millis() as u64)
-                    .unwrap_or(0);
-                let remaining_ms = terminal_inflight_confirmation_remaining_ms(elapsed_ms);
-                let already_finished = task.inner().is_finished();
-                log::info!(
-                    "[wake-phrase] terminal joining in-flight local confirmation embedded_session_id={} elapsed_ms={} remaining_ms={} already_finished={} window_origin_pcm_ms={} kws_hit={}",
-                    embedded_session_id,
-                    elapsed_ms,
-                    remaining_ms,
-                    already_finished,
-                    task_origin_bytes / 32,
-                    task_has_keyword_model_hit
-                );
-                let outcome = if already_finished {
-                    Some(task.await)
-                } else if remaining_ms == 0 {
-                    None
-                } else {
-                    match tokio::time::timeout(Duration::from_millis(remaining_ms), task).await {
-                        Ok(result) => Some(result),
-                        Err(_) => None,
-                    }
-                };
-                match outcome {
-                    Some(Ok(Ok(result))) => {
-                        log::info!(
-                            "[wake-phrase] terminal in-flight local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} phonetic_prefix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={} window_origin_pcm_ms={} kws_hit={}",
-                            embedded_session_id,
-                            result.matched,
-                            result.phrase_relation,
-                            result.snapshot_pcm_ms,
-                            result.transcript_chars,
-                            result.phonetic_prefix_units,
-                            result.phonetic_best_distance,
-                            result.phonetic_best_window_start,
-                            result.inference_ms,
-                            task_origin_bytes / 32,
-                            task_has_keyword_model_hit
-                        );
-                        terminal_completed_local_confirmation = Some((
-                            result,
-                            task_origin_bytes,
-                            task_has_keyword_model_hit,
-                        ));
-                    }
-                    Some(Ok(Err(err))) => log::info!(
-                        "[wake-phrase] terminal in-flight local confirmation unavailable embedded_session_id={embedded_session_id}: {err}"
-                    ),
-                    Some(Err(err)) => log::warn!(
-                        "[wake-phrase] terminal in-flight local confirmation task failed embedded_session_id={embedded_session_id}: {err}"
-                    ),
-                    None => log::info!(
-                        "[wake-phrase] terminal in-flight local confirmation exceeded remaining budget embedded_session_id={} elapsed_ms={} remaining_ms={}",
-                        embedded_session_id,
-                        elapsed_ms,
-                        remaining_ms
-                    ),
-                }
-            }
             let Some(mut detector) = candidate.wake_detector.take() else {
                 if let Some(sid) = take_early_capsule_session_id(&mut candidate) {
                     dismiss_early_wake_recording_capsule(inner, sid);
@@ -1487,10 +1423,7 @@ impl EmbeddedStreamingDictation {
                 let started = Instant::now();
                 let result = detector
                     .accept_pcm(&remaining_pcm)
-                    .and_then(|found| match found {
-                        Some(found) => Ok(Some(found)),
-                        None => detector.finish(),
-                    });
+                    .and_then(|_| detector.finish());
                 (detector, result, started.elapsed().as_millis() as u64)
             })
             .await;
@@ -1552,17 +1485,119 @@ impl EmbeddedStreamingDictation {
                 }
             };
             candidate.kws_total_ms = candidate.kws_total_ms.saturating_add(final_kws_ms);
+            // STOP can arrive a few milliseconds after the final rolling window
+            // schedules its local confirmation. Dropping that already-running
+            // task made late wake phrases deterministically lose their last
+            // evidence, while the blocking helper continued in the background.
+            // Wait only the remainder of the fixed budget already charged from
+            // task start; do not launch any additional work here.
+            #[cfg(target_os = "windows")]
+            let mut terminal_completed_local_confirmation = None;
+            #[cfg(target_os = "windows")]
+            if let Some(task) = candidate.local_confirmation_task.take() {
+                if wake_match
+                    .as_ref()
+                    .ok()
+                    .and_then(|found| found.as_ref())
+                    .is_some_and(|found| {
+                        found.complete_phrase_signal(&phrase)
+                            != denzic_voice_activation_v1_core::PhraseSignal::None
+                    })
+                {
+                    task.abort();
+                    candidate.local_confirmation_task_started_at = None;
+                } else {
+                    let task_origin_bytes = candidate.local_confirmation_task_origin_bytes;
+                    let task_source_range = candidate.local_confirmation_task_source_range.take();
+                    let task_has_keyword_model_hit =
+                        candidate.local_confirmation_task_has_keyword_model_hit;
+                    let elapsed_ms = candidate
+                        .local_confirmation_task_started_at
+                        .take()
+                        .map(|started| started.elapsed().as_millis() as u64)
+                        .unwrap_or(0);
+                    let remaining_ms = terminal_inflight_confirmation_remaining_ms(elapsed_ms);
+                    let already_finished = task.inner().is_finished();
+                    log::info!(
+                    "[wake-phrase] terminal joining in-flight local confirmation embedded_session_id={} elapsed_ms={} remaining_ms={} already_finished={} window_origin_pcm_ms={} kws_hit={}",
+                    embedded_session_id,
+                    elapsed_ms,
+                    remaining_ms,
+                    already_finished,
+                    task_origin_bytes / 32,
+                    task_has_keyword_model_hit
+                );
+                    let outcome = if already_finished {
+                        Some(task.await)
+                    } else if remaining_ms == 0 {
+                        None
+                    } else {
+                        match tokio::time::timeout(Duration::from_millis(remaining_ms), task).await
+                        {
+                            Ok(result) => Some(result),
+                            Err(_) => None,
+                        }
+                    };
+                    match outcome {
+                    Some(Ok(Ok(result))) => {
+                        log::info!(
+                            "[wake-phrase] terminal in-flight local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} phonetic_prefix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={} window_origin_pcm_ms={} kws_hit={}",
+                            embedded_session_id,
+                            result.matched,
+                            result.phrase_relation,
+                            result.snapshot_pcm_ms,
+                            result.transcript_chars,
+                            result.phonetic_prefix_units,
+                            result.phonetic_best_distance,
+                            result.phonetic_best_window_start,
+                            result.inference_ms,
+                            task_origin_bytes / 32,
+                            task_has_keyword_model_hit
+                        );
+                        terminal_completed_local_confirmation = Some((
+                            result,
+                            task_origin_bytes,
+                            task_has_keyword_model_hit,
+                            task_source_range,
+                        ));
+                    }
+                    Some(Ok(Err(err))) => log::info!(
+                        "[wake-phrase] terminal in-flight local confirmation unavailable embedded_session_id={embedded_session_id}: {err}"
+                    ),
+                    Some(Err(err)) => log::warn!(
+                        "[wake-phrase] terminal in-flight local confirmation task failed embedded_session_id={embedded_session_id}: {err}"
+                    ),
+                    None => log::info!(
+                        "[wake-phrase] terminal in-flight local confirmation exceeded remaining budget embedded_session_id={} elapsed_ms={} remaining_ms={}",
+                        embedded_session_id,
+                        elapsed_ms,
+                        remaining_ms
+                    ),
+                }
+                }
+            }
+            let verification_input = WakeVerifierSnapshot::from_candidate(&candidate);
             let (enrolled_owner_matched, verification, voiceprint_ms) =
-                terminal_owner_verification_for_recall(&candidate.pcm, &phrase).await;
+                terminal_owner_verification_for_recall(&verification_input.pcm, &phrase).await;
+            let retained_verification_source =
+                verification_input.observe_direct_result(&verification, &candidate);
             let mut phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
             let mut local_confirmation_ms = 0u64;
             #[cfg(target_os = "windows")]
-            if let Some((result, _, _)) = terminal_completed_local_confirmation.as_ref() {
+            if let Some((result, _, _, _)) = terminal_completed_local_confirmation.as_ref() {
                 local_confirmation_ms = local_confirmation_ms.saturating_add(result.inference_ms);
             }
-            let mut wake_match = match wake_match.map(|found| {
-                offset_streaming_wake_match(found, stream_origin_bytes)
-            }) {
+            let mut wake_match = match wake_match
+                .map(|found| offset_streaming_wake_match(found, stream_origin_bytes))
+            {
+                Ok(Some(found))
+                    if found.complete_phrase_signal(&phrase)
+                        != denzic_voice_activation_v1_core::PhraseSignal::None =>
+                {
+                    phrase_signal = found.complete_phrase_signal(&phrase);
+                    log::info!("[wake-phrase] terminal complete keyword admitted embedded_session_id={embedded_session_id}; secondary transcript cannot veto phrase evidence");
+                    Some(found)
+                }
                 Ok(Some(found)) => {
                     #[cfg(target_os = "windows")]
                     {
@@ -1581,8 +1616,8 @@ impl EmbeddedStreamingDictation {
                         .await;
                         match confirm {
                             Ok(Ok(result)) => {
-                                local_confirmation_ms = local_confirmation_ms
-                                    .saturating_add(result.inference_ms);
+                                local_confirmation_ms =
+                                    local_confirmation_ms.saturating_add(result.inference_ms);
                                 log::info!(
                                     "[wake-phrase] terminal KWS local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} phonetic_prefix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={}",
                                     embedded_session_id,
@@ -1595,33 +1630,30 @@ impl EmbeddedStreamingDictation {
                                     result.phonetic_best_window_start,
                                     result.inference_ms
                                 );
+                                let confirmed_source_range = local_confirmation_source_range(
+                                    &result,
+                                    candidate.current_candidate_range(),
+                                    0,
+                                );
                                 if result.matched {
+                                    candidate.owner_local_phrase_source_range =
+                                        confirmed_source_range;
+                                    candidate.retain_complete_local_wake_intent(&result);
                                     phrase_signal =
                                         denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
                                     Some(found)
                                 } else if let Some(signal) =
                                     enrolled_terminal_kws_phonetic_fusion_signal(
-                                    enrolled_owner_matched,
-                                    &result,
-                                    phrase.chars().count(),
-                                    embedded_session_id,
-                                )
-                                {
-                                    phrase_signal = signal;
-                                    Some(found)
-                                } else if !crate::speaker_verification::is_enrolled_for_phrase(
-                                    &phrase,
-                                ) {
-                                    // Without a voiceprint, preserve KWS recall when
-                                    // the short local-ASR confirmation is absent.
-                                    log::info!(
-                                        "[wake-phrase] terminal stage2 Absent fail-open KeywordModel open-gate embedded_session_id={} prior_absent_count={} transcript_chars={}",
+                                        enrolled_owner_matched,
+                                        &result,
+                                        phrase.chars().count(),
                                         embedded_session_id,
-                                        candidate.kws_local_absent_count,
-                                        result.transcript_chars
-                                    );
-                                    phrase_signal =
-                                        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                    )
+                                {
+                                    candidate.owner_local_phrase_source_range =
+                                        confirmed_source_range;
+                                    candidate.retain_complete_local_wake_intent(&result);
+                                    phrase_signal = signal;
                                     Some(found)
                                 } else {
                                     log::info!(
@@ -1636,7 +1668,8 @@ impl EmbeddedStreamingDictation {
                                 let explicit_absent_count =
                                     keyword_fallback_absent_count(&candidate, &found);
                                 if secondary_fallback_can_accept_keyword(
-                                    true,
+                                    found.complete_phrase_signal(&phrase)
+                                        != denzic_voice_activation_v1_core::PhraseSignal::None,
                                     explicit_absent_count,
                                 ) {
                                     log::warn!(
@@ -1658,7 +1691,8 @@ impl EmbeddedStreamingDictation {
                                 let explicit_absent_count =
                                     keyword_fallback_absent_count(&candidate, &found);
                                 if secondary_fallback_can_accept_keyword(
-                                    true,
+                                    found.complete_phrase_signal(&phrase)
+                                        != denzic_voice_activation_v1_core::PhraseSignal::None,
                                     explicit_absent_count,
                                 ) {
                                     log::warn!(
@@ -1690,51 +1724,12 @@ impl EmbeddedStreamingDictation {
                     #[cfg(target_os = "windows")]
                     let terminal_local_match = terminal_completed_local_confirmation
                         .take()
-                        .and_then(|(result, task_origin_bytes, task_has_keyword_model_hit)| {
-                            if enrolled_terminal_local_near_can_accept(
-                                enrolled_owner_matched,
-                                &result,
-                                phrase.chars().count(),
-                                task_origin_bytes,
-                            ) {
-                                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                                log::info!(
-                                    "[wake-phrase] terminal enrolled owner recovered start-aligned local near-match embedded_session_id={} prefix_units={} distance={} transcript_chars={}",
-                                    embedded_session_id,
-                                    result.phonetic_prefix_units,
-                                    result.phonetic_best_distance,
-                                    result.transcript_chars
-                                );
-                                return Some(crate::wake_phrase::Match {
-                                    start_seconds: None,
-                                    end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
-                                    matched_keyword: None,
-                                    audio_end_seconds: None,
-                                });
-                            }
-                            if open_terminal_local_near_can_accept(
-                                &verification,
-                                &result,
-                                phrase.chars().count(),
-                                task_origin_bytes,
-                            ) {
-                                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                                log::info!(
-                                    "[wake-phrase] terminal open near-phrase wake accepted (voiceprint floor) embedded_session_id={} prefix_units={} distance={} window_start={} transcript_chars={} owner_score={:.6}",
-                                    embedded_session_id,
-                                    result.phonetic_prefix_units,
-                                    result.phonetic_best_distance,
-                                    result.phonetic_best_window_start,
-                                    result.transcript_chars,
-                                    verification.as_ref().map(|result| result.score).unwrap_or_default()
-                                );
-                                return Some(crate::wake_phrase::Match {
-                                    start_seconds: None,
-                                    end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
-                                    matched_keyword: None,
-                                    audio_end_seconds: None,
-                                });
-                            }
+                        .and_then(|(
+                            result,
+                            task_origin_bytes,
+                            task_has_keyword_model_hit,
+                            task_source_range,
+                        )| {
                             match terminal_inflight_local_decision(
                                 &result,
                                 task_has_keyword_model_hit,
@@ -1752,10 +1747,15 @@ impl EmbeddedStreamingDictation {
                                         refined_end + task_origin_bytes as f32 / 32_000.0
                                     };
                                     phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                                    candidate.owner_local_phrase_source_range = local_confirmation_source_range(
+                                        &result, task_source_range, task_origin_bytes,
+                                    );
+                                    candidate.retain_complete_local_wake_intent(&result);
                                     Some(crate::wake_phrase::Match {
                                         start_seconds: None,
                                         end_seconds: refined_end,
                                         matched_keyword: None,
+                                        origin: crate::wake_phrase::KeywordEvidenceOrigin::PrimaryDetector,
                                         audio_end_seconds: None,
                                     })
                                 }
@@ -1808,7 +1808,9 @@ impl EmbeddedStreamingDictation {
                             }
                         });
                     #[cfg(not(target_os = "windows"))]
-                    let terminal_local_match: Option<crate::wake_phrase::Match> = None;
+                    let terminal_local_match: Option<
+                        crate::wake_phrase::Match,
+                    > = None;
 
                     if terminal_local_match.is_some() {
                         terminal_local_match
@@ -1818,8 +1820,7 @@ impl EmbeddedStreamingDictation {
                         candidate.local_kws_fusion_evidence,
                         enrolled_owner_matched,
                     ) {
-                        let too_short =
-                            candidate.pcm.len() < MIN_TERMINAL_OFFLINE_PCM_BYTES;
+                        let too_short = candidate.pcm.len() < MIN_TERMINAL_OFFLINE_PCM_BYTES;
                         log::info!(
                             "[wake-phrase] terminal skip offline cascade reason={} embedded_session_id={} pcm_ms={} min_ms={} local_absent_count={} enrolled_owner_matched={}",
                             if too_short { "candidate_too_short" } else { "local_absent_evidence" },
@@ -1866,6 +1867,14 @@ impl EmbeddedStreamingDictation {
                             }
                         };
                         match offline {
+                            Ok(Some(found))
+                                if found.complete_phrase_signal(&phrase)
+                                    != denzic_voice_activation_v1_core::PhraseSignal::None =>
+                            {
+                                phrase_signal = found.complete_phrase_signal(&phrase);
+                                log::info!("[wake-phrase] terminal offline complete keyword admitted embedded_session_id={embedded_session_id}");
+                                Some(found)
+                            }
                             Ok(Some(found)) => {
                                 log::info!(
                                     "[wake-phrase] terminal offline recall provisional hit embedded_session_id={} end_s={:.3}; requiring local full-phrase confirm",
@@ -1874,9 +1883,23 @@ impl EmbeddedStreamingDictation {
                                 );
                                 #[cfg(target_os = "windows")]
                                 {
-                                    let (confirm_pcm, confirm_origin) =
-                                        terminal_local_confirmation_pcm(&candidate.pcm);
-                                    let confirm = spawn_local_wake_confirmation(
+                                    // A full label from retrospective recall is
+                                    // still a hypothesis. Confirm the exact
+                                    // input that produced it, keeping its source
+                                    // origin and avoiding the old tail crop.
+                                    let (confirm_pcm, confirm_origin) = found
+                                        .recall_confirmation_input(&candidate.pcm)
+                                        .map(|(pcm, origin)| (pcm.to_vec(), origin))
+                                        .unwrap_or_default();
+                                    let confirm_source_range =
+                                        terminal_local_confirmation_candidate_range(
+                                            candidate.current_candidate_range(),
+                                            confirm_origin,
+                                            confirm_pcm.len(),
+                                        );
+                                    let confirm = if confirm_pcm.is_empty() {
+                                        Ok(Err("recorded keyword recall input unavailable".to_string()))
+                                    } else { spawn_local_wake_confirmation(
                                         inner,
                                         LocalWakeConfirmationDiagnosticContext {
                                             embedded_session_id,
@@ -1886,9 +1909,9 @@ impl EmbeddedStreamingDictation {
                                         },
                                         confirm_pcm,
                                         phrase.clone(),
-                                        false,
+                                        true,
                                     )
-                                    .await;
+                                    .await };
                                     match confirm {
                                         Ok(Ok(result)) => {
                                             local_confirmation_ms = local_confirmation_ms
@@ -1905,12 +1928,18 @@ impl EmbeddedStreamingDictation {
                                                 result.phonetic_best_window_start,
                                                 result.inference_ms
                                             );
-                                            let phonetic_near =
-                                                phonetic_near_phrase_evidence(
-                                                    &result,
-                                                    phrase.chars().count(),
-                                                );
+                                            let phonetic_near = phonetic_near_phrase_evidence(
+                                                &result,
+                                                phrase.chars().count(),
+                                            );
                                             if result.matched || phonetic_near {
+                                                candidate.owner_local_phrase_source_range =
+                                                    local_confirmation_source_range(
+                                                        &result,
+                                                        confirm_source_range,
+                                                        confirm_origin,
+                                                    );
+                                                candidate.retain_complete_local_wake_intent(&result);
                                                 phrase_signal = if result.matched {
                                                     denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript
                                                 } else {
@@ -1934,17 +1963,15 @@ impl EmbeddedStreamingDictation {
                                         }
                                         Ok(Err(err)) => {
                                             log::warn!(
-                                                "[wake-phrase] terminal offline stage2 unavailable embedded_session_id={embedded_session_id}: {err}; fail-open KeywordModel"
+                                                "[wake-phrase] terminal offline stage2 unavailable embedded_session_id={embedded_session_id}: {err}; recall candidate remains unconfirmed"
                                             );
-                                            phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
-                                            Some(found)
+                                            None
                                         }
                                         Err(err) => {
                                             log::warn!(
-                                                "[wake-phrase] terminal offline stage2 task failed embedded_session_id={embedded_session_id}: {err}; fail-open KeywordModel"
+                                                "[wake-phrase] terminal offline stage2 task failed embedded_session_id={embedded_session_id}: {err}; recall candidate remains unconfirmed"
                                             );
-                                            phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
-                                            Some(found)
+                                            None
                                         }
                                     }
                                 }
@@ -1973,75 +2000,33 @@ impl EmbeddedStreamingDictation {
                                         )
                                         .await
                                         {
-                                            Some((result, origin_bytes))
+                                            Some((result, origin_bytes, confirmation_bytes))
                                                 if terminal_local_result_can_activate(&result) =>
                                             {
+                                                candidate.owner_local_phrase_source_range =
+                                                    terminal_local_confirmation_candidate_range(
+                                                        candidate.current_candidate_range(),
+                                                        origin_bytes,
+                                                        confirmation_bytes,
+                                                    );
+                                                candidate.retain_complete_local_wake_intent(&result);
                                                 phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                                                let end_seconds =
-                                                    refined_wake_end_seconds(
-                                                        0.0,
-                                                        &result,
-                                                        phrase.chars().count(),
-                                                    )
-                                                        + origin_bytes as f32 / 32_000.0;
+                                                let end_seconds = refined_wake_end_seconds(
+                                                    0.0,
+                                                    &result,
+                                                    phrase.chars().count(),
+                                                ) + origin_bytes as f32
+                                                    / 32_000.0;
                                                 Some(crate::wake_phrase::Match {
                                                     start_seconds: None,
                                                     end_seconds,
                                                     matched_keyword: None,
+                                                    origin: crate::wake_phrase::KeywordEvidenceOrigin::PrimaryDetector,
                                                     audio_end_seconds: None,
                                                 })
                                             }
-                                            Some((result, _))
-                                                if enrolled_terminal_local_near_can_accept(
-                                                    enrolled_owner_matched,
-                                                    &result,
-                                                    phrase.chars().count(),
-                                                    0,
-                                                ) =>
-                                            {
-                                                    phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                                                    log::info!(
-                                                        "[wake-phrase] terminal enrolled owner recovered start-aligned local near-match embedded_session_id={} prefix_units={} distance={} transcript_chars={}",
-                                                        embedded_session_id,
-                                                        result.phonetic_prefix_units,
-                                                        result.phonetic_best_distance,
-                                                        result.transcript_chars
-                                                    );
-                                                    Some(crate::wake_phrase::Match {
-                                                        start_seconds: None,
-                                                        end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
-                                                        matched_keyword: None,
-                                                        audio_end_seconds: None,
-                                                    })
-                                            }
-                                            Some((result, origin_bytes))
-                                                if open_terminal_local_near_can_accept(
-                                                    &verification,
-                                                    &result,
-                                                    phrase.chars().count(),
-                                                    origin_bytes,
-                                                ) =>
-                                            {
-                                                    phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                                                    log::info!(
-                                                        "[wake-phrase] terminal open near-phrase wake accepted (voiceprint floor) embedded_session_id={} prefix_units={} distance={} window_start={} suffix_units={} transcript_chars={} owner_score={:.6}",
-                                                        embedded_session_id,
-                                                        result.phonetic_prefix_units,
-                                                        result.phonetic_best_distance,
-                                                        result.phonetic_best_window_start,
-                                                        result.phonetic_suffix_units,
-                                                        result.transcript_chars,
-                                                        verification.as_ref().map(|result| result.score).unwrap_or_default()
-                                                    );
-                                                    Some(crate::wake_phrase::Match {
-                                                        start_seconds: None,
-                                                        end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
-                                                        matched_keyword: None,
-                                                        audio_end_seconds: None,
-                                                    })
-                                            }
-                                            Some((result, _)) => {
-                                                    if crate::speech_decision_kernel::owner_near_phrase_evidence_can_accumulate(
+                                            Some((result, _, _)) => {
+                                                if crate::speech_decision_kernel::owner_near_phrase_evidence_can_accumulate(
                                                         result.phrase_relation == crate::wake_phrase::LocalPhraseRelation::Absent,
                                                         result.phonetic_best_distance,
                                                         result.phonetic_best_window_start,
@@ -2064,7 +2049,7 @@ impl EmbeddedStreamingDictation {
                                                             result.transcript_chars
                                                         );
                                                     }
-                                                    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+                                                #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
                                                     if crate::speech_decision_kernel::masked_owner_phrase_recovery_should_start(
                                                         crate::speech_decision_kernel::MaskedOwnerPhraseRecoveryEvidence {
                                                             bank_enrolled: verification
@@ -2090,15 +2075,17 @@ impl EmbeddedStreamingDictation {
                                                             verification.as_ref().map(|result| result.score).unwrap_or_default()
                                                         );
                                                     }
-                                                    if overlap_degraded_owner_phrase_evidence(
-                                                        &result,
-                                                        phrase.chars().count(),
-                                                        0,
-                                                    ) {
-                                                        candidate.local_owner_overlap_near_confirmations = candidate
+                                                if overlap_degraded_owner_phrase_evidence(
+                                                    &result,
+                                                    phrase.chars().count(),
+                                                    0,
+                                                ) {
+                                                    candidate
+                                                        .local_owner_overlap_near_confirmations =
+                                                        candidate
                                                             .local_owner_overlap_near_confirmations
                                                             .saturating_add(1);
-                                                        log::info!(
+                                                    log::info!(
                                                             "[wake-phrase] terminal overlap-degraded owner phrase evidence embedded_session_id={} count={}/{} prefix_units={} distance={}",
                                                             embedded_session_id,
                                                             candidate.local_owner_overlap_near_confirmations,
@@ -2106,8 +2093,8 @@ impl EmbeddedStreamingDictation {
                                                             result.phonetic_prefix_units,
                                                             result.phonetic_best_distance
                                                         );
-                                                    }
-                                                    None
+                                                }
+                                                None
                                             }
                                             None => None,
                                         }
@@ -2155,113 +2142,6 @@ impl EmbeddedStreamingDictation {
                     return Ok(true);
                 }
             };
-            // Firmware VoiceActivation is a VAD transport window, not phrase
-            // evidence. It must never be relabelled as KeywordModel merely
-            // because the enrolled owner is speaking. Interference recovery
-            // continues below through separated phrase + owner verification.
-            if wake_match.is_none()
-                && verification.as_ref().is_ok_and(|result| {
-                    crate::speech_decision_kernel::repeated_owner_near_phrase_wake_can_activate(
-                        result.enrolled_owner_matched(),
-                        result.score,
-                        candidate.owner_near_phrase_confirmations,
-                    )
-                })
-            {
-                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                wake_match = Some(crate::wake_phrase::Match {
-                    start_seconds: None,
-                    end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
-                    matched_keyword: None,
-                    audio_end_seconds: None,
-                });
-                log::info!(
-                    "[wake-phrase] terminal owner near-phrase recovery accepted embedded_session_id={} confirmations={} owner_score={:.6}",
-                    embedded_session_id,
-                    candidate.owner_near_phrase_confirmations,
-                    verification.as_ref().map(|result| result.score).unwrap_or_default()
-                );
-            }
-            if wake_match.is_none()
-                && candidate.local_owner_overlap_near_confirmations > 0
-                && verification.as_ref().is_ok_and(|result| {
-                    crate::speech_decision_kernel::terminal_owner_overlap_wake_can_activate(
-                        terminal_wake_source_owner_compatible(&verification),
-                        result.score,
-                        candidate.local_owner_overlap_near_confirmations,
-                    )
-                })
-            {
-                // The terminal full-buffer pass is the only usable window in
-                // a suffix-cropped wake.  Preserve the owner's wake instead of
-                // waiting for three windows that no longer contain the phrase.
-                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                wake_match = Some(crate::wake_phrase::Match {
-                    start_seconds: None,
-                    end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
-                    matched_keyword: None,
-                    audio_end_seconds: None,
-                });
-                log::info!(
-                    "[wake-phrase] terminal owner overlap recovered with single strong confirmation embedded_session_id={} confirmations={} owner_score={:.6}",
-                    embedded_session_id,
-                    candidate.local_owner_overlap_near_confirmations,
-                    verification.as_ref().map(|result| result.score).unwrap_or_default()
-                );
-            }
-            if wake_match.is_none()
-                && enrolled_owner_repeated_overlap_near_can_accept(
-                    terminal_wake_source_owner_compatible(&verification),
-                    candidate.local_owner_overlap_near_confirmations,
-                )
-            {
-                // Mono overlap cannot reconstruct two masked characters. Only
-                // three expanding, start-aligned confirmations plus compatible
-                // persistent enrolled identity may recover the phrase.
-                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                wake_match = Some(crate::wake_phrase::Match {
-                    start_seconds: None,
-                    end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
-                    matched_keyword: None,
-                    audio_end_seconds: None,
-                });
-                log::info!(
-                    "[wake-phrase] terminal enrolled owner recovered overlap-degraded phrase embedded_session_id={} confirmations={} end_s={:.3}",
-                    embedded_session_id,
-                    candidate.local_owner_overlap_near_confirmations,
-                    LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS
-                );
-            }
-            if wake_match.is_none()
-                && std::env::var("LISTENER_ENABLE_SUSTAINED_NEAR_PHRASE_RESCUE")
-                    .as_deref()
-                    == Ok("1")
-                && crate::speech_decision_kernel::sustained_near_phrase_wake_can_activate(
-                    candidate.owner_near_phrase_confirmations,
-                )
-            {
-                // 声纹失明兜底——2026-09-23 15:37 实战首开即误报后默认关闭
-                // (opt-in)：剧集音频 4 秒内在同一 window_start 滚动重听累计
-                // 5 票(distance=2),确认数不是独立证据;声纹 0.133 落在媒体带
-                // (0.01-0.11)与本人带(0.2+)之间的灰区。重设计要求:确认须来自
-                // 不同 window_start + owner 地板 0.15,并先对 diag-tks-20260923
-                // 的误报 WAV 与上午真样本跑离线矩阵。开启=
-                // LISTENER_ENABLE_SUSTAINED_NEAR_PHRASE_RESCUE=1。接受后下方
-                // !enrolled_owner_matched 分支仍会尝试分离升级归属。
-                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                wake_match = Some(crate::wake_phrase::Match {
-                    start_seconds: None,
-                    end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
-                    matched_keyword: None,
-                    audio_end_seconds: None,
-                });
-                log::info!(
-                    "[wake-phrase] sustained near-phrase wake rescued (owner-blind) embedded_session_id={} confirmations={} owner_score={:.6}",
-                    embedded_session_id,
-                    candidate.owner_near_phrase_confirmations,
-                    verification.as_ref().map(|result| result.score).unwrap_or_default()
-                );
-            }
             let mut owner_verified_by_extraction = false;
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             if wake_match.is_none()
@@ -2286,10 +2166,8 @@ impl EmbeddedStreamingDictation {
                     baseline_samples,
                     interference_owner_rise
                 );
-                let source_owner_compatible =
-                    terminal_wake_source_owner_compatible(&verification);
-                let extraction_was_prefetched =
-                    candidate.target_wake_extraction_task.is_some();
+                let source_owner_compatible = terminal_wake_source_owner_compatible(&verification);
+                let extraction_was_prefetched = candidate.target_wake_extraction_task.is_some();
                 maybe_start_terminal_owner_compatible_wake_extraction(
                     &mut candidate,
                     &phrase,
@@ -2298,8 +2176,8 @@ impl EmbeddedStreamingDictation {
                     interference_owner_rise,
                     wake_match.is_some(),
                 );
-                let lazy_terminal_extraction_started = !extraction_was_prefetched
-                    && candidate.target_wake_extraction_task.is_some();
+                let lazy_terminal_extraction_started =
+                    !extraction_was_prefetched && candidate.target_wake_extraction_task.is_some();
                 if let Some(evidence) = terminal_target_wake_evidence(
                     &mut candidate,
                     inner,
@@ -2310,10 +2188,9 @@ impl EmbeddedStreamingDictation {
                 )
                 .await
                 {
-                    local_confirmation_ms = local_confirmation_ms
-                        .saturating_add(evidence.local_confirmation_ms);
-                    phrase_signal =
-                        denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                    local_confirmation_ms =
+                        local_confirmation_ms.saturating_add(evidence.local_confirmation_ms);
+                    phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
                     wake_match = Some(evidence.wake_match);
                     owner_verified_by_extraction = evidence.owner_verified_by_extraction;
                     log::info!(
@@ -2336,16 +2213,19 @@ impl EmbeddedStreamingDictation {
                 .map(|_| phrase_signal)
                 .unwrap_or(denzic_voice_activation_v1_core::PhraseSignal::None);
             let verified_pcm_ms = candidate.pcm.len() / 32;
-            let (owner_gate, arbitration) = arbitrate_candidate_wake(
+            let (owner_gate, arbitration, effective_phrase_signal) = arbitrate_candidate_wake(
                 &mut candidate,
                 effective_phrase_signal,
+                wake_match.as_ref(),
+                &phrase,
                 &verification,
                 owner_verified_by_extraction,
                 true,
                 verified_pcm_ms,
             );
             let gate_decision = arbitration.decision;
-            let enrolled_owner_matched = arbitration.owner_access.enrolled_owner_verified();
+            let owner_access = arbitration.owner_access;
+            let enrolled_owner_matched = owner_access.enrolled_owner_verified();
             log::info!(
                 "[wake-phrase] automatic streaming gate embedded_session_id={} terminal=true pcm_ms={} kws_fed_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} total_compute_ms={} phrase_signal={:?} gate_decision={:?} owner_policy={} enrolled_owner_matched={} owner_recovered_by_local_phrase={}",
                 embedded_session_id,
@@ -2361,18 +2241,8 @@ impl EmbeddedStreamingDictation {
                 enrolled_owner_matched,
                 owner_gate.recovered_by_local_phrase
             );
-            if wake_match.is_none()
-                && gate_decision == denzic_voice_activation_v1_core::GateDecision::Accept
-            {
-                log::info!(
-                    "[wake-phrase] terminal enrolled-owner keep-wake without local phrase embedded_session_id={embedded_session_id}"
-                );
-                wake_match = Some(crate::wake_phrase::Match {
-                    start_seconds: None,
-                    end_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
-                    matched_keyword: None,
-                    audio_end_seconds: None,
-                });
+            if effective_phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::None {
+                wake_match = None;
             }
             let Some(wake_match) = wake_match else {
                 log::info!(
@@ -2445,7 +2315,12 @@ impl EmbeddedStreamingDictation {
                     0,
                 );
                 self.preserve_candidate_fact_ledger(&mut candidate);
-                reject_hidden_automatic_candidate(inner, reason, embedded_session_id, HiddenCandidateTransportState::Ended);
+                reject_hidden_automatic_candidate(
+                    inner,
+                    reason,
+                    embedded_session_id,
+                    HiddenCandidateTransportState::Ended,
+                );
                 return Ok(true);
             }
             let result = match verification {
@@ -2464,9 +2339,17 @@ impl EmbeddedStreamingDictation {
                 phrase,
                 wake_match.end_seconds
             );
-            local_speaker_seed = Some((
-                candidate.pcm.clone(),
+            let identity_seed = local_speaker_identity_seed(
+                &candidate.pcm,
+                candidate.pcm_base_offset,
                 wake_match.end_seconds,
+                wake_match.audio_end_seconds.is_some(),
+                candidate.owner_local_phrase_source_range,
+                owner_access,
+            );
+            local_speaker_seed = Some((
+                identity_seed.pcm,
+                identity_seed.profile_end_seconds,
                 phrase.clone(),
                 enrolled_owner_matched,
             ));
@@ -2481,13 +2364,13 @@ impl EmbeddedStreamingDictation {
             // its speaker anchor. The old terminal path retained only
             // `wake_pcm`, so the fresh continuation session started without
             // the already-received tail and could lose the first words.
-            let terminal_wake_body = candidate.terminal_wake_body(post_wake_offset);
-            let wake_anchor_offset =
-                wake_speaker_anchor_pcm_offset_bytes(
-                    wake_match.start_seconds,
-                    wake_match.end_seconds,
-                    candidate.pcm.len(),
-                );
+            let mut terminal_wake_body = candidate.terminal_wake_body(post_wake_offset);
+            terminal_wake_body.retained_verification_source = retained_verification_source;
+            let wake_anchor_offset = wake_speaker_anchor_pcm_offset_bytes(
+                wake_match.start_seconds,
+                wake_match.end_seconds,
+                candidate.pcm.len(),
+            );
             let candidate_pcm_before = candidate.pcm.len();
             let pcm_base_before = candidate.pcm_base_offset;
             candidate.pcm.drain(..wake_anchor_offset);
@@ -2510,9 +2393,9 @@ impl EmbeddedStreamingDictation {
             // Opening a host dictation session with <1s post-wake scrap produces
             // empty ASR + Error capsule (owner: completely unusable).
             const MIN_POST_WAKE_DICTATION_PCM_BYTES: usize = 16_000 * 2; // 1.0 s
-            // Terminal STOP means the VA window is over. Attaching dictation to
-            // the dying clip produced 2152: 11 wake chars, then empty insert.
-            // Always open a fresh host recording for the body.
+                                                                         // Terminal STOP means the VA window is over. Attaching dictation to
+                                                                         // the dying clip produced 2152: 11 wake chars, then empty insert.
+                                                                         // Always open a fresh host recording for the body.
             {
                 log::info!(
                     "[wake-phrase] terminal accept requires body continuation embedded_session_id={} post_wake_pcm_ms={} min_ms={}",
@@ -2530,7 +2413,10 @@ impl EmbeddedStreamingDictation {
                         .expect("accepted terminal wake has a speaker seed")
                         .0
                         .clone(),
-                    wake_match.end_seconds,
+                    local_speaker_seed
+                        .as_ref()
+                        .expect("accepted terminal wake has a speaker seed")
+                        .1,
                     phrase.clone(),
                     enrolled_owner_matched,
                     terminal_wake_body,
@@ -2720,7 +2606,11 @@ impl EmbeddedStreamingDictation {
         session.source_admission_ledger = Arc::clone(&candidate.source_admission_ledger);
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         let source_integrity_ledger = Arc::clone(&session.source_admission_ledger);
-        register_embedded_source_integrity_ledger(inner, session.session_id, &source_integrity_ledger);
+        register_embedded_source_integrity_ledger(
+            inner,
+            session.session_id,
+            &source_integrity_ledger,
+        );
         self.session = Some(session);
         let session = self
             .session
@@ -2736,14 +2626,11 @@ impl EmbeddedStreamingDictation {
         let mut release_outcome_unknown = false;
         let mut release_offset = 0usize;
         while release_offset < candidate.pcm.len() {
-            let release_end = (release_offset + EMBEDDED_AUDIO_FEED_CHUNK_BYTES)
-                .min(candidate.pcm.len());
+            let release_end =
+                (release_offset + EMBEDDED_AUDIO_FEED_CHUNK_BYTES).min(candidate.pcm.len());
             let release_bytes = release_end - release_offset;
-            let candidate_range = candidate_slice_range(
-                candidate.pcm_base_offset,
-                release_offset,
-                release_bytes,
-            );
+            let candidate_range =
+                candidate_slice_range(candidate.pcm_base_offset, release_offset, release_bytes);
             let source_runs = candidate.source_facts_for_range(candidate_range);
             let release_operation_id = candidate.next_operation_id();
             candidate.record_fact_with_operation_id(
@@ -2774,16 +2661,14 @@ impl EmbeddedStreamingDictation {
             let destination_range = destination_start
                 .zip(session.accepted_pcm_cursor.position())
                 .and_then(|(start, end)| {
-                    (end >= start && end - start == release_bytes as u64).then_some(
-                        crate::observability::PcmRange { start, end },
-                    )
+                    (end >= start && end - start == release_bytes as u64)
+                        .then_some(crate::observability::PcmRange { start, end })
                 });
             let accepted_bytes = session
                 .streamed_pcm_bytes
                 .saturating_sub(accepted_bytes_before);
             if accepted_bytes > 0 {
-                let source_admission_operation_id =
-                    session.next_source_admission_operation_id();
+                let source_admission_operation_id = session.next_source_admission_operation_id();
                 record_candidate_release_source_dependencies(
                     &candidate,
                     candidate_range,
@@ -2871,7 +2756,8 @@ impl EmbeddedStreamingDictation {
                         Some("coordinator_rejected_release"),
                     );
                     session.candidate_id = Some(candidate.candidate_id);
-                    session.candidate_fact_ledger = Some(std::mem::take(&mut candidate.fact_ledger));
+                    session.candidate_fact_ledger =
+                        Some(std::mem::take(&mut candidate.fact_ledger));
                     return Err(err);
                 }
             }
@@ -3032,7 +2918,11 @@ impl EmbeddedStreamingDictation {
         session.candidate_id = Some(candidate.candidate_id);
         session.candidate_fact_ledger = Some(std::mem::take(&mut candidate.fact_ledger));
         let source_integrity_ledger = Arc::clone(&session.source_admission_ledger);
-        register_embedded_source_integrity_ledger(inner, session.session_id, &source_integrity_ledger);
+        register_embedded_source_integrity_ledger(
+            inner,
+            session.session_id,
+            &source_integrity_ledger,
+        );
         self.session = Some(session);
         let session = self
             .session
@@ -3142,20 +3032,15 @@ impl EmbeddedStreamingDictation {
                 pending => pending,
             }
         };
-        // The terminal path already accepts two repeated near-phrase readings
-        // with an enrolled owner match. When KWS independently saw the phrase,
-        // offer that same decision while the buffer is still live instead of
-        // waiting for the firmware segment to end. The actual owner score is
-        // checked below before this candidate can activate a session.
-        let mut live_repeated_owner_near = false;
+        // Live and terminal admission require complete intent independently
+        // of owner identity. A pending phrase retains its own source proof.
         let (
             wake_match,
-            phrase_signal,
+            mut phrase_signal,
             local_confirmation_ms,
             kws_step_ms,
             owner_verified_by_extraction,
-        ) = if let Some(pending) = pending_phrase_match
-        {
+        ) = if let Some(pending) = pending_phrase_match {
             log::info!(
                     "[wake-phrase] pending phrase hit reached real owner window embedded_session_id={} pcm_ms={} owner_window_ms={}",
                     embedded_session_id,
@@ -3235,9 +3120,11 @@ impl EmbeddedStreamingDictation {
                         );
                     }
                 }
-                let feed_start = rotation_start_bytes.unwrap_or(candidate.kws_fed_bytes.max(
-                    candidate.kws_stream_origin_bytes,
-                ));
+                let feed_start = rotation_start_bytes.unwrap_or(
+                    candidate
+                        .kws_fed_bytes
+                        .max(candidate.kws_stream_origin_bytes),
+                );
                 let new_pcm = candidate.pcm[feed_start..].to_vec();
                 let incremental_pcm = candidate.pcm[candidate.kws_fed_bytes..].to_vec();
                 let incremental_feed_start = candidate.kws_fed_bytes;
@@ -3369,7 +3256,9 @@ impl EmbeddedStreamingDictation {
                     .pcm
                     .len()
                     .checked_sub(actual_feed_start)
-                    .and_then(|available| (actual_feed_bytes <= available).then_some(actual_feed_bytes))
+                    .and_then(|available| {
+                        (actual_feed_bytes <= available).then_some(actual_feed_bytes)
+                    })
                     .unwrap_or(0);
                 candidate.record_fact(
                     candidate_observation.as_ref(),
@@ -3463,12 +3352,22 @@ impl EmbeddedStreamingDictation {
                     }
                     maybe_prefetch_owner_verification(candidate, &phrase, embedded_session_id);
                     refresh_owner_verification_prefetch_for_wake(
-                        candidate, &phrase, embedded_session_id,
+                        candidate,
+                        &phrase,
+                        embedded_session_id,
                         kws_hit.as_ref().expect("keyword hit checked"),
                     );
                 }
             }
-            let wake_match = {
+            let wake_match = if kws_hit.as_ref().is_some_and(|found| {
+                found.complete_phrase_signal(&phrase)
+                    != denzic_voice_activation_v1_core::PhraseSignal::None
+            }) {
+                let found = kws_hit.expect("complete keyword evidence checked");
+                phrase_signal = found.complete_phrase_signal(&phrase);
+                log::info!("[wake-phrase] live complete keyword admitted embedded_session_id={embedded_session_id}; secondary transcript cannot veto phrase evidence");
+                Some(found)
+            } else {
                 #[cfg(target_os = "windows")]
                 {
                     let completed_task = {
@@ -3480,10 +3379,8 @@ impl EmbeddedStreamingDictation {
                             let window_origin_bytes = candidate
                                 .local_confirmation_window_origin_bytes
                                 .min(candidate.pcm.len());
-                            let window_pcm_bytes = candidate
-                                .pcm
-                                .len()
-                                .saturating_sub(window_origin_bytes);
+                            let window_pcm_bytes =
+                                candidate.pcm.len().saturating_sub(window_origin_bytes);
                             let defer_exploratory =
                                 should_defer_exploratory_local_confirmation_for_fast_preroll(
                                     kws_hit.is_some(),
@@ -3519,11 +3416,12 @@ impl EmbeddedStreamingDictation {
                                 && new_audio_since_last >= KWS_LOCAL_CONFIRM_RETRY_BYTES
                                 && candidate.kws_local_absent_count
                                     < KWS_SECONDARY_ABSENT_REJECT_COUNT;
-                            let prefix_retry = candidate.local_confirmation_prefix_retry.should_start(
-                                ladder_snapshot.is_some(),
-                                candidate.local_confirmation_attempts,
-                                new_audio_since_last,
-                            );
+                            let prefix_retry =
+                                candidate.local_confirmation_prefix_retry.should_start(
+                                    ladder_snapshot.is_some(),
+                                    candidate.local_confirmation_attempts,
+                                    new_audio_since_last,
+                                );
                             // 2026-09-22 跟手③:音近证据在窗 → ~250ms 新音频就跟一拍
                             // stage2,不等稀疏梯子的下一档(最坏 3.0→5.0 隔 2s)。
                             let near_retry =
@@ -3557,8 +3455,7 @@ impl EmbeddedStreamingDictation {
                                 let threshold_pcm_ms = ladder_snapshot
                                     .map(|bytes| bytes / 32)
                                     .unwrap_or(snapshot_pcm_ms);
-                                candidate.local_confirmation_last_snapshot_bytes =
-                                    window_pcm_bytes;
+                                candidate.local_confirmation_last_snapshot_bytes = window_pcm_bytes;
                                 // A keyword hit keeps the established full-candidate
                                 // confirmation. Exploratory local confirmation follows
                                 // the same rolling origin as KWS so early ambient
@@ -3568,20 +3465,26 @@ impl EmbeddedStreamingDictation {
                                 } else {
                                     window_origin_bytes
                                 };
-                                let confirmation_pcm =
-                                    candidate.pcm[task_origin_bytes..].to_vec();
+                                let confirmation_pcm = candidate.pcm[task_origin_bytes..].to_vec();
                                 let confirmation_pcm_ms = confirmation_pcm.len() / 32;
-                                candidate.local_confirmation_task_origin_bytes =
-                                    task_origin_bytes;
-                                candidate.local_confirmation_task_source_range = candidate.current_candidate_range();
+                                candidate.local_confirmation_task_origin_bytes = task_origin_bytes;
+                                candidate.local_confirmation_task_source_range =
+                                    slice_candidate_range(
+                                        candidate.current_candidate_range(),
+                                        task_origin_bytes,
+                                        confirmation_pcm.len(),
+                                    );
                                 candidate.owner_local_phrase_source_range = None;
-                                prefetch_owner_for_local_confirmation(candidate, &phrase, embedded_session_id);
+                                prefetch_owner_for_local_confirmation(
+                                    candidate,
+                                    &phrase,
+                                    embedded_session_id,
+                                );
                                 candidate.local_confirmation_task_has_keyword_model_hit =
                                     kws_hit.is_some();
-                                candidate.local_confirmation_task_started_at =
-                                    Some(Instant::now());
-                                candidate.local_confirmation_task = Some(
-                                    spawn_local_wake_confirmation(
+                                candidate.local_confirmation_task_started_at = Some(Instant::now());
+                                candidate.local_confirmation_task =
+                                    Some(spawn_local_wake_confirmation(
                                         inner,
                                         LocalWakeConfirmationDiagnosticContext {
                                             embedded_session_id,
@@ -3596,8 +3499,7 @@ impl EmbeddedStreamingDictation {
                                         confirmation_pcm,
                                         phrase.clone(),
                                         kws_hit.is_none(),
-                                    ),
-                                );
+                                    ));
                                 log::info!(
                                         "[wake-phrase] stage2 local confirm started embedded_session_id={} attempt={} threshold_pcm_ms={} snapshot_pcm_ms={} window_origin_pcm_ms={} window_pcm_ms={} kws_hit={} kws_immediate={} kws_retry={} prefix_retry={} near_retry={}",
                                         embedded_session_id,
@@ -3633,8 +3535,12 @@ impl EmbeddedStreamingDictation {
                             None
                         }
                     };
-                    if let Some((task, task_origin_bytes, task_has_keyword_model_hit, task_source_range)) =
-                        completed_task
+                    if let Some((
+                        task,
+                        task_origin_bytes,
+                        task_has_keyword_model_hit,
+                        task_source_range,
+                    )) = completed_task
                     {
                         let task_result = task.await;
                         // 跟手③:在飞标记先捕获后清除——matched/提升/错误等所有
@@ -3680,8 +3586,8 @@ impl EmbeddedStreamingDictation {
                             }
                             match task_result {
                                 Ok(Ok(result)) => {
-                                local_confirmation_ms = result.inference_ms;
-                                log::info!(
+                                    local_confirmation_ms = result.inference_ms;
+                                    log::info!(
                                         "[wake-phrase] stage2 local confirm finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} phonetic_prefix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={} window_origin_pcm_ms={} kws_hit={}",
                                         embedded_session_id,
                                         result.matched,
@@ -3695,54 +3601,72 @@ impl EmbeddedStreamingDictation {
                                         task_origin_bytes / 32,
                                         task_has_keyword_model_hit
                                 );
-                                let fusion_matched = result.matched
-                                    && local_confirmation_can_activate(
-                                        task_has_keyword_model_hit,
-                                        result.phrase_relation,
-                                    );
-                                if result.matched && !fusion_matched {
-                                    if let Some(candidate) = self.speaker_candidate.as_mut() {
-                                        candidate.local_kws_fusion_evidence = true;
-                                    }
-                                    log::info!(
+                                    let fusion_matched = result.matched
+                                        && local_confirmation_can_activate(
+                                            task_has_keyword_model_hit,
+                                            result.phrase_relation,
+                                        );
+                                    if result.matched && !fusion_matched {
+                                        if let Some(candidate) = self.speaker_candidate.as_mut() {
+                                            candidate.local_kws_fusion_evidence = true;
+                                        }
+                                        log::info!(
                                         "[wake-phrase] local-only PresentLater held for stage1 embedded_session_id={} phrase_relation={:?}",
                                         embedded_session_id,
                                         result.phrase_relation
                                     );
-                                }
-                                if fusion_matched {
-                                    let refined_end = kws_hit
-                                        .as_ref()
-                                        .map(|found| found.end_seconds)
-                                        .unwrap_or(0.0);
-                                    let refined_end = refined_wake_end_seconds(
-                                        refined_end,
-                                        &result,
-                                        phrase.chars().count(),
-                                    );
-                                    let refined_end = if task_has_keyword_model_hit {
-                                        refined_end
-                                    } else {
-                                        refined_end
-                                            + task_origin_bytes as f32 / 32_000.0
-                                    };
-                                    phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                                    if let Some(candidate) = self.speaker_candidate.as_mut() {
-                                        candidate.owner_local_phrase_source_range = task_source_range;
-                                        show_early_wake_recording_capsule(inner, candidate);
                                     }
-                                    Some(crate::wake_phrase::Match {
-                                        audio_end_seconds: kws_hit.as_ref().and_then(|found| found.audio_end_seconds),
-                                        start_seconds: kws_hit
+                                    if fusion_matched {
+                                        let refined_end = kws_hit
                                             .as_ref()
-                                            .and_then(|found| found.start_seconds),
-                                        end_seconds: refined_end,
-                                        matched_keyword: kws_hit
-                                            .and_then(|found| found.matched_keyword),
-                                    })
-                                } else if !result.matched {
-                                    let phrase_chars = phrase.chars().count();
-                                    if crate::speech_decision_kernel::owner_near_phrase_evidence_can_accumulate(
+                                            .map(|found| found.end_seconds)
+                                            .unwrap_or(0.0);
+                                        let refined_end = refined_wake_end_seconds(
+                                            refined_end,
+                                            &result,
+                                            phrase.chars().count(),
+                                        );
+                                        let refined_end = if task_has_keyword_model_hit {
+                                            refined_end
+                                        } else {
+                                            refined_end + task_origin_bytes as f32 / 32_000.0
+                                        };
+                                        phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                                        if let Some(candidate) = self.speaker_candidate.as_mut() {
+                                            candidate.owner_local_phrase_source_range =
+                                                local_confirmation_source_range(
+                                                    &result,
+                                                    task_source_range,
+                                                    task_origin_bytes,
+                                                );
+                                            candidate.retain_complete_local_wake_intent(&result);
+                                            if qualify_candidate_wake_intent(
+                                                phrase_signal,
+                                                kws_hit.as_ref().map(|found| found.phrase_evidence_for(&phrase))
+                                                    .unwrap_or(crate::speech_decision_kernel::KeywordPhraseEvidence::Unobserved),
+                                                candidate.complete_local_wake_intent,
+                                                candidate.current_candidate_range(),
+                                                false,
+                                            ) != denzic_voice_activation_v1_core::PhraseSignal::None {
+                                                show_early_wake_recording_capsule(inner, candidate);
+                                            }
+                                        }
+                                        Some(crate::wake_phrase::Match {
+                                            audio_end_seconds: kws_hit
+                                                .as_ref()
+                                                .and_then(|found| found.audio_end_seconds),
+                                            start_seconds: kws_hit
+                                                .as_ref()
+                                                .and_then(|found| found.start_seconds),
+                                            end_seconds: refined_end,
+                                            origin: kws_hit.as_ref().map(|found| found.origin)
+                                                .unwrap_or(crate::wake_phrase::KeywordEvidenceOrigin::PrimaryDetector),
+                                            matched_keyword: kws_hit
+                                                .and_then(|found| found.matched_keyword),
+                                        })
+                                    } else if !result.matched {
+                                        let phrase_chars = phrase.chars().count();
+                                        if crate::speech_decision_kernel::owner_near_phrase_evidence_can_accumulate(
                                         result.phrase_relation == crate::wake_phrase::LocalPhraseRelation::Absent,
                                         result.phonetic_best_distance,
                                         result.phonetic_best_window_start,
@@ -3766,76 +3690,6 @@ impl EmbeddedStreamingDictation {
                                             );
                                         }
                                     }
-                                    let (bounded_followup, current_window_origin_bytes) = self
-                                        .speaker_candidate
-                                        .as_ref()
-                                        .map(|candidate| {
-                                            (
-                                                candidate
-                                                    .local_confirmation_prefix_retry
-                                                    .task_is_retry,
-                                                candidate
-                                                    .local_confirmation_window_origin_bytes,
-                                            )
-                                        })
-                                        .unwrap_or_default();
-                                    let live_owner_near = live_owner_near_wake_can_attempt(
-                                        crate::speaker_verification::is_enrolled_for_phrase(
-                                            &phrase,
-                                        ),
-                                        bounded_followup,
-                                        &result,
-                                        phrase_chars,
-                                        task_origin_bytes,
-                                        current_window_origin_bytes,
-                                    );
-                                    if live_owner_near {
-                                        let wake_end_seconds = live_owner_near_wake_end_seconds(
-                                            &result,
-                                            phrase_chars,
-                                            task_origin_bytes,
-                                        );
-                                        phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                                        // This is deliberately weaker than a complete local
-                                        // phrase match. Keep the candidate hidden until the
-                                        // normal enrolled-owner arbitration below accepts it;
-                                        // otherwise another speaker's near phrase could flash a
-                                        // false Recording capsule before being rejected.
-                                        log::info!(
-                                            "[wake-phrase] bounded rolling owner near-match promoted to voiceprint gate embedded_session_id={} origin_pcm_ms={} prefix_units={} distance={} transcript_chars={} wake_end_s={:.3}",
-                                            embedded_session_id,
-                                            task_origin_bytes / 32,
-                                            result.phonetic_prefix_units,
-                                            result.phonetic_best_distance,
-                                            result.transcript_chars,
-                                            wake_end_seconds
-                                        );
-                                        Some(crate::wake_phrase::Match {
-                                            start_seconds: Some(
-                                                task_origin_bytes as f32 / 32_000.0,
-                                            ),
-                                            end_seconds: wake_end_seconds,
-                                            matched_keyword: None,
-                                            audio_end_seconds: None,
-                                        })
-                                    } else if self.speaker_candidate.as_ref().is_some_and(|candidate| {
-                                        crate::speech_decision_kernel::live_repeated_owner_near_phrase_can_verify(
-                                            task_has_keyword_model_hit && kws_hit.is_some(),
-                                            crate::speaker_verification::is_enrolled_for_phrase(&phrase),
-                                            owner_verification_window_ready(candidate.pcm.len(), true),
-                                            candidate.owner_near_phrase_confirmations,
-                                        )
-                                    })
-                                    {
-                                        live_repeated_owner_near = true;
-                                        phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                                        log::info!(
-                                            "[wake-phrase] live repeated owner near-phrase offered to voiceprint gate embedded_session_id={} confirmations={}",
-                                            embedded_session_id,
-                                            self.speaker_candidate.as_ref().map(|candidate| candidate.owner_near_phrase_confirmations).unwrap_or_default(),
-                                        );
-                                        kws_hit.clone()
-                                    } else {
                                     let absent = {
                                         let candidate = self
                                             .speaker_candidate
@@ -3906,37 +3760,35 @@ impl EmbeddedStreamingDictation {
                                         );
                                     }
                                     None
+                                    } else {
+                                        None
                                     }
-                                } else {
-                                    None
                                 }
-                            }
-                            Ok(Err(err)) => {
-                                if crate::asr::local::wake_helper::is_busy_error(&err) {
-                                    log::info!(
+                                Ok(Err(err)) => {
+                                    if crate::asr::local::wake_helper::is_busy_error(&err) {
+                                        log::info!(
                                         "[wake-phrase] stage2 local confirm busy; retrying without queue embedded_session_id={} kws_hit={}",
                                         embedded_session_id,
                                         kws_hit.is_some()
                                     );
-                                    None
-                                } else {
-                                    log::warn!(
+                                        None
+                                    } else {
+                                        log::warn!(
                                         "[wake-phrase] stage2 local confirm unavailable embedded_session_id={embedded_session_id}: {err}"
                                     );
-                                    let explicit_absent_count = self
-                                        .speaker_candidate
-                                        .as_ref()
-                                        .and_then(|candidate| {
-                                            kws_hit.as_ref().map(|wake_match| {
-                                                keyword_fallback_absent_count(
-                                                    candidate,
-                                                    wake_match,
-                                                )
+                                        let explicit_absent_count = self
+                                            .speaker_candidate
+                                            .as_ref()
+                                            .and_then(|candidate| {
+                                                kws_hit.as_ref().map(|wake_match| {
+                                                    keyword_fallback_absent_count(
+                                                        candidate, wake_match,
+                                                    )
+                                                })
                                             })
-                                        })
-                                        .unwrap_or(0);
-                                    if secondary_fallback_can_accept_keyword(
-                                        kws_hit.is_some(),
+                                            .unwrap_or(0);
+                                        if secondary_fallback_can_accept_keyword(
+                                        kws_hit.as_ref().is_some_and(|found| found.complete_phrase_signal(&phrase) != denzic_voice_activation_v1_core::PhraseSignal::None),
                                         explicit_absent_count,
                                     ) {
                                         let kws = kws_hit.expect("fallback requires keyword hit");
@@ -3954,23 +3806,23 @@ impl EmbeddedStreamingDictation {
                                         );
                                         None
                                     }
+                                    }
                                 }
-                            }
-                            Err(err) => {
-                                log::warn!(
+                                Err(err) => {
+                                    log::warn!(
                                         "[wake-phrase] stage2 local confirm task failed embedded_session_id={embedded_session_id}: {err}"
                                     );
-                                let explicit_absent_count = self
-                                    .speaker_candidate
-                                    .as_ref()
-                                    .and_then(|candidate| {
-                                        kws_hit.as_ref().map(|wake_match| {
-                                            keyword_fallback_absent_count(candidate, wake_match)
+                                    let explicit_absent_count = self
+                                        .speaker_candidate
+                                        .as_ref()
+                                        .and_then(|candidate| {
+                                            kws_hit.as_ref().map(|wake_match| {
+                                                keyword_fallback_absent_count(candidate, wake_match)
+                                            })
                                         })
-                                    })
-                                    .unwrap_or(0);
-                                if secondary_fallback_can_accept_keyword(
-                                    kws_hit.is_some(),
+                                        .unwrap_or(0);
+                                    if secondary_fallback_can_accept_keyword(
+                                    kws_hit.as_ref().is_some_and(|found| found.complete_phrase_signal(&phrase) != denzic_voice_activation_v1_core::PhraseSignal::None),
                                     explicit_absent_count,
                                 ) {
                                     let kws = kws_hit.expect("fallback requires keyword hit");
@@ -3988,8 +3840,8 @@ impl EmbeddedStreamingDictation {
                                     );
                                     None
                                 }
+                                }
                             }
-                        }
                         }
                     } else if let Some(kws) = kws_hit {
                         let kws_waited_ms = self
@@ -4004,20 +3856,14 @@ impl EmbeddedStreamingDictation {
                             .and_then(|c| c.local_confirmation_task_started_at)
                             .map(|t| t.elapsed().as_millis() as u64)
                             .unwrap_or(0);
-                        let waited_ms = effective_secondary_waited_ms(
-                            kws_waited_ms,
-                            confirmation_attempt_ms,
-                        );
+                        let waited_ms =
+                            effective_secondary_waited_ms(kws_waited_ms, confirmation_attempt_ms);
                         let explicit_absent_count = self
                             .speaker_candidate
                             .as_ref()
                             .map(|candidate| keyword_fallback_absent_count(candidate, &kws))
                             .unwrap_or(0);
-                        match pending_secondary_decision(
-                            true,
-                            waited_ms,
-                            explicit_absent_count,
-                        ) {
+                        match pending_secondary_decision(true, waited_ms, explicit_absent_count) {
                             PendingSecondaryDecision::HoldAfterExplicitAbsent => {
                                 log::info!(
                                     "[wake-phrase] stage2 timeout held after explicit Absent embedded_session_id={} waited_ms={} kws_waited_ms={} secondary_attempt_ms={} budget_ms={} absent_count={}",
@@ -4044,8 +3890,7 @@ impl EmbeddedStreamingDictation {
                 #[cfg(not(target_os = "windows"))]
                 {
                     if kws_hit.is_some() {
-                        phrase_signal =
-                            denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                        phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
                     }
                     kws_hit
                 }
@@ -4053,15 +3898,10 @@ impl EmbeddedStreamingDictation {
             let Some(wake_match) = wake_match else {
                 return Ok(false);
             };
-            let phrase_enrolled =
-                crate::speaker_verification::is_enrolled_for_phrase(&phrase);
-            if self
-                .speaker_candidate
-                .as_ref()
-                .is_some_and(|candidate| {
-                    !owner_verification_window_ready(candidate.pcm.len(), phrase_enrolled)
-                })
-            {
+            let phrase_enrolled = crate::speaker_verification::is_enrolled_for_phrase(&phrase);
+            if self.speaker_candidate.as_ref().is_some_and(|candidate| {
+                !owner_verification_window_ready(candidate.pcm.len(), phrase_enrolled)
+            }) {
                 let candidate = self
                     .speaker_candidate
                     .as_mut()
@@ -4095,75 +3935,70 @@ impl EmbeddedStreamingDictation {
             .speaker_candidate
             .as_mut()
             .ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
-        let pcm = candidate.pcm.clone();
-        let pcm_ms = pcm.len() / 32;
+        let pcm_ms = candidate.pcm.len() / 32;
         let kws_ms = candidate.kws_total_ms;
         let voiceprint_phrase = phrase.clone();
-        // Repeated near-phrase recovery relies on the newer confirmation
-        // window, so its identity evidence must cover that same accumulated
-        // audio. A completed exact keyword keeps the ordinary fast reuse path.
+        // Identity reuse covers the actual admitted phrase source. Near
+        // guesses stay hidden and cannot supply an identity or command range.
         let required_wake_range = owner_verification_required_wake_range(
-            candidate, &wake_match, live_repeated_owner_near,
+            candidate,
+            &wake_match,
+            false,
         );
-        let prefetched = candidate.owner_verification_task.take().filter(|prefetched| {
-            owner_verification_covers_wake(prefetched.source_range, required_wake_range)
-        });
-        let verified_pcm_ms = prefetched.as_ref().and_then(|prefetched| prefetched.source_range)
-            .map(|range| ((range.end - range.start) / 32) as usize).unwrap_or(pcm_ms);
+        let prefetched = candidate
+            .owner_verification_task
+            .take()
+            .filter(|prefetched| {
+                owner_verification_covers_wake(prefetched.source_range, required_wake_range)
+            });
+        let verified_pcm_ms = prefetched
+            .as_ref()
+            .and_then(|prefetched| prefetched.source_range)
+            .map(|range| ((range.end - range.start) / 32) as usize)
+            .unwrap_or(pcm_ms);
         let owner_join_started = Instant::now();
-        let verification_task = match prefetched {
-            Some(prefetched) => prefetched.task.await,
+        let (verification_input, verification_task) = match prefetched {
+            Some(prefetched) => (prefetched.input, prefetched.task.await),
             None => {
-                tauri::async_runtime::spawn_blocking(move || {
+                let input = WakeVerifierSnapshot::from_candidate(candidate);
+                let pcm = input.pcm.clone();
+                let completed = tauri::async_runtime::spawn_blocking(move || {
                     let started = Instant::now();
                     let result = crate::speaker_verification::verify(&pcm, &voiceprint_phrase);
                     (result, started.elapsed().as_millis() as u64)
                 })
-                .await
+                .await;
+                (input, completed)
             }
         };
         let (verification, voiceprint_ms) = match verification_task {
             Ok(result) => result,
             Err(err) => (Err(format!("声纹验证任务失败: {err}")), 0),
         };
+        let retained_wake_verification_source =
+            verification_input.observe_direct_result(&verification, candidate);
         let owner_join_wait_ms = owner_join_started.elapsed().as_millis() as u64;
         let total_ms = kws_ms
             .saturating_add(local_confirmation_ms)
             .saturating_add(voiceprint_ms);
-        if live_repeated_owner_near {
-            let accepted = verification.as_ref().is_ok_and(|result| {
-                crate::speech_decision_kernel::repeated_owner_near_phrase_wake_can_activate(
-                    result.enrolled_owner_matched(),
-                    result.score,
-                    candidate.owner_near_phrase_confirmations,
-                )
-            });
-            if !accepted {
-                log::info!(
-                    "[wake-phrase] live repeated owner near-phrase held by voiceprint embedded_session_id={} confirmations={} score={:.6}",
-                    embedded_session_id,
-                    candidate.owner_near_phrase_confirmations,
-                    verification.as_ref().map(|result| result.score).unwrap_or_default(),
-                );
-                return Ok(false);
-            }
-            log::info!(
-                "[wake-phrase] live repeated owner near-phrase verified embedded_session_id={} confirmations={} score={:.6}",
-                embedded_session_id,
-                candidate.owner_near_phrase_confirmations,
-                verification.as_ref().map(|result| result.score).unwrap_or_default(),
-            );
-        }
-        let (owner_gate, arbitration) = arbitrate_candidate_wake(
+        let (owner_gate, arbitration, qualified_intent) = arbitrate_candidate_wake(
             candidate,
             phrase_signal,
+            Some(&wake_match),
+            &phrase,
             &verification,
             owner_verified_by_extraction,
             false,
             verified_pcm_ms,
         );
+        phrase_signal = qualified_intent;
+        if phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::None {
+            log::info!("[wake-phrase] weak phrase retained for complete confirmation embedded_session_id={embedded_session_id}");
+            return Ok(false);
+        }
         let gate_decision = arbitration.decision;
-        let enrolled_owner_matched = arbitration.owner_access.enrolled_owner_verified();
+        let owner_access = arbitration.owner_access;
+        let enrolled_owner_matched = owner_access.enrolled_owner_verified();
         log::info!(
             "[wake-phrase] automatic streaming gate embedded_session_id={} terminal=false pcm_ms={} kws_fed_bytes={} kws_step_ms={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} total_compute_ms={} phrase_signal={:?} gate_decision={:?} owner_policy={} enrolled_owner_matched={} owner_recovered_by_local_phrase={} owner_ambiguous_confirmations={} owner_best_ambiguous_score={:.6} owner_verified_pcm_ms={} owner_join_wait_ms={}",
             embedded_session_id,
@@ -4212,9 +4047,7 @@ impl EmbeddedStreamingDictation {
                     return Ok(false);
                 }
             }
-            if let Some(retry_ms) =
-                next_owner_verification_retry_after(pcm_ms, &verification)
-            {
+            if let Some(retry_ms) = next_owner_verification_retry_after(pcm_ms, &verification) {
                 candidate.pending_phrase_match = Some(PendingAutomaticPhraseMatch {
                     wake_match,
                     phrase_signal,
@@ -4280,9 +4113,17 @@ impl EmbeddedStreamingDictation {
             .speaker_candidate
             .take()
             .ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
-        let local_speaker_seed = (
-            candidate.pcm.clone(),
+        let identity_seed = local_speaker_identity_seed(
+            &candidate.pcm,
+            candidate.pcm_base_offset,
             wake_match.end_seconds,
+            wake_match.audio_end_seconds.is_some(),
+            candidate.owner_local_phrase_source_range,
+            owner_access,
+        );
+        let local_speaker_seed = (
+            identity_seed.pcm,
+            identity_seed.profile_end_seconds,
             phrase.clone(),
             enrolled_owner_matched,
         );
@@ -4293,12 +4134,11 @@ impl EmbeddedStreamingDictation {
         let post_wake_offset =
             post_wake_pcm_offset_bytes(wake_match.end_seconds, candidate.pcm.len());
         let post_wake_pcm_bytes = candidate.pcm.len().saturating_sub(post_wake_offset);
-        let wake_anchor_offset =
-            wake_speaker_anchor_pcm_offset_bytes(
-                wake_match.start_seconds,
-                wake_match.end_seconds,
-                candidate.pcm.len(),
-            );
+        let wake_anchor_offset = wake_speaker_anchor_pcm_offset_bytes(
+            wake_match.start_seconds,
+            wake_match.end_seconds,
+            candidate.pcm.len(),
+        );
         let candidate_pcm_before = candidate.pcm.len();
         let pcm_base_before = candidate.pcm_base_offset;
         candidate.pcm.drain(..wake_anchor_offset);
@@ -4361,6 +4201,10 @@ impl EmbeddedStreamingDictation {
             local_speaker_seed.1,
             local_speaker_seed.2,
             local_speaker_seed.3,
+        );
+        session.attach_retained_wake_verification_source(
+            retained_wake_verification_source,
+            candidate.pcm_base_offset,
         );
         if !inner
             .recording_lifecycle
@@ -4430,19 +4274,33 @@ impl EmbeddedStreamingDictation {
                 wake_anchor_offset,
             );
         }
+        // Only this streaming provider supplies the retained-PCM word clock.
+        // Batch/local providers keep their existing activation normalization;
+        // they must not wait for timing callbacks they cannot produce.
+        if session.active_asr == "volcengine" {
+            bind_automatic_wake_confirmation_window(
+                inner,
+                session.session_id,
+                candidate.owner_local_phrase_source_range,
+                candidate.pcm_base_offset,
+            );
+        }
         // Automatic wake promotion keeps the candidate's live dependency
         // ledger; finalization must not fall back to the actor's bounded log.
         session.source_admission_ledger = Arc::clone(&candidate.source_admission_ledger);
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         let source_integrity_ledger = Arc::clone(&session.source_admission_ledger);
-        register_embedded_source_integrity_ledger(inner, session.session_id, &source_integrity_ledger);
+        register_embedded_source_integrity_ledger(
+            inner,
+            session.session_id,
+            &source_integrity_ledger,
+        );
         self.session = Some(session);
         self.accepted_wake_capture_ensure = Some(AcceptedWakeCaptureEnsure {
             request_id: ensure_request_id,
             previous_segment_id,
             requested_at: Instant::now(),
-            deadline_at: Instant::now()
-                + EMBEDDED_ACCEPTED_WAKE_CAPTURE_REPLACEMENT_TIMEOUT,
+            deadline_at: Instant::now() + EMBEDDED_ACCEPTED_WAKE_CAPTURE_REPLACEMENT_TIMEOUT,
             replacement_wait_started_at: None,
             confirmed_segment_id: None,
         });
@@ -4463,14 +4321,11 @@ impl EmbeddedStreamingDictation {
         let mut release_outcome_unknown = false;
         let mut release_offset = 0usize;
         while release_offset < candidate.pcm.len() {
-            let release_end = (release_offset + EMBEDDED_AUDIO_FEED_CHUNK_BYTES)
-                .min(candidate.pcm.len());
+            let release_end =
+                (release_offset + EMBEDDED_AUDIO_FEED_CHUNK_BYTES).min(candidate.pcm.len());
             let release_bytes = release_end - release_offset;
-            let candidate_range = candidate_slice_range(
-                candidate.pcm_base_offset,
-                release_offset,
-                release_bytes,
-            );
+            let candidate_range =
+                candidate_slice_range(candidate.pcm_base_offset, release_offset, release_bytes);
             let source_runs = candidate.source_facts_for_range(candidate_range);
             let release_operation_id = candidate.next_operation_id();
             candidate.record_fact_with_operation_id(
@@ -4501,16 +4356,14 @@ impl EmbeddedStreamingDictation {
             let destination_range = destination_start
                 .zip(session.accepted_pcm_cursor.position())
                 .and_then(|(start, end)| {
-                    (end >= start && end - start == release_bytes as u64).then_some(
-                        crate::observability::PcmRange { start, end },
-                    )
+                    (end >= start && end - start == release_bytes as u64)
+                        .then_some(crate::observability::PcmRange { start, end })
                 });
             let accepted_bytes = session
                 .streamed_pcm_bytes
                 .saturating_sub(accepted_bytes_before);
             if accepted_bytes > 0 {
-                let source_admission_operation_id =
-                    session.next_source_admission_operation_id();
+                let source_admission_operation_id = session.next_source_admission_operation_id();
                 record_candidate_release_source_dependencies(
                     &candidate,
                     candidate_range,
@@ -4598,7 +4451,8 @@ impl EmbeddedStreamingDictation {
                         Some("coordinator_rejected_release"),
                     );
                     session.candidate_id = Some(candidate.candidate_id);
-                    session.candidate_fact_ledger = Some(std::mem::take(&mut candidate.fact_ledger));
+                    session.candidate_fact_ledger =
+                        Some(std::mem::take(&mut candidate.fact_ledger));
                     return Err(err);
                 }
             }

@@ -1231,6 +1231,17 @@ pub struct UserPreferences {
     #[serde(default)]
     pub dictation_input_source_user_overridden: bool,
     pub active_asr_provider: String, // "volcengine" | "apple-speech" | ...
+    /// Optional, account-bound ASR cloud identity. Local wake templates stay separate.
+    #[serde(default)]
+    pub cloud_owner_voiceprint: Option<crate::asr::cloud_voiceprint::CloudOwnerVoiceprint>,
+    /// Retain ordinary ASR content; speaker presence controls endpointing only.
+    #[serde(default)]
+    pub owner_activity_only: bool,
+    /// Explicit experimental content locale; empty keeps ordinary ASR only.
+    #[serde(default)]
+    pub owner_content_recovery_locale: String,
+    #[serde(default)]
+    pub cloud_model_route: crate::asr::cloud_gateway::CloudModelRoute,
     /// One-time migration marker for the incorrect Windows Foundry default.
     #[serde(default = "default_true")]
     pub active_asr_provider_default_migrated: bool,
@@ -1524,6 +1535,14 @@ struct UserPreferencesWire {
     dictation_input_source_user_overridden: bool,
     active_asr_provider: String,
     #[serde(default)]
+    cloud_owner_voiceprint: Option<crate::asr::cloud_voiceprint::CloudOwnerVoiceprint>,
+    #[serde(default)]
+    owner_activity_only: bool,
+    #[serde(default)]
+    owner_content_recovery_locale: String,
+    #[serde(default)]
+    cloud_model_route: crate::asr::cloud_gateway::CloudModelRoute,
+    #[serde(default)]
     active_asr_provider_default_migrated: bool,
     active_llm_provider: String,
     #[serde(default)]
@@ -1652,6 +1671,10 @@ impl Default for UserPreferencesWire {
             dictation_input_source: prefs.dictation_input_source,
             dictation_input_source_user_overridden: prefs.dictation_input_source_user_overridden,
             active_asr_provider: prefs.active_asr_provider,
+            cloud_owner_voiceprint: prefs.cloud_owner_voiceprint,
+            owner_activity_only: prefs.owner_activity_only,
+            owner_content_recovery_locale: prefs.owner_content_recovery_locale,
+            cloud_model_route: prefs.cloud_model_route,
             active_asr_provider_default_migrated: prefs.active_asr_provider_default_migrated,
             active_llm_provider: prefs.active_llm_provider,
             llm_thinking_enabled: prefs.llm_thinking_enabled,
@@ -1843,6 +1866,10 @@ impl<'de> Deserialize<'de> for UserPreferences {
             dictation_input_source,
             dictation_input_source_user_overridden: wire.dictation_input_source_user_overridden,
             active_asr_provider: wire.active_asr_provider,
+            cloud_owner_voiceprint: wire.cloud_owner_voiceprint,
+            owner_activity_only: wire.owner_activity_only,
+            owner_content_recovery_locale: wire.owner_content_recovery_locale,
+            cloud_model_route: wire.cloud_model_route,
             active_asr_provider_default_migrated: wire.active_asr_provider_default_migrated,
             active_llm_provider: wire.active_llm_provider,
             llm_thinking_enabled: wire.llm_thinking_enabled,
@@ -2283,6 +2310,10 @@ impl Default for UserPreferences {
             dictation_input_source: DictationInputSource::EmbeddedBle,
             dictation_input_source_user_overridden: false,
             active_asr_provider: default_active_asr_provider(),
+            cloud_owner_voiceprint: None,
+            owner_activity_only: false,
+            owner_content_recovery_locale: String::new(),
+            cloud_model_route: crate::asr::cloud_gateway::CloudModelRoute::Byok,
             active_asr_provider_default_migrated: true,
             active_llm_provider: "ark".into(),
             llm_thinking_enabled: false,

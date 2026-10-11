@@ -166,6 +166,20 @@ impl EndpointStopAdmission {
         if !endpoint_current {
             return false;
         }
+        if self.asr.personal_vad_started() {
+            let now = Instant::now();
+            let captured_ms = self.asr.endpoint_update_snapshot().audio_duration_ms.unwrap_or_default();
+            let pending = pause_early_pending_body_delivery(inner, self.ticket.session_id, &self.asr);
+            let mut clock = self.endpoint_clock.lock();
+            clock.refresh_pending_body_delivery(pending, now);
+            let observation = self.asr.personal_vad_snapshot();
+            clock.note_personal_presence(observation, now);
+            // Revalidate independently completed silence immediately before
+            // STOP; a new short/possible utterance must revoke the proposal.
+            clock.note_local_vad_evidence_at(self.asr.local_speech_activity_snapshot(), now);
+            return clock.generation == self.ticket.endpoint_generation
+                && clock.personal_presence_stop_due(captured_ms, now, EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS);
+        }
         if !self.ticket.manual_vad_guard {
             let automatic_body_with_recent_owner = {
                 let clock = self.endpoint_clock.lock();
@@ -273,7 +287,7 @@ fn handle_target_speaker_endpoint_stop(
         session_id,
         Duration::from_millis(endpoint_policy.endpoint_timeout_ms.max(1_000)),
     );
-    if body_started && owner_endpoint_stop_blocked_by_live_owner(
+    if !asr.personal_vad_started() && body_started && owner_endpoint_stop_blocked_by_live_owner(
         fusion_state,
         &update,
         body_started,

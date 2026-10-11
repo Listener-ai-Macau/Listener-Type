@@ -128,7 +128,8 @@ for (const token of [
   "mpsc::channel::<AudioControlRequest>()",
   "ActiveAudioControlRegistration::install(",
   "control_tx",
-  "cleanup.drain_audio_control_requests(&control_rx)",
+  "cleanup.poll_audio_control_requests(&control_rx)",
+  "poll_pending_audio_control_write",
   "active audio control dispatch label={}",
 ]) {
   if (!source.includes(token)) {

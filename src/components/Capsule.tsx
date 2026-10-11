@@ -268,6 +268,30 @@ function Pill({
   onRetry,
 }: PillProps) {
   const { t } = useTranslation();
+  const dragPointer = useRef<number | null>(null);
+  const dragQueue = useRef(Promise.resolve());
+  const dragFrame = useRef<number | null>(null);
+  const dragMoveQueued = useRef(false);
+  const queueDrag = (phase: 'begin' | 'move' | 'end') => {
+    if (phase === 'move') {
+      if (dragMoveQueued.current) return;
+      dragMoveQueued.current = true;
+    }
+    // Serialize begin/move/end. The native side samples physical cursor
+    // coordinates; no screen-coordinate guesses enter persisted placement.
+    dragQueue.current = dragQueue.current
+      .then(() => invokeOrMock<void>('move_capsule', { phase }, () => undefined))
+      .catch(error => console.warn('[capsule] move failed', error))
+      .finally(() => { if (phase === 'move') dragMoveQueued.current = false; });
+  };
+  const finishDrag = () => {
+    if (dragPointer.current == null) return;
+    dragPointer.current = null;
+    if (dragFrame.current != null) cancelAnimationFrame(dragFrame.current);
+    dragFrame.current = null;
+    queueDrag('end');
+  };
+  useEffect(() => () => finishDrag(), []);
   const metrics = getCapsulePillMetrics(os);
   const processingLayout = getCapsuleMessageLayout(os, 'processing');
   const processingTextMaxWidth = getCapsuleProcessingTextMaxWidth(os);
@@ -452,7 +476,31 @@ function Pill({
       }}
     >
       <CircleButton variant="cancel" enabled={cancelEnabled} subdued={controlsSubdued} onClick={dismissOnly ? onDismiss : onCancel} />
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div
+        title={t('capsule.moveHint')}
+        onPointerDown={event => {
+          if (event.button !== 0 || !isTauri || dragPointer.current != null) return;
+          event.preventDefault();
+          dragPointer.current = event.pointerId;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          queueDrag('begin');
+        }}
+        onPointerMove={event => {
+          if (dragPointer.current !== event.pointerId || dragFrame.current != null) return;
+          dragFrame.current = requestAnimationFrame(() => {
+            dragFrame.current = null;
+            queueDrag('move');
+          });
+        }}
+        onPointerUp={event => {
+          if (dragPointer.current !== event.pointerId) return;
+          finishDrag();
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }}
+        onPointerCancel={finishDrag}
+        onLostPointerCapture={finishDrag}
+        style={{ flex: 1, minWidth: 0, alignSelf: 'stretch', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'grab', userSelect: 'none', touchAction: 'none' }}
+      >
         {center}
       </div>
       <CircleButton variant="confirm" enabled={confirmEnabled} subdued={controlsSubdued} onClick={errorActive ? onRetry : onConfirm} />
@@ -620,7 +668,7 @@ export function Capsule() {
         const previousTrace = capsuleIngressTraceRef.current;
         const significantRecordingEvent =
           p.state !== 'recording'
-          || Boolean(p.message)
+          || p.message != null
           || p.insertedChars != null
           || previousTrace.state !== p.state
           || previousTrace.sessionId !== p.sessionId
@@ -692,6 +740,7 @@ export function Capsule() {
           sessionId: p.sessionId ?? null,
           messageSessionId: messageSessionIdRef.current,
           currentMessage: messageRef.current,
+          incomingMessage: p.message,
         })) {
           messageSessionIdRef.current = null;
           resetPreviewReveal(false);

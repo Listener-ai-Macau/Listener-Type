@@ -65,6 +65,8 @@ use crate::windows_ime_ipc::ImeSubmitTarget;
 use crate::windows_ime_session::{PreparedWindowsImeSession, WindowsImeSessionController};
 
 mod dictation;
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+pub(crate) fn run_recorded_content_probe() -> i32 { dictation::run_recorded_content_probe() }
 mod qa;
 mod recording_gate;
 mod resources;
@@ -253,6 +255,10 @@ struct AutomaticWakeGuard {
     session_id: SessionId,
     phrase: String,
     activation_audio_end_ms: Option<u64>,
+    /// Confirmed phrase search range in the retained provider PCM clock.
+    /// It is not itself a phrase endpoint or permission to remove body audio.
+    activation_confirmation_window_ms: Option<(u64, u64)>,
+    activation_fragments: Vec<crate::transcript_boundary::ActivationFragment>,
     activation_prefix_evidence: Vec<crate::transcript_boundary::ControlPrefixEvidence>,
     latest_audio_ms: u64,
     initial_body_wait_until_audio_ms: Option<u64>,
@@ -318,6 +324,7 @@ struct Inner {
     /// 组字流式(2026-09-22 讯飞式逐字上屏)的会话状态机与驱动命令口。
     /// phase=Disabled 时全部路径 no-op,行为与粘贴版完全一致。
     streaming_composition: Mutex<dictation::StreamingCompositionState>,
+    native_composition: Mutex<dictation::NativeCompositionState>,
     /// Pause-early-delivery bookkeeping (2026-09-22 跟手①): text already
     /// inserted into the target mid-session at a stable sentence-terminal
     /// pause, so the final delivery only inserts the remainder. Keyed by
@@ -456,6 +463,7 @@ struct Inner {
     /// 最近一次应用到 capsule 窗口的几何状态。避免录音 level tick 反复触发
     /// resize / reposition。
     capsule_layout: Mutex<Option<CapsuleLayoutState>>,
+    capsule_placement: crate::capsule_placement::CapsulePlacement,
     /// 限流 capsule 窗口 show/position 操作；`capsule:state` 事件不受限，
     /// 保证电平条仍按前端可接受频率更新。
     capsule_ui_throttle: Mutex<CapsuleUiThrottleState>,
@@ -868,6 +876,7 @@ where
 
 #[cfg(target_os = "windows")]
 pub(super) struct WindowsInsertionResult {
+    pub(super) receipt: Option<crate::insertion::PasteReceiptHandle>,
     pub(super) status: InsertStatus,
     /// Only a successful TSF submit confirms that the selected target accepted the text.
     pub(super) target_confirmed: bool,
@@ -1117,6 +1126,7 @@ impl Coordinator {
                     embedded_audio_preview: Mutex::new(Default::default()),
                     embedded_audio_pause_early_delivery: Mutex::new(Default::default()),
                     streaming_composition: Mutex::new(Default::default()),
+                    native_composition: Mutex::new(Default::default()),
                     embedded_audio_automatic_wake_guard: Mutex::new(None),
                     embedded_audio_provider_progress_guard: Mutex::new(None),
                     embedded_audio_terminal_wake_continuation: Mutex::new(None),
@@ -1165,6 +1175,7 @@ impl Coordinator {
                     qa_hotkey: Mutex::new(None),
                     qa_state: Mutex::new(QaSessionState::default()),
                     capsule_layout: Mutex::new(None),
+                    capsule_placement: crate::capsule_placement::CapsulePlacement::new(),
                     capsule_ui_throttle: Mutex::new(CapsuleUiThrottleState::default()),
                     capsule_sequence: AtomicU64::new(0),
                     capsule_latest_payload: Mutex::new(None),
@@ -1208,6 +1219,7 @@ impl Coordinator {
                 embedded_audio_preview: Mutex::new(Default::default()),
                 embedded_audio_pause_early_delivery: Mutex::new(Default::default()),
                 streaming_composition: Mutex::new(Default::default()),
+                native_composition: Mutex::new(Default::default()),
                 embedded_audio_automatic_wake_guard: Mutex::new(None),
                 embedded_audio_provider_progress_guard: Mutex::new(None),
                 embedded_audio_terminal_wake_continuation: Mutex::new(None),
@@ -1254,6 +1266,7 @@ impl Coordinator {
                 qa_hotkey: Mutex::new(None),
                 qa_state: Mutex::new(QaSessionState::default()),
                 capsule_layout: Mutex::new(None),
+                capsule_placement: crate::capsule_placement::CapsulePlacement::new(),
                 capsule_ui_throttle: Mutex::new(CapsuleUiThrottleState::default()),
                 capsule_sequence: AtomicU64::new(0),
                 capsule_latest_payload: Mutex::new(None),
@@ -1272,84 +1285,66 @@ impl Coordinator {
         app: &AppHandle<R>,
         force: bool,
     ) {
-        let Some(window) = app.get_webview_window("capsule") else {
-            return;
-        };
-        let translation_active = self
-            .inner
-            .capsule_layout
-            .lock()
-            .as_ref()
-            .map(|layout| layout.translation_active)
-            .unwrap_or(false);
-        let current_monitor = window.current_monitor().ok().flatten();
-        let target_monitor = crate::capsule_target_monitor(app, &window);
-        let off_screen = crate::capsule_window_off_all_monitors(app, &window);
-        let target_changed = match target_monitor.as_ref() {
-            Some(monitor) => {
-                let position = monitor.position();
-                let size = monitor.size();
-                self.inner
-                    .capsule_layout
-                    .lock()
-                    .as_ref()
-                    .map_or(true, |last| {
-                        last.monitor_x != position.x
-                            || last.monitor_y != position.y
-                            || last.monitor_width != size.width
-                            || last.monitor_height != size.height
-                            || last.scale_bits != monitor.scale_factor().to_bits()
-                    })
-            }
-            None => off_screen,
-        };
-        let window_on_target_monitor = match (current_monitor.as_ref(), target_monitor.as_ref()) {
-            (Some(current), Some(target)) => {
-                let current_position = current.position();
-                let current_size = current.size();
-                let target_position = target.position();
-                let target_size = target.size();
-                current_position.x == target_position.x
-                    && current_position.y == target_position.y
-                    && current_size.width == target_size.width
-                    && current_size.height == target_size.height
-                    && current.scale_factor().to_bits() == target.scale_factor().to_bits()
-            }
-            (None, None) => true,
-            _ => false,
-        };
-        if !force && !off_screen && !target_changed && window_on_target_monitor {
-            return;
+        let Some(window) = app.get_webview_window("capsule") else { return };
+        let translation = self.inner.translation_modifier_seen.load(Ordering::SeqCst);
+        if force {
+            *self.inner.capsule_layout.lock() = None;
         }
+        support::maybe_position_capsule_bottom_center(&self.inner, app, &window, translation);
+    }
 
-        let result = match target_monitor.as_ref() {
-            Some(monitor) => crate::position_capsule_bottom_center_on_monitor(
-                &window,
-                monitor,
-                translation_active,
-            ),
-            None => crate::position_capsule_bottom_center(app, &window, translation_active),
-        };
-        if let Err(error) = result {
-            log::warn!("[coord] capsule display-change reposition failed: {error}");
-            return;
+    pub fn move_capsule<R: tauri::Runtime>(
+        &self, app: &AppHandle<R>, window: &tauri::WebviewWindow<R>, phase: &str,
+    ) -> Result<(), String> {
+        match phase {
+            "begin" => self.inner.capsule_placement.begin_drag(app, window),
+            "move" => self.inner.capsule_placement.drag_to_cursor(app, window),
+            "end" => {
+                // Always release placement ownership even if the last OS move fails.
+                let moved = self.inner.capsule_placement.drag_to_cursor(app, window);
+                let saved = self.inner.capsule_placement.finish_drag(window);
+                self.reposition_capsule_after_display_change(app, true);
+                moved.and(saved)
+            }
+            _ => Err("Unknown capsule drag phase".into()),
         }
+    }
 
-        let Some(monitor) = target_monitor.or_else(|| crate::capsule_target_monitor(app, &window))
-        else {
-            return;
-        };
-        let position = monitor.position();
-        let size = monitor.size();
-        let mut layout = self.inner.capsule_layout.lock();
-        *layout = Some(CapsuleLayoutState {
-            translation_active,
-            monitor_x: position.x,
-            monitor_y: position.y,
-            monitor_width: size.width,
-            monitor_height: size.height,
-            scale_bits: monitor.scale_factor().to_bits(),
-        });
+    pub fn reset_capsule_position<R: tauri::Runtime>(&self, app: &AppHandle<R>) -> Result<(), String> {
+        self.inner.capsule_placement.reset()?;
+        self.reposition_capsule_after_display_change(app, true);
+        Ok(())
+    }
+
+    pub fn refresh_capsule_visibility(&self) {
+        if !self.inner.prefs.get().show_capsule {
+            // A hidden capsule cannot acknowledge visibility. Release only that
+            // presentation wait; recording, speaker decisions and delivery stay owned
+            // by their existing state machines.
+            let session = self.inner.embedded_audio_automatic_wake_guard.lock()
+                .as_ref().map(|guard| guard.session_id);
+            if let Some(session) = session {
+                acknowledge_automatic_wake_capsule_visible(&self.inner, session);
+            }
+        }
+        // Refresh the host only. Re-emitting a cloned payload here could overwrite
+        // a newer recording/terminal snapshot that arrived while settings saved.
+        let Some(app) = self.inner.app.lock().clone() else { return };
+        let inner = Arc::clone(&self.inner);
+        let app_for_main = app.clone();
+        if let Err(error) = app.run_on_main_thread(move || {
+            let payload = inner.capsule_latest_payload.lock().clone();
+            if let Some(payload) = payload {
+                support::apply_capsule_window_request(
+                    &inner, &app_for_main, payload.seq,
+                    payload.session_id.as_deref().unwrap_or("-"), payload.state,
+                    payload.elapsed_ms, payload.translation,
+                    !matches!(payload.state, CapsuleState::Idle),
+                );
+            }
+        }) {
+            log::warn!("[capsule] refresh visibility failed: {error}");
+        }
     }
 
     /// 后台预加载本地 ASR 引擎；当用户在 UI 切到 local-qwen3 provider 时调一次。
@@ -2904,6 +2899,7 @@ async fn insert_with_windows_ime_first(
         }
         log::warn!("[windows-ime] non-TSF insertion fallback is disabled; failing insert");
         return WindowsInsertionResult {
+            receipt: None,
             status: InsertStatus::Failed,
             target_confirmed: false,
             route: DeliveryRoute::Failed,
@@ -2946,6 +2942,7 @@ async fn insert_with_windows_ime_first(
                     "[windows-ime] TSF retry unavailable; non-TSF insertion fallback is disabled"
                 );
                 return WindowsInsertionResult {
+            receipt: None,
                     status: InsertStatus::Failed,
                     target_confirmed: false,
                     route: DeliveryRoute::Failed,
@@ -2971,6 +2968,7 @@ async fn insert_with_windows_ime_first(
             insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut)
         } else {
             WindowsInsertionResult {
+            receipt: None,
                 status: InsertStatus::Failed,
                 target_confirmed: false,
                 route: DeliveryRoute::Failed,
@@ -2999,6 +2997,7 @@ async fn insert_with_windows_ime_first(
                 InsertStatus::Failed,
             ) {
                 return WindowsInsertionResult {
+            receipt: None,
                     status: InsertStatus::Failed,
                     target_confirmed: false,
                     route: DeliveryRoute::Failed,
@@ -3016,6 +3015,7 @@ async fn insert_with_windows_ime_first(
 
     if ime_status == InsertStatus::Inserted {
         WindowsInsertionResult {
+            receipt: None,
             status: ime_status,
             target_confirmed: true,
             route: DeliveryRoute::Tsf,
@@ -3026,6 +3026,7 @@ async fn insert_with_windows_ime_first(
     } else {
         log::warn!("[windows-ime] TSF did not insert; non-TSF insertion fallback is disabled");
         WindowsInsertionResult {
+            receipt: None,
             status: InsertStatus::Failed,
             target_confirmed: false,
             route: DeliveryRoute::Tsf,
@@ -3049,6 +3050,13 @@ fn insert_via_non_tsf_fallback(
     restore_clipboard: bool,
     paste_shortcut: PasteShortcut,
 ) -> WindowsInsertionResult {
+    insert_via_non_tsf_fallback_scoped(inner, polished, restore_clipboard, paste_shortcut, None)
+}
+
+#[cfg(target_os = "windows")]
+fn insert_via_non_tsf_fallback_scoped(inner: &Arc<Inner>, polished: &str,
+    restore_clipboard: bool, paste_shortcut: PasteShortcut,
+    scope: Option<crate::insertion::SessionPasteScope>) -> WindowsInsertionResult {
     // 2026-09-19: paste first. The target window still runs the user's CJK
     // IME, and in composition states that IME swallows Unicode SendInput
     // events while SendInput still reports them injected — a false-positive
@@ -3064,19 +3072,23 @@ fn insert_via_non_tsf_fallback(
     // (copied files etc.) is never borrowed: that dictation uses keystrokes.
     // IME-safe Unicode keystrokes stay as the second path for paste-hostile
     // targets.
-    let paste_status = if crate::insertion::clipboard_transport_is_reversible() {
-        inner
-            .inserter
-            .insert_via_clipboard_fallback(polished, restore_clipboard, paste_shortcut)
+    let (paste_status, receipt) = if crate::insertion::clipboard_transport_is_reversible() {
+        let submission = match scope {
+            Some(scope) => inner.inserter.insert_session_paste(polished, paste_shortcut, scope),
+            None => inner.inserter.insert_via_clipboard_fallback_with_receipt(
+                polished, restore_clipboard, paste_shortcut),
+        };
+        (submission.status, submission.receipt)
     } else {
         log::info!(
             "[windows-ime] clipboard holds content the restore path cannot write back; keeping it intact and using Unicode keystrokes chars={}",
             polished.chars().count()
         );
-        InsertStatus::Failed
+        (InsertStatus::Failed, None)
     };
     if paste_status == InsertStatus::DeferredNoTarget {
         return WindowsInsertionResult {
+            receipt: None,
             status: paste_status,
             target_confirmed: false,
             route: DeliveryRoute::CopyOnly,
@@ -3089,6 +3101,7 @@ fn insert_via_non_tsf_fallback(
             polished.chars().count()
         );
         return WindowsInsertionResult {
+            receipt,
             status: paste_status,
             target_confirmed: false,
             route: DeliveryRoute::Paste,
@@ -3108,6 +3121,7 @@ fn insert_via_non_tsf_fallback(
             polished.chars().count()
         );
         return WindowsInsertionResult {
+            receipt: None,
             status: InsertStatus::SubmittedUnconfirmed,
             target_confirmed: false,
             route: DeliveryRoute::Unicode,
@@ -3119,6 +3133,7 @@ fn insert_via_non_tsf_fallback(
         polished.chars().count()
     );
     WindowsInsertionResult {
+            receipt: None,
         status: unicode_status,
         target_confirmed: false,
         route: DeliveryRoute::Unicode,
@@ -3891,7 +3906,7 @@ fn read_bailian_credentials() -> BailianCredentials {
     }
 }
 
-fn read_volc_credentials() -> VolcengineCredentials {
+pub(crate) fn read_volc_credentials() -> VolcengineCredentials {
     #[cfg(target_os = "windows")]
     if let Err(err) = CredentialsVault::refresh_from_system() {
         // Keep the last known-good cache available during a transient Windows
@@ -4027,7 +4042,9 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
     // 3. 启动 Recorder + ASR（强制走 Volcengine 流式：QA 必须低延迟）。
     let hotwords = enabled_hotwords(inner);
     let creds = read_volc_credentials();
-    let asr = Arc::new(VolcengineStreamingASR::new(creds, hotwords));
+    let asr = Arc::new(VolcengineStreamingASR::new(creds, hotwords)
+        .with_cloud_owner(inner.prefs.get().cloud_owner_voiceprint)
+        .with_managed_cloud(inner.prefs.get().cloud_model_route == crate::asr::cloud_gateway::CloudModelRoute::Managed));
     let bridge = Arc::new(DeferredAsrBridge::new());
     let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge.clone();
     *inner.qa_asr.lock() = Some(Arc::clone(&asr));
@@ -4513,7 +4530,7 @@ fn read_llm_proxy_config(provider_id: &str) -> anyhow::Result<ProviderProxyConfi
     )
 }
 
-fn read_asr_proxy_config(provider_id: &str) -> anyhow::Result<ProviderProxyConfig> {
+pub(crate) fn read_asr_proxy_config(provider_id: &str) -> anyhow::Result<ProviderProxyConfig> {
     read_provider_proxy_config(
         provider_id,
         CredentialAccount::AsrProxyMode,

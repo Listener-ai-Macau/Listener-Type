@@ -2,6 +2,7 @@ import { useEffect, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import type { VoiceprintStatus } from '../../lib/types';
+import { voiceprintFailureUi } from '../../lib/voiceprintEnrollmentUi';
 import { Btn } from '../_atoms';
 
 // 与后端 ENROLLMENT_WAKE_STEP_SECONDS 对齐：整个录入是一次连续采集，按 3s 一个
@@ -16,6 +17,7 @@ interface VoiceprintEnrollmentWizardProps {
   phrase: string;
   status: VoiceprintStatus | null;
   onStart: () => void;
+  onRetrySave: () => void;
   onCancel: () => void;
   onClose: () => void;
 }
@@ -27,6 +29,7 @@ export function VoiceprintEnrollmentWizard({
   phrase,
   status,
   onStart,
+  onRetrySave,
   onCancel,
   onClose,
 }: VoiceprintEnrollmentWizardProps) {
@@ -34,7 +37,8 @@ export function VoiceprintEnrollmentWizard({
   const captureActive = ['preparing', 'armed', 'capturing', 'processing']
     .includes(status?.state ?? '');
   const success = attempted && status?.state === 'complete' && status.enrolled;
-  const failed = attempted && status?.state === 'error';
+  const failed = (attempted || status?.canRetrySave) && status?.state === 'error';
+  const failureUi = voiceprintFailureUi(status);
   const phase = success ? 'success' : failed ? 'error' : captureActive ? 'capture' : 'intro';
 
   useEffect(() => {
@@ -206,17 +210,23 @@ export function VoiceprintEnrollmentWizard({
           <>
             <div className="ol-voiceprint-wizard-result is-error" aria-hidden="true">!</div>
             <h2 id="voiceprint-wizard-title">
-              {t('settings.recording.voiceprintWizardErrorTitle', '这次没有录好')}
+              {t(`settings.recording.${failureUi.prefix}Title`)}
             </h2>
-            <p className="ol-voiceprint-wizard-lead is-error">{status?.error}</p>
+            <p className="ol-voiceprint-wizard-lead is-error">
+              {failureUi.sampleError ? status?.error : t(`settings.recording.${failureUi.prefix}Desc`)}
+            </p>
             <p className="ol-voiceprint-wizard-tip">
-              {t('settings.recording.voiceprintWizardErrorTip', '请靠近设备、降低周围噪声，然后重新录入。')}
+              {t(`settings.recording.${failureUi.prefix}Tip`)}
             </p>
             <div className="ol-voiceprint-wizard-actions">
-              <Btn onClick={onClose}>{t('common.cancel', '取消')}</Btn>
-              <Btn variant="blue" onClick={onStart} disabled={busy}>
-                {t('settings.recording.voiceprintRedo', '重新录制')}
-              </Btn>
+              <Btn onClick={onClose}>{t('common.close', '关闭')}</Btn>
+              {failureUi.retry !== 'none' && (
+                <Btn variant="blue" onClick={failureUi.retry === 'save' ? onRetrySave : onStart} disabled={busy}>
+                  {failureUi.retry === 'save'
+                    ? t('settings.recording.voiceprintRetrySave')
+                    : t('settings.recording.voiceprintRedo', '重新录制')}
+                </Btn>
+              )}
             </div>
           </>
         )}

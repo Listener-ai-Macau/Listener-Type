@@ -26,6 +26,9 @@ fn set_volcengine_preview_callbacks(
     let asr_for_stream = Arc::clone(asr);
     asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
         note_automatic_wake_transcript_timing(
+            &inner_for_stream, session_id, asr_for_stream.provider_timed_transcript_snapshot(),
+        );
+        note_automatic_wake_transcript_timing(
             &inner_for_stream, session_id, asr_for_stream.transcript_timing_snapshot_for(&text),
         );
         let previous_preview = current_embedded_audio_partial_preview(&inner_for_stream);
@@ -92,17 +95,31 @@ fn set_volcengine_preview_callbacks(
 
     let inner_for_visual_stream = Arc::clone(inner);
     let asr_for_visual_stream = Arc::clone(asr);
-    asr.set_visual_partial_transcript_callback(Some(Arc::new(move |text| {
+    asr.set_visual_partial_transcript_callback(Some(Arc::new(move |update| {
+        let text = update.text().to_string();
+        note_automatic_wake_transcript_timing(
+            &inner_for_visual_stream, session_id, asr_for_visual_stream.provider_timed_transcript_snapshot(),
+        );
         note_automatic_wake_transcript_timing(
             &inner_for_visual_stream, session_id, asr_for_visual_stream.transcript_timing_snapshot_for(&text),
         );
-        update_embedded_audio_visual_preview(&inner_for_visual_stream, session_id, text);
+        match update {
+            crate::asr::volcengine::VisualTranscriptUpdate::Provisional(_) => {
+                update_embedded_audio_visual_preview(&inner_for_visual_stream, session_id, text);
+            }
+            crate::asr::volcengine::VisualTranscriptUpdate::ConfirmedOwnerPartition(_) => {
+                reconcile_embedded_audio_owner_visual(&inner_for_visual_stream, session_id, text);
+            }
+        }
     })));
 
     let inner_for_partial = Arc::clone(inner);
     let clock_for_partial = Arc::clone(&endpoint_clock);
     let asr_for_partial = Arc::clone(asr);
     asr.set_final_intermediate_transcript_callback(Some(Arc::new(move |update| {
+        note_automatic_wake_transcript_timing(
+            &inner_for_partial, session_id, asr_for_partial.provider_timed_transcript_snapshot(),
+        );
         note_automatic_wake_transcript_timing(
             &inner_for_partial, session_id, asr_for_partial.transcript_timing_snapshot_for(&update.text),
         );
@@ -203,8 +220,11 @@ fn set_volcengine_preview_callbacks(
             update
         };
         let now = Instant::now();
-        {
+        let personal_owner_advanced = {
             let mut clock = clock_for_speaker.lock();
+            let personal_observation = asr_for_speaker.personal_vad_snapshot();
+            let personal_owner_advanced = asr_for_speaker.personal_vad_started()
+            && clock.note_personal_presence(personal_observation, Instant::now());
             clock.note_local_vad_evidence_at(local_vad_evidence, now);
             clock.observe_with_local_vad_revision(
                 &decision_update,
@@ -212,7 +232,9 @@ fn set_volcengine_preview_callbacks(
                 now,
                 local_vad_revision,
             );
-        }
+            personal_owner_advanced
+        };
+        if personal_owner_advanced { note_embedded_asr_speech_activity(&inner_for_speaker, session_id); }
         renew_firmware_lease_from_owner_observation(
             &inner_for_speaker,
             session_id,
@@ -224,16 +246,21 @@ fn set_volcengine_preview_callbacks(
         // decision as the watchdog instead of running a second endpoint policy
         // here; the previous split could commit Stopping in the clock and then
         // discard it during a second callback-side evaluation.
-        let owner_analysis_pending = asr_for_speaker.local_speaker_analysis_pending();
-        let committed_update = clock_for_speaker
-            .lock()
-            .reduce_session_policy_with_local_vad_revision(
-                Instant::now(),
+        let owner_analysis_pending = asr_for_speaker.owner_analysis_pending_for_endpoint();
+        let pending_owner_delivery =
+            pause_early_pending_body_delivery(&inner_for_speaker, session_id, &asr_for_speaker);
+        let committed_update = {
+            let now = Instant::now();
+            let mut clock = clock_for_speaker.lock();
+            clock.refresh_pending_body_delivery(pending_owner_delivery, now);
+            clock.reduce_session_policy_with_local_vad_revision(
+                now,
                 endpoint_policy,
                 &decision_update,
                 owner_analysis_pending,
                 local_vad_revision,
-            );
+            )
+        };
         if let Some(committed_update) = committed_update {
             handle_target_speaker_endpoint_stop(
                 &inner_for_speaker,

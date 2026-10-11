@@ -15,6 +15,7 @@ const trackedRoots = [
   'src-tauri/vendor/qwen-asr',
   'src-tauri/wix',
   'scripts',
+  'services',
   'windows-ime',
 ];
 const trackedFiles = [
@@ -28,8 +29,11 @@ const trackedFiles = [
   'src-tauri/tauri.conf.json',
   'src-tauri/Info.plist',
   'src-tauri/Entitlements.plist',
+  'services/voiceprint_gateway/requirements.txt',
+  'services/voiceprint_gateway/Dockerfile',
+  'services/voiceprint_gateway/.env.example',
 ];
-const ignoredDirs = new Set(['node_modules', 'target', '.git']);
+const ignoredDirs = new Set(['node_modules', 'target', '.git', '__pycache__']);
 const codeExts = new Set([
   '.c', '.cmd', '.cpp', '.css', '.def', '.h', '.html', '.js', '.json', '.mjs',
   '.plist', '.ps1', '.py', '.rc', '.rs', '.sln', '.toml', '.ts', '.tsx',
@@ -58,6 +62,7 @@ function walk(dir, out = []) {
 }
 
 function areaFor(file) {
+  if (file.startsWith('services/voiceprint_gateway')) return ['Optional account and voiceprint gateway', 'Gateway unit/integration tests, deployment smoke'];
   if (file.startsWith('src-tauri/src/asr')) return ['ASR providers', 'Provider tests, dictation smoke'];
   if (file.startsWith('src-tauri/vendor/qwen-asr')) return ['Vendored local ASR engine', 'Cargo check and local ASR smoke'];
   if (file.startsWith('src-tauri/src/llm') || file.includes('/polish')) return ['Polish providers', 'Rust unit tests, provider smoke'];

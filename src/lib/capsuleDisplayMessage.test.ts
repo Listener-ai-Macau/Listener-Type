@@ -114,4 +114,30 @@ for (const messageSessionId of [null, 'previous-session']) {
   );
 }
 
+assert.equal(
+  shouldRetainCapsulePreview({
+    state: 'recording',
+    sessionId: 's1',
+    messageSessionId: 's1',
+    currentMessage: '旁人对白',
+    incomingMessage: '',
+  }),
+  false,
+  'a confirmed empty owner partition must clear provisional foreign-only text',
+);
+
+for (const incomingMessage of [undefined, null, '正在启动 Listener 录音...']) {
+  assert.equal(
+    shouldRetainCapsulePreview({
+      state: 'recording',
+      sessionId: 's1',
+      messageSessionId: 's1',
+      currentMessage: '本人正文继续保留',
+      incomingMessage,
+    }),
+    true,
+    'level ticks and suppressed startup messages must still retain owner text',
+  );
+}
+
 console.log('capsuleDisplayMessage: all assertions passed');

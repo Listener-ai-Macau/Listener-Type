@@ -23,8 +23,14 @@ use parking_lot::Mutex;
 use crate::types::{InsertStatus, PasteShortcut};
 
 mod clipboard_handoff;
-pub(crate) use clipboard_handoff::{ClipboardTicket, RetentionResult};
+pub(crate) use clipboard_handoff::{
+    ClipboardTicket, SessionPasteScope, PasteReceiptCompletion, PasteReceiptHandle, PasteReceiptOutcome,
+    PasteReceiptPoll, PasteReceiptProof, PasteSubmission, RetentionResult, SessionRangePermission,
+};
+pub(crate) use clipboard_handoff::revisable_session_with_receipt;
 pub(crate) use clipboard_handoff::TerminalAppendDecision;
+#[cfg(test)]
+pub(crate) use clipboard_handoff::pending_receipt_handle_for_test;
 
 #[cfg(target_os = "windows")]
 const CLIPBOARD_RESTORE_DELAY: Duration = Duration::from_millis(750);
@@ -65,6 +71,27 @@ impl TextInserter {
         paste_shortcut: PasteShortcut,
     ) -> InsertStatus {
         self.insert(text, restore_clipboard_after_paste, paste_shortcut)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn insert_via_clipboard_fallback_with_receipt(
+        &self,
+        text: &str,
+        restore_clipboard_after_paste: bool,
+        paste_shortcut: PasteShortcut,
+    ) -> PasteSubmission {
+        if text.is_empty() {
+            return PasteSubmission {
+                status: InsertStatus::CopiedFallback,
+                receipt: None,
+                range_permission: SessionRangePermission::NotRequested,
+            };
+        }
+        clipboard_handoff::paste_with_receipt(
+            text,
+            restore_clipboard_after_paste,
+            paste_shortcut,
+        )
     }
 
     #[cfg(target_os = "windows")]
@@ -116,6 +143,23 @@ impl TextInserter {
         clipboard_handoff::paste(text, false, _paste_shortcut)
     }
 
+    #[cfg(target_os = "macos")]
+    pub(crate) fn insert_via_clipboard_fallback_with_receipt(
+        &self,
+        text: &str,
+        _restore_clipboard_after_paste: bool,
+        paste_shortcut: PasteShortcut,
+    ) -> PasteSubmission {
+        if text.is_empty() {
+            return PasteSubmission {
+                status: InsertStatus::CopiedFallback,
+                receipt: None,
+                range_permission: SessionRangePermission::NotRequested,
+            };
+        }
+        clipboard_handoff::paste_with_receipt(text, false, paste_shortcut)
+    }
+
     /// Copy text without attempting a synthetic paste. Used when the platform cannot
     /// prove the original input target is active enough to safely receive Ctrl/Cmd+V.
     pub fn copy_fallback(&self, text: &str) -> InsertStatus {
@@ -129,6 +173,11 @@ impl TextInserter {
         }
     }
 
+    pub(crate) fn insert_session_paste(&self, text: &str, shortcut: PasteShortcut,
+        scope: SessionPasteScope) -> PasteSubmission {
+        clipboard_handoff::paste_scoped_with_receipt(text, false, shortcut, Some(scope))
+    }
+
     pub(crate) fn clipboard_retention_ticket(&self) -> ClipboardTicket {
         clipboard_handoff::ticket()
     }
@@ -140,7 +189,13 @@ impl TextInserter {
     pub(crate) fn insert_terminal_suffix(&self, expected: &str, suffix: &str,
         restore: bool, shortcut: PasteShortcut) -> Result<InsertStatus, TerminalAppendDecision>
     {
-        clipboard_handoff::paste_terminal_suffix(expected, suffix, restore, shortcut)
+        clipboard_handoff::paste_terminal_suffix(expected, suffix, restore, shortcut, None)
+    }
+
+    pub(crate) fn insert_session_terminal_suffix(&self, session: uuid::Uuid,
+        expected: &str, suffix: &str, shortcut: PasteShortcut) -> Result<InsertStatus, TerminalAppendDecision> {
+        clipboard_handoff::paste_terminal_suffix(expected, suffix, false, shortcut,
+            Some(SessionPasteScope { session_id: session, previous_body: expected.into(), replace: false }))
     }
 
     pub(crate) fn retain_session_clipboard(

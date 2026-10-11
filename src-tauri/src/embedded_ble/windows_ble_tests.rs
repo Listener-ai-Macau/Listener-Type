@@ -2461,6 +2461,209 @@ fn queued_audio_control_timeout_keeps_live_capture_and_expires_command() {
 }
 
 #[test]
+fn active_audio_control_hang_stops_at_one_absolute_deadline() {
+    use windows::Foundation::AsyncStatus;
+
+    assert_eq!(
+        audio_control_write_poll_decision(AsyncStatus::Started, true, false),
+        AudioControlWritePollDecision::TimedOut
+    );
+    assert_eq!(
+        audio_control_failure_action(true, true, false),
+        AudioControlFailureAction::Finish,
+        "an expired primary write must not receive a second full fallback timeout"
+    );
+}
+
+#[test]
+fn pending_active_audio_control_hang_finishes_without_blocking_capture_poll() {
+    use windows::Foundation::AsyncStatus;
+
+    let (result_tx, result_rx) = mpsc::channel();
+    let request_cancelled = Arc::new(AtomicBool::new(false));
+    let operation_cancelled = Arc::new(AtomicBool::new(false));
+    let mut pending = PendingAudioControlWrite {
+        request: Some(AudioControlRequest {
+            bytes: b"VREC:ENSURE:00000001:00000002\n".to_vec(),
+            label: "accepted wake capture ensure".to_string(),
+            timeout: Duration::from_millis(10),
+            queued_at: Instant::now() - Duration::from_millis(11),
+            cancelled: request_cancelled,
+            result_tx,
+        }),
+        operation: Some(AudioControlAsyncOperation::Test {
+            status: AsyncStatus::Started,
+            result: Ok(GattCommunicationStatus::Success),
+            cancelled: Arc::clone(&operation_cancelled),
+        }),
+        fallback: Some(GattWriteOption::WriteWithoutResponse),
+        deadline_at: Instant::now() + Duration::from_secs(2),
+        primary_error: None,
+    };
+
+    let waiting_at = Instant::now();
+    assert!(pending.poll(None).is_none(), "waiting for control must yield back to PCM capture");
+    assert!(waiting_at.elapsed() < Duration::from_millis(50));
+    assert!(!operation_cancelled.load(Ordering::Acquire));
+    pending.deadline_at = Instant::now() - Duration::from_millis(1);
+    let polled_at = Instant::now();
+    let result = pending.poll(None).expect("expired hang must finish in one poll");
+    assert!(result.unwrap_err().contains("timed out"));
+    assert!(polled_at.elapsed() < Duration::from_millis(50));
+    pending.finish(Err("timed out".to_string()));
+    assert!(result_rx.recv_timeout(Duration::from_millis(50)).unwrap().is_err());
+    assert!(operation_cancelled.load(Ordering::Acquire));
+}
+
+#[test]
+fn active_audio_control_fallback_uses_only_remaining_deadline() {
+    use windows::Foundation::AsyncStatus;
+
+    assert_eq!(
+        audio_control_write_poll_decision(AsyncStatus::Error, false, false),
+        AudioControlWritePollDecision::Failed("async error")
+    );
+    assert_eq!(
+        audio_control_failure_action(true, false, false),
+        AudioControlFailureAction::TryFallback
+    );
+    assert_eq!(
+        audio_control_failure_action(false, false, false),
+        AudioControlFailureAction::Finish,
+        "the fallback is attempted at most once"
+    );
+}
+
+#[test]
+fn cancelled_active_audio_control_never_falls_back() {
+    use windows::Foundation::AsyncStatus;
+
+    assert_eq!(
+        audio_control_write_poll_decision(AsyncStatus::Started, false, true),
+        AudioControlWritePollDecision::Cancelled
+    );
+    assert_eq!(
+        audio_control_failure_action(true, false, true),
+        AudioControlFailureAction::Finish
+    );
+}
+
+#[test]
+fn pending_active_audio_control_observes_caller_cancel_and_closes_operation() {
+    use windows::Foundation::AsyncStatus;
+
+    let (result_tx, result_rx) = mpsc::channel();
+    let request_cancelled = Arc::new(AtomicBool::new(true));
+    let operation_cancelled = Arc::new(AtomicBool::new(false));
+    let mut pending = PendingAudioControlWrite {
+        request: Some(AudioControlRequest {
+            bytes: b"VREC:ABORT:00000001\n".to_vec(),
+            label: "accepted wake capture abort".to_string(),
+            timeout: Duration::from_secs(2),
+            queued_at: Instant::now(),
+            cancelled: request_cancelled,
+            result_tx,
+        }),
+        operation: Some(AudioControlAsyncOperation::Test {
+            status: AsyncStatus::Started,
+            result: Ok(GattCommunicationStatus::Success),
+            cancelled: Arc::clone(&operation_cancelled),
+        }),
+        fallback: Some(GattWriteOption::WriteWithoutResponse),
+        deadline_at: Instant::now() + Duration::from_secs(2),
+        primary_error: None,
+    };
+
+    let result = pending.poll(None).expect("cancel must finish in one poll");
+    assert!(result.unwrap_err().contains("cancelled"));
+    pending.finish(Err("cancelled".to_string()));
+    assert!(result_rx.recv_timeout(Duration::from_millis(50)).unwrap().is_err());
+    assert!(operation_cancelled.load(Ordering::Acquire));
+}
+
+#[test]
+fn active_audio_control_queue_preserves_fifo_while_skipping_cancelled_request() {
+    let (tx, rx) = mpsc::channel();
+    let mut result_receivers = Vec::new();
+    for (label, cancelled) in [("expired", true), ("ensure", false), ("abort", false)] {
+        let (result_tx, result_rx) = mpsc::channel();
+        let cancelled_flag = Arc::new(AtomicBool::new(cancelled));
+        tx.send(AudioControlRequest {
+            bytes: label.as_bytes().to_vec(),
+            label: label.to_string(),
+            timeout: Duration::from_secs(1),
+            queued_at: Instant::now(),
+            cancelled: cancelled_flag,
+            result_tx,
+        })
+        .unwrap();
+        result_receivers.push(result_rx);
+    }
+
+    assert_eq!(next_live_audio_control_request(&rx).unwrap().label, "ensure");
+    assert_eq!(next_live_audio_control_request(&rx).unwrap().label, "abort");
+    assert!(next_live_audio_control_request(&rx).is_none());
+    drop(result_receivers);
+}
+
+#[test]
+fn expired_audio_control_request_replies_without_disconnect_or_reordering() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    let (tx, rx) = mpsc::channel();
+    let registration = ActiveAudioControlRegistration::install(75, tx.clone());
+    let (expired_tx, expired_rx) = mpsc::channel();
+    tx.send(AudioControlRequest {
+        bytes: vec![],
+        label: "expired ensure".to_string(),
+        timeout: Duration::from_millis(1),
+        queued_at: Instant::now() - Duration::from_secs(1),
+        cancelled: Arc::new(AtomicBool::new(false)),
+        result_tx: expired_tx,
+    }).unwrap();
+    let (live_tx, _live_rx) = mpsc::channel();
+    tx.send(AudioControlRequest {
+        bytes: vec![],
+        label: "live stop".to_string(),
+        timeout: Duration::from_secs(2),
+        queued_at: Instant::now(),
+        cancelled: Arc::new(AtomicBool::new(false)),
+        result_tx: live_tx,
+    }).unwrap();
+    assert_eq!(next_live_audio_control_request(&rx).unwrap().label, "live stop");
+    let reply = expired_rx.recv_timeout(Duration::from_millis(50))
+        .expect("expired request must reply, not disconnect its live caller");
+    assert!(reply.unwrap_err().contains("expired in queue"));
+    assert_eq!(active_audio_control_sender().unwrap().capture_id, 75);
+    drop(registration);
+}
+
+#[test]
+fn accepted_wake_abort_is_scoped_to_ensure_capture_generation() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    *active_audio_control_slot().lock().unwrap() = None;
+    *accepted_wake_capture_owner_slot().lock().unwrap() = None;
+
+    let (old_tx, _old_rx) = mpsc::channel();
+    let old_registration = ActiveAudioControlRegistration::install(73, old_tx);
+    remember_accepted_wake_capture_owner(0x1234, 73);
+
+    let (new_tx, new_rx) = mpsc::channel();
+    let new_registration = ActiveAudioControlRegistration::install(74, new_tx);
+    let error = send_recording_control_abort_wake_capture(
+        0x1234,
+        Duration::from_millis(20),
+    )
+    .unwrap_err();
+    assert!(error.contains("owner changed"));
+    assert!(new_rx.try_recv().is_err(), "old ABORT must not enter the new capture queue");
+
+    drop(old_registration);
+    assert_eq!(active_audio_control_sender().unwrap().capture_id, 74);
+    drop(new_registration);
+    assert!(active_audio_control_sender().is_none());
+}
+
+#[test]
 fn device_settings_command_prefers_active_capture() {
     let _guard = active_audio_control_test_lock().lock().unwrap();
     *active_audio_control_slot().lock().unwrap() = None;
@@ -2831,7 +3034,7 @@ fn winrt_bluetooth_targets_release_without_synchronous_close_after_handler_detac
         .find("fn finish(&mut self, teardown: NotifyCccdTeardown)")
         .expect("notify cleanup finish should exist");
     let finish_end = source[finish_start..]
-        .find("fn handle_audio_control_request")
+        .find("fn poll_audio_control_requests")
         .map(|offset| finish_start + offset)
         .expect("notify cleanup finish boundary should exist");
     let finish = &source[finish_start..finish_end];

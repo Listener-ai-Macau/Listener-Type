@@ -17,6 +17,7 @@ import {
   isTauri,
   isWaylandCliMode,
   listMicrophoneDevices,
+  resetCapsulePosition,
   setDictationHotkey,
   startMicrophoneLevelMonitor,
   stopMicrophoneLevelMonitor,
@@ -757,6 +758,40 @@ function LevelMeter({ level }: { level: number }) {
 
 // 不存进 prefs：autostart 状态由 OS 持有（mac LaunchAgent plist / linux .desktop /
 // windows HKCU\Run），prefs 缓存反而会与 OS 真相不一致。issue #194。
+function CapsulePositionReset() {
+  const { t } = useTranslation();
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+      <button
+        type="button"
+        disabled={saving}
+        onClick={async () => {
+          setSaving(true);
+          setSaved(false);
+          setError(null);
+          try {
+            await resetCapsulePosition();
+            setSaved(true);
+          } catch (error) {
+            console.warn('[capsule] reset position failed', error);
+            setError(t('settings.recording.capsulePositionResetFailed'));
+          } finally {
+            setSaving(false);
+          }
+        }}
+        style={{ padding: '6px 10px', borderRadius: 8, border: '0.5px solid var(--ol-line-strong)', background: 'var(--ol-surface-2)', color: 'var(--ol-ink)', font: 'inherit', fontSize: 12, cursor: saving ? 'wait' : 'pointer' }}
+      >
+        {t('settings.recording.capsulePositionReset')}
+      </button>
+      {saved && <span role="status" style={{ fontSize: 11.5, color: 'var(--ol-ink-3)' }}>{t('settings.recording.capsulePositionResetDone')}</span>}
+      {error && <span role="alert" style={{ fontSize: 11.5, color: 'var(--ol-err)' }}>{error}</span>}
+    </div>
+  );
+}
+
 function AutostartRow() {
   const { t } = useTranslation();
   const [enabled, setEnabled] = useState(false);
@@ -1106,6 +1141,9 @@ export function RecordingSection() {
       )}
       <SettingRow label={t('settings.recording.capsuleLabel')} desc={t('settings.recording.capsuleDesc')}>
         <Toggle on={prefs.showCapsule} onToggle={onShowCapsuleChange} />
+      </SettingRow>
+      <SettingRow label={t('settings.recording.capsulePositionLabel')} desc={t('settings.recording.capsulePositionDesc')}>
+        <CapsulePositionReset />
       </SettingRow>
       <SettingRow
         label={t('settings.recording.muteDuringRecordingLabel')}

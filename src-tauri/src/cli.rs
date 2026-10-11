@@ -64,6 +64,10 @@ pub enum CliIntent {
     CleanupEmbeddedBlePairing { expected_name: Option<String> },
     /// 内部隔离进程：加载缓存的 Foundry 模型并通过 stdin/stdout 确认唤醒词。
     LocalWakeHelper,
+    /// 内部隔离进程：内存中的整段音频补漏，不参与UI、声纹登记或结束钟。
+    ContentRecoveryHelper,
+    /// 诊断：以明确提供的公开录音核对当前安装程序的普通云ASR和补漏。
+    RecordedContentProbe,
     /// 调试 / 自动化入口：校验固件 OTA 包，可选做 BLE preflight 或真实传输。
     FirmwareOta {
         manifest_path: PathBuf,
@@ -233,6 +237,8 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
                 return Some(CliIntent::CleanupEmbeddedBlePairing { expected_name });
             }
             "--local-wake-helper" => return Some(CliIntent::LocalWakeHelper),
+            "--content-recovery-helper" => return Some(CliIntent::ContentRecoveryHelper),
+            "--recorded-content-probe" => return Some(CliIntent::RecordedContentProbe),
             "--firmware-ota-check" | "--firmware-ota-preflight" | "--firmware-ota-transfer" => {
                 let mode = arg.as_ref();
                 if let Some((manifest_path, firmware_path)) = next_ota_paths(&mut args) {
@@ -431,6 +437,12 @@ mod tests {
     fn parse_recognizes_local_wake_helper() {
         let args = vec!["listener-type", "--local-wake-helper"];
         assert_eq!(parse_cli_intent(&args), Some(CliIntent::LocalWakeHelper));
+    }
+
+    #[test]
+    fn parse_recognizes_content_recovery_helper() {
+        let args = vec!["listener-type", "--content-recovery-helper"];
+        assert_eq!(parse_cli_intent(&args), Some(CliIntent::ContentRecoveryHelper));
     }
 
     #[test]

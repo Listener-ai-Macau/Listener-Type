@@ -1,0 +1,6 @@
+fastapi==0.136.1
+uvicorn==0.47.0
+httpx==0.28.1
+PyJWT[crypto]==2.15.1
+tos==2.9.3
+websockets==17.2

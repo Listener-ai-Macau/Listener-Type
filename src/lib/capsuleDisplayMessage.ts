@@ -57,7 +57,11 @@ export function shouldRetainCapsulePreview(options: {
   sessionId: string | null;
   messageSessionId: string | null;
   currentMessage: string | undefined;
+  incomingMessage?: string | null;
 }): boolean {
+  // An explicit empty message is a backend preview correction. An absent
+  // message is a level-only tick and still retains the current preview.
+  if (options.incomingMessage === '') return false;
   if (!options.currentMessage) return false;
   if (!PREVIEW_RETAIN_STATES.has(options.state)) return false;
   // Idle/dismissal clears message ownership while leaving the old text in

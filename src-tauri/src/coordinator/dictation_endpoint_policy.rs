@@ -231,6 +231,12 @@ impl SettledTargetEndpointClock {
         visible_chars: usize,
         now: Instant,
     ) {
+        if self.personal_presence_endpoint.is_some() {
+            self.last_visible_body_signature = Some((ends_terminal, visible_chars));
+            self.latest_visible_body_ends_terminal = Some(ends_terminal);
+            self.open_body_peak_visible_chars = self.open_body_peak_visible_chars.max(visible_chars);
+            return;
+        }
         let new_owner_speech_after_delivery = self.last_body_delivery_at.is_none()
             || self
                 .latest_update

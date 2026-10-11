@@ -11,12 +11,15 @@ struct ProductFinalCandidates {
     partial_preview: Option<RawTranscript>,
     local_shadow: Option<String>,
     local_shadow_owner_end_aligned: bool,
+    content_supplement: Option<crate::asr::content_consensus::ContentSupplement>,
     target_filter_required: bool,
     primary_mixture_rejected: bool,
-    /// r36：主轨终稿是否为 speaker_filtered 认证封存（说话人过滤已切尾的
-    /// 干净本人全文）。认证稿覆盖分离稿时分离稿必为截断/劣化（r36 吞字
-    /// 形态：主轨 51 字完好 vs 分离稿截断 20 字被误当"排除"放行）。
+    /// The exact primary rendering is fully covered by completed source-owner
+    /// permissions, independently of its provider filtering label.
     primary_speaker_filtered_certified: bool,
+    /// The removed suffix has explicit Other word intervals. A mere shorter
+    /// rendering or unfinished identity analysis does not establish this.
+    separated_owner_exclusion_confirmed: bool,
 }
 
 #[derive(Debug)]
@@ -24,6 +27,7 @@ struct ProductFinalDecision {
     transcript: RawTranscript,
     authority: crate::speech_decision_kernel::ProductFinalAuthority,
     local_shadow_recovered: bool,
+    content_supplement_recovered: bool,
 }
 
 fn nonempty_transcript(candidate: &Option<RawTranscript>) -> bool {
@@ -70,17 +74,12 @@ fn arbitrate_product_final_transcript(
         arbitrate_product_final, ProductFinalAuthority, ProductFinalEvidence,
     };
 
-    // r24（2026-09-18，session 999a5b67）：干扰轮里 separated 解码受提取伪影拖累
-    // 严重劣化（24 字/"第二步"，与主终稿内容分叉），却无条件压过第一仲裁已封存
-    // 的正确 52 字 speaker_filtered 终稿——用户判"吞字"。分离轨的存在价值是归属
-    // 排除：当主终稿只是比分离稿**多出一段尾巴**（分离稿是主终稿的紧凑子序列）
-    // 时，分离轨仍在做排除工作，维持分离优先；两轨内容分叉且主终稿说出内容
-    // 覆盖 ≥ 分离稿时，主终稿（标点/数字写法更好，r23）不应被劣化稿覆盖。
-    // r36（2026-09-18 晚）补丁：分离稿劣化还有第二种形态——**截断成主轨前缀**
-    // （主轨 51 字完好 vs 分离稿截断 20 字）。文本层面"前缀"与"排除尾巴后剩
-    // 正文"无法区分，需要主轨的封存认证位：speaker_filtered 认证稿（说话人
-    // 过滤已切尾的干净本人全文）只要覆盖分离稿，分离稿必为丢正文的劣化稿，
-    // 直接降权；无认证（可能是未过滤的带尾原始稿）才退回子序列判别。
+    // Extraction can damage owner words or truncate a valid continuation.
+    // A shorter prefix alone cannot distinguish that failure from successful
+    // foreign-tail removal. Keep the covering primary rendering unless the
+    // omitted words have explicit Other evidence or the mixture was rejected.
+    // This fidelity choice does not grant the primary an owner certificate;
+    // the ordinary-primary fallback below retains its separate policy.
     let mut candidates = candidates;
     let separated_units = candidates
         .separated_owner
@@ -93,6 +92,7 @@ fn arbitrate_product_final_transcript(
     };
     if let (Some(primary), Some(separated)) = (primary_units, separated_units) {
         let separated_still_excluding = !candidates.primary_speaker_filtered_certified
+            && candidates.separated_owner_exclusion_confirmed
             && primary > separated
             && {
                 let separated_text = candidates
@@ -175,6 +175,18 @@ fn arbitrate_product_final_transcript(
         }
     }
 
+    let mut content_supplement_recovered = false;
+    if !candidates.target_filter_required && !candidates.primary_mixture_rejected
+        && matches!(authority, ProductFinalAuthority::ProviderPrimary) {
+        if let Some(supplement) = candidates.content_supplement.as_ref() {
+            let decision = crate::asr::content_consensus::append_consensus(&transcript.text, supplement);
+            content_supplement_recovered = !decision.appended_channels.is_empty();
+            log::info!("[content-recovery] shared final decision reason={} appended_channels={} owner_identity=false endpoint_changed=false",
+                decision.reason, decision.appended_channels.len());
+            transcript.text = decision.text;
+        }
+    }
+
     if let Some(preview) = preview_for_hotwords.as_deref() {
         transcript.text = reconcile_final_transcript_with_preview_hotwords(
             &transcript.text,
@@ -190,6 +202,7 @@ fn arbitrate_product_final_transcript(
         transcript,
         authority,
         local_shadow_recovered,
+        content_supplement_recovered,
     }
 }
 
@@ -520,10 +533,11 @@ fn reduce_embedded_audio_authoritative_preview(
 }
 
 /// Publish a diarization-pending provider tail to the capsule without
-/// promoting it into the authoritative preview ledger. The ASR layer permits
-/// this only while the verified wake identity remains debounced as the owner
-/// and no NonTarget evidence is present. It may therefore improve visual
-/// cadence, but cannot extend the endpoint or enter final insertion/recovery.
+/// promoting it into the authoritative preview ledger. The ASR layer rejects
+/// this callback on current NonTarget evidence, a debounced switch away from
+/// the owner, or a suspected owner handoff; open/untracked wake policy remains
+/// valid. It may therefore improve visual cadence, but cannot extend the
+/// endpoint or enter final insertion/recovery.
 fn update_embedded_audio_visual_preview(
     inner: &Arc<Inner>,
     session_id: SessionId,
@@ -547,6 +561,26 @@ fn update_embedded_audio_visual_preview(
                 return false;
             };
             emit_embedded_audio_partial_preview_if_active(inner, session_id, provider_preview)
+        },
+    )
+}
+
+fn reconcile_embedded_audio_owner_visual(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    text: String,
+) -> bool {
+    let owner_view = filter_dictation_visual_preview_text(inner, session_id, &text);
+    dispatch_embedded_ble_session_actor_command(
+        inner,
+        EmbeddedBleSessionActorCommand::AsrPartial,
+        Some(session_id),
+        format!("confirmed_owner_visual chars={}", owner_view.chars().count()),
+        |_| {
+            let Some(visible) = inner.embedded_audio_preview.lock()
+                .reconcile_confirmed_owner_partition(session_id, &owner_view)
+            else { return false; };
+            emit_embedded_audio_partial_preview_if_active(inner, session_id, visible)
         },
     )
 }
@@ -847,6 +881,8 @@ fn arm_automatic_wake_text_guard(
         session_id,
         phrase,
         activation_audio_end_ms: None,
+        activation_confirmation_window_ms: None,
+        activation_fragments: Vec::new(),
         activation_prefix_evidence: Vec::new(),
         latest_audio_ms: capsule_audio_boundary_ms,
         initial_body_wait_until_audio_ms: body_wait_armed_immediately.then_some(
@@ -1055,6 +1091,20 @@ fn bind_automatic_wake_audio_boundary(
     }
 }
 
+fn bind_automatic_wake_confirmation_window(
+    inner: &Arc<Inner>, session_id: SessionId,
+    source_range: Option<crate::observability::CandidateRange>, retained_origin: Option<u64>,
+) {
+    let (Some(range), Some(origin)) = (source_range, retained_origin) else { return; };
+    if range.end <= origin || range.start >= range.end { return; }
+    let window = (range.start.saturating_sub(origin) / 32, (range.end - origin) / 32);
+    if let Some(guard) = inner.embedded_audio_automatic_wake_guard.lock().as_mut()
+        .filter(|guard| guard.session_id == session_id)
+    {
+        guard.activation_confirmation_window_ms = Some(window);
+    }
+}
+
 fn note_automatic_wake_transcript_timing(
     inner: &Arc<Inner>,
     session_id: SessionId,
@@ -1063,8 +1113,45 @@ fn note_automatic_wake_transcript_timing(
     let Some(timing) = timing else { return; };
     let mut slot = inner.embedded_audio_automatic_wake_guard.lock();
     let Some(guard) = slot.as_mut().filter(|guard| guard.session_id == session_id) else { return; };
-    let Some(end_ms) = guard.activation_audio_end_ms else { return; };
-    let Some(evidence) = timing.activation_prefix(end_ms, &guard.phrase) else { return; };
+    // A local recognizer can confirm the phrase without a KWS timestamp.
+    // Recover that missing coordinate from exact, timed provider words inside
+    // the very same confirmed PCM window, never from later body mentions.
+    let confirmed = guard.activation_confirmation_window_ms
+        .and_then(|window| timing.confirmed_activation_prefix(window, &guard.phrase, guard.activation_audio_end_ms));
+    if confirmed.is_none() && guard.activation_audio_end_ms.is_none() {
+        if let Some(window) = guard.activation_confirmation_window_ms {
+            let phrase_key=crate::transcript_boundary::content_key(&guard.phrase);
+            for fragment in timing.activation_fragments(window,&guard.phrase) {
+                let completed=guard.activation_fragments.iter().any(|prior| {
+                    prior.lead_key==fragment.lead_key && prior.end_ms<=fragment.start_ms
+                        && format!("{}{}",prior.phrase_part,fragment.phrase_part)==phrase_key
+                });
+                if completed {
+                    guard.activation_audio_end_ms=Some(fragment.end_ms);
+                    log::info!("[wake-phrase] ordered provider fragments resolved confirmed activation boundary session_id={session_id} activation_end_ms={}",fragment.end_ms);
+                    break;
+                }
+                if phrase_key.starts_with(&fragment.phrase_part)
+                    && !guard.activation_fragments.iter().any(|prior| prior.lead_key==fragment.lead_key
+                        && prior.phrase_part==fragment.phrase_part && prior.start_ms==fragment.start_ms && prior.end_ms==fragment.end_ms)
+                {
+                    if guard.activation_fragments.len()==16 {guard.activation_fragments.remove(0);}
+                    guard.activation_fragments.push(fragment);
+                }
+            }
+        }
+    }
+    let evidence = if let Some((end_ms, evidence)) = confirmed {
+        if guard.activation_audio_end_ms.is_none() {
+            log::info!("[wake-phrase] provider words resolved confirmed activation boundary session_id={session_id} activation_end_ms={end_ms}");
+            guard.activation_audio_end_ms = Some(end_ms);
+        }
+        evidence
+    } else {
+        let Some(end_ms) = guard.activation_audio_end_ms else { return; };
+        let Some(evidence) = timing.activation_prefix(end_ms, &guard.phrase) else { return; };
+        evidence
+    };
     guard.activation_prefix_evidence.retain(|prior| prior.source_key != evidence.source_key);
     // Keep bounded revision evidence: an early-sealed provider ledger may
     // select an older snapshot, while a later final can revise its preamble.
@@ -1093,7 +1180,20 @@ fn filter_automatic_wake_text(
     text: &str,
     partial: bool,
 ) -> String {
-    let (phrase, timed_body, late_body_blocked) = inner
+    resolve_automatic_wake_text(inner, session_id, text, partial).text
+}
+
+struct ResolvedAutomaticWakeText {
+    text: String,
+    /// Exact timed source evidence has located this session's activation.
+    /// This is control-prefix provenance, not speaker or editor permission.
+    activation_resolved: bool,
+}
+
+fn resolve_automatic_wake_text(
+    inner: &Arc<Inner>, session_id: SessionId, text: &str, partial: bool,
+) -> ResolvedAutomaticWakeText {
+    let (phrase, timed_body, late_body_blocked, activation_pending) = inner
         .embedded_audio_automatic_wake_guard
         .lock()
         .as_ref()
@@ -1104,13 +1204,32 @@ fn filter_automatic_wake_text(
                 guard.activation_prefix_evidence.iter().rev()
                     .find_map(|evidence| evidence.body(text).map(str::to_string)),
                 guard.stop_requested && !guard.body_started,
+                guard.activation_confirmation_window_ms.is_some() && guard.activation_audio_end_ms.is_none(),
             )
         })
-        .unwrap_or((None, None, false));
+        .unwrap_or((None, None, false, false));
+    // Early provider callbacks may contain only the ambient preamble. They
+    // cannot become immutable editor text while activation location is pending.
+    if activation_pending && timed_body.is_none() {
+        // A final can omit provider word coordinates. The independently
+        // confirmed activation is still removable when it uniquely starts
+        // that final; never authorize an untimed ambient preamble or a live
+        // irreversible paste from this fallback.
+        let final_starts_with_activation = !partial && phrase.as_deref().is_some_and(|phrase| {
+            let phrase_key = crate::transcript_boundary::content_key(phrase);
+            let source_key = crate::transcript_boundary::content_key(text);
+            !phrase_key.is_empty() && source_key.starts_with(&phrase_key)
+                && source_key.match_indices(&phrase_key).count() == 1
+        });
+        if !final_starts_with_activation {
+            return ResolvedAutomaticWakeText { text: String::new(), activation_resolved: false };
+        }
+    }
     // Audio-aligned evidence is tied to this exact provider revision. Once it
     // identifies the control prefix, do not strip a later literal wake phrase
     // from the body a second time. Untimed revisions retain the legacy path.
     let body_phrase = if timed_body.is_some() { None } else { phrase.as_deref() };
+    let activation_resolved = timed_body.is_some();
     let filtered = timed_body.unwrap_or_else(|| phrase.as_deref().map_or_else(
         || preserve_recording_transcript(text),
         |phrase| strip_automatic_activation_prefix(text, phrase, partial && !late_body_blocked),
@@ -1132,16 +1251,16 @@ fn filter_automatic_wake_text(
                 "[wake-phrase] kept spoken body after stop before visual latch session_id={session_id} chars={}",
                 filtered.chars().count()
             );
-            return filtered;
+            return ResolvedAutomaticWakeText { text: filtered, activation_resolved };
         }
         log::debug!(
             "[wake-phrase] ignored late text after stop before body start session_id={session_id} partial={partial} chars={}",
             text.chars().count()
         );
-        return String::new();
+        return ResolvedAutomaticWakeText { text: String::new(), activation_resolved };
     }
     latch_automatic_wake_body_if_filtered(inner, session_id, &filtered, text, body_phrase);
-    filtered
+    ResolvedAutomaticWakeText { text: filtered, activation_resolved }
 }
 
 fn latch_automatic_wake_body_if_filtered(
@@ -1417,11 +1536,77 @@ fn filter_dictation_visual_preview_text(
     // Strip the wake prefix before latching visible body so a provisional body
     // cannot expire as a wake-only session. Final delivery separately requires
     // the authoritative preview; this visual path does not supply final text.
-    let text = filter_automatic_wake_text(inner, session_id, text, true);
+    let filtered = filter_automatic_wake_text(inner, session_id, text, true);
+    let text = if filtered.is_empty() {
+        reversible_automatic_wake_visual_body(inner, session_id, text).unwrap_or(filtered)
+    } else {
+        filtered
+    };
     // Filler cleanup belongs on the sealed insert, not the live capsule.
     // Stripping 嗯/呃 from short partials delayed the first visible body
     // and made the preview look like it was swallowing text.
     text
+}
+
+/// Reveal an exact leading activation to the reversible capsule while its
+/// provider word coordinates are still pending. The confirmed local PCM window
+/// proves that this session contains the activation, while the exact textual
+/// prefix keeps an ambient lead-in from being treated as body. This result is
+/// used only by `update_embedded_audio_visual_preview`: it does not latch body,
+/// advance the authoritative preview, or enter the delivery ledger.
+fn reversible_automatic_wake_visual_body(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    text: &str,
+) -> Option<String> {
+    let phrase = inner
+        .embedded_audio_automatic_wake_guard
+        .lock()
+        .as_ref()
+        .filter(|guard| {
+            guard.session_id == session_id
+                && guard.activation_confirmation_window_ms.is_some()
+                && guard.activation_audio_end_ms.is_none()
+                && !guard.stop_requested
+        })
+        .map(|guard| guard.phrase.clone())?;
+    exact_leading_activation_body(text, &phrase)
+}
+
+fn exact_leading_activation_body(text: &str, phrase: &str) -> Option<String> {
+    let text = text.trim();
+    let phrase = phrase.trim();
+    if text.is_empty() || phrase.is_empty() {
+        return None;
+    }
+
+    let mut text_chars = text.char_indices();
+    let mut consumed_end = 0usize;
+    let mut matched_content = false;
+    for expected in phrase
+        .chars()
+        .filter(|ch| !is_embedded_audio_partial_preview_decorative(*ch))
+    {
+        let (index, actual) = loop {
+            let next = text_chars.next()?;
+            if !is_embedded_audio_partial_preview_decorative(next.1) {
+                break next;
+            }
+        };
+        if actual != expected {
+            return None;
+        }
+        matched_content = true;
+        consumed_end = index + actual.len_utf8();
+    }
+    if !matched_content {
+        return None;
+    }
+
+    let body = text[consumed_end..]
+        .trim_start_matches(is_embedded_audio_partial_preview_decorative)
+        .trim();
+    (!body.is_empty()).then(|| body.to_string())
 }
 
 
@@ -1551,7 +1736,7 @@ const PAUSE_EARLY_DELIVERY_MIN_STABLE: Duration =
 // noise even through a human pause, so its speech edge alone is not a safe
 // clause boundary on this device.
 const PAUSE_EARLY_UNPUNCTUATED_QUIET: Duration = Duration::from_millis(800);
-// A one-character stable prefix is still often a provider placeholder. In
+// Legacy rolling-stable prefixes can still be provider placeholders. In
 // installed 1.0.6 session 3e8ab1c5 it was pasted, then the provider rewrote
 // the opening and final reconciliation could not safely retract it. Keep such
 // fragments in the reversible capsule. Complete spoken clauses can be
@@ -1600,6 +1785,57 @@ fn pause_early_segment(delta: &str, quiet_boundary: bool) -> Option<&str> {
     }
 }
 
+/// Native clause/word confirmation already supplies the lexical boundary.
+/// Keep the old batching heuristics only for legacy rolling-stable views;
+/// otherwise short or unpunctuated confirmed speech waits for STOP despite
+/// having satisfied the ASR delivery contract. This cannot grant ownership,
+/// invent a source seam, or advance the editor receipt clock.
+fn pause_early_ready_segment<'a>(
+    delivered_display: &str,
+    delivered_key: &str,
+    remainder: &'a str,
+    quiet_boundary: bool,
+    stability: crate::asr::volcengine::LiveDeliveryStability,
+) -> Option<&'a str> {
+    if stability == crate::asr::volcengine::LiveDeliveryStability::ProviderConfirmed
+        && !embedded_audio_partial_preview_stability_key(remainder).is_empty()
+    {
+        return Some(remainder);
+    }
+    let delta = pause_early_segment(remainder, quiet_boundary)?;
+    (pause_early_chunk_ready(delivered_key, delta)
+        || pause_early_short_terminal_completion_ready(delivered_display, delta, true))
+        .then_some(delta)
+}
+
+/// An unpunctuated owner suffix is complete only when the owner-approved
+/// snapshot has caught up to the text the user can currently see. The visible
+/// preview may be provisional, so equality is only a completeness check: it
+/// never supplies speaker authority to `snapshot_text`. A longer/different
+/// visible preview (including a foreign tail) keeps the suffix reversible.
+fn pause_early_snapshot_covers_visible_body(
+    snapshot_text: &str,
+    visible_text: Option<&str>,
+) -> bool {
+    let snapshot_key = embedded_audio_partial_preview_stability_key(snapshot_text);
+    let visible_key = visible_text
+        .map(embedded_audio_partial_preview_stability_key)
+        .unwrap_or_default();
+    !snapshot_key.is_empty() && snapshot_key == visible_key
+}
+
+/// A stable snapshot can trail a newer owner-approved provider revision while
+/// the capsule trails by the same amount. Their equality does not make that
+/// shorter prefix complete. Querying after the snapshot's source body key
+/// keeps this check before filler, script and correction display transforms.
+/// `None` grants no authority: the stable snapshot and visible-body checks
+/// above still provide the required evidence.
+fn pause_early_snapshot_has_no_newer_owner_body(
+    pending_after_snapshot: Option<&str>,
+) -> bool {
+    pending_after_snapshot.is_none()
+}
+
 fn pause_early_chunk_ready(delivered_key: &str, delta: &str) -> bool {
     // Stable words already crossed the irreversible delivery boundary. Their
     // later terminal punctuation is decoration of that same body, not a new
@@ -1630,6 +1866,34 @@ fn pause_early_chunk_ready(delivered_key: &str, delta: &str) -> bool {
     }
 }
 
+fn pause_early_short_terminal_completion_ready(
+    delivered_display: &str,
+    delta: &str,
+    source_boundary_available: bool,
+) -> bool {
+    if !source_boundary_available || delivered_display.trim().is_empty() {
+        return false;
+    }
+    let ends_sentence = |text: &str| {
+        text.trim_end_matches(|ch: char| {
+            matches!(ch, '”' | '’' | '"' | '\'' | '）' | ')' | '】' | ']')
+        })
+        .chars()
+        .last()
+        .is_some_and(|ch| matches!(ch, '。' | '！' | '!' | '？' | '?'))
+    };
+    if pause_early_complete_clause(delivered_display) == Some(delivered_display)
+        || !ends_sentence(delta)
+    {
+        return false;
+    }
+    let content_chars = embedded_audio_partial_preview_stability_key(delta)
+        .chars()
+        .count();
+    (1..PAUSE_EARLY_NEXT_CHUNK_MIN_CONTENT_CHARS).contains(&content_chars)
+        && pause_early_complete_clause(delta) == Some(delta)
+}
+
 fn pause_early_terminal_punctuation_only(delta: &str) -> bool {
     crate::transcript_boundary::terminal_punctuation_only(delta)
 }
@@ -1638,14 +1902,30 @@ fn pause_early_terminal_punctuation_only(delta: &str) -> bool {
 #[derive(Default)]
 pub(super) struct PauseEarlyDeliveryLedger {
     pub(super) session_id: Option<SessionId>,
+    /// Sample credentials once per recording, outside the watchdog's hot path.
+    /// Outer None means unobserved; Some(None) preserves a lookup failure.
+    pub(super) llm_auth_fingerprint: Option<Option<u64>>,
     /// Exact display text already on screen for this session.
     pub(super) delivered_display: String,
     /// stability key（去标点小写）of `delivered_display`.
     pub(super) delivered_key: String,
-    /// Prefix of the most recent provider snapshot consumed by successful
-    /// delivery. Provider revisions change this coordinate without changing
-    /// the immutable text already submitted to the editor.
+    /// Prefix in the rendered provider snapshot, used only for display
+    /// reconciliation. It is not the raw ASR or audio consumption coordinate.
     pub(super) source_key: String,
+    /// Raw provider consumption is committed with the same successful
+    /// transaction. A reservation cannot advance it, and rollback retains it.
+    pub(super) committed_body_consumption: Option<crate::asr::volcengine::LiveBodyConsumption>,
+    pub(super) reserved_body_consumption: Option<crate::asr::volcengine::LiveBodyConsumption>,
+    /// Only the last successful transport submission may establish a timed seam.
+    /// Like source_key, this is not proof of an editor receipt; receipt ownership
+    /// and the three-second clock remain in SettledTargetEndpointClock.
+    /// A reserve leaves it intact; source/session checks prevent borrowing it
+    /// until rollback restores that same source coordinate.
+    pub(super) confirmed_timed_boundary: Option<(String, crate::transcript_boundary::TimedDeliveryBoundary, crate::asr::volcengine::LiveDeliverySource)>,
+    /// Raw prefix belonging to that successful timed submission, including the
+    /// original wake prefix. Never rebuilt from later provider revisions.
+    pub(super) confirmed_source_text: Option<String>,
+    pub(super) delivery_generation: u64,
     /// The state before the newest unconfirmed reserve. Rollback restores
     /// this instead of wiping the ledger: a failed mid-session paste must not
     /// make the final dispatch forget (and re-paste) text that is already on
@@ -1691,16 +1971,36 @@ fn pause_early_note_gate_blocked(
 /// 与 `embedded_audio_partial_preview_stability_key` 同口径逐字推进。
 fn pause_early_boundary_tail<'a>(tail: &'a str, delivered_display: &str) -> &'a str {
     let tail = tail.trim_start();
-    let previous = delivered_display.trim_end().chars().next_back();
-    let next = tail.chars().next();
-    if previous.is_some_and(pause_early_is_boundary_separator)
-        && next.is_some_and(pause_early_is_boundary_separator)
-    {
-        // An append cannot replace the separator already on screen. Consume
-        // only that one revised separator; keep a following quote or bracket.
-        return tail[next.expect("checked above").len_utf8()..].trim_start();
-    }
-    tail
+    // The content coordinate omits decoration, but the editor coordinate
+    // owns its complete boundary run. Removing only one separator makes a
+    // source such as "body.." offer the second dot on every watchdog tick.
+    // Match the entire already-submitted suffix, including closing delimiters
+    // and literal punctuation. Rollback restores this same editor coordinate.
+    let consumed: Vec<char> = delivered_display
+        .chars()
+        .rev()
+        .take_while(|ch| is_embedded_audio_partial_preview_decorative(*ch))
+        .filter(|ch| !ch.is_whitespace())
+        .collect();
+    let incoming: Vec<(usize, char)> = tail
+        .char_indices()
+        .take_while(|(_, ch)| is_embedded_audio_partial_preview_decorative(*ch))
+        .filter(|(_, ch)| !ch.is_whitespace())
+        .collect();
+    let covered = (1..=consumed.len().min(incoming.len()))
+        .rev()
+        .find(|count| {
+            consumed[..*count].iter().rev().zip(&incoming[..*count]).all(
+                |(previous, (_, next))| previous == next
+                    || (pause_early_is_boundary_separator(*previous)
+                        && pause_early_is_boundary_separator(*next)),
+            )
+        })
+        .unwrap_or(0);
+    let end = covered.checked_sub(1)
+        .map(|last| incoming[last].0 + incoming[last].1.len_utf8())
+        .unwrap_or(0);
+    tail[end..].trim_start()
 }
 
 fn pause_early_is_boundary_separator(ch: char) -> bool {
@@ -2138,6 +2438,105 @@ fn pause_early_delivery_source_key(inner: &Arc<Inner>, session_id: SessionId) ->
     }
 }
 
+fn pause_early_timed_continuation(inner: &Arc<Inner>, session_id: SessionId,
+    text: &str, source_key: &str, timing: Option<&crate::asr::volcengine::LiveDeliveryTiming>) -> Option<String> {
+    let ledger = inner.embedded_audio_pause_early_delivery.lock();
+    if ledger.session_id != Some(session_id) || ledger.unconfirmed_prior.is_some()
+        || ledger.ever_delivered_session != Some(session_id) || ledger.source_key != source_key {
+        return None;
+    }
+    let (key, boundary, source) = ledger.confirmed_timed_boundary.as_ref()?;
+    if key != source_key { return None; }
+    let timing = timing?;
+    if !source.same_capture(timing.source) { return None; }
+    let tail = timing.timing.body_suffix_after_delivery(text, boundary)?;
+    let raw_end = text.len().checked_sub(tail.len())?;
+    let body = filter_automatic_wake_text(inner, session_id, text, false);
+    let body_start = text.trim_end().strip_suffix(&body)?.len();
+    let prefs = inner.prefs.get();
+    let rules = inner.correction_rules.list().unwrap_or_default();
+    let rendered = render_raw_delivery_body(&body, &prefs, &rules);
+    let rendered_prefix = render_raw_delivery_body(text.get(body_start..raw_end)?, &prefs, &rules);
+    let rendered_tail = rendered.strip_prefix(&rendered_prefix)?;
+    Some(pause_early_boundary_tail(rendered_tail, &ledger.delivered_display).to_string())
+}
+
+fn pause_early_remember_timed_boundary(inner: &Arc<Inner>, session_id: SessionId,
+    source_key: &str, timing: Option<&crate::asr::volcengine::LiveDeliveryTiming>) {
+    let boundary = timing.and_then(|timing| timing.timing.delivery_boundary(source_key)
+        .map(|boundary| (source_key.into(), boundary, timing.source)));
+    let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+    if ledger.session_id == Some(session_id) && ledger.unconfirmed_prior.is_none()
+        && ledger.ever_delivered_session == Some(session_id) && ledger.source_key == source_key {
+        if let Some(consumed) = ledger.committed_body_consumption.as_ref()
+            .filter(|consumed| consumed.rendered_key == source_key).cloned() {
+            ledger.confirmed_source_text = Some(consumed.raw_prefix);
+            ledger.confirmed_timed_boundary = consumed.boundary
+                .map(|boundary| (source_key.into(), boundary, consumed.source));
+            return;
+        }
+        ledger.confirmed_source_text = timing.and_then(|timing| {
+            let raw_key = crate::transcript_boundary::content_key(&timing.timing.text);
+            if source_key.is_empty() { return None; }
+            let mut matches = raw_key.match_indices(source_key);
+            let (start, _) = matches.next()?;
+            if matches.next().is_some() { return None; }
+            let end = crate::transcript_boundary::consumed_prefix_end(&timing.timing.text,
+                &raw_key[..start + source_key.len()])?;
+            Some(timing.timing.text[..end].to_string())
+        });
+        ledger.confirmed_timed_boundary = boundary;
+    }
+}
+
+fn pause_early_ledger_anchor(inner: &Arc<Inner>, session_id: SessionId) -> Option<crate::asr::volcengine::LiveLedgerAnchor> {
+    let ledger = inner.embedded_audio_pause_early_delivery.lock();
+    if ledger.session_id != Some(session_id) || ledger.unconfirmed_prior.is_some()
+        || ledger.ever_delivered_session != Some(session_id) { return None; }
+    let (key, boundary, source) = ledger.confirmed_timed_boundary.as_ref()?;
+    if key != &ledger.source_key { return None; }
+    Some(crate::asr::volcengine::LiveLedgerAnchor {
+        source: *source, generation: ledger.delivery_generation,
+        source_key: key.clone(), source_text: ledger.confirmed_source_text.clone()?,
+        boundary: boundary.clone(),
+    })
+}
+
+fn pause_early_advance_continuation(inner: &Arc<Inner>, session_id: SessionId,
+    continuation: &crate::asr::volcengine::LiveLedgerContinuation,
+    expected_display_prefix: &str, new_source_key: &str) -> Option<crate::asr::volcengine::LiveLedgerAnchor> {
+    let mut suffix_key = String::new();
+    for word in &continuation.suffix.timing.words {
+        suffix_key.push_str(&crate::transcript_boundary::content_key(&word.text));
+        let Some(next) = continuation.advance(&suffix_key, new_source_key) else { continue; };
+        // Apply wake/filler/script/corrections to the complete raw coordinate.
+        // A display boundary inside a child token cannot advance the audio seam.
+        if pause_early_display_text(inner, session_id, &next.source_text).as_deref() == Some(expected_display_prefix) {
+            return Some(next);
+        }
+    }
+    None
+}
+
+fn pause_early_remember_continuation(inner: &Arc<Inner>, session_id: SessionId,
+    anchor: &crate::asr::volcengine::LiveLedgerAnchor) {
+    let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+    let continues_same_capture = ledger.confirmed_timed_boundary.as_ref()
+        .is_some_and(|(_, _, source)| source.same_capture(anchor.source));
+    let extends_committed_raw = ledger.confirmed_source_text.as_deref()
+        .and_then(|prior| anchor.source_text.strip_prefix(prior))
+        .is_some_and(|tail| !crate::transcript_boundary::content_key(tail).is_empty());
+    if ledger.session_id == Some(session_id) && ledger.unconfirmed_prior.is_none()
+        && ledger.ever_delivered_session == Some(session_id)
+        && ledger.delivery_generation == anchor.generation && ledger.source_key == anchor.source_key
+        && continues_same_capture && extends_committed_raw {
+        ledger.confirmed_source_text = Some(anchor.source_text.clone());
+        ledger.confirmed_timed_boundary = Some((anchor.source_key.clone(), anchor.boundary.clone(), anchor.source));
+        log::info!("[coord] cropped source bookmark advanced session_id={session_id} generation={} capture_stream={} child_decoder={} source_word_ms={:?}",
+            anchor.generation, anchor.source.capture_stream_id, anchor.source.decoder_stream_id, anchor.boundary.range_ms());
+    }
+}
+
 fn pause_early_admitted_source_key(inner: &Arc<Inner>, session_id: SessionId) -> String {
     let ledger = inner.embedded_audio_pause_early_delivery.lock();
     if ledger.session_id != Some(session_id)
@@ -2151,6 +2550,66 @@ fn pause_early_admitted_source_key(inner: &Arc<Inner>, session_id: SessionId) ->
         .map(|(_, key, source)| (source, key))
         .unwrap_or((&ledger.source_key, &ledger.delivered_key));
     if source.is_empty() { display_key.clone() } else { source.clone() }
+}
+
+/// All endpoint readers use the same successful raw consumption transaction.
+/// The rendered key remains available to display reconciliation independently.
+fn pause_early_committed_body_consumption(
+    inner: &Arc<Inner>, session_id: SessionId,
+) -> Option<crate::asr::volcengine::LiveBodyConsumption> {
+        let ledger = inner.embedded_audio_pause_early_delivery.lock();
+        let key = ledger.unconfirmed_prior.as_ref().map(|(_, _, key)| key)
+            .unwrap_or(&ledger.source_key);
+        (ledger.session_id == Some(session_id) && ledger.ever_delivered_session == Some(session_id))
+            .then(|| ledger.committed_body_consumption.as_ref()
+                .filter(|value| &value.rendered_key == key).cloned()).flatten()
+}
+
+fn pause_early_pending_body_delivery(
+    inner: &Arc<Inner>, session_id: SessionId,
+    asr: &crate::asr::volcengine::VolcengineStreamingASR,
+) -> Option<crate::asr::volcengine::PendingBodyDelivery> {
+    match pause_early_committed_body_consumption(inner, session_id) {
+        Some(consumed) => asr.pending_body_delivery_from_consumption(&consumed),
+        None => asr.pending_body_delivery_after(&pause_early_admitted_source_key(inner, session_id)),
+    }
+}
+
+fn pause_early_provider_consumed_key(inner: &Arc<Inner>, session_id: SessionId) -> String {
+    pause_early_committed_body_consumption(inner, session_id)
+        .map(|consumed| crate::transcript_boundary::content_key(&consumed.raw_prefix))
+        .unwrap_or_else(|| pause_early_admitted_source_key(inner, session_id))
+}
+
+fn pause_early_source_consumption(
+    inner: &Arc<Inner>, session_id: SessionId, snapshot: &str, rendered_key: &str,
+    source: crate::asr::volcengine::LiveDeliverySource,
+    timing: Option<&crate::asr::volcengine::LiveDeliveryTiming>,
+) -> Option<crate::asr::volcengine::LiveBodyConsumption> {
+    // Observe activation once on the actual full snapshot. Prefix probing is
+    // pure; artificial partial strings must not mutate the wake/body latch.
+    let body = filter_automatic_wake_text(inner, session_id, snapshot, false);
+    if body.is_empty() { return None; }
+    let body_offset = snapshot.trim_end().strip_suffix(&body)?.len();
+    let prefs = inner.prefs.get();
+    let rules = inner.correction_rules.list().unwrap_or_default();
+    let raw_prefix = crate::transcript_boundary::source_prefix_for_rendered_key(
+        snapshot, rendered_key, |prefix| prefix.get(body_offset..)
+            .map(|body| render_raw_delivery_body(body, &prefs, &rules)))?;
+    let boundary = timing.filter(|timing| timing.source == source)
+        .and_then(|timing| timing.timing.delivery_boundary(&crate::transcript_boundary::content_key(raw_prefix)));
+    Some(crate::asr::volcengine::LiveBodyConsumption {
+        raw_prefix: raw_prefix.into(), body_start: body_offset, rendered_key: rendered_key.into(), source, boundary,
+    })
+}
+
+fn render_raw_delivery_body(
+    body: &str, prefs: &crate::types::UserPreferences, rules: &[crate::types::CorrectionRule],
+) -> String {
+    let body = if prefs.remove_filler_words { remove_standalone_dictation_fillers(body) }
+        else { body.to_string() };
+    let body = apply_chinese_script_preference(&body, prefs.chinese_script_preference);
+    apply_correction_rules(&body, rules).trim().to_string()
 }
 
 /// Advance in the provider snapshot, not in the concatenated editor text.
@@ -2187,6 +2646,14 @@ fn pause_early_delivery_reserve(
     delivered_key: String,
     source_key: String,
 ) {
+    pause_early_delivery_reserve_source(inner, session_id, delivered_display, delivered_key, source_key, None);
+}
+
+fn pause_early_delivery_reserve_source(
+    inner: &Arc<Inner>, session_id: SessionId, delivered_display: String,
+    delivered_key: String, source_key: String,
+    consumed: Option<crate::asr::volcengine::LiveBodyConsumption>,
+) {
     let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
     if ledger.session_id != Some(session_id) {
         // A cancelled recording can leave a committed prefix behind. Its
@@ -2211,15 +2678,18 @@ fn pause_early_delivery_reserve(
     ledger.delivered_display = delivered_display;
     ledger.delivered_key = delivered_key;
     ledger.source_key = source_key;
+    ledger.reserved_body_consumption = consumed;
 }
 
 /// The newest reserved paste succeeded on screen: the ledger prefix is now
 /// confirmed and the sticky floor latches.
 fn pause_early_delivery_confirm(inner: &Arc<Inner>, session_id: SessionId) {
     let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
-    if ledger.session_id.as_ref() == Some(&session_id) {
+    if ledger.session_id.as_ref() == Some(&session_id) && ledger.unconfirmed_prior.is_some() {
+        ledger.committed_body_consumption = ledger.reserved_body_consumption.take();
         ledger.unconfirmed_prior = None;
         ledger.ever_delivered_session = Some(session_id);
+        ledger.delivery_generation = ledger.delivery_generation.wrapping_add(1);
     }
 }
 
@@ -2236,6 +2706,7 @@ fn pause_early_delivery_rollback(inner: &Arc<Inner>, session_id: SessionId) {
         ledger.delivered_key = prior_key;
         ledger.source_key = prior_source_key;
     }
+    ledger.reserved_body_consumption = None;
 }
 
 /// 本会话是否确实上屏过停顿落屏文本（跨回滚粘滞）。终稿交付的硬底线。
@@ -2277,11 +2748,21 @@ fn automatic_wake_has_unstripped_lead_in(raw_text: &str, phrase: &str, admitted_
         .find(phrase)
         .is_some_and(|offset| {
             let lead_key = embedded_audio_partial_preview_stability_key(&raw_text[..offset]);
-            // Once this source prefix has been admitted as body, a later wake
-            // phrase belongs to that body. Re-running initial wake admission
-            // would otherwise block every subsequent streaming clause.
-            // A newly prepended, uncovered preamble still fails this check.
-            if !admitted_source_key.is_empty() && lead_key.starts_with(admitted_source_key) {
+            // A literal phrase is body both before and after a successful
+            // append crosses it. Before crossing, the lead extends the
+            // committed source; after crossing, the complete current body
+            // extends that source. Comparing only the lead with the advancing
+            // consumption cursor revoked admission as soon as the phrase had
+            // been pasted (9919084d, ticket 77), freezing all later clauses.
+            // This requires the same complete prefix, not merely a shorter
+            // matching lead: prepended ambient text and incompatible revisions
+            // remain uncovered. The caller supplies only successful source
+            // consumption, never an in-flight reservation or display transform.
+            if !admitted_source_key.is_empty()
+                && (lead_key.starts_with(admitted_source_key)
+                    || embedded_audio_partial_preview_stability_key(raw_text)
+                        .starts_with(admitted_source_key))
+            {
                 return false;
             }
             raw_text[..offset].chars().filter(|ch| ch.is_alphanumeric()).count() > 2
@@ -2299,19 +2780,59 @@ fn pause_early_display_text(
     session_id: SessionId,
     raw_text: &str,
 ) -> Option<String> {
+    live_delivery_display_text(inner, session_id, raw_text, false)
+}
+
+fn session_llm_circuit_state(inner: &Arc<Inner>, session_id: SessionId) -> (bool, bool) {
+    let cached = {
+        let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+        if ledger.session_id != Some(session_id) {
+            *ledger = PauseEarlyDeliveryLedger { session_id: Some(session_id), ..Default::default() };
+        }
+        ledger.llm_auth_fingerprint
+    };
+    let fingerprint = cached.unwrap_or_else(|| {
+        let fingerprint = current_llm_auth_fingerprint().ok();
+        let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+        if ledger.session_id == Some(session_id) {
+            ledger.llm_auth_fingerprint = Some(fingerprint);
+        }
+        fingerprint
+    });
+    (fingerprint.is_some_and(current_llm_auth_is_rejected), llm_stall_circuit_open())
+}
+
+fn live_raw_delivery_supported(
+    translation_active: bool, needs_llm_polish: bool, auth_blocked: bool, stall_blocked: bool,
+) -> bool {
+    // Use the same actual disposition as final dispatch. A rejected/unavailable
+    // polish service cannot disable raw clauses that the final will pass through.
+    !translation_active && (!needs_llm_polish || auth_blocked || stall_blocked)
+}
+
+fn live_delivery_display_text(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    raw_text: &str,
+    partial: bool,
+) -> Option<String> {
     // The phrase detector can open a session even when the provider's early
     // text begins with another speaker and places the real wake phrase later.
     // Normalize the same proven control prefix used by capsule and final
     // before checking for an ambiguous, still-unstripped lead-in.
-    let text = filter_automatic_wake_text(inner, session_id, raw_text, false);
+    let resolved = resolve_automatic_wake_text(inner, session_id, raw_text, partial);
+    let text = resolved.text;
     let wake_phrase = inner
         .embedded_audio_automatic_wake_guard
         .lock()
         .as_ref()
         .filter(|guard| guard.session_id == session_id)
         .map(|guard| guard.phrase.clone());
-    let admitted_source_key = pause_early_admitted_source_key(inner, session_id);
-    if wake_phrase
+    let admitted_source_key = pause_early_committed_body_consumption(inner, session_id)
+        .and_then(|consumed| consumed.raw_prefix.get(consumed.body_start..)
+            .map(crate::transcript_boundary::content_key))
+        .unwrap_or_else(|| pause_early_admitted_source_key(inner, session_id));
+    if !resolved.activation_resolved && wake_phrase
         .as_deref()
         .is_some_and(|phrase| automatic_wake_has_unstripped_lead_in(&text, phrase, &admitted_source_key))
     {
@@ -2319,16 +2840,12 @@ fn pause_early_display_text(
         return None;
     }
     let prefs = inner.prefs.get();
-    let text = if prefs.remove_filler_words {
-        remove_standalone_dictation_fillers(&text)
-    } else {
-        text
-    };
     let translation_active = inner.translation_modifier_seen.load(Ordering::SeqCst)
-        && !prefs.translation_target_language.trim().is_empty();
+        && !prefs.translation_target_language.trim().is_empty()
+        && !pause_early_ever_delivered(inner, session_id);
     let force_raw_output = std::env::var("LISTENER_TYPE_FORCE_RAW_OUTPUT")
         .map(|value| value == "1")
-        .unwrap_or(false);
+        .unwrap_or(false) || pause_early_ever_delivered(inner, session_id);
     let pack = if force_raw_output {
         crate::types::builtin_style_pack_for_mode(PolishMode::Raw)
     } else {
@@ -2343,14 +2860,16 @@ fn pause_early_display_text(
     let raw_uses_llm = !force_raw_output
         && pack.base_mode == PolishMode::Raw
         && super::raw_style_pack_uses_llm(&pack);
-    if translation_active || pack.base_mode != PolishMode::Raw || raw_uses_llm {
+    let needs_llm_polish = pack.base_mode != PolishMode::Raw || raw_uses_llm;
+    let (auth_blocked, stall_blocked) = if needs_llm_polish {
+        session_llm_circuit_state(inner, session_id)
+    } else { (false, false) };
+    if !live_raw_delivery_supported(translation_active, needs_llm_polish, auth_blocked, stall_blocked) {
         pause_early_note_gate_blocked(inner, session_id, "polish_or_translation_active");
         return None;
     }
-    let text = apply_chinese_script_preference(&text, prefs.chinese_script_preference);
     let correction_rules = inner.correction_rules.list().unwrap_or_default();
-    let text = apply_correction_rules(&text, &correction_rules);
-    let text = text.trim().to_string();
+    let text = render_raw_delivery_body(&text, &prefs, &correction_rules);
     if text.is_empty() {
         None
     } else {
@@ -2359,7 +2878,7 @@ fn pause_early_display_text(
 }
 
 /// Watchdog 每拍评估（无 STOP 待决时）。条件全满足才动作：
-/// 干净会话（ASR 账本卫兵：无冻结）+ 账本前缀稳定 ≥1s +
+/// 干净会话（ASR 账本卫兵：无冻结）+ 同源原生确认或旧协议稳定前缀 +
 /// Raw 一次性路径（翻译/LLM 会整体改写，前缀会被孤立）+ 有新增内容 +
 /// 当前光标有输入目标。组字流式活着时改走 stream_commit 落定(不碰焦点,
 /// 组字锚在目标进程);任何失败静默回退到现行为(终稿一次性交付)。
@@ -2395,9 +2914,14 @@ async fn pause_early_delivery_tick(
         }
     }
     let source_key = pause_early_delivery_source_key(inner, session_id);
-    let Some(snapshot) = asr.pause_early_delivery_ledger_snapshot_after(
-        PAUSE_EARLY_DELIVERY_MIN_STABLE, &source_key,
-    )
+    let provider_consumed_key = pause_early_provider_consumed_key(inner, session_id);
+    let continuation = pause_early_ledger_anchor(inner, session_id).and_then(|anchor|
+        asr.pause_early_ledger_continuation_after(PAUSE_EARLY_DELIVERY_MIN_STABLE, &anchor));
+    let view = continuation.as_ref().map(|value| (value.source_text(), None,
+            crate::asr::volcengine::LiveDeliveryStability::ProviderConfirmed, value.suffix.source))
+        .or_else(|| asr.pause_early_delivery_evidence_after(PAUSE_EARLY_DELIVERY_MIN_STABLE, &provider_consumed_key)
+            .map(|snapshot| (snapshot.text, snapshot.timing, snapshot.stability, snapshot.source)));
+    let Some((snapshot_text, snapshot_timing, snapshot_stability, snapshot_source)) = view
     else {
         if let Some(reason) = asr.pause_early_delivery_persistent_block_reason() {
             pause_early_note_gate_blocked(inner, session_id, reason);
@@ -2418,7 +2942,7 @@ async fn pause_early_delivery_tick(
         }
         return;
     };
-    let snapshot_chars = snapshot.text.chars().count();
+    let snapshot_chars = snapshot_text.chars().count();
     let full_ledger_chars = asr.pause_early_delivery_gate_diag().2;
     {
         let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
@@ -2426,18 +2950,29 @@ async fn pause_early_delivery_tick(
             ledger.qualified_diag_logged = Some(session_id);
             log::info!(
                 "[coord] pause-early snapshot qualified session_id={session_id} chars={}",
-                snapshot.text.chars().count()
+                snapshot_text.chars().count()
             );
         }
     }
+    // Preserve the exact ASR source coordinate before wake/filler/script/
+    // correction display transforms. The current owner candidate lives in
+    // this same coordinate, including a bounded hesitation before the wake.
+    // Asking with the displayed body key would fail to locate such a prefix
+    // and could mistake an older stable snapshot for the complete candidate.
+    let snapshot_owner_source_key =
+        crate::transcript_boundary::content_key(&snapshot_text);
     // 显示侧变换必须镜像终稿 Raw 路径，前缀才能与终稿逐字可比（标点差由
     // stability key 容忍）。组字流式(切片3)与这里共用同一条链。
-    let Some(text) = pause_early_display_text(inner, session_id, &snapshot.text) else {
+    let Some(text) = pause_early_display_text(inner, session_id, &snapshot_text) else {
         return;
     };
     let prefs = inner.prefs.get();
     let (delivered_display, delivered_key) =
         pause_early_delivery_session_state(inner, session_id);
+    if continuation.is_some() && !text.starts_with(&delivered_display) {
+        pause_early_note_gate_blocked(inner, session_id, "cropped_display_prefix_changed");
+        return;
+    }
     let exact_delta = pause_early_final_remainder(&text, &delivered_display, &source_key);
     let anchored = exact_delta.is_none();
     let Some(delta) = exact_delta
@@ -2450,6 +2985,7 @@ async fn pause_early_delivery_tick(
         // alignment used at finalization, on the stable owner snapshot only.
         // Its internal-growth and large-rewrite guards still prevent a replay.
         .or_else(|| pause_early_aligned_growth_tail(&text, &source_key))
+        .or_else(|| pause_early_timed_continuation(inner, session_id, &snapshot_text, &source_key, snapshot_timing.as_ref()))
     else {
         let current_key = embedded_audio_partial_preview_stability_key(&text);
         if source_key.starts_with(&current_key) {
@@ -2482,16 +3018,75 @@ async fn pause_early_delivery_tick(
     let preview_quiet = inner.embedded_audio_preview.lock()
         .last_visible_growth_at(session_id)
         .is_some_and(|at| at.elapsed() >= PAUSE_EARLY_UNPUNCTUATED_QUIET);
-    let quiet_boundary = snapshot_chars == full_ledger_chars && ledger_quiet && preview_quiet;
+    // `full_ledger_chars` is an ASR-internal source coordinate. A late
+    // original-source Owner proof can extend the approved snapshot after the
+    // last provider frame, while that diagnostic still describes the shorter
+    // filtered ledger (and automatic wake stripping changes its length again).
+    // Compare the normalized body with the actual visible body instead. This
+    // remains conservative when the visual path contains any unowned tail.
+    let visible_delivery_text = current_embedded_audio_visual_preview(inner)
+        .and_then(|visible| pause_early_display_text(inner, session_id, &visible));
+    let visible_body_covered = pause_early_snapshot_covers_visible_body(
+        &text,
+        visible_delivery_text.as_deref(),
+    );
     let remainder = delta;
-    let Some(delta) = pause_early_segment(&remainder, quiet_boundary) else {
+    let pending_after_snapshot = (!snapshot_owner_source_key.is_empty())
+        .then(|| asr.pending_body_delivery_after(&snapshot_owner_source_key))
+        .flatten()
+        .map(|pending| pending.key);
+    let owner_candidate_caught_up = continuation.as_ref().map_or_else(
+        || pause_early_snapshot_has_no_newer_owner_body(pending_after_snapshot.as_deref()),
+        |value| value.owner_caught_up,
+    );
+    if snapshot_stability == crate::asr::volcengine::LiveDeliveryStability::RollingStable
+        && visible_body_covered
+        && ledger_quiet
+        && preview_quiet
+        && !owner_candidate_caught_up
+        && pause_early_complete_clause(&remainder).is_none()
+    {
+        pause_early_note_gate_blocked(inner, session_id, "newer_owner_candidate_settling");
+    }
+    let quiet_boundary = visible_body_covered
+        && owner_candidate_caught_up
+        && ledger_quiet
+        && preview_quiet;
+    let Some(delta) = pause_early_ready_segment(&delivered_display, &delivered_key,
+        &remainder, quiet_boundary, snapshot_stability) else {
         return;
     };
-    if !pause_early_chunk_ready(&delivered_key, delta) {
-        return;
-    }
     let Some(new_source_key) = pause_early_source_key_after_append(&text, &remainder, delta) else {
         pause_early_note_gate_blocked(inner, session_id, "source_boundary_unavailable");
+        return;
+    };
+    let next_anchor = if let Some(value) = &continuation {
+        let Some(prefix_len) = text.len().checked_sub(remainder.len()) else { return; };
+        let Some(next) = pause_early_advance_continuation(inner, session_id, value,
+            &text[..prefix_len + delta.len()], &new_source_key) else {
+            pause_early_note_gate_blocked(inner, session_id, "cropped_child_boundary_unavailable");
+            return;
+        };
+        if pause_early_ledger_anchor(inner, session_id).as_ref() != Some(&value.anchor)
+            || !asr.ledger_continuation_is_current(value) { return; }
+        Some(next)
+    } else { None };
+    let consumed = if let Some(anchor) = &next_anchor {
+        let Some(prior) = pause_early_committed_body_consumption(inner, session_id)
+            .filter(|prior| anchor.source_text.starts_with(&prior.raw_prefix)) else {
+                pause_early_note_gate_blocked(inner, session_id, "cropped_raw_body_boundary_unavailable");
+                return;
+            };
+        Some(crate::asr::volcengine::LiveBodyConsumption {
+            raw_prefix: anchor.source_text.clone(), body_start: prior.body_start, rendered_key: new_source_key.clone(),
+            source: anchor.source, boundary: Some(anchor.boundary.clone()),
+        })
+    } else {
+        pause_early_source_consumption(inner, session_id, &snapshot_text, &new_source_key,
+            snapshot_source, snapshot_timing.as_ref())
+    };
+    let Some(consumed) = consumed else {
+        pause_early_note_gate_blocked(inner, session_id, "raw_source_boundary_unavailable");
         return;
     };
     let new_display = format!("{delivered_display}{delta}");
@@ -2505,6 +3100,17 @@ async fn pause_early_delivery_tick(
             new_display.chars().count()
         );
     }
+    if native_composition_written(inner, session_id) {
+        if native_composition_commit_stable(inner, session_id, delta, &delivered_display,
+            &new_key, &new_source_key, consumed, endpoint_clock).await {
+            if let Some(next) = &next_anchor {
+                pause_early_remember_continuation(inner, session_id, next);
+            } else {
+                pause_early_remember_timed_boundary(inner, session_id, &new_source_key, snapshot_timing.as_ref());
+            }
+        }
+        return;
+    }
     // 组字流式活着 → 落定走 stream_commit(组字锚在目标进程,不需要焦点
     // 恢复;账本先记后 commit,失败回滚——次序与粘贴路径同款)。失败时驱动
     // 已降级清组字,下一拍以空账本走粘贴分支补上。
@@ -2516,8 +3122,13 @@ async fn pause_early_delivery_tick(
             pause_early_note_gate_blocked(inner, session_id, "terminal_suffix_current_editor_unverified");
             return;
         }
-        streaming_composition_commit_stable(inner, session_id, delta, &delivered_display, &new_key, &new_source_key, endpoint_clock)
-            .await;
+        if streaming_composition_commit_stable(inner, session_id, delta, &delivered_display, &new_key, &new_source_key, consumed, endpoint_clock).await {
+            if let Some(next) = &next_anchor {
+                pause_early_remember_continuation(inner, session_id, next);
+            } else {
+                pause_early_remember_timed_boundary(inner, session_id, &new_source_key, snapshot_timing.as_ref());
+            }
+        }
         return;
     }
     // 组字降级且清场也失败:文档里可能有残留组字,粘贴会重复,宁停手。
@@ -2535,7 +3146,13 @@ async fn pause_early_delivery_tick(
         return;
     }
     // 先记账再粘贴：并发触发的终稿交付会按在途前缀计算余量；粘贴失败回滚。
-    pause_early_delivery_reserve(inner, session_id, new_display, new_key, new_source_key);
+    pause_early_delivery_reserve_source(inner, session_id, new_display, new_key, new_source_key.clone(), Some(consumed));
+    // Close the endpoint race before the synchronous platform insertion. The
+    // sequence is settled only by this dispatch, so a late failure cannot
+    // release a newer delivery's hold.
+    let body_submission = endpoint_clock
+        .lock()
+        .begin_text_submission(Instant::now(), delta);
     // 2026-09-23 tki:中途粘贴不恢复剪贴板。750ms 恢复窗口追不上忙碌目标
     // (VS Code/Chromium 渲染器)的粘贴派发——08:39 实锤:第 1 段 22 字正确,
     // 第 2/3 段粘出的是用户 08:22 复制的旧报告×2(账本记 14+14 字已交付,
@@ -2543,11 +3160,14 @@ async fn pause_early_delivery_tick(
     // 交付仍按用户偏好恢复,那才是剪贴板所有权归还的正当时机。
     let restore_clipboard = false;
     let terminal_status = if pause_early_terminal_punctuation_only(delta) {
-        match inner.inserter.insert_terminal_suffix(&delivered_display, delta, restore_clipboard, prefs.paste_shortcut) {
+        match inner.inserter.insert_session_terminal_suffix(session_id, &delivered_display, delta, prefs.paste_shortcut) {
             Ok(status) => Some(status),
             Err(crate::insertion::TerminalAppendDecision::AlreadyPresent) => Some(InsertStatus::Inserted),
             Err(_) => {
                 pause_early_delivery_rollback(inner, session_id);
+                endpoint_clock
+                    .lock()
+                    .settle_text_submission(body_submission, false, None);
                 pause_early_note_gate_blocked(inner, session_id, "terminal_suffix_current_editor_unverified");
                 return;
             }
@@ -2556,25 +3176,34 @@ async fn pause_early_delivery_tick(
         None
     };
     #[cfg(target_os = "windows")]
-    let (status, route) = {
+    let (status, route, receipt) = {
         if let Some(status) = terminal_status {
-            (status, DeliveryRoute::Paste)
+            (status, DeliveryRoute::Paste, None)
         } else {
-            let result = insert_via_non_tsf_fallback(inner, delta, restore_clipboard, prefs.paste_shortcut);
-            (result.status, result.route)
+            let result = insert_via_non_tsf_fallback_scoped(inner, delta, restore_clipboard, prefs.paste_shortcut,
+                Some(crate::insertion::SessionPasteScope { session_id, previous_body: delivered_display.clone(), replace: false }));
+            (result.status, result.route, result.receipt)
         }
     };
     #[cfg(not(target_os = "windows"))]
-    let (status, route) = (
-        terminal_status.unwrap_or_else(|| inner.inserter.insert(delta, restore_clipboard, prefs.paste_shortcut)),
-        DeliveryRoute::Paste,
-    );
+    let (status, route, receipt) = {
+        if let Some(status) = terminal_status {
+            (status, DeliveryRoute::Paste, None)
+        } else {
+            let submission = inner.inserter.insert_session_paste(delta, prefs.paste_shortcut,
+                crate::insertion::SessionPasteScope { session_id, previous_body: delivered_display.clone(), replace: false });
+            (submission.status, DeliveryRoute::Paste, submission.receipt)
+        }
+    };
     let inserted = matches!(
         status,
         InsertStatus::PasteSent | InsertStatus::Inserted | InsertStatus::SubmittedUnconfirmed
     );
     if !inserted {
         pause_early_delivery_rollback(inner, session_id);
+        endpoint_clock
+            .lock()
+            .settle_text_submission(body_submission, false, None);
         log::warn!(
             "[coord] pause-early-delivery paste failed status={:?} chars={} — final will deliver the remainder",
             status,
@@ -2583,7 +3212,14 @@ async fn pause_early_delivery_tick(
         return;
     }
     pause_early_delivery_confirm(inner, session_id);
-    endpoint_clock.lock().note_text_delivery(Instant::now(), delta);
+    if let Some(next) = &next_anchor {
+                pause_early_remember_continuation(inner, session_id, next);
+            } else {
+                pause_early_remember_timed_boundary(inner, session_id, &new_source_key, snapshot_timing.as_ref());
+            }
+    endpoint_clock
+        .lock()
+        .settle_text_submission(body_submission, true, receipt);
     if route == DeliveryRoute::Paste {
         inner.embedded_audio_pause_early_delivery.lock().paste_delivered_session = Some(session_id);
     }
@@ -2595,4 +3231,41 @@ async fn pause_early_delivery_tick(
         route,
         status
     );
+}
+
+#[cfg(test)]
+mod reversible_visual_activation_tests {
+    use super::exact_leading_activation_body;
+
+    #[test]
+    fn exact_activation_prefix_reveals_only_the_reversible_body() {
+        assert_eq!(
+            exact_leading_activation_body("开始录音，今天的安排已经确认", "开始录音"),
+            Some("今天的安排已经确认".to_string())
+        );
+    }
+
+    #[test]
+    fn ambient_or_incomplete_prefix_cannot_become_reversible_body() {
+        assert_eq!(
+            exact_leading_activation_body("你欺负她。开始录音，这是我的正文", "开始录音"),
+            None
+        );
+        assert_eq!(
+            exact_leading_activation_body("开始安排今天的资料", "开始录音"),
+            None
+        );
+        assert_eq!(exact_leading_activation_body("开始录音。", "开始录音"), None);
+    }
+
+    #[test]
+    fn repeated_wake_phrase_in_body_is_preserved() {
+        assert_eq!(
+            exact_leading_activation_body(
+                "开始录音，正文里再说开始录音也要保留",
+                "开始录音"
+            ),
+            Some("正文里再说开始录音也要保留".to_string())
+        );
+    }
 }

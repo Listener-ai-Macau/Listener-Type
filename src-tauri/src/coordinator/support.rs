@@ -562,6 +562,15 @@ pub(super) fn publish_dictation_capsule(
     true
 }
 
+fn capsule_host_request_is_current(
+    latest: Option<&CapsulePayload>, session_id: &str, state: CapsuleState, translation: bool,
+) -> bool {
+    // Content/level updates can advance seq without changing the host request.
+    // Only a new session, state or layout can invalidate a queued operation.
+    latest.is_some_and(|payload| payload.state == state && payload.translation == translation
+        && payload.session_id.as_deref().unwrap_or("-") == session_id)
+}
+
 pub(super) fn apply_capsule_window_request<R: tauri::Runtime>(
     inner: &Arc<Inner>,
     app: &AppHandle<R>,
@@ -570,9 +579,16 @@ pub(super) fn apply_capsule_window_request<R: tauri::Runtime>(
     state: CapsuleState,
     elapsed_ms: u64,
     translation: bool,
-    show_capsule: bool,
     visible: bool,
 ) {
+    if !capsule_host_request_is_current(
+        inner.capsule_latest_payload.lock().as_ref(), session_id_for_log, state, translation,
+    ) {
+        return;
+    }
+    // Window requests may have waited on the UI thread while preferences changed.
+    let show_capsule = inner.prefs.get().show_capsule
+        && std::env::var("LISTENER_TYPE_SUPPRESS_CAPSULE_WINDOW").ok().as_deref() != Some("1");
     let Some(window) = app.get_webview_window("capsule") else {
         log::warn!("[capsule] emit requested but capsule window is missing");
         crate::timeline::mark(
@@ -762,7 +778,6 @@ pub(super) fn emit_capsule_with_session(
             state,
             elapsed_ms,
             translation,
-            show_capsule,
             visible,
         );
 
@@ -780,7 +795,6 @@ pub(super) fn emit_capsule_with_session(
                     state,
                     elapsed_ms,
                     translation,
-                    show_capsule,
                     visible,
                 );
             }) {
@@ -969,6 +983,27 @@ pub(super) struct CapsuleLayoutState {
     pub(super) monitor_width: u32,
     pub(super) monitor_height: u32,
     pub(super) scale_bits: u64,
+    pub(super) work_x: i32,
+    pub(super) work_y: i32,
+    pub(super) work_width: u32,
+    pub(super) work_height: u32,
+}
+
+impl CapsuleLayoutState {
+    pub(super) fn for_monitor(monitor: &tauri::Monitor, translation_active: bool) -> Self {
+        Self {
+            translation_active,
+            monitor_x: monitor.position().x,
+            monitor_y: monitor.position().y,
+            monitor_width: monitor.size().width,
+            monitor_height: monitor.size().height,
+            scale_bits: monitor.scale_factor().to_bits(),
+            work_x: monitor.work_area().position.x,
+            work_y: monitor.work_area().position.y,
+            work_width: monitor.work_area().size.width,
+            work_height: monitor.work_area().size.height,
+        }
+    }
 }
 
 pub(super) fn maybe_position_capsule_bottom_center<R: tauri::Runtime>(
@@ -977,17 +1012,10 @@ pub(super) fn maybe_position_capsule_bottom_center<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
     translation_active: bool,
 ) {
-    let Some(monitor) = crate::capsule_target_monitor(app, window) else {
+    let Some(monitor) = inner.capsule_placement.target_monitor(app, window) else {
         return;
     };
-    let next = CapsuleLayoutState {
-        translation_active,
-        monitor_x: monitor.position().x,
-        monitor_y: monitor.position().y,
-        monitor_width: monitor.size().width,
-        monitor_height: monitor.size().height,
-        scale_bits: monitor.scale_factor().to_bits(),
-    };
+    let next = CapsuleLayoutState::for_monitor(&monitor, translation_active);
     // 窗口被甩到所有显示器之外时（DPI/拓扑变化后常见），缓存状态不再可信，
     // 必须强制重定位；否则胶囊一旦出屏就永远回不来。
     let off_screen = crate::capsule_window_off_all_monitors(app, window);
@@ -997,7 +1025,7 @@ pub(super) fn maybe_position_capsule_bottom_center<R: tauri::Runtime>(
             return;
         }
     }
-    if crate::position_capsule_bottom_center(app, window, translation_active).is_ok() {
+    if inner.capsule_placement.place(window, &monitor, translation_active).is_ok() {
         let mut last = inner.capsule_layout.lock();
         *last = Some(next);
     }
@@ -1121,5 +1149,26 @@ impl crate::recorder::AudioConsumer for DeferredAsrBridge {
                 source_interval,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod capsule_host_request_tests {
+    use super::*;
+
+    #[test]
+    fn capsule_host_request_keeps_newer_level_ticks_but_rejects_closed_or_replaced_sessions() {
+        let mut latest = CapsulePayload {
+            seq: 99, session_id: Some("current".into()), state: CapsuleState::Recording,
+            level: 0.2, elapsed_ms: 500, message: Some("newer preview".into()),
+            inserted_chars: None, translation: false,
+        };
+        assert!(capsule_host_request_is_current(Some(&latest), "current", CapsuleState::Recording, false));
+        assert!(!capsule_host_request_is_current(Some(&latest), "old", CapsuleState::Recording, false));
+        assert!(!capsule_host_request_is_current(Some(&latest), "current", CapsuleState::Recording, true));
+        latest.state = CapsuleState::Idle;
+        assert!(!capsule_host_request_is_current(Some(&latest), "current", CapsuleState::Recording, false));
+        assert!(capsule_host_request_is_current(Some(&latest), "current", CapsuleState::Idle, false));
+        assert!(!capsule_host_request_is_current(None, "current", CapsuleState::Recording, false));
     }
 }

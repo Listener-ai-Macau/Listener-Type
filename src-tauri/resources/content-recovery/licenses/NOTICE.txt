@@ -1,0 +1,12 @@
+Listener Type optional Chinese content recovery candidate.
+
+Sortformer weights: Licensed by NVIDIA Corporation under the NVIDIA Open Model License.
+Nemotron 3.5 ASR weights: NVIDIA, OpenMDW-1.1; full upstream model card and agreement included.
+PS4 weights: TaurenMountain, Apache-2.0; model card and license included.
+transcribe.cpp / ggml / miniz: notices and licenses in runtime/licenses.
+
+Modified artifacts: exported PS4 ECAPA/BSRNN graphs and a recomposed GGUF activity-mask bundle.
+The recomposed bundle retains ordinary ASR variant metadata and copies the existing ASR/diarizer tensor bytes;
+it is not the English trained multitalker kernel and is not a speaker identity model.
+No original copyright notice is removed. Source URLs are in the model cards and license-source-receipt.json.
+This package is a local test candidate; no global or real-device acceptance is asserted.

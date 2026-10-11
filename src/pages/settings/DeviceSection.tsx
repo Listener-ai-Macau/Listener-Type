@@ -12,6 +12,7 @@ import {
   deleteVoiceprint,
   setDeviceSettings,
   startVoiceprintEnrollment,
+  retryVoiceprintSave,
 } from '../../lib/ipc';
 import type {
   DeviceCustomKeyAction,
@@ -395,6 +396,17 @@ function DeviceFirmwareSettingsCard() {
         state: 'error',
         error: error instanceof Error ? error.message : String(error),
       } : null);
+    } finally {
+      setVoiceprintBusy(false);
+    }
+  };
+
+  const retryVoiceprintStorage = async () => {
+    setVoiceprintBusy(true);
+    try {
+      setVoiceprint(await retryVoiceprintSave());
+    } catch {
+      await refreshVoiceprint();
     } finally {
       setVoiceprintBusy(false);
     }
@@ -814,6 +826,7 @@ function DeviceFirmwareSettingsCard() {
           phrase={prefs.voiceWakePhrase}
           status={voiceprint}
           onStart={() => void enrollVoiceprint()}
+          onRetrySave={() => void retryVoiceprintStorage()}
           onCancel={() => void cancelVoiceprintCapture()}
           onClose={() => {
             setVoiceprintWizardOpen(false);

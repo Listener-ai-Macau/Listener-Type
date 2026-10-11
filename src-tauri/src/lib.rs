@@ -16,6 +16,7 @@ mod asr;
 mod audio_mute;
 mod audio_transport_codec;
 mod capsule_log;
+mod capsule_placement;
 mod cli;
 mod combo_hotkey;
 mod commands;
@@ -35,16 +36,30 @@ mod llm_gemini;
 mod marketplace_backend;
 mod net_health;
 mod observability;
+#[cfg(all(target_os = "windows", test))]
+mod original_speaker_identity;
 mod permissions;
 mod persistence;
 mod polish;
+#[cfg(any(target_os = "windows", test))]
+mod protected_voice_profile;
 mod qa_hotkey;
 mod recorder;
 mod selection;
 mod shortcut_binding;
 mod shortcut_dispatch;
+#[cfg(target_os = "windows")]
+mod speaker_identity_eres;
+mod personal_vad;
 mod speaker_verification;
+#[cfg(test)]
+mod speaker_channel_binding;
+#[cfg(test)]
+mod speaker_source_capture;
 mod speech_decision_kernel;
+mod speech_signal_quality;
+#[cfg(target_os = "windows")]
+mod speech_vad_windows;
 mod startup_evidence;
 mod timeline;
 mod transcript_boundary;
@@ -55,6 +70,10 @@ mod windows_ime_ipc;
 mod windows_ime_profile;
 mod windows_ime_protocol;
 mod windows_ime_session;
+#[cfg(test)]
+mod word_authority;
+#[cfg(test)]
+mod word_non_owner_evidence;
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 pub fn run_target_speaker_filter_diagnostic(
@@ -543,6 +562,18 @@ pub fn run() {
             cli::CliIntent::LocalWakeHelper => {
                 exit_after_headless_cli(asr::local::wake_helper::run_helper());
             }
+            cli::CliIntent::ContentRecoveryHelper => {
+                #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+                exit_after_headless_cli(asr::content_recovery_worker::run_helper());
+                #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
+                exit_after_headless_cli(1);
+            }
+            cli::CliIntent::RecordedContentProbe => {
+                #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+                exit_after_headless_cli(coordinator::run_recorded_content_probe());
+                #[cfg(not(all(target_os = "windows", feature = "target-speaker-extraction")))]
+                exit_after_headless_cli(1);
+            }
             cli::CliIntent::SubmitEmbeddedAudioBleOnce { .. }
             | cli::CliIntent::SubmitEmbeddedAudioBleStream { .. }
             | cli::CliIntent::SendEmbeddedAudioControlStop { .. }
@@ -659,13 +690,10 @@ pub fn run() {
                 }));
             }
 
-            // Capsule 启动时定位到屏幕底部居中并隐藏；coordinator 按需显示。
-            // 与 Swift `CapsuleWindowController.repositionToBottomCenter` 同语义。
+            // Restore the user's placement while hidden; coordinator shows on demand.
             if let Some(capsule) = app.get_webview_window("capsule") {
                 prepare_capsule_window_for_overlay(&capsule);
-                if let Err(e) = position_capsule_bottom_center(app.handle(), &capsule, false) {
-                    log::warn!("[capsule] position failed: {e}");
-                }
+                coordinator.reposition_capsule_after_display_change(app.handle(), true);
                 let _ = capsule.hide();
             }
 
@@ -684,53 +712,22 @@ pub fn run() {
                 log::info!("[qa] qa 窗口未在 tauri.conf.json 中声明，前端 agent 会补上");
             }
 
-            // 主窗口磨砂：macOS 用 NSVisualEffectView，Windows 用 Mica。
-            // 没这一层的话 transparent: true 让窗口透明 → 背后只是空，不是磨砂。
-            //
-            // decorations:true 由 Tauri 配置统一保留：macOS 用系统红黄绿；
-            // Windows 用原生 Win11 标题栏、拖动、圆角与 resize border。
+            // 静默启动且未开启自动更新时，主页面等首次托盘访问再创建。
+            // 自动更新由主页面的 AutoUpdateGate 调度，因此开启时仍保留隐藏页面。
+            let startup_prefs = coordinator.prefs().get();
+            let force_show = should_force_show_main_on_start();
+            let hide_main_on_start = std::env::var("LISTENER_TYPE_HIDE_MAIN_ON_START")
+                .ok()
+                .as_deref()
+                == Some("1");
+            let suppress_show =
+                !force_show && (hide_main_on_start || startup_prefs.start_minimized);
+            if !suppress_show || startup_prefs.auto_update_check {
+                ensure_main_window(app.handle()).map_err(std::io::Error::other)?;
+            } else {
+                log::info!("[main] defer WebView creation until first show");
+            }
             if let Some(main) = app.get_webview_window("main") {
-                #[cfg(target_os = "macos")]
-                {
-                    use window_vibrancy::{
-                        apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState,
-                    };
-                    if let Err(e) = main.set_decorations(true) {
-                        log::warn!("[main] enable native decorations failed: {e}");
-                    }
-                    if let Err(e) = apply_vibrancy(
-                        &main,
-                        NSVisualEffectMaterial::HudWindow,
-                        Some(NSVisualEffectState::Active),
-                        Some(20.0),
-                    ) {
-                        log::warn!("[main] vibrancy failed: {e}");
-                    }
-                }
-                #[cfg(target_os = "windows")]
-                {
-                    use window_vibrancy::apply_mica;
-                    // Windows 走 Tauri decorations:true 原生 Win11 标题栏 / 关闭按钮 /
-                    // 拖动 / 圆角 / resize border。保留 apply_mica 给原生 chrome 提供
-                    // 磨砂材质，配合 WindowChrome 半透明 background 让 sidebar 透出玻璃感。
-                    if let Err(e) = apply_mica(&main, None) {
-                        log::warn!("[main] mica failed: {e}");
-                    }
-                    // Win11 22H2+: 把原生标题栏底色调成白色，与应用 sidebar 视觉统一。
-                    // 老版 Windows 静默失败，不阻塞。
-                    apply_windows_caption_color_for_theme(&main, coordinator.prefs().get().dark_mode);
-                }
-                // 静默启动开关：prefs.start_minimized = true 或测试脚本设置
-                // LISTENER_TYPE_HIDE_MAIN_ON_START=1 → 不弹主窗口，用户从菜单栏 /
-                // 托盘点击访问。LISTENER_TYPE_SHOW_MAIN_ON_START=1 仍保留老的强制
-                // show 路径（手动 dispatch 测试 / dev 用），优先级最高。
-                let force_show = should_force_show_main_on_start();
-                let hide_main_on_start = std::env::var("LISTENER_TYPE_HIDE_MAIN_ON_START")
-                    .ok()
-                    .as_deref()
-                    == Some("1");
-                let suppress_show = !force_show
-                    && (hide_main_on_start || coordinator.prefs().get().start_minimized);
                 if suppress_show {
                     log::info!(
                         "[main] start minimized/hidden requested → 跳过初始 show，等用户点托盘"
@@ -897,8 +894,15 @@ pub fn run() {
             commands::list_installed_applications,
             commands::record_ui_timeline_event,
             commands::get_capsule_state,
+            commands::reset_capsule_position,
+            commands::move_capsule,
             commands::set_settings,
+            commands::set_cloud_account_session,
+            commands::clear_cloud_account_session,
+            commands::get_cloud_account_status,
+            commands::prepare_cloud_voiceprint_enrollment,
             commands::start_voiceprint_enrollment,
+            commands::retry_voiceprint_save,
             commands::cancel_voiceprint_enrollment,
             commands::delete_voiceprint,
             commands::refresh_device_settings_status,
@@ -1054,19 +1058,15 @@ pub fn run() {
                 }
             }
             RunEvent::WindowEvent { label, event, .. } => {
-                if label == "capsule"
-                    && matches!(
-                        &event,
-                        tauri::WindowEvent::Moved(_)
-                            | tauri::WindowEvent::ScaleFactorChanged { .. }
-                    )
-                {
+                if label == "capsule" {
                     let coordinator = app.state::<Arc<coordinator::Coordinator>>();
-                    let force = matches!(
-                        &event,
-                        tauri::WindowEvent::ScaleFactorChanged { .. }
-                    );
-                    coordinator.reposition_capsule_after_display_change(app, force);
+                    match &event {
+                        tauri::WindowEvent::Moved(_) =>
+                            coordinator.reposition_capsule_after_display_change(app, false),
+                        tauri::WindowEvent::ScaleFactorChanged { .. } =>
+                            coordinator.reposition_capsule_after_display_change(app, true),
+                        _ => {}
+                    }
                 }
                 if label == "main" {
                     if let tauri::WindowEvent::CloseRequested { ref api, .. } = event {
@@ -1849,33 +1849,100 @@ pub fn log_dir_path() -> std::path::PathBuf {
 
 /// 验收清单弹窗(2026-09-22 起的分轮人工验收):托盘菜单「验收清单…」。
 /// always-on-top 小窗,场景勾完一键复制结果发回开发侧。窗口本体在
-/// tauri.conf.json 声明(默认隐藏),这里只负责显示与聚焦。
+/// tauri.conf.json 声明(按需创建),首次打开时才加载其 WebView。
 fn show_acceptance_window<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("acceptance") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-        log::info!("[acceptance] window shown");
+    let window = if let Some(window) = app.get_webview_window("acceptance") {
+        window
     } else {
-        log::warn!("[acceptance] window missing from config");
+        let Some(config) = app
+            .config()
+            .app
+            .windows
+            .iter()
+            .find(|config| config.label == "acceptance")
+        else {
+            log::warn!("[acceptance] window missing from config");
+            return;
+        };
+        match tauri::WebviewWindowBuilder::from_config(app, config)
+            .and_then(|builder| builder.build())
+        {
+            Ok(window) => window,
+            Err(error) => {
+                log::warn!("[acceptance] create window failed: {error}");
+                return;
+            }
+        }
+    };
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+    log::info!("[acceptance] window shown");
+}
+
+fn ensure_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, String> {
+    if let Some(window) = app.get_webview_window("main") {
+        return Ok(window);
     }
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .ok_or_else(|| "main window configuration missing".to_string())?;
+    let window = tauri::WebviewWindowBuilder::from_config(app, config)
+        .and_then(|builder| builder.build())
+        .map_err(|error| format!("create main window failed: {error}"))?;
+
+    // Keep the same native chrome and material when the page is first opened.
+    #[cfg(target_os = "macos")]
+    {
+        use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
+        if let Err(error) = window.set_decorations(true) {
+            log::warn!("[main] enable native decorations failed: {error}");
+        }
+        if let Err(error) = apply_vibrancy(
+            &window,
+            NSVisualEffectMaterial::HudWindow,
+            Some(NSVisualEffectState::Active),
+            Some(20.0),
+        ) {
+            log::warn!("[main] vibrancy failed: {error}");
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Err(error) = window_vibrancy::apply_mica(&window, None) {
+            log::warn!("[main] mica failed: {error}");
+        }
+        let dark_mode = app
+            .try_state::<Arc<coordinator::Coordinator>>()
+            .is_some_and(|coordinator| coordinator.prefs().get().dark_mode);
+        apply_windows_caption_color_for_theme(&window, dark_mode);
+    }
+    log::info!("[main] WebView created");
+    Ok(window)
 }
 
 pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
     activate_window_mode(app);
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        restore_main_window_native(&w);
-        let _ = w.unminimize();
-        restore_main_window_layout_if_needed(&w);
-        if main_window_needs_recenter(&w) {
-            let _ = w.center();
+    match ensure_main_window(app) {
+        Ok(w) => {
+            let _ = w.show();
             restore_main_window_native(&w);
+            let _ = w.unminimize();
+            restore_main_window_layout_if_needed(&w);
+            if main_window_needs_recenter(&w) {
+                let _ = w.center();
+                restore_main_window_native(&w);
+            }
+            let _ = w.show();
+            let _ = w.unminimize();
+            restore_main_window_native(&w);
+            let _ = w.set_focus();
         }
-        let _ = w.show();
-        let _ = w.unminimize();
-        restore_main_window_native(&w);
-        let _ = w.set_focus();
+        Err(error) => log::warn!("[main] show failed: {error}"),
     }
     activate_app(app);
 }
@@ -2311,6 +2378,12 @@ fn dispatch_cli_intent<R: Runtime>(
         }
         cli::CliIntent::LocalWakeHelper => {
             log::warn!("[cli] local wake helper is headless-only and was ignored by the running GUI instance");
+        }
+        cli::CliIntent::ContentRecoveryHelper => {
+            log::warn!("[cli] content recovery helper is headless-only and was ignored by the running GUI instance");
+        }
+        cli::CliIntent::RecordedContentProbe => {
+            log::warn!("[cli] recorded content probe is headless-only and was ignored by the running GUI instance");
         }
         cli::CliIntent::FirmwareOta {
             manifest_path,
@@ -3543,7 +3616,7 @@ mod tests {
     fn single_instance_callback_uses_the_plugin_complete_argv() {
         let source = include_str!("lib.rs");
         let production = source
-            .split("#[cfg(test)]")
+            .split("mod tests {")
             .next()
             .expect("production source should precede tests");
         assert!(production.contains("dispatch_single_instance_callback(app, argv);"));

@@ -126,12 +126,30 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/windows-ui-config.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/write-updater-manifest.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/write-updater-manifest.test.mjs` | Automation and audits | Node/PowerShell script tests |
+| `services/voiceprint_gateway/.env.example` | Optional account and voiceprint gateway | Gateway unit/integration tests, deployment smoke |
+| `services/voiceprint_gateway/Dockerfile` | Optional account and voiceprint gateway | Gateway unit/integration tests, deployment smoke |
+| `services/voiceprint_gateway/__init__.py` | Optional account and voiceprint gateway | Gateway unit/integration tests, deployment smoke |
+| `services/voiceprint_gateway/adapters.py` | Optional account and voiceprint gateway | Gateway unit/integration tests, deployment smoke |
+| `services/voiceprint_gateway/app.py` | Optional account and voiceprint gateway | Gateway unit/integration tests, deployment smoke |
+| `services/voiceprint_gateway/auth.py` | Optional account and voiceprint gateway | Gateway unit/integration tests, deployment smoke |
+| `services/voiceprint_gateway/models.py` | Optional account and voiceprint gateway | Gateway unit/integration tests, deployment smoke |
+| `services/voiceprint_gateway/protocol.py` | Optional account and voiceprint gateway | Gateway unit/integration tests, deployment smoke |
+| `services/voiceprint_gateway/requirements.txt` | Optional account and voiceprint gateway | Gateway unit/integration tests, deployment smoke |
+| `services/voiceprint_gateway/store.py` | Optional account and voiceprint gateway | Gateway unit/integration tests, deployment smoke |
+| `services/voiceprint_gateway/tests/__init__.py` | Optional account and voiceprint gateway | Gateway unit/integration tests, deployment smoke |
+| `services/voiceprint_gateway/tests/test_gateway.py` | Optional account and voiceprint gateway | Gateway unit/integration tests, deployment smoke |
+| `services/voiceprint_gateway/tests/test_registry_response.py` | Optional account and voiceprint gateway | Gateway unit/integration tests, deployment smoke |
 | `src-tauri/Cargo.toml` | Build and release config | Build, updater and audit scripts |
 | `src-tauri/Entitlements.plist` | Core app | Build and targeted tests |
 | `src-tauri/Info.plist` | Core app | Build and targeted tests |
 | `src-tauri/backend-tests/Cargo.toml` | Build and release config | Build, updater and audit scripts |
 | `src-tauri/backend-tests/tests/backend_rust.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/asr/bailian.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/cloud_gateway.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/cloud_voiceprint.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/content_consensus.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/content_recovery_worker.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/fixtures/content-consensus-20261006.json` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/frame.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/cache.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/download.rs` | ASR providers | Provider tests, dictation smoke |
@@ -148,19 +166,36 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/asr/local/test_run.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/wake_helper.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/mod.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/multitalker_native.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/owner_content_extraction.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/target_speaker_extraction.rs` | ASR providers | Provider tests, dictation smoke |
-| `src-tauri/src/asr/volcengine.rs` | ASR providers | Provider tests, pending handoff/confirmed Other boundary, recorded dictation smoke |
+| `src-tauri/src/asr/target_speaker_output.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine.rs` | ASR providers, source permissions and raw/audio consumption independent of rendered delivery | Saved native response/endpoint replay, provider revision and capture-boundary contracts |
+| `src-tauri/src/asr/volcengine_cloud_owner.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_cloud_owner_recorded_fixture.json` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_owner_gap_fixture.json` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_platform.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_secondary_timing_empty_row_fixture.json` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_snapshot_confirmation.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_snapshot_probe.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_snapshot_runtime_tests.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_snapshot_timing_fixture.json` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_source_snapshot.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_speaker_partition.rs` | ASR providers | Provider tests, dictation smoke |
-| `src-tauri/src/asr/volcengine_transcript.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_transcript.rs` | Native row/word rendering reconciliation, recognition confirmation and transcript merging | Provider transcript contracts and saved missing-row response replay |
+| `src-tauri/src/asr/volcengine_speaker_ledger.rs` | Ordinary ASR source revisions, separate identity/activity protection and dual-evidence foreign tail projection | Owner preservation, valid empty occurrences, source revision, overlap and late positive evidence |
+| `src-tauri/src/asr/volcengine_native_identity.rs` | Enrollment-bound RAM natural reference and exact native PCM identity; separates raw activity from mixed context protection without owning STOP | Saved native/PCM replay, weak owner counterexamples, current source and profile lifecycle |
+| `src-tauri/src/asr/volcengine_pending_source.rs` | Independent exact-suffix endpoint obligation evidence after body consumption; asynchronous bounded enrollment scoring, with no text deletion or STOP authority | Saved slow-tail and owner-continuation replay; capture/profile reset and detector-positive veto |
 | `src-tauri/src/asr/volcengine_untimed_merge.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/wav.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/whisper.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/audio_mute.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/audio_transport_codec.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/capsule_log.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/capsule_placement.rs` | Capsule position and persistence | Build and targeted geometry/persistence tests |
 | `src-tauri/src/cli.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/combo_hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
+| `src-tauri/src/commands/cloud_account.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/device/ble.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/device/firmware.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/device/mod.rs` | Core app | Build and targeted tests |
@@ -172,32 +207,36 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/commands/style_pack_commands.rs` | Local data and style packs | Rust unit tests, local import/export smoke |
 | `src-tauri/src/commands_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation.rs` | Dictation lifecycle, current-cursor tail append, witnessed middle supplementation and complete recovery retention | Build and saved continuation/final-delivery regressions |
 | `src-tauri/src/coordinator/dictation_asr_selection.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_content_probe.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_delivery_diagnostics.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_device_ai.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation_embedded_candidate_begin.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_embedded_candidate_begin.rs` | Candidate initialization with independent complete-local-intent state | Complete-intent behavioral regressions and product build |
 | `src-tauri/src/coordinator/dictation_embedded_detector_init.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation_embedded_stream.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_embedded_stream.rs` | BLE candidate lifecycle, shared phrase admission and recording handoff | Wake continuation, source provenance and terminal/live regressions |
 | `src-tauri/src/coordinator/dictation_embedded_stream_completion.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_embedded_stream_session.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_embedded_submit.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation_endpoint_clock.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_endpoint_clock.rs` | Owner endpoint, unresolved recognition obligations, activity-bound settling and matching editor receipt ownership | Build and affected recognition/activity/dispatch/receipt regressions |
 | `src-tauri/src/coordinator/dictation_endpoint_policy.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_local_speech_activity.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation_preview.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_preview.rs` | Raw consumption transaction, rendered reconciliation, native confirmation and source-bound continuation | Saved native/rendered-prefix replay, display transforms, delivery/rollback and timed continuation |
 | `src-tauri/src/coordinator/dictation_session.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation_streaming_composition.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation_target_speaker_update.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation_tests.rs` | Core app | Build, submission-window VAD continuation and confirmed Other regressions |
+| `src-tauri/src/coordinator/dictation_native_composition.rs` | Revisable Owner editor range, immutable committed prefix, fresh native confirmation and session-scoped input failure finalization | Saved complete provider-to-editor replay, range revocation and receipt clock regressions |
+| `src-tauri/src/coordinator/dictation_streaming_composition.rs` | Optional TSF composition using revisable Owner snapshots and native commit/cancel ownership | Affected delivery and native composition regressions |
+| `src-tauri/src/coordinator/dictation_target_speaker_update.rs` | Physical STOP admission with current presence and pending-body revalidation | Build and affected STOP admission contracts |
+| `src-tauri/src/coordinator/dictation_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_volcengine_callbacks.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_diagnostic_retention.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_diagnostics.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_fusion.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_fusion_core.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation_wake_owner_gate.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation_wake_polish.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_wake_owner_gate.rs` | Shared live/terminal complete-intent qualification and separate owner arbitration | Complete-intent behavioral regressions and product build |
+| `src-tauri/src/coordinator/dictation_wake_polish.rs` | Candidate state, immutable local phrase proof and accepted control-prefix propagation in every transcript mode | Accepted activation/source-coordinate regressions and product build |
 | `src-tauri/src/coordinator/dictation_wake_prefix_retry.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_wake_verification_source.rs` | Wake verification provenance and input-bound complete local command proof | Complete-intent behavioral regressions and product build |
+| `src-tauri/src/coordinator/dictation_wake_verification_source_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/embedded_ble_runtime.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/hotkey_device_runtime.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/coordinator/qa.rs` | Core app | Build and targeted tests |
@@ -227,34 +266,50 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/global_hotkey_runtime.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/insertion.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/insertion/clipboard_handoff.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/insertion/clipboard_handoff.rs` | Clipboard transport, actual receipts and continuous native session-range ownership | Paste receipt, retention, changed-editor and source-supplement regressions |
+| `src-tauri/src/insertion/clipboard_handoff/native_supplement_test.rs` | Explicit original-renderer replay of saved source supplementation through the production worker and native adapter | Requires idle clipboard, fixture process ownership and an actual native edit receipt; no cloud or spoken re-recording |
 | `src-tauri/src/lib.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/llm_gemini.rs` | Polish providers | Rust unit tests, provider smoke |
 | `src-tauri/src/main.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/marketplace_backend.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/net_health.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/observability.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/original_speaker_identity.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/permissions.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/persistence.rs` | Local data and style packs | Rust unit tests, local import/export smoke |
+| `src-tauri/src/personal_vad.rs` | Exact sample coverage, original-coordinate context publication, typed projection/endpoint identity permissions and complete-history reconciliation | Packet/batch continuity, pending revisions, owner vetoes, partial-snapshot protection and editor-receipt timing |
+| `src-tauri/src/personal_vad_windows.rs` | Same-window bounded parallel activity/identity inference; frozen enrollment and separate qualified projection/endpoint histories | Native score parity, selected private-history model replay, premature-stop preservation, foreign-tail submission and build |
 | `src-tauri/src/polish.rs` | Polish providers | Rust unit tests, provider smoke |
+| `src-tauri/src/protected_voice_profile.rs` | Atomic publication of a complete enrollment generation | Failed writes, binding integrity and replacement/delete regressions |
 | `src-tauri/src/qa_hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/recorder.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/selection.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/selection/windows_uia.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/selection.rs` | Shared native editor identity, readback and exact owned suffix selection adapter | Native range and focused-input validation; macOS runtime validation required on macOS |
+| `src-tauri/src/selection/windows_uia.rs` | Bounded UIA editor permission, native identity and exact owned suffix selection | Windows source-supplement and focused-input validation |
 | `src-tauri/src/shortcut_binding.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/shortcut_dispatch.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/speaker_verification.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/speech_decision_kernel.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/speaker_channel_binding.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/speaker_diarization_native.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/speaker_identity_eres.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/speaker_source_capture.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/speaker_verification.rs` | Wake/body/separator/personal activity banks, atomic reference snapshots, distinct projection/endpoint identity permissions and legacy loading | Model/frontend/phrase isolation, legacy compatibility, inconclusive-versus-strong endpoint identity and build |
+| `src-tauri/src/speech_decision_kernel.rs` | Shared phrase intent, owner access and text/session decisions | Evidence separation and affected decision regressions |
+| `src-tauri/src/speech_signal_quality.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/speech_vad_windows.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/startup_evidence.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/timeline.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/transcript_boundary.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/transcript_boundary.rs` | Raw/rendered source mapping and native final append versus owned-range supplementation | Saved continuation/omission, multilingual rendering, correction expansion and ambiguous-source regressions |
 | `src-tauri/src/types.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/unicode_keystroke.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/wake_phrase.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/wake_phrase.rs` | Sensitive complete-keyword and recall streams, detector/recorded-recall origins, exact recall input and audio coordinates | Native continuation, recorded-recall admission, near-phrase controls and audio-boundary regressions |
 | `src-tauri/src/windows_ime_ipc.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/src/windows_ime_profile.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/src/windows_ime_protocol.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/src/windows_ime_session.rs` | Windows IME insertion | Windows static and runtime smoke |
+| `src-tauri/src/word_authority.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/word_authority_recorded_fixture.json` | Core app | Build and targeted tests |
+| `src-tauri/src/word_authority_recorded_source.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/word_authority_source.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/word_non_owner_evidence.rs` | Core app | Build and targeted tests |
 | `src-tauri/tauri.conf.json` | Build and release config | Build, updater and audit scripts |
 | `src-tauri/vendor/qwen-asr/Makefile` | Vendored local ASR engine | Cargo check and local ASR smoke |
 | `src-tauri/vendor/qwen-asr/asr_regression.py` | Vendored local ASR engine | Cargo check and local ASR smoke |
@@ -345,6 +400,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/lib/types.ts` | Core app | Build and targeted tests |
 | `src/lib/vocab-presets.json` | Core app | Build and targeted tests |
 | `src/lib/vocabPresets.ts` | Core app | Build and targeted tests |
+| `src/lib/voiceprintEnrollmentUi.ts` | Map enrollment failure stages to recording or saving actions | Enrollment failure action regression and frontend build |
+| `src/lib/voiceprintEnrollmentUi.test.ts` | Regress storage failures without requesting new speech or blaming audio | Node TypeScript test |
 | `src/lib/windowHotkeyFallback.test.ts` | Core app | Build and targeted tests |
 | `src/lib/windowHotkeyFallback.ts` | Core app | Build and targeted tests |
 | `src/main.tsx` | Core app | Build and targeted tests |

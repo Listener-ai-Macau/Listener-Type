@@ -1338,7 +1338,7 @@ fn wake_diagnostic_retention_removes_expired_then_oldest_for_bytes() {
 }
 
 #[test]
-fn wake_diagnostic_cleanup_caps_matching_files_and_keeps_unrelated_files() {
+fn wake_diagnostic_cleanup_caps_candidates_and_stage2_and_keeps_unrelated_files() {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock")
@@ -1349,8 +1349,9 @@ fn wake_diagnostic_cleanup_caps_matching_files_and_keeps_unrelated_files() {
     ));
     std::fs::create_dir_all(&directory).expect("create retention fixture");
     for index in 0..2050 {
+        let prefix = if index % 2 == 0 { "wake-candidate" } else { "wake-stage2" };
         std::fs::write(
-            directory.join(format!("wake-candidate-{index:03}.wav")),
+            directory.join(format!("{prefix}-{index:03}.wav")),
             [index as u8],
         )
         .expect("write matching fixture");
@@ -1369,9 +1370,8 @@ fn wake_diagnostic_cleanup_caps_matching_files_and_keeps_unrelated_files() {
                 .is_some_and(|value| value.eq_ignore_ascii_case("wav"))
         })
         .count();
-    // 2026-09-20: caps raised 128→512 — the per-process budget exhausted
-    // mid-day on live incident 2274297663, blinding forensics when needed.
-    // 2026-09-21: 512 died in ~3h (index 511 at 09:41) — raised to 2048.
+    // Both the original candidate and the helper's raw/boosted WAVs belong
+    // to the same rolling budget; keeping either family unbounded is unsafe.
     assert_eq!(removed, 2);
     assert_eq!(remaining_wavs, 2048);
     assert!(unrelated.exists());
@@ -1865,6 +1865,286 @@ fn automatic_wake_timed_boundary_keeps_recorded_control_out_of_all_text_channels
 }
 
 #[test]
+fn local_confirmed_wake_does_not_admit_ambient_prefix_before_provider_anchor() {
+    use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+    // Beta.26 acceptance 0864e31a: PresentLater with no KWS timestamp.
+    // Actual ambient text was pasted before the provider reached the phrase.
+    // Texts/confirmation bounds follow the recording; word timings here model
+    // that ordering and are not presented as captured provider coordinates.
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 4450);
+    super::bind_automatic_wake_confirmation_window(inner, session,
+        Some(crate::observability::CandidateRange { start: 0, end: 142400 }), Some(0));
+    let timing = |text: &str, words: Vec<(&str, u64, u64)>| TimedTranscript {
+        text: text.into(), words: words.into_iter().map(|(text,start,end)| TimedTranscriptWord {
+            text: text.into(), start_ms: Some(start), end_ms: Some(end),
+        }).collect(),
+    };
+    let ambient = "你欺负她。";
+    super::note_automatic_wake_transcript_timing(inner, session,
+        Some(timing(ambient, vec![("你欺负她",100,1500)])));
+    for partial in [true,false] {
+        assert_eq!(super::filter_automatic_wake_text(inner,session,ambient,partial), "");
+    }
+    assert!(super::pause_early_display_text(inner,session,ambient).is_none());
+    assert!(!super::automatic_wake_body_started(inner,session));
+    let raw = "你欺负她。开始录音。这是我本人继续说的话。";
+    super::note_automatic_wake_transcript_timing(inner,session,Some(timing(raw,
+        vec![("你欺负她",100,1500),("开始",2000,2500),("录音",2500,3000),("这是我本人继续说的话",3100,6000)])));
+    assert_eq!(super::filter_dictation_visual_preview_text(inner,session,raw), "这是我本人继续说的话。");
+    assert_eq!(super::pause_early_display_text(inner,session,raw).unwrap(), "这是我本人继续说的话。");
+    // Final speaker filtering can remove some earlier rows. Its own text key
+    // still needs matching coordinates, not the unfiltered revision's key.
+    let filtered = "开始录音。这是我本人继续说的话。";
+    let result = super::normalize_automatic_wake_final_candidate(inner,session,
+        Some(crate::asr::RawTranscript {text:filtered.into(),duration_ms:7000}),
+        Some(timing(filtered,vec![("开始",2000,2500),("录音",2500,3000),("这是我本人继续说的话",3100,6000)]))).unwrap();
+    assert_eq!(result.text,"这是我本人继续说的话。");
+    let mention = "正文里提到开始录音这四个字。";
+    super::note_automatic_wake_transcript_timing(inner,session,Some(timing(mention,
+        vec![("正文里提到",6000,6500),("开始",6500,7000),("录音",7000,7500),("这四个字",7500,8000)])));
+    assert_eq!(super::filter_automatic_wake_text(inner,session,mention,false),mention);
+}
+
+#[test]
+fn local_activation_components_revised_at_same_source_seam_keep_live_body() {
+    use crate::transcript_boundary::{TimedTranscript,TimedTranscriptWord};
+    let coordinator=Coordinator::new();let inner=&coordinator.inner;let session=new_session_id();
+    arm_automatic_wake_text_guard(inner,session,"开始录音".into(),4450);
+    super::bind_automatic_wake_confirmation_window(inner,session,
+        Some(crate::observability::CandidateRange {start:0,end:4450*32}),Some(0));
+    let observe=|text:&str,part:&str,start,end| TimedTranscript {text:text.into(),words:vec![
+        TimedTranscriptWord {text:"你欺负她".into(),start_ms:Some(40),end_ms:Some(560)},
+        TimedTranscriptWord {text:part.into(),start_ms:Some(start),end_ms:Some(end)},
+        TimedTranscriptWord {text:"这是我的正文".into(),start_ms:Some(4752),end_ms:Some(5500)}]};
+    // Actual fresh provider replay of 0864 changes 开始 to 录音 rather than
+    // retaining both. Waiting for the full phrase would delay all body to STOP.
+    super::note_automatic_wake_transcript_timing(inner,session,Some(observe("你欺负她。开始","开始",3432,4002)));
+    assert_eq!(super::filter_automatic_wake_text(inner,session,"你欺负她。开始",true),"");
+    super::note_automatic_wake_transcript_timing(inner,session,Some(observe("你欺负她。录音，这是我的正文。","录音",4272,4352)));
+    assert_eq!(super::pause_early_display_text(inner,session,"你欺负她。录音，这是我的正文。").unwrap(),"这是我的正文。");
+    assert!(super::automatic_wake_body_started(inner,session));
+    let unrelated=new_session_id();
+    assert_eq!(super::filter_automatic_wake_text(inner,unrelated,"你欺负她。录音，这是我的正文。",true),"你欺负她。录音，这是我的正文。");
+}
+
+#[test]
+fn activation_components_cannot_join_different_leads_overlaps_or_later_body() {
+    use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+    for (lead, start, end) in [("另一句话", 3200, 3400), ("旁人的话", 2300, 2700), ("旁人的话", 5100, 5500)] {
+        let coordinator = Coordinator::new();
+        let inner = &coordinator.inner;
+        let session = new_session_id();
+        arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 4500);
+        super::bind_automatic_wake_confirmation_window(inner, session,
+            Some(crate::observability::CandidateRange { start: 0, end: 4500 * 32 }), Some(0));
+        let timing = |lead: &str, part: &str, start, end| TimedTranscript {
+            text: format!("{lead}。{part}"),
+            words: vec![
+                TimedTranscriptWord { text: lead.into(), start_ms: Some(100), end_ms: Some(1000) },
+                TimedTranscriptWord { text: part.into(), start_ms: Some(start), end_ms: Some(end) },
+            ],
+        };
+        super::note_automatic_wake_transcript_timing(inner, session,
+            Some(timing("旁人的话", "开始", 2000, 2500)));
+        let next = timing(lead, "录音", start, end);
+        let text = next.text.clone();
+        super::note_automatic_wake_transcript_timing(inner, session, Some(next));
+        assert_eq!(super::filter_automatic_wake_text(inner, session, &text, true), "");
+        assert!(!super::automatic_wake_body_started(inner, session));
+        assert!(inner.embedded_audio_automatic_wake_guard.lock().as_ref().unwrap().activation_audio_end_ms.is_none());
+    }
+}
+
+#[test]
+fn confirmed_wake_final_without_word_coordinates_keeps_an_exact_leading_body() {
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 4500);
+    super::bind_automatic_wake_confirmation_window(inner, session,
+        Some(crate::observability::CandidateRange { start: 0, end: 4500 * 32 }), Some(0));
+    let text = "开始录音。本人已经说完的正文。";
+    assert_eq!(super::filter_automatic_wake_text(inner, session, "旁人的开场白。", false), "");
+    assert_eq!(super::filter_automatic_wake_text(inner, session, text, true), "");
+    assert_eq!(super::filter_automatic_wake_text(inner, session, text, false), "本人已经说完的正文。");
+    assert!(super::automatic_wake_body_started(inner, session));
+}
+
+#[test]
+fn confirmed_untimed_activation_can_only_supply_reversible_visual_text() {
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    let unrelated = new_session_id();
+    let raw = "开始录音，今天的安排已经确认";
+
+    begin_embedded_audio_preview_session(inner, session);
+    arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 2200);
+    super::bind_automatic_wake_confirmation_window(
+        inner,
+        session,
+        Some(crate::observability::CandidateRange {
+            start: 0,
+            end: 2105 * 32,
+        }),
+        Some(0),
+    );
+
+    assert_eq!(
+        filter_dictation_visual_preview_text(inner, session, raw),
+        "今天的安排已经确认"
+    );
+    assert_eq!(
+        filter_automatic_wake_text(inner, session, raw, true),
+        "",
+        "authoritative partial stays held until provider timing certifies the activation"
+    );
+    {
+        let guard = inner.embedded_audio_automatic_wake_guard.lock();
+        let guard = guard.as_ref().expect("automatic wake guard");
+        assert!(!guard.body_started);
+        assert_eq!(guard.activation_audio_end_ms, None);
+    }
+    {
+        let preview = inner.embedded_audio_preview.lock();
+        assert_eq!(preview.authoritative(session), None);
+        assert_eq!(preview.visible(session), None);
+    }
+    {
+        let ledger = inner.embedded_audio_pause_early_delivery.lock();
+        assert_eq!(ledger.session_id, None);
+        assert!(ledger.delivered_display.is_empty());
+        assert!(ledger.delivered_key.is_empty());
+        assert!(ledger.source_key.is_empty());
+        assert_eq!(ledger.ever_delivered_session, None);
+        assert_eq!(ledger.paste_delivered_session, None);
+    }
+
+    assert_eq!(
+        super::reversible_automatic_wake_visual_body(inner, unrelated, raw),
+        None,
+        "confirmation evidence is session scoped"
+    );
+    assert_eq!(
+        filter_dictation_visual_preview_text(inner, unrelated, raw),
+        raw,
+        "an unrelated session keeps ordinary speech and cannot strip it as activation"
+    );
+    mark_automatic_wake_stop_requested(inner, session);
+    assert_eq!(
+        super::reversible_automatic_wake_visual_body(inner, session, raw),
+        None,
+        "a stopped wake session cannot publish a new provisional body"
+    );
+    assert_eq!(filter_dictation_visual_preview_text(inner, session, raw), "");
+
+    let no_confirmation = Coordinator::new();
+    let no_confirmation_inner = &no_confirmation.inner;
+    let no_confirmation_session = new_session_id();
+    arm_automatic_wake_text_guard(
+        no_confirmation_inner,
+        no_confirmation_session,
+        "开始录音".into(),
+        2200,
+    );
+    assert_eq!(
+        super::reversible_automatic_wake_visual_body(
+            no_confirmation_inner,
+            no_confirmation_session,
+            raw,
+        ),
+        None,
+        "the new reversible fallback requires a traceable local confirmation window"
+    );
+}
+
+#[test]
+fn confirmed_wake_word_coordinates_resolve_a_short_detector_endpoint() {
+    use crate::transcript_boundary::{TimedTranscript,TimedTranscriptWord};
+    let coordinator = Coordinator::new(); let inner=&coordinator.inner; let session=new_session_id();
+    arm_automatic_wake_text_guard(inner,session,"开始录音".into(),2200);
+    super::bind_automatic_wake_audio_boundary(inner,session,1.763,0);
+    super::bind_automatic_wake_confirmation_window(inner,session,
+        Some(crate::observability::CandidateRange {start:0,end:2087*32}),Some(0));
+    let text="开始录音。正文继续。";
+    super::note_automatic_wake_transcript_timing(inner,session,Some(TimedTranscript {
+        text:text.into(),words:vec![TimedTranscriptWord {text:"开始".into(),start_ms:Some(1720),end_ms:Some(1800)},
+            TimedTranscriptWord {text:"录音".into(),start_ms:Some(2180),end_ms:Some(2260)},
+            TimedTranscriptWord {text:"正文继续".into(),start_ms:Some(2400),end_ms:Some(3500)}],
+    }));
+    assert_eq!(super::pause_early_display_text(inner,session,text).unwrap(),"正文继续。");
+    assert_eq!(super::filter_automatic_wake_text(inner,session,text,false),"正文继续。");
+}
+
+#[test]
+#[ignore = "requires explicit fresh provider replay of the consented acceptance recordings"]
+fn recorded_acceptance_activation_boundaries_replay() {
+    let path=std::env::var("LISTENER_ACCEPTANCE_ACTIVATION_REPLAY").unwrap();
+    let fixture:serde_json::Value=serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let mut control_frames=0;let mut body_frames=0;
+    for case in fixture["cases"].as_array().unwrap() {
+        let coordinator=Coordinator::new();let inner=&coordinator.inner;let session=new_session_id();
+        let upper=case["confirmation_end_ms"].as_u64().unwrap();
+        arm_automatic_wake_text_guard(inner,session,"开始录音".into(),upper);
+        if let Some(end)=case["keyword_end_ms"].as_u64() {
+            super::bind_automatic_wake_audio_boundary(inner,session,end as f32/1000.0,0);
+        }
+        super::bind_automatic_wake_confirmation_window(inner,session,
+            Some(crate::observability::CandidateRange {start:0,end:upper*32}),Some(0));
+        for frame in case["frames"].as_array().unwrap() {
+            let timing=crate::asr::volcengine_transcript::timed_transcript_from_result(&frame["result"]);
+            let text=timing.text.clone();let expected=frame["expected_body"].as_str().unwrap();
+            super::note_automatic_wake_transcript_timing(inner,session,Some(timing));
+            assert_eq!(super::filter_dictation_visual_preview_text(inner,session,&text),expected,"visual {}: {text}",case["sid"]);
+            assert_eq!(super::filter_automatic_wake_text(inner,session,&text,true),expected,"stream {}: {text}",case["sid"]);
+            assert_eq!(super::filter_automatic_wake_text(inner,session,&text,false),expected,"final {}: {text}",case["sid"]);
+            // Raw body is not granted speaker authority by this replay. The
+            // production speaker gate still decides which body may be sent.
+            if expected.is_empty(){control_frames+=1;}else{body_frames+=1;}
+        }
+    }
+    assert!(control_frames>0 && body_frames>0);
+    println!("ACTIVATION_ACCEPTANCE_REPLAY_PASS control_frames={control_frames} body_frames={body_frames}");
+}
+
+#[test]
+fn locally_confirmed_phrase_with_later_provider_end_opens_all_body_channels() {
+    use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 1887);
+    super::bind_automatic_wake_confirmation_window(inner, session,
+        Some(crate::observability::CandidateRange { start: 0, end: 1833 * 32 }), Some(0));
+    // Beta30 f80 real PCM replay: the local recognizer accepted the phrase
+    // before the independent provider's 2020 ms endpoint. A changed filler
+    // in the second pass must not strand the otherwise admitted owner body.
+    for filler in ["嗯", "呃"] {
+        for body in ["", "今天的安排已经结束。", "今天的安排已经结束。然后我在三秒内继续说话。"] {
+            let text = format!("{filler}，开始录音，{body}");
+            let mut words = vec![(filler, 1240, 1320), ("开始", 1560, 1640), ("录音", 1940, 2020)];
+            if !body.is_empty() { words.push((body, 2300, 14000)); }
+            super::note_automatic_wake_transcript_timing(inner, session, Some(TimedTranscript {
+                text: text.clone(), words: words.into_iter().map(|(text, start, end)| TimedTranscriptWord {
+                    text: text.into(), start_ms: Some(start), end_ms: Some(end),
+                }).collect(),
+            }));
+            assert_eq!(super::filter_dictation_visual_preview_text(inner, session, &text), body);
+            assert_eq!(super::filter_automatic_wake_text(inner, session, &text, true), body);
+            assert_eq!(super::filter_automatic_wake_text(inner, session, &text, false), body);
+            assert_eq!(super::pause_early_display_text(inner, session, &text),
+                (!body.is_empty()).then(|| body.to_string()));
+        }
+    }
+    assert!(super::automatic_wake_body_started(inner, session));
+    let guard = inner.embedded_audio_automatic_wake_guard.lock();
+    assert_eq!(guard.as_ref().unwrap().activation_audio_end_ms, Some(2020));
+}
+
+#[test]
 fn automatic_wake_timed_body_preserves_literal_wake_words_and_manual_recordings() {
     use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
     let coordinator = Coordinator::new();
@@ -1976,6 +2256,150 @@ fn later_wake_phrase_in_admitted_body_does_not_block_streaming_continuation() {
 }
 
 #[test]
+fn later_wake_phrase_remains_body_after_submission_crosses_the_phrase() {
+    use super::embedded_audio_partial_preview_stability_key as key;
+    let body = "第一段已经上屏。随后提到开始录音这四个字。后面的话还要保留。";
+    for committed in ["第一段已经上屏。", "第一段已经上屏。随后提到开始录音这四个字。"] {
+        assert!(!super::automatic_wake_has_unstripped_lead_in(body, "开始录音", &key(committed)),
+            "a successful append cannot revoke the same body's original admission");
+        assert!(super::automatic_wake_has_unstripped_lead_in(
+            &format!("新增的环境前导。{body}"), "开始录音", &key(committed)),
+            "newly prepended audio remains outside the successful source prefix");
+    }
+    let crossed = key("第一段已经上屏。随后提到开始录音这四个字。");
+    assert!(super::automatic_wake_has_unstripped_lead_in(
+        "第一段已经上屏。随后提到开始录音另一件事。", "开始录音", &crossed),
+        "an incompatible provider rewrite cannot borrow the crossed prefix");
+    assert!(super::automatic_wake_has_unstripped_lead_in(body, "开始录音", ""));
+}
+
+#[test]
+#[ignore = "saved failed native returns and actual committed prefix; no editor, cloud, microphone or models"]
+fn recorded_second_wake_in_body_preserves_all_later_submission() {
+    use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
+    use crate::asr::volcengine_speaker_ledger::{EvidenceKind, LocalSpeakerTimeline, SpeakerSpan};
+    use crate::transcript_boundary::content_key;
+    let path = std::env::var_os("LISTENER_BODY_ADMISSION_ARCHIVE").unwrap();
+    let archive: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    let mut prefs = inner.prefs.get();
+    prefs.active_style_pack_id = crate::types::BUILTIN_STYLE_PACK_RAW_ID.into();
+    prefs.remove_filler_words = false;
+    inner.prefs.set(prefs).unwrap();
+    arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 2000);
+    let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        app_id: "recorded".into(), access_token: "offline".into(), resource_id: "offline".into(),
+    }, Vec::new()).with_owner_activity_only(true);
+    asr.note_accepted_wake_phrase("开始录音");
+    // 20:02:49.744: ticket 77 read back this exact 82-character body. Earlier
+    // provider frames have rotated out of this archive; reuse the real receipt
+    // as the starting coordinate, without claiming a native editor replay.
+    let first = "文字也要完整保留。最后一句。显现。离我远点，身上全是油烟味。油烟闻不了。股份倒是要了不少。开始录音，明天上午9点，我们先谈论产品的使用体验，需要解决的问题先写清楚。";
+    assert_eq!(first.chars().count(), 82);
+    let mut submitted = first.to_string();
+    let mut timeline = LocalSpeakerTimeline::default();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut seeded = false;
+    let mut frames = 0;
+    let mut appends = Vec::new();
+    let mut refused_consumed_revisions = Vec::new();
+    for entry in archive["trace"]["entries"].as_array().unwrap().iter()
+        .filter(|entry| entry["stage"] == "normalized_result") {
+        for (key, identity) in [("local_identity_newest_first", true), ("local_presence_newest_first", false)] {
+            for row in entry["speaker_projection"][key].as_array().into_iter().flatten().rev() {
+                let start = row[0].as_u64().unwrap();
+                let end = row[1].as_u64().unwrap();
+                let name = row[2].as_str().unwrap();
+                if !seen.insert((identity, start, end, name.to_string())) { continue; }
+                let kind = match name { "Owner" => EvidenceKind::Owner, "Other" => EvidenceKind::Other, _ => EvidenceKind::Unknown };
+                let span = SpeakerSpan { start_ms: start, end_ms: end, kind };
+                if identity { timeline.note_identity(span); } else { timeline.note_presence(span); }
+            }
+        }
+        asr.apply_saved_native_result_with_local_timeline_for_test(&entry["provider_result"], false, &timeline);
+        if !seeded {
+            let snapshot = asr.pause_early_delivery_evidence_after(super::PAUSE_EARLY_DELIVERY_MIN_STABLE, "").unwrap();
+            let raw = super::pause_early_source_consumption(inner, session, &snapshot.text,
+                &content_key(first), snapshot.source, snapshot.timing.as_ref()).unwrap();
+            super::pause_early_delivery_reserve_source(inner, session, first.into(), content_key(first), content_key(first), Some(raw));
+            super::pause_early_delivery_confirm(inner, session);
+            seeded = true;
+        }
+        let provider_consumed = super::pause_early_provider_consumed_key(inner, session);
+        // Native confirmation bypasses the legacy draft age in production;
+        // unconfirmed formatting revisions must retain that actual age gate.
+        // A zero-duration probe would incorrectly promote the recorded 9 ->
+        // 九 draft at frame 135 and demand irreversible delivery of it.
+        if let Some(snapshot) = asr.pause_early_delivery_evidence_after(super::PAUSE_EARLY_DELIVERY_MIN_STABLE, &provider_consumed) {
+            let display = match super::pause_early_display_text(inner, session, &snapshot.text) {
+                Some(display) => display,
+                None if !appends.is_empty() => {
+                    // Frame 135 rewrites old numerals and loses word/source
+                    // alignment; its video tail is deliberately not proven
+                    // Other. Keep production's refusal and pending obligation
+                    // until later aligned responses. It must not erase earlier
+                    // submissions or turn uncertainty into permission to STOP.
+                    refused_consumed_revisions.push(serde_json::json!({
+                        "frame": entry["frame"],
+                        "pendingBodyRetained": super::pause_early_pending_body_delivery(inner, session, &asr).is_some()
+                    }));
+                    frames += 1;
+                    continue;
+                }
+                None => {
+                    if let Some(path) = std::env::var_os("LISTENER_BODY_ADMISSION_REPORT") {
+                        std::fs::write(path, serde_json::to_vec_pretty(&serde_json::json!({
+                            "blockedFrame": entry["frame"], "snapshot": snapshot.text,
+                            "source": format!("{:?}", snapshot.source), "stability": format!("{:?}", snapshot.stability), "submitted": submitted,
+                            "rawConsumption": format!("{:?}", super::pause_early_committed_body_consumption(inner, session)),
+                            "appends": appends
+                        })).unwrap()).unwrap();
+                    }
+                    panic!("source admission blocked at saved frame {} after {} planned characters", entry["frame"], submitted.chars().count());
+                }
+            };
+            let consumed_key = super::pause_early_delivery_source_key(inner, session);
+            let remainder = super::pause_early_final_remainder(&display, &submitted, &consumed_key)
+                .or_else(|| super::pause_early_anchored_continuation(&display, &submitted, &consumed_key))
+                .or_else(|| super::pause_early_aligned_growth_tail(&display, &consumed_key))
+                .expect("saved approved continuation retains its committed body seam");
+            if let Some(delta) = super::pause_early_ready_segment(&submitted, &content_key(&submitted),
+                &remainder, false, snapshot.stability).filter(|delta| !delta.is_empty()) {
+                let next_source = super::pause_early_source_key_after_append(&display, &remainder, delta).unwrap();
+                let raw = super::pause_early_source_consumption(inner, session, &snapshot.text,
+                    &next_source, snapshot.source, snapshot.timing.as_ref()).unwrap();
+                appends.push(serde_json::json!({"frame": entry["frame"], "delta": delta}));
+                submitted.push_str(delta);
+                super::pause_early_delivery_reserve_source(inner, session, submitted.clone(), content_key(&submitted), next_source, Some(raw));
+                super::pause_early_delivery_confirm(inner, session);
+            }
+        }
+        frames += 1;
+    }
+    let expected = archive["trace"]["entries"].as_array().unwrap().iter().rev()
+        .find(|entry| entry["stage"] == "speaker_filtered_result").unwrap()["text"].as_str().unwrap();
+    let body = super::filter_automatic_wake_text(inner, session, expected, false);
+    assert_eq!(content_key(&submitted), content_key(&body), "every approved body token reaches the submission plan");
+    assert!(submitted.contains("会议一共12个人"));
+    assert!(submitted.contains("最后请把所有资料放进同一个文件夹"));
+    assert!(submitted.contains("这就是我全部的内容"));
+    assert!(!submitted.contains("我五点半去市场"), "the independently excluded video tail stays excluded");
+    assert!(super::pause_early_pending_body_delivery(inner, session, &asr).is_none(),
+        "the recognizer obligation ends only after successful source consumption, not a timeout");
+    if let Some(path) = std::env::var_os("LISTENER_BODY_ADMISSION_REPORT") {
+        std::fs::write(path, serde_json::to_vec_pretty(&serde_json::json!({
+            "sessionId": archive["sessionId"], "nativeFrames": frames,
+            "actualStartingReceipt": first, "plannedBody": submitted, "appends": appends,
+            "refusedConsumedRevisions": refused_consumed_revisions,
+            "scope": "saved native/local source decisions through production admission, readiness, consumption and pending-body state; subsequent submission confirmations are simulated, not editor or physical STOP evidence",
+            "cloudCalls": 0, "modelRuns": 0, "editorWrites": 0
+        })).unwrap()).unwrap();
+    }
+}
+
+#[test]
 fn wake_body_admission_uses_successful_source_before_pending_append() {
     use super::{pause_early_admitted_source_key, pause_early_delivery_confirm,
         pause_early_delivery_reserve, pause_early_delivery_rollback};
@@ -1991,6 +2415,214 @@ fn wake_body_admission_uses_successful_source_before_pending_append() {
     pause_early_delivery_rollback(inner, session);
     assert_eq!(pause_early_admitted_source_key(inner, session), "第一段");
     assert!(pause_early_admitted_source_key(inner, new_session_id()).is_empty());
+}
+
+#[test]
+fn live_output_keeps_healthy_rewriting_and_translation_deferred() {
+    use super::live_raw_delivery_supported;
+    assert!(live_raw_delivery_supported(false, false, false, false));
+    assert!(!live_raw_delivery_supported(false, true, false, false));
+    for (auth, stall) in [(true, false), (false, true), (true, true)] {
+        assert!(live_raw_delivery_supported(false, true, auth, stall));
+        assert!(!live_raw_delivery_supported(true, true, auth, stall),
+            "translation has its own final dispatch and is never raw passthrough");
+    }
+}
+
+#[test]
+fn live_output_timed_control_allows_body_mentions_before_first_submission() {
+    use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    let mut prefs = inner.prefs.get();
+    prefs.active_style_pack_id = crate::types::BUILTIN_STYLE_PACK_RAW_ID.into();
+    prefs.remove_filler_words = false;
+    inner.prefs.set(prefs).unwrap();
+    arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 980);
+    super::bind_automatic_wake_confirmation_window(inner, session,
+        Some(crate::observability::CandidateRange { start: 0, end: 65056 }), Some(35616));
+    let body = "我现在看的开始录音好像是卡卡的，这个是为什么呢？";
+    let raw = format!("开始录音。{body}");
+    super::note_automatic_wake_transcript_timing(inner, session, Some(TimedTranscript {
+        text: raw.clone(), words: vec![
+            TimedTranscriptWord { text: "开始录音".into(), start_ms: Some(120), end_ms: Some(740) },
+            TimedTranscriptWord { text: body.into(), start_ms: Some(1872), end_ms: Some(7632) },
+        ],
+    }));
+    assert!(super::pause_early_admitted_source_key(inner, session).is_empty());
+    assert_eq!(super::pause_early_display_text(inner, session, &raw), Some(body.into()));
+    assert_eq!(super::filter_automatic_wake_text(inner, session, &raw, false), body);
+    assert!(super::pause_early_display_text(inner, session,
+        &format!("未确认的旁人前导。{raw}")).is_none(),
+        "an incompatible provider revision cannot borrow the timed control prefix");
+    let other_session = new_session_id();
+    arm_automatic_wake_text_guard(inner, other_session, "开始录音".into(), 980);
+    assert!(super::pause_early_display_text(inner, other_session, body).is_none(),
+        "another recording has not independently located this control prefix");
+}
+
+#[test]
+fn live_output_raw_commit_survives_circuit_recovery_without_new_session_leak() {
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    let mut prefs = inner.prefs.get();
+    prefs.active_style_pack_id = crate::types::BUILTIN_STYLE_PACK_FORMAL_ID.into();
+    prefs.remove_filler_words = false;
+    inner.prefs.set(prefs).unwrap();
+    let old_circuit = std::mem::take(&mut *super::super::llm_auth_failure_circuit().lock());
+    let fingerprint = 0x610010;
+    super::super::note_llm_auth_rejection(fingerprint);
+    {
+        let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+        ledger.session_id = Some(session);
+        ledger.llm_auth_fingerprint = Some(Some(fingerprint));
+    }
+    assert_eq!(super::pause_early_display_text(inner, session, "第一句。"), Some("第一句。".into()));
+    super::pause_early_delivery_reserve(inner, session, "第一句。".into(), "第一句".into(), "第一句".into());
+    super::pause_early_delivery_confirm(inner, session);
+    *super::super::llm_auth_failure_circuit().lock() = Default::default();
+    let mut prefs = inner.prefs.get();
+    prefs.translation_target_language = "en".into();
+    inner.prefs.set(prefs).unwrap();
+    inner.translation_modifier_seen.store(true, Ordering::SeqCst);
+    assert_eq!(super::pause_early_display_text(inner, session, "第一句。续句。"), Some("第一句。续句。".into()),
+        "circuit recovery and late translation cannot revise an irreversible raw recording");
+    let next = new_session_id();
+    {
+        let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+        ledger.session_id = Some(next);
+        ledger.llm_auth_fingerprint = Some(Some(fingerprint));
+    }
+    assert!(super::pause_early_display_text(inner, next, "下一段。应正常润色。").is_none());
+    *super::super::llm_auth_failure_circuit().lock() = old_circuit;
+}
+
+#[test]
+#[ignore = "explicit saved native/source timeline replay; optional real source models; no editor/cloud/microphone"]
+fn recorded_live_output_fallback_reaches_source_consumption_before_stop() {
+    use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
+    use crate::asr::volcengine_speaker_ledger::{EvidenceKind, LocalSpeakerTimeline, SpeakerSpan};
+    use crate::transcript_boundary::{content_key, TimedTranscript, TimedTranscriptWord};
+    let archive: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        std::env::var_os("LISTENER_LIVE_OUTPUT_ARCHIVE").unwrap()).unwrap()).unwrap();
+    #[cfg(target_os = "windows")]
+    let native_pcm=std::env::var_os("LISTENER_LIVE_NATIVE_PCM").map(|path| std::fs::read(path).unwrap());
+    #[cfg(target_os = "windows")]
+    let (mut native_analyzer,native_raw)=if let Some(pcm)=native_pcm.as_ref() {
+        // Establish the reference through the full production source qualifier
+        // on preceding saved captures; human row labels are assertions only.
+        crate::asr::volcengine_native_identity::tests::recorded_native_source_projection_keeps_owner_and_excludes_foreign_without_endpoint_changes();
+        let stream=crate::personal_vad::PersonalVadStream::start(Vec::new(),
+            crate::speaker_verification::personal_activity_reference_for_phrase("开始录音").unwrap(),
+            crate::speaker_verification::endpoint_identity_verifier_for_phrase("开始录音").unwrap());
+        stream.submit(pcm,(pcm.len()/2) as u64);
+        let through=(pcm.len()/5120*160) as u64;
+        let started=std::time::Instant::now();
+        while stream.raw_activity_timeline().presence.iter().map(|span|span.end_ms).max().unwrap_or(0)<through {
+            assert!(!stream.analysis_unavailable_for_test());
+            assert!(started.elapsed()<std::time::Duration::from_secs(40));
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        (Some(crate::asr::volcengine_native_identity::NativeSourceIdentity::default()),Some(stream.raw_activity_timeline()))
+    } else { (None,None) };
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    let mut prefs = inner.prefs.get();
+    prefs.active_style_pack_id = crate::types::BUILTIN_STYLE_PACK_FORMAL_ID.into();
+    prefs.remove_filler_words = true;
+    inner.prefs.set(prefs).unwrap();
+    arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 980);
+    super::bind_automatic_wake_confirmation_window(inner, session,
+        Some(crate::observability::CandidateRange { start: 0, end: 65056 }), Some(35616));
+    let old_circuit = std::mem::take(&mut *super::super::llm_auth_failure_circuit().lock());
+    let fingerprint = 0x610017;
+    super::super::note_llm_auth_rejection(fingerprint);
+    {
+        let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+        ledger.session_id = Some(session);
+        ledger.llm_auth_fingerprint = Some(Some(fingerprint));
+    }
+    let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        app_id: "recorded".into(), access_token: "offline".into(), resource_id: "offline".into(),
+    }, Vec::new()).with_owner_activity_only(true);
+    asr.note_accepted_wake_phrase("开始录音");
+    let mut timeline = LocalSpeakerTimeline::default();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut submitted = String::new();
+    let mut appends = Vec::new();
+    let mut frames = 0;
+    let replay_started=std::time::Instant::now();
+    let mut source_views=Vec::new();
+    for entry in archive["trace"]["entries"].as_array().unwrap().iter()
+        .filter(|entry| entry["stage"] == "normalized_result") {
+        // Provider arrival time and existing stability age are distinct from
+        // source audio coordinates. An instantaneous loop cannot reproduce
+        // the original readiness decisions; do not lower the product timer.
+        let due=replay_started+std::time::Duration::from_millis(entry["elapsed_ms"].as_u64().unwrap());
+        std::thread::sleep(due.saturating_duration_since(std::time::Instant::now()));
+        for (key, identity) in [("local_identity_newest_first", true), ("local_presence_newest_first", false)] {
+            for row in entry["speaker_projection"][key].as_array().into_iter().flatten().rev() {
+                let start = row[0].as_u64().unwrap(); let end = row[1].as_u64().unwrap();
+                let name = row[2].as_str().unwrap();
+                if !seen.insert((identity, start, end, name.to_string())) { continue; }
+                let kind = match name { "Owner" => EvidenceKind::Owner, "Other" => EvidenceKind::Other, _ => EvidenceKind::Unknown };
+                let span = SpeakerSpan { start_ms: start, end_ms: end, kind };
+                if identity { timeline.note_identity(span); } else { timeline.note_presence(span); }
+            }
+        }
+        let native = &entry["provider_result"];
+        #[cfg(target_os = "windows")]
+        if let (Some(analyzer),Some(pcm),Some(raw))=(native_analyzer.as_mut(),native_pcm.as_ref(),native_raw.as_ref()) {
+            asr.install_native_word_identity_for_test(analyzer.analyze("开始录音",native,pcm,&timeline,raw.clone()));
+        }
+        let words = native["utterances"].as_array().into_iter().flatten().flat_map(|row|
+            row["words"].as_array().into_iter().flatten()).filter_map(|word| {
+                Some(TimedTranscriptWord { text: word["text"].as_str()?.into(),
+                    start_ms: word["start_time"].as_u64(), end_ms: word["end_time"].as_u64() })
+            }).collect();
+        super::note_automatic_wake_transcript_timing(inner, session, Some(TimedTranscript {
+            text: entry["text"].as_str().unwrap().into(), words,
+        }));
+        asr.apply_saved_native_result_with_local_timeline_for_test(native, false, &timeline);
+        let consumed = super::pause_early_provider_consumed_key(inner, session);
+        source_views.push(serde_json::json!({"frame":entry["frame"],"state":asr.pause_early_delivery_snapshot_diagnostics(&consumed)}));
+        if let Some(snapshot) = asr.pause_early_delivery_evidence_after(super::PAUSE_EARLY_DELIVERY_MIN_STABLE, &consumed) {
+            let display = match super::pause_early_display_text(inner, session, &snapshot.text) {
+                Some(display) => display,
+                None if super::filter_automatic_wake_text(inner, session, &snapshot.text, false).is_empty() => {
+                    frames += 1;
+                    continue;
+                }
+                None => panic!("actual raw fallback blocked at native frame {}", entry["frame"]),
+            };
+            let key = super::pause_early_delivery_source_key(inner, session);
+            let remainder = super::pause_early_final_remainder(&display, &submitted, &key).unwrap();
+            if let Some(delta) = super::pause_early_ready_segment(&submitted, &content_key(&submitted), &remainder, false, snapshot.stability)
+                .filter(|delta| !delta.is_empty()) {
+                let next_source = super::pause_early_source_key_after_append(&display, &remainder, delta).unwrap();
+                let raw = super::pause_early_source_consumption(inner, session, &snapshot.text,
+                    &next_source, snapshot.source, snapshot.timing.as_ref()).unwrap();
+                appends.push(serde_json::json!({"frame": entry["frame"], "elapsedMs": entry["elapsed_ms"], "finalFrame": entry["final_frame"], "delta": delta}));
+                submitted.push_str(delta);
+                super::pause_early_delivery_reserve_source(inner, session, submitted.clone(), content_key(&submitted), next_source, Some(raw));
+                super::pause_early_delivery_confirm(inner, session);
+            }
+        }
+        frames += 1;
+    }
+    *super::super::llm_auth_failure_circuit().lock() = old_circuit;
+    let expected = archive["finalCoordinatorText"].as_str().unwrap();
+    let pending = super::pause_early_pending_body_delivery(inner, session, &asr).is_some();
+    let report = serde_json::json!({"sessionId": archive["sessionId"], "nativeFrames": frames,
+        "plannedBody": submitted, "appends": appends, "pendingBody": pending, "sourceViews":source_views,
+        "scope": "saved native/local source decisions at recorded provider arrival times through production control normalization, effective raw policy, recognition readiness and source consumption; optional protected native-source inference; submission confirmations simulated, no real editor or physical STOP", "cloudCalls":0,"sourceModelsRequested":std::env::var_os("LISTENER_LIVE_NATIVE_PCM").is_some(),"editorWrites":0});
+    std::fs::write(std::env::var_os("LISTENER_LIVE_OUTPUT_REPORT").unwrap(), serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    assert_eq!(submitted, expected, "all final raw bytes retain their source without duplication");
+    assert!(appends.len() >= 3 && appends.iter().all(|a| a["finalFrame"] == false), "all three body clauses are deliverable before recording completion");
+    assert!(!pending, "the submitted source clears its own pending body obligation");
 }
 
 #[test]
@@ -2195,11 +2827,191 @@ fn embedded_audio_test_session(
         streaming_agc: EmbeddedStreamingAgcState::default(),
         local_speech_activity: LocalSpeechActivity::disabled(),
         local_speaker_tracker: None,
+        retained_wake_verification_source: None,
         device_ai_processing_started: false,
         proactive_stop_body_started: false,
         proactive_stop_silence_ms: 0,
         proactive_stop_dispatched: false,
     }
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+#[ignore = "explicit saved PCM and current protected enrollment; real session startup/local models, no microphone, cloud or editor"]
+fn admitted_nonmatching_wake_starts_enrolled_presence_without_granting_identity() {
+    use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
+    use crate::asr::volcengine_native_identity::NativeSourceIdentity;
+    use crate::asr::volcengine_speaker_ledger::EvidenceKind;
+    use std::time::{Duration, Instant};
+    let root = std::path::PathBuf::from(std::env::var_os("LISTENER_ENROLLED_START_REPLAY").unwrap());
+    let protocol: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("protocol.json")).unwrap()).unwrap();
+    let phrase = protocol["phrase"].as_str().unwrap();
+    assert!(crate::speaker_verification::personal_activity_reference_for_phrase(phrase).unwrap().is_some());
+    let mut output = Vec::new();
+    for case in protocol["cases"].as_array().unwrap() {
+        let pcm = std::fs::read(case["pcm"].as_str().unwrap()).unwrap();
+        let archive: serde_json::Value = serde_json::from_slice(&std::fs::read(case["archive"].as_str().unwrap()).unwrap()).unwrap();
+        let make_asr = || Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
+            app_id:"saved".into(), access_token:"offline".into(), resource_id:"offline".into(),
+        }, Vec::new()).with_owner_activity_only(true));
+        let baseline = make_asr();
+        baseline.note_accepted_wake_phrase(phrase);
+        let asr = make_asr();
+        let mut session = embedded_audio_test_session(new_session_id(), Arc::new(CapturingConsumer::default()));
+        session.volcengine_asr = Some(asr.clone());
+        // The failed field session admitted a complete keyword with no owner
+        // match. Even an empty endpoint must use the protected bank, not seed
+        // the model from this accepted but unverified wake recording.
+        session.start_local_speaker_tracking(pcm[..pcm.len().min(3_000*32)].to_vec(), 0.0, phrase.into(), false);
+        assert!(asr.personal_vad_started(), "accepted full KWS must not disable an independent enrollment");
+        assert!(!asr.endpoint_update_snapshot().local_speaker_tracking_enabled,
+            "starting enrollment-backed presence cannot grant the accepted command owner identity");
+        asr.submit_personal_vad(&pcm, (pcm.len()/2) as u64);
+        let through_ms = (pcm.len()/5120*160) as u64;
+        let began = Instant::now();
+        while asr.personal_vad_snapshot().is_none_or(|frame| frame.analyzed_end_ms < through_ms) {
+            assert!(began.elapsed() < Duration::from_secs(40), "saved worker did not cover this capture");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let complete = asr.personal_speaker_timeline_for_test();
+        let raw = asr.personal_raw_activity_timeline_for_test();
+        let mut analyzer = NativeSourceIdentity::default();
+        let mut frames = Vec::new();
+        for entry in archive["trace"]["entries"].as_array().unwrap().iter()
+            .filter(|entry| entry["stage"] == "normalized_result") {
+            let result = &entry["provider_result"];
+            let frontier = result["utterances"].as_array().into_iter().flatten()
+                .filter_map(|row| row["end_time"].as_u64()).max().unwrap_or(0);
+            let mut local = complete.clone();
+            local.identity.retain(|span| span.end_ms <= frontier);
+            local.presence.retain(|span| span.end_ms <= frontier);
+            let mut observed_raw = raw.clone();
+            observed_raw.presence.retain(|span| span.end_ms <= frontier);
+            let identity = analyzer.analyze(phrase, result, &pcm, &local, observed_raw);
+            let qualified = identity.qualified_reference;
+            asr.install_native_word_identity_for_test(identity);
+            asr.apply_saved_native_result_with_local_timeline_for_test(result, false, &local);
+            baseline.apply_saved_native_result_for_test(result, false);
+            let consumed = case["consumedSourceKey"].as_str().unwrap_or("");
+            frames.push(serde_json::json!({"frame":entry["frame"],"elapsedMs":entry["elapsed_ms"],
+                "qualifiedReference":qualified,
+                "baselinePending":baseline.pending_body_delivery_after(consumed).map(|body|body.key),
+                "candidatePending":asr.pending_body_delivery_after(consumed).map(|body|body.key),
+                "baselineDelivery":baseline.pause_early_delivery_evidence_after(Duration::ZERO, "").map(|value|value.text),
+                "candidateDelivery":asr.pause_early_delivery_evidence_after(Duration::ZERO, "").map(|value|value.text)}));
+        }
+        let own_end = case["ownerBodyEndMs"].as_u64().unwrap();
+        let encode_span = |span: &crate::asr::volcengine_speaker_ledger::SpeakerSpan| serde_json::json!({
+            "startMs":span.start_ms,"endMs":span.end_ms,"kind":format!("{:?}",span.kind)});
+        let false_other: Vec<_> = complete.presence.iter()
+            .filter(|span| span.kind == EvidenceKind::Other && span.start_ms < own_end).map(encode_span).collect();
+        output.push(serde_json::json!({"id":case["id"],"started":asr.personal_vad_started(),
+            "analysisMs":through_ms,"ownerBodyEndMs":own_end,"bodyOtherSpans":false_other,
+            "identity":complete.identity.iter().map(encode_span).collect::<Vec<_>>(),
+            "presence":complete.presence.iter().map(encode_span).collect::<Vec<_>>(),"frames":frames}));
+    }
+    std::fs::write(root.join("saved-startup-chain.json"), serde_json::to_vec_pretty(&serde_json::json!({
+        "cases":output,"cloudCalls":0,"actualEditor":false,"actualStop":false,
+        "profileModified":false,"schedule":"production worker batches saved PCM; source projection has no future spans"})).unwrap()).unwrap();
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+#[ignore = "saved original capture/native/receipt cadence and protected enrollment; real local workers and endpoint reducer, no editor/cloud/device"]
+fn chronological_saved_foreign_draft_uses_source_evidence_and_original_body_receipt() {
+    use crate::asr::{AudioConsumer as AsrAudioConsumer, volcengine::{VolcengineStreamingASR,VolcengineCredentials,LiveBodyConsumption}};
+    use crate::transcript_boundary::content_key;
+    use std::time::{Duration, Instant};
+    let root = std::path::PathBuf::from(std::env::var_os("LISTENER_PENDING_SOURCE_REPLAY").unwrap());
+    let protocol:serde_json::Value=serde_json::from_slice(&std::fs::read(root.join("chronological-protocol.json")).unwrap()).unwrap();
+    let case=&protocol["case"];
+    let pcm=std::fs::read(case["pcm"].as_str().unwrap()).unwrap();
+    let archive:serde_json::Value=serde_json::from_slice(&std::fs::read(case["trace"].as_str().unwrap()).unwrap()).unwrap();
+    let frames:Vec<_>=archive["trace"]["entries"].as_array().unwrap().iter().filter(|entry|entry["stage"]=="normalized_result").collect();
+    let audio=protocol["audioEvents"].as_array().unwrap();
+    let receipts=protocol["receiptEvents"].as_array().unwrap();
+    let phrase=protocol["phrase"].as_str().unwrap();
+    let asr=Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
+        app_id:"saved".into(),access_token:"offline".into(),resource_id:"offline".into(),
+    },Vec::new()).with_owner_activity_only(true));
+    let mut session=embedded_audio_test_session(new_session_id(),Arc::new(CapturingConsumer::default()));
+    session.volcengine_asr=Some(asr.clone());
+    session.start_local_speaker_tracking(pcm[..pcm.len().min(3_000*32)].to_vec(),0.0,phrase.into(),false);
+    assert!(asr.personal_vad_started());
+    let start=Instant::now();
+    let mut clock=super::SettledTargetEndpointClock::default();
+    clock.automatic_wake_session=true;
+    let (mut a,mut f,mut r,mut sent)=(0,0,0,0);
+    let mut consumed=None;
+    let mut observations=Vec::new();
+    let mut simulated_stop=None;
+    let end=(audio.last().unwrap()["elapsedMs"].as_i64().unwrap().max(0) as u64)
+        .max(frames.last().unwrap()["elapsed_ms"].as_u64().unwrap());
+    let mut last_sample=0;
+    loop {
+        let now=Instant::now(); let elapsed=now.duration_since(start).as_millis() as u64;
+        while a<audio.len() && audio[a]["elapsedMs"].as_i64().unwrap()<=elapsed as i64 {
+            let through=audio[a]["throughMs"].as_u64().unwrap() as usize*32;
+            assert!(through<=pcm.len() && sent<=through,"saved PCM clock must remain exact and available");
+            if sent<through {
+                AsrAudioConsumer::consume_pcm_chunk(asr.as_ref(),&pcm[sent..through]);
+                asr.submit_personal_vad(&pcm[sent..through],(through/2) as u64);
+                sent=through;
+            }
+            a+=1;
+        }
+        while f<frames.len() && frames[f]["elapsed_ms"].as_u64().unwrap()<=elapsed {
+            asr.apply_saved_native_result_for_test(&frames[f]["provider_result"],frames[f]["final_frame"].as_bool().unwrap());
+            f+=1;
+        }
+        let presence=asr.personal_vad_snapshot();
+        clock.note_personal_presence(presence,now);
+        let mut update=asr.endpoint_update_snapshot();
+        update.audio_duration_ms=Some((sent/32) as u64);
+        clock.latest_update=Some(update);
+        while r<receipts.len() && receipts[r]["elapsedMs"].as_u64().unwrap()<=elapsed {
+            // These are recorded real receipts replayed into the shared clock,
+            // not new editor writes or newly confirmed paste transactions.
+            // A preview is not a consumed occurrence: only the two archived
+            // receipts may advance the committed raw/audio source boundary.
+            let snapshot=asr.pause_early_delivery_evidence_after(Duration::ZERO,"")
+                .expect("saved actual receipt must still have an admitted confirmed native source");
+            let prefix=receipts[r]["rawPrefix"].as_str().unwrap();
+            let boundary=snapshot.timing.as_ref().and_then(|t|t.timing.delivery_boundary(&content_key(prefix)))
+                .expect("saved actual receipt requires its complete original native word partition");
+            assert_eq!([boundary.range_ms().0,boundary.range_ms().1],
+                [receipts[r]["audioBoundaryMs"][0].as_u64().unwrap(),receipts[r]["audioBoundaryMs"][1].as_u64().unwrap()]);
+            consumed=Some(LiveBodyConsumption {raw_prefix:prefix.into(),
+                body_start:receipts[r]["bodyStartByte"].as_u64().unwrap() as usize,
+                rendered_key:content_key(receipts[r]["renderedText"].as_str().unwrap()),
+                source:snapshot.source,boundary:Some(boundary)});
+            clock.note_body_delivery(start+Duration::from_millis(receipts[r]["elapsedMs"].as_u64().unwrap()));
+            r+=1;
+        }
+        let pending=consumed.as_ref().and_then(|raw|asr.pending_body_delivery_from_consumption(raw));
+        let pending_key=pending.as_ref().map(|body|body.key.clone());
+        clock.refresh_pending_body_delivery(pending,now);
+        let due=r>0 && clock.personal_presence_stop_due((sent/32) as u64,now,super::EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS);
+        if elapsed>=last_sample+100 || due {
+            last_sample=elapsed;
+            observations.push(serde_json::json!({"elapsedMs":elapsed,"capturedMs":sent/32,"nativeFrames":f,
+                "receipts":r,"pending":pending_key,"due":due,"presence":presence.map(|frame|serde_json::json!({
+                    "throughMs":frame.analyzed_end_ms,"ownerEndMs":frame.last_positive_end_ms,
+                    "unknownEndMs":frame.last_unresolved_end_ms,"state":format!("{:?}",frame.state)}))}));
+        }
+        if due && simulated_stop.is_none() { simulated_stop=Some(elapsed); }
+        if elapsed>=end { break; }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let last_receipt=receipts.last().unwrap()["elapsedMs"].as_u64().unwrap();
+    let report=serde_json::json!({"session":case["session"],"elapsedMs":start.elapsed().as_millis(),
+        "lastActualHistoricalReceiptMs":last_receipt,"simulatedStopMs":simulated_stop,
+        "simulatedReceiptToStopMs":simulated_stop.map(|stop|stop as i64-last_receipt as i64),
+        "observations":observations,"actualEditor":false,"actualStop":false,"cloudCalls":0,"profileModified":false,
+        "scope":"Saved exact source PCM/capture cadence and native arrival times through real production activity/startup/pending workers and shared endpoint reducer. Historical receipt clocks simulated; no physical STOP or installed candidate claim."});
+    std::fs::write(root.join("chronological-result.json"),serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    assert!(simulated_stop.is_none_or(|stop|stop>=last_receipt+super::EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS),
+        "candidate stopped before the last original body receipt's full continuation interval");
 }
 
 fn correction_rule(pattern: &str, replacement: &str) -> CorrectionRule {
@@ -3420,6 +4232,7 @@ fn startup_voiceprint_pending_does_not_discard_unclassified_retained_audio() {
     // provider-final speaker row for the rest of the recording.
     let (_pending_profile_sender, profile_rx) = std::sync::mpsc::channel();
     let mut tracker = super::LocalSessionSpeakerTracker {
+        evidence_sink: None, classification_inflight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         profile_rx: Some(profile_rx), profile: None, classification_rx: None,
         adaptation_gate: Default::default(), rolling_pcm: Vec::new(),
         next_classification_audio_ms: super::LOCAL_SPEAKER_CLASSIFY_MIN_MS as u64,
@@ -3434,6 +4247,30 @@ fn startup_voiceprint_pending_does_not_discard_unclassified_retained_audio() {
     let first = super::local_speaker_covered_pcm(&tracker.rolling_pcm, 6_000, 1_000)
         .expect("startup owner proof must still have the first captured words");
     assert_eq!(first, &pcm[..32_000]);
+}
+
+#[test]
+fn completed_speaker_evidence_does_not_wait_for_the_audio_mailbox_to_be_drained() {
+    use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
+    use crate::speaker_verification::SessionSpeakerClassification::NonTarget;
+    let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
+        app_id:"test".into(), access_token:"test".into(),
+        resource_id:VolcengineCredentials::default_resource_id().into(),
+    }, Vec::new()));
+    asr.note_verified_local_speaker_tracking_started("开始录音");
+    // No next audio pass and no mailbox drain occurs between inference
+    // completion and this decision snapshot.
+    let sink = Arc::downgrade(&asr);
+    for (start, end) in [(11800,13000),(12200,13400),(13000,14200)] {
+        super::publish_local_speaker_evidence(Some(&sink), start, end,
+            NonTarget { score:0.05 },
+            crate::speech_decision_kernel::TranscriptSpeakerEvidence::HardNonTarget, true);
+    }
+    let update = asr.endpoint_update_snapshot();
+    assert_eq!(update.local_non_target_speech_end_ms, Some(14200));
+    assert_eq!(update.local_speaker_observation_end_ms, Some(14200));
+    assert_eq!(update.local_speaker_classification_kind,
+        Some(crate::asr::volcengine::LocalSpeakerClassificationKind::NonTarget));
 }
 
 #[test]
@@ -3560,6 +4397,39 @@ fn vad_coverage_quiet_capture_does_not_extend_the_three_second_owner_deadline() 
 }
 
 #[cfg(target_os = "windows")]
+#[test]
+#[ignore = "explicit recorded PCM and immutable enrolled profile; diagnostic only"]
+fn recorded_original_owner_window_probe() {
+    let input = std::env::var_os("LISTENER_OWNER_WINDOW_INPUT").expect("explicit fixture");
+    let output = std::env::var_os("LISTENER_OWNER_WINDOW_OUTPUT").expect("explicit output");
+    let fixture: serde_json::Value = serde_json::from_slice(&std::fs::read(input).unwrap()).unwrap();
+    let pcm = std::fs::read(fixture["pcm_path"].as_str().unwrap()).unwrap();
+    let profile = crate::speaker_verification::session_profile_snapshot_from_wake(
+        &pcm, fixture["wake_end_seconds"].as_f64().unwrap() as f32,
+        fixture["wake_phrase"].as_str().unwrap(), true).unwrap();
+    let mut observations = Vec::new();
+    let mut production_context = crate::speaker_verification::VerifiedOriginalSourceContext::new(profile.clone()).unwrap();
+    let seed = crate::speaker_verification::observe_session_speaker(&profile, &pcm[..96000]).unwrap();
+    let context_profile = profile.diagnostic_verified_source_context(&seed);
+    for end_ms in (3000..=pcm.len() / 32).step_by(1500) {
+        let start_ms = end_ms - 3000;
+        let observation = crate::speaker_verification::observe_session_speaker(
+            &profile, &pcm[start_ms * 32..end_ms * 32]).unwrap();
+        let contextual = crate::speaker_verification::observe_session_speaker(
+            &context_profile, &pcm[start_ms * 32..end_ms * 32]).unwrap();
+        observations.push(serde_json::json!({"start_ms":start_ms,"end_ms":end_ms,
+            "classification":format!("{:?}",observation.classification),
+            "quality":observation.signal_quality_sufficient,
+            "speech_ms":observation.real_speech_ms,
+            "transcript_evidence":observation.transcript_speaker_evidence.label(),
+            "context_classification":format!("{:?}",contextual.classification),
+            "context_quality":contextual.signal_quality_sufficient,
+            "production_context_owner":production_context.certifies_original_pcm(&pcm[start_ms * 32..end_ms * 32])}));
+    }
+    std::fs::write(output, serde_json::to_vec_pretty(&observations).unwrap()).unwrap();
+}
+
+#[cfg(target_os = "windows")]
 #[tokio::test]
 #[ignore = "selected device PCM, enrolled profile and installed provider credentials; no editor acceptance"]
 async fn recorded_startup_speaker_coverage_live_delivery_probe() {
@@ -3570,27 +4440,80 @@ async fn recorded_startup_speaker_coverage_live_delivery_probe() {
     let output = std::env::var_os("LISTENER_STARTUP_REPLAY_OUTPUT").expect("explicit output path");
     let fixture: serde_json::Value = serde_json::from_slice(&std::fs::read(input).unwrap()).unwrap();
     let pcm = std::fs::read(fixture["pcm_path"].as_str().unwrap()).unwrap();
-    assert!(!pcm.is_empty() && pcm.len() % 2 == 0 && pcm.len() <= 60 * 32_000);
+    let synthetic_long_capture = fixture["synthetic_long_capture"].as_bool().unwrap_or(false);
+    assert!(!pcm.is_empty() && pcm.len() % 2 == 0);
+    if synthetic_long_capture {
+        assert!(pcm.len() > 75 * 32_000 && pcm.len() <= 120 * 32_000,
+            "constructed long replay must cross 75 seconds but remain bounded");
+    } else {
+        assert!(pcm.len() <= 60 * 32_000);
+    }
     let pcm_sha256 = {
         use sha2::{Digest, Sha256};
         format!("{:x}", Sha256::digest(&pcm))
     };
     assert_eq!(pcm_sha256, fixture["pcm_sha256"].as_str().unwrap());
+    let pcm_segments = fixture["pcm_segments"].as_array().cloned().unwrap_or_default();
+    if synthetic_long_capture {
+        use sha2::{Digest, Sha256};
+        assert!(pcm_segments.len() >= 3, "constructed long replay needs explicit source segments");
+        let mut destination_cursor = 0usize;
+        for segment in &pcm_segments {
+            let path = segment["source_pcm_path"].as_str().expect("segment source PCM path");
+            let source = std::fs::read(path).expect("read segment source PCM");
+            let source_sha = format!("{:x}", Sha256::digest(&source));
+            assert_eq!(source_sha, segment["source_pcm_sha256"].as_str().expect("segment source SHA"));
+            let source_start = usize::try_from(segment["source_start_byte"].as_u64().expect("segment source start")).unwrap();
+            let source_end = usize::try_from(segment["source_end_byte"].as_u64().expect("segment source end")).unwrap();
+            let destination_start = usize::try_from(segment["destination_start_byte"].as_u64().expect("segment destination start")).unwrap();
+            let destination_end = usize::try_from(segment["destination_end_byte"].as_u64().expect("segment destination end")).unwrap();
+            assert!(matches!(segment["role"].as_str(),
+                Some("owner") | Some("foreign") | Some("silence")
+                    | Some("mixed_owner_foreign") | Some("owner-and-foreign")),
+                "segment role must describe the constructed evidence scope");
+            assert_eq!(destination_start, destination_cursor, "segments must cover output contiguously");
+            assert!(source_start < source_end && source_end <= source.len());
+            assert!(destination_start < destination_end && destination_end <= pcm.len());
+            assert_eq!(source_end - source_start, destination_end - destination_start);
+            assert!(source_start % 32 == 0 && source_end % 32 == 0
+                && destination_start % 32 == 0 && destination_end % 32 == 0,
+                "segment boundaries must preserve exact 16 kHz millisecond coordinates");
+            assert_eq!(&source[source_start..source_end], &pcm[destination_start..destination_end],
+                "constructed PCM must be a byte-exact source splice");
+            destination_cursor = destination_end;
+        }
+        assert_eq!(destination_cursor, pcm.len(), "segment manifest must cover the complete constructed PCM");
+        assert!(pcm_segments.iter().any(|segment| matches!(segment["role"].as_str(),
+            Some("owner") | Some("mixed_owner_foreign") | Some("owner-and-foreign"))),
+            "constructed replay must contain explicitly identified owner audio");
+    } else {
+        assert!(pcm_segments.is_empty(), "physical recording replay must not carry synthetic splice provenance");
+    }
     let wake_phrase = fixture["wake_phrase"].as_str().unwrap();
-    // Evaluate the persisted owner bank without writing adaptation templates or
-    // adding a live wake exemplar. This is conservative relative to the actual
-    // enrolled-match session; it still runs the production embedding model.
-    let profile_pcm = pcm.clone();
+    // Evaluate the production model without writing adaptation templates. A
+    // fixture may provide the separately confirmed identity window; otherwise
+    // retain the original conservative persisted-bank-only replay policy.
+    let profile_pcm = fixture["identity_pcm_path"].as_str()
+        .map(|path| std::fs::read(path).expect("explicit bounded identity reference"))
+        .unwrap_or_else(|| pcm.clone());
+    let extraction_pcm = profile_pcm.clone();
     let profile_phrase = wake_phrase.to_string();
     let wake_end_seconds = fixture["wake_end_seconds"].as_f64().unwrap() as f32;
-    let profile = tokio::task::spawn_blocking(move ||
-        crate::speaker_verification::session_profile_from_wake(
-            &profile_pcm, wake_end_seconds, &profile_phrase, false,
+    let verified_identity = fixture["verified_identity"].as_bool().unwrap_or(false);
+    let profile = tokio::task::spawn_blocking(move || {
+        // The installed wake path has already prepared the shared runtime.
+        // Keep that same precondition even when replaying an absent live seed;
+        // otherwise VAD DLL initialization can differ between the two arms.
+        crate::speaker_verification::prepare_for_phrase(&profile_phrase)
+            .expect("prepare installed owner runtime without adapting templates");
+        crate::speaker_verification::session_profile_snapshot_from_wake(
+            &profile_pcm, wake_end_seconds, &profile_phrase, verified_identity,
         )
-    ).await.expect("join profile model task").expect("read installed enrolled profile");
+    }).await.expect("join profile model task").expect("read installed enrolled profile");
     assert!(!profile.is_adaptive(), "selected recording requires the installed enrollment");
     let (profile_tx, profile_rx) = std::sync::mpsc::channel();
     let mut tracker = super::LocalSessionSpeakerTracker {
+        evidence_sink: None, classification_inflight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         profile_rx: Some(profile_rx), profile: None, classification_rx: None,
         adaptation_gate: Default::default(), rolling_pcm: Vec::new(),
         next_classification_audio_ms: super::LOCAL_SPEAKER_CLASSIFY_MIN_MS as u64,
@@ -3605,31 +4528,74 @@ async fn recorded_startup_speaker_coverage_live_delivery_probe() {
     }, Vec::new());
     asr.enable_diagnostic_trace();
     let asr = Arc::new(asr);
-    let callbacks = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
-    let callback_sink = Arc::clone(&callbacks);
-    asr.set_partial_transcript_callback(Some(Arc::new(move |text| callback_sink.lock().push(text))));
+    // Match production: establish the accepted wake identity before arming
+    // strict extraction, which cannot certify output on an open wake.
     asr.note_verified_local_speaker_tracking_started(wake_phrase);
     asr.note_local_speaker_profile_adaptive(false);
+    let extraction_enabled = fixture["exercise_original_source_extraction"].as_bool().unwrap_or(false);
+    if extraction_enabled {
+        #[cfg(feature = "target-speaker-extraction")]
+        asr.start_target_speaker_extraction(wake_phrase, &extraction_pcm, wake_end_seconds);
+    }
+    let eager_evidence = fixture["publish_completed_speaker_evidence"].as_bool().unwrap_or(false);
+    if eager_evidence { tracker.evidence_sink = Some(Arc::downgrade(&asr)); }
+    let callbacks = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+    let callback_sink = Arc::clone(&callbacks);
+    let preview_growth = Arc::new(parking_lot::Mutex::new(Vec::<(u64, String)>::new()));
+    let preview_started = Instant::now();
+    let authoritative_growth = Arc::clone(&preview_growth);
+    asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
+        authoritative_growth.lock().push((preview_started.elapsed().as_millis() as u64, text.clone()));
+        callback_sink.lock().push(text);
+    })));
+    let visual_growth = Arc::clone(&preview_growth);
+    asr.set_visual_partial_transcript_callback(Some(Arc::new(move |update| {
+        let text = update.text().to_string();
+        visual_growth.lock().push((preview_started.elapsed().as_millis() as u64, text));
+    })));
     asr.open_session().await.expect("open recorded PCM provider session");
     asr.mark_audio_delivery_ready();
     let speech_sink = Arc::new(parking_lot::Mutex::new(LocalSpeechEvidence::default()));
-    let mut vad = super::LocalSpeechActivity::new(Arc::clone(&speech_sink));
+    let mut vad = super::LocalSpeechActivity::with_quality_timeline(
+        Arc::clone(&speech_sink), asr.local_speech_quality_sink());
     let mut bytes = 0u64;
+    let mut streaming_agc = super::EmbeddedStreamingAgcState::default();
     let started = Instant::now();
     let startup_ms = fixture["buffered_startup_ms"].as_u64().unwrap();
     let mut pending_profile = Some((profile_tx, profile));
     let mut observations = Vec::new();
+    let mut endpoint_evidence = Vec::new();
     let mut ledgers = Vec::new();
+    let mut snapshot_gate_diagnostics = Vec::new();
+    let mut last_snapshot_gate_diagnostic = String::new();
+    let mut snapshot_selection_diagnostics = Vec::new();
+    let mut last_snapshot_selection_diagnostic = String::new();
     let mut first_body_wall_ms = None;
     let mut first_body_audio_ms = None;
     let mut admitted_source_key = String::new();
+    let guard_coordinator = Coordinator::new();
+    let guard_session = new_session_id();
+    let activation_window_ms = fixture["activation_confirmation_end_ms"].as_u64();
+    if let Some(end_ms) = activation_window_ms {
+        arm_automatic_wake_text_guard(&guard_coordinator.inner, guard_session, wake_phrase.into(), startup_ms);
+        super::bind_automatic_wake_confirmation_window(&guard_coordinator.inner, guard_session,
+            Some(crate::observability::CandidateRange { start: 0, end: end_ms * 32 }), Some(0));
+    }
+    let mut guarded_previews = Vec::new();
+    let mut last_guarded_preview = String::new();
     let exercise_endpoint = fixture["exercise_endpoint_clock"].as_bool().unwrap_or(false);
+    let exercise_delivery = exercise_endpoint || synthetic_long_capture;
     let check_undelivered_turn = fixture["check_undelivered_turn"].as_bool().unwrap_or(false);
+    let expected_incremental_clauses = fixture["expected_incremental_clauses"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let mut endpoint_clock = super::SettledTargetEndpointClock::default();
     endpoint_clock.automatic_wake_session = true;
     let mut submitted_display = String::new();
     let mut submitted_source_key = String::new();
     let mut submissions = Vec::new();
+    let mut continuation_advances = Vec::new();
     let mut first_stop_wall_ms = None;
     let mut first_stop_audio_ms = None;
     let mut last_body_submission_wall_ms = None;
@@ -3652,25 +4618,60 @@ async fn recorded_startup_speaker_coverage_live_delivery_probe() {
         let voiced_end = super::embedded_confirmed_speech_end_ms(has_signal, evidence, end_samples);
         asr.note_local_audio_activity_with_speech_end_samples(captured_ms, end_samples, voiced_end);
         asr.note_local_speech_activity(evidence);
-        let completed = tracker.observe(chunk, captured_ms, voiced_end, asr.stable_target_speech_end_ms());
+        let identity_analysis_end = voiced_end.into_iter()
+            .chain(asr.latest_timed_provider_speech_end_ms()).max();
+        let completed = tracker.observe(chunk, captured_ms, identity_analysis_end, asr.stable_target_speech_end_ms());
         for (start, end, classification, transcript_evidence, quality) in completed {
             observations.push(serde_json::json!({"start_ms": start, "end_ms": end,
                 "classification": format!("{classification:?}"), "quality": quality,
                 "wall_ms": started.elapsed().as_millis()}));
-            asr.note_local_speaker_observation_with_audio_range(start, end, classification, transcript_evidence, quality);
+            if !eager_evidence {
+                asr.note_local_speaker_observation_with_audio_range(start, end, classification, transcript_evidence, quality);
+            }
         }
         asr.note_local_speaker_analysis_pending(tracker.classification_pending());
-        asr.consume_pcm_chunk(chunk);
+        // Match the device path: identity and VAD see the original samples;
+        // the provider and extraction branch receive the host limiter output.
+        let (asr_pcm, _) =
+            super::normalize_embedded_streaming_pcm_for_asr(chunk, &mut streaming_agc);
+        asr.consume_pcm_chunk(&asr_pcm);
         if captured_ms >= startup_ms {
-            if let Some((tx, profile)) = pending_profile.take() { tx.send(Ok(profile)).unwrap(); }
+            if let Some((tx, profile)) = pending_profile.take() {
+                #[cfg(feature = "target-speaker-extraction")]
+                if extraction_enabled { asr.set_target_speaker_source_profile(&profile); }
+                tx.send(Ok(profile)).unwrap();
+            }
             tokio::time::sleep(Duration::from_millis(chunk.len() as u64 / 32)).await;
         }
         let now = Instant::now();
+        if activation_window_ms.is_some() {
+            super::note_automatic_wake_transcript_timing(&guard_coordinator.inner, guard_session,
+                asr.provider_timed_transcript_snapshot());
+            if let Some((_, raw)) = preview_growth.lock().last() {
+                super::note_automatic_wake_transcript_timing(&guard_coordinator.inner, guard_session,
+                    asr.transcript_timing_snapshot_for(raw));
+                let visible = super::filter_dictation_visual_preview_text(&guard_coordinator.inner, guard_session, raw);
+                if visible != last_guarded_preview {
+                    guarded_previews.push(serde_json::json!({"text": visible, "wall_ms": started.elapsed().as_millis()}));
+                    last_guarded_preview = visible;
+                }
+            }
+        }
         if exercise_endpoint {
             endpoint_clock.note_local_vad_evidence_at(asr.local_speech_activity_snapshot(), now);
             let body_started = !submitted_display.is_empty() || (check_undelivered_turn
                 && captured_ms >= fixture["recorded_body_started_audio_ms"].as_u64().unwrap());
-            endpoint_clock.observe(&asr.endpoint_update_snapshot(), body_started, now);
+            let update = asr.endpoint_update_snapshot();
+            endpoint_evidence.push(serde_json::json!({
+                "wall_ms":started.elapsed().as_millis(),"audio_ms":captured_ms,
+                "qualified_owner_ms":update.qualified_owner_speech_end_ms,
+                "local_owner_ms":update.local_target_speech_end_ms,
+                "non_owner_ms":update.local_non_target_speech_end_ms,
+                "observation_ms":update.local_speaker_observation_end_ms,
+                "vad_epoch":evidence.activity_epoch,"vad_state":format!("{:?}",evidence.state),
+                "pending":update.pending_unattributed_speech,
+            }));
+            endpoint_clock.observe(&update, body_started, now);
             if let Some(preview) = callbacks.lock().last() {
                 let key = super::embedded_audio_partial_preview_stability_key(preview);
                 if key != visible_key {
@@ -3683,50 +4684,214 @@ async fn recorded_startup_speaker_coverage_live_delivery_probe() {
                 );
             }
         }
-        if let Some(snapshot) = asr.pause_early_delivery_ledger_snapshot_after(Duration::from_millis(1_000), &admitted_source_key) {
-            if !super::automatic_wake_has_unstripped_lead_in(&snapshot.text, wake_phrase, &admitted_source_key) {
-                admitted_source_key = crate::transcript_boundary::content_key(&snapshot.text);
-                if crate::transcript_boundary::content_key(&snapshot.text)
-                    != crate::transcript_boundary::content_key(wake_phrase) {
+        // Production asks the rolling ledger from the last successfully
+        // submitted source coordinate. The observation-only probe has no
+        // editor submission, so it retains the admission coordinate instead.
+        let snapshot_query_key = if exercise_delivery {
+            submitted_source_key.clone()
+        } else {
+            admitted_source_key.clone()
+        };
+        let continuation = exercise_delivery.then(||
+            super::pause_early_ledger_anchor(&guard_coordinator.inner, guard_session)
+                .and_then(|anchor| asr.pause_early_ledger_continuation_after(
+                    Duration::from_millis(1_000), &anchor)))
+            .flatten();
+        let snapshot = continuation.is_none().then(|| asr.pause_early_delivery_evidence_after(
+            Duration::from_millis(1_000), &snapshot_query_key)).flatten();
+        let (snapshot_text, snapshot_timing, snapshot_stability) = continuation.as_ref()
+            .map(|value| (value.source_text(), None,
+                crate::asr::volcengine::LiveDeliveryStability::ProviderConfirmed))
+            .or_else(|| snapshot.map(|value| (value.text, value.timing, value.stability)))
+            .map_or((None, None, crate::asr::volcengine::LiveDeliveryStability::RollingStable),
+                |(text, timing, stability)| (Some(text), timing, stability));
+        let selection = asr.pause_early_delivery_snapshot_diagnostics(&snapshot_query_key);
+        let source_snapshot_diag = selection["source_snapshot"].clone();
+        let selection_key = serde_json::json!({
+            "authority": selection["authority"],
+            "selected_branch": selection["selected_branch"],
+            "selected_text": selection["selected_text"],
+            "best_text": selection["best_text"],
+            "live_text": selection["live_text"],
+            "source_text": selection["source_text"],
+            "provider_timing_words": selection["provider_timing_words"],
+            "local_owner_ranges": selection["local_owner_ranges"],
+            "source_owner_ranges": selection["source_owner_ranges"],
+            "physical_interference_ranges": selection["physical_interference_ranges"],
+            "provider_foreign_ranges": selection["provider_foreign_ranges"],
+            "consumed_source_key": selection["consumed_source_key"],
+            "provider_key": selection["provider_key"],
+            "source_snapshot": source_snapshot_diag.clone(),
+            "revision_seams": selection["revision_seams"].as_array().map(|rows| rows.iter().map(|row| {
+                serde_json::json!({"chars":row["chars"],"key_chars":row["key_chars"],"consumed_end":row["consumed_end"]})
+            }).collect::<Vec<_>>()),
+        }).to_string();
+        if selection_key != last_snapshot_selection_diagnostic {
+            last_snapshot_selection_diagnostic = selection_key;
+            snapshot_selection_diagnostics.push(serde_json::json!({
+                "wall_ms": started.elapsed().as_millis(),
+                "audio_ms": captured_ms,
+                "selection": selection,
+            }));
+        }
+        let gate = asr.pause_early_delivery_gate_diag();
+        let gate_row = serde_json::json!({
+            "wall_ms": started.elapsed().as_millis(),
+            "audio_ms": captured_ms,
+            "coordinate": if exercise_delivery { "submitted" } else { "admitted" },
+            "source_key": snapshot_query_key.clone(),
+            "snapshot_chars": snapshot_text.as_ref().map(|value| value.chars().count()),
+            "persistent_block": asr.pause_early_delivery_persistent_block_reason(),
+            "frozen": gate.0,
+            "stable_ms": gate.1,
+            "ledger_chars": gate.2,
+        });
+        let gate_key = serde_json::json!({
+            "coordinate": if exercise_delivery { "submitted" } else { "admitted" },
+            "source_key": snapshot_query_key,
+            "snapshot_chars": snapshot_text.as_ref().map(|value| value.chars().count()),
+            "persistent_block": asr.pause_early_delivery_persistent_block_reason(),
+            "frozen": gate.0,
+            "stable_ready": gate.1.is_some_and(|ms|
+                ms >= super::PAUSE_EARLY_DELIVERY_MIN_STABLE.as_millis()),
+            "ledger_chars": gate.2,
+        }).to_string();
+        if gate_key != last_snapshot_gate_diagnostic {
+            last_snapshot_gate_diagnostic = gate_key;
+            snapshot_gate_diagnostics.push(gate_row);
+        }
+        if let Some(snapshot_text) = snapshot_text {
+            let guarded_body = if activation_window_ms.is_some() {
+                if continuation.is_none() {
+                    super::note_automatic_wake_transcript_timing(&guard_coordinator.inner, guard_session,
+                        snapshot_timing.as_ref().map(|value| value.timing.clone()));
+                }
+                super::pause_early_display_text(&guard_coordinator.inner, guard_session, &snapshot_text)
+            } else { None };
+            if !super::automatic_wake_has_unstripped_lead_in(&snapshot_text, wake_phrase, &admitted_source_key)
+                && (activation_window_ms.is_none() || guarded_body.is_some()) {
+                if !exercise_delivery {
+                    admitted_source_key = crate::transcript_boundary::content_key(&snapshot_text);
+                }
+                let measured_body = guarded_body.clone().unwrap_or_else(||
+                    super::strip_automatic_activation_prefix(&snapshot_text, wake_phrase, true));
+                let measured_key = crate::transcript_boundary::content_key(&measured_body);
+                if !measured_key.is_empty()
+                    && !crate::transcript_boundary::content_key(wake_phrase).starts_with(&measured_key) {
                     first_body_wall_ms.get_or_insert(started.elapsed().as_millis());
                     first_body_audio_ms.get_or_insert(captured_ms);
                 }
-                if exercise_endpoint {
-                    let text = super::strip_automatic_activation_prefix(&snapshot.text, wake_phrase, true);
+                if exercise_delivery {
+                    let text = guarded_body.unwrap_or_else(||
+                        super::strip_automatic_activation_prefix(&snapshot_text, wake_phrase, true));
                     let delivered_key = super::embedded_audio_partial_preview_stability_key(&submitted_display);
-                    let remainder = super::pause_early_final_remainder(&text, &submitted_display, &submitted_source_key)
-                        .or_else(|| super::pause_early_revised_terminal_remainder(&text, &submitted_display, &submitted_source_key)
-                            .filter(|tail| super::pause_early_terminal_punctuation_only(tail)))
-                        .or_else(|| super::pause_early_anchored_continuation(&text, &submitted_display, &submitted_source_key))
-                        .or_else(|| super::pause_early_aligned_growth_tail(&text, &submitted_source_key));
-                    let (_, stable_ms, full_chars) = asr.pause_early_delivery_gate_diag();
-                    let quiet = snapshot.text.chars().count() == full_chars
-                        && stable_ms.is_some_and(|ms| ms >= super::PAUSE_EARLY_DELIVERY_MIN_STABLE.as_millis())
-                        && now.saturating_duration_since(visible_growth_at) >= super::PAUSE_EARLY_UNPUNCTUATED_QUIET;
+                    let continuation_display_compatible = continuation.is_none()
+                        || text.starts_with(&submitted_display);
+                    let remainder = continuation_display_compatible.then(||
+                        super::pause_early_final_remainder(&text, &submitted_display, &submitted_source_key)
+                            .or_else(|| super::pause_early_revised_terminal_remainder(&text, &submitted_display, &submitted_source_key)
+                                .filter(|tail| super::pause_early_terminal_punctuation_only(tail)))
+                            .or_else(|| super::pause_early_anchored_continuation(&text, &submitted_display, &submitted_source_key))
+                            .or_else(|| super::pause_early_aligned_growth_tail(&text, &submitted_source_key))
+                            .or_else(|| super::pause_early_timed_continuation(&guard_coordinator.inner,
+                                guard_session, &text, &submitted_source_key, snapshot_timing.as_ref())))
+                        .flatten();
+                    let (_, stable_ms, _) = asr.pause_early_delivery_gate_diag();
+                    let visible_body = if activation_window_ms.is_some() {
+                        Some(last_guarded_preview.clone())
+                    } else {
+                        preview_growth.lock().last().map(|(_, text)| text.clone())
+                    };
                     if let Some(remainder) = remainder {
-                        if let Some(delta) = super::pause_early_segment(&remainder, quiet)
-                            .filter(|delta| !delta.is_empty() && super::pause_early_chunk_ready(&delivered_key, delta)) {
+                        let snapshot_owner_source_key =
+                            crate::transcript_boundary::content_key(&snapshot_text);
+                        let pending_after_snapshot = (!snapshot_owner_source_key.is_empty())
+                            .then(|| asr.pending_owner_delivery_after(&snapshot_owner_source_key))
+                            .flatten()
+                            .map(|(pending, _)| pending);
+                        let owner_candidate_caught_up = continuation.as_ref().map_or_else(
+                            || super::pause_early_snapshot_has_no_newer_owner_body(
+                                pending_after_snapshot.as_deref()),
+                            |value| value.owner_caught_up,
+                        );
+                        let quiet = super::pause_early_snapshot_covers_visible_body(
+                            &text,
+                            visible_body.as_deref(),
+                        )
+                            && owner_candidate_caught_up
+                            && stable_ms.is_some_and(|ms| ms >= super::PAUSE_EARLY_DELIVERY_MIN_STABLE.as_millis())
+                            && now.saturating_duration_since(visible_growth_at) >= super::PAUSE_EARLY_UNPUNCTUATED_QUIET;
+                        if let Some(delta) = super::pause_early_ready_segment(
+                            &submitted_display, &delivered_key, &remainder, quiet, snapshot_stability)
+                            .filter(|delta| !delta.is_empty()) {
                             if let Some(key) = super::pause_early_source_key_after_append(&text, &remainder, delta) {
-                                submitted_display.push_str(delta);
-                                submitted_source_key = key;
-                                endpoint_clock.note_text_delivery(now, delta);
-                                if !super::pause_early_terminal_punctuation_only(delta) {
-                                    last_body_submission_wall_ms = Some(started.elapsed().as_millis());
+                                let next_anchor = continuation.as_ref().and_then(|value| {
+                                    let prefix_len = text.len().checked_sub(remainder.len())?;
+                                    super::pause_early_advance_continuation(
+                                        &guard_coordinator.inner, guard_session, value,
+                                        &text[..prefix_len + delta.len()], &key,
+                                    )
+                                });
+                                let continuation_is_current = continuation.as_ref().is_none_or(|value| {
+                                    next_anchor.is_some()
+                                        && super::pause_early_ledger_anchor(&guard_coordinator.inner, guard_session)
+                                            .as_ref() == Some(&value.anchor)
+                                        && asr.ledger_continuation_is_current(value)
+                                });
+                                if continuation_is_current {
+                                    submitted_display.push_str(delta);
+                                    submitted_source_key = key;
+                                    super::pause_early_delivery_reserve(&guard_coordinator.inner, guard_session,
+                                        submitted_display.clone(), super::embedded_audio_partial_preview_stability_key(&submitted_display),
+                                        submitted_source_key.clone());
+                                    super::pause_early_delivery_confirm(&guard_coordinator.inner, guard_session);
+                                    admitted_source_key = submitted_source_key.clone();
+                                    if let Some(next) = &next_anchor {
+                                        super::pause_early_remember_continuation(
+                                            &guard_coordinator.inner, guard_session, next);
+                                        let remembered = super::pause_early_ledger_anchor(
+                                            &guard_coordinator.inner, guard_session).as_ref() == Some(next);
+                                        continuation_advances.push(serde_json::json!({
+                                            "wall_ms": started.elapsed().as_millis(),
+                                            "audio_ms": captured_ms,
+                                            "captured_origin_bytes": source_snapshot_diag["child"]["captured_origin_bytes"].clone(),
+                                            "captured_through_ms": source_snapshot_diag["child"]["captured_through_ms"].clone(),
+                                            "child_decoder_id": source_snapshot_diag["child"]["child_decoder_id"].clone(),
+                                            "capture_stream_id": next.source.capture_stream_id,
+                                            "capture_generation": next.source.capture_generation,
+                                            "from_anchor_generation": next.generation.saturating_sub(1),
+                                            "to_anchor_generation": next.generation,
+                                            "cumulative_text": submitted_display.clone(),
+                                            "remembered_anchor_matches": remembered,
+                                        }));
+                                    } else {
+                                        super::pause_early_remember_timed_boundary(
+                                            &guard_coordinator.inner, guard_session,
+                                            &submitted_source_key, snapshot_timing.as_ref());
+                                    }
+                                    if exercise_endpoint { endpoint_clock.note_text_delivery(now, delta); }
+                                    if !super::pause_early_terminal_punctuation_only(delta) {
+                                        last_body_submission_wall_ms = Some(started.elapsed().as_millis());
+                                    }
+                                    submissions.push(serde_json::json!({"delta": delta, "text": submitted_display,
+                                        "wall_ms": started.elapsed().as_millis(), "audio_ms": captured_ms}));
                                 }
-                                submissions.push(serde_json::json!({"delta": delta, "text": submitted_display,
-                                    "wall_ms": started.elapsed().as_millis(), "audio_ms": captured_ms}));
                             }
                         }
                     }
                 }
-                ledgers.push(serde_json::json!({"text": snapshot.text, "audio_ms": captured_ms,
+                ledgers.push(serde_json::json!({"text": snapshot_text, "audio_ms": captured_ms,
                     "wall_ms": started.elapsed().as_millis()}));
             }
+        }
+        if exercise_endpoint {
+            endpoint_clock.refresh_pending_owner_delivery(
+                asr.pending_owner_delivery_after(&submitted_source_key), now);
         }
         if exercise_endpoint && (!submitted_display.is_empty() || check_undelivered_turn) && first_stop_wall_ms.is_none()
             && endpoint_clock.latest_due_update_after_owner_analysis(
                 now, super::EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
-                asr.local_speaker_analysis_pending(),
+                asr.owner_analysis_pending_for_endpoint(),
             ).is_some() {
             first_stop_wall_ms = Some(started.elapsed().as_millis());
             first_stop_audio_ms = Some(captured_ms);
@@ -3739,8 +4904,8 @@ async fn recorded_startup_speaker_coverage_live_delivery_probe() {
         .contains(&crate::transcript_boundary::content_key(owner_tail));
     let first_window_covers_start = observations.first().is_some_and(|row|
         row["start_ms"].as_u64() == Some(0) && row["end_ms"].as_u64() == Some(1_000));
-    let streamed_before_final = first_body_wall_ms.is_some_and(|wall|
-        wall <= fixture["maximum_first_body_wall_ms"].as_u64().unwrap() as u128);
+    let streamed_before_final = fixture["maximum_first_body_wall_ms"].as_u64()
+        .is_some_and(|maximum| first_body_wall_ms.is_some_and(|wall| wall <= maximum as u128));
     let live_tail_retained = fixture["expected_live_tail"].as_str().is_none_or(|tail|
         ledgers.iter().any(|row| crate::transcript_boundary::content_key(row["text"].as_str().unwrap())
             .contains(&crate::transcript_boundary::content_key(tail))));
@@ -3752,31 +4917,219 @@ async fn recorded_startup_speaker_coverage_live_delivery_probe() {
         first_stop_wall_ms.zip(last_body_submission_wall_ms)
             .is_some_and(|(stop, submitted)| stop >= submitted + 3_000);
     let captured_body_not_cut = first_stop_audio_ms.is_some_and(|stop_ms| stop_ms >= pcm.len() as u64 / 32);
-    let passed = if check_undelivered_turn {
+    let incremental_clause_checks = expected_incremental_clauses.iter().map(|expectation| {
+        let required = crate::transcript_boundary::content_key(
+            expectation["required"].as_str().unwrap_or_default(),
+        );
+        let later = crate::transcript_boundary::content_key(
+            expectation["before"].as_str().unwrap_or_default(),
+        );
+        let matched = !required.is_empty() && !later.is_empty() && submissions.iter().any(|row| {
+            let key = crate::transcript_boundary::content_key(
+                row["text"].as_str().unwrap_or_default(),
+            );
+            key.contains(&required) && !key.contains(&later)
+        });
+        serde_json::json!({
+            "required": expectation["required"],
+            "before": expectation["before"],
+            "matched": matched,
+        })
+    }).collect::<Vec<_>>();
+    let incremental_clause_cadence_passed =
+        incremental_clause_checks.iter().all(|check| check["matched"].as_bool() == Some(true));
+    let mut longest_preview_growth_gap_ms = 0;
+    let mut last_growth = None;
+    let mut greatest_preview_chars = 0;
+    for (wall_ms, text) in preview_growth.lock().iter() {
+        let chars = crate::transcript_boundary::content_key(text).chars().count();
+        if chars > greatest_preview_chars {
+            if let Some(previous) = last_growth {
+                longest_preview_growth_gap_ms = longest_preview_growth_gap_ms.max(wall_ms - previous);
+            }
+            greatest_preview_chars = chars;
+            last_growth = Some(*wall_ms);
+        }
+    }
+    let preview_cadence_passed = fixture["maximum_preview_growth_gap_ms"].as_u64()
+        .is_none_or(|maximum| greatest_preview_chars > 0 && longest_preview_growth_gap_ms <= maximum);
+    let expected_submitted_body = fixture["expected_submitted_body"].as_str().unwrap_or_default();
+    let submitted_body_exact = !expected_submitted_body.is_empty()
+        && crate::transcript_boundary::content_key(&submitted_display)
+            == crate::transcript_boundary::content_key(expected_submitted_body);
+    let expected_foreign_fragments = fixture["expected_foreign_fragments"].as_array()
+        .or_else(|| fixture["forbidden_body_phrases"].as_array())
+        .cloned().unwrap_or_default();
+    let submitted_key = crate::transcript_boundary::content_key(&submitted_display);
+    let mixed_source_present = pcm_segments.iter().any(|segment| matches!(segment["role"].as_str(),
+        Some("foreign") | Some("mixed_owner_foreign") | Some("owner-and-foreign")));
+    let foreign_fragments_excluded = (!mixed_source_present || !expected_foreign_fragments.is_empty())
+        && expected_foreign_fragments.iter().all(|fragment| {
+        let key = crate::transcript_boundary::content_key(fragment.as_str().unwrap_or_default());
+        !key.is_empty() && !submitted_key.contains(&key)
+    });
+    let nonzero_continuation_count = continuation_advances.iter().filter(|row|
+        row["captured_origin_bytes"].as_u64().is_some_and(|origin| origin > 0)).count();
+    let continuation_child_decoders = continuation_advances.iter()
+        .filter_map(|row| row["child_decoder_id"].as_u64())
+        .collect::<std::collections::BTreeSet<_>>();
+    let continuation_capture_binding_consistent = continuation_advances.first().is_some_and(|first| {
+        let stream = first["capture_stream_id"].as_u64();
+        let generation = first["capture_generation"].as_u64();
+        stream.is_some() && generation.is_some() && continuation_advances.iter().all(|row| {
+            row["capture_stream_id"].as_u64() == stream
+                && row["capture_generation"].as_u64() == generation
+                && row["remembered_anchor_matches"].as_bool() == Some(true)
+        })
+    });
+    let continuation_generations_strict = continuation_advances.len() >= 2
+        && continuation_advances.iter().all(|row| {
+            row["from_anchor_generation"].as_u64().zip(row["to_anchor_generation"].as_u64())
+                .is_some_and(|(from, to)| to == from.wrapping_add(1))
+        })
+        && continuation_advances.windows(2).all(|pair| {
+            pair[0]["to_anchor_generation"].as_u64().zip(pair[1]["from_anchor_generation"].as_u64())
+                .is_some_and(|(prior, next)| next >= prior)
+        });
+    let no_premature_stop = exercise_endpoint.then(||
+        first_stop_audio_ms.is_none_or(|stop_ms| stop_ms >= pcm.len() as u64 / 32));
+    let synthetic_long_passed = !synthetic_long_capture || (
+        submitted_body_exact && foreign_fragments_excluded
+            && nonzero_continuation_count >= 2 && continuation_generations_strict
+            && continuation_child_decoders.len() >= 2
+            && continuation_capture_binding_consistent
+            && no_premature_stop.unwrap_or(true)
+    );
+    let passed = preview_cadence_passed && synthetic_long_passed && if synthetic_long_capture {
+        first_window_covers_start
+    } else if check_undelivered_turn {
         tail_retained && first_window_covers_start && captured_body_not_cut
     } else {
         tail_retained && live_tail_retained && first_window_covers_start && streamed_before_final
             && endpoint_tail_submitted && full_post_submission_window
+            && incremental_clause_cadence_passed
     };
-    let report = serde_json::json!({
+    let mut report = serde_json::json!({
         "status": if passed {"PASS"} else {"FAIL"}, "source_session_id": fixture["source_session_id"],
-        "scope": "real device recording replay, production VAD, chronological speaker tracker, persisted owner bank and provider; no fresh microphone/editor or broad interference acceptance",
-        "profile_policy": "persisted enrolled bank only; no live wake exemplar or persisted adaptation writes",
+        "scope": if synthetic_long_capture {
+            "constructed byte-exact PCM sequence through production VAD, speaker tracker, provider and simulated successful ledger submission; not a physical >=75s recording, OS/editor receipt or endpoint acceptance"
+        } else {
+            "real device recording replay, production VAD, chronological speaker tracker, persisted owner bank and provider; no fresh microphone/editor or broad interference acceptance"
+        },
+        "profile_policy": if verified_identity { "enrolled bank plus explicit verified identity window; no persisted adaptation writes" }
+            else { "persisted enrolled bank only; no live wake exemplar or persisted adaptation writes" },
+    });
+    let replay_metrics = serde_json::json!({
+        "longest_preview_growth_gap_ms": longest_preview_growth_gap_ms,
+        "preview_cadence_passed": preview_cadence_passed,
+        "activation_confirmation_end_ms": activation_window_ms,
+        "activation_resolved_end_ms": guard_coordinator.inner.embedded_audio_automatic_wake_guard.lock()
+            .as_ref().and_then(|guard| guard.activation_audio_end_ms),
+        "guarded_previews": guarded_previews,
+        "snapshot_gate_diagnostics": snapshot_gate_diagnostics,
+        "snapshot_selection_diagnostics": snapshot_selection_diagnostics,
+        "preview_callbacks": preview_growth.lock().clone(),
         "pcm_sha256": pcm_sha256, "buffered_startup_ms": startup_ms,
         "first_live_body_wall_ms": first_body_wall_ms, "first_live_body_audio_ms": first_body_audio_ms,
         "first_window_covers_start": first_window_covers_start, "streamed_before_final": streamed_before_final,
         "expected_owner_tail": owner_tail, "owner_tail_retained": tail_retained, "live_tail_retained": live_tail_retained,
         "endpoint_exercised": exercise_endpoint, "endpoint_tail_submitted": endpoint_tail_submitted,
+        "endpoint_assertion": if exercise_endpoint { "evaluated" } else { "not_exercised" },
+        "incremental_clause_cadence_passed": incremental_clause_cadence_passed,
+        "incremental_clause_checks": incremental_clause_checks,
         "endpoint_probe_scope": "shared source segmentation, submission boundary and endpoint clock; simulated successful submission, appended quiet PCM, no OS/editor assertion",
         "check_undelivered_turn": check_undelivered_turn, "captured_body_not_cut": captured_body_not_cut,
         "first_stop_audio_ms": first_stop_audio_ms, "recorded_pcm_ms": pcm.len() / 32,
         "first_stop_wall_ms": first_stop_wall_ms, "last_body_submission_wall_ms": last_body_submission_wall_ms,
         "full_post_submission_window": full_post_submission_window, "submissions": submissions,
         "final_text": final_result.text,
-        "observations": observations, "ledgers": ledgers, "committed_callbacks": callbacks.lock().clone(), "trace": trace,
+        "provider_responses": asr.diagnostic_provider_responses(),
+        "observations": observations,
+        "endpoint_evidence": endpoint_evidence, "ledgers": ledgers, "committed_callbacks": callbacks.lock().clone(), "trace": trace,
     });
+    let long_evidence = serde_json::json!({
+        "synthetic_long_capture": synthetic_long_capture,
+        "pcm_segments": pcm_segments,
+        "delivery_exercised": exercise_delivery,
+        "expected_submitted_body": expected_submitted_body,
+        "submitted_body_exact": submitted_body_exact,
+        "expected_foreign_fragments": expected_foreign_fragments,
+        "foreign_fragments_excluded": foreign_fragments_excluded,
+        "continuation_advances": continuation_advances,
+        "nonzero_continuation_count": nonzero_continuation_count,
+        "continuation_child_decoder_ids": continuation_child_decoders,
+        "continuation_capture_binding_consistent": continuation_capture_binding_consistent,
+        "continuation_generations_strict": continuation_generations_strict,
+        "no_premature_stop": no_premature_stop,
+    });
+    report.as_object_mut().unwrap().extend(replay_metrics.as_object().unwrap().clone());
+    report.as_object_mut().unwrap().extend(long_evidence.as_object().unwrap().clone());
     std::fs::write(output, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
     assert!(passed, "startup PCM must acquire source identity and stream before final; see explicit report");
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+#[ignore = "captured PCM and installed speaker/VAD assets; offline quality-bound replay"]
+fn recorded_continuous_speech_quality_probe() {
+    use crate::asr::volcengine::LocalSpeechEvidence;
+    let fixture: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        std::env::var("LISTENER_SPEECH_QUALITY_INPUT").unwrap()).unwrap()).unwrap();
+    let pcm = std::fs::read(fixture["pcm_path"].as_str().unwrap()).unwrap();
+    let identity_pcm = std::fs::read(fixture["identity_pcm_path"].as_str().unwrap()).unwrap();
+    let profile = crate::speaker_verification::session_profile_snapshot_from_wake(
+        &identity_pcm, fixture["wake_end_ms"].as_u64().unwrap() as f32 / 1000.0,
+        fixture["wake_phrase"].as_str().unwrap(), true).unwrap();
+    let evidence = Arc::new(parking_lot::Mutex::new(LocalSpeechEvidence::default()));
+    let quality = Arc::new(parking_lot::Mutex::new(crate::speech_signal_quality::SpeechSignalTimeline::default()));
+    let mut vad = super::LocalSpeechActivity::with_quality_timeline(Arc::clone(&evidence), Arc::clone(&quality));
+    let queries = fixture["quality_windows"].as_array().unwrap();
+    let mut rows = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (index, chunk) in pcm.chunks(3_200).enumerate() {
+        let start = index as u64 * 1_600;
+        let end = start + chunk.len() as u64 / 2;
+        vad.submit(start, end, chunk);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while end.saturating_sub(evidence.lock().analyzed_through_samples) >= 512 {
+            assert!(Instant::now() < deadline, "continuous VAD did not process captured PCM");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        for (query_index, query) in queries.iter().enumerate() {
+            let a = query[0].as_u64().unwrap();
+            let b = query[1].as_u64().unwrap();
+            if b * 16 > end || !seen.insert(query_index) { continue; }
+            let mut observation = crate::speaker_verification::observe_session_speaker(
+                &profile, &pcm[a as usize * 32..b as usize * 32]).unwrap();
+            let original = format!("{:?}", observation.classification);
+            let energy_ms = observation.real_speech_ms;
+            let upper_bound = quality.lock().speech_upper_bound_ms(a, b);
+            observation.constrain_speech_duration(upper_bound);
+            rows.push(serde_json::json!({"start_ms":a,"end_ms":b,
+                "analyzed_ms":evidence.lock().analyzed_through_ms,
+                "energy_active_ms":energy_ms,"speech_upper_bound_ms":upper_bound,
+                "before":original,"after":format!("{:?}", observation.classification),
+                "quality_after":observation.signal_quality_sufficient,
+                "transcript_evidence_after":observation.transcript_speaker_evidence.label()}));
+        }
+    }
+    let final_bounds: Vec<_> = queries.iter().map(|q| quality.lock().speech_upper_bound_ms(
+        q[0].as_u64().unwrap(), q[1].as_u64().unwrap())).collect();
+    let final_resolved_speech_ms: Vec<_> = queries.iter().map(|q| quality.lock().resolved_speech_ms(
+        q[0].as_u64().unwrap(), q[1].as_u64().unwrap())).collect();
+    assert!(!quality.lock().is_invalid(), "real continuous VAD must not rewrite previously finalized silence");
+    std::fs::write(std::env::var("LISTENER_SPEECH_QUALITY_OUTPUT").unwrap(),
+        serde_json::to_vec_pretty(&serde_json::json!({"rows":rows,"final_bounds_ms":final_bounds,
+            "final_resolved_speech_ms":final_resolved_speech_ms,
+            "completed_speech_ranges_ms":quality.lock().completed_speech_ranges_ms(),
+            "scope":"offline exact captured PCM through continuous production VAD worker and shared quality constraint; no device/editor acceptance"})).unwrap()).unwrap();
+    if fixture["expect_quiet_pause_downgrade"].as_bool() == Some(true) {
+        let row = rows.iter().find(|r| r["start_ms"] == 5400 && r["end_ms"] == 6600).unwrap();
+        assert_eq!(row["quality_after"], false);
+        assert!(row["after"].as_str().unwrap().starts_with("Uncertain"));
+        assert_eq!(row["transcript_evidence_after"], "inconclusive");
+        assert!(final_bounds.iter().any(|bound| *bound == Some(398)));
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -5460,6 +6813,397 @@ fn undelivered_owner_turn_clock() -> (
 }
 
 #[test]
+fn personal_vad_unavailable_can_end_after_independently_confirmed_silence() {
+    use crate::asr::volcengine::{LocalSpeechActivityState, LocalSpeechEvidence, TargetSpeakerUpdate};
+    use std::time::Duration;
+    let (mut clock, owner, started) = undelivered_owner_turn_clock();
+    // The personal worker exists but supplies no observation (load failure,
+    // overflow or startup delay). That absence does not prove silence.
+    clock.note_personal_presence(None, started);
+    clock.note_body_delivery(started);
+    let now = started + Duration::from_millis(3_300);
+    let update = TargetSpeakerUpdate {
+        audio_duration_ms: Some(7_300), provider_audio_duration_ms: Some(7_300),
+        local_speech_end_ms: Some(4_000), qualified_owner_activity_advanced: false,
+        target_activity_advanced: false, ..owner
+    };
+    // A different, completed local VAD has covered the full quiet interval.
+    clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+        state: LocalSpeechActivityState::NonSpeech,
+        revision: 2, activity_epoch: 1, analyzed_through_ms: 7_300,
+        analyzed_through_samples: 116_800, last_detected_speech_end_ms: Some(4_000),
+        trailing_non_speech_ms: Some(3_300), pending_speech_start_ms: None,
+    }, now);
+    clock.observe(&update, true, now);
+    println!("owner-priority trace: capture=7300ms provider=7300ms editor_receipt=0ms personal=unavailable independent_silence=3300ms");
+    assert!(clock.latest_due_update(now, 3_000).is_some(),
+        "completed silence must release the session without treating missing personal evidence as silence");
+}
+
+#[test]
+fn personal_vad_silence_fallback_preserves_a_short_onset_skipped_between_snapshots() {
+    use crate::asr::volcengine::{LocalSpeechActivityState as VadState, LocalSpeechEvidence, TargetSpeakerUpdate};
+    use std::time::Duration;
+    let (mut clock, owner, started) = undelivered_owner_turn_clock();
+    clock.note_personal_presence(None, started);
+    clock.note_body_delivery(started);
+    let quiet = |end, revision, epoch| LocalSpeechEvidence {
+        state: VadState::NonSpeech, revision, activity_epoch: epoch,
+        analyzed_through_ms: end, last_detected_speech_end_ms: Some(4_000),
+        trailing_non_speech_ms: Some(end - 4_000), ..Default::default()
+    };
+    clock.note_local_vad_evidence_at(quiet(4_200, 2, 1), started + Duration::from_millis(200));
+    // Two worker publications (PendingSpeech then NonSpeech) occur between
+    // watchdog snapshots. The new epoch is the surviving onset evidence.
+    let now = started + Duration::from_millis(3_300);
+    clock.note_local_vad_evidence_at(quiet(7_300, 5, 2), now);
+    clock.observe(&TargetSpeakerUpdate { audio_duration_ms: Some(7_300), ..owner.clone() }, true, now);
+    assert!(!clock.personal_presence_stop_due(7_300, now, 3_000),
+        "a skipped short onset must not inherit the previous utterance's quiet span");
+    let due = now + Duration::from_millis(3_000);
+    clock.note_local_vad_evidence_at(quiet(10_300, 6, 2), due);
+    clock.observe(&TargetSpeakerUpdate { audio_duration_ms: Some(10_300), ..owner }, true, due);
+    assert!(clock.personal_presence_stop_due(10_300, due, 3_000));
+}
+
+#[test]
+fn personal_vad_stop_revalidation_waits_for_a_new_editor_dispatch() {
+    use crate::asr::volcengine::TargetSpeakerUpdate;
+    use crate::personal_vad::PresenceObservation;
+    use std::time::Duration;
+    let (mut clock, owner, started) = undelivered_owner_turn_clock();
+    let now = started + Duration::from_millis(3_300);
+    clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+        analyzed_end_ms: 7_200, last_positive_end_ms: Some(4_000), last_unresolved_end_ms: None, state: crate::personal_vad::PresenceState::ConfirmedOther,
+        observed_at: now,
+    }), now);
+    clock.observe(&TargetSpeakerUpdate { audio_duration_ms: Some(7_300), ..owner }, true, now);
+    assert!(clock.latest_due_update(now, 3_000).is_some());
+    assert!(clock.personal_presence_stop_due(7_300, now, 3_000));
+    let proposal_generation = clock.generation;
+    let sequence = clock.begin_text_submission(now, "The remaining words arrive.")
+        .expect("ordinary body dispatch");
+    assert_eq!(clock.generation, proposal_generation,
+        "dispatch alone does not invalidate the STOP generation");
+    assert!(!clock.personal_presence_stop_due(7_300, now, 3_000),
+        "the physical STOP recheck must wait for the new editor receipt");
+    clock.settle_text_submission(Some(sequence), false, None);
+    assert!(clock.personal_presence_stop_due(7_300, now, 3_000),
+        "failed delivery must not stall recording forever");
+}
+
+#[test]
+fn personal_vad_silence_fallback_preserves_short_onsets_and_editor_receipt_window() {
+    use crate::asr::volcengine::{LocalSpeechActivityState as VadState, LocalSpeechEvidence, TargetSpeakerUpdate};
+    use std::time::Duration;
+    let (mut clock, owner, started) = undelivered_owner_turn_clock();
+    clock.note_personal_presence(None, started);
+    clock.note_body_delivery(started);
+    // This short possible word never becomes canonical Speech. It still
+    // breaks the full quiet span and gets its own continuation allowance.
+    let onset_at = started + Duration::from_millis(2_900);
+    clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+        state: VadState::PendingSpeech, revision: 2, activity_epoch: 2,
+        analyzed_through_ms: 6_900, pending_speech_start_ms: Some(6_850),
+        last_detected_speech_end_ms: Some(4_000), ..Default::default()
+    }, onset_at);
+    let quiet = |end| LocalSpeechEvidence {
+        state: VadState::NonSpeech, revision: end / 100, activity_epoch: 2,
+        analyzed_through_ms: end, last_detected_speech_end_ms: Some(4_000),
+        trailing_non_speech_ms: Some(end - 4_000), ..Default::default()
+    };
+    let now = started + Duration::from_millis(3_300);
+    clock.note_local_vad_evidence_at(quiet(7_300), now);
+    clock.observe(&TargetSpeakerUpdate { audio_duration_ms: Some(7_300), ..owner.clone() }, true, now);
+    assert!(!clock.personal_presence_stop_due(7_300, now, 3_000));
+    let received = started + Duration::from_millis(3_500);
+    clock.note_body_delivery(received);
+    let audio_quiet_at = started + Duration::from_millis(6_100);
+    clock.note_local_vad_evidence_at(quiet(10_100), audio_quiet_at);
+    clock.observe(&TargetSpeakerUpdate { audio_duration_ms: Some(10_100), ..owner }, true, audio_quiet_at);
+    assert!(!clock.personal_presence_stop_due(10_100, audio_quiet_at, 3_000),
+        "late actual editor delivery still owns three seconds");
+    let due_at = received + Duration::from_millis(3_000);
+    clock.note_local_vad_evidence_at(quiet(10_500), due_at);
+    assert!(clock.personal_presence_stop_due(10_500, due_at, 3_000));
+}
+
+#[test]
+fn personal_vad_silence_fallback_rejects_stale_unknown_future_and_out_of_order_evidence() {
+    use crate::asr::volcengine::{LocalSpeechActivityState as VadState, LocalSpeechEvidence, TargetSpeakerUpdate};
+    use std::time::Duration;
+    let (mut clock, owner, started) = undelivered_owner_turn_clock();
+    clock.note_personal_presence(None, started);
+    let now = started + Duration::from_millis(3_300);
+    let quiet = LocalSpeechEvidence {
+        state: VadState::NonSpeech, revision: 2, activity_epoch: 1,
+        analyzed_through_ms: 7_300, last_detected_speech_end_ms: Some(4_000),
+        trailing_non_speech_ms: Some(3_300), ..Default::default()
+    };
+    clock.observe(&TargetSpeakerUpdate { audio_duration_ms: Some(7_300), ..owner }, true, now);
+    clock.note_local_vad_evidence_at(quiet, now);
+    assert!(clock.personal_presence_stop_due(7_300, now, 3_000));
+    assert!(!clock.personal_presence_stop_due(7_299, now, 3_000), "future coverage cannot prove current silence");
+    assert!(!clock.personal_presence_stop_due(7_551, now, 3_000), "lagging coverage is pending");
+    let later = now + Duration::from_millis(501);
+    clock.note_local_vad_evidence_at(quiet, later);
+    assert!(!clock.personal_presence_stop_due(7_300, later, 3_000), "polling cannot refresh an old quiet snapshot");
+    clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+        state: VadState::Unknown, revision: 3, analyzed_through_ms: 7_400, ..quiet
+    }, later);
+    assert!(!clock.personal_presence_stop_due(7_400, later, 3_000));
+    clock.note_local_vad_evidence_at(quiet, later);
+    assert!(!clock.personal_presence_stop_due(7_400, later, 3_000), "an older negative cannot overwrite missing/newer analysis");
+}
+
+#[test]
+fn personal_vad_silence_fallback_revokes_a_proposal_on_new_possible_or_confirmed_owner() {
+    use crate::asr::volcengine::{LocalSpeechActivityState as VadState, LocalSpeechEvidence, TargetSpeakerUpdate};
+    use crate::personal_vad::PresenceObservation;
+    use std::time::Duration;
+    let (mut clock, owner, started) = undelivered_owner_turn_clock();
+    clock.note_personal_presence(None, started);
+    let now = started + Duration::from_millis(3_300);
+    let quiet = LocalSpeechEvidence {
+        state: VadState::NonSpeech, revision: 2, analyzed_through_ms: 7_300,
+        last_detected_speech_end_ms: Some(4_000), trailing_non_speech_ms: Some(3_300),
+        ..Default::default()
+    };
+    clock.note_local_vad_evidence_at(quiet, now);
+    clock.observe(&TargetSpeakerUpdate { audio_duration_ms: Some(7_300), ..owner.clone() }, true, now);
+    assert!(clock.latest_due_update(now, 3_000).is_some());
+    for state in [VadState::PendingSpeech, VadState::Speech, VadState::Unknown] {
+        let mut veto = super::LocalVadStopObservation::new(quiet, now);
+        veto.observe(LocalSpeechEvidence { state, revision: 3, analyzed_through_ms: 7_360, ..quiet }, now);
+        assert!(veto.confirmed_silence().is_none());
+    }
+    clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+        analyzed_end_ms: 7_360, last_positive_end_ms: Some(7_360), last_unresolved_end_ms: None, state: crate::personal_vad::PresenceState::Owner,
+        observed_at: now,
+    }), now);
+    assert!(!clock.stop_proposed);
+    assert!(!clock.personal_presence_stop_due(7_360, now, 3_000));
+    assert_eq!(clock.latest_update.as_ref().unwrap().qualified_owner_speech_end_ms,
+        owner.qualified_owner_speech_end_ms, "silence never grants word ownership");
+}
+
+#[test]
+fn personal_vad_filtered_background_does_not_create_a_delivery_obligation() {
+    use std::time::Duration;
+    use crate::personal_vad::PresenceObservation;
+    let (mut clock, owner, started) = undelivered_owner_turn_clock();
+    clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+        analyzed_end_ms: 4_000, last_positive_end_ms: Some(4_000), last_unresolved_end_ms: None, state: crate::personal_vad::PresenceState::Owner, observed_at: started,
+    }), started);
+    clock.note_body_delivery(started);
+    let mut due = None;
+    for index in 0..20u64 {
+        let now = started + Duration::from_millis(3_200 + index*200);
+        let audio_ms = 7_200 + index*200;
+        clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+            analyzed_end_ms: audio_ms, last_positive_end_ms: Some(4_000), last_unresolved_end_ms: None, state: crate::personal_vad::PresenceState::ConfirmedOther, observed_at: now,
+        }), now);
+        clock.observe(&crate::asr::volcengine::TargetSpeakerUpdate {
+            audio_duration_ms: Some(audio_ms+100), local_speech_end_ms: Some(audio_ms),
+            pending_unattributed_speech: true, ..owner.clone()
+        }, true, now);
+        // Definite foreign rows have been removed by the provider projection.
+        // Raw video preview words cannot create an approved-body obligation.
+        clock.refresh_pending_body_delivery(None, now);
+        if clock.is_due(now, 3_000) { due = Some(now); break; }
+    }
+    assert!(due.is_some(), "fresh background transcripts must not repeatedly manufacture owner-tail settling");
+    let returned_at = started + Duration::from_millis(8_000);
+    clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+        analyzed_end_ms: 12_000, last_positive_end_ms: Some(12_000), last_unresolved_end_ms: None, state: crate::personal_vad::PresenceState::Owner, observed_at: returned_at,
+    }), returned_at);
+    clock.refresh_pending_owner_delivery(Some(("本人真正追加的下一句".into(), returned_at)), returned_at);
+    assert!(clock.pending_owner_delivery_active(returned_at), "new owner speech retains its delivery opportunity");
+    clock.note_body_delivery(returned_at);
+    let before_deadline = returned_at + Duration::from_millis(2_900);
+    clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+        analyzed_end_ms: 15_000, last_positive_end_ms: Some(12_000), last_unresolved_end_ms: None, state: crate::personal_vad::PresenceState::ConfirmedOther, observed_at: before_deadline,
+    }), before_deadline);
+    assert!(!clock.personal_presence_stop_due(15_100, before_deadline, 3_000), "actual owner-body delivery keeps the full continuation window");
+}
+
+#[test]
+fn personal_vad_batched_owner_return_revokes_stop_even_when_the_last_chunk_is_negative() {
+    use std::time::Duration;
+    use crate::personal_vad::PresenceObservation;
+    let (mut clock, owner, started) = undelivered_owner_turn_clock();
+    clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+        analyzed_end_ms: 7_200, last_positive_end_ms: Some(4_000), last_unresolved_end_ms: None, state: crate::personal_vad::PresenceState::ConfirmedOther, observed_at: started,
+    }), started);
+    clock.observe(&crate::asr::volcengine::TargetSpeakerUpdate { audio_duration_ms: Some(7_300), ..owner }, true, started);
+    assert!(clock.latest_due_update(started, 3_000).is_some());
+    let proposal_generation = clock.generation;
+    let returned_at = started + Duration::from_millis(320);
+    // The two fresh scores were [owner, absent]. The latest snapshot must
+    // retain the short intervening owner occurrence, invalidate the STOP and
+    // renew the device lease even though its last score is negative.
+    assert!(clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+        analyzed_end_ms: 7_520, last_positive_end_ms: Some(7_360), last_unresolved_end_ms: None, state: crate::personal_vad::PresenceState::ConfirmedOther, observed_at: returned_at,
+    }), returned_at));
+    assert!(clock.generation > proposal_generation);
+    assert!(!clock.stop_proposed);
+    assert!(!clock.personal_presence_stop_due(7_600, returned_at, 3_000));
+}
+
+#[test]
+fn personal_vad_releases_confirmed_other_speech_without_cutting_owner_return() {
+    use std::time::Duration;
+    use crate::personal_vad::PresenceObservation;
+    let (mut clock, owner, started) = undelivered_owner_turn_clock();
+    clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+        analyzed_end_ms: 4_000, last_positive_end_ms: Some(4_000), last_unresolved_end_ms: None, state: crate::personal_vad::PresenceState::Owner,
+        observed_at: started,
+    }), started);
+    clock.note_body_delivery(started);
+    let due_at = started + Duration::from_millis(3_200);
+    // The provider's speech remains unattributed, but the local identity bank
+    // has independently confirmed Other. A target-only rejection could not
+    // supply this state, and presence still grants no word ownership.
+    let background = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(7_300), provider_audio_duration_ms: Some(7_300),
+        local_speech_end_ms: Some(7_280), qualified_owner_activity_advanced: false,
+        target_activity_advanced: false, pending_activity_advanced: true,
+        pending_unattributed_speech: true, ..owner.clone()
+    };
+    clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+        analyzed_end_ms: 7_200, last_positive_end_ms: Some(4_000), last_unresolved_end_ms: None, state: crate::personal_vad::PresenceState::ConfirmedOther,
+        observed_at: due_at,
+    }), due_at);
+    clock.observe(&background, true, due_at);
+    clock.note_body_delivery(due_at);
+    assert!(clock.latest_due_update(due_at, 3_000).is_some());
+    let proposal_generation = clock.generation;
+    clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+        analyzed_end_ms: 7_360, last_positive_end_ms: Some(7_360), last_unresolved_end_ms: None, state: crate::personal_vad::PresenceState::Owner,
+        observed_at: due_at + Duration::from_millis(160),
+    }), due_at + Duration::from_millis(160));
+    assert!(clock.generation > proposal_generation);
+    assert!(!clock.stop_proposed, "a real owner return must cancel the outstanding STOP ticket");
+    assert_eq!(clock.latest_update.as_ref().unwrap().qualified_owner_speech_end_ms,
+        owner.qualified_owner_speech_end_ms, "presence must not grant a word-owner watermark");
+}
+
+#[test]
+fn personal_vad_missing_observation_revokes_stop_even_after_a_recent_negative() {
+    use std::time::Duration;
+    use crate::personal_vad::PresenceObservation;
+    let (mut clock, owner, started) = undelivered_owner_turn_clock();
+    let now = started + Duration::from_millis(3_200);
+    clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+        analyzed_end_ms: 7_200, last_positive_end_ms: Some(4_000), last_unresolved_end_ms: None, state: crate::personal_vad::PresenceState::ConfirmedOther,
+        observed_at: now,
+    }), started);
+    clock.observe(&crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(7_300), ..owner
+    }, true, now);
+    assert!(clock.personal_presence_stop_due(7_300, now, 3_000));
+    clock.note_personal_presence(None, now);
+    assert!(!clock.personal_presence_stop_due(7_300, now, 3_000));
+}
+
+#[test]
+fn personal_vad_unknown_identity_vetoes_stop_and_breaks_other_coverage() {
+    use crate::personal_vad::{PresenceObservation, PresenceState};
+    use std::time::Duration;
+    let (mut clock, owner, started) = undelivered_owner_turn_clock();
+    let proposed_at = started + Duration::from_millis(3_200);
+    clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+        analyzed_end_ms: 7_200, last_positive_end_ms: Some(4_000),
+        last_unresolved_end_ms: None, state: PresenceState::ConfirmedOther,
+        observed_at: proposed_at,
+    }), proposed_at);
+    clock.observe(&crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(7_300), ..owner
+    }, true, proposed_at);
+    assert!(clock.latest_due_update(proposed_at, 3_000).is_some());
+    let unknown_at = proposed_at + Duration::from_millis(160);
+    clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+        analyzed_end_ms: 7_360, last_positive_end_ms: Some(4_000),
+        last_unresolved_end_ms: Some(7_360), state: PresenceState::Unknown,
+        observed_at: unknown_at,
+    }), unknown_at);
+    assert!(!clock.personal_presence_stop_due(7_360, unknown_at, 3_000),
+        "physical STOP admission must veto a proposal when identity becomes uncertain");
+    for end in [10_080, 10_480] {
+        let now = unknown_at + Duration::from_millis(end - 7_360);
+        clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+            analyzed_end_ms: end, last_positive_end_ms: Some(4_000),
+            last_unresolved_end_ms: Some(7_360), state: PresenceState::ConfirmedOther,
+            observed_at: now,
+        }), now);
+        assert_eq!(clock.personal_presence_stop_due(end, now, 3_000), end >= 10_360,
+            "later Other cannot borrow coverage across the unresolved speech");
+    }
+}
+
+#[test]
+fn personal_vad_first_preview_and_background_growth_do_not_replace_owner_clock() {
+    use crate::asr::volcengine::TargetSpeakerUpdate;
+    use crate::personal_vad::PresenceObservation;
+    use std::time::Duration;
+    let (_, template, started) = undelivered_owner_turn_clock();
+    let mut clock = super::SettledTargetEndpointClock::default();
+    let wake = TargetSpeakerUpdate {
+        audio_duration_ms: Some(1_000), provider_audio_duration_ms: Some(1_000),
+        local_speech_end_ms: Some(1_000), qualified_owner_speech_end_ms: None,
+        qualified_owner_activity_advanced: false, local_speaker_tracking_enabled: false,
+        local_speaker_observation_end_ms: None, local_target_speech_end_ms: None,
+        target_activity_advanced: false, ..template
+    };
+    clock.arm_automatic_no_body_if_needed(&wake, started, started);
+    clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+        analyzed_end_ms: 1_000, last_positive_end_ms: Some(1_000),
+        last_unresolved_end_ms: None,
+        state: crate::personal_vad::PresenceState::Owner, observed_at: started,
+    }), started);
+    for offset in [1_000, 2_000, 3_200] {
+        let now = started + Duration::from_millis(offset);
+        let captured_ms = 1_000 + offset;
+        clock.note_personal_presence(Some(PresenceObservation {
+        source_history_complete: false,
+            analyzed_end_ms: captured_ms, last_positive_end_ms: Some(1_000),
+            last_unresolved_end_ms: None,
+            state: crate::personal_vad::PresenceState::ConfirmedOther, observed_at: now,
+        }), now);
+        let background = TargetSpeakerUpdate {
+            audio_duration_ms: Some(captured_ms), local_speech_end_ms: Some(captured_ms),
+            target_activity_advanced: true, pending_activity_advanced: true,
+            pending_unattributed_speech: true, ..wake.clone()
+        };
+        // The first body leaves no-body mode and clears the old armed_at.
+        // Subsequent growing previews must not seed, renew or pause that clock.
+        clock.observe(&background, true, now);
+        clock.note_visible_body_boundary(false, offset as usize, now);
+        assert_eq!(clock.arm_latest_for_visible_body(now, true), None);
+        assert!(!clock.should_renew_firmware_endpoint_lease(&background, true));
+        assert!(!clock.should_keep_firmware_alive_for_host_hang(4_000, Some(now), now));
+        assert_eq!(clock.is_due(now, 3_000), offset >= 3_000);
+    }
+    assert!(clock.latest_due_update(started + Duration::from_millis(3_200), 3_000).is_some());
+}
+
+#[test]
 fn automatic_undelivered_owner_turn_releases_on_other_or_stalled_vad() {
     use crate::asr::volcengine::{LocalSpeechActivityState as VadState, LocalSpeechEvidence};
     use std::time::Duration;
@@ -5864,6 +7608,126 @@ fn automatic_body_late_uncertain_speech_gets_three_seconds_after_its_own_end() {
     other_clock.observe(&other, true, delivered_at + Duration::from_millis(3_100));
     assert_eq!(other_clock.tentative_owner_vad_epoch, None);
     assert!(other_clock.due_update(other_generation, delivered_at + Duration::from_millis(3_100), 2_900).is_some());
+}
+
+#[test]
+fn late_original_source_owner_proof_rearms_handoff_endpoint_without_admitting_uncertain() {
+    use std::time::{Duration, Instant};
+
+    let started = Instant::now();
+    let owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(5_762),
+        provider_audio_duration_ms: Some(12_300),
+        audio_duration_ms: Some(13_000),
+        local_speech_end_ms: Some(12_896),
+        qualified_owner_speech_end_ms: Some(8_200),
+        qualified_owner_activity_advanced: true,
+        local_speaker_classification_kind: Some(
+            crate::asr::volcengine::LocalSpeakerClassificationKind::Uncertain,
+        ),
+        local_speaker_signal_quality_sufficient: Some(true),
+        local_speaker_observation_end_ms: Some(12_600),
+        local_tentative_owner_speech_end_ms: None,
+        local_target_speech_end_ms: Some(8_200),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(5_762),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.automatic_wake_session = true;
+    clock.note_visible_body_boundary(true, 40, started);
+    clock.observe(&owner, true, started).expect("owner watermark arms endpoint");
+
+    assert!(clock
+        .latest_due_update_after_owner_analysis(
+            started + Duration::from_millis(3_100),
+            2_900,
+            true,
+        )
+        .is_none(), "the in-flight original-source chunk is a bounded STOP barrier");
+
+    let source_owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        qualified_owner_speech_end_ms: Some(12_000),
+        qualified_owner_activity_advanced: false,
+        ..owner.clone()
+    };
+    let source_generation = clock
+        .observe(&source_owner, true, started + Duration::from_millis(3_500))
+        .expect("fresh source-profile Owner proof rearms the shared owner clock");
+    assert!(clock
+        .due_update(source_generation, started + Duration::from_millis(6_300), 2_900)
+        .is_none(), "Uncertain never became Owner; only exact source proof moved the watermark");
+    assert!(clock
+        .due_update(source_generation, started + Duration::from_millis(6_500), 2_900)
+        .is_some(), "without a body receipt, source proof still has a finite endpoint");
+}
+
+#[test]
+fn confirmed_foreign_releases_background_source_analysis_without_renewing_owner() {
+    use std::time::{Duration, Instant};
+
+    let started = Instant::now();
+    let owner = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(5_000),
+        provider_audio_duration_ms: Some(9_000),
+        audio_duration_ms: Some(9_000),
+        local_speech_end_ms: Some(9_000),
+        qualified_owner_speech_end_ms: Some(5_000),
+        qualified_owner_activity_advanced: true,
+        local_speaker_classification_kind: Some(
+            crate::asr::volcengine::LocalSpeakerClassificationKind::Target,
+        ),
+        local_speaker_signal_quality_sufficient: Some(true),
+        local_speaker_observation_end_ms: Some(5_000),
+        local_tentative_owner_speech_end_ms: None,
+        local_target_speech_end_ms: Some(5_000),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(5_000),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    let policy = super::TargetSpeakerEndpointPolicy {
+        body_started: true,
+        initial_body_wait_active: false,
+        automatic_no_body_started_at: None,
+        endpoint_timeout_ms: 3_000,
+        wall_clock_timeout_ms: 2_900,
+        stop_reason: "target_speaker_inactive_3000ms",
+    };
+    let mut clock = super::SettledTargetEndpointClock::default();
+    clock.automatic_wake_session = true;
+    clock.note_visible_body_boundary(true, 20, started);
+    clock.observe(&owner, true, started).expect("owner arms endpoint");
+
+    let foreign = crate::asr::volcengine::TargetSpeakerUpdate {
+        local_speaker_classification_kind: Some(
+            crate::asr::volcengine::LocalSpeakerClassificationKind::NonTarget,
+        ),
+        local_speaker_signal_quality_sufficient: Some(true),
+        local_speaker_observation_end_ms: Some(9_000),
+        local_non_target_speech_end_ms: Some(9_000),
+        qualified_owner_activity_advanced: false,
+        ..owner
+    };
+    assert!(clock
+        .reduce_session_policy(
+            started + Duration::from_millis(3_100),
+            policy,
+            &foreign,
+            true,
+        )
+        .is_some(),
+        "confirmed Other releases a source worker hold instead of extending recording",
+    );
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -7901,6 +9765,7 @@ fn target_speaker_endpoint_terminal_wake_continuation_is_bounded_session_matched
 #[test]
 fn terminal_wake_body_release_plan_is_ordered_and_nonduplicating() {
     let body = super::TerminalWakeBody {
+        retained_verification_source: None,
         candidate_id: 7,
         pcm: (0u8..12).collect(),
         candidate_range: Some(crate::observability::CandidateRange {
@@ -7958,7 +9823,20 @@ fn terminal_wake_body_is_transferred_once_and_dropped_on_expiry_or_wrong_binding
     let coordinator = Coordinator::new();
     let started = Instant::now();
     let first_session_id = new_session_id();
+    let candidate_pcm = (0u8..96).collect::<Vec<_>>();
+    let identity_seed = super::local_speaker_identity_seed(
+        &candidate_pcm,
+        Some(10_000),
+        0.0,
+        false,
+        Some(crate::observability::CandidateRange {
+            start: 10_016,
+            end: 10_080,
+        }),
+        crate::speech_decision_kernel::OwnerAccessEvidence::EnrolledMatch,
+    );
     let body = super::TerminalWakeBody {
+        retained_verification_source: None,
         candidate_id: 9,
         pcm: vec![9u8; 8],
         candidate_range: Some(crate::observability::CandidateRange { start: 20, end: 28 }),
@@ -7969,8 +9847,8 @@ fn terminal_wake_body_is_transferred_once_and_dropped_on_expiry_or_wrong_binding
     };
     assert!(super::stage_terminal_wake_continuation_with_body_at(
         &coordinator.inner,
-        vec![1u8; 16],
-        0.4,
+        identity_seed.pcm.clone(),
+        identity_seed.profile_end_seconds,
         "开始录音".into(),
         true,
         body,
@@ -7987,7 +9865,13 @@ fn terminal_wake_body_is_transferred_once_and_dropped_on_expiry_or_wrong_binding
         started + Duration::from_millis(2),
     )
     .expect("matching continuation");
+    assert_eq!(continuation.wake_pcm, candidate_pcm[16..80]);
+    assert_eq!(continuation.wake_end_seconds, 64.0 / 32_000.0);
     assert_eq!(continuation.body.pcm, vec![9u8; 8]);
+    assert_eq!(
+        continuation.body.candidate_range,
+        Some(crate::observability::CandidateRange { start: 20, end: 28 })
+    );
     assert!(super::take_terminal_wake_continuation_at(
         &coordinator.inner,
         first_session_id,
@@ -7996,6 +9880,7 @@ fn terminal_wake_body_is_transferred_once_and_dropped_on_expiry_or_wrong_binding
     .is_none());
 
     let expired_body = super::TerminalWakeBody {
+        retained_verification_source: None,
         candidate_id: 10,
         pcm: vec![10u8; 8],
         candidate_range: None,
@@ -8026,6 +9911,7 @@ fn terminal_wake_body_is_transferred_once_and_dropped_on_expiry_or_wrong_binding
         .is_none());
 
     let wrong_binding_body = super::TerminalWakeBody {
+        retained_verification_source: None,
         candidate_id: 11,
         pcm: vec![11u8; 8],
         candidate_range: None,
@@ -9648,6 +11534,45 @@ fn short_empty_recovery_never_broadens_the_automatic_wake_gate() {
 }
 
 #[test]
+fn capsule_display_toggle_releases_only_visibility_wait_and_preserves_session_and_preview() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = session_id;
+        state.phase = SessionPhase::Listening;
+    }
+    arm_automatic_wake_text_guard(&coordinator.inner, session_id, "开始录音".into(), 1_200);
+    assert!(coordinator.inner.embedded_audio_automatic_wake_guard.lock()
+        .as_ref().unwrap().initial_body_wait_until_audio_ms.is_none());
+    let payload = crate::types::CapsulePayload {
+        seq: 42, session_id: Some(session_id.to_string()), state: crate::types::CapsuleState::Recording,
+        level: 0.5, elapsed_ms: 1200, message: Some("本人正文".into()), inserted_chars: Some(4), translation: false,
+    };
+    *coordinator.inner.capsule_latest_payload.lock() = Some(payload);
+    let mut prefs = coordinator.prefs().get();
+    prefs.show_capsule = false;
+    coordinator.prefs().replace_for_tests(prefs.clone());
+    coordinator.refresh_capsule_visibility();
+    let wait = coordinator.inner.embedded_audio_automatic_wake_guard.lock()
+        .as_ref().unwrap().initial_body_wait_until_audio_ms;
+    assert!(wait.is_some());
+    prefs.show_capsule = true;
+    coordinator.prefs().replace_for_tests(prefs);
+    coordinator.refresh_capsule_visibility();
+    assert_eq!(coordinator.inner.embedded_audio_automatic_wake_guard.lock()
+        .as_ref().unwrap().initial_body_wait_until_audio_ms, wait);
+    let state = coordinator.inner.state.lock();
+    assert_eq!(state.session_id, session_id);
+    assert_eq!(state.phase, SessionPhase::Listening);
+    assert!(!state.pending_stop && !state.cancelled && !state.user_initiated_stop);
+    let latest = coordinator.capsule_latest_payload().unwrap();
+    assert_eq!(latest.seq, 42);
+    assert_eq!(latest.message.as_deref(), Some("本人正文"));
+    assert_eq!(latest.inserted_chars, Some(4));
+}
+
+#[test]
 fn automatic_wake_starts_initial_body_wait_at_visible_capsule_ack() {
     let coordinator = Coordinator::new();
     let session_id = new_session_id();
@@ -9741,6 +11666,7 @@ fn rolling_wake_match_keeps_absolute_candidate_boundary() {
         start_seconds: Some(0.10),
         end_seconds: 0.75,
         matched_keyword: Some("开始录音".into()),
+        origin: crate::wake_phrase::KeywordEvidenceOrigin::PrimaryDetector,
         audio_end_seconds: Some(0.75),
     };
     let adjusted = super::offset_streaming_wake_match(Some(found), 1_500 * 32)
@@ -9936,6 +11862,7 @@ fn rolling_local_confirmation_discards_only_stale_exploratory_tasks() {
         inference_ms: 200,
         snapshot_pcm_ms: 2_000,
         recovered_keyword_end_seconds: Some(0.8),
+        source_window: None,
     };
     assert!(super::stale_local_confirmation_can_activate(
         true, &exact, false
@@ -12654,6 +14581,7 @@ fn near_retry_arms_only_on_full_length_near_evidence() {
         inference_ms: 120,
         snapshot_pcm_ms: 1_600,
         recovered_keyword_end_seconds: None,
+        source_window: None,
     };
     assert!(super::local_near_retry_should_arm(&near, 5, 0));
 
@@ -12700,6 +14628,7 @@ fn target_speaker_endpoint_strong_start_prefix_gets_one_non_authoritative_latenc
         inference_ms: 150,
         snapshot_pcm_ms: 1_600,
         recovered_keyword_end_seconds: None,
+        source_window: None,
     };
     assert!(super::local_confirmation_prefix_retry_eligible(&partial, 4));
 
@@ -12755,6 +14684,7 @@ fn bounded_rolling_owner_near_match_reaches_voiceprint_gate_without_swallowing_b
         inference_ms: 314,
         snapshot_pcm_ms: 1_880,
         recovered_keyword_end_seconds: None,
+        source_window: None,
     };
     assert!(super::live_owner_near_wake_can_attempt(
         true,
@@ -13747,6 +15677,27 @@ fn terminal_local_confirmation_uses_last_2500ms_of_long_candidates() {
     assert_eq!(windows[1].1, 0);
     assert_eq!(windows[1].0.len(), 2_500 * 32);
     assert_eq!(windows[2].0.len(), long.len());
+
+    let exact = super::terminal_local_confirmation_candidate_range(
+        Some(crate::observability::CandidateRange {
+            start: 50_000,
+            end: 60_000,
+        }),
+        258,
+        1_234,
+    )
+    .expect("exact confirmation source range");
+    assert_eq!(exact.start, 50_258);
+    assert_eq!(exact.end, 51_492);
+    assert!(super::terminal_local_confirmation_candidate_range(
+        Some(crate::observability::CandidateRange {
+            start: 50_000,
+            end: 50_100,
+        }),
+        80,
+        40,
+    )
+    .is_none());
 }
 
 #[test]
@@ -13810,6 +15761,7 @@ fn phonetic_near_match_requires_independent_kws_and_never_wakes_alone() {
         inference_ms: 100,
         snapshot_pcm_ms: 1_400,
         recovered_keyword_end_seconds: None,
+        source_window: None,
     };
     assert!(super::phonetic_near_phrase_evidence(&near, 4));
 
@@ -13848,6 +15800,7 @@ fn phonetic_near_match_requires_independent_kws_and_never_wakes_alone() {
         inference_ms: 100,
         snapshot_pcm_ms: 1_400,
         recovered_keyword_end_seconds: None,
+        source_window: None,
     };
     assert_eq!(
         super::terminal_inflight_local_decision(&exact, false, 4),
@@ -13892,6 +15845,7 @@ fn terminal_owner_local_near_recovery_matches_installed_session_501_without_broa
         inference_ms: 872,
         snapshot_pcm_ms: 5_000,
         recovered_keyword_end_seconds: None,
+        source_window: None,
     };
     assert!(super::enrolled_terminal_local_near_can_accept(
         true,
@@ -13966,6 +15920,7 @@ fn terminal_open_near_recovery_matches_session_2274297156_gated_by_voiceprint_fl
         inference_ms: 640,
         snapshot_pcm_ms: 5_000,
         recovered_keyword_end_seconds: None,
+        source_window: None,
     };
     let drifted_owner_voice = Ok(crate::speaker_verification::VerificationResult {
         matched: false,
@@ -14096,6 +16051,7 @@ fn repeated_start_aligned_half_phrase_requires_enrolled_owner_for_overlap_recove
         inference_ms: 205,
         snapshot_pcm_ms: 2_439,
         recovered_keyword_end_seconds: None,
+        source_window: None,
     };
     assert!(!super::overlap_degraded_owner_phrase_evidence(
         &overlap, 4, 0,
@@ -14261,6 +16217,7 @@ fn exact_phrase_only_local_confirmation_refines_late_keyword_boundary() {
         inference_ms: 100,
         snapshot_pcm_ms: 2_775,
         recovered_keyword_end_seconds: None,
+        source_window: None,
     };
     let refined = super::refined_wake_end_seconds(1.915, &confirmation, 4);
     assert!((refined - 2.655).abs() < 0.001);
@@ -14366,18 +16323,21 @@ fn local_only_start_phrase_has_a_bounded_nonzero_audio_endpoint() {
         inference_ms: 100,
         snapshot_pcm_ms: 1_800,
         recovered_keyword_end_seconds: None,
+        source_window: None,
     };
     let estimated = super::refined_wake_end_seconds(0.0, &confirmation, 4);
     assert!((estimated - 0.8).abs() < 0.001);
 
     let recovered = super::LocalWakeConfirmation {
         recovered_keyword_end_seconds: Some(0.72),
+        source_window: None,
         ..confirmation
     };
     assert!((super::refined_wake_end_seconds(0.0, &recovered, 4) - 0.72).abs() < 0.001);
 
     let later_keyword_occurrence = super::LocalWakeConfirmation {
         recovered_keyword_end_seconds: Some(1.84),
+        source_window: None,
         ..confirmation
     };
     assert!(
@@ -14387,6 +16347,7 @@ fn local_only_start_phrase_has_a_bounded_nonzero_audio_endpoint() {
     let later = super::LocalWakeConfirmation {
         phrase_relation: crate::wake_phrase::LocalPhraseRelation::PresentLater,
         recovered_keyword_end_seconds: None,
+        source_window: None,
         ..confirmation
     };
     assert_eq!(super::refined_wake_end_seconds(0.0, &later, 4), 0.0);
@@ -14720,7 +16681,20 @@ fn every_automatic_wake_path_seeds_session_speaker_tracking() {
 
 #[tokio::test]
 async fn activation_segment_race_rebinds_post_activation_segment_instead_of_finalizing() {
-    for with_body in [false, true] {
+    for (with_body, stop_origin) in [
+        (
+            false,
+            crate::embedded_audio::SessionStopOrigin::VoiceActivation,
+        ),
+        (
+            true,
+            crate::embedded_audio::SessionStopOrigin::VoiceActivation,
+        ),
+        (
+            true,
+            crate::embedded_audio::SessionStopOrigin::VoiceActivationMaxDuration,
+        ),
+    ] {
         // 2026-08-09 12:46:59 复现 fixture：VREC:ACTIVATE 后 0.1s 旧唤醒段（93）
         // complete，仅含 1845ms 唤醒词——竞态窗口内旧段 STOP 不得 finalize（否则
         // 必空稿）；听写会话必须绑定激活后的新设备段（94），其 PCM 正常进 ASR。
@@ -14757,11 +16731,7 @@ async fn activation_segment_race_rebinds_post_activation_segment_instead_of_fina
                 StreamingSessionEvent::Stopped {
                     session_id: 93,
                     expected_packet_count: 58,
-                    origin: if with_body {
-                        crate::embedded_audio::SessionStopOrigin::VoiceActivationMaxDuration
-                    } else {
-                        crate::embedded_audio::SessionStopOrigin::VoiceActivation
-                    },
+                    origin: stop_origin,
                 },
             )
             .await
@@ -15315,20 +17285,15 @@ async fn accepted_wake_ensure_ignores_late_same_segment_marker_after_stop() {
 
 #[tokio::test]
 async fn activation_segment_race_guard_does_not_break_normal_stop_paths() {
-    // 守卫不得改变正常路径：窗口外（>2s）或正文已开始时，旧段 STOP 照常走
-    // pending-stop/finalize 流程。
+    // 守卫不得改变正常路径：窗口外（>2s）或显式用户停止时，旧段 STOP 照常走
+    // pending-stop/finalize 流程。竞态窗内的自动 STOP 即使正文已经开始也仍是
+    // predecessor rotation；上面的 continuation 回归覆盖该路径。
     for (guard_age, with_body, origin, label) in [
         (
             Some(Duration::from_secs(3)),
             false,
             crate::embedded_audio::SessionStopOrigin::VoiceActivationMaxDuration,
             "race window expired",
-        ),
-        (
-            None,
-            true,
-            crate::embedded_audio::SessionStopOrigin::VoiceActivation,
-            "body already started",
         ),
         (
             None,
@@ -16416,12 +18381,13 @@ fn firmware_speech_refresh_coalesces_latest_instead_of_dropping_it() {
 }
 
 #[test]
-fn explicit_wake_diagnostic_sequence_stops_at_retention_limit() {
-    assert_eq!(
-        super::next_wake_diagnostic_capture_count(false, super::WAKE_DIAGNOSTIC_MAX_CANDIDATES),
-        None,
-        "an explicit operator-managed capture session must remain bounded"
-    );
+fn explicit_wake_diagnostic_sequence_keeps_new_incidents_after_retention_limit() {
+    for current in [super::WAKE_DIAGNOSTIC_RETENTION_MAX_FILES, 30_000] {
+        assert_eq!(super::next_wake_diagnostic_capture_count(current), Some(current + 1),
+            "retention may evict old audio, but must not disable new incident capture");
+    }
+    assert_eq!(super::next_wake_diagnostic_capture_count(usize::MAX), None,
+        "a filename sequence must not wrap and overwrite an existing capture");
 }
 
 #[test]
@@ -16500,9 +18466,41 @@ fn product_final_candidates(primary: &str) -> super::ProductFinalCandidates {
         partial_preview: None,
         local_shadow: None,
         local_shadow_owner_end_aligned: false,
+        content_supplement: None,
         target_filter_required: false,
         primary_mixture_rejected: false,
         primary_speaker_filtered_certified: false,
+        separated_owner_exclusion_confirmed: false,
+    }
+}
+
+#[test]
+fn product_final_content_consensus_enters_shared_arbitration_without_replacing_primary() {
+    let controls:serde_json::Value=serde_json::from_str(include_str!("../asr/fixtures/content-consensus-20261006.json")).unwrap();
+    let row=&controls["cases"][0];
+    let mut candidates=product_final_candidates(row["primary"].as_str().unwrap());
+    candidates.content_supplement=Some(serde_json::from_value(row["supplement"].clone()).unwrap());
+    let decision=super::arbitrate_product_final_transcript(candidates,&[],false);
+    assert_eq!(decision.transcript.text,row["expected"].as_str().unwrap());
+    assert_eq!(decision.authority,crate::speech_decision_kernel::ProductFinalAuthority::ProviderPrimary);
+    assert!(decision.content_supplement_recovered);
+}
+
+#[test]
+fn product_final_content_consensus_cannot_replace_certified_owner_or_override_foreign_veto() {
+    let controls:serde_json::Value=serde_json::from_str(include_str!("../asr/fixtures/content-consensus-20261006.json")).unwrap();
+    let row=&controls["cases"][0];
+    for kind in 0..3 {
+        let mut candidates=product_final_candidates(row["primary"].as_str().unwrap());
+        candidates.content_supplement=Some(serde_json::from_value(row["supplement"].clone()).unwrap());
+        match kind {
+            0=>candidates.verified_provider_owner=Some(crate::asr::RawTranscript {text:"已独立确认的本人正文".into(),duration_ms:4966}),
+            1=>candidates.primary_mixture_rejected=true,
+            _=>{candidates.target_filter_required=true;candidates.provider_primary.text.clear();}
+        }
+        let decision=super::arbitrate_product_final_transcript(candidates,&[],false);
+        assert!(!decision.content_supplement_recovered);
+        assert_eq!(decision.transcript.text,if kind==0 {"已独立确认的本人正文"}else{""});
     }
 }
 
@@ -16597,6 +18595,7 @@ fn product_final_separated_owner_keeps_punctuated_provider_rendering() {
     // r36：此处主轨是未过滤的 provider_raw 全文（带旁人尾，无认证）——分离稿
     // 是它的紧凑子序列（只少尾巴=在做排除），子序列豁免必须仍然生效。
     candidates.primary_speaker_filtered_certified = false;
+    candidates.separated_owner_exclusion_confirmed = true;
     let decision = super::arbitrate_product_final_transcript(candidates, &[], false);
     assert_eq!(
         decision.transcript.text,
@@ -16607,6 +18606,28 @@ fn product_final_separated_owner_keeps_punctuated_provider_rendering() {
         decision.authority,
         crate::speech_decision_kernel::ProductFinalAuthority::SeparatedOwner
     );
+}
+
+#[test]
+fn pending_identity_does_not_turn_a_truncated_separator_into_confirmed_exclusion() {
+    let full = "本人已经说完前半句。后面的完整正文也需要保留。";
+    let prefix = "本人已经说完前半句。";
+    for (excluded, rejected, expected, authority) in [
+        (false,false,full,crate::speech_decision_kernel::ProductFinalAuthority::ProviderPrimary),
+        (true,false,prefix,crate::speech_decision_kernel::ProductFinalAuthority::SeparatedOwner),
+        (false,true,prefix,crate::speech_decision_kernel::ProductFinalAuthority::SeparatedOwner),
+    ] {
+        let mut candidates = product_final_candidates(full);
+        candidates.separated_owner = Some(crate::asr::RawTranscript {text:prefix.into(),duration_ms:3000});
+        candidates.target_filter_required = true;
+        candidates.primary_speaker_filtered_certified = false;
+        candidates.separated_owner_exclusion_confirmed = excluded;
+        candidates.primary_mixture_rejected = rejected;
+        let decision = super::arbitrate_product_final_transcript(candidates,&[],false);
+        assert_eq!(decision.transcript.text,expected);
+        assert_eq!(decision.authority,authority,
+            "a pending identity result is neither a strong owner certificate nor proof that the omitted suffix is Other");
+    }
 }
 
 #[test]
@@ -16798,7 +18819,25 @@ async fn recorded_separator_product_authority_probe() {
     let fixture: serde_json::Value = serde_json::from_slice(&std::fs::read(fixture_path).unwrap()).unwrap();
     let pcm = std::fs::read(fixture["pcm_path"].as_str().unwrap()).unwrap();
     assert_eq!(format!("{:x}", Sha256::digest(&pcm)), fixture["pcm_sha256"].as_str().unwrap().to_ascii_lowercase());
-    assert!(!pcm.is_empty() && pcm.len() % 2 == 0 && pcm.len() <= 60 * 32_000);
+    assert!(!pcm.is_empty() && pcm.len() % 2 == 0 && pcm.len() <= 120 * 32_000);
+    let identity_pcm_path = fixture
+        .get("identity_pcm_path")
+        .and_then(serde_json::Value::as_str);
+    let identity_pcm_sha256 = fixture
+        .get("identity_pcm_sha256")
+        .and_then(serde_json::Value::as_str);
+    assert_eq!(
+        identity_pcm_path.is_some(),
+        identity_pcm_sha256.is_some(),
+        "identity_pcm_path and identity_pcm_sha256 must be supplied together"
+    );
+    let identity_pcm = identity_pcm_path
+        .map(|path| std::fs::read(path).expect("read explicit identity PCM"))
+        .unwrap_or_else(|| pcm.clone());
+    let identity_sha256 = format!("{:x}", Sha256::digest(&identity_pcm));
+    if let Some(expected) = identity_pcm_sha256 {
+        assert_eq!(identity_sha256, expected.to_ascii_lowercase());
+    }
     let credential = |account| CredentialsVault::get(account).unwrap().filter(|v| !v.is_empty()).unwrap();
     let mut asr = crate::asr::VolcengineStreamingASR::new(
         crate::asr::VolcengineCredentials {
@@ -16810,6 +18849,24 @@ async fn recorded_separator_product_authority_probe() {
     asr.enable_diagnostic_trace();
     let asr = std::sync::Arc::new(asr);
     let phrase = fixture["wake_phrase"].as_str().unwrap();
+    let activation_end_ms = fixture["wake_end_ms"].as_u64().unwrap();
+    let identity_reference_from_fixture = fixture
+        .get("identity_reference_end_ms")
+        .and_then(serde_json::Value::as_u64)
+        .is_some();
+    assert!(
+        identity_pcm_path.is_none() || identity_reference_from_fixture,
+        "a separate identity PCM requires identity_reference_end_ms in that PCM's coordinates"
+    );
+    let identity_reference_end_ms = fixture
+        .get("identity_reference_end_ms")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(activation_end_ms);
+    assert!(
+        identity_reference_end_ms > 0
+            && identity_reference_end_ms.saturating_mul(32) <= identity_pcm.len() as u64,
+        "identity reference end must be inside the identity PCM"
+    );
     if fixture["wake_owner_verified"].as_bool().unwrap_or(false) {
         asr.note_verified_local_speaker_tracking_started(phrase);
     } else {
@@ -16824,10 +18881,33 @@ async fn recorded_separator_product_authority_probe() {
         crate::speaker_verification::target_speaker_embedding_for_phrase(&enrolled_phrase).unwrap().is_some()
     }).await.unwrap();
     assert!(enrolled, "recorded pipeline must use the enrolled owner, not mixture enrollment");
-    asr.start_target_speaker_extraction(phrase, &pcm, fixture["wake_end_ms"].as_u64().unwrap() as f32 / 1000.0);
+    // The persistent target bank is the expected production reference. Keep
+    // the exact identity PCM here only for the explicit no-bank fallback; body
+    // activation coordinates remain attached to the body fixture above.
+    asr.start_target_speaker_extraction(
+        phrase,
+        &identity_pcm,
+        identity_reference_end_ms as f32 / 1000.0,
+    );
+    let separator_stream = asr
+        .target_speaker_stream_for_test()
+        .expect("recorded separator stream started");
+    // The semantic activation end controls separator cropping. The enrolled
+    // identity seed can come from a distinct, exact local-confirmation window;
+    // preserve both clocks in recorded replays just as production does.
+    let identity_reference_end_seconds = identity_reference_end_ms as f32 / 1000.0;
+    let profile = crate::speaker_verification::session_profile_snapshot_from_wake(&identity_pcm,
+        identity_reference_end_seconds, phrase,
+        fixture["wake_owner_verified"].as_bool().unwrap_or(false)).unwrap();
+    asr.set_target_speaker_source_profile(&profile);
     let observations = fixture["observations"].as_array().unwrap();
     let mut observed = 0;
     let mut bytes = 0u64;
+    let replay_started = Instant::now();
+    let mut live_ledgers = Vec::new();
+    let mut previous_live = String::new();
+    let mut live_selection_diagnostics = Vec::new();
+    let mut previous_selection_diagnostic = String::new();
     for chunk in pcm.chunks(3_200) {
         bytes += chunk.len() as u64;
         let end_ms = bytes / 32;
@@ -16842,19 +18922,73 @@ async fn recorded_separator_product_authority_probe() {
                 "Uncertain" => SessionSpeakerClassification::Uncertain { score },
                 _ => panic!("invalid captured classification"),
             };
-            asr.note_local_speaker_observation_with_quality(row["end_ms"].as_u64().unwrap(), classification,
-                crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive,
-                row["quality"].as_bool().unwrap());
+            if let Some(start_ms) = row["audio_start_ms"].as_u64() {
+                asr.note_local_speaker_observation_with_audio_range(start_ms,
+                    row["end_ms"].as_u64().unwrap(), classification,
+                    crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive,
+                    row["quality"].as_bool().unwrap());
+            } else {
+                asr.note_local_speaker_observation_with_quality(row["end_ms"].as_u64().unwrap(), classification,
+                    crate::speech_decision_kernel::TranscriptSpeakerEvidence::Inconclusive,
+                    row["quality"].as_bool().unwrap());
+            }
             observed += 1;
         }
         asr.consume_pcm_chunk(chunk);
         tokio::time::sleep(std::time::Duration::from_millis(chunk.len() as u64 / 32)).await;
+        let delivery_snapshot =
+            asr.pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), "");
+        let selection = asr.pause_early_delivery_snapshot_diagnostics("");
+        let selection_key = serde_json::json!({
+            "authority": selection["authority"],
+            "selected_branch": selection["selected_branch"],
+            "selected_text": selection["selected_text"],
+            "live_text": selection["live_text"],
+            "source_text": selection["source_text"],
+            "provider_timing_words": selection["provider_timing_words"],
+            "source_owner_ranges": selection["source_owner_ranges"],
+            "physical_interference_ranges": selection["physical_interference_ranges"],
+            "provider_foreign_ranges": selection["provider_foreign_ranges"],
+            "delivery_snapshot_text": delivery_snapshot.as_ref().map(|candidate| &candidate.text),
+            "source_snapshot":selection["source_snapshot"],
+            "snapshot_delivery_text":selection["snapshot_delivery_text"],
+        }).to_string();
+        if selection_key != previous_selection_diagnostic {
+            previous_selection_diagnostic = selection_key;
+            live_selection_diagnostics.push(serde_json::json!({
+                "phase": "paced_pcm",
+                "wall_ms": replay_started.elapsed().as_millis(),
+                "audio_ms": end_ms,
+                "delivery_snapshot_text": delivery_snapshot.as_ref().map(|candidate| &candidate.text),
+                "selection": selection,
+            }));
+        }
+        if let Some(candidate) = delivery_snapshot {
+            if candidate.text != previous_live {
+                previous_live = candidate.text.clone();
+                live_ledgers.push(serde_json::json!({"text": candidate.text, "audio_ms": end_ms,
+                    "wall_ms": replay_started.elapsed().as_millis()}));
+            }
+        }
     }
+    let (source_owner_ranges, physical_interference_ranges) =
+        asr.source_owner_evidence_ranges_for_test();
+    let separator_owner_audio_ranges = asr.separator_owner_audio_ranges_for_test();
+    let separator_pre_final = separator_stream.test_diagnostics();
     let stop_at = std::time::Instant::now();
     asr.send_last_frame().await.unwrap();
     asr.begin_target_speaker_final_early();
     let primary = asr.await_final_result_with_early_seal().await.unwrap();
     let primary_text = primary.text.clone();
+    live_selection_diagnostics.push(serde_json::json!({
+        "phase": "after_primary_final",
+        "wall_ms": replay_started.elapsed().as_millis(),
+        "audio_ms": bytes / 32,
+        "delivery_snapshot_text": asr
+            .pause_early_delivery_ledger_snapshot_after(Duration::from_secs(1), "")
+            .map(|candidate| candidate.text),
+        "selection": asr.pause_early_delivery_snapshot_diagnostics(""),
+    }));
     let separated = asr.await_target_speaker_final().await;
     let separated_error = separated.as_ref().err().cloned();
     let separated = separated.unwrap_or(None);
@@ -16865,10 +18999,28 @@ async fn recorded_separator_product_authority_probe() {
     candidates.separated_owner = separated;
     candidates.target_filter_required = asr.target_speaker_filter_was_required();
     candidates.primary_mixture_rejected = asr.primary_mixture_was_rejected();
-    candidates.primary_speaker_filtered_certified = asr.primary_seal_speaker_filtered_certified();
+    candidates.primary_speaker_filtered_certified = asr.primary_seal_speaker_filtered_certified_for(&candidates.provider_primary.text);
+    candidates.separated_owner_exclusion_confirmed = candidates.separated_owner.as_ref()
+        .is_some_and(|owner| asr.separated_prefix_excludes_confirmed_other(&candidates.provider_primary.text, &owner.text));
     let primary_rejected = candidates.primary_mixture_rejected;
     let filter_required = candidates.target_filter_required;
     let product = super::arbitrate_product_final_transcript(candidates, &[], false);
+    // Freeze the product decision latency before test-only retained-stream
+    // diagnostics. Cancellation branches may need another runtime poll before
+    // the worker Drop guard becomes observable; that wait is report evidence,
+    // not product finalization work.
+    let stop_to_product_final_ms = stop_at.elapsed().as_millis();
+    let diagnostic_wait_started = std::time::Instant::now();
+    let separator_terminal_observed = separator_stream
+        .test_wait_for_terminal(Duration::from_secs(5))
+        .await;
+    let diagnostic_wait_ms = diagnostic_wait_started.elapsed().as_millis();
+    let separator_post_final = separator_stream.test_diagnostics();
+    let target_speaker_pcm_export_directory =
+        separator_post_final["pcm_export_directory"].clone();
+    let secondary_provider_responses =
+        separator_post_final["secondary_provider_responses"].clone();
+    let secondary_final_timing = separator_post_final["secondary_final_timing"].clone();
     let selected_key = crate::transcript_boundary::content_key(&product.transcript.text);
     let primary_key = crate::transcript_boundary::content_key(&primary_text);
     let owner_source_present = fixture["required_owner_fragments"].as_array().unwrap().iter().all(|value| {
@@ -16877,20 +19029,63 @@ async fn recorded_separator_product_authority_probe() {
     let foreign_excluded = fixture["foreign_fragments"].as_array().unwrap().iter().all(|value| {
         !selected_key.contains(&crate::transcript_boundary::content_key(value.as_str().unwrap()))
     });
-    let owner_preserved = owner_source_present && selected_key == primary_key;
-    let passed = owner_preserved && foreign_excluded;
-    let report = serde_json::json!({
+    let owner_preserved = owner_source_present && fixture["required_owner_fragments"].as_array().unwrap().iter()
+        .all(|value| selected_key.contains(&crate::transcript_boundary::content_key(value.as_str().unwrap())));
+    let live_owner_preserved = fixture["required_owner_fragments"].as_array().unwrap().iter().all(|fragment| {
+        live_ledgers.iter().any(|row| crate::transcript_boundary::content_key(row["text"].as_str().unwrap())
+            .contains(&crate::transcript_boundary::content_key(fragment.as_str().unwrap())))
+    });
+    let live_foreign_excluded = live_ledgers.iter().all(|row| {
+        let key = crate::transcript_boundary::content_key(row["text"].as_str().unwrap());
+        fixture["foreign_fragments"].as_array().unwrap().iter().all(|fragment|
+            !key.contains(&crate::transcript_boundary::content_key(fragment.as_str().unwrap())))
+    });
+    let passed = owner_preserved && foreign_excluded
+        && (!fixture["require_live_owner"].as_bool().unwrap_or(false)
+            || (live_owner_preserved && live_foreign_excluded));
+    let stop_to_report_ms = stop_at.elapsed().as_millis();
+    let mut report = serde_json::json!({
         "status": if passed { "PASS" } else { "FAIL" },
-        "scope": "original PCM, actual separator and both provider paths, captured primary identity, product arbitration; no new-device/editor or new primary voiceprint acceptance",
+        "scope": "original PCM, actual separator and both provider paths, captured primary identity observations and product arbitration; no new device/editor, physical source-interval transport, wake acceptance or primary voiceprint acceptance",
         "source_session_id": fixture["source_session_id"], "pcm_sha256": fixture["pcm_sha256"],
         "captured_observations": observed, "input_bytes": pcm.len(),
+        "wake_end_ms": activation_end_ms,
+        "identity_reference_end_ms": identity_reference_end_ms,
+        "identity_reference_scope": if identity_reference_from_fixture {
+            "explicit archived identity-PCM boundary; separate from body activation coordinates"
+        } else {
+            "body PCM and semantic wake-end fallback; not an exact reconstruction of a separate physical confirmation window"
+        },
+        "source_owner_ranges": source_owner_ranges,
+        "separator_owner_audio_ranges": separator_owner_audio_ranges,
+        "separator_pre_final": separator_pre_final,
+        "separator_post_final": separator_post_final,
+        "separator_terminal_observed": separator_terminal_observed,
+        "physical_interference_ranges": physical_interference_ranges,
+        "live_ledgers": live_ledgers, "live_owner_preserved": live_owner_preserved,
+        "live_foreign_excluded": live_foreign_excluded,
+        "live_selection_diagnostics": live_selection_diagnostics,
+        "primary_provider_responses": asr.diagnostic_provider_responses(),
         "primary_owner_text": primary_text, "separated_text": separated_text, "separated_error": separated_error,
         "selected_text": product.transcript.text, "selected_authority": product.authority.label(),
         "owner_source_present": owner_source_present, "owner_preserved": owner_preserved,
         "foreign_excluded": foreign_excluded, "primary_mixture_rejected": primary_rejected,
-        "target_filter_required": filter_required, "stop_to_product_final_ms": stop_at.elapsed().as_millis(),
+        "target_filter_required": filter_required,
+        "stop_to_product_final_ms": stop_to_product_final_ms,
+        "diagnostic_wait_ms": diagnostic_wait_ms,
+        "stop_to_report_ms": stop_to_report_ms,
         "primary_trace": asr.take_diagnostic_trace(),
     });
+    report.as_object_mut().unwrap().extend(serde_json::json!({
+        "identity_pcm_path": identity_pcm_path,
+        "identity_pcm_sha256": identity_sha256,
+        "target_reference_scope": "persisted enrolled target bank; explicit identity PCM is used only for source-profile construction and the no-bank TSE fallback",
+        "ownership_evidence_scope": "fixture-captured primary observations are injected; this probe does not recompute or validate production ownership acquisition",
+        "source_coordinate_scope": "all separator chunk ranges and exported PCM filenames use half-open milliseconds relative to the retained body PCM; they are not physical transport PcmSourceInterval evidence",
+        "target_speaker_pcm_export_directory": target_speaker_pcm_export_directory,
+        "secondary_provider_responses": secondary_provider_responses,
+        "secondary_final_timing": secondary_final_timing,
+    }).as_object().unwrap().clone());
     std::fs::write(output_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
     assert!(passed, "recorded real separator must preserve the distinct owner body and exclude foreign speech; see replay report");
 }
@@ -17092,6 +19287,155 @@ fn candidate_slice_ranges_become_unknown_on_missing_or_overflowed_base() {
     );
     assert!(super::candidate_slice_range(None, 12, 8).is_none());
     assert!(super::candidate_slice_range(Some(u64::MAX - 3), 0, 8).is_none());
+}
+
+#[test]
+fn local_speaker_seed_preserves_reliable_keyword_boundary() {
+    let pcm = (0u8..64).collect::<Vec<_>>();
+    let seed = super::local_speaker_identity_seed(
+        &pcm,
+        Some(1_000),
+        0.001,
+        true,
+        Some(crate::observability::CandidateRange { start: 1_016, end: 1_048 }),
+        crate::speech_decision_kernel::OwnerAccessEvidence::EnrolledMatch,
+    );
+    assert_eq!(seed.pcm, pcm);
+    assert_eq!(seed.profile_end_seconds, 0.001);
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn terminal_kws_confirmed_tail_keeps_identity_without_inventing_word_boundary() {
+    // f6985eb8: KWS's last token exceeded captured audio by 44 ms. That
+    // cannot prove a text crop, but stage2 did confirm the 1.020..6.020 s tail.
+    let pcm = vec![7u8; 6_020 * 32];
+    let mut result = super::LocalWakeConfirmation {
+        matched: true,
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::PresentLater,
+        transcript_chars: 18,
+        phonetic_prefix_units: 0,
+        phonetic_suffix_units: 4,
+        phonetic_best_distance: 0,
+        phonetic_best_window_start: 14,
+        inference_ms: 63,
+        snapshot_pcm_ms: 5_000,
+        recovered_keyword_end_seconds: None,
+        source_window: Some(super::LocalConfirmationCoverage {
+            start_bytes: 1_020 * 32,
+            end_bytes: 6_020 * 32,
+        }),
+    };
+    let input = Some(crate::observability::CandidateRange { start: 10_000, end: 10_000 + pcm.len() as u64 });
+    let range = super::local_confirmation_source_range(&result, input, 0);
+    let seed = super::local_speaker_identity_seed(
+        &pcm, Some(10_000), 6.020, false, range,
+        crate::speech_decision_kernel::OwnerAccessEvidence::EnrolledMatch,
+    );
+    assert_eq!(seed.pcm, pcm[1_020 * 32..]);
+    assert_eq!(seed.profile_end_seconds, 5.0);
+    assert_eq!(result.recovered_keyword_end_seconds, None);
+
+    // A focus retry must keep the smaller audio it actually recognized.
+    result.source_window.as_mut().unwrap().start_bytes = 4_020 * 32;
+    let range = super::local_confirmation_source_range(&result, input, 0).unwrap();
+    assert_eq!(range.start, 10_000 + 4_020 * 32);
+    assert_eq!(range.end, 10_000 + 6_020 * 32);
+
+    // Missing/stale/out-of-range source proof cannot borrow current audio.
+    assert!(super::local_confirmation_source_range(&result, None, 0).is_none());
+    assert!(super::local_confirmation_source_range(&result, input, 5_020 * 32).is_none());
+    result.source_window.as_mut().unwrap().end_bytes += 2;
+    assert!(super::local_confirmation_source_range(&result, input, 0).is_none());
+    result.source_window = None;
+    assert!(super::local_confirmation_source_range(&result, input, 0).is_none());
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn completed_confirmation_uses_frozen_source_clock_after_candidate_rotation() {
+    let result = super::LocalWakeConfirmation {
+        matched: true,
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::ExactStart,
+        transcript_chars: 4,
+        phonetic_prefix_units: 4,
+        phonetic_suffix_units: 4,
+        phonetic_best_distance: 0,
+        phonetic_best_window_start: 0,
+        inference_ms: 80,
+        snapshot_pcm_ms: 2_000,
+        recovered_keyword_end_seconds: None,
+        source_window: Some(super::LocalConfirmationCoverage { start_bytes: 160_000, end_bytes: 224_000 }),
+    };
+    let input = Some(crate::observability::CandidateRange { start: 900_000, end: 1_060_000 });
+    let range = super::local_confirmation_source_range(&result, input, 64_000).unwrap();
+    assert_eq!(range, crate::observability::CandidateRange { start: 996_000, end: 1_060_000 });
+}
+
+#[test]
+fn local_speaker_seed_uses_traced_confirmed_range_when_wake_end_is_unproven() {
+    let pcm = (0u8..96).collect::<Vec<_>>();
+    let seed = super::local_speaker_identity_seed(
+        &pcm,
+        Some(10_000),
+        0.001,
+        false,
+        Some(crate::observability::CandidateRange { start: 10_016, end: 10_080 }),
+        crate::speech_decision_kernel::OwnerAccessEvidence::EnrolledMatch,
+    );
+    assert_eq!(seed.pcm, pcm[16..80]);
+    assert_eq!(seed.profile_end_seconds, 64.0 / 32_000.0);
+}
+
+#[test]
+fn local_speaker_seed_does_not_invent_anchor_without_traced_owner_range() {
+    use crate::speech_decision_kernel::OwnerAccessEvidence::{EnrolledMatch, EnrolledNonMatch};
+    let pcm = vec![7u8; 96];
+    for (base, wake_end, wake_end_is_proven, range, owner_access) in [
+        (None, 0.0, false, Some(crate::observability::CandidateRange { start: 10, end: 40 }), EnrolledMatch),
+        (Some(100), 0.0, false, Some(crate::observability::CandidateRange { start: 98, end: 120 }), EnrolledMatch),
+        (Some(100), 0.0, false, Some(crate::observability::CandidateRange { start: 120, end: 198 }), EnrolledMatch),
+        (Some(100), 0.0, false, Some(crate::observability::CandidateRange { start: 120, end: 160 }), EnrolledNonMatch),
+        (Some(100), 0.0, false, None, EnrolledMatch),
+        (Some(100), f32::NAN, true, None, EnrolledMatch),
+        (Some(100), 1.0, true, None, EnrolledMatch),
+        (Some(100), 0.001, false, None, EnrolledMatch),
+    ] {
+        let seed = super::local_speaker_identity_seed(
+            &pcm,
+            base,
+            wake_end,
+            wake_end_is_proven,
+            range,
+            owner_access,
+        );
+        assert_eq!(seed.pcm, pcm);
+        assert_eq!(seed.profile_end_seconds, 0.0);
+    }
+}
+
+#[test]
+fn local_speaker_seed_keeps_open_policy_anchor_session_local() {
+    use crate::speech_decision_kernel::OwnerAccessEvidence::{
+        OpenInactiveProfile, OpenUnenrolled, Unavailable,
+    };
+    let pcm = (0u8..96).collect::<Vec<_>>();
+    let range = Some(crate::observability::CandidateRange {
+        start: 20_016,
+        end: 20_080,
+    });
+
+    for access in [OpenUnenrolled, OpenInactiveProfile] {
+        let seed =
+            super::local_speaker_identity_seed(&pcm, Some(20_000), 0.0, false, range, access);
+        assert_eq!(seed.pcm, pcm[16..80]);
+        assert_eq!(seed.profile_end_seconds, 64.0 / 32_000.0);
+    }
+
+    let unavailable =
+        super::local_speaker_identity_seed(&pcm, Some(20_000), 0.0, false, range, Unavailable);
+    assert_eq!(unavailable.pcm, pcm);
+    assert_eq!(unavailable.profile_end_seconds, 0.0);
 }
 
 #[test]
@@ -17397,6 +19741,56 @@ fn pause_early_final_remainder_splits_on_stability_key_prefix() {
 }
 
 #[test]
+fn pause_early_boundary_clusters_are_consumed_once_and_keep_new_words() {
+    use super::{embedded_audio_partial_preview_stability_key as key,
+        pause_early_final_remainder, pause_early_source_key_after_append};
+    for punctuation in ["。。", "...", "……", "？！", "。”", "。）", "?!\"", ");"] {
+        let mut delivered = "本人正文".to_string();
+        let mut source = key(&delivered);
+        let snapshot = format!("{delivered}{punctuation}");
+        let delta = pause_early_final_remainder(&snapshot, &delivered, &source).unwrap();
+        assert_eq!(delta, punctuation);
+        source = pause_early_source_key_after_append(&snapshot, &delta, &delta).unwrap();
+        delivered.push_str(&delta);
+        for _ in 0..100 {
+            assert_eq!(pause_early_final_remainder(&snapshot, &delivered, &source), Some(String::new()),
+                "already submitted boundary {punctuation:?} cannot emit on a later watchdog tick");
+        }
+        let continued = format!("{snapshot}最少4万，then continue。");
+        assert_eq!(pause_early_final_remainder(&continued, &delivered, &source),
+            Some("最少4万，then continue。".into()));
+    }
+    let snapshot = "本人正文。。最少4万";
+    assert_eq!(pause_early_final_remainder(snapshot, "本人正文。", &key("本人正文")),
+        Some("。最少4万".into()), "a genuinely new boundary mark is delivered once");
+    assert_eq!(pause_early_final_remainder("本人正文。“新句”", "本人正文。", &key("本人正文")),
+        Some("“新句”".into()), "the opening delimiter of new words is still undelivered");
+}
+
+#[test]
+fn pause_early_boundary_failed_submission_restores_the_whole_run_for_retry() {
+    use super::{embedded_audio_partial_preview_stability_key as key,
+        pause_early_delivery_reserve, pause_early_delivery_confirm,
+        pause_early_delivery_rollback, pause_early_delivery_session_state,
+        pause_early_final_remainder};
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session_id = uuid::Uuid::new_v4();
+    pause_early_delivery_reserve(inner, session_id, "本人正文。".into(), key("本人正文"), key("本人正文"));
+    pause_early_delivery_confirm(inner, session_id);
+    let snapshot = "本人正文。。。”";
+    let delta = pause_early_final_remainder(snapshot, "本人正文。", &key("本人正文")).unwrap();
+    assert_eq!(delta, "。。”");
+    pause_early_delivery_reserve(inner, session_id, snapshot.into(), key(snapshot), key(snapshot));
+    pause_early_delivery_rollback(inner, session_id);
+    let restored = pause_early_delivery_session_state(inner, session_id).0;
+    assert_eq!(pause_early_final_remainder(snapshot, &restored, &key("本人正文")), Some(delta));
+    pause_early_delivery_reserve(inner, session_id, snapshot.into(), key(snapshot), key(snapshot));
+    pause_early_delivery_confirm(inner, session_id);
+    assert_eq!(pause_early_final_remainder(snapshot, snapshot, &key(snapshot)), Some(String::new()));
+}
+
+#[test]
 fn final_asr_revision_cannot_replace_a_committed_word() {
     use super::{pause_early_final_remainder, pause_early_mismatch_recovery_tail};
     let delivered = "你不用一直轮询，检查到自动判刑再去查。";
@@ -17476,6 +19870,21 @@ fn pause_early_terminal_punctuation_delivers_before_final_without_repeating_the_
 }
 
 #[test]
+fn pause_early_short_terminal_completion_requires_open_committed_body_and_exact_source() {
+    use super::pause_early_short_terminal_completion_ready as ready;
+
+    assert!(ready("这就是最后一", "句话。", true));
+    assert!(ready("前文仍未闭合", "好。", true));
+    assert!(!ready("", "好。", true), "a standalone short sentence keeps the existing minimum");
+    assert!(!ready("上一句。", "好。", true), "a new short sentence is not a completion of committed text");
+    assert!(!ready("上一句，", "好。", true), "a comma-closed clause cannot authorize a new short sentence");
+    assert!(!ready("上一句；", "好。", true), "a semicolon-closed clause cannot authorize a new short sentence");
+    assert!(!ready("这就是最后一", "句话", true), "an unclosed short provider placeholder remains reversible");
+    assert!(!ready("这就是最后一", "句话。", false), "missing source continuation cannot authorize body text");
+    assert!(!ready("这就是最后一句话。", "话。", true), "a completed sentence cannot append a repeated short ending");
+}
+
+#[test]
 fn pause_early_delivery_waits_for_a_clause_instead_of_pasting_provider_placeholders() {
     use super::{pause_early_chunk_ready, pause_early_complete_clause, pause_early_segment};
 
@@ -17517,6 +19926,323 @@ fn pause_early_delivery_waits_for_a_clause_instead_of_pasting_provider_placehold
 }
 
 #[test]
+fn native_confirmation_reaches_short_and_unpunctuated_submission_without_a_second_wait() {
+    use crate::asr::volcengine::{LiveDeliveryStability, VolcengineCredentials, VolcengineStreamingASR};
+    use super::{pause_early_ready_segment as ready, embedded_audio_partial_preview_stability_key as key};
+    for text in ["好。", "Yes.", "はい。", "네.", "OK", "a confirmed clause without punctuation"] {
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+            app_id: "app".into(), access_token: "token".into(), resource_id: "resource".into(),
+        }, Vec::new()).with_owner_activity_only(true);
+        let result = |definite: bool| serde_json::json!({"text":text,"utterances":[{
+            "text":text,"definite":definite,"start_time":100,"end_time":900,
+            "additions":{"source":if definite { "two_pass" } else { "stream" }},
+            "words":[{"text":text,"start_time":100,"end_time":900}]
+        }]});
+        asr.apply_saved_native_result_for_test(&result(false), false);
+        assert!(asr.pause_early_delivery_evidence_after(Duration::ZERO, "").is_none(),
+            "a short provisional placeholder must remain reversible: {text}");
+        assert!(asr.pending_body_delivery_after("").is_some_and(|body| body.recognition_pending));
+        asr.apply_saved_native_result_for_test(&result(true), false);
+        let snapshot = asr.pause_early_delivery_evidence_after(Duration::ZERO, "").unwrap();
+        assert_eq!(snapshot.stability, LiveDeliveryStability::ProviderConfirmed);
+        assert_eq!(ready("", "", &snapshot.text, false, snapshot.stability), Some(text),
+            "native lexical finality must reach the coordinator before STOP: {text}");
+        assert!(ready("", "", text, false, LiveDeliveryStability::RollingStable).is_none(),
+            "the same-looking legacy draft must retain its existing safeguards: {text}");
+        assert_eq!(ready("上一句。", &key("上一句。"), text, false, snapshot.stability), Some(text),
+            "a new short confirmed sentence is not limited to completing an open clause");
+    }
+    assert_eq!(ready("", "", "。", false, LiveDeliveryStability::ProviderConfirmed), None);
+    assert_eq!(ready("正文。", &key("正文。"), "，", false, LiveDeliveryStability::ProviderConfirmed), None);
+    assert_eq!(ready("正文", &key("正文"), "。", false, LiveDeliveryStability::ProviderConfirmed), Some("。"));
+}
+
+#[test]
+#[ignore = "explicit saved native archives; no editor, microphone, cloud or model execution"]
+fn recorded_native_confirmation_reaches_coordinator_submission_boundary() {
+    use crate::asr::volcengine::{LiveDeliveryStability, VolcengineCredentials, VolcengineStreamingASR};
+    use super::pause_early_ready_segment as ready;
+    let root = std::path::PathBuf::from(std::env::var_os("LISTENER_CONFIRMED_DELIVERY_REPLAY_ROOT").unwrap());
+    let report = std::env::var_os("LISTENER_CONFIRMED_DELIVERY_REPORT").unwrap();
+    let protocol: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("native-protocol.json")).unwrap()).unwrap();
+    let mut cases = Vec::new();
+    for case in protocol["cases"].as_array().unwrap() {
+        let archive: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join(case["archive"].as_str().unwrap())).unwrap()).unwrap();
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+            app_id: "app".into(), access_token: "token".into(), resource_id: "resource".into(),
+        }, Vec::new()).with_owner_activity_only(true);
+        let mut frames = Vec::new();
+        for entry in archive["trace"]["entries"].as_array().unwrap().iter()
+            .filter(|entry| entry["stage"] == "normalized_result") {
+            asr.apply_saved_native_result_for_test(&entry["provider_result"], entry["final_frame"] == true);
+            let snapshot = asr.pause_early_delivery_evidence_after(Duration::ZERO, "");
+            let row = snapshot.map(|snapshot| {
+                let previous = ready("", "", &snapshot.text, false, LiveDeliveryStability::RollingStable);
+                let current = ready("", "", &snapshot.text, false, snapshot.stability);
+                if snapshot.stability == LiveDeliveryStability::ProviderConfirmed {
+                    assert_eq!(current, Some(snapshot.text.as_str()),
+                        "same-source confirmed body cannot be truncated by punctuation: {} frame={}", archive["sessionId"], entry["frame"]);
+                }
+                serde_json::json!({"text":snapshot.text,"stability":format!("{:?}",snapshot.stability),
+                    "previousReadyText":previous,"readyText":current})
+            });
+            frames.push(serde_json::json!({"frame":entry["frame"],"elapsedMs":entry["elapsed_ms"],
+                "final":entry["final_frame"],"delivery":row}));
+        }
+        let final_snapshot = asr.pause_early_delivery_evidence_after(Duration::ZERO, "").unwrap();
+        assert_eq!(crate::transcript_boundary::content_key(&final_snapshot.text),
+            crate::transcript_boundary::content_key(case["expected"].as_str().unwrap()));
+        if archive["sessionId"].as_str().unwrap().starts_with("0c2dde6c") {
+            let original = frames.iter().find(|row| row["frame"] == 44).unwrap();
+            assert!(original["final"] == false);
+            assert!(original["delivery"]["previousReadyText"].is_null(),
+                "the recorded unpunctuated confirmed response reproduces the second wait");
+            assert!(original["delivery"]["readyText"].is_string());
+        }
+        cases.push(serde_json::json!({"sessionId":archive["sessionId"],"frames":frames}));
+    }
+    std::fs::write(report, serde_json::to_vec_pretty(&serde_json::json!({
+        "scope":"saved native returns through production ASR and coordinator readiness; no actual editor receipts or physical STOP",
+        "cloudCalls":0,"modelRuns":0,"cases":cases
+    })).unwrap()).unwrap();
+}
+
+#[test]
+#[ignore = "explicit native returns and contemporaneous local decisions; no cloud, models or editor writes"]
+fn recorded_ordinary_tail_and_punctuation_reaches_final_delivery_planner() {
+    use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
+    use crate::asr::volcengine_speaker_ledger::{EvidenceKind, LocalSpeakerTimeline, SpeakerSpan};
+    let root = std::path::PathBuf::from(std::env::var_os("LISTENER_ORDINARY_TAIL_REPLAY_ROOT").unwrap());
+    let protocol: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("saved-native-protocol.json")).unwrap()).unwrap();
+    let mut cases = Vec::new();
+    for case in protocol["cases"].as_array().unwrap() {
+        let archive: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join(case["archive"].as_str().unwrap())).unwrap()).unwrap();
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+            app_id:"recorded".into(), access_token:"offline".into(), resource_id:"offline".into(),
+        },Vec::new()).with_owner_activity_only(true);
+        if let Some(phrase) = case["acceptedWakePhrase"].as_str() {
+            asr.note_accepted_wake_phrase(phrase);
+        }
+        let raw_probe = (case["rawConsumptionProbe"] == true).then(|| {
+            let coordinator = Coordinator::new();
+            let session = new_session_id();
+            let mut prefs = coordinator.inner.prefs.get();
+            prefs.remove_filler_words = true;
+            prefs.active_style_pack_id = crate::types::BUILTIN_STYLE_PACK_RAW_ID.into();
+            coordinator.inner.prefs.set(prefs).unwrap();
+            if let Some(phrase) = case["acceptedWakePhrase"].as_str() {
+                arm_automatic_wake_text_guard(&coordinator.inner, session, phrase.into(), 2000);
+            }
+            (coordinator, session)
+        });
+        let mut raw_prefix_consumed = None;
+        let mut timeline = LocalSpeakerTimeline::default();
+        let mut seen_identity = std::collections::BTreeSet::new();
+        let mut seen_presence = std::collections::BTreeSet::new();
+        let mut frames = 0;
+        let mut sealed_final = None;
+        let mut live_delivery = Vec::new();
+        for entry in archive["trace"]["entries"].as_array().unwrap().iter().filter(|e|e["stage"]=="normalized_result") {
+            for (key, identity) in [("local_identity_newest_first",true),("local_presence_newest_first",false)] {
+                for span in entry["speaker_projection"][key].as_array().into_iter().flatten().rev() {
+                    let start=span[0].as_u64().unwrap();let end=span[1].as_u64().unwrap();let kind=span[2].as_str().unwrap();
+                    let fresh=if identity {seen_identity.insert((start,end,kind.to_string()))} else {seen_presence.insert((start,end,kind.to_string()))};
+                    if !fresh {continue;}
+                    let kind=match kind {"Owner"=>EvidenceKind::Owner,"Other"=>EvidenceKind::Other,_=>EvidenceKind::Unknown};
+                    let span=SpeakerSpan{start_ms:start,end_ms:end,kind};
+                    if identity {timeline.note_identity(span);} else {timeline.note_presence(span);}
+                }
+            }
+            if let Some(final_text) = asr.apply_saved_native_result_with_local_timeline_for_test(
+                &entry["provider_result"],entry["final_frame"]==true,&timeline,
+            ) { sealed_final = Some(final_text); }
+            if case["liveExpected"].is_string() && entry["final_frame"] != true {
+                let consumed = crate::transcript_boundary::content_key(case["consumedBodySource"].as_str().unwrap());
+                let provider_consumed = raw_probe.as_ref()
+                    .map(|(coordinator, session)| super::pause_early_provider_consumed_key(&coordinator.inner, *session))
+                    .unwrap_or_else(|| consumed.clone());
+                let snapshot = asr.pause_early_delivery_evidence_after(Duration::ZERO, &provider_consumed);
+                let pending = if let Some((coordinator, session)) = &raw_probe {
+                    if raw_prefix_consumed.is_none() {
+                        if let Some(snapshot) = &snapshot {
+                            if let Some(timing) = &snapshot.timing {
+                                super::note_automatic_wake_transcript_timing(&coordinator.inner, *session, Some(timing.timing.clone()));
+                            }
+                            if let Some(raw) = super::pause_early_source_consumption(&coordinator.inner, *session,
+                                &snapshot.text, &consumed, snapshot.source, snapshot.timing.as_ref()) {
+                                raw_prefix_consumed = Some(raw.raw_prefix.clone());
+                                super::pause_early_delivery_reserve_source(&coordinator.inner, *session,
+                                    case["consumedBodySource"].as_str().unwrap().into(), consumed.clone(),
+                                    consumed.clone(), Some(raw));
+                                super::pause_early_delivery_confirm(&coordinator.inner, *session);
+                                super::pause_early_remember_timed_boundary(&coordinator.inner, *session, &consumed, snapshot.timing.as_ref());
+                            }
+                        }
+                    }
+                    super::pause_early_pending_body_delivery(&coordinator.inner, *session, &asr)
+                } else { asr.pending_body_delivery_after(&consumed) };
+                let mut endpoint = super::SettledTargetEndpointClock::default();
+                endpoint.refresh_pending_body_delivery(pending, Instant::now());
+                live_delivery.push(serde_json::json!({"frame":entry["frame"],"elapsedMs":entry["elapsed_ms"],
+                    "snapshot":snapshot.map(|value| value.text),
+                    "pending":endpoint.pending_owner_delivery.as_ref().map(|value| &value.key),
+                    "endpointHeld":endpoint.pending_owner_delivery_active(Instant::now()),
+                    "committedRawPrefix":raw_prefix_consumed,
+                    "blocked":asr.pause_early_delivery_persistent_block_reason()}));
+            }
+            frames+=1;
+        }
+        if let Some(expected) = case["liveExpected"].as_str() {
+            let live = live_delivery.last().expect("recorded continuation has live provider responses");
+            std::fs::write(root.join(format!("{}-live-delivery.json",case["id"].as_str().unwrap())),
+                serde_json::to_vec_pretty(&live_delivery).unwrap()).unwrap();
+            assert_eq!(live["snapshot"].as_str().map(crate::transcript_boundary::content_key),
+                Some(crate::transcript_boundary::content_key(expected)),
+                "the already confirmed continuation must reach delivery before STOP: {} last={live}",case["id"]);
+            assert!(live["pending"].is_string(),
+                "unsubmitted admitted continuation must retain its endpoint delivery obligation: {}",case["id"]);
+            assert_eq!(live["endpointHeld"], true,
+                "the actual endpoint clock must retain the unsent continuation: {}",case["id"]);
+            if raw_probe.is_some() {
+                assert!(raw_prefix_consumed.is_some(), "the actual display transform must resolve a raw source occurrence");
+            }
+        }
+        let final_text=sealed_final.expect("saved archive contains a terminal native packet");
+        assert_eq!(final_text.text,case["expected"].as_str().unwrap(),
+            "the actual final receiver cannot resurrect an excluded occurrence: {}",case["id"]);
+        let supplemented=if case["supplement"]==true {
+            assert!(asr.target_speaker_filter_was_required(),
+                "the product boundary must not recover the raw foreign preview after projection");
+            let native=asr.final_native_word_snapshot_for(&final_text.text).unwrap_or_else(|| {
+                let diagnostics=asr.pause_early_delivery_snapshot_diagnostics("");
+                std::fs::write(root.join("failed-native-snapshot-diagnostics.json"),serde_json::to_vec_pretty(&diagnostics).unwrap()).unwrap();
+                panic!("selected filtered source owns final tokens: {}",diagnostics);
+            });
+            let body=native.text.strip_prefix(case["activationPrefix"].as_str().unwrap()).unwrap();
+            let old=case["initialDeliveredText"].as_str().unwrap();
+            let result=crate::transcript_boundary::lossless_final_supplement(old,&native,body).unwrap();
+            assert_eq!(result,case["expectedBody"].as_str().unwrap(),"only unseen source rendering is added, with original punctuation");
+            assert!(result.starts_with(old));
+            assert!(!result.contains(case["foreignText"].as_str().unwrap()));
+            assert!(crate::transcript_boundary::lossless_final_supplement(&result,&native,body).is_none(),"no punctuation/word loop on repeated final");
+            if let Some(expected) = case["appendExpected"].as_str() {
+                assert_eq!(crate::transcript_boundary::lossless_final_delivery(old,&native,body),
+                    Some(crate::transcript_boundary::FinalSourceDelivery::Append { suffix: expected.into() }),
+                    "native continuation cannot be promoted into a replacement of the previously submitted range");
+            }
+            Some(result)
+        } else {None};
+        cases.push(serde_json::json!({"sessionId":case["id"],"nativeFrames":frames,
+            "sealedFinalText":final_text.text,"filterRequired":asr.target_speaker_filter_was_required(),
+            "recordedSubmittedText":case["recordedSubmittedText"],"supplementedText":supplemented,
+            "probeScope":case["probeScope"],"committedRawPrefix":raw_prefix_consumed,
+            "liveDelivery":live_delivery}));
+    }
+    std::fs::write(root.join("saved-native-replay-result.json"),serde_json::to_vec_pretty(&serde_json::json!({
+        "scope":"saved native responses with their contemporaneous local timeline through actual ASR arbitration and final delivery planner; no native editor or STOP",
+        "cloudCalls":0,"modelRuns":0,"editorWrites":0,"cases":cases
+    })).unwrap()).unwrap();
+}
+
+#[test]
+#[ignore = "one selected failed native archive; no models, cloud, editor or device capture"]
+fn recorded_final_rendering_revision_does_not_resubmit_consumed_native_word() {
+    use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
+    use crate::asr::volcengine_speaker_ledger::{EvidenceKind, SpeakerSpan, LocalSpeakerTimeline};
+    use crate::transcript_boundary::{content_key, FinalSourceDelivery};
+    let root = std::path::PathBuf::from(std::env::var_os("LISTENER_FINAL_COVERAGE_REPLAY").unwrap());
+    let archive: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("source.asr-trace.json")).unwrap()).unwrap();
+    let delivery: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("source.delivery-trace.json")).unwrap()).unwrap();
+    let consumed_prefix = delivery["consumedRawSource"]["prefix"].as_str().unwrap();
+    let delivered = consumed_prefix.strip_prefix("开始录音").unwrap()
+        .trim_start_matches(crate::transcript_boundary::is_decorative);
+    let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        app_id:"recorded".into(), access_token:"offline".into(), resource_id:"offline".into(),
+    }, Vec::new()).with_owner_activity_only(true);
+    asr.note_accepted_wake_phrase("开始录音");
+    let mut timeline = LocalSpeakerTimeline::default();
+    let mut seen_identity = std::collections::HashSet::new();
+    let mut seen_presence = std::collections::HashSet::new();
+    let mut boundary = None;
+    let mut sealed = None;
+    let mut frames = 0;
+    for entry in archive["trace"]["entries"].as_array().unwrap().iter().filter(|e| e["stage"] == "normalized_result") {
+        for (key, identity) in [("local_identity_newest_first", true), ("local_presence_newest_first", false)] {
+            for span in entry["speaker_projection"][key].as_array().into_iter().flatten().rev() {
+                let start = span[0].as_u64().unwrap(); let end = span[1].as_u64().unwrap(); let kind = span[2].as_str().unwrap();
+                let fresh = if identity { seen_identity.insert((start,end,kind.to_string())) }
+                    else { seen_presence.insert((start,end,kind.to_string())) };
+                if !fresh { continue; }
+                let kind = match kind { "Owner" => EvidenceKind::Owner, "Other" => EvidenceKind::Other, _ => EvidenceKind::Unknown };
+                let span = SpeakerSpan { start_ms:start, end_ms:end, kind };
+                if identity { timeline.note_identity(span); } else { timeline.note_presence(span); }
+            }
+        }
+        if let Some(raw) = asr.apply_saved_native_result_with_local_timeline_for_test(&entry["provider_result"], entry["final_frame"] == true, &timeline) {
+            sealed = Some(raw);
+        }
+        // Recreate the actual confirmed raw submission, not an earlier
+        // equal-looking stream draft with a different tokenization/clock.
+        let submitted_revision = entry["provider_result"]["text"].as_str() == Some(consumed_prefix)
+            && entry["provider_result"]["utterances"].as_array().is_some_and(|rows|
+                !rows.is_empty() && rows.iter().all(|row| row["definite"] == true));
+        if boundary.is_none() && submitted_revision {
+            boundary = asr.transcript_timing_snapshot_for(consumed_prefix)
+                .and_then(|timing| timing.delivery_boundary(&content_key(consumed_prefix)));
+        }
+        frames += 1;
+    }
+    let boundary = boundary.expect("the saved confirmed live source supplies its submitted whole-word boundary");
+    assert_eq!(serde_json::json!(boundary.range_ms()), delivery["consumedRawSource"]["audioBoundaryMs"]);
+    let final_text = sealed.expect("the complete archive seals a final source").text;
+    assert_eq!(final_text.strip_prefix("开始录音").unwrap().trim_start_matches(crate::transcript_boundary::is_decorative),
+        archive["finalCoordinatorText"].as_str().unwrap());
+    let native = asr.final_native_word_snapshot_for(&final_text).expect("selected final source retains native word view");
+    let body = native.text.strip_prefix("开始录音").unwrap().trim_start_matches(crate::transcript_boundary::is_decorative);
+    let plan = crate::transcript_boundary::final_delivery_after_consumption(delivered, &native, body, Some(&boundary));
+    assert_eq!(plan, Some(FinalSourceDelivery::Covered), "a provider display revision is not an unseen acoustic word");
+    assert_ne!(delivery["submittedText"].as_str().unwrap(), delivered, "the selected archive must be the recorded duplicate failure");
+    std::fs::write(root.join("saved-native-coverage-result.json"), serde_json::to_vec_pretty(&serde_json::json!({
+        "sessionId":archive["sessionId"], "nativeFrames":frames, "cloudCalls":0, "modelRuns":0, "editorWrites":0,
+        "recordedSubmitted":delivery["submittedText"], "retainedSubmitted":delivered, "sealedProvider":final_text,
+        "consumedBoundaryMs":boundary.range_ms(), "sourceCovered":plan == Some(FinalSourceDelivery::Covered)
+    })).unwrap()).unwrap();
+}
+
+#[test]
+fn unpunctuated_owner_snapshot_must_cover_the_same_visible_body() {
+    use super::{
+        pause_early_snapshot_has_no_newer_owner_body as no_newer_owner_body,
+        pause_early_snapshot_covers_visible_body as covers,
+    };
+
+    let owner = "我把今天的事情说明完了，需要保留的内容是整理文件，再检查设备，最后确认会议时间，这就是本段最后一句话";
+    assert!(covers(owner, Some(owner)),
+        "a source-approved owner snapshot that caught up to the capsule may settle");
+    assert!(covers(&format!("{owner}。"), Some(owner)),
+        "terminal punctuation is decoration, not a new body generation");
+    assert!(!covers("我把今天的事情说明完了", Some(owner)),
+        "a shorter approved prefix cannot claim the still-visible owner tail is complete");
+    assert!(!covers(owner, Some(&format!("{owner}旁人继续说话"))),
+        "provisional foreign growth in the capsule cannot authorize an owner paste");
+    assert!(!covers(owner, Some("另一段同长度的未认证正文")),
+        "character count equality cannot replace source identity");
+    assert!(!covers(owner, None), "missing visible state is not a completeness certificate");
+
+    let stable_short = "这就是最后一";
+    let current_owner = "这就是最后一句话";
+    assert!(covers(stable_short, Some(stable_short)),
+        "the observed failure had two equally lagging views");
+    assert!(!no_newer_owner_body(Some("句话")),
+        "a newer owner-approved revision keeps the shorter quiet prefix reversible");
+    assert!(no_newer_owner_body(None),
+        "a current full snapshot (including punctuation-only revisions) has no approved body remaining after its normalized source key");
+    assert!(!covers(current_owner, Some(&format!("{current_owner}旁人继续说话")))
+        && no_newer_owner_body(None),
+        "missing owner-candidate evidence cannot turn a foreign visual tail into authority");
+}
+
+#[test]
 fn pause_early_short_opening_correction_keeps_unsubmitted_owner_body() {
     use super::{embedded_audio_partial_preview_stability_key as key, pause_early_aligned_growth_tail};
 
@@ -17530,6 +20256,181 @@ fn pause_early_short_opening_correction_keeps_unsubmitted_owner_body() {
         .expect("a unique small opening correction must not drop the entire owner tail");
     assert_eq!(tail, "优化一下速度，然后这个胶囊弹起的速度，然后看一下能不能先优化一下速度，就是这个唤醒速度以及这个说话文字到文字处理完的速度。");
     assert!(format!("{submitted}{tail}").starts_with(submitted));
+}
+
+#[test]
+fn timed_delivery_seam_is_owned_by_successful_source_and_session() {
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    let key = super::embedded_audio_partial_preview_stability_key;
+    let timing = crate::transcript_boundary::TimedTranscript {
+        text: "本人第一句。第二句。".into(), words: vec![
+            crate::transcript_boundary::TimedTranscriptWord { text: "本人第一句".into(), start_ms: Some(0), end_ms: Some(1000) },
+            crate::transcript_boundary::TimedTranscriptWord { text: "第二句".into(), start_ms: Some(1100), end_ms: Some(2000) },
+        ],
+    };
+    let timing = crate::asr::volcengine::LiveDeliveryTiming {
+        timing,
+        source: crate::asr::volcengine::LiveDeliverySource {
+            capture_stream_id: 10, capture_generation: 2,
+            decoder_stream_id: 77, owner_generation: 4,
+        },
+    };
+    let first = "本人第一句。";
+    let first_key = key(first);
+    super::pause_early_delivery_reserve(inner, session, first.into(), first_key.clone(), first_key.clone());
+    super::pause_early_remember_timed_boundary(inner, session, &first_key, Some(&timing));
+    assert!(inner.embedded_audio_pause_early_delivery.lock().confirmed_timed_boundary.is_none());
+    super::pause_early_delivery_confirm(inner, session);
+    super::pause_early_remember_timed_boundary(inner, session, &first_key, Some(&timing));
+    assert_eq!(super::pause_early_timed_continuation(inner, session, &timing.timing.text, &first_key, Some(&timing)), Some("第二句。".into()));
+    assert!(super::pause_early_timed_continuation(inner, new_session_id(), &timing.timing.text, &first_key, Some(&timing)).is_none());
+    let mut other = timing.clone();
+    other.source.decoder_stream_id += 1;
+    assert_eq!(super::pause_early_timed_continuation(inner, session, &other.timing.text, &first_key, Some(&other)), Some("第二句。".into()),
+        "a new decoder may map the same submitted occurrence in the same capture");
+    other.source.capture_generation += 1;
+    assert!(super::pause_early_timed_continuation(inner, session, &other.timing.text, &first_key, Some(&other)).is_none(),
+        "same object reopened: equal words and equal times cannot reuse an old capture boundary");
+    other.source.capture_generation = timing.source.capture_generation;
+    other.source.capture_stream_id += 1;
+    assert!(super::pause_early_timed_continuation(inner, session, &other.timing.text, &first_key, Some(&other)).is_none(),
+        "another stream cannot borrow the successful source seam");
+    let full_key = key(&timing.timing.text);
+    super::pause_early_delivery_reserve(inner, session, timing.timing.text.clone(), full_key.clone(), full_key.clone());
+    assert!(super::pause_early_timed_continuation(inner, session, &timing.timing.text, &first_key, Some(&timing)).is_none());
+    super::pause_early_delivery_rollback(inner, session);
+    assert_eq!(super::pause_early_timed_continuation(inner, session, &timing.timing.text, &first_key, Some(&timing)), Some("第二句。".into()));
+    // A failed punctuation-only reservation has the same source key. Rollback
+    // must retain the preceding successful PCM bookmark, not install the
+    // failed revision's absent or changed timing.
+    super::pause_early_delivery_reserve(inner, session, "本人第一句！".into(), first_key.clone(), first_key.clone());
+    super::pause_early_delivery_rollback(inner, session);
+    assert_eq!(super::pause_early_timed_continuation(inner, session, &timing.timing.text, &first_key, Some(&timing)), Some("第二句。".into()));
+    super::pause_early_delivery_reserve(inner, session, timing.timing.text.clone(), full_key.clone(), full_key.clone());
+    super::pause_early_delivery_confirm(inner, session);
+    assert!(super::pause_early_timed_continuation(inner, session, &timing.timing.text, &full_key, Some(&timing)).is_none(), "old bookmark cannot be borrowed after another successful source");
+}
+
+#[test]
+fn cropped_child_ledger_anchor_advances_atomically_without_replaying_final_text() {
+    use crate::transcript_boundary::{TimedTranscript, TimedTranscriptWord};
+    use super::{
+        embedded_audio_partial_preview_stability_key as key,
+        pause_early_advance_continuation, pause_early_delivery_confirm,
+        pause_early_delivery_reserve, pause_early_delivery_rollback,
+        pause_early_final_remainder, pause_early_ledger_anchor,
+        pause_early_remember_continuation, pause_early_remember_timed_boundary,
+        take_pause_early_delivery,
+    };
+    let word = |text: &str, start_ms, end_ms| TimedTranscriptWord {
+        text: text.into(), start_ms: Some(start_ms), end_ms: Some(end_ms),
+    };
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 2_000);
+    // This fixture's timing is already relative to retained PCM origin zero.
+    // Passing a 500 ms retained offset collapses the activation boundary to
+    // zero and makes the guard treat the control phrase as ordinary body.
+    super::bind_automatic_wake_audio_boundary(inner, session, 0.5, 0);
+
+    let source = crate::asr::volcengine::LiveDeliverySource {
+        capture_stream_id: 41, capture_generation: 7,
+        decoder_stream_id: 81, owner_generation: 3,
+    };
+    let first_timing = TimedTranscript {
+        text: "嗯，开始录音，第一段。".into(),
+        words: vec![
+            word("嗯", 0, 100), word("开始录音", 100, 500),
+            word("第一段", 600, 1_000),
+        ],
+    };
+    super::note_automatic_wake_transcript_timing(inner, session, Some(first_timing.clone()));
+    let first_display = super::pause_early_display_text(inner, session, &first_timing.text).unwrap();
+    assert_eq!(first_display, "第一段。");
+    let first_key = key(&first_display);
+    let first_delivery_timing = crate::asr::volcengine::LiveDeliveryTiming {
+        timing: first_timing, source,
+    };
+    pause_early_delivery_reserve(inner, session, first_display.clone(), first_key.clone(), first_key.clone());
+    pause_early_delivery_confirm(inner, session);
+    pause_early_remember_timed_boundary(inner, session, &first_key, Some(&first_delivery_timing));
+    let old_anchor = pause_early_ledger_anchor(inner, session).expect("first successful source has an anchor");
+    assert_eq!(old_anchor.generation, 1);
+    assert_eq!(old_anchor.source_text, "嗯，开始录音，第一段。");
+
+    // The cropped child repeats one submitted word for the audio seam. Its
+    // new suffix mentions the wake phrase as ordinary body text. The child
+    // owns every new word coordinate; no parent timing is concatenated.
+    let child = TimedTranscript {
+        text: "第一段。正文里提到开始录音，这四个字要保留。".into(),
+        words: vec![
+            word("第一段", 600, 1_000), word("正文里提到", 1_100, 1_500),
+            word("开始录音", 1_500, 1_900), word("这四个字要保留", 2_000, 2_600),
+        ],
+    };
+    let suffix = child.timed_suffix_after_delivery(&old_anchor.boundary).unwrap();
+    let continuation = crate::asr::volcengine::LiveLedgerContinuation {
+        anchor: old_anchor.clone(),
+        suffix: crate::asr::volcengine::LiveDeliveryTiming {
+            timing: suffix,
+            source: crate::asr::volcengine::LiveDeliverySource {
+                decoder_stream_id: 99,
+                ..source
+            },
+        },
+        owner_caught_up: true,
+        lifecycle_generation: 12,
+    };
+    let next_raw = continuation.source_text();
+    // Production has no concatenated parent/child timing certificate here.
+    // The original admitted control prefix must suffice on the raw source path.
+    let next_display = super::pause_early_display_text(inner, session, &next_raw).unwrap();
+    assert_eq!(next_display, "第一段。正文里提到开始录音，这四个字要保留。",
+        "only the control wake is stripped; a later body mention remains");
+    let next_source_key = key(&next_display);
+    let next_anchor = pause_early_advance_continuation(
+        inner, session, &continuation, &next_display, &next_source_key,
+    ).expect("the complete display transform ends on a child token boundary");
+    assert_eq!(next_anchor.generation, old_anchor.generation + 1);
+    assert_eq!(next_anchor.source_text, next_raw);
+    assert_eq!(next_anchor.boundary.range_ms(), (2_000, 2_600));
+    assert!(pause_early_advance_continuation(
+        inner, session, &continuation, "第一段。正文里提到开始", &next_source_key,
+    ).is_none(), "a display seam inside 开始录音 cannot consume that child token");
+
+    // A failed transport reserve restores the complete old anchor. It cannot
+    // consume child words or alter the source coordinate used by finalization.
+    pause_early_delivery_reserve(inner, session, next_display.clone(), key(&next_display), next_source_key.clone());
+    assert!(pause_early_ledger_anchor(inner, session).is_none());
+    pause_early_delivery_rollback(inner, session);
+    assert_eq!(pause_early_ledger_anchor(inner, session), Some(old_anchor.clone()));
+
+    // The same append succeeds: generation, raw source prefix and child-only
+    // audio boundary move together. A late result bound to the old generation
+    // cannot overwrite the new bookmark.
+    pause_early_delivery_reserve(inner, session, next_display.clone(), key(&next_display), next_source_key.clone());
+    pause_early_delivery_confirm(inner, session);
+    pause_early_remember_continuation(inner, session, &next_anchor);
+    assert_eq!(pause_early_ledger_anchor(inner, session), Some(next_anchor.clone()));
+    pause_early_remember_continuation(inner, session, &old_anchor);
+    assert_eq!(pause_early_ledger_anchor(inner, session), Some(next_anchor));
+
+    // Final reconciliation sees the cumulative editor body as fully covered;
+    // it does not paste either the wake prefix or the child suffix again.
+    assert_eq!(pause_early_final_remainder(&next_display, &next_display, &next_source_key), Some(String::new()));
+    assert_eq!(take_pause_early_delivery(inner, session), Some((next_display.clone(), key(&next_display))));
+
+    let next_session = new_session_id();
+    // Even identical words and the same generation in a different session
+    // cannot manufacture a capture bookmark from the old result.
+    pause_early_delivery_reserve(inner, next_session, first_display.clone(), first_key.clone(), first_key.clone());
+    pause_early_delivery_confirm(inner, next_session);
+    pause_early_remember_continuation(inner, next_session, &old_anchor);
+    assert!(pause_early_ledger_anchor(inner, next_session).is_none(),
+        "an old result cannot create a timed anchor in another session");
 }
 
 #[test]
@@ -18046,4 +20947,369 @@ fn pause_early_alignment_rejects_ambiguous_rewrites_and_internal_growth() {
         pause_early_aligned_growth_tail(long_internal_growth, &key(long_delivered)),
         None
     );
+}
+
+/// Capture fresh provider word coordinates for independently labelled PCM.
+/// No speaker observations, enrollment, separator or editor are exercised.
+#[tokio::test]
+#[ignore = "requires explicit consented PCM manifest and configured provider credentials"]
+async fn recorded_provider_word_coordinates_probe() {
+    use crate::asr::{AudioConsumer, VolcengineCredentials, VolcengineStreamingASR};
+    use crate::persistence::{CredentialAccount, CredentialsVault};
+    use sha2::{Digest, Sha256};
+
+    let input_path = std::env::var("LISTENER_PROVIDER_WORD_INPUT").expect("explicit PCM manifest");
+    let output_dir = std::path::PathBuf::from(
+        std::env::var("LISTENER_PROVIDER_WORD_OUTPUT_DIR").expect("explicit output directory"),
+    );
+    let manifest_bytes = std::fs::read(&input_path).unwrap();
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).unwrap();
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let credential = |account| {
+        CredentialsVault::get(account).unwrap().filter(|v| !v.is_empty()).expect("configured credential")
+    };
+    let mut failures = Vec::new();
+    for input in manifest["inputs"].as_array().unwrap() {
+        let id = input["id"].as_str().unwrap();
+        assert!(id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+        let pcm = std::fs::read(input["extracted_pcm_path"].as_str().unwrap()).unwrap();
+        assert!(!pcm.is_empty() && pcm.len() % 2 == 0 && pcm.len() <= 120 * 32_000);
+        let pcm_sha256 = format!("{:x}", Sha256::digest(&pcm));
+        assert_eq!(pcm_sha256, input["extracted_pcm_sha256"].as_str().unwrap());
+        let mut asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: credential(CredentialAccount::VolcengineAppKey),
+                access_token: credential(CredentialAccount::VolcengineAccessKey),
+                resource_id: credential(CredentialAccount::VolcengineResourceId),
+            },
+            Vec::new(),
+        );
+        asr.enable_diagnostic_trace();
+        let asr = std::sync::Arc::new(asr);
+        let started = std::time::Instant::now();
+        let mut first_seen = Vec::new();
+        let mut sent_bytes = 0usize;
+        let result = async {
+            asr.open_session().await.map_err(|e| e.to_string())?;
+            asr.mark_audio_delivery_ready();
+            for chunk in pcm.chunks(3200) {
+                asr.consume_pcm_chunk(chunk);
+                sent_bytes += chunk.len();
+                tokio::time::sleep(std::time::Duration::from_micros(chunk.len() as u64 * 1000 / 32)).await;
+                let count = asr.diagnostic_provider_responses().len();
+                while first_seen.len() < count {
+                    first_seen.push(serde_json::json!({
+                        "response_index": first_seen.len(),
+                        "observed_wall_ms": started.elapsed().as_millis(),
+                        "input_sent_ms": sent_bytes / 32,
+                    }));
+                }
+            }
+            asr.send_last_frame().await.map_err(|e| e.to_string())?;
+            asr.await_final_result_with_timeout(std::time::Duration::from_secs(30))
+                .await.map_err(|e| e.to_string())
+        }.await;
+        let packets = asr.diagnostic_provider_responses();
+        while first_seen.len() < packets.len() {
+            first_seen.push(serde_json::json!({
+                "response_index": first_seen.len(),
+                "observed_wall_ms": started.elapsed().as_millis(),
+                "input_sent_ms": sent_bytes / 32,
+            }));
+        }
+        let error = result.as_ref().err().cloned();
+        let report = serde_json::json!({
+            "schema": "listener.provider-word-coordinate-replay.v1",
+            "id": id,
+            "manifest_sha256": format!("{:x}", Sha256::digest(&manifest_bytes)),
+            "source": input,
+            "pcm_sha256": pcm_sha256,
+            "input_bytes": pcm.len(),
+            "sent_bytes": sent_bytes,
+            "provider_responses": packets,
+            "first_observed_checkpoints": first_seen,
+            "checkpoint_scope": "Conservative first poll after reception, not provider or exact local reception timestamps.",
+            "final_text": result.as_ref().ok().map(|r| &r.text),
+            "error": error,
+            "wall_ms": started.elapsed().as_millis(),
+            "scope": "Fresh cloud recognition of byte-exact archived PCM; provider timing evidence only. No injected identity observations, enrollment writes, separator, device or editor acceptance.",
+        });
+        std::fs::write(output_dir.join(format!("{id}-provider.json")), serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+        if result.is_err() || packets.is_empty() {
+            failures.push(id.to_owned());
+        }
+    }
+    assert!(failures.is_empty(), "provider replay incomplete for {failures:?}; saved reports retain errors");
+}
+// BEGIN COMPLETE_WAKE_INTENT_REGRESSIONS
+#[test]
+fn complete_wake_intent_near_repetition_and_owner_identity_cannot_start_recording() {
+    use denzic_voice_activation_v1_core::{GateDecision, PhraseSignal};
+    use crate::speech_decision_kernel::{KeywordPhraseEvidence, OwnerAccessEvidence};
+    // These real recovery policies accept overlapping near observations. The
+    // complete-intent seam must prevent the adapter from calling them a phrase.
+    assert!(crate::speech_decision_kernel::repeated_owner_overlap_wake_can_activate(true, 3));
+    for claimed in [PhraseSignal::KeywordModel, PhraseSignal::LocalTranscript] {
+        for keyword in [KeywordPhraseEvidence::Unobserved, KeywordPhraseEvidence::RecallCandidate] {
+            let qualified=super::qualify_candidate_wake_intent(claimed,keyword,None,
+                Some(crate::observability::CandidateRange {start:0,end:160_000}),false);
+            assert_eq!(qualified,PhraseSignal::None);
+            for owner in [OwnerAccessEvidence::EnrolledMatch,OwnerAccessEvidence::EnrolledNonMatch,
+                OwnerAccessEvidence::OpenUnenrolled,OwnerAccessEvidence::OpenInactiveProfile,
+                OwnerAccessEvidence::Unavailable] {
+                for terminal in [false,true] {
+                    assert_ne!(crate::speech_decision_kernel::arbitrate_wake(qualified,owner,terminal).decision,GateDecision::Accept);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn complete_wake_intent_real_keyword_survives_missing_secondary_and_unknown_coordinates() {
+    use denzic_voice_activation_v1_core::PhraseSignal;
+    for claimed in [PhraseSignal::None,PhraseSignal::KeywordModel,PhraseSignal::LocalTranscript] {
+        assert_eq!(super::qualify_candidate_wake_intent(claimed,
+            crate::speech_decision_kernel::KeywordPhraseEvidence::Complete,None,None,false),PhraseSignal::KeywordModel);
+    }
+}
+
+#[test]
+fn complete_wake_intent_local_phrase_remains_bound_to_its_actual_input() {
+    use denzic_voice_activation_v1_core::PhraseSignal;
+    use crate::observability::CandidateRange;
+    let proof=Some(super::CompleteLocalWakeIntent {range:CandidateRange {start:32_000,end:96_000}});
+    let evaluate=|current| super::qualify_candidate_wake_intent(PhraseSignal::LocalTranscript,
+        crate::speech_decision_kernel::KeywordPhraseEvidence::Unobserved,proof,current,false);
+    assert_eq!(evaluate(Some(CandidateRange {start:0,end:128_000})),PhraseSignal::LocalTranscript);
+    assert_eq!(evaluate(Some(CandidateRange {start:64_000,end:128_000})),PhraseSignal::None);
+    assert_eq!(evaluate(Some(CandidateRange {start:0,end:64_000})),PhraseSignal::None);
+    assert_eq!(evaluate(None),PhraseSignal::None);
+}
+
+#[test]
+fn complete_wake_intent_empty_local_range_cannot_become_a_command() {
+    use crate::observability::CandidateRange;
+    assert_eq!(super::qualify_candidate_wake_intent(denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript,
+        crate::speech_decision_kernel::KeywordPhraseEvidence::Unobserved,
+        Some(super::CompleteLocalWakeIntent {range:CandidateRange {start:64_000,end:64_000}}),
+        Some(CandidateRange {start:0,end:96_000}),false),denzic_voice_activation_v1_core::PhraseSignal::None);
+}
+
+#[test]
+fn complete_wake_intent_extraction_requires_its_complete_phrase_result() {
+    use denzic_voice_activation_v1_core::PhraseSignal;
+    for claimed in [PhraseSignal::None,PhraseSignal::KeywordModel] {
+        assert_eq!(super::qualify_candidate_wake_intent(claimed,
+            crate::speech_decision_kernel::KeywordPhraseEvidence::RecallCandidate,None,None,true),PhraseSignal::None);
+    }
+    assert_eq!(super::qualify_candidate_wake_intent(PhraseSignal::LocalTranscript,
+        crate::speech_decision_kernel::KeywordPhraseEvidence::Unobserved,None,None,true),PhraseSignal::LocalTranscript);
+}
+#[test]
+fn complete_wake_intent_missing_or_absent_followup_cannot_erase_a_real_phrase() {
+    use crate::observability::CandidateRange;
+    use denzic_voice_activation_v1_core::{LocalPhraseRelation, PhraseSignal};
+    let current=Some(CandidateRange {start:0,end:160_000});
+    for relation in [LocalPhraseRelation::ExactStart,LocalPhraseRelation::PhoneticStart,LocalPhraseRelation::PresentLater] {
+        let proof=super::retain_local_intent_proof(None,true,relation,current);
+        assert!(proof.is_some());
+        for (matched,followup,range) in [(false,LocalPhraseRelation::Absent,current),
+            (true,LocalPhraseRelation::Absent,current),(true,LocalPhraseRelation::ExactStart,None)] {
+            let retained=super::retain_local_intent_proof(proof,matched,followup,range);
+            assert_eq!(super::qualify_candidate_wake_intent(PhraseSignal::LocalTranscript,
+                crate::speech_decision_kernel::KeywordPhraseEvidence::RecallCandidate,retained,current,false),PhraseSignal::LocalTranscript);
+        }
+    }
+    assert!(super::retain_local_intent_proof(None,false,LocalPhraseRelation::Absent,current).is_none());
+    assert!(super::retain_local_intent_proof(None,true,LocalPhraseRelation::Absent,current).is_none());
+}
+// END COMPLETE_WAKE_INTENT_REGRESSIONS
+
+#[cfg(target_os = "windows")]
+#[test]
+#[ignore = "diagnostic: saved wake inputs and installed local helper; no device/editor/cloud"]
+fn recorded_recall_intent_saved_inputs() {
+    let protocol: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        std::env::var_os("LISTENER_RECALL_INTENT_PROTOCOL").expect("selected saved inputs")
+    ).unwrap()).unwrap();
+    let phrase = protocol["phrase"].as_str().unwrap();
+    let coordinator = Coordinator::new();
+    let mut rows = Vec::new();
+    let mut failed = Vec::new();
+    for row in protocol["cases"].as_array().unwrap() {
+        let name = row["name"].as_str().unwrap();
+        let wav = std::fs::read(row["path"].as_str().unwrap()).unwrap();
+        let pcm = crate::embedded_audio::read_wav_pcm16le(&wav).unwrap();
+        let found = crate::wake_phrase::detect_with_recall_cascade(&pcm, phrase).unwrap();
+        let Some(found) = found else {
+            rows.push(serde_json::json!({"name":name,"recordedKeyword":null,"scope":"recorded recall did not find a hypothesis; primary/local-only admission unchanged"}));
+            if row["requireRecallHit"].as_bool().unwrap_or(false) { failed.push(name.to_owned()); }
+            continue;
+        };
+        let (input, origin) = found.recall_confirmation_input(&pcm).unwrap();
+        let source = Some(crate::observability::CandidateRange { start:0, end:pcm.len() as u64 });
+        let input_range = super::terminal_local_confirmation_candidate_range(source, origin, input.len());
+        let result = tauri::async_runtime::block_on(super::spawn_local_wake_confirmation(
+            &coordinator.inner,
+            super::LocalWakeConfirmationDiagnosticContext {
+                embedded_session_id: 0, attempt: None, source_origin_bytes: origin, branch: "recorded-recall-diagnostic",
+            }, input.to_vec(), phrase.to_owned(), true,
+        )).unwrap().unwrap();
+        let verified_range = super::local_confirmation_source_range(&result, input_range, origin);
+        let proof = super::retain_local_intent_proof(None, result.matched, result.phrase_relation, verified_range);
+        let qualified = super::qualify_candidate_wake_intent(
+            if result.matched { denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript }
+                else { denzic_voice_activation_v1_core::PhraseSignal::KeywordModel },
+            found.phrase_evidence_for(phrase), proof, source, false,
+        );
+        let admits = qualified != denzic_voice_activation_v1_core::PhraseSignal::None;
+        let transcript = super::take_last_local_wake_diagnostic_result().and_then(|(_,text)|text);
+        if row["expectedRecallAdmission"].as_bool().is_some_and(|expected| expected != admits) {
+            failed.push(name.to_owned());
+        }
+        rows.push(serde_json::json!({
+            "name":name,"path":row["path"],"fileSha256":super::wake_pcm_digest(&wav).iter().map(|v|format!("{v:02x}")).collect::<String>(),
+            "pcmMs":pcm.len()/32,"keywordOrigin":format!("{:?}",found.origin),
+            "keywordLabel":found.matched_keyword,"keywordEvidence":format!("{:?}",found.phrase_evidence_for(phrase)),
+            "keywordCanAdmitAlone":found.complete_phrase_signal(phrase) != denzic_voice_activation_v1_core::PhraseSignal::None,
+            "confirmationOriginMs":origin/32,"confirmationPcmMs":input.len()/32,"actualConfirmationMs":result.snapshot_pcm_ms,
+            "localRelation":format!("{:?}",result.phrase_relation),"matched":result.matched,"transcript":transcript,
+            "qualifiedIntent":format!("{qualified:?}"),"recallAdmission":admits,"inferenceMs":result.inference_ms,
+            "labelScope":row["labelScope"],
+        }));
+    }
+    let report=serde_json::json!({"rows":rows,"failed":failed,"cloudCalls":0,"scope":"Production retrospective detector, exact-input helper, source binding and intent qualifier. No editor writes, hardware STOP or new installed-app evidence."});
+    std::fs::write(std::env::var_os("LISTENER_RECALL_INTENT_REPORT").unwrap(),serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    assert!(failed.is_empty(),"saved recall cases failed: {failed:?}; reports retained");
+}
+
+#[test]
+fn raw_body_consumption_preserves_control_fillers_and_display_corrections() {
+    use crate::transcript_boundary::{content_key, source_prefix_for_rendered_key};
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    let mut prefs = inner.prefs.get();
+    prefs.remove_filler_words = true;
+    prefs.active_style_pack_id = crate::types::BUILTIN_STYLE_PACK_RAW_ID.into();
+    inner.prefs.set(prefs.clone()).unwrap();
+    arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 2000);
+    let source = crate::asr::volcengine::LiveDeliverySource {
+        capture_stream_id: 10, capture_generation: 2, decoder_stream_id: 77, owner_generation: 4,
+    };
+    let raw = "嗯，开始录音什么意思？就是呃，你现在是一个，是我不是很懂，随后继续说明。";
+    let displayed = "什么意思？就是，你现在是一个，是我不是很懂，";
+    let consumed = super::pause_early_source_consumption(inner, session, raw, &content_key(displayed), source, None).unwrap();
+    assert_eq!(content_key(&consumed.raw_prefix), content_key("嗯，开始录音什么意思？就是呃，你现在是一个，是我不是很懂"));
+    assert_eq!(consumed.rendered_key, content_key(displayed));
+    assert!(consumed.boundary.is_none(), "missing native word times cannot invent an audio occurrence");
+    assert!(super::automatic_wake_body_started(inner, session));
+    super::pause_early_delivery_reserve_source(inner, session, displayed.into(), content_key(displayed),
+        content_key(displayed), Some(consumed));
+    super::pause_early_delivery_confirm(inner, session);
+    let mention = "嗯，开始录音什么意思？就是呃，你现在是一个，是我不是很懂，随后提到开始录音这四个字。";
+    assert_eq!(super::pause_early_display_text(inner, session, mention),
+        Some("什么意思？就是，你现在是一个，是我不是很懂，随后提到开始录音这四个字。".into()),
+        "later literal activation words cannot re-open admission using the transformed display coordinate");
+
+    let rule = crate::types::CorrectionRule { id: "test".into(), pattern: "Type".into(),
+        replacement: "Listener Type".into(), enabled: true, created_at: String::new() };
+    let correction = [rule];
+    let render = |prefix: &str| Some(super::render_raw_delivery_body(prefix, &prefs, &correction));
+    let source = "Type works. 日本語 한국어 العربية ไทย";
+    assert_eq!(source_prefix_for_rendered_key(source, &content_key("Listener Type works"), render), Some("Type works. "));
+    assert!(source_prefix_for_rendered_key(source, &content_key("Listener"), render).is_none(),
+        "a visible cut inside a correction expansion cannot consume its source word");
+    assert_eq!(source_prefix_for_rendered_key(source, &content_key(&super::render_raw_delivery_body(source, &prefs, &correction)), render), Some(source));
+    prefs.chinese_script_preference = crate::types::ChineseScriptPreference::Traditional;
+    let raw = "产品体验，下一句。";
+    let display = super::render_raw_delivery_body("产品体验", &prefs, &[]);
+    assert_ne!(display, "产品体验");
+    assert_eq!(source_prefix_for_rendered_key(raw, &content_key(&display),
+        |prefix| Some(super::render_raw_delivery_body(prefix, &prefs, &[]))), Some("产品体验，"));
+}
+
+#[test]
+fn raw_body_consumption_commits_with_delivery_and_rollback_keeps_the_old_occurrence() {
+    use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
+    use crate::transcript_boundary::content_key;
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        app_id: "offline".into(), access_token: "offline".into(), resource_id: "offline".into(),
+    }, Vec::new()).with_owner_activity_only(true);
+    asr.note_accepted_wake_phrase("开始录音");
+    asr.apply_saved_native_result_for_test(&serde_json::json!({"text":"开始录音，第一句。续句要保留。","utterances":[{
+        "text":"开始录音，第一句。续句要保留。","definite":true,"start_time":0,"end_time":2000,
+        "additions":{"source":"two_pass","speaker_id":"0"},"words":[
+            {"text":"开始录音","start_time":0,"end_time":500},
+            {"text":"第一句","start_time":500,"end_time":1000},
+            {"text":"续句要保留","start_time":1000,"end_time":2000}]}]}), false);
+    arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 2000);
+    let snapshot = asr.pause_early_delivery_evidence_after(Duration::ZERO, "").unwrap();
+    let first_key = content_key("第一句。");
+    let first = super::pause_early_source_consumption(inner, session, &snapshot.text, &first_key,
+        snapshot.source, snapshot.timing.as_ref()).unwrap();
+    super::pause_early_delivery_reserve_source(inner, session, "第一句。".into(), first_key.clone(), first_key.clone(), Some(first.clone()));
+    assert!(inner.embedded_audio_pause_early_delivery.lock().committed_body_consumption.is_none());
+    super::pause_early_delivery_confirm(inner, session);
+    assert_eq!(super::pause_early_pending_body_delivery(inner, session, &asr).unwrap().key, content_key("续句要保留"));
+    super::pause_early_delivery_confirm(inner, session);
+    assert_eq!(super::pause_early_provider_consumed_key(inner, session), content_key(&first.raw_prefix),
+        "a repeated confirmation cannot discard the committed provider coordinate");
+    let full_key = content_key("第一句。续句要保留。");
+    let full = super::pause_early_source_consumption(inner, session, &snapshot.text, &full_key,
+        snapshot.source, snapshot.timing.as_ref()).unwrap();
+    super::pause_early_delivery_reserve_source(inner, session, "第一句。续句要保留。".into(), full_key.clone(), full_key.clone(), Some(full.clone()));
+    assert_eq!(super::pause_early_pending_body_delivery(inner, session, &asr).unwrap().key, content_key("续句要保留"),
+        "an in-flight append cannot erase the outstanding continuation");
+    super::pause_early_delivery_rollback(inner, session);
+    assert_eq!(inner.embedded_audio_pause_early_delivery.lock().committed_body_consumption.as_ref().unwrap().raw_prefix, first.raw_prefix);
+    assert!(super::pause_early_pending_body_delivery(inner, session, &asr).is_some());
+    super::pause_early_delivery_reserve_source(inner, session, "第一句。续句要保留。".into(), full_key.clone(), full_key, Some(full));
+    super::pause_early_delivery_confirm(inner, session);
+    assert!(super::pause_early_pending_body_delivery(inner, session, &asr).is_none());
+    let next = new_session_id();
+    super::pause_early_delivery_reserve(inner, next, "另一段。".into(), content_key("另一段"), content_key("另一段"));
+    super::pause_early_delivery_rollback(inner, next);
+    assert!(inner.embedded_audio_pause_early_delivery.lock().committed_body_consumption.is_none(),
+        "a new recording cannot restore an old raw source boundary");
+}
+
+#[test]
+fn raw_body_consumption_timed_continuation_renders_only_the_unsubmitted_suffix() {
+    use crate::asr::volcengine::{LiveDeliverySource, LiveDeliveryTiming};
+    use crate::transcript_boundary::{content_key, TimedTranscript, TimedTranscriptWord};
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session = new_session_id();
+    let mut prefs = inner.prefs.get();
+    prefs.remove_filler_words = true;
+    prefs.active_style_pack_id = crate::types::BUILTIN_STYLE_PACK_RAW_ID.into();
+    inner.prefs.set(prefs).unwrap();
+    arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 2000);
+    let source = LiveDeliverySource {capture_stream_id: 17, capture_generation: 2, decoder_stream_id: 20, owner_generation: 3};
+    let timing = |text: &str, middle: &str, tail: Option<&str>| LiveDeliveryTiming {
+        source, timing: TimedTranscript {text:text.into(), words: vec![
+            TimedTranscriptWord{text:"开始录音".into(),start_ms:Some(0),end_ms:Some(500)},
+            TimedTranscriptWord{text:middle.into(),start_ms:Some(500),end_ms:Some(900)},
+            TimedTranscriptWord{text:"设备".into(),start_ms:Some(900),end_ms:Some(1200)},
+        ].into_iter().chain(tail.map(|tail|TimedTranscriptWord{text:tail.into(),start_ms:Some(1200),end_ms:Some(2000)})).collect()}
+    };
+    let raw = "开始录音，今天检查设备。";
+    let first_timing = timing(raw, "今天检查", None);
+    let key = content_key("今天检查设备。");
+    let consumed = super::pause_early_source_consumption(inner,session,raw,&key,source,Some(&first_timing)).unwrap();
+    super::pause_early_delivery_reserve_source(inner,session,"今天检查设备。".into(),key.clone(),key.clone(),Some(consumed));
+    super::pause_early_delivery_confirm(inner,session);
+    super::pause_early_remember_timed_boundary(inner,session,&key,Some(&first_timing));
+    let revised = "开始录音，今天检查这台设备，就是呃，下一句。";
+    let revised_timing = timing(revised, "今天检查这台", Some("就是呃下一句"));
+    assert_eq!(super::pause_early_timed_continuation(inner,session,revised,&key,Some(&revised_timing)),
+        Some("就是，下一句。".into()), "raw native seam precedes display filler removal; old editor bytes are never replayed");
+    assert!(super::pause_early_timed_continuation(inner,session,
+        "今天检查这台设备，就是，下一句。",&key,Some(&revised_timing)).is_none(),
+        "a transformed display cannot impersonate the native source occurrence");
 }

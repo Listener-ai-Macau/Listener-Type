@@ -209,10 +209,10 @@ async fn streaming_composition_update_tick(
         Some(elapsed) if elapsed < STREAMING_COMPOSITION_MIN_UPDATE_INTERVAL => return,
         _ => {}
     }
-    let Some(snapshot) = asr.pause_early_delivery_ledger_snapshot(Duration::ZERO) else {
+    let Some(snapshot) = asr.revisable_owner_snapshot() else {
         return;
     };
-    let Some(display) = pause_early_display_text(inner, session_id, &snapshot.text) else {
+    let Some(display) = live_delivery_display_text(inner, session_id, &snapshot.text, true) else {
         return;
     };
     let key = embedded_audio_partial_preview_stability_key(&display);
@@ -257,10 +257,11 @@ async fn streaming_composition_commit_stable(
     delivered_display: &str,
     full_key: &str,
     source_key: &str,
+    consumed: crate::asr::volcengine::LiveBodyConsumption,
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
 ) -> bool {
     let new_display = format!("{delivered_display}{delta}");
-    pause_early_delivery_reserve(inner, session_id, new_display, full_key.to_string(), source_key.to_string());
+    pause_early_delivery_reserve_source(inner, session_id, new_display, full_key.to_string(), source_key.to_string(), Some(consumed));
     let (tx, mut rx) = tokio::sync::oneshot::channel();
     if !streaming_composition_send(
         inner,

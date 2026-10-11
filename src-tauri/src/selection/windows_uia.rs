@@ -10,7 +10,7 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
 use windows::Win32::UI::Accessibility::{
-    CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern, UIA_EditControlTypeId,
+    CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern, IUIAutomationValuePattern, UIA_EditControlTypeId,
     UIA_TextPatternId, UIA_WindowControlTypeId, UIA_CONTROLTYPE_ID,
     UIA_ValuePatternId, UIA_PATTERN_ID,
     TextPatternRangeEndpoint_Start, TextPatternRangeEndpoint_End,
@@ -33,8 +33,15 @@ fn pattern_available(element: &IUIAutomationElement, pattern: UIA_PATTERN_ID) ->
 }
 
 fn focused_input_state(control: UIA_CONTROLTYPE_ID, keyboard_focusable: Option<bool>,
-    text_pattern: Option<bool>, value_pattern: Option<bool>) -> FocusedInputState {
-    if control == UIA_EditControlTypeId {
+    text_pattern: Option<bool>, value_pattern: Option<bool>, read_only: Option<bool>,
+    enabled: Option<bool>) -> FocusedInputState {
+    // Edit describes the control's role, not permission to change its value.
+    // WinForms read-only transcript/instruction boxes expose Edit + TextPattern.
+    // Only positive native facts may defer a paste; an unavailable provider
+    // remains Unknown and keeps the existing paste fallback.
+    if read_only == Some(true) || enabled == Some(false) {
+        FocusedInputState::NonEditable
+    } else if control == UIA_EditControlTypeId && read_only == Some(false) {
         FocusedInputState::Editable
     } else if control == UIA_WindowControlTypeId && keyboard_focusable == Some(false)
         && text_pattern == Some(false) && value_pattern == Some(false) {
@@ -46,6 +53,9 @@ fn focused_input_state(control: UIA_CONTROLTYPE_ID, keyboard_focusable: Option<b
 
 pub(crate) struct WindowsSelectionReader {
     pattern: IUIAutomationTextPattern,
+    focused: IUIAutomationElement,
+    automation: IUIAutomation,
+    target_hwnd: usize,
     _apartment: ComApartment,
 }
 
@@ -112,7 +122,21 @@ impl WindowsSelectionReader {
             let control = unsafe { focused.CurrentControlType() }
                 .map_err(|err| format!("focused editor control type unavailable: {err}"))?;
             if control == UIA_EditControlTypeId {
-                *state = FocusedInputState::Editable;
+                let value: Option<IUIAutomationValuePattern> =
+                    unsafe { focused.GetCurrentPatternAs(UIA_ValuePatternId) }.ok();
+                let read_only = value.as_ref()
+                    .and_then(|value| unsafe { value.CurrentIsReadOnly() }.ok())
+                    .map(|value| value.as_bool());
+                let enabled = unsafe { focused.CurrentIsEnabled() }.ok().map(|value| value.as_bool());
+                // Recheck focus after querying the native mutation permission.
+                if unsafe { GetForegroundWindow().0 as usize } != target_hwnd
+                    || !unsafe { focused.CurrentHasKeyboardFocus() }.ok().is_some_and(|v| v.as_bool()) {
+                    return Err("session target changed during editability lookup".into());
+                }
+                *state = focused_input_state(control, None, None, None, read_only, enabled);
+                if *state == FocusedInputState::NonEditable {
+                    return Err("focused text field is read-only or disabled".into());
+                }
             } else {
                 // Positive container/capability facts, never a window title or
                 // a failed text read. Provider failure stays Unknown; only a
@@ -122,7 +146,7 @@ impl WindowsSelectionReader {
                 let value = pattern_available(&focused, UIA_ValuePatternId);
                 if unsafe { GetForegroundWindow().0 as usize } == target_hwnd
                     && unsafe { focused.CurrentHasKeyboardFocus() }.ok().is_some_and(|v| v.as_bool()) {
-                    *state = focused_input_state(control, focusable, text, value);
+                    *state = focused_input_state(control, focusable, text, value, None, None);
                 }
                 return Err("focused control is not an editable text field".into());
             }
@@ -133,6 +157,9 @@ impl WindowsSelectionReader {
         Ok(Self {
             _apartment: apartment,
             pattern,
+            focused,
+            automation,
+            target_hwnd,
         })
     }
 
@@ -162,6 +189,10 @@ impl WindowsSelectionReader {
     pub(crate) fn read_document_text(&self) -> Result<String, String> {
         let range = unsafe { self.pattern.DocumentRange() }
             .map_err(|err| format!("accessibility editor text unavailable: {err}"))?;
+        // Some native empty Edit ranges return the accessible label from
+        // GetText. Endpoint equality describes an empty range, not label text.
+        if unsafe { range.CompareEndpoints(TextPatternRangeEndpoint_Start, &range, TextPatternRangeEndpoint_End) }
+            .map_err(|err| err.to_string())? == 0 { return Ok(String::new()); }
         unsafe { range.GetText(8_193) }
             .map(|text| text.to_string())
             .map_err(|err| format!("accessibility editor text read failed: {err}"))
@@ -175,7 +206,9 @@ impl WindowsSelectionReader {
         }
         let range = unsafe { ranges.GetElement(0) }.map_err(|err| err.to_string())?;
         // Empty means an ordinary caret, not an unavailable selection.
-        let selected = unsafe { range.GetText(8_193) }.map_err(|err| err.to_string())?.to_string();
+        let selected = if unsafe { range.CompareEndpoints(TextPatternRangeEndpoint_Start, &range, TextPatternRangeEndpoint_End) }
+            .map_err(|err| err.to_string())? == 0 { String::new() }
+            else { unsafe { range.GetText(8_193) }.map_err(|err| err.to_string())?.to_string() };
         if selected.chars().count() > 8_192 {
             return Err("paste selection exceeds readback limit".into());
         }
@@ -188,6 +221,93 @@ impl WindowsSelectionReader {
             return Err("paste document exceeds readback limit".into());
         }
         Ok(value)
+    }
+
+    pub(crate) fn revisable_document_agrees(&self, document: &str) -> Result<bool, String> {
+        let value: IUIAutomationValuePattern = unsafe { self.focused.GetCurrentPatternAs(UIA_ValuePatternId) }
+            .map_err(|error| error.to_string())?;
+        let value = unsafe { value.CurrentValue() }.map_err(|error| error.to_string())?.to_string();
+        Ok(native_text_matches_value(document, &value)
+            && self.bounded_document()? == document && self.current_observation()?)
+    }
+
+    pub(crate) fn expected_document_after_paste(&self, before: &(String, String), payload: &str) -> Result<String, String> {
+        if self.paste_snapshot()? != *before { return Err("paste selection changed".into()); }
+        unsafe {
+            let selections = self.pattern.GetSelection().map_err(|e| e.to_string())?;
+            if selections.Length().map_err(|e| e.to_string())? != 1 {
+                return Err("paste selection is not contiguous".into());
+            }
+            let selection = selections.GetElement(0).map_err(|e| e.to_string())?;
+            let document = self.pattern.DocumentRange().map_err(|e| e.to_string())?;
+            let prefix = document.Clone().map_err(|e| e.to_string())?;
+            prefix.MoveEndpointByRange(TextPatternRangeEndpoint_End, &selection, TextPatternRangeEndpoint_Start)
+                .map_err(|e| e.to_string())?;
+            let suffix = document.Clone().map_err(|e| e.to_string())?;
+            suffix.MoveEndpointByRange(TextPatternRangeEndpoint_Start, &selection, TextPatternRangeEndpoint_End)
+                .map_err(|e| e.to_string())?;
+            let read = |range: &windows::Win32::UI::Accessibility::IUIAutomationTextRange| -> Result<String, String> {
+                if range.CompareEndpoints(TextPatternRangeEndpoint_Start, range, TextPatternRangeEndpoint_End)
+                    .map_err(|e| e.to_string())? == 0 { return Ok(String::new()); }
+                range.GetText(8_193).map(|s| s.to_string()).map_err(|e| e.to_string())
+            };
+            let expected = super::native_edit_result(&before.0, &before.1, &read(&prefix)?, &read(&suffix)?, payload)?;
+            if self.paste_snapshot()? != *before { return Err("native document changed during edit prediction".into()); }
+            Ok(expected)
+        }
+    }
+
+    pub(crate) fn same_target(&self, other: &Self) -> bool {
+        self.same_target_observation(other).unwrap_or(false)
+    }
+
+    pub(crate) fn same_target_observation(&self, other: &Self) -> Result<bool, String> {
+        if self.target_hwnd != other.target_hwnd { return Ok(false); }
+        unsafe { self.automation.CompareElements(&self.focused, &other.focused) }
+            .map(|same| same.as_bool()).map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn is_current(&self) -> bool {
+        self.current_observation().unwrap_or(false)
+    }
+
+    pub(crate) fn current_observation(&self) -> Result<bool, String> {
+        unsafe {
+            if GetForegroundWindow().0 as usize != self.target_hwnd { return Ok(false); }
+            let focused = self.automation.GetFocusedElement().map_err(|error| error.to_string())?;
+            if !self.automation.CompareElements(&self.focused, &focused).map_err(|error| error.to_string())?.as_bool()
+                || !self.focused.CurrentHasKeyboardFocus().map_err(|error| error.to_string())?.as_bool()
+                || !self.focused.CurrentIsEnabled().map_err(|error| error.to_string())?.as_bool() {
+                return Ok(false);
+            }
+            let value: IUIAutomationValuePattern = self.focused.GetCurrentPatternAs(UIA_ValuePatternId)
+                .map_err(|error| error.to_string())?;
+            Ok(!value.CurrentIsReadOnly().map_err(|error| error.to_string())?.as_bool())
+        }
+    }
+
+    /// Select only the receipted session suffix; never synthesize Ctrl+A or
+    /// move focus. UIA's character units must expose the exact expected bytes.
+    pub(crate) fn select_owned_suffix(&self, document: &str, expected: &str) -> Result<(), String> {
+        if expected.is_empty() || !self.is_current() || self.paste_snapshot()? != (document.into(), String::new())
+            || !self.caret_at_end()? { return Err("session editor changed".into()); }
+        unsafe {
+            let selection = self.pattern.GetSelection().map_err(|e| e.to_string())?
+                .GetElement(0).map_err(|e| e.to_string())?;
+            let range = selection.Clone().map_err(|e| e.to_string())?;
+            range.MoveEndpointByUnit(TextPatternRangeEndpoint_Start,
+                windows::Win32::UI::Accessibility::TextUnit_Character,
+                -(expected.chars().count() as i32)).map_err(|e| e.to_string())?;
+            if range.GetText(8_193).map_err(|e| e.to_string())?.to_string() != expected
+                || !self.is_current() || self.bounded_document()? != document {
+                return Err("session suffix is not an exact native range".into());
+            }
+            range.Select().map_err(|e| e.to_string())?;
+        }
+        if !self.is_current() || self.paste_snapshot()? != (document.into(), expected.into()) {
+            return Err("session selection changed".into());
+        }
+        Ok(())
     }
 
     pub(crate) fn caret_at_end(&self) -> Result<bool, String> {
@@ -204,29 +324,61 @@ impl WindowsSelectionReader {
             let tail = self.pattern.DocumentRange().map_err(|err| err.to_string())?;
             tail.MoveEndpointByRange(TextPatternRangeEndpoint_Start, &selection, TextPatternRangeEndpoint_End)
                 .map_err(|err| err.to_string())?;
+            if tail.CompareEndpoints(TextPatternRangeEndpoint_Start, &tail, TextPatternRangeEndpoint_End)
+                .map_err(|err| err.to_string())? == 0 { return Ok(true); }
             let text = tail.GetText(8_193).map_err(|err| err.to_string())?.to_string();
             Ok(text.chars().all(|ch| matches!(ch, '\r' | '\n')))
         }
     }
 }
 
+fn native_text_matches_value(document: &str, value: &str) -> bool {
+    // UIA may expose a terminal paragraph marker. Preserve the complete value
+    // and permit only that suffix; a placeholder is never a user-text prefix.
+    document.strip_prefix(value).is_some_and(|suffix|
+        suffix.chars().all(|ch| matches!(ch, '\r' | '\n')))
+}
+
 #[cfg(test)]
 mod focus_tests {
     use super::*;
+
+    #[test]
+    fn reversible_baseline_requires_real_value_and_preserves_user_text() {
+        assert!(!native_text_matches_value("输入内容\n", ""), "an empty editor's prompt cannot be a user prefix");
+        assert!(!native_text_matches_value("用户原文\n", "新原文"));
+        for text in ["", "用户原文🔒：\r\n", "日本語\n한국어", "Words at 9."] {
+            assert!(native_text_matches_value(text, text));
+            assert!(native_text_matches_value(&format!("{text}\r\n"), text));
+            assert!(!native_text_matches_value(&format!("{text} extra"), text));
+        }
+    }
     use windows::Win32::UI::Accessibility::{UIA_CustomControlTypeId, UIA_DocumentControlTypeId};
 
     #[test]
     fn exposed_window_container_is_distinct_from_unreadable_or_custom_editor() {
-        assert_eq!(focused_input_state(UIA_WindowControlTypeId, Some(false), Some(false), Some(false)), FocusedInputState::NonEditable);
-        assert_eq!(focused_input_state(UIA_EditControlTypeId, Some(true), Some(false), Some(false)), FocusedInputState::Editable);
+        assert_eq!(focused_input_state(UIA_WindowControlTypeId, Some(false), Some(false), Some(false), None, None), FocusedInputState::NonEditable);
+        assert_eq!(focused_input_state(UIA_EditControlTypeId, Some(true), Some(false), Some(false), Some(false), Some(true)), FocusedInputState::Editable);
         for control in [UIA_CustomControlTypeId, UIA_DocumentControlTypeId] {
-            assert_eq!(focused_input_state(control, Some(false), Some(false), Some(false)), FocusedInputState::Unknown);
+            assert_eq!(focused_input_state(control, Some(false), Some(false), Some(false), None, None), FocusedInputState::Unknown);
         }
         for facts in [(None, Some(false), Some(false)), (Some(false), None, Some(false)),
             (Some(false), Some(false), None), (Some(true), Some(false), Some(false)),
             (Some(false), Some(true), Some(false)), (Some(false), Some(false), Some(true))] {
-            assert_eq!(focused_input_state(UIA_WindowControlTypeId, facts.0, facts.1, facts.2), FocusedInputState::Unknown);
+            assert_eq!(focused_input_state(UIA_WindowControlTypeId, facts.0, facts.1, facts.2, None, None), FocusedInputState::Unknown);
         }
+    }
+
+    #[test]
+    fn read_only_edit_role_cannot_consume_dictation_but_unknown_accessibility_can_fallback() {
+        // The failed long recording moved from an editable note to a read-only
+        // 472-character instruction box. Both expose Edit and TextPattern.
+        for enabled in [None, Some(true), Some(false)] {
+            assert_eq!(focused_input_state(UIA_EditControlTypeId, Some(true), Some(true), Some(true), Some(true), enabled), FocusedInputState::NonEditable);
+        }
+        assert_eq!(focused_input_state(UIA_EditControlTypeId, Some(true), Some(true), Some(true), Some(false), Some(false)), FocusedInputState::NonEditable);
+        assert_eq!(focused_input_state(UIA_EditControlTypeId, Some(true), Some(true), Some(true), Some(false), Some(true)), FocusedInputState::Editable);
+        assert_eq!(focused_input_state(UIA_EditControlTypeId, Some(true), Some(true), None, None, Some(true)), FocusedInputState::Unknown);
     }
 }
 

@@ -85,8 +85,8 @@ assertMatch(
 );
 
 assertMatch(
-  libRs,
-  /#\[cfg\(target_os = "windows"\)\]\s*\{[\s\S]*?apply_mica\(&main, None\)[\s\S]*?apply_windows_caption_color_for_theme\(&main,\s*coordinator\.prefs\(\)\.get\(\)\.dark_mode\);/,
+  libRs.split('fn ensure_main_window')[1]?.split('pub(crate) fn show_main_window')[0] ?? '',
+  /#\[cfg\(target_os = "windows"\)\]\s*\{[\s\S]*?apply_mica\(&window, None\)[\s\S]*?coordinator\.prefs\(\)\.get\(\)\.dark_mode[\s\S]*?apply_windows_caption_color_for_theme\(&window, dark_mode\);/,
   'windows runtime should keep native chrome while applying Mica and caption color',
 );
 

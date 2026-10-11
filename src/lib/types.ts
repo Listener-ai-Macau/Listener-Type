@@ -381,6 +381,26 @@ export interface StylePackRuntimeDiagnostics {
   previewOmitsFrontApp: boolean;
 }
 
+export interface CloudAccountStatus {
+  configured: boolean;
+  signedIn: boolean;
+  customer: string | null;
+  managedEnabled: boolean;
+  enrollmentState: string | null;
+  error: string | null;
+}
+
+export interface CloudOwnerVoiceprint {
+  id: string;
+  speakerName: string;
+  accountFingerprint: string;
+}
+
+export interface CloudVoiceprintRecord {
+  id: string;
+  speakerName: string;
+}
+
 export interface UserPreferences {
   hotkey: HotkeyBinding;
   dictationHotkey: ShortcutBinding;
@@ -400,6 +420,10 @@ export interface UserPreferences {
   /** 输入源是否已经由用户显式改过。false 表示沿用产品默认 embeddedBle。 */
   dictationInputSourceUserOverridden: boolean;
   activeAsrProvider: string;
+  cloudOwnerVoiceprint: CloudOwnerVoiceprint | null;
+  /** Preserve ordinary ASR content; use owner activity only for automatic end. */
+  ownerActivityOnly?: boolean;
+  cloudModelRoute: 'byok' | 'managed';
   /** 1.0.2 Windows 错误 Foundry 默认是否已完成一次性迁移。 */
   activeAsrProviderDefaultMigrated: boolean;
   activeLlmProvider: string;
@@ -553,6 +577,8 @@ export interface VoiceprintStatus {
   threshold: number;
   error: string | null;
   modelName: string;
+  failureStage: 'preparation' | 'device' | 'capture' | 'phrase' | 'features' | 'storage' | null;
+  canRetrySave: boolean;
   runtimeVersion: string;
   localOnly: boolean;
 }

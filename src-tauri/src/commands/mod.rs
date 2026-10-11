@@ -52,6 +52,8 @@ use crate::types::{
 
 type CoordinatorState<'a> = State<'a, Arc<Coordinator>>;
 
+pub mod cloud_account;
+pub(crate) use cloud_account::*;
 pub mod device;
 pub(crate) use device::*;
 pub use device::{
@@ -119,7 +121,9 @@ pub fn get_voiceprint_status(
     coord: CoordinatorState<'_>,
 ) -> crate::speaker_verification::VoiceprintStatus {
     let wake_phrase = coord.prefs().get().voice_wake_phrase;
-    crate::speaker_verification::status_for_phrase(&wake_phrase)
+    let mut status = crate::speaker_verification::status_for_phrase(&wake_phrase);
+    crate::asr::cloud_gateway::overlay_enrollment_status(&mut status);
+    status
 }
 
 #[tauri::command]
@@ -135,9 +139,20 @@ pub async fn start_voiceprint_enrollment(
 }
 
 #[tauri::command]
+pub async fn retry_voiceprint_save(
+    coord: CoordinatorState<'_>,
+) -> Result<crate::speaker_verification::VoiceprintStatus, String> {
+    let wake_phrase = coord.prefs().get().voice_wake_phrase;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::speaker_verification::retry_enrollment_save(&wake_phrase)
+    }).await.map_err(|err| format!("保存声纹任务失败: {err}"))?
+}
+
+#[tauri::command]
 pub async fn cancel_voiceprint_enrollment(
     coord: CoordinatorState<'_>,
 ) -> Result<crate::speaker_verification::VoiceprintStatus, String> {
+    crate::asr::cloud_gateway::cancel_enrollment().await;
     let wake_phrase = coord.prefs().get().voice_wake_phrase;
     tauri::async_runtime::spawn_blocking(move || {
         crate::speaker_verification::cancel_enrollment(&wake_phrase)
@@ -150,13 +165,22 @@ pub async fn cancel_voiceprint_enrollment(
 pub async fn delete_voiceprint(
     coord: CoordinatorState<'_>,
 ) -> Result<crate::speaker_verification::VoiceprintStatus, String> {
-    let wake_phrase = coord.prefs().get().voice_wake_phrase;
-    tauri::async_runtime::spawn_blocking(move || {
+    coord.cancel_dictation();
+    let mut prefs=coord.prefs().get();
+    let phrase=prefs.voice_wake_phrase.clone();
+    let mut status=tauri::async_runtime::spawn_blocking(move || {
         crate::speaker_verification::delete_template()?;
-        Ok(crate::speaker_verification::status_for_phrase(&wake_phrase))
-    })
-    .await
-    .map_err(|err| format!("删除声纹任务失败: {err}"))?
+        Ok::<_,String>(crate::speaker_verification::status_for_phrase(&phrase))
+    }).await.map_err(|err|format!("删除声纹任务失败: {err}"))??;
+    let route=prefs.cloud_model_route;
+    let profile=prefs.cloud_owner_voiceprint.take();
+    coord.prefs().set(prefs).map_err(|_|"无法清除本机云端声纹绑定")?;
+    let proxy=crate::coordinator::read_asr_proxy_config("volcengine")
+        .unwrap_or_else(|_|crate::polish::ProviderProxyConfig::provider_default("volcengine"));
+    if let Err(error)=crate::asr::cloud_gateway::delete_binding(route,profile,
+        crate::coordinator::read_volc_credentials(),proxy).await { status.error=Some(error); }
+    // Local template deletion never changes automatic wake/firmware preferences.
+    Ok(status)
 }
 
 #[tauri::command]
@@ -374,6 +398,28 @@ pub fn get_capsule_state(coord: CoordinatorState<'_>) -> Option<CapsulePayload> 
     coord.capsule_latest_payload()
 }
 
+#[tauri::command]
+pub fn reset_capsule_position(coord: CoordinatorState<'_>, app: AppHandle) -> Result<(), String> {
+    coord.reset_capsule_position(&app)
+}
+
+#[tauri::command]
+pub async fn move_capsule(
+    coord: CoordinatorState<'_>, app: AppHandle, window: tauri::WebviewWindow, phase: String,
+) -> Result<(), String> {
+    if window.label() != "capsule" {
+        return Err("Only the capsule can move itself".into());
+    }
+    let coordinator = coord.inner().clone();
+    let app_for_main = app.clone();
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.run_on_main_thread(move || {
+        let result = coordinator.move_capsule(&app_for_main, &window, &phase);
+        let _ = sender.send(result);
+    }).map_err(|error| error.to_string())?;
+    receiver.await.map_err(|error| error.to_string())?
+}
+
 trait SettingsWriter {
     fn sync_active_providers(
         &self,
@@ -557,6 +603,9 @@ pub fn set_settings(
     // 没有 HotkeySettingsContext，必须靠事件感知录音键变化，否则面板可见时
     // 用户改键会让浮窗里的 "{recordHotkey}" 文案一直停留在旧值。
     persist_settings(&*coord, prefs.clone())?;
+    if prefs.show_capsule != previous_prefs.show_capsule {
+        coord.refresh_capsule_visibility();
+    }
     if input_source_changed {
         coord.refresh_embedded_ble_listener();
     }

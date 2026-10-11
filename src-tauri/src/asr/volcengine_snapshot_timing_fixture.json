@@ -1,0 +1,508 @@
+{
+  "provenance": {
+    "source_session_id": "14194dfd-ed02-4eea-9f26-8267bfc4bc01",
+    "source_report": "E:\\ListenerAnalysisState\\new-chat\\beta35-state-review\\source-authority-replay-runs\\20261004-113013-581364+0800\\source-authority-result.json",
+    "source_report_sha256": "0ee1e44130b59b05eed922e1c5354552e78a017a601e40e6a03218ba34f35169",
+    "captured_run": "20261004-113013-581364+0800",
+    "scope": "Archived provider timing from the same retained original PCM; no device or editor claim"
+  },
+  "binding": {
+    "parent_stream_id": 2,
+    "parent_lifecycle_generation": 1,
+    "source_epoch": 25,
+    "child_decoder_id": 6,
+    "captured_origin_bytes": 0,
+    "captured_pcm_bytes": 364800,
+    "captured_through_ms": 11400
+  },
+  "parent_online": {
+    "text": "开始录音，我把今天的事情说明完了，需要保留的内容是整理文件，再检查设备，最后确认会议时间，这就是本段最后一句话",
+    "definite": false,
+    "words": [
+      {
+        "text": "开始",
+        "start_ms": 680,
+        "end_ms": 760
+      },
+      {
+        "text": "录音",
+        "start_ms": 920,
+        "end_ms": 1000
+      },
+      {
+        "text": "我",
+        "start_ms": 1080,
+        "end_ms": 1160
+      },
+      {
+        "text": "把",
+        "start_ms": 1240,
+        "end_ms": 1320
+      },
+      {
+        "text": "今天",
+        "start_ms": 1560,
+        "end_ms": 1640
+      },
+      {
+        "text": "的",
+        "start_ms": 1720,
+        "end_ms": 1800
+      },
+      {
+        "text": "事情",
+        "start_ms": 1800,
+        "end_ms": 1880
+      },
+      {
+        "text": "说明",
+        "start_ms": 2280,
+        "end_ms": 2360
+      },
+      {
+        "text": "完了",
+        "start_ms": 2520,
+        "end_ms": 2600
+      },
+      {
+        "text": "需要",
+        "start_ms": 2920,
+        "end_ms": 3000
+      },
+      {
+        "text": "保留",
+        "start_ms": 3240,
+        "end_ms": 3320
+      },
+      {
+        "text": "的",
+        "start_ms": 3480,
+        "end_ms": 3560
+      },
+      {
+        "text": "内容",
+        "start_ms": 3640,
+        "end_ms": 3720
+      },
+      {
+        "text": "是",
+        "start_ms": 4120,
+        "end_ms": 4200
+      },
+      {
+        "text": "整理",
+        "start_ms": 4360,
+        "end_ms": 4440
+      },
+      {
+        "text": "文件",
+        "start_ms": 4600,
+        "end_ms": 4680
+      },
+      {
+        "text": "再",
+        "start_ms": 5240,
+        "end_ms": 5320
+      },
+      {
+        "text": "检查",
+        "start_ms": 5400,
+        "end_ms": 5480
+      },
+      {
+        "text": "设备",
+        "start_ms": 5560,
+        "end_ms": 5640
+      },
+      {
+        "text": "最后",
+        "start_ms": 6360,
+        "end_ms": 6440
+      },
+      {
+        "text": "确认",
+        "start_ms": 6760,
+        "end_ms": 6840
+      },
+      {
+        "text": "会议",
+        "start_ms": 7160,
+        "end_ms": 7240
+      },
+      {
+        "text": "时间",
+        "start_ms": 7320,
+        "end_ms": 7400
+      },
+      {
+        "text": "这",
+        "start_ms": 7640,
+        "end_ms": 7720
+      },
+      {
+        "text": "就是",
+        "start_ms": 7800,
+        "end_ms": 7880
+      },
+      {
+        "text": "本",
+        "start_ms": 8040,
+        "end_ms": 8120
+      },
+      {
+        "text": "段",
+        "start_ms": 8200,
+        "end_ms": 8280
+      },
+      {
+        "text": "最后",
+        "start_ms": 8360,
+        "end_ms": 8440
+      },
+      {
+        "text": "一",
+        "start_ms": 8520,
+        "end_ms": 8600
+      },
+      {
+        "text": "句话",
+        "start_ms": 8740,
+        "end_ms": 8820
+      }
+    ]
+  },
+  "child_final": {
+    "text": "开始录音，我把今天的事情说明完了，需要保留的内容是整理文件，再检查设备，最后确认会议时间，这就是本段最后一句话。把行政长官逼的说一句补一句。",
+    "words": [
+      {
+        "end_ms": 520,
+        "start_ms": 280,
+        "text": "开"
+      },
+      {
+        "end_ms": 640,
+        "start_ms": 520,
+        "text": "始"
+      },
+      {
+        "end_ms": 840,
+        "start_ms": 640,
+        "text": "录"
+      },
+      {
+        "end_ms": 1000,
+        "start_ms": 840,
+        "text": "音"
+      },
+      {
+        "end_ms": 1200,
+        "start_ms": 1000,
+        "text": "我"
+      },
+      {
+        "end_ms": 1360,
+        "start_ms": 1200,
+        "text": "把"
+      },
+      {
+        "end_ms": 1520,
+        "start_ms": 1360,
+        "text": "今"
+      },
+      {
+        "end_ms": 1600,
+        "start_ms": 1520,
+        "text": "天"
+      },
+      {
+        "end_ms": 1760,
+        "start_ms": 1600,
+        "text": "的"
+      },
+      {
+        "end_ms": 1920,
+        "start_ms": 1760,
+        "text": "事"
+      },
+      {
+        "end_ms": 2080,
+        "start_ms": 1920,
+        "text": "情"
+      },
+      {
+        "end_ms": 2320,
+        "start_ms": 2120,
+        "text": "说"
+      },
+      {
+        "end_ms": 2520,
+        "start_ms": 2320,
+        "text": "明"
+      },
+      {
+        "end_ms": 2720,
+        "start_ms": 2520,
+        "text": "完"
+      },
+      {
+        "end_ms": 2880,
+        "start_ms": 2720,
+        "text": "了"
+      },
+      {
+        "end_ms": 3040,
+        "start_ms": 2880,
+        "text": "需"
+      },
+      {
+        "end_ms": 3200,
+        "start_ms": 3040,
+        "text": "要"
+      },
+      {
+        "end_ms": 3360,
+        "start_ms": 3200,
+        "text": "保"
+      },
+      {
+        "end_ms": 3480,
+        "start_ms": 3360,
+        "text": "留"
+      },
+      {
+        "end_ms": 3680,
+        "start_ms": 3480,
+        "text": "的"
+      },
+      {
+        "end_ms": 3800,
+        "start_ms": 3680,
+        "text": "内"
+      },
+      {
+        "end_ms": 3920,
+        "start_ms": 3800,
+        "text": "容"
+      },
+      {
+        "end_ms": 4240,
+        "start_ms": 3920,
+        "text": "是"
+      },
+      {
+        "end_ms": 4480,
+        "start_ms": 4280,
+        "text": "整"
+      },
+      {
+        "end_ms": 4640,
+        "start_ms": 4480,
+        "text": "理"
+      },
+      {
+        "end_ms": 4800,
+        "start_ms": 4640,
+        "text": "文"
+      },
+      {
+        "end_ms": 4960,
+        "start_ms": 4800,
+        "text": "件"
+      },
+      {
+        "end_ms": 5240,
+        "start_ms": 5040,
+        "text": "再"
+      },
+      {
+        "end_ms": 5440,
+        "start_ms": 5240,
+        "text": "检"
+      },
+      {
+        "end_ms": 5560,
+        "start_ms": 5440,
+        "text": "查"
+      },
+      {
+        "end_ms": 5760,
+        "start_ms": 5560,
+        "text": "设"
+      },
+      {
+        "end_ms": 5960,
+        "start_ms": 5760,
+        "text": "备"
+      },
+      {
+        "end_ms": 6480,
+        "start_ms": 6280,
+        "text": "最"
+      },
+      {
+        "end_ms": 6640,
+        "start_ms": 6480,
+        "text": "后"
+      },
+      {
+        "end_ms": 6840,
+        "start_ms": 6640,
+        "text": "确"
+      },
+      {
+        "end_ms": 6960,
+        "start_ms": 6840,
+        "text": "认"
+      },
+      {
+        "end_ms": 7160,
+        "start_ms": 6960,
+        "text": "会"
+      },
+      {
+        "end_ms": 7240,
+        "start_ms": 7160,
+        "text": "议"
+      },
+      {
+        "end_ms": 7440,
+        "start_ms": 7280,
+        "text": "时"
+      },
+      {
+        "end_ms": 7560,
+        "start_ms": 7440,
+        "text": "间"
+      },
+      {
+        "end_ms": 7760,
+        "start_ms": 7560,
+        "text": "这"
+      },
+      {
+        "end_ms": 7880,
+        "start_ms": 7760,
+        "text": "就"
+      },
+      {
+        "end_ms": 8000,
+        "start_ms": 7880,
+        "text": "是"
+      },
+      {
+        "end_ms": 8200,
+        "start_ms": 8000,
+        "text": "本"
+      },
+      {
+        "end_ms": 8360,
+        "start_ms": 8200,
+        "text": "段"
+      },
+      {
+        "end_ms": 8520,
+        "start_ms": 8400,
+        "text": "最"
+      },
+      {
+        "end_ms": 8600,
+        "start_ms": 8520,
+        "text": "后"
+      },
+      {
+        "end_ms": 8680,
+        "start_ms": 8600,
+        "text": "一"
+      },
+      {
+        "end_ms": 8840,
+        "start_ms": 8680,
+        "text": "句"
+      },
+      {
+        "end_ms": 9000,
+        "start_ms": 8840,
+        "text": "话"
+      },
+      {
+        "end_ms": 9400,
+        "start_ms": 9360,
+        "text": "把"
+      },
+      {
+        "end_ms": 9600,
+        "start_ms": 9560,
+        "text": "行"
+      },
+      {
+        "end_ms": 9720,
+        "start_ms": 9640,
+        "text": "政"
+      },
+      {
+        "end_ms": 9920,
+        "start_ms": 9800,
+        "text": "长"
+      },
+      {
+        "end_ms": 10080,
+        "start_ms": 9960,
+        "text": "官"
+      },
+      {
+        "end_ms": 10320,
+        "start_ms": 10200,
+        "text": "逼"
+      },
+      {
+        "end_ms": 10440,
+        "start_ms": 10400,
+        "text": "的"
+      },
+      {
+        "end_ms": 10640,
+        "start_ms": 10520,
+        "text": "说"
+      },
+      {
+        "end_ms": 10760,
+        "start_ms": 10640,
+        "text": "一"
+      },
+      {
+        "end_ms": 10840,
+        "start_ms": 10760,
+        "text": "句"
+      },
+      {
+        "end_ms": 11000,
+        "start_ms": 10960,
+        "text": "补"
+      },
+      {
+        "end_ms": 11160,
+        "start_ms": 11080,
+        "text": "一"
+      },
+      {
+        "end_ms": 11240,
+        "start_ms": 11160,
+        "text": "句"
+      }
+    ]
+  },
+  "owner_ranges_ms": [
+    [
+      0,
+      9000
+    ]
+  ],
+  "foreign_ranges_ms": [
+    [
+      9360,
+      14662
+    ]
+  ],
+  "expected_child_owned_rendering": "开始录音，我把今天的事情说明完了，需要保留的内容是整理文件，再检查设备，最后确认会议时间，这就是本段最后一句话。",
+  "expected_foreign_text": "把行政长官逼的说一句补一句。"
+}

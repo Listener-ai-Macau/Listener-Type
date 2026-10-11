@@ -1,7 +1,8 @@
 //! Own the clipboard across asynchronous paste and final transcript retention.
 //! A queued shortcut is not a receipt: only an observed payload in the same
 //! editor can release it. This is not acceptance of the entire session text.
-//! All decisions are shared; native readers only observe.
+//! Shared session ownership authorizes lossless final supplements. Native
+//! adapters can select only the exact receipted range in the current editor.
 
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
@@ -11,6 +12,10 @@ use parking_lot::Mutex;
 
 use crate::types::{InsertStatus, PasteShortcut};
 
+#[cfg(all(test, target_os = "windows"))]
+#[path = "clipboard_handoff/native_supplement_test.rs"]
+mod native_supplement_test;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RetentionResult {
     Stored,
@@ -19,16 +24,116 @@ pub(crate) enum RetentionResult {
     Failed,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ClipboardTicket {
     id: u64,
     revision: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PasteReceiptProof {
+    ExactEdit,
+    WholePayloadDocument,
+    /// No shortcut was sent: the current owned session range was read back.
+    OwnedSessionRange,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PasteReceiptOutcome {
+    Confirmed(PasteReceiptProof),
+    Unsupported,
+    TimedOut,
+    Superseded,
+    WorkerUnavailable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PasteReceiptCompletion {
+    pub(crate) ticket: ClipboardTicket,
+    pub(crate) observed_at: Instant,
+    pub(crate) outcome: PasteReceiptOutcome,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PasteReceiptPoll {
+    Pending,
+    Ready(PasteReceiptCompletion),
+    Consumed,
+}
+
+pub(crate) struct PasteReceiptHandle {
+    ticket: ClipboardTicket,
+    receiver: Option<Receiver<PasteReceiptCompletion>>,
+}
+
+impl std::fmt::Debug for PasteReceiptHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PasteReceiptHandle")
+            .field("ticket", &self.ticket)
+            .field("consumed", &self.receiver.is_none())
+            .finish()
+    }
+}
+
+impl PasteReceiptHandle {
+    pub(crate) fn completed(completion: PasteReceiptCompletion) -> Self {
+        let (sender, receiver) = mpsc::channel();
+        let ticket = completion.ticket;
+        let _ = sender.send(completion);
+        Self { ticket, receiver: Some(receiver) }
+    }
+    pub(crate) fn ticket(&self) -> ClipboardTicket {
+        self.ticket
+    }
+
+    /// Non-blocking, one-shot receipt observation. A completed value remains
+    /// queued in this handle even if a newer paste supersedes the worker's
+    /// current lease before the coordinator polls it.
+    pub(crate) fn try_take(&mut self) -> PasteReceiptPoll {
+        let Some(receiver) = self.receiver.as_ref() else {
+            return PasteReceiptPoll::Consumed;
+        };
+        match receiver.try_recv() {
+            Ok(completion) => {
+                self.receiver = None;
+                PasteReceiptPoll::Ready(completion)
+            }
+            Err(mpsc::TryRecvError::Empty) => PasteReceiptPoll::Pending,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.receiver = None;
+                PasteReceiptPoll::Ready(PasteReceiptCompletion {
+                    ticket: self.ticket,
+                    observed_at: Instant::now(),
+                    outcome: PasteReceiptOutcome::WorkerUnavailable,
+                })
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct PasteSubmission {
+    pub(crate) status: InsertStatus,
+    pub(crate) receipt: Option<PasteReceiptHandle>,
+    pub(crate) range_permission: SessionRangePermission,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SessionRangePermission {
+    NotRequested,
+    /// No session body has been written; the current target cannot acquire it.
+    Unavailable,
+    Unobserved,
+    Owned,
+    Revoked,
+}
+
 enum Command {
-    Paste(String, bool, PasteShortcut, Option<String>, Sender<PasteResult>),
+    Paste(String, bool, PasteShortcut, Option<String>, Option<SessionPasteScope>, Sender<PasteResult>),
     Copy(String, Sender<bool>),
     Retain(ClipboardTicket, String, bool, Sender<RetentionResult>),
+    Revisable(String, PasteShortcut, SessionPasteScope, Sender<PasteResult>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,13 +144,34 @@ pub(crate) enum TerminalAppendDecision {
     Unavailable,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct SessionPasteScope {
+    pub session_id: uuid::Uuid,
+    pub previous_body: String,
+    pub replace: bool,
+}
+
 struct PasteResult {
     status: InsertStatus,
     terminal_decision: Option<TerminalAppendDecision>,
+    receipt: Option<PasteReceiptHandle>,
+    range_permission: SessionRangePermission,
 }
 
 fn paste_dispatch_allowed(focus: crate::selection::FocusedInputState) -> bool {
     focus != crate::selection::FocusedInputState::NonEditable
+}
+
+fn revisable_permission(existing_body: bool, chain: bool, observed_revocation: bool,
+    facts: [Option<bool>; 4]) -> SessionRangePermission {
+    if observed_revocation || facts.contains(&Some(false)) {
+        if existing_body { SessionRangePermission::Revoked }
+        else { SessionRangePermission::Unavailable }
+    } else if chain && facts.iter().all(|fact| *fact == Some(true)) {
+        SessionRangePermission::Owned
+    } else {
+        SessionRangePermission::Unobserved
+    }
 }
 
 /// An old paste receipt permits clipboard retention, not a new insertion.
@@ -114,21 +240,64 @@ pub(super) fn begin_external_write() -> parking_lot::MutexGuard<'static, u64> {
 }
 
 pub(super) fn paste(text: &str, restore: bool, shortcut: PasteShortcut) -> InsertStatus {
-    let (sender, receiver) = mpsc::channel();
-    if WORKER
-        .send(Command::Paste(text.into(), restore, shortcut, None, sender))
-        .is_err()
-    {
-        return InsertStatus::Failed;
-    }
-    receiver.recv().map(|result| result.status).unwrap_or(InsertStatus::Failed)
+    paste_with_receipt(text, restore, shortcut).status
 }
 
-pub(crate) fn paste_terminal_suffix(expected: &str, suffix: &str, restore: bool, shortcut: PasteShortcut)
-    -> Result<InsertStatus, TerminalAppendDecision>
+pub(crate) fn paste_with_receipt(
+    text: &str,
+    restore: bool,
+    shortcut: PasteShortcut,
+) -> PasteSubmission {
+    paste_scoped_with_receipt(text, restore, shortcut, None)
+}
+
+pub(crate) fn paste_scoped_with_receipt(text: &str, restore: bool, shortcut: PasteShortcut,
+    scope: Option<SessionPasteScope>) -> PasteSubmission {
+    let (sender, receiver) = mpsc::channel();
+    if WORKER
+        .send(Command::Paste(text.into(), restore, shortcut, None, scope, sender))
+        .is_err()
+    {
+        return PasteSubmission {
+            status: InsertStatus::Failed,
+            receipt: None,
+            range_permission: SessionRangePermission::NotRequested,
+        };
+    }
+    receiver
+        .recv()
+        .map(|result| PasteSubmission {
+            status: result.status,
+            receipt: result.receipt,
+            range_permission: result.range_permission,
+        })
+        .unwrap_or(PasteSubmission {
+            status: InsertStatus::Failed,
+            receipt: None,
+            range_permission: SessionRangePermission::NotRequested,
+        })
+}
+
+/// A draft has no blind paste fallback. The worker must own and be able to
+/// select precisely this session's range, including on the first dispatch.
+pub(crate) fn revisable_session_with_receipt(text: &str, shortcut: PasteShortcut,
+    scope: SessionPasteScope) -> PasteSubmission {
+    let (reply, result) = mpsc::channel();
+    if WORKER.send(Command::Revisable(text.into(), shortcut, scope, reply)).is_err() {
+        return PasteSubmission { status: InsertStatus::Failed, receipt: None,
+            range_permission: SessionRangePermission::Revoked };
+    }
+    result.recv().map(|result| PasteSubmission { status: result.status, receipt: result.receipt,
+        range_permission: result.range_permission })
+        .unwrap_or(PasteSubmission { status: InsertStatus::Failed, receipt: None,
+            range_permission: SessionRangePermission::Revoked })
+}
+
+pub(crate) fn paste_terminal_suffix(expected: &str, suffix: &str, restore: bool, shortcut: PasteShortcut,
+    scope: Option<SessionPasteScope>) -> Result<InsertStatus, TerminalAppendDecision>
 {
     let (sender, receiver) = mpsc::channel();
-    if WORKER.send(Command::Paste(suffix.into(), restore, shortcut, Some(expected.into()), sender)).is_err() {
+    if WORKER.send(Command::Paste(suffix.into(), restore, shortcut, Some(expected.into()), scope, sender)).is_err() {
         return Ok(InsertStatus::Failed);
     }
     match receiver.recv() {
@@ -162,21 +331,23 @@ struct PasteReceipt {
     before: Option<(String, String)>,
     dispatched_at: Instant,
     observation: PasteObservation,
+    completion: Option<Sender<PasteReceiptCompletion>>,
+    // Kept only until the next paste/final retention, on this worker thread.
+    // This is an editor ownership witness, never an ASR/speaker permission.
+    session_body: Option<(uuid::Uuid, String)>,
+    observed_document: Option<String>,
+    expected_session_document: Option<String>,
+    strict_session_edit: bool,
+    staged_selection: bool,
 }
 
 #[derive(Default)]
 struct PasteObservation {
     consumed: bool,
-    proof: Option<PasteConsumptionProof>,
+    proof: Option<PasteReceiptProof>,
     attempts: u32,
     last_shape: Option<(usize, usize, usize, bool)>,
     read_failed: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PasteConsumptionProof {
-    ExactEdit,
-    WholePayloadDocument,
 }
 
 impl PasteObservation {
@@ -201,8 +372,60 @@ impl PasteObservation {
 }
 
 impl PasteReceipt {
+    fn ticket(&self) -> ClipboardTicket {
+        ClipboardTicket {
+            id: self.ticket,
+            revision: self.revision,
+        }
+    }
+
+    fn complete(&mut self, observed_at: Instant, outcome: PasteReceiptOutcome) {
+        if let Some(sender) = self.completion.take() {
+            let _ = sender.send(PasteReceiptCompletion {
+                ticket: self.ticket(),
+                observed_at,
+                outcome,
+            });
+        }
+    }
+
     fn observing(&self) -> bool {
         !self.observation.consumed && self.reader.is_some() && self.before.is_some()
+    }
+
+    fn complete_unsupported_if_needed(&mut self, observed_at: Instant) {
+        if self.completion.is_some() && !self.observing() && !self.observation.consumed {
+            self.complete(observed_at, PasteReceiptOutcome::Unsupported);
+        }
+    }
+
+    fn expire_if_due(&mut self, observed_at: Instant) -> bool {
+        if self.completion.is_none()
+            || observed_at.saturating_duration_since(self.dispatched_at) < Duration::from_secs(5)
+        {
+            return false;
+        }
+        log::warn!("[insertion] paste receipt unconfirmed ticket={} observations={} read_failed={} shape={:?} payload_chars={}",
+            self.ticket, self.observation.attempts, self.observation.read_failed, self.observation.last_shape, self.payload.chars().count());
+        self.complete(observed_at, PasteReceiptOutcome::TimedOut);
+        self.reader = None;
+        self.before = None;
+        true
+    }
+
+    fn observe_session_document(&mut self, after: &str, caret_at_end: Option<bool>) {
+        let exact_document = self.observation.consumed && self.session_body.as_ref().is_some_and(|(_, body)|
+            session_document_proves_range(self.expected_session_document.as_deref(), body,
+                &self.payload, self.observation.proof, after, self.strict_session_edit));
+        if exact_document && caret_at_end != Some(false) {
+            // The consumed paste and exact document are already positive
+            // facts. An unavailable caret query cannot erase them. A later
+            // revision still needs a fresh, positively observed end caret.
+            self.observed_document = Some(after.into());
+        } else {
+            self.session_body = None;
+            self.observed_document = None;
+        }
     }
 
     fn observe(&mut self) {
@@ -214,9 +437,22 @@ impl PasteReceipt {
             Ok(after) => {
                 let first_changed_read = self.observation.last_shape.is_none_or(|shape| shape.3) && before != &after;
                 self.observation.observe(before, selected, &self.payload, &after);
+                // Final replacement must preserve the entire observed user
+                // prefix. A generic whole-payload receipt alone cannot prove
+                // that an editor honored the exact selected session range.
+                if self.strict_session_edit && !self.session_body.as_ref().is_some_and(|(_, body)|
+                    session_document_proves_range(self.expected_session_document.as_deref(), body,
+                        &self.payload, self.observation.proof, &after, true)) {
+                    self.observation.consumed = false;
+                    self.observation.proof = None;
+                }
                 if first_changed_read && !self.observation.consumed {
                     log::info!("[insertion] paste readback changed without receipt ticket={} shape={:?} before_lines={} after_lines={} payload_chars={}",
                         self.ticket, self.observation.last_shape, before.matches('\n').count(), after.matches('\n').count(), self.payload.chars().count());
+                }
+                if self.observation.consumed {
+                    let caret = self.reader.as_ref().and_then(|r| r.caret_at_end().ok());
+                    self.observe_session_document(&after, caret);
                 }
             }
             Err(_) => {
@@ -225,16 +461,25 @@ impl PasteReceipt {
             }
         }
         if self.observation.consumed {
+            let observed_at = Instant::now();
+            let proof = self
+                .observation
+                .proof
+                .expect("consumed paste has a receipt proof");
             log::info!("[insertion] paste receipt observed ticket={} elapsed_ms={} observations={} payload_chars={} proof={:?}",
-                self.ticket, self.dispatched_at.elapsed().as_millis(), self.observation.attempts, self.payload.chars().count(), self.observation.proof);
-            self.reader = None;
+                self.ticket, observed_at.saturating_duration_since(self.dispatched_at).as_millis(), self.observation.attempts, self.payload.chars().count(), self.observation.proof);
+            self.complete(observed_at, PasteReceiptOutcome::Confirmed(proof));
+            if self.session_body.is_none() { self.reader = None; }
             self.before = None;
-        } else if self.dispatched_at.elapsed() >= Duration::from_secs(5) {
-            log::warn!("[insertion] paste receipt unconfirmed ticket={} observations={} read_failed={} shape={:?} payload_chars={}",
-                self.ticket, self.observation.attempts, self.observation.read_failed, self.observation.last_shape, self.payload.chars().count());
-            self.reader = None;
-            self.before = None;
+        } else {
+            self.expire_if_due(Instant::now());
         }
+    }
+}
+
+impl Drop for PasteReceipt {
+    fn drop(&mut self) {
+        self.complete(Instant::now(), PasteReceiptOutcome::Superseded);
     }
 }
 
@@ -278,8 +523,13 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                     Err(_) => break,
                 }
             };
+        let (command, revisable) = match command {
+            Some(Command::Revisable(text, shortcut, scope, reply)) =>
+                (Some(Command::Paste(text, false, shortcut, None, Some(scope), reply)), true),
+            command => (command, false),
+        };
         match command {
-            Some(Command::Paste(text, restore, shortcut, expected, reply)) => {
+            Some(Command::Paste(text, restore, shortcut, expected, scope, reply)) => {
                 let capture_started = Instant::now();
                 let (captured_reader, focus) = capture();
                 if !paste_dispatch_allowed(focus) {
@@ -288,11 +538,131 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                     // No write, shortcut, owner generation, or source commit.
                     // Keep an older paste lease intact until its own receipt.
                     let _ = reply.send(PasteResult { status: InsertStatus::DeferredNoTarget,
-                        terminal_decision: expected.as_ref().map(|_| TerminalAppendDecision::Unavailable) });
+                        terminal_decision: expected.as_ref().map(|_| TerminalAppendDecision::Unavailable),
+                        receipt: None, range_permission: if revisable {
+                            revisable_permission(scope.as_ref().is_some_and(|s| !s.previous_body.is_empty()),
+                                false, true, [None; 4]) }
+                            else { SessionRangePermission::NotRequested } });
                     continue;
                 }
-                let reader = if restore && expected.is_none() { None } else { captured_reader };
-                let before = reader.as_ref().and_then(|reader| reader.before().ok());
+                let reader = if restore && expected.is_none() && scope.is_none() { None } else { captured_reader };
+                let mut before = reader.as_ref().and_then(|reader| reader.before().ok());
+                // Observe a prior dispatch before advancing the chain. Native
+                // object identity, exact document, empty selection and end
+                // caret all have to agree; matching text alone is not ownership.
+                if paste_receipt.as_ref().is_some_and(|prior|
+                    !still_owns_transport(prior.ticket, *OWNER.lock(), prior.revision, clipboard_revision())) {
+                    paste_receipt = None;
+                }
+                if let Some(prior) = paste_receipt.as_mut() { prior.observe(); }
+                let staged = revisable && scope.as_ref().zip(paste_receipt.as_ref()).is_some_and(|(scope, prior)| {
+                    prior.staged_selection && prior.observation.consumed
+                        && prior.session_body.as_ref().is_some_and(|(id, body)| *id == scope.session_id && body == &scope.previous_body)
+                        && prior.reader.as_ref().zip(reader.as_ref()).is_some_and(|(old,new)|
+                            old.same_target_observation(new).ok() == Some(true))
+                        && before.as_ref().is_some_and(|(doc, selected)|
+                            prior.observed_document.as_ref() == Some(doc) && selected == &scope.previous_body)
+                });
+                let chain = staged || scope.as_ref().is_some_and(|scope| {
+                    scope.previous_body.is_empty() && !scope.replace || paste_receipt.as_ref().is_some_and(|prior| {
+                        let same_target = prior.reader.as_ref().zip(reader.as_ref())
+                            .is_some_and(|(old, new)| old.same_target(new));
+                        session_range_owned(prior.session_body.as_ref().map(|(id, body)| (*id, body.as_str())),
+                            prior.observation.consumed, prior.observed_document.as_deref(),
+                            scope.session_id, &scope.previous_body,
+                            before.as_ref().map(|(doc, selected)| (doc.as_str(), selected.as_str())),
+                            same_target, reader.as_ref().and_then(|r| r.caret_at_end().ok()))
+                    })
+                });
+                let mut range_permission = SessionRangePermission::NotRequested;
+                if revisable {
+                    let identity = paste_receipt.as_ref().and_then(|prior|
+                        prior.reader.as_ref().zip(reader.as_ref()).and_then(|(old,new)| old.same_target_observation(new).ok()));
+                    let revoked = scope.as_ref().is_some_and(|scope| !scope.previous_body.is_empty()
+                        && (paste_receipt.is_none() || paste_receipt.as_ref().is_some_and(|prior|
+                            prior.session_body.as_ref().is_some_and(|(id, body)| *id != scope.session_id || body != &scope.previous_body)
+                                || identity == Some(false)
+                                || prior.observed_document.as_ref().zip(before.as_ref()).is_some_and(|(old,(doc,_))| old != doc))));
+                    let current = reader.as_ref().and_then(|r| r.current_observation().ok());
+                    let unchanged = reader.as_ref().and_then(|r| r.before().ok())
+                        .zip(before.as_ref()).map(|(fresh, old)| &fresh == old);
+                    let selection = before.as_ref().map(|(_,selected)| selected.is_empty() || staged);
+                    let caret = if staged { Some(true) } else { reader.as_ref().and_then(|r| r.caret_at_end().ok()) };
+                    range_permission = revisable_permission(scope.as_ref().is_some_and(|s| !s.previous_body.is_empty()),
+                        chain, revoked, [current, unchanged, selection, caret]);
+                }
+                if revisable && (text.is_empty() || range_permission != SessionRangePermission::Owned
+                    || focus != crate::selection::FocusedInputState::Editable) {
+                    log::info!("[insertion] revisable acquisition deferred session_id={:?} permission={range_permission:?} focus={focus:?}",
+                        scope.as_ref().map(|scope| scope.session_id));
+                    let _ = reply.send(PasteResult { status: InsertStatus::DeferredNoTarget,
+                        terminal_decision: None, receipt: None, range_permission });
+                    continue;
+                }
+                if revisable {
+                    let agrees = reader.as_ref().zip(before.as_ref())
+                        .and_then(|(r, (document, _))| r.revisable_document_agrees(document).ok());
+                    if agrees != Some(true) {
+                        log::info!("[insertion] revisable baseline deferred: text/value agreement={agrees:?}");
+                        let _ = reply.send(PasteResult { status: InsertStatus::DeferredNoTarget,
+                            terminal_decision: None, receipt: None,
+                            range_permission: revisable_permission(scope.as_ref().is_some_and(|s| !s.previous_body.is_empty()),
+                                false, false, [agrees, None, None, None]) });
+                        continue;
+                    }
+                }
+                // A cloud confirmation may not change the draft's bytes.
+                // Verify the *current* owned range instead of sending a second
+                // paste, manufacturing an edit receipt, or recycling its age.
+                if revisable && !staged && scope.as_ref().is_some_and(|s| s.previous_body == text) {
+                    let completion = PasteReceiptCompletion {
+                        ticket: paste_receipt.as_ref().expect("nonempty owned range").ticket(),
+                        observed_at: Instant::now(),
+                        outcome: PasteReceiptOutcome::Confirmed(PasteReceiptProof::OwnedSessionRange),
+                    };
+                    let _ = reply.send(PasteResult { status: InsertStatus::Inserted,
+                        terminal_decision: None, receipt: Some(PasteReceiptHandle::completed(completion)), range_permission });
+                    continue;
+                }
+                if let Some(scope) = scope.as_ref().filter(|s| s.replace) {
+                    // A failed revision has no append/Unicode fallback. Those
+                    // would duplicate the body instead of supplementing it.
+                    if revisable && chain {
+                        if let Some(prior) = paste_receipt.as_mut() { prior.staged_selection = true; }
+                    }
+                    let selected = staged || chain && focus == crate::selection::FocusedInputState::Editable
+                        && reader.as_ref().zip(before.as_ref()).is_some_and(|(r, (doc, _))|
+                            r.select_owned_suffix(doc, &scope.previous_body).is_ok());
+                    if !selected {
+                        log::info!("[insertion] final supplement deferred: session editor ownership changed session_id={}", scope.session_id);
+                        let _ = reply.send(PasteResult { status: InsertStatus::DeferredNoTarget,
+                            terminal_decision: None, receipt: None, range_permission: if revisable {
+                                SessionRangePermission::Unobserved } else { range_permission } });
+                        continue;
+                    }
+                    before = reader.as_ref().and_then(|r| r.before().ok());
+                    let current = reader.as_ref().and_then(|r| r.current_observation().ok());
+                    let unchanged = before.as_ref().map(|(doc, selected)| selected == &scope.previous_body
+                        && paste_receipt.as_ref().and_then(|p| p.observed_document.as_ref()) == Some(doc));
+                    if current != Some(true) || unchanged != Some(true) {
+                        let _ = reply.send(PasteResult { status: InsertStatus::DeferredNoTarget,
+                            terminal_decision: None, receipt: None, range_permission: if revisable {
+                                revisable_permission(true, true, false, [current, unchanged, Some(true), Some(true)])
+                            } else { range_permission } });
+                        continue;
+                    }
+                }
+                let session_body = scope.as_ref().filter(|_| chain).map(|s| (s.session_id,
+                    if s.replace { text.clone() } else { format!("{}{text}", s.previous_body) }));
+                let strict_session_edit = revisable || scope.as_ref().is_some_and(|s| s.replace);
+                let expected_session_document = session_body.as_ref().and_then(|_| {
+                    reader.as_ref()?.expected_document_after_paste(before.as_ref()?, &text).ok()
+                });
+                if revisable && (text.is_empty() || expected_session_document.is_none()) {
+                    let _ = reply.send(PasteResult { status: InsertStatus::DeferredNoTarget,
+                        terminal_decision: None, receipt: None, range_permission: SessionRangePermission::Unobserved });
+                    continue;
+                }
                 let terminal_decision = expected.as_ref().map(|expected| {
                     let caret_at_end = reader.as_ref().and_then(|reader| reader.caret_at_end().ok());
                     terminal_append_decision(before.as_ref().map(|(doc, selected)| (doc.as_str(), selected.as_str())),
@@ -300,7 +670,7 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                 });
                 if terminal_decision.is_some_and(|decision| decision != TerminalAppendDecision::Append) {
                     log::info!("[insertion] terminal suffix not pasted decision={terminal_decision:?} suffix_chars={}", text.chars().count());
-                    let _ = reply.send(PasteResult { status: InsertStatus::Failed, terminal_decision });
+                    let _ = reply.send(PasteResult { status: InsertStatus::Failed, terminal_decision, receipt: None, range_permission });
                     continue;
                 }
                 finish(&mut pending, RetentionResult::Superseded);
@@ -308,6 +678,30 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                     before.is_some(), capture_started.elapsed().as_millis(), text.chars().count());
                 // The clipboard writer and receipt share one owner generation.
                 let mut owner = OWNER.lock();
+                if revisable {
+                    let current = reader.as_ref().and_then(|r| r.current_observation().ok());
+                    let fresh = reader.as_ref().map(|r| r.before());
+                    let unchanged = fresh.as_ref().and_then(|r| r.as_ref().ok()).zip(before.as_ref()).map(|(new,old)| new == old);
+                    if current != Some(true) || unchanged != Some(true) {
+                        range_permission = revisable_permission(scope.as_ref().is_some_and(|s| !s.previous_body.is_empty()),
+                            true, false, [current, unchanged, Some(true), Some(true)]);
+                        log::warn!("[insertion] revisable permission changed before dispatch current={current:?} snapshot_equal={unchanged:?} read_error={:?}",
+                            fresh.as_ref().and_then(|r| r.as_ref().err()));
+                        let _ = reply.send(PasteResult { status: InsertStatus::DeferredNoTarget,
+                            terminal_decision: None, receipt: None, range_permission });
+                        continue;
+                    }
+                }
+                if scope.as_ref().is_some_and(|s| s.replace) && !paste_receipt.as_ref().is_some_and(|prior|
+                    still_owns_transport(prior.ticket, *owner, prior.revision, clipboard_revision())) {
+                    log::warn!("[insertion] session transport permission changed before dispatch ticket={:?} owner={} previous_revision={:?} current_revision={:?}",
+                        paste_receipt.as_ref().map(|p| p.ticket), *owner,
+                        paste_receipt.as_ref().and_then(|p| p.revision), clipboard_revision());
+                    let _ = reply.send(PasteResult { status: InsertStatus::DeferredNoTarget,
+                        terminal_decision: None, receipt: None, range_permission: if revisable {
+                            SessionRangePermission::Revoked } else { range_permission } });
+                    continue;
+                }
                 *owner = owner.wrapping_add(1);
                 let current_ticket = *owner;
                 #[cfg(not(target_os = "macos"))]
@@ -321,17 +715,49 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                         InsertStatus::Failed
                     }
                 };
-                paste_receipt = Some(PasteReceipt {
+                let revision = clipboard_revision();
+                let dispatched_at = Instant::now();
+                let dispatched = matches!(result, InsertStatus::PasteSent | InsertStatus::Inserted);
+                let (completion, receipt_handle) = if dispatched {
+                    let (completion, receiver) = mpsc::channel();
+                    let ticket = ClipboardTicket {
+                        id: current_ticket,
+                        revision,
+                    };
+                    (
+                        Some(completion),
+                        Some(PasteReceiptHandle {
+                            ticket,
+                            receiver: Some(receiver),
+                        }),
+                    )
+                } else {
+                    (None, None)
+                };
+                let mut receipt = PasteReceipt {
                     ticket: current_ticket,
-                    revision: clipboard_revision(),
+                    revision,
                     payload: text,
                     reader,
                     before,
-                    dispatched_at: Instant::now(),
+                    dispatched_at,
                     observation: PasteObservation::default(),
-                });
+                    completion,
+                    session_body,
+                    observed_document: None,
+                    expected_session_document,
+                    strict_session_edit,
+                    staged_selection: false,
+                };
+                receipt.complete_unsupported_if_needed(dispatched_at);
+                paste_receipt = Some(receipt);
                 drop(owner);
-                let _ = reply.send(PasteResult { status: result, terminal_decision });
+                let _ = reply.send(PasteResult {
+                    status: result,
+                    terminal_decision,
+                    receipt: receipt_handle,
+                    range_permission,
+                });
             }
             Some(Command::Copy(text, reply)) => {
                 finish(&mut pending, RetentionResult::Superseded);
@@ -407,6 +833,7 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                 });
             }
             None => {}
+            Some(Command::Revisable(..)) => unreachable!("revisable command normalized before dispatch"),
         }
         if let Some(receipt) = paste_receipt.as_mut() {
             if still_owns_transport(
@@ -464,6 +891,25 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
     }
 }
 
+fn session_document_proves_range(expected: Option<&str>, body: &str, payload: &str,
+    proof: Option<PasteReceiptProof>, after: &str, strict: bool) -> bool {
+    (expected == Some(after) || (!strict && body == payload && after == payload
+        && proof == Some(PasteReceiptProof::WholePayloadDocument)))
+        && (after.ends_with(body) || after.trim_end_matches(['\r', '\n']).ends_with(body))
+}
+
+/// Mutation authorization is stricter than a historical paste receipt. A
+/// consumed message can release its clipboard after send, but cannot be edited.
+fn session_range_owned(owned: Option<(uuid::Uuid, &str)>, consumed: bool,
+    observed_document: Option<&str>, session: uuid::Uuid, expected: &str,
+    current: Option<(&str, &str)>, same_target: bool, caret_end: Option<bool>) -> bool {
+    consumed && same_target && caret_end == Some(true) && !expected.is_empty()
+        && owned == Some((session, expected))
+        && current.is_some_and(|(doc, selected)| selected.is_empty()
+            && Some(doc) == observed_document
+            && (doc.ends_with(expected) || doc.trim_end_matches(['\r', '\n']).ends_with(expected)))
+}
+
 fn still_owns_transport(
     ticket: u64,
     owner: u64,
@@ -493,7 +939,7 @@ fn paste_consumption_proof(
     selected: &str,
     payload: &str,
     after: &str,
-) -> Option<PasteConsumptionProof> {
+) -> Option<PasteReceiptProof> {
     let normalize = |value: &str| value.replace("\r\n", "\n").replace('\r', "\n");
     let (before, selected, payload, after) = (
         normalize(before),
@@ -511,7 +957,7 @@ fn paste_consumption_proof(
     // This authorizes clipboard handoff only, never earlier-text preservation
     // or whole-session delivery acceptance. A substring is not this proof.
     if selected.is_empty() && after == payload {
-        return Some(PasteConsumptionProof::WholePayloadDocument);
+        return Some(PasteReceiptProof::WholePayloadDocument);
     }
     if selected.len() > before.len()
         || before.len() - selected.len() + payload.len() != after.len()
@@ -538,7 +984,7 @@ fn paste_consumption_proof(
             && after[offset..].starts_with(&payload)
             && before[offset + selected.len()..] == after[offset + payload.len()..]
         {
-            return Some(PasteConsumptionProof::ExactEdit);
+            return Some(PasteReceiptProof::ExactEdit);
         }
     }
     None
@@ -550,8 +996,211 @@ fn paste_was_consumed(before: &str, selected: &str, payload: &str, after: &str) 
 }
 
 #[cfg(test)]
+pub(crate) fn pending_receipt_handle_for_test(
+    id: u64,
+) -> (PasteReceiptHandle, Sender<PasteReceiptCompletion>) {
+    let ticket = ClipboardTicket {
+        id,
+        revision: Some(id + 100),
+    };
+    let (completion, receiver) = mpsc::channel();
+    (
+        PasteReceiptHandle {
+            ticket,
+            receiver: Some(receiver),
+        },
+        completion,
+    )
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unavailable_first_target_does_not_revoke_a_range_that_was_never_written() {
+        let (send, receive) = mpsc::channel();
+        let worker = std::thread::spawn(move || run_with_capture(receive, None,
+            || (None, crate::selection::FocusedInputState::NonEditable)));
+        let session_id = uuid::Uuid::new_v4();
+        for (body, permission) in [("", SessionRangePermission::Unavailable),
+            ("previously written body", SessionRangePermission::Revoked)] {
+            let (reply, result) = mpsc::channel();
+            send.send(Command::Revisable("next body".into(), PasteShortcut::CtrlV,
+                SessionPasteScope { session_id, previous_body: body.into(), replace: !body.is_empty() }, reply)).unwrap();
+            let result = result.recv().unwrap();
+            assert_eq!(result.status, InsertStatus::DeferredNoTarget);
+            assert_eq!(result.range_permission, permission);
+            assert!(result.receipt.is_none());
+        }
+        drop(send);
+        worker.join().unwrap();
+        for fact in 0..4 {
+            let mut facts = [Some(true); 4];
+            facts[fact] = Some(false);
+            assert_eq!(revisable_permission(false, true, false, facts), SessionRangePermission::Unavailable);
+            assert_eq!(revisable_permission(true, true, false, facts), SessionRangePermission::Revoked);
+        }
+        assert_eq!(revisable_permission(false, true, false, [None; 4]), SessionRangePermission::Unobserved);
+        assert_eq!(revisable_permission(false, true, false, [Some(true); 4]), SessionRangePermission::Owned);
+    }
+
+    fn pending_receipt(
+        id: u64,
+        dispatched_at: Instant,
+    ) -> (PasteReceipt, PasteReceiptHandle) {
+        let ticket = ClipboardTicket {
+            id,
+            revision: Some(id + 100),
+        };
+        let (completion, receiver) = mpsc::channel();
+        (
+            PasteReceipt {
+                ticket: ticket.id,
+                revision: ticket.revision,
+                payload: format!("payload-{id}"),
+                reader: None,
+                before: None,
+                dispatched_at,
+                observation: PasteObservation::default(),
+                completion: Some(completion), session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, staged_selection: false,
+            },
+            PasteReceiptHandle {
+                ticket,
+                receiver: Some(receiver),
+            },
+        )
+    }
+
+    #[test]
+    fn exact_receipt_survives_unavailable_caret_without_authorizing_an_unobserved_revision() {
+        let session = uuid::Uuid::new_v4();
+        let prefix = "用户原有文字🔒：\r\n";
+        let body = "明天上午9点，我们先讨论产品的使用体验。";
+        let document = format!("{prefix}{body}");
+        let (mut receipt, _handle) = pending_receipt(71, Instant::now());
+        receipt.payload = body.into();
+        receipt.session_body = Some((session, body.into()));
+        receipt.expected_session_document = Some(document.clone());
+        receipt.strict_session_edit = true;
+        receipt.observation.observe(prefix, "", body, &document);
+        assert_eq!(receipt.observation.proof, Some(PasteReceiptProof::ExactEdit));
+
+        // Reproduce the observed-paste/unavailable-native-query boundary.
+        receipt.observe_session_document(&document, None);
+        assert_eq!(receipt.session_body.as_ref().map(|(id, text)| (*id, text.as_str())), Some((session, body)));
+        assert_eq!(receipt.observed_document.as_deref(), Some(document.as_str()));
+        let owns = |current: &str, same_target: bool, caret| session_range_owned(
+            receipt.session_body.as_ref().map(|(id, text)| (*id, text.as_str())),
+            receipt.observation.consumed, receipt.observed_document.as_deref(),
+            session, body, Some((current, "")), same_target, caret);
+        assert!(!owns(&document, true, None));
+        assert!(owns(&document, true, Some(true)), "a fresh native observation may resume the exact existing range");
+        assert!(!owns(&document, false, Some(true)));
+        assert!(!owns("", true, Some(true)));
+        assert!(!owns(&format!("{document} user edit"), true, Some(true)));
+
+        receipt.observe_session_document(&document, Some(false));
+        assert!(receipt.session_body.is_none(), "a positively moved caret retires the range");
+        assert!(receipt.observation.consumed, "later range retirement cannot retract the original paste receipt");
+    }
+
+    #[test]
+    fn unavailable_caret_cannot_rescue_a_receipt_with_a_changed_document() {
+        let session = uuid::Uuid::new_v4();
+        let (mut receipt, _handle) = pending_receipt(72, Instant::now());
+        receipt.payload = "body".into();
+        receipt.session_body = Some((session, "body".into()));
+        receipt.expected_session_document = Some("user prefix body".into());
+        receipt.strict_session_edit = true;
+        receipt.observation.observe("user prefix ", "", "body", "user prefix body");
+        receipt.observe_session_document("body", None);
+        assert!(receipt.session_body.is_none());
+        assert!(receipt.observed_document.is_none());
+        assert!(receipt.observation.consumed);
+    }
+
+    #[test]
+    fn confirmed_receipt_is_pollable_once_and_survives_later_lease_drop() {
+        let dispatched_at = Instant::now();
+        let (mut receipt, mut handle) = pending_receipt(41, dispatched_at);
+        assert_eq!(handle.try_take(), PasteReceiptPoll::Pending);
+        let observed_at = dispatched_at + Duration::from_millis(53);
+        receipt.complete(
+            observed_at,
+            PasteReceiptOutcome::Confirmed(PasteReceiptProof::ExactEdit),
+        );
+        // Dropping or superseding the worker-side lease after confirmation
+        // cannot replace the already queued positive fact.
+        drop(receipt);
+        let PasteReceiptPoll::Ready(completion) = handle.try_take() else {
+            panic!("confirmed receipt must remain queued");
+        };
+        assert_eq!(completion.ticket, handle.ticket());
+        assert_eq!(completion.observed_at, observed_at);
+        assert_eq!(
+            completion.outcome,
+            PasteReceiptOutcome::Confirmed(PasteReceiptProof::ExactEdit)
+        );
+        assert_eq!(handle.try_take(), PasteReceiptPoll::Consumed);
+    }
+
+    #[test]
+    fn receipt_handle_distinguishes_unsupported_timeout_and_supersession() {
+        let started = Instant::now();
+
+        let (mut unsupported, mut unsupported_handle) = pending_receipt(51, started);
+        unsupported.complete_unsupported_if_needed(started);
+        assert!(matches!(
+            unsupported_handle.try_take(),
+            PasteReceiptPoll::Ready(PasteReceiptCompletion {
+                outcome: PasteReceiptOutcome::Unsupported,
+                ..
+            })
+        ));
+
+        let (mut timed_out, mut timeout_handle) = pending_receipt(52, started);
+        assert!(!timed_out.expire_if_due(started + Duration::from_millis(4_999)));
+        assert_eq!(timeout_handle.try_take(), PasteReceiptPoll::Pending);
+        assert!(timed_out.expire_if_due(started + Duration::from_secs(5)));
+        assert!(matches!(
+            timeout_handle.try_take(),
+            PasteReceiptPoll::Ready(PasteReceiptCompletion {
+                outcome: PasteReceiptOutcome::TimedOut,
+                ..
+            })
+        ));
+
+        let (superseded, mut superseded_handle) = pending_receipt(53, started);
+        drop(superseded);
+        assert!(matches!(
+            superseded_handle.try_take(),
+            PasteReceiptPoll::Ready(PasteReceiptCompletion {
+                outcome: PasteReceiptOutcome::Superseded,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn an_old_receipt_cannot_identify_a_new_paste_ticket() {
+        let started = Instant::now();
+        let (mut old_receipt, mut old_handle) = pending_receipt(61, started);
+        let (mut new_receipt, new_handle) = pending_receipt(62, started);
+        old_receipt.complete(
+            started + Duration::from_millis(40),
+            PasteReceiptOutcome::Confirmed(PasteReceiptProof::WholePayloadDocument),
+        );
+        new_receipt.complete(
+            started + Duration::from_millis(80),
+            PasteReceiptOutcome::Confirmed(PasteReceiptProof::ExactEdit),
+        );
+        let PasteReceiptPoll::Ready(old_completion) = old_handle.try_take() else {
+            panic!("old completion missing");
+        };
+        assert_eq!(old_completion.ticket, old_handle.ticket());
+        assert_ne!(old_completion.ticket, new_handle.ticket());
+    }
 
     #[test]
     fn a_focused_non_editor_must_not_create_a_paste_lease_for_clipboard_only_dictation() {
@@ -648,6 +1297,7 @@ mod tests {
                 before: None,
                 dispatched_at: Instant::now(),
                 observation: PasteObservation::default(),
+                completion: None, session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, staged_selection: false,
             }), || (None, crate::selection::FocusedInputState::NonEditable)));
             let (reply, results) = mpsc::channel();
             commands.send(Command::Retain(ClipboardTicket { id: ticket, revision: transport_revision }, final_body.clone(), true, reply)).unwrap();
@@ -658,7 +1308,7 @@ mod tests {
             // alter the clipboard or consume/replace a previous paste lease.
             let (reply, results) = mpsc::channel();
             commands.send(Command::Paste(temporary_second.clone(), false,
-                PasteShortcut::CtrlV, None, reply)).unwrap();
+                PasteShortcut::CtrlV, None, None, reply)).unwrap();
             assert_eq!(results.recv_timeout(Duration::from_secs(3)).unwrap().status, InsertStatus::DeferredNoTarget);
             assert_eq!(clipboard_revision(), transport_revision);
             assert_eq!(*OWNER.lock(), ticket);
@@ -681,7 +1331,7 @@ mod tests {
             let no_paste_ticket = self::ticket();
             let (reply, results) = mpsc::channel();
             commands.send(Command::Paste(temporary_tail.clone(), false,
-                PasteShortcut::CtrlV, None, reply)).unwrap();
+                PasteShortcut::CtrlV, None, None, reply)).unwrap();
             assert_eq!(results.recv_timeout(Duration::from_secs(3)).unwrap().status, InsertStatus::DeferredNoTarget);
             assert_eq!(clipboard_revision(), no_paste_ticket.revision);
             let (reply, results) = mpsc::channel();
@@ -747,11 +1397,11 @@ mod tests {
         assert!(!receipt.consumed);
         receipt.observe("An accessible prompt\n", "", "。", "。");
         assert!(receipt.consumed);
-        assert_eq!(receipt.proof, Some(PasteConsumptionProof::WholePayloadDocument));
+        assert_eq!(receipt.proof, Some(PasteReceiptProof::WholePayloadDocument));
         // A submitted message clears the editor, but not its observed receipt.
         receipt.observe("An accessible prompt\n", "", "。", "An accessible prompt\n");
         assert!(receipt.consumed);
-        assert_eq!(receipt.proof, Some(PasteConsumptionProof::WholePayloadDocument));
+        assert_eq!(receipt.proof, Some(PasteReceiptProof::WholePayloadDocument));
     }
 
     #[test]
@@ -764,7 +1414,7 @@ mod tests {
         assert!(!paste_was_consumed("提示\n", "不存在的选区", "正文。", "正文。"));
         assert_eq!(
             paste_consumption_proof("first clause", "", " final clause", "first clause final clause"),
-            Some(PasteConsumptionProof::ExactEdit)
+            Some(PasteReceiptProof::ExactEdit)
         );
     }
 
@@ -840,5 +1490,51 @@ mod tests {
             !still_owns_transport(2, 2, Some(82), Some(83)),
             "a user copy supersedes even a consumed receipt"
         );
+    }
+}
+
+
+#[cfg(test)]
+mod session_range_tests {
+    use super::*;
+    #[test]
+    fn final_supplement_range_cannot_adopt_identical_preexisting_suffix_or_lost_user_prefix() {
+        let exact=Some(PasteReceiptProof::ExactEdit);
+        let whole=Some(PasteReceiptProof::WholePayloadDocument);
+        assert!(session_document_proves_range(Some("user prefix body"),"body","body",exact,"user prefix body",false));
+        assert!(!session_document_proves_range(None,"body","body",exact,"body inserted elsewhere body",false));
+        assert!(!session_document_proves_range(Some("user prefix body"),"body","body",whole,"body",true));
+        assert!(session_document_proves_range(None,"body","body",whole,"body",false),
+            "an inconsistent initial editor snapshot can still own an exact whole payload document");
+        assert!(!session_document_proves_range(None,"first. tail.","tail.",whole,"tail.",false),
+            "a later isolated payload does not preserve the earlier session body");
+        let document="用户原有文字🔒：\r\nfirst. tail.";
+        assert!(session_document_proves_range(Some(document),"first. tail.","tail.",exact,document,false));
+        assert!(!session_document_proves_range(Some("用户原有文字🔒：first. tail."),"first. tail.","tail.",exact,document,false),
+            "a receipted paste must not invent a document with the user's newline removed");
+        let marked=format!("{document}\r\n");
+        assert!(session_document_proves_range(Some(&marked),"first. tail.","first. tail.",exact,&marked,true));
+        assert!(!session_document_proves_range(Some(document),"first. tail.","first. tail.",exact,&marked,true),
+            "native trailing text must also be represented in the exact edit witness");
+    }
+
+    #[test]
+    fn final_supplement_range_requires_receipted_same_session_native_target_and_unchanged_document() {
+        let id=uuid::Uuid::new_v4();
+        let body="first. last.";
+        let document=format!("existing user text {body}");
+        let owns=|owned, consumed, observed, session, expected, current, same, caret|
+            session_range_owned(owned,consumed,observed,session,expected,current,same,caret);
+        assert!(owns(Some((id,body)),true,Some(document.as_str()),id,body,Some((document.as_str(),"")),true,Some(true)));
+        assert!(!owns(Some((id,body)),false,Some(document.as_str()),id,body,Some((document.as_str(),"")),true,Some(true)));
+        assert!(!owns(Some((id,body)),true,Some(document.as_str()),uuid::Uuid::new_v4(),body,Some((document.as_str(),"")),true,Some(true)));
+        assert!(!owns(Some((id,body)),true,Some(document.as_str()),id,body,Some((document.as_str(),"")),false,Some(true)));
+        assert!(!owns(Some((id,body)),true,Some(document.as_str()),id,body,Some((document.as_str(),"")),true,None));
+        assert!(!owns(Some((id,body)),true,Some(document.as_str()),id,body,Some((document.as_str(),"selected")),true,Some(true)));
+        for changed in ["", "sent and cleared", "same body in another document", "user edits first. last."] {
+            assert!(!owns(Some((id,body)),true,Some(document.as_str()),id,body,Some((changed,"")),true,Some(true)));
+        }
+        assert!(!owns(None,true,Some(document.as_str()),id,body,Some((document.as_str(),"")),true,Some(true)),
+            "matching pasted text alone cannot establish session ownership");
     }
 }

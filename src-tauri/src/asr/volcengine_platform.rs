@@ -26,6 +26,8 @@ pub struct VolcengineStreamingProvider {
     hotwords: Vec<DictionaryHotword>,
     session_options: VolcengineSessionOptions,
     proxy_config: ProviderProxyConfig,
+    cloud_owner: Option<super::cloud_voiceprint::CloudOwnerVoiceprint>,
+    managed_cloud: bool,
 }
 
 impl VolcengineStreamingProvider {
@@ -75,8 +77,17 @@ impl VolcengineStreamingProvider {
             hotwords,
             session_options,
             proxy_config,
+            cloud_owner: None,
+            managed_cloud: false,
         }
     }
+
+    pub fn with_cloud_owner(mut self, profile: Option<super::cloud_voiceprint::CloudOwnerVoiceprint>) -> Self {
+        self.cloud_owner = profile;
+        self
+    }
+
+    pub fn with_managed_cloud(mut self,enabled: bool) -> Self { self.managed_cloud=enabled;self }
 }
 
 impl StreamingAsrProvider for VolcengineStreamingProvider {
@@ -88,9 +99,9 @@ impl StreamingAsrProvider for VolcengineStreamingProvider {
         &self,
         sink: Arc<dyn AsrEventSink>,
     ) -> Result<Box<dyn StreamingAsrSession>, AsrError> {
-        if self.credentials.app_id.trim().is_empty()
+        if !self.managed_cloud && (self.credentials.app_id.trim().is_empty()
             || self.credentials.access_token.trim().is_empty()
-            || self.credentials.resource_id.trim().is_empty()
+            || self.credentials.resource_id.trim().is_empty())
         {
             return Err(map_volcengine_error(VolcengineASRError::CredentialsMissing));
         }
@@ -106,7 +117,7 @@ impl StreamingAsrProvider for VolcengineStreamingProvider {
             self.hotwords.clone(),
             self.session_options,
             self.proxy_config.clone(),
-        ));
+        ).with_cloud_owner(self.cloud_owner.clone()).with_managed_cloud(self.managed_cloud));
         let seen_final = Arc::new(AtomicBool::new(false));
         let seen_error = Arc::new(AtomicBool::new(false));
         let sink_for_events = Arc::clone(&sink);
@@ -224,7 +235,7 @@ where
 fn map_volcengine_error(error: VolcengineASRError) -> AsrError {
     let message = error.to_string();
     match error {
-        VolcengineASRError::CredentialsMissing => AsrError::new(AsrErrorKind::Unavailable, message),
+        VolcengineASRError::CredentialsMissing | VolcengineASRError::CloudOwnerUnavailable(_) => AsrError::new(AsrErrorKind::Unavailable, message),
         VolcengineASRError::AuthRejected(_) | VolcengineASRError::AuthenticationFailed => {
             AsrError::new(AsrErrorKind::Auth, message)
         }

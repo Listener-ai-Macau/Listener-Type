@@ -1,0 +1,469 @@
+{
+  "quiet": {
+    "source_session_id": "ee0c35c1-2725-40e5-8b23-fc88d5f1c6a8",
+    "samples": [
+      {
+        "text": "今天的安排已经确认资料放在左边设备放在右边然后我在3秒内继续说话这句话应该完整保留这就是最后一句话",
+        "id": "quiet_complete_body",
+        "owner": true,
+        "words": [
+          {
+            "start_ms": 1502,
+            "text": "今",
+            "end_ms": 1622
+          },
+          {
+            "start_ms": 1622,
+            "text": "天",
+            "end_ms": 1702
+          },
+          {
+            "start_ms": 1702,
+            "text": "的",
+            "end_ms": 1862
+          },
+          {
+            "start_ms": 1862,
+            "text": "安",
+            "end_ms": 1982
+          },
+          {
+            "start_ms": 1982,
+            "text": "排",
+            "end_ms": 2102
+          },
+          {
+            "start_ms": 2142,
+            "text": "已",
+            "end_ms": 2262
+          },
+          {
+            "start_ms": 2262,
+            "text": "经",
+            "end_ms": 2382
+          },
+          {
+            "start_ms": 2422,
+            "text": "确",
+            "end_ms": 2622
+          },
+          {
+            "start_ms": 2622,
+            "text": "认",
+            "end_ms": 2782
+          },
+          {
+            "start_ms": 3182,
+            "text": "资",
+            "end_ms": 3382
+          },
+          {
+            "start_ms": 3382,
+            "text": "料",
+            "end_ms": 3542
+          },
+          {
+            "start_ms": 3542,
+            "text": "放",
+            "end_ms": 3702
+          },
+          {
+            "start_ms": 3702,
+            "text": "在",
+            "end_ms": 3862
+          },
+          {
+            "start_ms": 3862,
+            "text": "左",
+            "end_ms": 4062
+          },
+          {
+            "start_ms": 4062,
+            "text": "边",
+            "end_ms": 4182
+          },
+          {
+            "start_ms": 4262,
+            "text": "设",
+            "end_ms": 4422
+          },
+          {
+            "start_ms": 4422,
+            "text": "备",
+            "end_ms": 4542
+          },
+          {
+            "start_ms": 4622,
+            "text": "放",
+            "end_ms": 4702
+          },
+          {
+            "start_ms": 4702,
+            "text": "在",
+            "end_ms": 4822
+          },
+          {
+            "start_ms": 4822,
+            "text": "右",
+            "end_ms": 5022
+          },
+          {
+            "start_ms": 5022,
+            "text": "边",
+            "end_ms": 5222
+          },
+          {
+            "start_ms": 6702,
+            "text": "然",
+            "end_ms": 6862
+          },
+          {
+            "start_ms": 6862,
+            "text": "后",
+            "end_ms": 7022
+          },
+          {
+            "start_ms": 7022,
+            "text": "我",
+            "end_ms": 7262
+          },
+          {
+            "start_ms": 7262,
+            "text": "在",
+            "end_ms": 7502
+          },
+          {
+            "start_ms": 7502,
+            "text": "3",
+            "end_ms": 7742
+          },
+          {
+            "start_ms": 7742,
+            "text": "秒",
+            "end_ms": 7942
+          },
+          {
+            "start_ms": 7982,
+            "text": "内",
+            "end_ms": 8182
+          },
+          {
+            "start_ms": 8222,
+            "text": "继",
+            "end_ms": 8342
+          },
+          {
+            "start_ms": 8342,
+            "text": "续",
+            "end_ms": 8502
+          },
+          {
+            "start_ms": 8502,
+            "text": "说",
+            "end_ms": 8702
+          },
+          {
+            "start_ms": 8702,
+            "text": "话",
+            "end_ms": 8902
+          },
+          {
+            "start_ms": 8942,
+            "text": "这",
+            "end_ms": 9142
+          },
+          {
+            "start_ms": 9142,
+            "text": "句",
+            "end_ms": 9262
+          },
+          {
+            "start_ms": 9262,
+            "text": "话",
+            "end_ms": 9422
+          },
+          {
+            "start_ms": 9422,
+            "text": "应",
+            "end_ms": 9582
+          },
+          {
+            "start_ms": 9582,
+            "text": "该",
+            "end_ms": 9702
+          },
+          {
+            "start_ms": 9742,
+            "text": "完",
+            "end_ms": 9942
+          },
+          {
+            "start_ms": 9942,
+            "text": "整",
+            "end_ms": 9982
+          },
+          {
+            "start_ms": 10102,
+            "text": "保",
+            "end_ms": 10302
+          },
+          {
+            "start_ms": 10302,
+            "text": "留",
+            "end_ms": 10462
+          },
+          {
+            "start_ms": 10622,
+            "text": "这",
+            "end_ms": 10902
+          },
+          {
+            "start_ms": 10902,
+            "text": "就",
+            "end_ms": 11022
+          },
+          {
+            "start_ms": 11022,
+            "text": "是",
+            "end_ms": 11222
+          },
+          {
+            "start_ms": 11222,
+            "text": "最",
+            "end_ms": 11382
+          },
+          {
+            "start_ms": 11382,
+            "text": "后",
+            "end_ms": 11502
+          },
+          {
+            "start_ms": 11502,
+            "text": "一",
+            "end_ms": 11622
+          },
+          {
+            "start_ms": 11622,
+            "text": "句",
+            "end_ms": 11742
+          },
+          {
+            "start_ms": 11742,
+            "text": "话",
+            "end_ms": 11942
+          }
+        ],
+        "timing_source": "fresh_provider_final_on_identical_archived_pcm"
+      }
+    ],
+    "pcm_sha256": "cb75d27af42644b5715a78f8644c7c68b8ceaec7265759d32d7c685500ad24e7"
+  },
+  "long": {
+    "source_session_id": "a6ff7b12-12dd-48f5-84df-f60c2525ac03",
+    "samples": [
+      {
+        "text": "然后最后整理后再统一编号",
+        "id": "owner_before",
+        "owner": true,
+        "words": [
+          {
+            "start_ms": 43462,
+            "text": "然",
+            "end_ms": 43622
+          },
+          {
+            "start_ms": 43622,
+            "text": "后",
+            "end_ms": 43822
+          },
+          {
+            "start_ms": 43822,
+            "text": "最",
+            "end_ms": 44022
+          },
+          {
+            "start_ms": 44022,
+            "text": "后",
+            "end_ms": 44222
+          },
+          {
+            "start_ms": 44262,
+            "text": "整",
+            "end_ms": 44502
+          },
+          {
+            "start_ms": 44502,
+            "text": "理",
+            "end_ms": 44622
+          },
+          {
+            "start_ms": 44662,
+            "text": "后",
+            "end_ms": 44942
+          },
+          {
+            "start_ms": 44942,
+            "text": "再",
+            "end_ms": 45142
+          },
+          {
+            "start_ms": 45222,
+            "text": "统",
+            "end_ms": 45382
+          },
+          {
+            "start_ms": 45382,
+            "text": "一",
+            "end_ms": 45502
+          },
+          {
+            "start_ms": 45542,
+            "text": "编",
+            "end_ms": 45702
+          },
+          {
+            "start_ms": 45702,
+            "text": "号",
+            "end_ms": 45942
+          }
+        ],
+        "timing_source": "fresh_provider_final_on_identical_archived_pcm"
+      },
+      {
+        "text": "然后暂时按照三百二百三十元记录",
+        "id": "owner_return",
+        "owner": true,
+        "words": [
+          {
+            "start_ms": 47621,
+            "text": "然",
+            "end_ms": 47821
+          },
+          {
+            "start_ms": 47821,
+            "text": "后",
+            "end_ms": 48061
+          },
+          {
+            "start_ms": 48101,
+            "text": "暂",
+            "end_ms": 48381
+          },
+          {
+            "start_ms": 48381,
+            "text": "时",
+            "end_ms": 48541
+          },
+          {
+            "start_ms": 48541,
+            "text": "按",
+            "end_ms": 48781
+          },
+          {
+            "start_ms": 48781,
+            "text": "照",
+            "end_ms": 49021
+          },
+          {
+            "start_ms": 49301,
+            "text": "三",
+            "end_ms": 49541
+          },
+          {
+            "start_ms": 49541,
+            "text": "百",
+            "end_ms": 49781
+          },
+          {
+            "start_ms": 50021,
+            "text": "二",
+            "end_ms": 50181
+          },
+          {
+            "start_ms": 50181,
+            "text": "百",
+            "end_ms": 50341
+          },
+          {
+            "start_ms": 50341,
+            "text": "三",
+            "end_ms": 50461
+          },
+          {
+            "start_ms": 50461,
+            "text": "十",
+            "end_ms": 50581
+          },
+          {
+            "start_ms": 50581,
+            "text": "元",
+            "end_ms": 50701
+          },
+          {
+            "start_ms": 50821,
+            "text": "记",
+            "end_ms": 50901
+          },
+          {
+            "start_ms": 50941,
+            "text": "录",
+            "end_ms": 51021
+          }
+        ],
+        "timing_source": "fresh_provider_final_on_identical_archived_pcm"
+      },
+      {
+        "text": "方便后边查询",
+        "id": "owner_tail",
+        "owner": true,
+        "words": [
+          {
+            "start_ms": 59541,
+            "text": "方",
+            "end_ms": 59821
+          },
+          {
+            "start_ms": 59821,
+            "text": "便",
+            "end_ms": 59901
+          },
+          {
+            "start_ms": 59941,
+            "text": "后",
+            "end_ms": 60141
+          },
+          {
+            "start_ms": 60181,
+            "text": "边",
+            "end_ms": 60261
+          },
+          {
+            "start_ms": 60381,
+            "text": "查",
+            "end_ms": 60581
+          },
+          {
+            "start_ms": 60581,
+            "text": "询",
+            "end_ms": 60781
+          }
+        ],
+        "timing_source": "fresh_provider_final_on_identical_archived_pcm"
+      },
+      {
+        "text": "白菜长得水灵",
+        "id": "background",
+        "owner": false,
+        "words": [
+          {
+            "start_ms": 46022,
+            "text": "白菜长得水灵",
+            "end_ms": 46782
+          }
+        ],
+        "timing_source": "human_confirmed_audio_phrase_range_from_failure_review; original provider word packet unavailable"
+      }
+    ],
+    "pcm_sha256": "75834d72609457fa68ab939cd2bed803b8d39d2910f335d34ca552a7b5729a0a"
+  }
+}

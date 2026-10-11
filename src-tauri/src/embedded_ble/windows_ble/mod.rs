@@ -41,7 +41,7 @@ use windows::Devices::Bluetooth::Advertisement::{
 use windows::Devices::Bluetooth::GenericAttributeProfile::{
     GattCharacteristic, GattCharacteristicProperties,
     GattClientCharacteristicConfigurationDescriptorValue, GattCommunicationStatus,
-    GattDeviceService, GattSession, GattSessionStatus, GattSessionStatusChangedEventArgs,
+    GattDeviceService, GattSession, GattSessionStatus, GattSessionStatusChangedEventArgs, GattWriteResult,
     GattValueChangedEventArgs, GattWriteOption,
 };
 use windows::Devices::Bluetooth::{
@@ -54,6 +54,7 @@ use windows::Devices::Enumeration::{
     DevicePairingRequestedEventArgs, DevicePairingResultStatus, DeviceUnpairingResultStatus,
 };
 use windows::Foundation::{EventRegistrationToken, IAsyncOperation, TypedEventHandler};
+use windows::Storage::Streams::DataWriter;
 use windows::Win32::Devices::DeviceAndDriverInstallation::{
     CM_Locate_DevNodeW, CM_Query_And_Remove_SubTreeW, CM_LOCATE_DEVNODE_NORMAL,
     CM_LOCATE_DEVNODE_PHANTOM, CM_REMOVE_NO_RESTART, CM_REMOVE_UI_NOT_OK, CR_NO_SUCH_DEVINST,
@@ -390,6 +391,12 @@ struct ActiveAudioControlSender {
     tx: mpsc::Sender<AudioControlRequest>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct AcceptedWakeCaptureOwner {
+    request_id: u32,
+    capture_id: u64,
+}
+
 #[derive(Clone)]
 struct RuntimeBluetoothTargetAddress {
     address: u64,
@@ -466,6 +473,44 @@ fn active_audio_control_sender() -> Option<ActiveAudioControlSender> {
     active_audio_control_slot().lock().ok()?.clone()
 }
 
+fn accepted_wake_capture_owner_slot() -> &'static Mutex<Option<AcceptedWakeCaptureOwner>> {
+    static SLOT: OnceLock<Mutex<Option<AcceptedWakeCaptureOwner>>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(None))
+}
+
+fn remember_accepted_wake_capture_owner(request_id: u32, capture_id: u64) {
+    if let Ok(mut slot) = accepted_wake_capture_owner_slot().lock() {
+        *slot = Some(AcceptedWakeCaptureOwner {
+            request_id,
+            capture_id,
+        });
+    }
+}
+
+fn take_accepted_wake_capture_owner(request_id: u32) -> Option<AcceptedWakeCaptureOwner> {
+    let mut slot = accepted_wake_capture_owner_slot().lock().ok()?;
+    if slot
+        .as_ref()
+        .is_some_and(|owner| owner.request_id == request_id)
+    {
+        slot.take()
+    } else {
+        None
+    }
+}
+
+fn clear_accepted_wake_capture_owner(capture_id: u64) {
+    let Ok(mut slot) = accepted_wake_capture_owner_slot().lock() else {
+        return;
+    };
+    if slot
+        .as_ref()
+        .is_some_and(|owner| owner.capture_id == capture_id)
+    {
+        *slot = None;
+    }
+}
+
 fn clear_active_audio_control_sender(capture_id: u64) {
     let Ok(mut slot) = active_audio_control_slot().lock() else {
         return;
@@ -475,6 +520,7 @@ fn clear_active_audio_control_sender(capture_id: u64) {
         .is_some_and(|active| active.capture_id == capture_id)
     {
         *slot = None;
+        clear_accepted_wake_capture_owner(capture_id);
         log::info!("[embedded-ble] capture #{capture_id}: audio control sender cleared");
     }
 }
@@ -495,6 +541,7 @@ impl ActiveAudioControlRegistration {
 
 impl Drop for ActiveAudioControlRegistration {
     fn drop(&mut self) {
+        clear_accepted_wake_capture_owner(self.capture_id);
         clear_active_audio_control_sender(self.capture_id);
     }
 }
@@ -4965,6 +5012,8 @@ struct NotifyCleanup {
     connection_status_token: Option<EventRegistrationToken>,
     session_status_token: Option<EventRegistrationToken>,
     audio_control_registration: Option<ActiveAudioControlRegistration>,
+    pending_audio_control: Option<PendingAudioControlWrite>,
+    type_heartbeat_preempted: bool,
     type_heartbeat_open: bool,
     pending_type_heartbeat: Option<PendingTypeHeartbeat>,
     notify_disabled: bool,
@@ -4980,6 +5029,8 @@ impl NotifyCleanup {
             connection_status_token: None,
             session_status_token: None,
             audio_control_registration: None,
+            pending_audio_control: None,
+            type_heartbeat_preempted: false,
             type_heartbeat_open: false,
             pending_type_heartbeat: None,
             notify_disabled: false,
@@ -5111,6 +5162,11 @@ impl NotifyCleanup {
     fn finish(&mut self, teardown: NotifyCccdTeardown) {
         // An old pending HB must not renew readiness after BYE or an OTA handoff.
         self.pending_type_heartbeat.take();
+        if let Some(pending) = self.pending_audio_control.take() {
+            pending.finish(Err(
+                "active Listener BLE audio control capture closed".to_string(),
+            ));
+        }
         if self.notify_disabled {
             return;
         }
@@ -5175,40 +5231,64 @@ impl NotifyCleanup {
         self.notify_disabled = true;
     }
 
-    fn handle_audio_control_request(&self, request: AudioControlRequest) {
-        let queued_ms = request.queued_at.elapsed().as_millis();
-        if request.cancelled.load(Ordering::Acquire) {
-            log::warn!(
-                "[embedded-ble] expired active audio control request skipped label={} queued_ms={}",
-                request.label,
-                queued_ms
-            );
+    fn poll_audio_control_requests(&mut self, rx: &mpsc::Receiver<AudioControlRequest>) {
+        poll_pending_audio_control_write(&mut self.pending_audio_control, self.target.control.as_ref());
+        if self.pending_audio_control.is_some() {
             return;
         }
-        if request.label == "audio control stop" || queued_ms >= 50 {
-            log::info!(
-                "[embedded-ble] active audio control dispatch label={} queued_ms={}",
-                request.label,
-                queued_ms
-            );
-        }
-        let result = match self.target.control.as_ref() {
-            Some(control) => write_audio_control_value_with_timeout(
-                control,
-                &request.bytes,
-                request.timeout,
-                &request.label,
-            ),
-            None => {
-                Err("active Listener BLE capture has no audio control characteristic".to_string())
+
+        while let Some(request) = next_live_audio_control_request(rx) {
+            let queued_ms = request.queued_at.elapsed().as_millis();
+            if request.label == "audio control stop" || queued_ms >= 50 {
+                log::info!(
+                    "[embedded-ble] active audio control dispatch label={} queued_ms={}",
+                    request.label,
+                    queued_ms
+                );
             }
-        };
-        let _ = request.result_tx.send(result);
+            let Some(control) = self.target.control.as_ref() else {
+                let _ = request.result_tx.send(Err(
+                    "active Listener BLE capture has no audio control characteristic".to_string(),
+                ));
+                continue;
+            };
+            // Urgent recording control owns the characteristic. A readiness
+            // heartbeat is disposable and must not serialize ENSURE/STOP
+            // behind its WinRT timeout.
+            if self.pending_type_heartbeat.take().is_some() {
+                self.type_heartbeat_preempted = true;
+                log::info!(
+                    "[embedded-ble] capture #{}: pending Type heartbeat preempted by active audio control",
+                    self.capture_id
+                );
+            }
+            match PendingAudioControlWrite::start(control, request) {
+                Ok(pending) => self.pending_audio_control = Some(pending),
+                Err((request, err)) => {
+                    let _ = request.result_tx.send(Err(err));
+                    continue;
+                }
+            }
+            break;
+        }
     }
 
-    fn drain_audio_control_requests(&self, rx: &mpsc::Receiver<AudioControlRequest>) {
-        while let Ok(request) = rx.try_recv() {
-            self.handle_audio_control_request(request);
+    fn has_pending_audio_control(&self) -> bool {
+        self.pending_audio_control.is_some()
+    }
+
+    fn pending_audio_control_deadline(&self) -> Option<Instant> {
+        self.pending_audio_control
+            .as_ref()
+            .map(|pending| pending.deadline_at)
+    }
+
+    fn take_type_heartbeat_preempted(&mut self) -> bool {
+        if self.type_heartbeat_preempted && self.pending_audio_control.is_none() {
+            self.type_heartbeat_preempted = false;
+            true
+        } else {
+            false
         }
     }
 

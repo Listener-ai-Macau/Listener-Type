@@ -357,6 +357,15 @@ fn send_audio_control_via_active_capture(
     label: &str,
 ) -> Option<Result<(), String>> {
     let active = active_audio_control_sender()?;
+    Some(send_audio_control_via_sender(active, bytes, timeout, label))
+}
+
+fn send_audio_control_via_sender(
+    active: ActiveAudioControlSender,
+    bytes: &[u8],
+    timeout: Duration,
+    label: &str,
+) -> Result<(), String> {
     let (result_tx, result_rx) = mpsc::channel();
     let cancelled = Arc::new(AtomicBool::new(false));
     let request = AudioControlRequest {
@@ -369,7 +378,7 @@ fn send_audio_control_via_active_capture(
     };
     if active.tx.send(request).is_err() {
         clear_active_audio_control_sender(active.capture_id);
-        return None;
+        return Err("active Listener BLE audio control worker disconnected".to_string());
     }
     let result = match result_rx.recv_timeout(timeout + Duration::from_secs(1)) {
         Ok(result) => result,
@@ -384,22 +393,402 @@ fn send_audio_control_via_active_capture(
                 active.capture_id,
                 (timeout + Duration::from_secs(1)).as_millis()
             );
-            return Some(Err(format!(
+            return Err(format!(
                 "active Listener BLE audio control timed out after {} ms",
                 timeout.as_millis()
-            )));
+            ));
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {
             clear_active_audio_control_sender(active.capture_id);
-            return Some(Err("active Listener BLE audio control worker disconnected".to_string()));
+            return Err("active Listener BLE audio control worker disconnected".to_string());
         }
     };
-    if let Err(err) = &result {
-        if is_transient_audio_control_write_error(err) {
-            clear_active_audio_control_sender(active.capture_id);
+    result
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum AudioControlWritePollDecision {
+    Pending,
+    ReadResult,
+    Failed(&'static str),
+    Cancelled,
+    TimedOut,
+}
+
+fn audio_control_write_poll_decision(
+    status: windows::Foundation::AsyncStatus,
+    deadline_reached: bool,
+    cancelled: bool,
+) -> AudioControlWritePollDecision {
+    use windows::Foundation::AsyncStatus;
+    if cancelled {
+        return AudioControlWritePollDecision::Cancelled;
+    }
+    if deadline_reached {
+        return AudioControlWritePollDecision::TimedOut;
+    }
+    match status {
+        AsyncStatus::Completed => AudioControlWritePollDecision::ReadResult,
+        AsyncStatus::Started => AudioControlWritePollDecision::Pending,
+        AsyncStatus::Error => AudioControlWritePollDecision::Failed("async error"),
+        AsyncStatus::Canceled => AudioControlWritePollDecision::Failed("async cancelled"),
+        _ => AudioControlWritePollDecision::Failed("unknown async status"),
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum AudioControlFailureAction {
+    TryFallback,
+    Finish,
+}
+
+enum AudioControlAsyncOperation {
+    WinRtStatus(IAsyncOperation<GattCommunicationStatus>),
+    WinRtResult(IAsyncOperation<GattWriteResult>),
+    #[cfg(test)]
+    Test {
+        status: windows::Foundation::AsyncStatus,
+        result: Result<GattCommunicationStatus, String>,
+        cancelled: Arc<AtomicBool>,
+    },
+}
+
+impl AudioControlAsyncOperation {
+    fn status(&self) -> Result<windows::Foundation::AsyncStatus, String> {
+        match self {
+            Self::WinRtStatus(operation) => operation
+                .Status()
+                .map_err(|err| err.to_string()),
+            Self::WinRtResult(operation) => operation
+                .Status()
+                .map_err(|err| err.to_string()),
+            #[cfg(test)]
+            Self::Test { status, .. } => Ok(*status),
         }
     }
-    Some(result)
+
+    fn get_results(&self) -> Result<GattCommunicationStatus, String> {
+        match self {
+            Self::WinRtStatus(operation) => operation
+                .GetResults()
+                .map_err(|err| err.to_string()),
+            Self::WinRtResult(operation) => {
+                let result = operation.GetResults().map_err(|err| err.to_string())?;
+                let status = result.Status().map_err(|err| err.to_string())?;
+                let protocol_error = result
+                    .ProtocolError()
+                    .ok()
+                    .and_then(|value| value.Value().ok());
+                if status != GattCommunicationStatus::Success {
+                    let protocol_suffix = protocol_error
+                        .map(|value| format!(" protocol_error={value}"))
+                        .unwrap_or_default();
+                    return Err(format!(
+                        "write returned status={status:?}{protocol_suffix}"
+                    ));
+                }
+                Ok(status)
+            }
+            #[cfg(test)]
+            Self::Test { result, .. } => result.clone(),
+        }
+    }
+
+    fn cancel_and_close(&self) {
+        match self {
+            Self::WinRtStatus(operation) => {
+                let _ = operation.Cancel();
+                let _ = operation.Close();
+            }
+            Self::WinRtResult(operation) => {
+                let _ = operation.Cancel();
+                let _ = operation.Close();
+            }
+            #[cfg(test)]
+            Self::Test { cancelled, .. } => {
+                cancelled.store(true, Ordering::Release);
+            }
+        }
+    }
+}
+
+fn start_audio_control_async_operation(
+    control: &GattCharacteristic,
+    bytes: &[u8],
+    write_option: GattWriteOption,
+    label: &str,
+) -> Result<AudioControlAsyncOperation, String> {
+    let writer = DataWriter::new()
+        .map_err(|err| format!("BLE {label} buffer writer failed: {err}"))?;
+    writer.WriteBytes(bytes)
+        .map_err(|err| format!("BLE {label} buffer write failed: {err}"))?;
+    let buffer = writer
+        .DetachBuffer()
+        .map_err(|err| format!("BLE {label} buffer detach failed: {err}"))?;
+    if write_option == GattWriteOption::WriteWithoutResponse {
+        control
+            .WriteValueWithOptionAsync(&buffer, write_option)
+            .map(AudioControlAsyncOperation::WinRtStatus)
+            .map_err(|err| format!("BLE {label} write failed: {err}"))
+    } else {
+        control
+            .WriteValueWithResultAndOptionAsync(&buffer, write_option)
+            .map(AudioControlAsyncOperation::WinRtResult)
+            .map_err(|err| format!("BLE {label} write failed: {err}"))
+    }
+}
+
+fn audio_control_failure_action(
+    fallback_available: bool,
+    deadline_reached: bool,
+    cancelled: bool,
+) -> AudioControlFailureAction {
+    if fallback_available && !deadline_reached && !cancelled {
+        AudioControlFailureAction::TryFallback
+    } else {
+        AudioControlFailureAction::Finish
+    }
+}
+
+struct PendingAudioControlWrite {
+    request: Option<AudioControlRequest>,
+    operation: Option<AudioControlAsyncOperation>,
+    fallback: Option<GattWriteOption>,
+    deadline_at: Instant,
+    primary_error: Option<String>,
+}
+
+impl PendingAudioControlWrite {
+    fn start(
+        control: &GattCharacteristic,
+        request: AudioControlRequest,
+    ) -> Result<Self, (AudioControlRequest, String)> {
+        let (primary, fallback) = match audio_control_write_options(
+            control,
+            &request.bytes,
+            &request.label,
+        ) {
+            Ok(options) => options,
+            Err(err) => return Err((request, err)),
+        };
+        let deadline_at = request.queued_at + request.timeout;
+        let (operation, fallback, primary_error) = match start_audio_control_async_operation(
+            control,
+            &request.bytes,
+            primary,
+            &request.label,
+        ) {
+            Ok(operation) => (operation, fallback, None),
+            Err(primary_error)
+                if fallback.is_some() && Instant::now() < deadline_at =>
+            {
+                let fallback = fallback.expect("fallback checked above");
+                log::warn!(
+                    "[embedded-ble] {} primary {primary:?} could not start before absolute deadline: {primary_error}; retrying with {fallback:?}",
+                    request.label
+                );
+                match start_audio_control_async_operation(
+                    control,
+                    &request.bytes,
+                    fallback,
+                    &request.label,
+                ) {
+                    Ok(operation) => (operation, None, Some(primary_error)),
+                    Err(fallback_error) => {
+                        return Err((
+                            request,
+                            format!(
+                                "{primary_error}; fallback {fallback:?} could not start: {fallback_error}"
+                            ),
+                        ));
+                    }
+                }
+            }
+            Err(err) => return Err((request, err)),
+        };
+        Ok(Self {
+            request: Some(request),
+            operation: Some(operation),
+            fallback,
+            deadline_at,
+            primary_error,
+        })
+    }
+
+    fn cancel_operation(&mut self) {
+        if let Some(operation) = self.operation.take() {
+            operation.cancel_and_close();
+        }
+    }
+
+    fn combined_error(&self, error: String) -> String {
+        self.primary_error
+            .as_ref()
+            .map(|primary| format!("{primary}; fallback also failed: {error}"))
+            .unwrap_or(error)
+    }
+
+    fn start_fallback(
+        &mut self,
+        control: &GattCharacteristic,
+        primary_error: String,
+    ) -> Result<(), String> {
+        let fallback = self
+            .fallback
+            .take()
+            .ok_or_else(|| primary_error.clone())?;
+        let request = self
+            .request
+            .as_ref()
+            .ok_or_else(|| "active audio control request missing".to_string())?;
+        let bytes = request.bytes.clone();
+        let label = request.label.clone();
+        self.cancel_operation();
+        let operation = start_audio_control_async_operation(
+            control,
+            &bytes,
+            fallback,
+            &label,
+        )
+        .map_err(|err| format!("{primary_error}; fallback {fallback:?} could not start: {err}"))?;
+        log::warn!(
+            "[embedded-ble] {} failed before absolute deadline: {}; retrying with {fallback:?}",
+            label,
+            primary_error
+        );
+        self.primary_error = Some(primary_error);
+        self.operation = Some(operation);
+        Ok(())
+    }
+
+    fn poll(&mut self, control: Option<&GattCharacteristic>) -> Option<Result<(), String>> {
+        let request = self.request.as_ref()?;
+        let cancelled = request.cancelled.load(Ordering::Acquire);
+        let deadline_reached = Instant::now() >= self.deadline_at;
+        let operation = self.operation.as_ref()?;
+        let status = match operation.status() {
+            Ok(status) => status,
+            Err(err) => {
+                return Some(Err(self.combined_error(format!(
+                    "BLE {} status failed: {err}",
+                    request.label
+                ))));
+            }
+        };
+        let outcome = match audio_control_write_poll_decision(
+            status,
+            deadline_reached,
+            cancelled,
+        ) {
+            AudioControlWritePollDecision::Pending => return None,
+            AudioControlWritePollDecision::ReadResult => operation
+                .get_results()
+                .map_err(|err| format!("BLE {} result failed: {err}", request.label))
+                .and_then(|status| {
+                    if status == GattCommunicationStatus::Success {
+                        Ok(())
+                    } else {
+                        Err(format!(
+                            "BLE {} write returned status={status:?}",
+                            request.label
+                        ))
+                    }
+                }),
+            AudioControlWritePollDecision::Failed(reason) => {
+                Err(format!("BLE {} {reason}", request.label))
+            }
+            AudioControlWritePollDecision::Cancelled => Err(format!(
+                "active Listener BLE audio control request cancelled: {}",
+                request.label
+            )),
+            AudioControlWritePollDecision::TimedOut => Err(format!(
+                "BLE {} write timed out after {} ms",
+                request.label,
+                request.timeout.as_millis()
+            )),
+        };
+        match outcome {
+            Ok(()) => Some(Ok(())),
+            Err(err)
+                if audio_control_failure_action(
+                    self.fallback.is_some(),
+                    Instant::now() >= self.deadline_at,
+                    cancelled,
+                ) == AudioControlFailureAction::TryFallback =>
+            {
+                let Some(control) = control else {
+                    return Some(Err(self.combined_error(format!(
+                        "{err}; active audio control fallback target unavailable"
+                    ))));
+                };
+                match self.start_fallback(control, err) {
+                    Ok(()) => None,
+                    Err(err) => Some(Err(err)),
+                }
+            }
+            Err(err) => Some(Err(self.combined_error(err))),
+        }
+    }
+
+    fn finish(mut self, result: Result<(), String>) {
+        self.cancel_operation();
+        if let Some(request) = self.request.take() {
+            let _ = request.result_tx.send(result);
+        }
+    }
+}
+
+impl Drop for PendingAudioControlWrite {
+    fn drop(&mut self) {
+        self.cancel_operation();
+    }
+}
+
+fn poll_pending_audio_control_write(
+    pending: &mut Option<PendingAudioControlWrite>,
+    control: Option<&GattCharacteristic>,
+) {
+    let Some(write) = pending.as_mut() else {
+        return;
+    };
+    let result = match control {
+        Some(control) => write.poll(Some(control)),
+        None => Some(Err(
+            "active Listener BLE capture has no audio control characteristic".to_string(),
+        )),
+    };
+    if let Some(result) = result {
+        if let Some(write) = pending.take() {
+            write.finish(result);
+        }
+    }
+}
+
+fn next_live_audio_control_request(
+    rx: &mpsc::Receiver<AudioControlRequest>,
+) -> Option<AudioControlRequest> {
+    while let Ok(request) = rx.try_recv() {
+        let queued_ms = request.queued_at.elapsed().as_millis();
+        if request.cancelled.load(Ordering::Acquire)
+            || request.queued_at.elapsed() >= request.timeout
+        {
+            log::warn!(
+                "[embedded-ble] expired active audio control request skipped label={} queued_ms={}",
+                request.label,
+                queued_ms
+            );
+            // Expiry belongs to this request, not to the capture worker.
+            // Dropping the reply sender here looks like worker disconnection
+            // to a caller that is still inside its reply grace period.
+            let _ = request.result_tx.send(Err(format!(
+                "active Listener BLE audio control request expired in queue: {}",
+                request.label
+            )));
+            continue;
+        }
+        return Some(request);
+    }
+    None
 }
 
 fn wait_post_ota_notify_target_connected(
@@ -876,8 +1265,14 @@ fn capture_notification_events_until_cancelled_impl(
     let mut consecutive_type_heartbeat_failures = 0u32;
     let mut next_pipeline_snapshot_at = Instant::now();
     loop {
-        cleanup.drain_audio_control_requests(&control_rx);
+        cleanup.poll_audio_control_requests(&control_rx);
         let now = Instant::now();
+        if cleanup.take_type_heartbeat_preempted() {
+            next_type_heartbeat = Some(now);
+            log::info!(
+                "[embedded-ble] capture #{capture_id}: Type heartbeat rescheduled immediately after active audio control"
+            );
+        }
         if now >= next_pipeline_snapshot_at {
             pipeline_observation.snapshot("capture_poll", false);
             next_pipeline_snapshot_at = now + Duration::from_secs(1);
@@ -895,6 +1290,7 @@ fn capture_notification_events_until_cancelled_impl(
         let mut heartbeat_outcome = cleanup.poll_periodic_type_heartbeat();
         if heartbeat_outcome.is_none()
             && cleanup.pending_type_heartbeat.is_none()
+            && !cleanup.has_pending_audio_control()
             && next_type_heartbeat.is_some_and(|due| now >= due)
         {
             // The audio/control queue was drained above. Start one write and
@@ -1075,6 +1471,7 @@ fn capture_notification_events_until_cancelled_impl(
             link_recovery_deadline,
             ec11_recovery_prepare_disconnect_deadline,
             ec11_recovery_disconnect_deadline,
+            cleanup.pending_audio_control_deadline(),
         ]
         .into_iter()
         .flatten()

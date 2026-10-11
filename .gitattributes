@@ -2,7 +2,6 @@
 # text files to CRLF on checkout, which breaks source-assertion unit tests that
 # match include_str!/readFileSync output against LF line-ending patterns.
 # Source files keep LF in both the repo and the working tree.
-
 .gitattributes text eol=lf
 *.rs     text eol=lf
 *.toml   text eol=lf
@@ -19,9 +18,9 @@
 *.py     text eol=lf
 *.onnx   binary
 src-tauri/resources/models/*.LICENSE.txt text eol=lf
-
 # Windows-only scripts keep CRLF.
 *.ps1    text eol=crlf
 *.psm1   text eol=crlf
 *.bat    text eol=crlf
 *.cmd    text eol=crlf
+src-tauri/resources/content-recovery/*.gguf filter=lfs diff=lfs merge=lfs -text

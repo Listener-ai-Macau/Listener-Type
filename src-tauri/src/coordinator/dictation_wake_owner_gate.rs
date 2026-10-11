@@ -57,8 +57,9 @@ fn start_owner_verification_prefetch(
     phrase: &str,
     embedded_session_id: u32,
 ) {
-    let pcm = candidate.pcm.clone();
-    let source_range = candidate.current_candidate_range();
+    let input = WakeVerifierSnapshot::from_candidate(candidate);
+    let pcm = input.pcm.clone();
+    let source_range = input.range;
     let voiceprint_phrase = phrase.to_string();
     candidate.owner_verification_attempted = true;
     let task = tauri::async_runtime::spawn_blocking(move || {
@@ -66,7 +67,7 @@ fn start_owner_verification_prefetch(
         let result = crate::speaker_verification::verify(&pcm, &voiceprint_phrase);
         (result, started.elapsed().as_millis() as u64)
     });
-    candidate.owner_verification_task = Some(PrefetchedOwnerVerification { source_range, task });
+    candidate.owner_verification_task = Some(PrefetchedOwnerVerification { source_range, input, task });
     log::info!(
         "[speaker-verification] owner check prefetched beside stage2 embedded_session_id={} pcm_ms={}",
         embedded_session_id,
@@ -320,6 +321,8 @@ fn evaluate_candidate_owner_gate(
 fn arbitrate_candidate_wake(
     candidate: &mut BufferedSpeakerCandidate,
     phrase_signal: denzic_voice_activation_v1_core::PhraseSignal,
+    wake_match: Option<&crate::wake_phrase::Match>,
+    phrase: &str,
     verification: &Result<crate::speaker_verification::VerificationResult, String>,
     owner_verified_by_extraction: bool,
     terminal: bool,
@@ -327,18 +330,31 @@ fn arbitrate_candidate_wake(
 ) -> (
     OwnerGateEvaluation,
     crate::speech_decision_kernel::WakeArbitration,
+    denzic_voice_activation_v1_core::PhraseSignal,
 ) {
-    let mut owner_gate = evaluate_candidate_owner_gate(candidate, phrase_signal, verification, verified_pcm_ms);
+    let qualified_intent = qualify_candidate_wake_intent(
+        phrase_signal,
+        wake_match.map(|found| found.phrase_evidence_for(phrase))
+            .unwrap_or(crate::speech_decision_kernel::KeywordPhraseEvidence::Unobserved),
+        candidate.complete_local_wake_intent,
+        candidate.current_candidate_range(),
+        owner_verified_by_extraction,
+    );
+    if qualified_intent != phrase_signal {
+        log::info!("[wake-phrase] intent qualified candidate_id={} claimed={:?} qualified={:?} terminal={}",
+            candidate.candidate_id, phrase_signal, qualified_intent, terminal);
+    }
+    let mut owner_gate = evaluate_candidate_owner_gate(candidate, qualified_intent, verification, verified_pcm_ms);
     if owner_verified_by_extraction {
         owner_gate.access = crate::speech_decision_kernel::OwnerAccessEvidence::EnrolledMatch;
         owner_gate.recovered_by_local_phrase = true;
     }
     let arbitration = crate::speech_decision_kernel::arbitrate_wake(
-        phrase_signal,
+        qualified_intent,
         owner_gate.access,
         terminal,
     );
-    (owner_gate, arbitration)
+    (owner_gate, arbitration, qualified_intent)
 }
 
 // Run terminal verification before phrase recall. Otherwise repeated local-ASR
@@ -605,6 +621,7 @@ async fn evaluate_target_wake_extraction(
             phrase.chars().count(),
         ),
         matched_keyword: None,
+        origin: crate::wake_phrase::KeywordEvidenceOrigin::PrimaryDetector,
         audio_end_seconds: None,
     };
     Ok(Some(ExtractedOwnerWakeEvidence {

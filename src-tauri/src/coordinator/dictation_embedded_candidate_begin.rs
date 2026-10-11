@@ -253,6 +253,7 @@ impl EmbeddedStreamingDictation {
                 owner_verification_task: None,
                 owner_verification_attempted: false,
                 owner_local_phrase_source_range: None,
+                complete_local_wake_intent: None,
                 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
                 target_wake_extraction_task: None,
                 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
