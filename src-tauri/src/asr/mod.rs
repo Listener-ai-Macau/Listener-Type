@@ -21,6 +21,8 @@ pub(crate) mod owner_content_extraction;
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 pub(crate) mod content_recovery_worker;
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+pub(crate) mod content_recovery_assets;
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 pub(crate) mod target_speaker_extraction;
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 mod target_speaker_output;

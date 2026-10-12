@@ -89,7 +89,7 @@ fn native_assets() -> Result<super::multitalker_native::MultitalkerAssets, Strin
     };
     Ok(super::multitalker_native::MultitalkerAssets {
         runtime_directory: root.join("runtime"),
-        model_path: root.join("multilingual-activity-mask.gguf"),
+        model_path: super::content_recovery_assets::ready_model()?,
     })
 }
 
@@ -383,6 +383,12 @@ pub(crate) async fn recover(
     pcm: Vec<u8>,
     want_activity: bool,
 ) -> Result<RecoveredAudio, String> {
+    if want_activity {
+        super::content_recovery_assets::prepare_in_background("zh-CN");
+        // Never wait for an 890 MB network transfer in finalization. The
+        // model-independent empty-final extraction route still works offline.
+        super::content_recovery_assets::ready_model()?;
+    }
     let cancel = Arc::new(AtomicBool::new(false));
     let _guard = CancelOnDrop(Arc::clone(&cancel));
     tauri::async_runtime::spawn_blocking(move || {

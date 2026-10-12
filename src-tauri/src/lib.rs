@@ -802,7 +802,13 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             coordinator.bind_app(app_handle);
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            crate::asr::content_recovery_assets::prepare_in_background(
+                &coordinator.prefs().get().owner_content_recovery_locale,
+            );
             let wake_phrase = coordinator.prefs().get().voice_wake_phrase;
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            let needs_target_extraction = !coordinator.prefs().get().owner_activity_only;
             std::thread::Builder::new()
                 .name("voice-activation-preload".to_string())
                 .spawn(move || {
@@ -824,7 +830,7 @@ pub fn run() {
                         None => Ok(()),
                     };
                     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-                    if enrolled {
+                    if enrolled && needs_target_extraction {
                         std::thread::Builder::new()
                             .name("target-speaker-preload".to_string())
                             .spawn(|| match crate::asr::target_speaker_extraction::warm_up() {

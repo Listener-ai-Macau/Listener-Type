@@ -318,6 +318,12 @@ pub(crate) fn extract_full_session(reference: &[u8], pcm: &[u8]) -> Result<Vec<u
     let load = |path: &Path| {
         Session::builder()
             .map_err(|e| e.to_string())?
+            // Each phase runs once. A reusable arena/pattern reserves memory
+            // for a future inference which never happens in this worker.
+            .with_execution_providers([ort::ep::CPU::default().with_arena_allocator(false).build()])
+            .map_err(|e| e.to_string())?
+            .with_memory_pattern(false)
+            .map_err(|e| e.to_string())?
             .with_intra_threads(8)
             .map_err(|e| e.to_string())?
             .with_inter_threads(1)
@@ -325,9 +331,6 @@ pub(crate) fn extract_full_session(reference: &[u8], pcm: &[u8]) -> Result<Vec<u
             .commit_from_file(path)
             .map_err(|e| e.to_string())
     };
-    let mut encoder = load(&encoder_path)?;
-    resource_headroom(separator_path.metadata().map_err(|e| e.to_string())?.len())?;
-    let mut separator = load(&separator_path)?;
     let mel_bytes = std::fs::read(mel_path).map_err(|e| e.to_string())?;
     if mel_bytes.len() != BINS * MEL_BINS * 4 {
         return Err("invalid PS4 mel asset size".into());
@@ -357,20 +360,31 @@ pub(crate) fn extract_full_session(reference: &[u8], pcm: &[u8]) -> Result<Vec<u
     });
     let result = (|| {
         resource_headroom(0)?;
-        let features =
-            TensorRef::from_array_view(([1usize, reference_frames, MEL_BINS], features.as_slice()))
+        // Own the 192-float result, then drop the output and encoder session
+        // before allocating separator weights/activations. No audio is split.
+        let embedding_values = {
+            let mut encoder = load(&encoder_path)?;
+            let features = TensorRef::from_array_view((
+                [1usize, reference_frames, MEL_BINS],
+                features.as_slice(),
+            ))
+            .map_err(|e| e.to_string())?;
+            let output = encoder
+                .run_with_options(ort::inputs!["fbank" => features], &run_options)
                 .map_err(|e| e.to_string())?;
-        let output = encoder
-            .run_with_options(ort::inputs!["fbank" => features], &run_options)
-            .map_err(|e| e.to_string())?;
-        let (shape, embedding) = output["embedding"]
-            .try_extract_tensor::<f32>()
-            .map_err(|e| e.to_string())?;
-        if shape.as_ref() != [1i64, 192] || embedding.iter().any(|v| !v.is_finite()) {
-            return Err("invalid PS4 embedding".into());
-        }
-        let embedding = TensorRef::from_array_view(([1usize, 192usize], embedding))
-            .map_err(|e| e.to_string())?;
+            let (shape, embedding) = output["embedding"]
+                .try_extract_tensor::<f32>()
+                .map_err(|e| e.to_string())?;
+            if shape.as_ref() != [1i64, 192] || embedding.iter().any(|v| !v.is_finite()) {
+                return Err("invalid PS4 embedding".into());
+            }
+            embedding.to_vec()
+        };
+        resource_headroom(separator_path.metadata().map_err(|e| e.to_string())?.len())?;
+        let mut separator = load(&separator_path)?;
+        let embedding =
+            TensorRef::from_array_view(([1usize, 192usize], embedding_values.as_slice()))
+                .map_err(|e| e.to_string())?;
         let spectrum =
             TensorRef::from_array_view(([1usize, 2usize, BINS, frames], spectrum.as_slice()))
                 .map_err(|e| e.to_string())?;

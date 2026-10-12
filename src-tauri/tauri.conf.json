@@ -117,7 +117,9 @@
       "resources/models/ps4-bsrnn-fp32.onnx",
       "resources/models/ps4-mel-257x80.f32",
       "resources/models/ps4-content-manifest.json",
-      "resources/content-recovery/**/*",
+      "resources/content-recovery/runtime/**/*",
+      "resources/content-recovery/licenses/**/*",
+      "resources/content-recovery/bundle-receipt.json",
       "resources/windows-ime/x64/ListenerTypeIme.dll",
       "resources/windows-ime/x86/ListenerTypeIme.dll"
     ],

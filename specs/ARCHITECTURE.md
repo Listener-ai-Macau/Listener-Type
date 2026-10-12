@@ -232,6 +232,24 @@ or transcript prompt. A Windows job limits it to one process and kills it on
 drop; the parent checks cancellation, 60-second total deadline, 4 GiB worker RSS
 and 2 GiB minimum system headroom. Loading and inference are both covered.
 
+The 890,413,984-byte optional activity/content GGUF is outside the Windows MSI.
+`asr/content_recovery_assets.rs` prepares a per-user, SHA-named model cache only
+when `ownerContentRecoveryLocale=zh-CN`. It imports a verified legacy bundle or
+streams the pinned public repository object through a 64 KiB buffer to a private
+temporary file, checks exact length and SHA-256, syncs and atomically publishes
+it. Interrupted/invalid downloads never replace a ready model. Preparation does
+not load inference models and finalization never waits for the network; until
+ready, original ASR remains primary. The worker cannot download anything and
+independently verifies the cache before decoding. Runtime DLLs and licenses stay
+bundled. PS4's one-shot CPU sessions disable reusable arenas/memory patterns;
+its reference encoder and borrowed output are released after copying the exact
+192-float embedding, before the separator is loaded. Weights, thread count,
+complete audio and digital-tail handling remain the same.
+Startup only warms the WeSep encoder/separator for the legacy extraction mode.
+Owner-activity mode sends original audio and explicitly never starts WeSep;
+it must not retain unused WeSep sessions solely because a voiceprint exists.
+Wake detection, enrolled verification and personal activity still prepare as before.
+
 `asr/content_consensus.rs` makes the cross-platform content decision. Only one
 local text segment per anonymous channel is qualified. A unique primary-like
 channel, valid same-source overlapping activity, and complete tone-aware phonetic

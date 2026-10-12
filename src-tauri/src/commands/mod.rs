@@ -603,6 +603,8 @@ pub fn set_settings(
     // 没有 HotkeySettingsContext，必须靠事件感知录音键变化，否则面板可见时
     // 用户改键会让浮窗里的 "{recordHotkey}" 文案一直停留在旧值。
     persist_settings(&*coord, prefs.clone())?;
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    crate::asr::content_recovery_assets::prepare_in_background(&prefs.owner_content_recovery_locale);
     if prefs.show_capsule != previous_prefs.show_capsule {
         coord.refresh_capsule_visibility();
     }

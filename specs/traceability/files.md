@@ -149,6 +149,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/asr/cloud_voiceprint.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/content_consensus.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/content_recovery_worker.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/content_recovery_assets.rs` | Optional content model download, bounded fingerprinted cache and legacy reuse | Targeted download/cache and installed worker checks |
 | `src-tauri/src/asr/fixtures/content-consensus-20261006.json` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/frame.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/cache.rs` | ASR providers | Provider tests, dictation smoke |
