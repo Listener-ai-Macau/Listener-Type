@@ -19,7 +19,12 @@ flowchart TB
 
 ## Frontend
 
-- `src/App.tsx` selects the window surface.
+- `src/main.tsx` selects the window's module before importing it; capsule and
+  QA renderers do not load the main shell, settings or onboarding. Imports start
+  during i18n preparation, not when a recording begins. Shared theme lifecycle
+  lives in `src/state/useDarkMode.ts`; development settings previews have their
+  own entry point.
+- `src/App.tsx` initializes only the main window.
 - `src/components/FloatingShell.tsx` is the main app shell.
 - `src/components/Capsule.tsx` is the compact recording/status window.
 - `src/pages/*` implement product workflows.
@@ -249,10 +254,12 @@ Startup only warms the WeSep encoder/separator for the legacy extraction mode.
 Owner-activity mode sends original audio and explicitly never starts WeSep;
 it must not retain unused WeSep sessions solely because a voiceprint exists.
 Wake detection, enrolled verification and personal activity still prepare as before.
-The personal activity runtime loads its detector independently. Its separate
-Nomo enrollment encoder is lazy: an existing protected, model-bound reference
-does not need that model. Reference generation still loads the exact original
-encoder on first demand and retains it for later generation. This changes no
+The personal activity runtime retains only its streaming detector. Its separate
+Nomo reference encoder belongs to one reference-generation call and is released
+after copying the normalized 192 values, on success or error. Enrollment never
+loads the streaming detector; a legacy verified-wake reference finishes encoding
+before acquiring that detector. Protected model-bound references still skip
+encoding. The existing detector stays warm across recordings. This changes no
 features, normalization, probability threshold or endpoint decision.
 
 `asr/content_consensus.rs` makes the cross-platform content decision. Only one

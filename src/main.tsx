@@ -1,9 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { Settings } from "./pages/Settings";
-import { HotkeySettingsProvider } from "./state/HotkeySettingsContext";
+import { useDarkMode } from "./state/useDarkMode";
 import i18n from "./i18n"; // 副作用：触发 i18next init
 import "./styles/tokens.css";
 import "./styles/global.css";
@@ -42,6 +40,31 @@ const isSettingsShortcutsVisual =
 const isSettingsDeviceVisual =
   import.meta.env.DEV && params.get("visual") === "settings-device";
 
+const visualSection = isLocalAsrVisual ? 'advanced'
+  : isSettingsShortcutsVisual ? 'shortcuts'
+  : isSettingsDeviceVisual ? 'device' : null;
+
+// Select before importing a window's module. A hidden overlay must not parse
+// the main shell, history, settings and onboarding on every renderer startup.
+const viewModule = isCapsule
+  ? import('./components/Capsule').then(({ Capsule }) => ({ default: Capsule }))
+  : isQa
+    ? import('./pages/QaPanel').then(({ QaPanel }) => ({ default: QaPanel }))
+    : visualSection
+      ? import('./pages/SettingsVisual').then(({ SettingsVisual }) => ({
+          default: () => <SettingsVisual section={visualSection} />,
+        }))
+      : import('./App').then(({ App }) => ({ default: App }));
+// The import begins while i18n prepares. React's boundary handles rejection
+// when rendering; attach a handler meanwhile to avoid an unhandled rejection.
+void viewModule.catch(() => {});
+const WindowView = React.lazy(() => viewModule);
+
+function ThemedWindow() {
+  useDarkMode();
+  return <WindowView />;
+}
+
 if (import.meta.env.DEV && params.get("theme") === "dark") {
   document.documentElement.setAttribute("data-theme", "dark");
   window.localStorage.setItem("ol-dark-mode", "true");
@@ -62,27 +85,9 @@ const renderApp = (reason: string) => {
   root.render(
     <React.StrictMode>
       <ErrorBoundary>
-        {isLocalAsrVisual ? (
-          <HotkeySettingsProvider>
-            <div className="ol-settings-visual-root" style={{ width: "100%", height: "100%", padding: 24, overflow: "auto", background: "var(--ol-window-bg)" }}>
-              <Settings embedded initialSection="advanced" />
-            </div>
-          </HotkeySettingsProvider>
-        ) : isSettingsShortcutsVisual ? (
-          <HotkeySettingsProvider>
-            <div className="ol-settings-visual-root" style={{ width: "100%", height: "100%", padding: 24, overflow: "auto", background: "var(--ol-window-bg)" }}>
-              <Settings embedded initialSection="shortcuts" />
-            </div>
-          </HotkeySettingsProvider>
-        ) : isSettingsDeviceVisual ? (
-          <HotkeySettingsProvider>
-            <div className="ol-settings-visual-root" style={{ width: "100%", height: "100%", padding: 24, overflow: "auto", background: "var(--ol-window-bg)" }}>
-              <Settings embedded initialSection="device" />
-            </div>
-          </HotkeySettingsProvider>
-        ) : (
-          <App isCapsule={isCapsule} isQa={isQa} />
-        )}
+        <React.Suspense fallback={null}>
+          {visualSection ? <WindowView /> : <ThemedWindow />}
+        </React.Suspense>
       </ErrorBoundary>
     </React.StrictMode>,
   );

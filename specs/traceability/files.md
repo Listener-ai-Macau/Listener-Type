@@ -338,7 +338,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/vendor/qwen-asr/qwen_asr_tokenizer.h` | Vendored local ASR engine | Cargo check and local ASR smoke |
 | `src-tauri/wix/listener-type-ime-cleanup.wxs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/wix/listener-type-ime.wxs` | Windows IME insertion | Windows static and runtime smoke |
-| `src/App.tsx` | Core app | Build and targeted tests |
+| `src/App.tsx` | Main-window initialization, kept outside overlay import graphs | Frontend build and window-entry dependency checks |
 | `src/components/AutoUpdate.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/AutoUpdateGate.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/Capsule.tsx` | React UI | TypeScript build and visual smoke |
@@ -408,7 +408,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/lib/voiceprintEnrollmentUi.test.ts` | Regress storage failures without requesting new speech or blaming audio | Node TypeScript test |
 | `src/lib/windowHotkeyFallback.test.ts` | Core app | Build and targeted tests |
 | `src/lib/windowHotkeyFallback.ts` | Core app | Build and targeted tests |
-| `src/main.tsx` | Core app | Build and targeted tests |
+| `src/main.tsx` | Select and preload one window entry during i18n preparation | Compiled overlay dependency graph and frontend build |
+| `src/pages/SettingsVisual.tsx` | Development-only settings visual entry | Frontend build |
 | `src/pages/History.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/LocalAsr.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/Marketplace.tsx` | React UI | TypeScript build and visual smoke |
@@ -432,6 +433,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/pages/settings/VoiceprintEnrollmentWizard.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/shared.tsx` | React UI | TypeScript build and visual smoke |
 | `src/state/HotkeySettingsContext.tsx` | Core app | Build and targeted tests |
+| `src/state/useDarkMode.ts` | Shared window theme and listener ownership without main-shell imports | Frontend build and window-entry dependency checks |
 | `src/state/useAppState.ts` | Core app | Build and targeted tests |
 | `src/styles/global.css` | Design system | Visual smoke |
 | `src/styles/tokens.css` | Design system | Visual smoke |

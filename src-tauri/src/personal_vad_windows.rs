@@ -36,12 +36,12 @@ impl PersonalVadReference {
 }
 
 pub(crate) fn enrollment_reference(pcm: &[u8]) -> Result<PersonalVadReference, String> {
-    let values = runtime()?.lock().reference(pcm)?;
+    // Enrollment owns only reference generation, never the streaming detector.
+    let values = encode_reference(pcm)?;
     PersonalVadReference::from_bound_values(ENCODER_SHA, crate::speaker_identity_eres::FRONTEND_ID, values)
 }
 
 struct Runtime {
-    encoder: Option<Session>,
     detector: Session,
 }
 
@@ -79,32 +79,28 @@ fn load_session(path: &Path, expected_hash: &str) -> Result<Session, String> {
         .map_err(|e| format!("load personal VAD model: {e}"))
 }
 
-impl Runtime {
-    fn load() -> Result<Self, String> {
-        let root = crate::persistence::speaker_verification_root().map_err(|e| e.to_string())?;
-        let dll = root.join("onnxruntime.dll");
-        let initializer =
-            ort::init_from(&dll).map_err(|e| format!("load personal VAD runtime: {e}"))?;
-        let _ = initializer.with_name("listener-owner-activity").commit();
-        Ok(Self {
-            // A protected enrollment already supplies the bound reference.
-            // Streaming detection does not use this separate encoder model.
-            encoder: None,
-            detector: load_session(&model_path(DETECTOR)?, DETECTOR_SHA)?,
-        })
-    }
+fn initialize_runtime() -> Result<(), String> {
+    let root = crate::persistence::speaker_verification_root().map_err(|e| e.to_string())?;
+    let dll = root.join("onnxruntime.dll");
+    let initializer = ort::init_from(&dll).map_err(|e| format!("load personal VAD runtime: {e}"))?;
+    let _ = initializer.with_name("listener-owner-activity").commit();
+    Ok(())
+}
 
-    fn reference(&mut self, pcm: &[u8]) -> Result<Vec<f32>, String> {
+fn encode_reference(pcm: &[u8]) -> Result<Vec<f32>, String> {
+        // Keep transient generation serialized as the old shared runtime did,
+        // without retaining an encoder or blocking streaming detector calls.
+        static GENERATION: once_cell::sync::Lazy<Mutex<()>> =
+            once_cell::sync::Lazy::new(|| Mutex::new(()));
+        let _generation = GENERATION.lock();
         let (frames, values) = crate::speaker_identity_eres::fbank(pcm)?;
-        if self.encoder.is_none() {
-            self.encoder = Some(load_session(&model_path(ENCODER)?, ENCODER_SHA)?);
-        }
+        initialize_runtime()?;
+        // The caller retains the 192 values, not a native model or borrowed
+        // output. Drop the encoder on success and on every error path.
+        let mut encoder = load_session(&model_path(ENCODER)?, ENCODER_SHA)?;
         let input = TensorRef::from_array_view(([1usize, frames, 80usize], values.as_slice()))
             .map_err(|e| e.to_string())?;
-        let output = self
-            .encoder
-            .as_mut()
-            .ok_or("personal activity reference encoder unavailable")?
+        let output = encoder
             .run(ort::inputs!["fbank" => input])
             .map_err(|e| e.to_string())?;
         let (shape, embedding) = output["embedding"]
@@ -125,6 +121,17 @@ impl Runtime {
             .iter()
             .map(|v| (*v as f64 / norm) as f32)
             .collect())
+}
+
+impl Runtime {
+    fn load() -> Result<Self, String> {
+        initialize_runtime()?;
+        Ok(Self { detector: load_session(&model_path(DETECTOR)?, DETECTOR_SHA)? })
+    }
+
+    #[cfg(test)]
+    fn reference(&mut self, pcm: &[u8]) -> Result<Vec<f32>, String> {
+        encode_reference(pcm)
     }
 
     fn probabilities(&mut self, reference: &[f32], pcm: &[u8]) -> Result<Vec<f32>, String> {
@@ -203,14 +210,14 @@ impl PersonalVadStream {
             #[cfg(test)]
             eprintln!("[saved-presence] worker entered");
             let work = || -> Result<(), String> {
-                let loaded = runtime()?;
-                #[cfg(test)]
-                eprintln!("[saved-presence] runtime loaded");
                 let source = if enrolled_reference.is_some() { "three_sample_enrollment" } else { "legacy_verified_wake" };
                 let reference = match enrolled_reference {
                     Some(reference) => reference.0,
-                    None => loaded.lock().reference(&reference_pcm)?,
+                    None => encode_reference(&reference_pcm)?,
                 };
+                let loaded = runtime()?;
+                #[cfg(test)]
+                eprintln!("[saved-presence] runtime loaded");
                 log::info!("[owner-activity] reference ready source={source} verified_wake_pcm_ms={} output=all_chunks", reference_pcm.len()/32);
                 let mut audio = PresenceAudioBuffer::default();
                 let mut positive_end = None;
