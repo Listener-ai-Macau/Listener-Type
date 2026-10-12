@@ -503,6 +503,7 @@ mod platform {
         _sherpa: Library,
         spotter: *const c_void,
         create_stream: CreateStream,
+        create_stream_with_keywords: unsafe extern "C" fn(*const c_void, *const c_char) -> *const c_void,
         accept_waveform: AcceptWaveform,
         input_finished: InputFinished,
         is_ready: IsReady,
@@ -890,6 +891,7 @@ mod platform {
             let create: CreateSpotter = sym!("SherpaOnnxCreateKeywordSpotter", CreateSpotter);
             let destroy_spotter = sym!("SherpaOnnxDestroyKeywordSpotter", DestroySpotter);
             let create_stream = sym!("SherpaOnnxCreateKeywordStream", CreateStream);
+            let create_stream_with_keywords = sym!("SherpaOnnxCreateKeywordStreamWithKeywords", unsafe extern "C" fn(*const c_void, *const c_char) -> *const c_void);
             let accept_waveform = sym!("SherpaOnnxOnlineStreamAcceptWaveform", AcceptWaveform);
             let input_finished = sym!("SherpaOnnxOnlineStreamInputFinished", InputFinished);
             let is_ready = sym!("SherpaOnnxIsKeywordStreamReady", IsReady);
@@ -949,6 +951,7 @@ mod platform {
                 _sherpa: sherpa,
                 spotter,
                 create_stream,
+                create_stream_with_keywords,
                 accept_waveform,
                 input_finished,
                 is_ready,
@@ -970,6 +973,8 @@ mod platform {
         let (score, threshold) = configured_keyword_values(phrase);
         load_cached_runtime(&LIVE_CACHE, phrase, score, threshold, true)
     }
+
+    include!("wake_phrase_competition.rs");
 
     /// p95 → 0.65 boost (clamp 1..48). The board's wake-candidate PCM arrives
     /// far below KWS training levels (real candidates RMS ~-40 dBFS), so the

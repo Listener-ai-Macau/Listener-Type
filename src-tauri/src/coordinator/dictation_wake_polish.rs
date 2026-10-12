@@ -2271,6 +2271,8 @@ struct BufferedSpeakerCandidate {
     /// growth cannot move that proof's identity boundary.
     owner_local_phrase_source_range: Option<crate::observability::CandidateRange>,
     complete_local_wake_intent: Option<CompleteLocalWakeIntent>,
+    #[cfg(target_os = "windows")]
+    primary_keyword_check: Option<PrimaryKeywordCheck>,
     /// Strong continuous Mandarin can hide the owner's phrase from both raw
     /// KWS and local ASR. Run one bounded, enrolled-owner extraction beside the
     /// established raw path; it may release only after the extracted output

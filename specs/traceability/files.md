@@ -234,6 +234,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator/dictation_wake_fusion_core.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_owner_gate.rs` | Shared live/terminal complete-intent qualification and separate owner arbitration | Complete-intent behavioral regressions and product build |
 | `src-tauri/src/coordinator/dictation_wake_polish.rs` | Candidate state, immutable local phrase proof and accepted control-prefix propagation in every transcript mode | Accepted activation/source-coordinate regressions and product build |
+| `src-tauri/src/coordinator/dictation_wake_keyword_check_tests.rs` | Regression evidence for asynchronous keyword assessment and retained ordinary-speech failure | Targeted candidate lifecycle and actual helper IPC live/terminal replay; no editor or device control |
+| `src-tauri/src/coordinator/dictation_wake_keyword_check.rs` | Candidate-owned asynchronous keyword assessment, frozen PCM/candidate identity and decoder-only rejection | Retained false-wake helper/candidate replay; pending, stale input, complete intent and worker-unavailable behavior |
 | `src-tauri/src/coordinator/dictation_wake_prefix_retry.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_verification_source.rs` | Wake verification provenance and input-bound complete local command proof | Complete-intent behavioral regressions and product build |
 | `src-tauri/src/coordinator/dictation_wake_verification_source_tests.rs` | Core app | Build and targeted tests |
@@ -301,6 +303,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/types.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/unicode_keystroke.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/wake_phrase.rs` | Sensitive complete-keyword and recall streams, detector/recorded-recall origins, exact recall input and audio coordinates | Native continuation, recorded-recall admission, near-phrase controls and audio-boundary regressions |
+| `src-tauri/src/wake_phrase_competition.rs` | Same-source competing keyword paths using complete native timestamps and per-stream keyword graphs | Complete raw/enhanced agreement, same acoustic occurrence and retained false-wake comparison |
 | `src-tauri/src/windows_ime_ipc.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/src/windows_ime_profile.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/src/windows_ime_protocol.rs` | Windows IME insertion | Windows static and runtime smoke |

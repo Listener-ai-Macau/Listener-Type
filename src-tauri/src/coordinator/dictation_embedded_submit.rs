@@ -595,6 +595,18 @@ async fn submit_embedded_audio_ble_stream_impl(
             }
         }
 
+        // Poll completed assessment when transport is quiet; never await its
+        // unfinished model work on the audio actor.
+        #[cfg(target_os = "windows")]
+        if streaming.speaker_candidate.as_ref().is_some_and(|candidate|
+            candidate.primary_keyword_check.as_ref().is_some_and(|check| check.task.inner().is_finished())) {
+            if let Some(segment) = streaming.embedded_session_id {
+                if let Err(error) = streaming.try_release_automatic_candidate(inner, segment).await {
+                    log::warn!("[wake-phrase] completed primary check admission failed: {error}");
+                }
+            }
+        }
+
         let maybe_signal = if session_abort.is_some() || !emit_idle_capture_errors {
             tokio::select! {
                 signal = rx.recv() => signal,

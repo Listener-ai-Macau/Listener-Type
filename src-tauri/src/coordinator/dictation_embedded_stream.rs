@@ -1504,8 +1504,7 @@ impl EmbeddedStreamingDictation {
                             != denzic_voice_activation_v1_core::PhraseSignal::None
                     })
                 {
-                    task.abort();
-                    candidate.local_confirmation_task_started_at = None;
+                    candidate.local_confirmation_task = Some(task);
                 } else {
                     let task_origin_bytes = candidate.local_confirmation_task_origin_bytes;
                     let task_source_range = candidate.local_confirmation_task_source_range.take();
@@ -1594,9 +1593,20 @@ impl EmbeddedStreamingDictation {
                     if found.complete_phrase_signal(&phrase)
                         != denzic_voice_activation_v1_core::PhraseSignal::None =>
                 {
-                    phrase_signal = found.complete_phrase_signal(&phrase);
-                    log::info!("[wake-phrase] terminal complete keyword admitted embedded_session_id={embedded_session_id}; secondary transcript cannot veto phrase evidence");
-                    Some(found)
+                    #[cfg(target_os = "windows")]
+                    let admitted = {
+                        if candidate.primary_keyword_check.is_none() {
+                            begin_primary_keyword_check(&mut candidate, &found, &phrase);
+                        }
+                        if candidate.primary_keyword_check.is_some() {
+                            finish_primary_keyword_check(&mut candidate, true).await
+                        } else { Some(found) }
+                    };
+                    #[cfg(not(target_os = "windows"))]
+                    let admitted = Some(found);
+                    phrase_signal = admitted.as_ref().map(|found| found.complete_phrase_signal(&phrase))
+                        .unwrap_or(denzic_voice_activation_v1_core::PhraseSignal::None);
+                    admitted
                 }
                 Ok(Some(found)) => {
                     #[cfg(target_os = "windows")]
@@ -2952,6 +2962,18 @@ impl EmbeddedStreamingDictation {
                 maybe_prefetch_owner_verification(candidate, &phrase, embedded_session_id);
             }
         }
+        #[cfg(target_os = "windows")]
+        if let Some(candidate) = self.speaker_candidate.as_mut() {
+            if candidate.primary_keyword_check.is_some() {
+                if let Some(found) = finish_primary_keyword_check(candidate, false).await {
+                    candidate.pending_phrase_match = Some(PendingAutomaticPhraseMatch {
+                        phrase_signal: found.complete_phrase_signal(&phrase), wake_match: found,
+                        local_confirmation_ms: 0, owner_verification_start_ms: OWNER_VERIFICATION_START_MS,
+                        owner_verified_by_extraction: false,
+                    });
+                } else if candidate.primary_keyword_check.is_some() { return Ok(false); }
+            }
+        }
         #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
         {
             let completed_task = self.speaker_candidate.as_mut().and_then(|candidate| {
@@ -3364,8 +3386,12 @@ impl EmbeddedStreamingDictation {
                     != denzic_voice_activation_v1_core::PhraseSignal::None
             }) {
                 let found = kws_hit.expect("complete keyword evidence checked");
+                #[cfg(target_os = "windows")]
+                {
+                    let candidate = self.speaker_candidate.as_mut().ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
+                    if begin_primary_keyword_check(candidate, &found, &phrase) { return Ok(false); }
+                }
                 phrase_signal = found.complete_phrase_signal(&phrase);
-                log::info!("[wake-phrase] live complete keyword admitted embedded_session_id={embedded_session_id}; secondary transcript cannot veto phrase evidence");
                 Some(found)
             } else {
                 #[cfg(target_os = "windows")]

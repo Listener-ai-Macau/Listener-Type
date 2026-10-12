@@ -60,6 +60,20 @@ capsule does not certify the enrolled owner. Terminal processing finishes the
 keyword streams before joining optional local recognition, preserving a final
 complete hit even after an earlier partial hit.
 
+A complete primary keyword with reliable token coordinates can also own a
+single asynchronous acoustic comparison. The job freezes candidate ID, PCM range,
+digest and the claimed endpoint; the BLE actor continues buffering and polls the
+finished job, including on its existing quiet tick. A completed full local phrase
+on that input retains the existing fast path. Only agreement of raw and enhanced
+recognition on a complete alternative, plus the same native phoneme anchors in a
+competitive keyword graph, can refute this occurrence. Absence, busy/error and
+unproven/repaired coordinates cannot veto a complete keyword. Refutation advances
+only decoder context; original PCM and the full local-recognition head remain.
+Later commands are still eligible. The helper uses custom keyword streams over
+cached trained weights; alternatives live in that stream, never in a persistent
+voice profile or global keyword vocabulary. This check grants no speaker, text
+exclusion or endpoint permission.
+
 Wake diagnostic audio remains opt-in through an explicitly selected operator
 directory. Its filename sequence does not expire after a lifetime capture count;
 candidate and raw/boosted helper WAVs share the existing file, byte and age

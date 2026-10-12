@@ -48,6 +48,12 @@ mod imp {
     #[derive(Debug, Serialize, Deserialize)]
     #[serde(tag = "kind", rename_all = "snake_case")]
     enum HelperRequest {
+        CompareKeyword {
+            request_id: String,
+            wav_path: String,
+            phrase: String,
+            claimed_end_seconds: f32,
+        },
         Confirm {
             request_id: String,
             wav_path: String,
@@ -62,6 +68,13 @@ mod imp {
     #[derive(Debug, Serialize, Deserialize)]
     #[serde(tag = "kind", rename_all = "snake_case")]
     enum HelperResponse {
+        KeywordComparison {
+            request_id: String,
+            input_pcm_sha256: [u8; 32],
+            conflict: Option<crate::wake_phrase::AcousticKeywordConflict>,
+            inference_ms: u64,
+            error: Option<String>,
+        },
         Ready {
             model_id: Option<String>,
             warmup_ms: u64,
@@ -111,9 +124,15 @@ mod imp {
                 std::env::current_exe().ok()
             }
             .ok_or_else(|| "resolve Listener Type executable".to_string())?;
-            let mut child = Command::new(executable)
-                .arg("--local-wake-helper")
-                .stdin(Stdio::piped())
+            let mut command = Command::new(executable);
+            #[cfg(test)]
+            let diagnostic_test = std::env::var("LISTENER_WAKE_HELPER_DIAGNOSTIC_TEST").ok();
+            #[cfg(not(test))]
+            let diagnostic_test: Option<String> = None;
+            if let Some(test) = diagnostic_test.filter(|_| diagnostic_mode) {
+                command.args(["--ignored", "--exact", &test, "--nocapture"]);
+            } else { command.arg("--local-wake-helper"); }
+            let mut child = command.stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .creation_flags(CREATE_NO_WINDOW)
@@ -135,6 +154,8 @@ mod imp {
                         let Ok(line) = line else {
                             break;
                         };
+                        #[cfg(test)]
+                        if !line.starts_with('{') { continue; }
                         if response_tx.send(line).is_err() {
                             break;
                         }
@@ -219,6 +240,36 @@ mod imp {
     }
 
     impl WakeHelperClient {
+        fn compare_keyword(&self, pcm: &[u8], phrase: &str, claimed_end_seconds: f32,
+            timeout: Duration) -> Result<Option<crate::wake_phrase::AcousticKeywordConflict>, String> {
+            use sha2::{Digest, Sha256};
+            let mut slot = self.process.try_lock()
+                .ok_or_else(|| super::WAKE_HELPER_BUSY_ERROR_CODE.to_string())?;
+            let wav = TempWavFile::create_without_context_padding(pcm)
+                .map_err(|err| format!("prepare keyword comparison WAV: {err:#}"))?;
+            let request_id = Uuid::new_v4().to_string();
+            let process = Self::ensure_process(&mut slot)?;
+            if let Err(error) = process.send(&HelperRequest::CompareKeyword {
+                request_id: request_id.clone(), wav_path: wav.path().to_string_lossy().into_owned(),
+                phrase: phrase.to_string(), claimed_end_seconds,
+            }) {
+                *slot = None;
+                return Err(error);
+            }
+            let response = match process.receive(timeout) {
+                Ok(response) => response,
+                Err(err) => { *slot = None; return Err(err); }
+            };
+            match response {
+                HelperResponse::KeywordComparison { request_id: returned_id, input_pcm_sha256,
+                    conflict, error, .. } if returned_id == request_id
+                        && input_pcm_sha256 == <[u8; 32]>::from(Sha256::digest(pcm)) => {
+                    if let Some(error) = error { Err(error) } else { Ok(conflict) }
+                },
+                _ => { *slot = None; Err("keyword comparison source mismatch".into()) }
+            }
+        }
+
         fn preload(&self) -> Result<(), String> {
             super::super::paraformer::prepare_assets()?;
             let mut process = self.process.lock();
@@ -406,6 +457,11 @@ mod imp {
         timeout: Duration,
     ) -> Result<ShadowTranscriptResult, String> {
         client().transcribe_if_ready(pcm, timeout)
+    }
+
+    pub fn compare_keyword(pcm: &[u8], phrase: &str, claimed_end_seconds: f32,
+        timeout: Duration) -> Result<Option<crate::wake_phrase::AcousticKeywordConflict>, String> {
+        client().compare_keyword(pcm, phrase, claimed_end_seconds, timeout)
     }
 
     fn emit_response(response: &HelperResponse) -> Result<(), String> {
@@ -616,6 +672,28 @@ mod imp {
                 Err(_) => continue,
             };
             let response = match request {
+                HelperRequest::CompareKeyword { request_id, wav_path, phrase, claimed_end_seconds } => {
+                    use sha2::{Digest, Sha256};
+                    let started = Instant::now();
+                    let mut input_pcm_sha256 = [0u8; 32];
+                    let result = (|| -> Result<_, String> {
+                        let wav = std::fs::read(&wav_path).map_err(|err| err.to_string())?;
+                        let pcm = denzic_audio_v1_core::read_wav_pcm16le(&wav).map_err(|err| err.to_string())?;
+                        input_pcm_sha256 = Sha256::digest(&pcm).into();
+                        let raw = paraformer.transcribe_wav_raw(std::path::Path::new(&wav_path))?;
+                        if phrase_relation_matches(crate::wake_phrase::local_transcript_phrase_relation(&raw, &phrase)) {
+                            return Ok(None);
+                        }
+                        let enhanced = paraformer.transcribe_wav(std::path::Path::new(&wav_path))?;
+                        if phrase_relation_matches(crate::wake_phrase::local_transcript_phrase_relation(&enhanced, &phrase)) {
+                            return Ok(None);
+                        }
+                        crate::wake_phrase::compare_recognized_keyword_paths(&pcm, &phrase, &raw, &enhanced, claimed_end_seconds)
+                    })();
+                    let (conflict, error) = match result { Ok(value) => (value, None), Err(err) => (None, Some(err)) };
+                    HelperResponse::KeywordComparison { request_id, input_pcm_sha256, conflict,
+                        inference_ms: started.elapsed().as_millis() as u64, error }
+                },
                 HelperRequest::Confirm {
                     request_id,
                     wav_path,
@@ -694,6 +772,28 @@ mod imp {
 
     #[cfg(test)]
     mod tests {
+        #[test]
+        #[ignore = "child process for one captured keyword comparison, no microphone/cloud"]
+        fn diagnostic_keyword_comparison_helper() {
+            assert_eq!(super::run_helper(), 0);
+        }
+
+        #[test]
+        #[ignore = "captured false command through production helper IPC and source hash"]
+        fn saved_primary_false_command_is_refuted_through_helper_ipc() {
+            let path = std::env::var("LISTENER_WAKE_DIAG_CLIP").expect("retained false wake");
+            let wav = std::fs::read(path).unwrap();
+            let pcm = denzic_audio_v1_core::read_wav_pcm16le(&wav).unwrap();
+            let started = std::time::Instant::now();
+            let client = super::WakeHelperClient::default();
+            client.preload().unwrap();
+            let warmup_ms = started.elapsed().as_millis();
+            let compute = std::time::Instant::now();
+            let proof = client.compare_keyword(&pcm,"开始录音",1.76,std::time::Duration::from_secs(4)).unwrap();
+            println!("saved_primary_helper_ipc proof={proof:?} warmup_ms={warmup_ms} compute_ms={}",compute.elapsed().as_millis());
+            assert!(proof.is_some(),"known ordinary speech must produce affirmative source-bound conflict");
+        }
+
         use std::collections::BTreeMap;
         use std::fs;
         use std::path::PathBuf;
@@ -1452,7 +1552,7 @@ mod imp {
 #[cfg(target_os = "windows")]
 #[allow(unused_imports)]
 pub use imp::{
-    confirm, preload, run_helper, transcribe_if_ready, ShadowTranscriptResult, WakeHelperResult,
+    compare_keyword, confirm, preload, run_helper, transcribe_if_ready, ShadowTranscriptResult, WakeHelperResult,
 };
 
 #[cfg(not(target_os = "windows"))]
