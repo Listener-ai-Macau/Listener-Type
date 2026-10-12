@@ -241,7 +241,7 @@ it. Interrupted/invalid downloads never replace a ready model. Preparation does
 not load inference models and finalization never waits for the network; until
 ready, original ASR remains primary. The worker cannot download anything and
 independently verifies the cache before decoding. Runtime DLLs and licenses stay
-bundled. PS4's one-shot CPU sessions disable reusable arenas/memory patterns;
+bundled. PS4 retains its original CPU allocator and inference options;
 its reference encoder and borrowed output are released after copying the exact
 192-float embedding, before the separator is loaded. Weights, thread count,
 complete audio and digital-tail handling remain the same.

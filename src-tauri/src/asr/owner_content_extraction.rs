@@ -318,12 +318,6 @@ pub(crate) fn extract_full_session(reference: &[u8], pcm: &[u8]) -> Result<Vec<u
     let load = |path: &Path| {
         Session::builder()
             .map_err(|e| e.to_string())?
-            // Each phase runs once. A reusable arena/pattern reserves memory
-            // for a future inference which never happens in this worker.
-            .with_execution_providers([ort::ep::CPU::default().with_arena_allocator(false).build()])
-            .map_err(|e| e.to_string())?
-            .with_memory_pattern(false)
-            .map_err(|e| e.to_string())?
             .with_intra_threads(8)
             .map_err(|e| e.to_string())?
             .with_inter_threads(1)
