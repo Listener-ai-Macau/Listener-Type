@@ -41,7 +41,7 @@ pub(crate) fn enrollment_reference(pcm: &[u8]) -> Result<PersonalVadReference, S
 }
 
 struct Runtime {
-    encoder: Session,
+    encoder: Option<Session>,
     detector: Session,
 }
 
@@ -87,17 +87,24 @@ impl Runtime {
             ort::init_from(&dll).map_err(|e| format!("load personal VAD runtime: {e}"))?;
         let _ = initializer.with_name("listener-owner-activity").commit();
         Ok(Self {
-            encoder: load_session(&model_path(ENCODER)?, ENCODER_SHA)?,
+            // A protected enrollment already supplies the bound reference.
+            // Streaming detection does not use this separate encoder model.
+            encoder: None,
             detector: load_session(&model_path(DETECTOR)?, DETECTOR_SHA)?,
         })
     }
 
     fn reference(&mut self, pcm: &[u8]) -> Result<Vec<f32>, String> {
         let (frames, values) = crate::speaker_identity_eres::fbank(pcm)?;
+        if self.encoder.is_none() {
+            self.encoder = Some(load_session(&model_path(ENCODER)?, ENCODER_SHA)?);
+        }
         let input = TensorRef::from_array_view(([1usize, frames, 80usize], values.as_slice()))
             .map_err(|e| e.to_string())?;
         let output = self
             .encoder
+            .as_mut()
+            .ok_or("personal activity reference encoder unavailable")?
             .run(ort::inputs!["fbank" => input])
             .map_err(|e| e.to_string())?;
         let (shape, embedding) = output["embedding"]

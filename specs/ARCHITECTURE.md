@@ -249,6 +249,11 @@ Startup only warms the WeSep encoder/separator for the legacy extraction mode.
 Owner-activity mode sends original audio and explicitly never starts WeSep;
 it must not retain unused WeSep sessions solely because a voiceprint exists.
 Wake detection, enrolled verification and personal activity still prepare as before.
+The personal activity runtime loads its detector independently. Its separate
+Nomo enrollment encoder is lazy: an existing protected, model-bound reference
+does not need that model. Reference generation still loads the exact original
+encoder on first demand and retains it for later generation. This changes no
+features, normalization, probability threshold or endpoint decision.
 
 `asr/content_consensus.rs` makes the cross-platform content decision. Only one
 local text segment per anonymous channel is qualified. A unique primary-like
