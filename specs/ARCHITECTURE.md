@@ -1331,3 +1331,24 @@ for analysis per packet. A paced replay alone cannot establish that the live
 producer/consumer backlog survives wake takeover. The separate overrun replay
 holds the consumer, exceeds the byte budget, and verifies fresh-source recovery
 while the skipped original history remains unresolved.
+
+
+### Transient append readback discovery
+
+A recording's ordinary append may retain the preceding consumed paste's native
+editor interface independently of whole-session replacement permission. If a
+fresh discovery/snapshot fails, only that same logical recording can query the
+interface again: native focus and editability must still match, the document
+and selection are read anew, and identity is rechecked after the read. Windows
+interface duplication owns a separate balanced COM initialization on the same
+worker thread. Old document bytes and old paste receipts never stand in for
+this new snapshot or the next payload's consumption. The last interface stays
+bounded to one worker receipt and is released on the existing handoff path.
+
+Manual capsule confirmation remains a normal stop through the shared source
+drain, final body and full clipboard retention path. Discovery recovery adds no
+extra paste, Unicode-first fallback, selection, focus activation or recording
+deadline. The new payload still requires its own observed editor change before
+replacing clipboard transport with the full transcript; a genuinely unreadable
+provider remains unconfirmed. Reusing this query capability alone cannot grant
+whole-range correction or a physical STOP.

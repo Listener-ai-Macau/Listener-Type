@@ -331,6 +331,21 @@ impl PasteReader {
         { (None, FocusedInputState::Unknown) }
     }
 
+    /// Recover a transient full-lookup failure using the same native editor.
+    /// The snapshot and both identity checks are fresh; no old receipt/text
+    /// becomes permission for the next paste or for a whole-range replacement.
+    pub(crate) fn recover_current_paste_snapshot(&self) -> Option<(Self, (String, String))> {
+        #[cfg(target_os = "windows")]
+        {
+            let reader = Self { reader: self.reader.duplicate_current_for_paste().ok()? };
+            let snapshot = reader.before().ok()?;
+            if reader.current_observation().ok() != Some(true) { return None; }
+            Some((reader, snapshot))
+        }
+        #[cfg(not(target_os = "windows"))]
+        { None }
+    }
+
     pub(crate) fn before(&self) -> Result<(String, String), String> {
         #[cfg(target_os = "windows")]
         { self.reader.paste_snapshot() }

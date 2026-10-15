@@ -163,6 +163,18 @@ impl WindowsSelectionReader {
         })
     }
 
+    /// Reuse only this thread's bounded native interface, never its old text.
+    /// Each duplicate owns a balanced COM apartment reference of its own.
+    pub(crate) fn duplicate_current_for_paste(&self) -> Result<Self, String> {
+        if !self.current_observation()? { return Err("paste editor identity changed".into()); }
+        let init = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        let apartment = if init.is_ok() { ComApartment(true) }
+            else if init == RPC_E_CHANGED_MODE { ComApartment(false) }
+            else { return Err(format!("accessibility COM duplication failed: {init}")); };
+        Ok(Self { pattern: self.pattern.clone(), focused: self.focused.clone(),
+            automation: self.automation.clone(), target_hwnd: self.target_hwnd, _apartment: apartment })
+    }
+
     pub(crate) fn read_selected_text(&self) -> Result<String, String> {
         for _ in 0..8 {
             let ranges = unsafe { self.pattern.GetSelection() }

@@ -339,6 +339,7 @@ struct PasteReceipt {
     expected_session_document: Option<String>,
     strict_session_edit: bool,
     staged_selection: bool,
+    dispatch_session: Option<uuid::Uuid>,
 }
 
 #[derive(Default)]
@@ -469,7 +470,7 @@ impl PasteReceipt {
             log::info!("[insertion] paste receipt observed ticket={} elapsed_ms={} observations={} payload_chars={} proof={:?}",
                 self.ticket, observed_at.saturating_duration_since(self.dispatched_at).as_millis(), self.observation.attempts, self.payload.chars().count(), self.observation.proof);
             self.complete(observed_at, PasteReceiptOutcome::Confirmed(proof));
-            if self.session_body.is_none() { self.reader = None; }
+            if self.session_body.is_none() && self.dispatch_session.is_none() { self.reader = None; }
             self.before = None;
         } else {
             self.expire_if_due(Instant::now());
@@ -545,7 +546,7 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                             else { SessionRangePermission::NotRequested } });
                     continue;
                 }
-                let reader = if restore && expected.is_none() && scope.is_none() { None } else { captured_reader };
+                let mut reader = if restore && expected.is_none() && scope.is_none() { None } else { captured_reader };
                 let mut before = reader.as_ref().and_then(|reader| reader.before().ok());
                 // Observe a prior dispatch before advancing the chain. Native
                 // object identity, exact document, empty selection and end
@@ -555,6 +556,19 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                     paste_receipt = None;
                 }
                 if let Some(prior) = paste_receipt.as_mut() { prior.observe(); }
+                if before.is_none() && !revisable && expected.is_none()
+                    && scope.as_ref().is_some_and(|scope| !scope.replace) {
+                    let recovered = recover_scoped_paste_snapshot(
+                        scope.as_ref().map(|scope| scope.session_id),
+                        paste_receipt.as_ref().and_then(|prior| prior.reader.as_ref().map(|reader|
+                            (prior.dispatch_session, prior.observation.consumed, reader))),
+                        crate::selection::PasteReader::recover_current_paste_snapshot);
+                    if let Some((recovered_reader, snapshot)) = recovered {
+                        reader = Some(recovered_reader);
+                        before = Some(snapshot);
+                        log::info!("[insertion] recovered fresh paste readback from same-session native editor after lookup failure");
+                    }
+                }
                 let staged = revisable && scope.as_ref().zip(paste_receipt.as_ref()).is_some_and(|(scope, prior)| {
                     prior.staged_selection && prior.observation.consumed
                         && prior.session_body.as_ref().is_some_and(|(id, body)| *id == scope.session_id && body == &scope.previous_body)
@@ -748,6 +762,7 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                     expected_session_document,
                     strict_session_edit,
                     staged_selection: false,
+                    dispatch_session: scope.as_ref().map(|scope| scope.session_id),
                 };
                 receipt.complete_unsupported_if_needed(dispatched_at);
                 paste_receipt = Some(receipt);
@@ -891,6 +906,18 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
     }
 }
 
+/// A native interface is a capability to query again, not a text/receipt
+/// substitute. Only the same logical recording's consumed predecessor may
+/// supply it, and recovery must produce a new snapshot with fresh identity.
+fn recover_scoped_paste_snapshot<R>(session: Option<uuid::Uuid>,
+    previous: Option<(Option<uuid::Uuid>, bool, &R)>,
+    recover: impl FnOnce(&R) -> Option<(R, (String, String))>) -> Option<(R, (String, String))> {
+    let session = session?;
+    let (previous_session, consumed, reader) = previous?;
+    if previous_session != Some(session) || !consumed { return None; }
+    recover(reader)
+}
+
 fn session_document_proves_range(expected: Option<&str>, body: &str, payload: &str,
     proof: Option<PasteReceiptProof>, after: &str, strict: bool) -> bool {
     (expected == Some(after) || (!strict && body == payload && after == payload
@@ -1018,6 +1045,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn transient_capture_failure_recovers_a_fresh_snapshot_without_reusing_old_text_or_receipt() {
+        let session = uuid::Uuid::new_v4();
+        let original_document = "用户原来的前文，已上屏的第一段。";
+        let fresh_document = "用户后来编辑的前文，已上屏的第一段。";
+        let payload = "这一段在点击勾之前已经说完。";
+        let native_capability = 51_u64;
+        let recovered = recover_scoped_paste_snapshot(Some(session),
+            Some((Some(session), true, &native_capability)), |reader| {
+                Some((*reader, (fresh_document.into(), String::new())))
+            }).expect("a fresh same-editor snapshot must survive a transient discovery failure");
+        assert_eq!(recovered.1.0, fresh_document);
+        assert_ne!(recovered.1.0, original_document, "old receipted text is never the new baseline");
+        let mut observation = PasteObservation::default();
+        observation.observe(&recovered.1.0, &recovered.1.1, payload, fresh_document);
+        assert!(!observation.consumed, "recovering the native query cannot release clipboard transport");
+        observation.observe(&recovered.1.0, &recovered.1.1, payload, &format!("{fresh_document}{payload}"));
+        assert!(observation.consumed, "only this new payload's observed edit releases full retention");
+        assert_eq!(observation.proof, Some(PasteReceiptProof::ExactEdit));
+    }
+
+    #[test]
+    fn paste_recovery_requires_same_session_consumed_predecessor_and_fresh_native_success() {
+        let session = uuid::Uuid::new_v4();
+        let other = uuid::Uuid::new_v4();
+        let reader = 51;
+        for (current, previous, consumed) in [(None,Some(session),true),
+            (Some(session),None,true),(Some(session),Some(other),true),
+            (Some(session),Some(session),false)] {
+            let result = recover_scoped_paste_snapshot(current,Some((previous,consumed,&reader)),
+                |_| -> Option<(i32,(String,String))> { panic!("unqualified old capability must not be queried") });
+            assert!(result.is_none());
+        }
+        assert!(recover_scoped_paste_snapshot(Some(session),Some((Some(session),true,&reader)),
+            |_| -> Option<(i32,(String,String))> { None }).is_none(),
+            "unavailable/mismatching native identity or text remains unknown");
+        let mut observation = PasteObservation::default();
+        observation.observe("prefix", "", "new tail", "different input prefixnew tail");
+        assert!(!observation.consumed, "a substring in another document cannot release clipboard transport");
+    }
+
+    #[test]
     fn unavailable_first_target_does_not_revoke_a_range_that_was_never_written() {
         let (send, receive) = mpsc::channel();
         let worker = std::thread::spawn(move || run_with_capture(receive, None,
@@ -1063,7 +1131,7 @@ mod tests {
                 before: None,
                 dispatched_at,
                 observation: PasteObservation::default(),
-                completion: Some(completion), session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, staged_selection: false,
+                completion: Some(completion), session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, staged_selection: false, dispatch_session: None,
             },
             PasteReceiptHandle {
                 ticket,
@@ -1297,7 +1365,7 @@ mod tests {
                 before: None,
                 dispatched_at: Instant::now(),
                 observation: PasteObservation::default(),
-                completion: None, session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, staged_selection: false,
+                completion: None, session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, staged_selection: false, dispatch_session: None,
             }), || (None, crate::selection::FocusedInputState::NonEditable)));
             let (reply, results) = mpsc::channel();
             commands.send(Command::Retain(ClipboardTicket { id: ticket, revision: transport_revision }, final_body.clone(), true, reply)).unwrap();
