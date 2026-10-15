@@ -616,23 +616,30 @@ impl SettledTargetEndpointClock {
                 PasteReceiptPoll::Ready(completion) => {
                     let pending = self.pending_body_receipts.remove(index);
                     if completion.ticket != pending.ticket {
+                        if self.last_body_submission_sequence == Some(pending.sequence) {
+                            if let Some(endpoint) = self.personal_presence_endpoint.as_mut() {
+                                endpoint.settle_unconfirmed_delivery(pending.personal_continuation_boundary_ms);
+                            }
+                        }
                         continue;
                     }
                     // Only a positive editor observation moves the public
                     // continuation clock. A delayed receipt cannot erase PCM
                     // or VAD evidence recorded after dispatch.
-                    if self.last_body_submission_sequence == Some(pending.sequence)
-                        && matches!(completion.outcome, PasteReceiptOutcome::Confirmed(_))
-                    {
-                        if let Some(dispatched_at) = self.last_body_delivery_at {
-                            self.last_body_delivery_at =
-                                Some(dispatched_at.max(completion.observed_at));
-                        }
-                        if let Some(endpoint) = self.personal_presence_endpoint.as_mut() {
-                            endpoint.confirm_delivery(
-                                completion.observed_at,
-                                pending.personal_continuation_boundary_ms,
-                            );
+                    if self.last_body_submission_sequence == Some(pending.sequence) {
+                        if matches!(completion.outcome, PasteReceiptOutcome::Confirmed(_)) {
+                            if let Some(dispatched_at) = self.last_body_delivery_at {
+                                self.last_body_delivery_at =
+                                    Some(dispatched_at.max(completion.observed_at));
+                            }
+                            if let Some(endpoint) = self.personal_presence_endpoint.as_mut() {
+                                endpoint.confirm_delivery(
+                                    completion.observed_at,
+                                    pending.personal_continuation_boundary_ms,
+                                );
+                            }
+                        } else if let Some(endpoint) = self.personal_presence_endpoint.as_mut() {
+                            endpoint.settle_unconfirmed_delivery(pending.personal_continuation_boundary_ms);
                         }
                     }
                     log::info!(
@@ -645,7 +652,12 @@ impl SettledTargetEndpointClock {
                     );
                 }
                 PasteReceiptPoll::Consumed => {
-                    self.pending_body_receipts.remove(index);
+                    let pending = self.pending_body_receipts.remove(index);
+                    if self.last_body_submission_sequence == Some(pending.sequence) {
+                        if let Some(endpoint) = self.personal_presence_endpoint.as_mut() {
+                            endpoint.settle_unconfirmed_delivery(pending.personal_continuation_boundary_ms);
+                        }
+                    }
                 }
             }
         }
@@ -2360,14 +2372,14 @@ fn start_settled_target_endpoint_watchdog(
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
     asr: &Arc<crate::asr::volcengine::VolcengineStreamingASR>,
 ) {
-    let inner = Arc::clone(inner);
+    let inner = Arc::downgrade(inner);
     let stop_dispatched = Arc::clone(stop_dispatched);
     let stop_completed = Arc::clone(stop_completed);
     let stop_state = Arc::clone(stop_state);
     let endpoint_clock = Arc::clone(endpoint_clock);
-    let asr = Arc::clone(asr);
+    let asr = Arc::downgrade(asr);
     let watchdog_started_at = Instant::now();
-    let asr_instance = Arc::as_ptr(&asr) as usize;
+    let asr_instance = asr.as_ptr() as usize;
     log::info!(
         "[asr] endpoint watchdog started session_id={session_id} asr_instance=0x{asr_instance:x}"
     );
@@ -2379,6 +2391,8 @@ fn start_settled_target_endpoint_watchdog(
         let mut last_status_signature: Option<EndpointWatchdogStatusSignature> = None;
         loop {
             tokio::time::sleep(POLL_INTERVAL).await;
+            let (Some(inner), Some(asr)) = (inner.upgrade(), asr.upgrade()) else { return; };
+            if inner.shutdown.load(Ordering::SeqCst) { return; }
             tick_count = tick_count.saturating_add(1);
             if stop_completed.load(Ordering::SeqCst) {
                 log::info!(
@@ -2807,6 +2821,182 @@ mod endpoint_clock_submission_tests {
         clock.settle_text_submission(Some(second), false, None);
         assert!(clock.pending_body_dispatch.is_none());
         assert_eq!(clock.last_body_delivery_at, None);
+    }
+
+    #[test]
+    fn terminal_editor_receipt_releases_only_its_wait_not_speech_or_unfinished_body() {
+        use crate::personal_vad::{PresenceObservation, PresenceState};
+        use crate::asr::volcengine::{LocalSpeechActivityState, LocalSpeechEvidence, PendingBodyDelivery};
+        // 2026-10-15 ce8801eb: ticket 158 returned Unsupported at 10:01:27.375,
+        // after seven confirmed receipts. The outer ticket was removed while
+        // the personal endpoint kept waiting through capture 50000 ms/cancel.
+        // Quiet and new-owner observations below are explicit component inputs,
+        // not claims that the archived live VAD supplied those observations.
+        for outcome in [PasteReceiptOutcome::Unsupported, PasteReceiptOutcome::TimedOut,
+            PasteReceiptOutcome::Superseded, PasteReceiptOutcome::WorkerUnavailable]
+        {
+            let started = Instant::now();
+            let mut clock = automatic_body_clock();
+            clock.latest_update = Some(owner_update(35_500, 34_880));
+            clock.note_personal_presence(Some(PresenceObservation {
+                analyzed_end_ms: 35_040, last_positive_end_ms: Some(34_880),
+                last_unresolved_end_ms: None, source_history_complete: false,
+                state: PresenceState::Owner, observed_at: started,
+            }), started);
+            let sequence = clock.begin_text_submission(started, "最后一批已经发出的文字").unwrap();
+            let (handle, completion) = pending_receipt_handle_for_test(158);
+            let ticket = handle.ticket();
+            clock.settle_text_submission(Some(sequence), true, Some(handle));
+            completion.send(PasteReceiptCompletion { ticket,
+                observed_at: started + Duration::from_millis(57), outcome }).unwrap();
+            clock.poll_body_receipts();
+            assert!(clock.pending_body_receipts.is_empty());
+            assert!(!clock.personal_presence_endpoint.as_ref().unwrap().due(35_500, started, 3_000),
+                "a terminal negative cannot itself stop live owner speech");
+            assert!(!clock.personal_presence_stop_due(35_500, started, 3_000),
+                "the coordinator still protects the existing continuation window");
+            let quiet_at = started + Duration::from_millis(4_500);
+            clock.latest_update = Some(owner_update(40_000, 34_880));
+            clock.note_personal_presence(Some(PresenceObservation {
+                analyzed_end_ms: 40_000, last_positive_end_ms: Some(34_880),
+                last_unresolved_end_ms: Some(40_000), source_history_complete: false,
+                state: PresenceState::Unknown, observed_at: quiet_at,
+            }), quiet_at);
+            assert!(!clock.personal_presence_stop_due(40_000, quiet_at, 3_000),
+                "an editor failure is not proof of silence or another speaker");
+            clock.local_vad_stop_observation = Some(LocalVadStopObservation::new(LocalSpeechEvidence {
+                revision: 1, analyzed_through_ms: 40_000,
+                state: LocalSpeechActivityState::NonSpeech,
+                last_detected_speech_end_ms: Some(35_000),
+                ..Default::default()
+            }, quiet_at));
+            assert!(clock.personal_presence_stop_due(40_000, quiet_at, 3_000),
+                "independent completed quiet can release recording after the transaction has ended");
+            clock.refresh_pending_body_delivery(Some(PendingBodyDelivery {
+                key: "还没有确认的下一句".into(), updated_at: quiet_at, recognition_pending: true,
+            }), quiet_at);
+            assert!(!clock.personal_presence_stop_due(40_000, quiet_at, 3_000),
+                "retiring a receipt cannot consume or confirm unfinished recognition");
+            clock.refresh_pending_body_delivery(None, quiet_at);
+            clock.note_personal_presence(Some(PresenceObservation {
+                analyzed_end_ms: 40_160, last_positive_end_ms: Some(40_160),
+                last_unresolved_end_ms: None, source_history_complete: false,
+                state: PresenceState::Owner, observed_at: quiet_at,
+            }), quiet_at);
+            assert!(!clock.personal_presence_stop_due(40_160, quiet_at, 3_000),
+                "new owner activity must still veto the old independent quiet span");
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
+    #[ignore = "explicit saved Unsupported-receipt failures; no live device, editor or cloud"]
+    async fn saved_failed_input_quiet_audio_releases_the_finished_receipt_wait() {
+        use crate::personal_vad::{PresenceObservation, PresenceState};
+        use sha2::{Digest, Sha256};
+        let root = std::path::PathBuf::from(std::env::var_os("LISTENER_RECEIPT_FAILURE_REPLAY").unwrap());
+        let cases: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("saved-failure-cases.json")).unwrap()).unwrap();
+        let mut results = Vec::new();
+        for case in cases.as_array().unwrap() {
+            let bytes = std::fs::read(case["wav"].as_str().unwrap()).unwrap();
+            assert_eq!(&bytes[..4], b"RIFF");
+            assert_eq!(&bytes[8..12], b"WAVE");
+            assert_eq!(&bytes[36..40], b"data");
+            assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), 16_000);
+            let pcm = &bytes[44..];
+            let captured_ms = pcm.len() as u64 / 32;
+            let trace: serde_json::Value = serde_json::from_slice(&std::fs::read(case["trace"].as_str().unwrap()).unwrap()).unwrap();
+            let native = trace["trace"]["entries"].as_array().unwrap().iter().rev()
+                .find(|row| row["stage"] == "normalized_result").unwrap();
+            let spans = native["speaker_projection"]["local_presence_newest_first"].as_array().unwrap();
+            let owner_end = spans.iter().filter(|span| span[2] == "Owner")
+                .filter_map(|span| span[1].as_u64()).max().expect("saved owner evidence");
+            let analyzed = spans.iter().filter_map(|span| span[1].as_u64()).max().unwrap();
+            let unresolved = spans.iter().filter(|span| span[2] == "Unknown")
+                .filter_map(|span| span[1].as_u64()).max();
+            let sink = Arc::new(Mutex::new(crate::asr::volcengine::LocalSpeechEvidence::default()));
+            let mut vad = LocalSpeechActivity::new(Arc::clone(&sink));
+            let mut vad_observations = Vec::new();
+            // Pace by the real VAD completion frontier so accelerated replay
+            // cannot overflow its live queue or manufacture silence by timeout.
+            for (i, chunk) in pcm.chunks(3_200).enumerate() {
+                let start = (i * 3_200 / 2) as u64;
+                let end = start + chunk.len() as u64 / 2;
+                vad.submit(start, end, chunk);
+                let limit = Instant::now() + Duration::from_secs(3);
+                while sink.lock().analyzed_through_ms + 32 < end / 16 {
+                    assert!(Instant::now() < limit, "saved VAD did not complete its own input");
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                vad_observations.push(*sink.lock());
+            }
+            let evidence = *sink.lock();
+            let now = Instant::now();
+            let mut clock = automatic_body_clock();
+            clock.latest_update = Some(owner_update(captured_ms, owner_end));
+            clock.note_personal_presence(Some(PresenceObservation {
+                analyzed_end_ms: analyzed, last_positive_end_ms: Some(owner_end),
+                last_unresolved_end_ms: unresolved, source_history_complete: false,
+                state: PresenceState::Unknown, observed_at: now - Duration::from_secs(1),
+            }), now);
+            let provider_ms = trace["audioDelivery"]["providerAudioDurationMs"].as_u64().unwrap();
+            assert!(captured_ms > provider_ms + 3_000);
+            let dispatched = now - Duration::from_millis(captured_ms - provider_ms);
+            let sequence = clock.begin_text_submission(dispatched, "saved already-dispatched body").unwrap();
+            let (handle, completion) = pending_receipt_handle_for_test(90_158);
+            let ticket = handle.ticket();
+            clock.settle_text_submission(Some(sequence), true, Some(handle));
+            completion.send(PasteReceiptCompletion { ticket, observed_at: dispatched,
+                outcome: PasteReceiptOutcome::Unsupported }).unwrap();
+            clock.poll_body_receipts();
+            // Replay the completed observations, not just the last snapshot.
+            // A first-ever negative snapshot after an activity epoch cannot
+            // retrospectively prove uninterrupted quiet. Live polling observes
+            // the intervening epochs and completed negatives in source order.
+            let source_started = now - Duration::from_millis(captured_ms);
+            for observation in &vad_observations {
+                clock.note_local_vad_evidence_at(*observation,
+                    source_started + Duration::from_millis(observation.analyzed_through_ms));
+            }
+            let due = clock.personal_presence_stop_due(captured_ms, now, 3_000);
+            results.push(serde_json::json!({"session":case["session"],
+                "wavSha256":format!("{:x}",Sha256::digest(&bytes)),"capturedMs":captured_ms,
+                "savedOwnerMs":owner_end,"vadAnalyzedMs":evidence.analyzed_through_ms,
+                "vadState":format!("{:?}",evidence.state),"vadSpeechEndMs":evidence.last_detected_speech_end_ms,
+                "savedTerminalOutcome":"Unsupported","sourceEndpointDue":due,
+                "completedVadObservations":vad_observations.len(),
+                "acceleratedComponentReplay":true,"actualEditor":false,"actualStop":false}));
+            std::fs::write(root.join("saved-failure-replay-result.json"), serde_json::to_vec_pretty(&results).unwrap()).unwrap();
+            assert!(due, "saved failed input {} remains blocked: VAD={evidence:?}", case["session"]);
+        }
+    }
+
+    #[test]
+    fn disconnected_or_consumed_editor_handle_cannot_orphan_the_personal_reservation() {
+        use crate::personal_vad::{PresenceObservation, PresenceState};
+        for consumed in [false, true] {
+            let now = Instant::now();
+            let mut clock = automatic_body_clock();
+            clock.note_personal_presence(Some(PresenceObservation {
+                analyzed_end_ms: 4_000, last_positive_end_ms: Some(4_000),
+                last_unresolved_end_ms: None, source_history_complete: false,
+                state: PresenceState::Owner, observed_at: now,
+            }), now);
+            let sequence = clock.begin_text_submission(now, "后台输入工作线程已经退出").unwrap();
+            let (mut handle, sender) = pending_receipt_handle_for_test(159);
+            drop(sender);
+            if consumed { let _ = handle.try_take(); }
+            clock.settle_text_submission(Some(sequence), true, Some(handle));
+            clock.poll_body_receipts();
+            let later = now + Duration::from_millis(4_000);
+            clock.note_personal_presence(Some(PresenceObservation {
+                analyzed_end_ms: 8_000, last_positive_end_ms: Some(4_000),
+                last_unresolved_end_ms: None, source_history_complete: true,
+                state: PresenceState::ConfirmedOther, observed_at: later,
+            }), later);
+            assert!(clock.personal_presence_stop_due(8_000, later, 3_000),
+                "terminal handles must not keep the old receipt reservation alive");
+        }
     }
 
     #[test]

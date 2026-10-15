@@ -211,8 +211,14 @@ pub(crate) struct PresenceEndpoint {
     last_unresolved_end_ms: Option<u64>,
     delivery_at: Option<Instant>,
     delivered_continuation_end_ms: Option<u64>,
-    delivery_receipt_pending: bool,
+    pending_delivery: Option<PendingPresenceDelivery>,
     invalidated: bool,
+}
+
+#[derive(Debug)]
+struct PendingPresenceDelivery {
+    activity_end_ms: u64,
+    submitted_at: Instant,
 }
 
 impl PresenceEndpoint {
@@ -263,21 +269,41 @@ impl PresenceEndpoint {
         activity_end: Option<u64>,
         receipt_pending: bool,
     ) {
-        if activity_end.is_some() && activity_end > self.delivered_continuation_end_ms {
-            self.delivered_continuation_end_ms = activity_end;
-            self.delivery_at = Some(submitted_at);
-            self.delivery_receipt_pending = receipt_pending;
-        } else if !receipt_pending {
-            self.confirm_delivery(submitted_at, activity_end);
+        // The coordinator supersedes older handles when a newer dispatch is
+        // accepted. Replace its reservation even when source reconciliation
+        // moved this dispatch's activity range behind an already delivered one.
+        self.pending_delivery = if receipt_pending {
+            activity_end.filter(|end| Some(*end) > self.delivered_continuation_end_ms)
+                .map(|activity_end_ms| PendingPresenceDelivery { activity_end_ms, submitted_at })
+        } else { None };
+        if !receipt_pending {
+            if activity_end.is_some() && activity_end > self.delivered_continuation_end_ms {
+                self.delivered_continuation_end_ms = activity_end;
+                self.delivery_at = Some(submitted_at);
+            }
         }
     }
 
     /// Only the first confirmed receipt for this continuation range starts
     /// the window. Subsequent confirmed-background bodies cannot renew it.
     pub(crate) fn confirm_delivery(&mut self, received_at: Instant, activity_end: Option<u64>) {
-        if self.delivery_receipt_pending && activity_end == self.delivered_continuation_end_ms {
-            self.delivery_at = Some(self.delivery_at.map_or(received_at, |at| at.max(received_at)));
-            self.delivery_receipt_pending = false;
+        if self.pending_delivery.as_ref()
+            .is_some_and(|pending| Some(pending.activity_end_ms) == activity_end)
+        {
+            let pending = self.pending_delivery.take().expect("matching pending delivery");
+            self.delivered_continuation_end_ms = Some(pending.activity_end_ms);
+            self.delivery_at = Some(pending.submitted_at.max(received_at));
+        }
+    }
+
+    /// An unobserved/failed editor transaction is terminal, not silence or a
+    /// receipt. It releases only its matching reservation; live owner/unknown
+    /// activity and the last confirmed delivery keep their original authority.
+    pub(crate) fn settle_unconfirmed_delivery(&mut self, activity_end: Option<u64>) {
+        if self.pending_delivery.as_ref()
+            .is_some_and(|pending| Some(pending.activity_end_ms) == activity_end)
+        {
+            self.pending_delivery = None;
         }
     }
 
@@ -289,7 +315,7 @@ impl PresenceEndpoint {
             return false;
         };
         !self.invalidated
-            && !self.delivery_receipt_pending
+            && self.pending_delivery.is_none()
             && frame.state == PresenceState::ConfirmedOther
             && frame.analyzed_end_ms <= captured_ms
             && captured_ms.saturating_sub(frame.analyzed_end_ms) <= 250
@@ -314,7 +340,7 @@ impl PresenceEndpoint {
             self.latest.and_then(|frame| frame.last_positive_end_ms).unwrap_or_default(),
         );
         silence.analyzed_end_ms <= captured_ms
-            && !self.delivery_receipt_pending
+            && self.pending_delivery.is_none()
             && captured_ms.saturating_sub(silence.analyzed_end_ms) <= 250
             && silence.observed_at <= now
             && now.saturating_duration_since(silence.observed_at) <= Duration::from_millis(500)
@@ -347,6 +373,35 @@ impl PersonalVadStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_editor_reservation_keeps_prior_confirmed_clock_and_newer_range_ownership() {
+        let now = Instant::now();
+        let mut endpoint = PresenceEndpoint::default();
+        endpoint.note_submission(now, Some(4_000), false);
+        let later = now + Duration::from_secs(2);
+        endpoint.note_submission(later, Some(6_000), true);
+        assert_eq!(endpoint.delivery_at, Some(now));
+        assert_eq!(endpoint.delivered_continuation_end_ms, Some(4_000));
+        endpoint.settle_unconfirmed_delivery(Some(4_000));
+        assert!(endpoint.pending_delivery.is_some(), "an older result cannot retire a newer range");
+        endpoint.settle_unconfirmed_delivery(Some(6_000));
+        assert!(endpoint.pending_delivery.is_none());
+        assert_eq!(endpoint.delivery_at, Some(now));
+        assert_eq!(endpoint.delivered_continuation_end_ms, Some(4_000));
+        endpoint.confirm_delivery(later, Some(6_000));
+        assert_eq!(endpoint.delivery_at, Some(now), "a retired transaction cannot manufacture confirmation");
+        endpoint.note_submission(later, Some(6_000), true);
+        endpoint.confirm_delivery(later + Duration::from_millis(50), Some(6_000));
+        assert_eq!(endpoint.delivery_at, Some(later + Duration::from_millis(50)));
+        assert_eq!(endpoint.delivered_continuation_end_ms, Some(6_000));
+        endpoint.note_submission(later, Some(8_000), true);
+        endpoint.note_submission(later, Some(6_000), true);
+        assert!(endpoint.pending_delivery.is_none(),
+            "a superseded higher range cannot retain an orphan wait after source reconciliation");
+        assert_eq!(endpoint.delivery_at, Some(later + Duration::from_millis(50)));
+    }
+
 
     #[test]
     fn pending_word_absence_requires_endpoint_grade_and_retains_positive_context() {

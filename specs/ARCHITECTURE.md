@@ -305,6 +305,14 @@ remains unknown. Transcript content permission stays independent.
 
 The same three guided enrollment recordings now produce a separate,
 model-and-frontend-bound Nomo reference before raw samples are discarded.
+Wake keeps its short exemplars. The session identity, separator and Nomo
+reference encoders consume the continuous speech span of each guided sample,
+with only outer silence trimmed. They retain internal quiet phonemes and speech
+after the first second rather than borrowing the compacted, repeated wake input.
+Both inputs use the existing per-step speech minimum; no fourth prompt is added.
+Existing protected references remain readable and are not reconstructed from
+an unverified dictation. Replacing their derived features needs a new enrollment,
+because the original enrollment PCM has already been discarded.
 Wake, body, separator and personal-activity banks publish as one protected
 generation; partial writes retain the previous generation. Sessions prefer
 this immutable enrollment over a potentially mixed wake recording.
@@ -1284,3 +1292,20 @@ The bounded private diagnostic trace retains the newest native frames when full,
 so a long capture's terminal text and speaker projection remain inspectable.
 Synthetic source and receiver contracts do not establish provider identity or
 multilingual audio accuracy; installed owner/video use still requires evidence.
+
+
+Software fix build8 retains the installed build7 audio/model/streaming policy.
+Unaccepted local-model anti-interference research is retired outside the active
+module graph; its complete sources and failed results remain archived.
+Receipt reservations are distinct from confirmed editor delivery. Every terminal
+negative outcome retires its matching current reservation, without granting text
+confirmation or STOP; independent audio/quiet and unfinished body gates remain.
+ASR callbacks and the endpoint watchdog use weak references to session and parent,
+upgrading only during execution. Finalization retains explicit ownership until
+its result is handled; ended/cancelled/failed-start sessions can release resources.
+Long link-loss backoff preserves the existing power/idle policy, but passively
+polls Windows' paired Connected selector. This query opens no Bluetooth device,
+GATT service, session, pairing or read/write operation. Only a fresh matching
+native connection can interrupt the hold and select its address for notify reopen;
+generation/target changes discard the result, and disconnected devices retain
+their original retry deadline. Tests inject the observation, never open hardware.

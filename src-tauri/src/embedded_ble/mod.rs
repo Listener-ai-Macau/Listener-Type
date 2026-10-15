@@ -1104,6 +1104,16 @@ pub fn native_windows_hid_present_pairing_addresses() -> Result<Vec<u64>, String
 }
 
 #[cfg(target_os = "windows")]
+pub fn passively_connected_listener_address(expected_name: &str, timeout: std::time::Duration) -> Result<Option<u64>, String> {
+    windows_ble::passively_connected_listener_address(expected_name, timeout)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn passively_connected_listener_address(_: &str, _: std::time::Duration) -> Result<Option<u64>, String> {
+    Ok(None)
+}
+
+#[cfg(target_os = "windows")]
 pub fn warm_native_windows_hid_present_pairing_snapshot() {
     windows_ble::warm_native_windows_hid_present_pairing_snapshot()
 }

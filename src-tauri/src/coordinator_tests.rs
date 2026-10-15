@@ -2120,6 +2120,30 @@ fn embedded_ble_usb_powered_wake_does_not_sleep_through_offline_backoff() {
     );
 }
 
+#[tokio::test]
+async fn disconnected_ble_hold_yields_only_to_fresh_connection_and_current_generation() {
+    use std::sync::atomic::AtomicUsize;
+    let count = AtomicUsize::new(0);
+    let address = passive_ble_retry_wait(Duration::from_secs(180), Duration::from_millis(1),
+        || true, |_| { let n = count.fetch_add(1, Ordering::SeqCst); async move { (n == 1).then_some(0xEF0F18FC9E4Du64) } }).await;
+    assert_eq!(address, Some(0xEF0F18FC9E4D));
+    assert_eq!(count.load(Ordering::SeqCst), 2);
+    // A wake probe that finishes after another listener generation took over
+    // must not change the next generation's cached target.
+    let current = AtomicBool::new(true);
+    let stale = passive_ble_retry_wait(Duration::from_secs(180), Duration::from_millis(1),
+        || current.load(Ordering::SeqCst), |_| {
+            current.store(false, Ordering::SeqCst);
+            async { Some(0xF7D0C23D874Cu64) }
+        }).await;
+    assert_eq!(stale, None);
+    let start = Instant::now();
+    let disconnected = passive_ble_retry_wait(Duration::from_millis(15), Duration::from_millis(2),
+        || true, |_| async { None }).await;
+    assert_eq!(disconnected, None);
+    assert!(start.elapsed() >= Duration::from_millis(15), "no fresh connection means the original hold remains");
+}
+
 #[test]
 fn embedded_ble_background_retry_caps_generic_errors() {
     assert_eq!(

@@ -14,6 +14,9 @@ Listener Type is a local-first desktop voice input app. It records speech, trans
 - AIW 合同、归档、目标管理和行政验收不是开始开发或继续修复的前提。只记录必要的实际完成时间、功能变化、验证结果和剩余问题，复用既有进度文档，不另造管理流程。
 - 不把检查通过说成功能已修好；修复结论必须与实际证据范围一致。未复现的问题如实保留，不能靠增加无关测试宣称完成。
 - 编辑器回执缺失或超时、光标查询失败、输入范围丢失均不代表本人停说，不得直接授权物理STOP。输入事务和录音结束权必须分开；初次未取得写入权限与已写范围被撤销必须分开。可修订输入须在真实编辑器用保存数据验证完整链路后才默认启用，源码状态检查不能替代该证据。
+- 编辑器回执的所有终态须同时结算对应的内外层等待；Unsupported、TimedOut、Superseded、工作线程退出及已消费句柄不得留下永久的本人回执等待。终态失败不确认上屏、不更新已确认交付时钟、不直接授权STOP；其后仍由独立声音/静音证据及未完成正文决定收尾，旧回执不得结算新事务。
+- ASR自身保存的回调不得用强引用反向持有该ASR及父coordinator；端点watchdog作为观察者不得成为会话最后的持有者。最终处理由明确的会话所有者保活，观察者只在执行期间临时取得引用；结束、取消、开流失败及应用退出均须能释放会话资源。
+- 用户2026-10-15停止继续换本地模型做抗干扰的研究路线。日常输入缺陷及安装交付优先；失败研究保留但不自主重启，现有已验收基础能力保持，非模型方案须符合单麦及外部手机播放参考不可得的实际条件。
 - 本节优先于本文及引用文档中的旧最小补丁限制和验证流程。下文检查按根因和实际影响范围选择，不是每轮必须整套执行的门槛。
 
 ## Stack
@@ -79,6 +82,7 @@ For Windows IME edits, select the affected static scripts under `scripts/windows
 
 - Follow the user's current scope and the product behavior in this repository. AIW Goal contracts, archives and blocking acceptance popups are not development prerequisites.
 - Preserve existing uncommitted work. Use focused behavioral regressions while iterating; run release checks once a candidate is ready.
+- 用户2026-10-14要求后台开发保持安装版Type可用：分析、编译及隔离回放不得退出用户的主进程、占用设备或实际输入焦点；确有安装需要才正常退出，完成后立即重启并核对。诊断进程只按本次PID/命令行管理，不得按程序名批量结束Type及唤醒辅助进程。
 - 实际功能与用户报告的故障优先；遇到具体问题才补对应回归并记录已确认的约束，不把额外行政验收、目标台账或重复冒烟当成修复进度。当前先修间歇唤醒、尾句流式和实际提交后三秒结束，严格旁人文字过滤暂缓；不得把“保字优先模式已关闭严格过滤”说成仍在稳定排除旁人。
 - 二遍响应的正文修订与确认状态必须绑定同一响应/音频范围；旧文字较长不能使已确认的新尾句一直等到 STOP。整段识别确认不得代替逐词本人身份，未确认尾句与已经提交的编辑器正文仍须分别处理。
 - 有正文响应里的明确空时段与整帧空封口分开处理；只撤回该来源时段内已观察但未确认的精确词，不得让较长旧草稿经预览、兜底或终稿仲裁重新补出。已确认正文、缺失元数据及编辑器实际回执不因此撤销。
@@ -120,3 +124,5 @@ For Windows IME edits, select the affected static scripts under `scripts/windows
 - 新程序安装、切换运行版本或发现旧进程时，核对所有 `listener-type` 进程的绝对路径、ProductVersion/FileVersion 和 SHA-256一次；允许同一哈希的主进程和 `--local-wake-helper` 子进程。相同运行版本的有效核对结果可复用，不因纯文档修改或重复采集而重装、重启、重复核对。发现旧进程、未知副本或哈希不一致时再修正，未通过核对不得称为“已修复”。
 - 日志中的 session 只有在上述运行时核对通过后才可作为本次代码验收证据。
 - 闸门命令：`pwsh -NoProfile -File .\scripts\verify_latest_runtime.ps1 -RequireRunning`。
+
+- 2026-10-15 已确认旧遗漏约束：用户配置的空动作快捷键表示关闭；启动supervisor、运行中设置更新和latch恢复须复用未配置语义，不得把空主键当注册错误无限重试，也不得恢复用户已关闭的风格切换。

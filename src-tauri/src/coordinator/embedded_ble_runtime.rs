@@ -2023,13 +2023,65 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                     "[embedded-ble] background listen retrying in {} ms after: {err}",
                     retry_delay.as_millis()
                 );
-                tokio::time::sleep(retry_delay).await;
+                wait_for_embedded_ble_background_retry(&inner, generation, retry_delay,
+                    is_embedded_ble_link_loss_error(&err)).await;
                 continue;
             }
         }
         clear_embedded_ble_listener_cancel(&inner, &cancel_capture);
     }
     log::info!("[embedded-ble] background listener stopped generation={generation}");
+}
+
+/// Wait for the original retry deadline while observing an independent native
+/// connection. A disconnected battery/unknown-power device keeps its full hold;
+/// a user/Windows-established connection no longer sleeps through that hold.
+async fn passive_ble_retry_wait<Current, Probe, Pending>(
+    delay: Duration, poll: Duration, mut current: Current, mut probe: Probe,
+) -> Option<u64>
+where Current: FnMut() -> bool, Probe: FnMut(Duration) -> Pending,
+    Pending: std::future::Future<Output = Option<u64>>,
+{
+    let deadline = Instant::now() + delay;
+    while current() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() { return None; }
+        tokio::time::sleep(remaining.min(poll)).await;
+        if !current() { return None; }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() { return None; }
+        if let Some(address) = probe(remaining).await {
+            return current().then_some(address);
+        }
+    }
+    None
+}
+
+async fn wait_for_embedded_ble_background_retry(
+    inner: &Arc<Inner>, generation: u64, delay: Duration, link_loss: bool,
+) {
+    if !link_loss || delay <= EMBEDDED_BLE_RETRY_LONG_DELAY {
+        tokio::time::sleep(delay).await;
+        return;
+    }
+    let name = inner.prefs.get().device_ble_name;
+    let current_name = name.clone();
+    let address = passive_ble_retry_wait(delay, EMBEDDED_BLE_RETRY_LONG_DELAY,
+        || embedded_ble_listener_generation_is_current(inner, generation)
+            && inner.prefs.get().device_ble_name == current_name,
+        |remaining| {
+            let expected = name.clone();
+            async move {
+                async_runtime::spawn_blocking(move || crate::embedded_ble::passively_connected_listener_address(
+                    &expected, remaining.min(Duration::from_millis(750)),
+                )).await.ok().and_then(Result::ok).flatten()
+            }
+        }).await;
+    if let Some(address) = address {
+        #[cfg(target_os = "windows")]
+        crate::embedded_ble::remember_passive_local_pairing_notify_address(address);
+        log::info!("[embedded-ble] interrupted offline hold after fresh Windows Connected evidence generation={generation} address={address:012X}; reopening notify without changing power/idle policy");
+    }
 }
 
 async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(

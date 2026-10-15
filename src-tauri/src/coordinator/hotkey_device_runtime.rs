@@ -395,8 +395,9 @@ fn action_hotkey_supervisor_loop(inner: Arc<Inner>, kind: ActionHotkeyKind) {
             return;
         }
         let binding = action_hotkey_binding(&inner, kind);
-        if is_modifier_only_shortcut(&binding) {
+        if is_unconfigured_shortcut(&binding) || is_modifier_only_shortcut(&binding) {
             take_action_hotkey_on_main_thread(&inner, kind);
+            attempts = 0;
             std::thread::sleep(std::time::Duration::from_secs(5));
             continue;
         }

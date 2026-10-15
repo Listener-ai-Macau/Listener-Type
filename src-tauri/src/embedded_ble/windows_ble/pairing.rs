@@ -625,6 +625,28 @@ pub fn native_windows_hid_pairing_active_connection(
     Ok(None)
 }
 
+/// Query Windows' current Connected selector only. No BluetoothLEDevice,
+/// GattSession, discovery, pairing or device read/write is opened here.
+pub fn passively_connected_listener_address(expected_name: &str, timeout: Duration) -> Result<Option<u64>, String> {
+    let selector = BluetoothLEDevice::GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus::Connected)
+        .map_err(|err| format!("connected BLE selector failed: {err}"))?;
+    let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+        .map_err(|err| format!("connected BLE query failed: {err}"))
+        .and_then(|op| wait_async_operation(op, timeout, "connected BLE query"))?;
+    for index in 0..devices.Size().map_err(|err| format!("connected BLE query size failed: {err}"))? {
+        let info = devices.GetAt(index).map_err(|err| format!("connected BLE entry failed: {err}"))?;
+        let name = device_information_display_name(&info);
+        if !listener_pairing_name_matches(&name, Some(expected_name))
+            || !info.Pairing().and_then(|pairing| pairing.IsPaired()).unwrap_or(false)
+        { continue; }
+        let id = info.Id().map(|value| value.to_string_lossy()).unwrap_or_default();
+        if let Some(address) = device_information_bluetooth_address(&info)
+            .or_else(|| parse_bluetooth_address_from_device_id(&id))
+        { return Ok(Some(address)); }
+    }
+    Ok(None)
+}
+
 fn native_windows_hid_pairing_visible_for_startup() -> bool {
     NATIVE_WINDOWS_HID_PAIRING_VISIBLE.load(Ordering::SeqCst)
 }

@@ -1367,6 +1367,29 @@ mod platform {
         Ok(compacted)
     }
 
+    /// Preserve continuous source speech for session identity and activity.
+    fn quality_session_step_span(pcm: &[u8], step: usize) -> Result<Vec<u8>, String> {
+        let frame_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_FRAME_MS / 1000;
+        let (first, last, active_frames, _, _, _) = active_speech_bounds(pcm, frame_bytes, 20.0)
+            .map_err(|_| format!("第 {step} 次没有检测到清晰唤醒词，请靠近设备重新录制。"))?;
+        if active_frames < ENROLLMENT_WAKE_MIN_ACTIVE_FRAMES_PER_STEP {
+            return Err(format!(
+                "第 {step} 次唤醒词太短，请自然、完整地说出唤醒词。"
+            ));
+        }
+        let start = first.saturating_sub(1) * frame_bytes;
+        let end = ((last + 2) * frame_bytes).min(pcm.len()) & !1usize;
+        // A valid guided phrase may contain only 600 ms of active speech, while
+        // the identity encoder accepts at least 1 s of source audio. Extend into
+        // the original slot's surrounding context, never repeat the phrase to
+        // satisfy that encoder contract or discard any part of the speech span.
+        let minimum_bytes = SAMPLE_RATE as usize * 2 * VERIFICATION_MIN_SPEECH_MS / 1000;
+        let span_bytes = (end - start).max(minimum_bytes);
+        let start = (start.saturating_sub((span_bytes - (end - start)) / 2) & !1usize)
+            .min((pcm.len() & !1usize).saturating_sub(span_bytes));
+        Ok(pcm[start..start + span_bytes].to_vec())
+    }
+
     fn enrollment_template_windows(pcm: &[u8]) -> Result<EnrollmentTemplateWindows, String> {
         enrollment_speech_window(pcm)?;
         let wake_pcm = normalized_enrollment_wake_pcm(pcm)?;
@@ -1375,11 +1398,15 @@ mod platform {
             .enumerate()
             .map(|(index, step_pcm)| quality_wake_step_window(step_pcm, index + 1))
             .collect::<Result<Vec<_>, _>>()?;
-        // Speaker embeddings are phrase-independent. Reuse the three independently
-        // quality-gated and model-padded owner samples for the session bank instead
-        // of imposing a second, stricter free-speech-era gate that contradicts the
-        // visible 600 ms-per-step contract.
-        let session = wake.clone();
+        // Preserve the existing wake exemplars. Session encoders own their input
+        // separately: the same three quality-gated recordings, including internal
+        // low-energy speech and the complete tail, without synthetic repetition.
+        // The visible per-step speech minimum is identical for both banks.
+        let session = enrollment_wake_step_slices(wake_pcm.as_ref())?
+            .into_iter()
+            .enumerate()
+            .map(|(index, step_pcm)| quality_session_step_span(step_pcm, index + 1))
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(EnrollmentTemplateWindows { wake, session })
     }
 
@@ -2280,7 +2307,7 @@ mod platform {
                 .collect::<Result<Vec<_>, _>>().map_err(features_error)?;
             #[cfg(feature = "target-speaker-extraction")]
             let target_speaker_embedding = {
-                let target_enrollment_pcm = windows.wake.concat();
+                let target_enrollment_pcm = windows.session.concat();
                 crate::asr::target_speaker_extraction::speaker_embedding_from_enrollment_pcm(
                     &target_enrollment_pcm,
                 )
@@ -2293,7 +2320,7 @@ mod platform {
                 wake_embeddings,
                 session_embeddings,
                 target_speaker_embedding,
-                personal_activity_reference: Some(crate::personal_vad::enrollment_reference(&windows.wake.concat())
+                personal_activity_reference: Some(crate::personal_vad::enrollment_reference(&windows.session.concat())
                     .map_err(|error| features_error(format!("本人活动声纹特征提取失败：{error}")))?),
                 phrase: Some(phrase.clone()),
                 invalidated: false,
@@ -3888,7 +3915,7 @@ mod platform {
             assert!(windows
                 .session
                 .iter()
-                .all(|window| window.len() == ENROLLMENT_TEMPLATE_WINDOW_MS * 32));
+                .all(|window| window.len() == ENROLLMENT_WAKE_STEP_SECONDS as usize * 32_000));
         }
 
         #[test]
@@ -3914,12 +3941,72 @@ mod platform {
                 .expect("three accepted phrase samples must build both template banks");
             assert_eq!(windows.wake.len(), 3);
             assert_eq!(windows.session.len(), 3);
-            assert_eq!(windows.session, windows.wake);
+            assert_ne!(
+                windows.session, windows.wake,
+                "session references retain surrounding context rather than repeated speech"
+            );
             assert!(windows
                 .wake
                 .iter()
                 .chain(&windows.session)
                 .all(|window| window.len() >= VERIFICATION_MIN_SPEECH_MS * 32));
+        }
+
+        #[test]
+        fn session_enrollment_retains_quiet_phonemes_and_late_speech_in_source_order() {
+            let frame = |value: i16| vec![value; SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000];
+            let mut sample = Vec::new();
+            for value in [
+                0, 0, 0, 0, 700, 800, 900, 700, 12, -12, 800, 900, 700, 800, 900, 700, 800, 900,
+                700, 800, 900, 700, 1300, -1400, 0, 0, 0, 0, 0, 0,
+            ] {
+                sample.extend(frame(value));
+            }
+            let step = sample
+                .iter()
+                .flat_map(|v| v.to_le_bytes())
+                .collect::<Vec<_>>();
+            let pcm = step.repeat(ENROLLMENT_WAKE_STEPS as usize);
+            let windows = enrollment_template_windows(&pcm).expect("three complete guided samples");
+            // All original bytes from the first speech context through the last
+            // speech context must reach every session reference, including the
+            // quiet internal frames and late phonemes the wake exemplar omits.
+            let expected = &step[300 * 32..2500 * 32];
+            for span in &windows.session {
+                assert_eq!(span, expected);
+            }
+            assert!(windows.wake.iter().all(|short| short.len() == 1000 * 32));
+            assert!(windows
+                .wake
+                .iter()
+                .all(|short| !short.chunks_exact(2).any(|b| b == (-1400i16).to_le_bytes())));
+        }
+
+        #[test]
+        fn session_enrollment_uses_original_context_for_minimum_phrases_at_slot_edges() {
+            let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
+            let mut steps = Vec::new();
+            for first in [0, 13, 24] {
+                let mut samples = vec![0i16; frame_samples * 30];
+                samples[first * frame_samples..(first + 6) * frame_samples].fill(800);
+                steps.push(
+                    samples
+                        .iter()
+                        .flat_map(|v| v.to_le_bytes())
+                        .collect::<Vec<_>>(),
+                );
+            }
+            let windows = enrollment_template_windows(&steps.concat())
+                .expect("the existing 600 ms phrase gate must feed the 1 s encoder");
+            for ((span, original), start_ms) in
+                windows.session.iter().zip(&steps).zip([0, 1100, 2000])
+            {
+                assert_eq!(span, &original[start_ms * 32..(start_ms + 1000) * 32]);
+                assert_eq!(
+                    span.chunks_exact(2).filter(|b| *b != [0u8, 0]).count(),
+                    600 * 16
+                );
+            }
         }
 
         #[test]

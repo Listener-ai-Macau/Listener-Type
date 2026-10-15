@@ -21,10 +21,12 @@ fn set_volcengine_preview_callbacks(
         asr,
     );
 
-    let inner_for_stream = Arc::clone(inner);
+    let inner_for_stream = Arc::downgrade(inner);
     let clock_for_stream = Arc::clone(&endpoint_clock);
-    let asr_for_stream = Arc::clone(asr);
+    let asr_for_stream = Arc::downgrade(asr);
     asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
+        let (Some(inner_for_stream), Some(asr_for_stream)) =
+            (inner_for_stream.upgrade(), asr_for_stream.upgrade()) else { return; };
         note_automatic_wake_transcript_timing(
             &inner_for_stream, session_id, asr_for_stream.provider_timed_transcript_snapshot(),
         );
@@ -93,9 +95,11 @@ fn set_volcengine_preview_callbacks(
         }
     })));
 
-    let inner_for_visual_stream = Arc::clone(inner);
-    let asr_for_visual_stream = Arc::clone(asr);
+    let inner_for_visual_stream = Arc::downgrade(inner);
+    let asr_for_visual_stream = Arc::downgrade(asr);
     asr.set_visual_partial_transcript_callback(Some(Arc::new(move |update| {
+        let (Some(inner_for_visual_stream), Some(asr_for_visual_stream)) =
+            (inner_for_visual_stream.upgrade(), asr_for_visual_stream.upgrade()) else { return; };
         let text = update.text().to_string();
         note_automatic_wake_transcript_timing(
             &inner_for_visual_stream, session_id, asr_for_visual_stream.provider_timed_transcript_snapshot(),
@@ -113,10 +117,12 @@ fn set_volcengine_preview_callbacks(
         }
     })));
 
-    let inner_for_partial = Arc::clone(inner);
+    let inner_for_partial = Arc::downgrade(inner);
     let clock_for_partial = Arc::clone(&endpoint_clock);
-    let asr_for_partial = Arc::clone(asr);
+    let asr_for_partial = Arc::downgrade(asr);
     asr.set_final_intermediate_transcript_callback(Some(Arc::new(move |update| {
+        let (Some(inner_for_partial), Some(asr_for_partial)) =
+            (inner_for_partial.upgrade(), asr_for_partial.upgrade()) else { return; };
         note_automatic_wake_transcript_timing(
             &inner_for_partial, session_id, asr_for_partial.provider_timed_transcript_snapshot(),
         );
@@ -185,13 +191,15 @@ fn set_volcengine_preview_callbacks(
         }
     })));
 
-    let inner_for_speaker = Arc::clone(inner);
+    let inner_for_speaker = Arc::downgrade(inner);
     let clock_for_speaker = Arc::clone(&endpoint_clock);
-    let asr_for_speaker = Arc::clone(asr);
+    let asr_for_speaker = Arc::downgrade(asr);
     let stop_dispatched_for_speaker = Arc::clone(&stop_dispatched);
     let stop_completed_for_speaker = Arc::clone(&stop_completed);
     let stop_state_for_speaker = Arc::clone(&stop_state);
     asr.set_target_speaker_update_callback(Some(Arc::new(move |update| {
+        let (Some(inner_for_speaker), Some(asr_for_speaker)) =
+            (inner_for_speaker.upgrade(), asr_for_speaker.upgrade()) else { return; };
         let preview = current_embedded_audio_endpoint_preview(&inner_for_speaker);
         let decision_audio_ms = update.audio_duration_ms.or(update.provider_audio_duration_ms);
         let endpoint_policy = resolve_target_speaker_endpoint_policy(
@@ -275,4 +283,48 @@ fn set_volcengine_preview_callbacks(
             );
         }
     })));
+}
+
+#[cfg(test)]
+mod callback_resource_lifetime_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn recognition_callbacks_and_watchdog_release_the_finished_session_and_parent() {
+        for (phase, cancelled, shutting_down) in [
+            (SessionPhase::Idle, false, false),
+            (SessionPhase::Idle, true, false),
+            (SessionPhase::Listening, false, true),
+        ] {
+            let coordinator = crate::coordinator::Coordinator::new();
+            let session_id = new_session_id();
+            {
+                let mut state = coordinator.inner.state.lock();
+                state.session_id = session_id;
+                state.phase = phase;
+                state.cancelled = cancelled;
+            }
+            coordinator.inner.shutdown.store(shutting_down, Ordering::SeqCst);
+            let asr = Arc::new(VolcengineStreamingASR::new(crate::asr::VolcengineCredentials {
+                app_id: "offline-lifetime-test".into(), access_token: "not-a-credential".into(),
+                resource_id: crate::asr::VolcengineCredentials::default_resource_id().into(),
+            }, Vec::new()));
+            let weak_asr = Arc::downgrade(&asr);
+            let weak_parent = Arc::downgrade(&coordinator.inner);
+            // Register all real callbacks and the real watchdog. No provider
+            // connection, model, capture, editor event or device is started.
+            set_volcengine_preview_callbacks(&asr, &coordinator.inner, session_id);
+            if cancelled { asr.cancel(); }
+            drop(asr);
+            let deadline = Instant::now() + Duration::from_millis(600);
+            while weak_asr.upgrade().is_some() && Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert!(weak_asr.upgrade().is_none(),
+                "ASR owns its callbacks, so callbacks/watchdog cannot own ASR: phase={phase:?} cancelled={cancelled} shutdown={shutting_down}");
+            drop(coordinator);
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            assert!(weak_parent.upgrade().is_none(), "session observers cannot keep the coordinator alive");
+        }
+    }
 }
