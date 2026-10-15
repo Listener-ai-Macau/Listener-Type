@@ -126,3 +126,5 @@ For Windows IME edits, select the affected static scripts under `scripts/windows
 - 闸门命令：`pwsh -NoProfile -File .\scripts\verify_latest_runtime.ps1 -RequireRunning`。
 
 - 2026-10-15 已确认旧遗漏约束：用户配置的空动作快捷键表示关闭；启动supervisor、运行中设置更新和latch恢复须复用未配置语义，不得把空主键当注册错误无限重试，也不得恢复用户已关闭的风格切换。
+
+- 2026-10-15 已确认启动历史音频会突发送入本地VAD；分析队列须按PCM字节有界而非固定小包数。暂时积压不得令整场永久Unknown；超载后必须作废旧代分析、保持丢失区间未知并恢复新原音，旧任务不得覆盖新代状态。原失败回放须保留实际突发节奏，不得逐包等待检测完成而掩盖生产者/消费者故障；分析丢帧不授权删正文或强制STOP。

@@ -2890,6 +2890,69 @@ mod endpoint_clock_submission_tests {
 
     #[cfg(target_os = "windows")]
     #[tokio::test]
+    #[ignore = "explicit captured startup-burst failure; no cloud/device/editor"]
+    async fn saved_startup_burst_keeps_vad_live_and_reaches_real_quiet() {
+        use crate::asr::volcengine::{LocalSpeechActivityState, LocalSpeechEvidence};
+        let root = std::path::PathBuf::from(std::env::var_os("LISTENER_VAD_BURST_REPLAY").unwrap());
+        let bytes = std::fs::read(root.join("8ae1f493-2fba-42c3-9580-7dddfc1785d8.wav")).unwrap();
+        assert_eq!(&bytes[36..40], b"data");
+        let pcm = &bytes[44..];
+        let burst_bytes = 54_000 * 32;
+        assert!(pcm.len() > burst_bytes);
+        let sink = Arc::new(Mutex::new(LocalSpeechEvidence::default()));
+        let mut vad = LocalSpeechActivity::new(Arc::clone(&sink));
+        // The live log advances 5.8 s in 26 ms, 13 s in 82 ms and 21.8 s
+        // in 144 ms, before ordinary live input. Do not pace this history by
+        // waiting for its consumer: that hid the installed queue-full failure.
+        for (i, chunk) in pcm[..burst_bytes].chunks(3_200).enumerate() {
+            vad.submit(i as u64 * 1_600, (i as u64 + 1) * 1_600, chunk);
+        }
+        let limit = Instant::now() + Duration::from_secs(8);
+        while sink.lock().analyzed_through_ms + 32 < 54_000 {
+            assert!(Instant::now() < limit, "original startup burst left VAD unavailable: {:?}", *sink.lock());
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        let mut observations = vec![*sink.lock()];
+        for (i, chunk) in pcm[burst_bytes..].chunks(3_200).enumerate() {
+            let start = (burst_bytes / 2 + i * 1_600) as u64;
+            let end = start + chunk.len() as u64 / 2;
+            vad.submit(start, end, chunk);
+            let limit = Instant::now() + Duration::from_secs(2);
+            while sink.lock().analyzed_through_samples + 512 < end {
+                assert!(Instant::now() < limit, "VAD stopped after accepting startup history");
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            observations.push(*sink.lock());
+        }
+        let last = *sink.lock();
+        assert_eq!(last.state, LocalSpeechActivityState::NonSpeech,
+            "the original recorded tail must be assessed, not supplied as synthetic silence");
+        let now = Instant::now();
+        let total_ms = pcm.len() as u64 / 32;
+        let source_started = now - Duration::from_millis(total_ms);
+        let mut clock = automatic_body_clock();
+        clock.note_personal_presence(Some(crate::personal_vad::PresenceObservation {
+            analyzed_end_ms: total_ms, last_positive_end_ms: None,
+            last_unresolved_end_ms: Some(total_ms), source_history_complete: false,
+            state: crate::personal_vad::PresenceState::Unknown, observed_at: now,
+        }), now);
+        // This incident had three matching Confirmed editor receipts; no
+        // unsubmitted body/receipt is invented or retired by this replay.
+        for evidence in &observations {
+            clock.note_local_vad_evidence_at(*evidence,
+                source_started + Duration::from_millis(evidence.analyzed_through_ms));
+        }
+        let due = clock.personal_presence_stop_due(total_ms, now, 3_000);
+        let output = serde_json::json!({"startupBurstMs":54000,"capturedMs":total_ms,
+            "completedVadMs":last.analyzed_through_ms,"state":format!("{:?}",last.state),
+            "lastSpeechMs":last.last_detected_speech_end_ms,"quietEndpointDue":due,
+            "realRecordedTail":true,"cloudCalls":0,"actualEditor":false,"physicalStop":false});
+        std::fs::write(root.join("startup-burst-replay.json"),serde_json::to_vec_pretty(&output).unwrap()).unwrap();
+        assert!(due,"completed original quiet must not retain a permanent queue-full hold: {last:?}");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
     #[ignore = "explicit saved Unsupported-receipt failures; no live device, editor or cloud"]
     async fn saved_failed_input_quiet_audio_releases_the_finished_receipt_wait() {
         use crate::personal_vad::{PresenceObservation, PresenceState};

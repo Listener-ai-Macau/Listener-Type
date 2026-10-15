@@ -1309,3 +1309,25 @@ GATT service, session, pairing or read/write operation. Only a fresh matching
 native connection can interrupt the hold and select its address for notify reopen;
 generation/target changes discard the result, and disconnected devices retain
 their original retry deadline. Tests inject the observation, never open hardware.
+
+
+### Local speech analysis backlog ownership
+
+Wake takeover can deliver retained PCM faster than real time, including before
+the asynchronous VAD runtime has initialized. Its nonblocking producer bounds
+queued PCM by bytes (1,920,000 bytes), rather than a transport-packet count.
+That bound limits analysis memory, not recording duration. Analysis never
+changes the original cloud/recording PCM. A transient overrun retires the
+queued analysis generation and publishes Unknown; subsequent fresh PCM starts
+a reset detector and a new quality timeline at its original source coordinate.
+The dropped interval remains unknown. Both evidence publication and quality
+updates reject retired in-flight jobs, so stale inference cannot restore old
+coverage after invalidation. Malformed/noncontiguous input and a disconnected
+worker remain distinct fatal input/runtime failures. Unknown never supplies
+silence, speaker identity, successful insertion, or a forced STOP.
+
+The recorded startup-burst regression feeds retained history without waiting
+for analysis per packet. A paced replay alone cannot establish that the live
+producer/consumer backlog survives wake takeover. The separate overrun replay
+holds the consumer, exceeds the byte budget, and verifies fresh-source recovery
+while the skipped original history remains unresolved.
