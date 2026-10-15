@@ -4,6 +4,8 @@ export interface CapsuleOrderingTracker {
   lastSeq: number;
   activeSessionId: string | null;
   closedSessionStates: Map<string, CapsuleState>;
+  supersededSessionIds: Set<string>;
+  latestStartedSessionId: string | null;
 }
 
 export interface CapsuleOrderingDecision {
@@ -19,6 +21,8 @@ export function createCapsuleOrderingTracker(): CapsuleOrderingTracker {
     lastSeq: 0,
     activeSessionId: null,
     closedSessionStates: new Map<string, CapsuleState>(),
+    supersededSessionIds: new Set<string>(),
+    latestStartedSessionId: null,
   };
 }
 
@@ -75,10 +79,22 @@ export function applyCapsulePayloadOrdering(
     return { accepted: false, reason: 'stale-idle-for-inactive-session' };
   }
 
+  // Sequence orders publication, not recording ownership. A late callback can
+  // have a larger sequence while still belonging to the replaced recording.
+  if (sessionId && tracker.supersededSessionIds.has(sessionId)) {
+    return { accepted: false, reason: 'superseded-session-state' };
+  }
+
   if (seq > 0) {
     tracker.lastSeq = seq;
   }
   if (sessionId && ACTIVE_STATES.has(payload.state)) {
+    // Remember the preceding owner even when Done already cleared activeSessionId.
+    // Do this only at adoption; PCM/level updates must not scan session history.
+    if (tracker.latestStartedSessionId && tracker.latestStartedSessionId !== sessionId) {
+      tracker.supersededSessionIds.add(tracker.latestStartedSessionId);
+    }
+    tracker.latestStartedSessionId = sessionId;
     tracker.activeSessionId = sessionId;
   }
   if (sessionId && TERMINAL_STATES.has(payload.state)) {

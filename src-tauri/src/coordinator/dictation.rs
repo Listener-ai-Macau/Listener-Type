@@ -1592,7 +1592,7 @@ async fn request_embedded_ble_recording_stop_from_host_for_endpoint(
                     expected_session_id,
                     admission.ticket.proposal_id,
                 );
-                set_device_ai_processing_async(inner, false, "host_stop_failed");
+                let _ = set_device_ai_processing_async(inner, expected_session_id, false, "host_stop_failed");
                 crate::timeline::mark(
                     "backend.embedded_ble_session_actor",
                     "firmware_stop_failed",
@@ -1705,7 +1705,7 @@ async fn request_embedded_ble_recording_stop_from_host_for_session(
             }
             Err(err) => {
                 reopen_recording_stop(inner, session_id);
-                set_device_ai_processing_async(inner, false, "host_stop_failed");
+                let _ = set_device_ai_processing_async(inner, session_id, false, "host_stop_failed");
                 crate::timeline::mark(
                     "backend.embedded_ble_session_actor",
                     "firmware_stop_failed",
@@ -2807,7 +2807,7 @@ fn finish_source_integrity_blocked(
     }
     clear_automatic_wake_text_guard(inner);
     clear_embedded_audio_preview_session(inner, session_id);
-    set_device_ai_processing_async(inner, false, "source_integrity_blocked");
+    let _ = set_device_ai_processing_async(inner, session_id, false, "source_integrity_blocked");
 
     let embedded_audio_stats = take_embedded_audio_stats(inner);
     let duration_ms = embedded_audio_stats
@@ -3064,12 +3064,12 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         None => {
             restore_prepared_windows_ime_session(inner, current_session_id);
             clear_embedded_audio_stats(inner);
-            set_device_ai_processing_async(inner, false, "dictation_processing_no_asr");
+            let _ = set_device_ai_processing_async(inner, current_session_id, false, "dictation_processing_no_asr");
             transition_pipeline_error_if_session_matches(inner, current_session_id);
             return Ok(());
         }
     };
-    let mut device_ai_processing = DeviceAiProcessingGuard::defer(inner);
+    let mut device_ai_processing = DeviceAiProcessingGuard::defer(inner, current_session_id);
     device_ai_processing.start_if_needed("dictation_transcribing_processing_start");
 
     let uses_global_timeout = asr_transcribe_uses_global_timeout(&asr);
@@ -4627,34 +4627,60 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     }
     restore_prepared_windows_ime_session(inner, current_session_id);
 
-    // Preserve the immutable text submitted during this logical recording.
-    // A later provider rewrite must not silently make its clipboard differ
-    // from the clauses the user saw arrive while speaking.
-    let clipboard_text = if final_source_delivery.is_some() && !final_payload_submitted {
-        // A permission loss cannot discard recognized words from recovery.
-        // The source plan preserves every already delivered byte as well.
-        native_final_body.as_str()
-    } else if native_final_handled && !native_final_confirmed {
-        // Input permission can end before cloud confirmation. Retain the
-        // complete recognized result for recovery, never just its old draft.
-        polished.as_str()
-    } else if pause_early_sticky && !streaming_contaminated {
-        delivery_submission.submitted_text.as_deref().unwrap_or(&polished)
-    } else {
-        &polished
+    // 用 polished（最终插入的文本）扫描，与用户实际看到的输出一致。
+    let total_hits: u64 = match inner.vocab.record_hits(&polished) {
+        Ok(n) => n,
+        Err(e) => {
+            log::error!("[coord] record_hits failed: {e}");
+            0
+        }
     };
+    // 词汇本页面在打开时通常需要立即看到 hits 增长，否则用户得手动切走再切回来才刷新。
+    // 命中数 > 0 时通知前端：Vocab 页面订阅 vocab:updated 即时 listVocab() 重新加载。
+    if total_hits > 0 {
+        if let Some(app) = inner.app.lock().clone() {
+            let _ = app.emit("vocab:updated", total_hits);
+        }
+    }
+
+    // 与 coordinator 内部 SessionId 对齐：方便 recorder 旁路写盘的 `<session_id>.wav`
+    // 跟 history 这条 DictationSession.id 同名，前端凭 id 就能找到对应录音文件。
+    let history_session_id = current_session_id.to_string();
+    let history_created_at = Utc::now().to_rfc3339();
+    let prefs_snapshot = inner.prefs.get();
+    let mut session = DictationSession {
+        id: history_session_id.clone(),
+        created_at: history_created_at.clone(),
+        raw_transcript: raw.text.clone(),
+        final_text: polished.clone(),
+        mode,
+        app_bundle_id: None,
+        app_name: None,
+        insert_status: status,
+        error_code: None, // Filled after clipboard/insertion status settles.
+        duration_ms: Some(raw.duration_ms),
+        // 历史详情页的"X 个热词"显示：用本次实际命中次数（每个匹配实例算一次），
+        // 比"启用词条总数"更能反映本段口述命中了多少。u64 → u32 截断对单段听写足够。
+        dictionary_entry_count: Some(total_hits.min(u32::MAX as u64) as u32),
+        // 用 begin_session 时 Recorder::start 返回的实际写盘状态，而不是 prefs 开关——
+        // 开关打开但路径创建失败时这里是 false，避免前端渲染播放按钮后端 404。
+        has_audio_recording: Some(inner.audio_archive_active.load(Ordering::Relaxed)),
+        embedded_audio_stats: take_embedded_audio_stats(inner),
+    };
+    // History and recovery share this recording's complete finalized body.
+    // Actual editor submissions remain separate facts; a lost cursor/range
+    // cannot shrink the recoverable text to the previously emitted prefix.
     let unconfirmed_streamed_paste = unconfirmed_paste_uses_clipboard(
         status,
         delivery_submission.route,
         pause_early_sticky,
         &insert_text,
-        clipboard_text,
+        &session.final_text,
     ) || (cfg!(target_os = "macos") && pause_early_sticky && delivery_submission.route == DeliveryRoute::Direct);
     let (clipboard_retention_satisfied, clipboard_result) = if retain_plain_dictation {
         retain_final_clipboard_with_foreground_budget(
             inner,
-            current_session_id,
-            clipboard_text,
+            &session,
             unconfirmed_streamed_paste,
         )
         .await
@@ -4748,22 +4774,6 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     let inserted_chars = submitted_chars;
 
     // 累计每条 enabled 词条在最终文本中的命中次数。
-    // 用 polished（最终插入的文本）扫描，与用户实际看到的输出一致。
-    let total_hits: u64 = match inner.vocab.record_hits(&polished) {
-        Ok(n) => n,
-        Err(e) => {
-            log::error!("[coord] record_hits failed: {e}");
-            0
-        }
-    };
-    // 词汇本页面在打开时通常需要立即看到 hits 增长，否则用户得手动切走再切回来才刷新。
-    // 命中数 > 0 时通知前端：Vocab 页面订阅 vocab:updated 即时 listVocab() 重新加载。
-    if total_hits > 0 {
-        if let Some(app) = inner.app.lock().clone() {
-            let _ = app.emit("vocab:updated", total_hits);
-        }
-    }
-
     // polish 失败时在 history 里标记 polishFailed，让用户能在历史详情看到为什么这次输出
     // 不是预期的 mode 风格。即使失败也不丢词 — final_text 仍是原文（保留"用户的话不丢"语义）。
     let error_code = dictation_error_code(
@@ -4789,30 +4799,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         device_ai_processing.complete_warning_async("dictation_processing_warning");
     }
 
-    // 与 coordinator 内部 SessionId 对齐：方便 recorder 旁路写盘的 `<session_id>.wav`
-    // 跟 history 这条 DictationSession.id 同名，前端凭 id 就能找到对应录音文件。
-    let history_session_id = current_session_id.to_string();
-    let history_created_at = Utc::now().to_rfc3339();
-    let prefs_snapshot = inner.prefs.get();
-    let session = DictationSession {
-        id: history_session_id.clone(),
-        created_at: history_created_at.clone(),
-        raw_transcript: raw.text.clone(),
-        final_text: polished.clone(),
-        mode,
-        app_bundle_id: None,
-        app_name: None,
-        insert_status: status,
-        error_code,
-        duration_ms: Some(raw.duration_ms),
-        // 历史详情页的"X 个热词"显示：用本次实际命中次数（每个匹配实例算一次），
-        // 比"启用词条总数"更能反映本段口述命中了多少。u64 → u32 截断对单段听写足够。
-        dictionary_entry_count: Some(total_hits.min(u32::MAX as u64) as u32),
-        // 用 begin_session 时 Recorder::start 返回的实际写盘状态，而不是 prefs 开关——
-        // 开关打开但路径创建失败时这里是 false，避免前端渲染播放按钮后端 404。
-        has_audio_recording: Some(inner.audio_archive_active.load(Ordering::Relaxed)),
-        embedded_audio_stats: take_embedded_audio_stats(inner),
-    };
+    session.insert_status = status;
+    session.error_code = error_code;
     let delivery_fact =
         finalize_delivery_fact(delivery_request, intended_text, delivery_submission, || {
             inner
@@ -4837,32 +4825,12 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             error_code: transcript_error_code,
         },
     );
-    // LLM auth 熔断打开时发一次可见提示（每个凭据指纹一次）：后续会话仍走
-    // 静默原文的合同路径，但用户必须有机会知道「润色已失效」——2026-08-05
-    // owner 的 key 401 了一整天、48 次听写全走原文而无人察觉。仅在本会话
-    // 需要 LLM 润色时提示（raw 原文用户与坏 key 无关，不打扰）。
-    if (mode != PolishMode::Raw || raw_uses_llm) && !translation_active {
-        if let Ok(fingerprint) = current_llm_auth_fingerprint() {
-            if current_llm_auth_is_rejected(fingerprint)
-                && take_llm_auth_rejection_notice(fingerprint)
-            {
-                let notice_inner = Arc::clone(inner);
-                async_runtime::spawn(async move {
-                    // 等本次 Done 先落位，再弹出 2.5s 自消的错误胶囊。
-                    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
-                    log::info!("[coord] LLM auth rejection notice shown (once per credential set)");
-                    emit_capsule(
-                        &notice_inner,
-                        CapsuleState::Error,
-                        0.0,
-                        0,
-                        Some("润色 API key 失效，已改用原文上屏；请到设置更新 key".to_string()),
-                        None,
-                    );
-                });
-            }
-        }
-    }
+    // The credential warning belongs to this completion, never to a delayed
+    // unscoped Error event that can overwrite the next session's cached UI.
+    let llm_auth_notice_fingerprint = ((mode != PolishMode::Raw || raw_uses_llm)
+        && !translation_active)
+        .then(|| current_llm_auth_fingerprint().ok()).flatten()
+        .filter(|fingerprint| current_llm_auth_is_rejected(*fingerprint));
     let done_message = if status == InsertStatus::Inserted
         && !polish_error.is_some()
         && !tsf_required_insert_failed
@@ -4885,23 +4853,52 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         )
     };
 
-    apply_and_publish_dictation_event(
+    publish_dictation_completion_with_notice(
         inner,
-        DictationEvent::InsertionComplete {
-            session_id: current_session_id,
-        },
-        0.0,
+        current_session_id,
         done_message,
         inserted_chars,
-    );
-
-    schedule_capsule_idle(
-        inner,
-        CAPSULE_SUCCESS_HIDE_DELAY_MS,
-        Some(current_session_id),
+        || llm_auth_notice_fingerprint.is_some_and(take_llm_auth_rejection_notice),
     );
 
     Ok(())
+}
+
+fn completion_message_with_auth_notice(message: Option<String>, auth_notice: bool) -> Option<String> {
+    if !auth_notice { return message; }
+    let warning = "润色 API key 失效，已改用原文；请到设置更新 key";
+    Some(match message.filter(|text| !text.is_empty()) {
+        Some(message) => format!("{message}；{warning}"),
+        None => warning.to_string(),
+    })
+}
+
+fn publish_dictation_completion_with_notice(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    message: Option<String>,
+    inserted_chars: Option<u32>,
+    take_auth_notice: impl FnOnce() -> bool,
+) -> bool {
+    let transition = {
+        let mut state = inner.state.lock();
+        apply_dictation_event(&mut state, DictationEvent::InsertionComplete { session_id })
+    };
+    if transition.snapshot().is_none() {
+        return false;
+    }
+    // Claim a once-per-credential notice only for an admitted completion. A
+    // retired task must not consume the warning before a later session shows it.
+    let auth_notice = take_auth_notice();
+    publish_dictation_transition(inner, transition, 0.0,
+        completion_message_with_auth_notice(message, auth_notice), inserted_chars);
+    // Presentation duration only: recording, actual insertion, clipboard and
+    // endpoint clocks have already settled. The existing idle scheduler yields
+    // to a new dictation or QA session.
+    schedule_capsule_idle(inner,
+        if auth_notice { 2_500 } else { CAPSULE_SUCCESS_HIDE_DELAY_MS },
+        Some(session_id));
+    true
 }
 
 pub(super) fn dictation_error_code(
@@ -4962,7 +4959,7 @@ fn cancel_embedded_ble_session_through_actor(inner: &Arc<Inner>) {
         request_embedded_ble_firmware_cancel_on_active_recording(*session_id, *phase)
     });
     if !firmware_cancel_sent {
-        set_device_ai_processing_async(inner, false, "embedded_session_cancel");
+        let _ = set_device_ai_processing_async(inner, session_id, false, "embedded_session_cancel");
     }
     if cancelled.is_none() {
         if request_embedded_ble_capture_cancel_flag(inner) {

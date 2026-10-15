@@ -4,6 +4,36 @@ Listener Type is a Tauri desktop app with a Rust backend and React frontend. The
 
 ## Runtime Shape
 
+Device AI processing hints carry the originating dictation ID and a logical
+revision from request time through the blocking queue. Retired producers cannot
+claim the current recording's identity or invalidate its latest hint. Hint IO
+is serialized separately from the coordinator lock, and superseded queued
+START/DONE/WARN/STOP operations are dropped before dispatch. The max-visible
+timer and generic guard cleanup may supersede only their own still-current START;
+neither may erase an already admitted completion or warning. This is presentation IO,
+not recording STOP authority or an acknowledgement from firmware; an already
+in-flight write is not revocable. Error/timeout state admission precedes warning
+scheduling. Processing guards keep the original ID through completion and Drop.
+
+LLM credential rejection notices are part of the originating dictation's
+`InsertionComplete` presentation. They retain the session ID and ordinary
+completion transition; no detached delayed Error event may overwrite a later
+recording's display cache. Existing delivery warnings remain in the same message.
+The notice display duration does not delay recording or input completion.
+The shared backend capsule cache commits session-tagged payloads while holding
+the coordinator generation lock, so retired publishers cannot replace a new
+recording's snapshot. The frontend separately remembers superseded sessions:
+a higher event sequence does not authorize an older recording to reclaim UI.
+
+Final dictation recovery uses the same session's `DictationSession.final_text`
+as History, including after an early checkmark or interrupted input. Submitted
+editor bytes remain separate delivery facts and never truncate the recovery
+body. The clipboard worker retains its paste-consumption and newer-copy
+ownership checks; retaining a full recovery result grants no new insertion or
+target-confirmation permission. Streamed typer failures retain the complete
+provider final (or complete raw fallback), while reporting the emitted prefix
+separately.
+
 ```mermaid
 flowchart TB
   UI["React UI"] --> IPC["Tauri IPC wrappers"]

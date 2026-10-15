@@ -144,4 +144,25 @@ function payload(seq: number, sessionId: string | null, state: CapsuleState): Ca
   assert.equal(recovery.reason, 'non-session-active-while-session-active');
 }
 
+// A later sequence from a replaced capture is still stale. This is separate
+// from rejecting a lower sequence or an Error after Done in the same session.
+for (const terminal of ['done', 'error', 'cancelled'] as const) {
+  const tracker = createCapsuleOrderingTracker();
+  applyCapsulePayloadOrdering(tracker, payload(1, 'old', 'recording'));
+  applyCapsulePayloadOrdering(tracker, payload(2, 'current', 'recording'));
+  const late = applyCapsulePayloadOrdering(tracker, payload(3, 'old', terminal));
+  assert.equal(late.accepted, false);
+  assert.equal(tracker.activeSessionId, 'current');
+  assert.equal(tracker.lastSeq, 2);
+}
+{
+  const tracker = createCapsuleOrderingTracker();
+  applyCapsulePayloadOrdering(tracker, payload(1, 'old', 'recording'));
+  applyCapsulePayloadOrdering(tracker, payload(2, 'old', 'done'));
+  applyCapsulePayloadOrdering(tracker, payload(3, 'current', 'recording'));
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(4, 'old', 'done')).accepted, false);
+  assert.equal(tracker.activeSessionId, 'current');
+  assert.equal(tracker.lastSeq, 3);
+}
+
 console.log('capsuleEventOrdering: all assertions passed');

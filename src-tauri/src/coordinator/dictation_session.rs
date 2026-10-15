@@ -32,19 +32,32 @@ fn final_clipboard_insert_status(status: InsertStatus, retention_enabled: bool, 
 
 async fn retain_final_clipboard_with_foreground_budget(
     inner: &Arc<Inner>,
-    session_id: SessionId,
-    text: &str,
+    history: &DictationSession,
     unconfirmed_paste_uses_clipboard: bool,
 ) -> (bool, &'static str) {
     // Capture ownership before scheduling, so an old task cannot adopt a newer
     // session's clipboard while waiting for its blocking worker to run.
     let ticket = inner.inserter.clipboard_retention_ticket();
     let inner = Arc::clone(inner);
-    let text = text.to_string();
+    retain_history_clipboard_with_foreground_budget(history, move |text| {
+        inner.inserter.retain_session_clipboard(ticket, text, unconfirmed_paste_uses_clipboard)
+    }).await
+}
+
+/// Recovery owns the same immutable final body as this recording's History
+/// record. Submission prefixes and whichever history row is newest later are
+/// never allowed to replace it. The insertion worker still owns paste handoff.
+async fn retain_history_clipboard_with_foreground_budget(
+    history: &DictationSession,
+    retain: impl FnOnce(&str) -> crate::insertion::RetentionResult + Send + 'static,
+) -> (bool, &'static str) {
+    let session_id = history.id.clone();
+    let task_session_id = session_id.clone();
+    let text = history.final_text.clone();
     let chars = text.chars().count();
     let copy_task = async_runtime::spawn_blocking(move || {
-        let status = inner.inserter.retain_session_clipboard(ticket, &text, unconfirmed_paste_uses_clipboard);
-        log::info!("[coord] final clipboard retention result session_id={session_id} chars={chars} result={status:?}");
+        let status = retain(&text);
+        log::info!("[coord] final clipboard retention result session_id={task_session_id} chars={chars} result={status:?}");
         status
     });
 

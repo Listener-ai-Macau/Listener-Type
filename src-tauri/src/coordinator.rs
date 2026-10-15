@@ -311,6 +311,8 @@ struct Inner {
     /// 由 Recorder::start 返回值 (archive_active) 写入；history.append 路径读取，
     /// 决定 DictationSession.has_audio_recording 字段。比单纯读 prefs.record_audio_for_debug
     /// 更准确：用户开了开关但路径无法创建（权限 / 磁盘满）也算 false。
+    device_processing_hint_revision: AtomicU64,
+    device_processing_hint_io: Mutex<()>,
     audio_archive_active: AtomicBool,
     /// 当前嵌入式 BLE 音频会话的传输统计，随同一条 dictation history 写入。
     embedded_audio_stats: Mutex<Option<crate::embedded_audio::SessionStats>>,
@@ -1120,6 +1122,9 @@ impl Coordinator {
                     recording_lifecycle: Mutex::new(Default::default()),
                     asr: Mutex::new(None),
                     recorder: Mutex::new(None),
+                    device_processing_hint_revision: AtomicU64::new(0),
+                    device_processing_hint_io: Mutex::new(()),
+
                     audio_archive_active: AtomicBool::new(false),
                     embedded_audio_stats: Mutex::new(None),
                     embedded_audio_final_result: Mutex::new(None),
@@ -1213,6 +1218,9 @@ impl Coordinator {
                 recording_lifecycle: Mutex::new(Default::default()),
                 asr: Mutex::new(None),
                 recorder: Mutex::new(None),
+                device_processing_hint_revision: AtomicU64::new(0),
+                device_processing_hint_io: Mutex::new(()),
+
                 audio_archive_active: AtomicBool::new(false),
                 embedded_audio_stats: Mutex::new(None),
                 embedded_audio_final_result: Mutex::new(None),

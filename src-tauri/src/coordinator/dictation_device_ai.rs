@@ -203,14 +203,12 @@ fn finish_dictation_pipeline_error(
         return false;
     }
     let observability_message = message.clone();
-    set_device_ai_processing_warning_async(
-        inner,
-        "dictation_pipeline_error",
-        Duration::from_millis(0),
-    );
     if !publish_dictation_pipeline_error(inner, session_id, message) {
         return false;
     }
+    set_device_ai_processing_warning_async(
+        inner, session_id, "dictation_pipeline_error", Duration::from_millis(0),
+    );
     restore_prepared_windows_ime_session(inner, session_id);
     schedule_actionable_error_capsule_idle(inner, session_id);
     crate::observability::record_embedded_audio_failure(session_id, &observability_message);
@@ -221,7 +219,6 @@ fn finish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message: 
     if cleanup_cancelled_dictation_completion(inner, session_id) {
         return false;
     }
-    set_device_ai_processing_warning_async(inner, "dictation_timeout", Duration::from_millis(0));
     let published = if embedded_ble_actor_context_active(inner) {
         apply_embedded_ble_session_actor_dictation_event(
             inner,
@@ -239,6 +236,7 @@ fn finish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message: 
     if !published {
         return false;
     }
+    set_device_ai_processing_warning_async(inner, session_id, "dictation_timeout", Duration::from_millis(0));
     restore_prepared_windows_ime_session(inner, session_id);
     schedule_actionable_error_capsule_idle(inner, session_id);
     crate::observability::record_embedded_audio_timeout(session_id);
@@ -331,21 +329,60 @@ fn should_sync_device_ai_processing(inner: &Arc<Inner>) -> bool {
         && !embedded_ble_processing_sync_disabled()
 }
 
-fn set_device_ai_processing_async(inner: &Arc<Inner>, active: bool, reason: &'static str) {
-    if !should_sync_device_ai_processing(inner) {
-        return;
-    }
-    let session_id = inner.state.lock().session_id;
+// Logical hint order is independent of blocking-worker scheduling. A later
+// hint supersedes a queued earlier one, including within the same dictation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DeviceAiProcessingTicket { session_id: SessionId, revision: u64 }
+
+fn claim_device_ai_processing_ticket(inner: &Arc<Inner>, session_id: SessionId) -> Option<DeviceAiProcessingTicket> {
+    let state = inner.state.lock();
+    if state.session_id != session_id { return None; }
+    let revision = inner.device_processing_hint_revision.fetch_add(1, Ordering::SeqCst) + 1;
+    Some(DeviceAiProcessingTicket { session_id, revision })
+}
+
+fn device_ai_processing_session_current(inner: &Arc<Inner>, expected_session_id: SessionId) -> bool {
+    inner.state.lock().session_id == expected_session_id
+}
+
+fn device_ai_processing_ticket_current(inner: &Arc<Inner>, ticket: DeviceAiProcessingTicket) -> bool {
+    let state = inner.state.lock();
+    state.session_id == ticket.session_id
+        && inner.device_processing_hint_revision.load(Ordering::SeqCst) == ticket.revision
+}
+
+fn supersede_device_ai_processing_ticket(inner: &Arc<Inner>, prior: DeviceAiProcessingTicket) -> Option<DeviceAiProcessingTicket> {
+    let state = inner.state.lock();
+    if state.session_id != prior.session_id { return None; }
+    inner.device_processing_hint_revision.compare_exchange(
+        prior.revision, prior.revision + 1, Ordering::SeqCst, Ordering::SeqCst,
+    ).ok().map(|_| DeviceAiProcessingTicket { revision: prior.revision + 1, ..prior })
+}
+
+// Serialize only hint IO, never coordinator state. Once a write is in flight it
+// is not revocable; a newer admitted hint follows it rather than overtaking it.
+fn dispatch_device_ai_processing_ticket(
+    inner: &Arc<Inner>, ticket: DeviceAiProcessingTicket,
+    send: impl FnOnce() -> Result<(), String>,
+) -> Option<Result<(), String>> {
+    let _io = inner.device_processing_hint_io.lock();
+    if !device_ai_processing_ticket_current(inner, ticket) { return None; }
+    Some(send())
+}
+
+fn set_device_ai_processing_async(inner: &Arc<Inner>, expected_session_id: SessionId, active: bool, reason: &'static str) -> Option<DeviceAiProcessingTicket> {
+    if !should_sync_device_ai_processing(inner) { return None; }
+    let ticket = claim_device_ai_processing_ticket(inner, expected_session_id)?;
+    let inner = Arc::clone(inner);
     async_runtime::spawn_blocking(move || {
-        match crate::embedded_ble::send_recording_processing_state(active, Duration::from_secs(2)) {
-            Ok(()) => log::info!(
-                "[embedded-ble] device AI processing LED synced active={active} reason={reason} session_id={session_id}"
-            ),
-            Err(err) => log::warn!(
-                "[embedded-ble] device AI processing LED sync failed active={active} reason={reason} session_id={session_id}: {err}"
-            ),
+        let session_id = expected_session_id;
+        match dispatch_device_ai_processing_ticket(&inner, ticket, || crate::embedded_ble::send_recording_processing_state(active, Duration::from_secs(2))) {
+            Some(Ok(())) => log::info!("[embedded-ble] device AI processing LED synced active={active} reason={reason} session_id={session_id}"),
+            Some(Err(err)) => log::warn!("[embedded-ble] device AI processing LED sync failed active={active} reason={reason} session_id={session_id}: {err}"),
+            None => log::info!("[embedded-ble] skipped superseded processing hint reason={reason} session_id={session_id}"),
         }
     });
+    Some(ticket)
 }
 
 fn device_ai_processing_completion_delay(started_at: Option<Instant>, now: Instant) -> Duration {
@@ -356,109 +393,85 @@ fn device_ai_processing_completion_delay(started_at: Option<Instant>, now: Insta
     min_visible.saturating_sub(now.saturating_duration_since(started_at))
 }
 
-fn schedule_device_ai_processing_max_visible_timeout(
-    inner: &Arc<Inner>,
-    cancel: Arc<AtomicBool>,
-    reason: &'static str,
-) {
-    if !should_sync_device_ai_processing(inner) {
-        return;
-    }
-    let expected_session_id = inner.state.lock().session_id;
+fn stop_device_ai_processing_for_ticket(inner: &Arc<Inner>, prior: DeviceAiProcessingTicket, reason: &'static str) {
+    if !should_sync_device_ai_processing(inner) { return; }
+    let Some(stop_ticket) = supersede_device_ai_processing_ticket(inner, prior) else { return; };
     let inner = Arc::clone(inner);
     async_runtime::spawn_blocking(move || {
-        std::thread::sleep(Duration::from_millis(DEVICE_AI_PROCESSING_MAX_VISIBLE_MS));
-        if cancel.load(Ordering::SeqCst) {
-            return;
-        }
-        let session_id = inner.state.lock().session_id;
-        if session_id != expected_session_id {
-            log::info!(
-                "[embedded-ble] skipped stale device AI processing LED max-visible timeout reason={reason} expected_session_id={expected_session_id} current_session_id={session_id}"
-            );
-            return;
-        }
-        if !should_sync_device_ai_processing(&inner) {
-            log::info!(
-                "[embedded-ble] skipped device AI processing LED max-visible timeout reason={reason} session_id={session_id}; processing sync no longer active"
-            );
-            return;
-        }
-        // Cap purple AI only. Do NOT send PROCESSING:DONE here — DONE flashes green OK.
-        // Long ASR/polish used to fire DONE at 5s and again at real completion → intermittent
-        // double green flash after a recording finishes.
-        match crate::embedded_ble::send_recording_processing_state(false, Duration::from_secs(2))
-        {
-            Ok(()) => log::warn!(
-                "[embedded-ble] device AI processing LED max-visible timeout stopped reason={reason} session_id={session_id} max_visible_ms={DEVICE_AI_PROCESSING_MAX_VISIBLE_MS}"
-            ),
-            Err(err) => log::warn!(
-                "[embedded-ble] device AI processing LED max-visible timeout stop failed reason={reason} session_id={session_id}: {err}"
-            ),
+        match dispatch_device_ai_processing_ticket(&inner, stop_ticket, || crate::embedded_ble::send_recording_processing_state(false, Duration::from_secs(2))) {
+            Some(Ok(())) => log::info!("[embedded-ble] device AI processing cleared reason={reason} session_id={}", prior.session_id),
+            Some(Err(err)) => log::warn!("[embedded-ble] device AI processing clear failed reason={reason}: {err}"),
+            None => {},
         }
     });
 }
 
-fn set_device_ai_processing_done_async(inner: &Arc<Inner>, reason: &'static str, delay: Duration) {
+fn schedule_device_ai_processing_max_visible_timeout(
+    inner: &Arc<Inner>, start_ticket: DeviceAiProcessingTicket,
+    cancel: Arc<AtomicBool>, reason: &'static str,
+) {
+    if !should_sync_device_ai_processing(inner) { return; }
+    let inner = Arc::clone(inner);
+    async_runtime::spawn_blocking(move || {
+        std::thread::sleep(Duration::from_millis(DEVICE_AI_PROCESSING_MAX_VISIBLE_MS));
+        if cancel.load(Ordering::SeqCst) || !device_ai_processing_ticket_current(&inner, start_ticket)
+            || !should_sync_device_ai_processing(&inner) { return; }
+        // Clear purple AI only. This does not end dictation or flash green DONE.
+        stop_device_ai_processing_for_ticket(&inner, start_ticket, reason);
+    });
+}
+
+fn set_device_ai_processing_done_async(inner: &Arc<Inner>, expected_session_id: SessionId, reason: &'static str, delay: Duration) {
     if !should_sync_device_ai_processing(inner) {
         return;
     }
-    let expected_session_id = inner.state.lock().session_id;
+    let Some(ticket) = claim_device_ai_processing_ticket(inner, expected_session_id) else { return; };
     let inner = Arc::clone(inner);
     async_runtime::spawn_blocking(move || {
         if delay > Duration::from_millis(0) {
             std::thread::sleep(delay);
         }
-        let session_id = inner.state.lock().session_id;
-        if session_id != expected_session_id {
-            log::info!(
-                "[embedded-ble] skipped stale device AI processing LED completion reason={reason} expected_session_id={expected_session_id} current_session_id={session_id}"
-            );
-            return;
-        }
-        match crate::embedded_ble::send_recording_processing_done(Duration::from_secs(2)) {
-            Ok(()) => log::info!(
+        let session_id = expected_session_id;
+        match dispatch_device_ai_processing_ticket(&inner, ticket, || crate::embedded_ble::send_recording_processing_done(Duration::from_secs(2))) {
+            Some(Ok(())) => log::info!(
                 "[embedded-ble] device AI processing LED completed reason={reason} session_id={session_id} delayed_ms={}",
                 delay.as_millis()
             ),
-            Err(err) => log::warn!(
+            Some(Err(err)) => log::warn!(
                 "[embedded-ble] device AI processing LED completion sync failed reason={reason} session_id={session_id}: {err}"
             ),
+            None => log::info!("[embedded-ble] skipped superseded processing hint reason={reason} session_id={session_id}"),
         }
     });
 }
 
 async fn set_device_ai_processing_done_wait(
-    inner: &Arc<Inner>,
+    inner: &Arc<Inner>, expected_session_id: SessionId,
     reason: &'static str,
     delay: Duration,
 ) {
     if !should_sync_device_ai_processing(inner) {
         return;
     }
-    let expected_session_id = inner.state.lock().session_id;
+    let Some(ticket) = claim_device_ai_processing_ticket(inner, expected_session_id) else { return; };
     if delay > Duration::from_millis(0) {
         tokio::time::sleep(delay).await;
     }
-    let session_id = inner.state.lock().session_id;
-    if session_id != expected_session_id {
-        log::info!(
-            "[embedded-ble] skipped stale device AI processing LED completion reason={reason} expected_session_id={expected_session_id} current_session_id={session_id}"
-        );
-        return;
-    }
+    let session_id = expected_session_id;
+    let inner = Arc::clone(inner);
     let result = async_runtime::spawn_blocking(move || {
-        crate::embedded_ble::send_recording_processing_done(Duration::from_secs(2))
+        dispatch_device_ai_processing_ticket(&inner, ticket, || crate::embedded_ble::send_recording_processing_done(Duration::from_secs(2)))
     })
     .await;
     match result {
-        Ok(Ok(())) => log::info!(
+        Ok(Some(Ok(()))) => log::info!(
             "[embedded-ble] device AI processing LED completed reason={reason} session_id={session_id} delayed_ms={}",
             delay.as_millis()
         ),
-        Ok(Err(err)) => log::warn!(
+        Ok(Some(Err(err))) => log::warn!(
             "[embedded-ble] device AI processing LED completion sync failed reason={reason} session_id={session_id}: {err}"
         ),
+        Ok(None) => log::info!("[embedded-ble] skipped superseded processing hint reason={reason} session_id={session_id}"),
         Err(err) => log::warn!(
             "[embedded-ble] device AI processing LED completion task failed reason={reason} session_id={session_id}: {err}"
         ),
@@ -466,69 +479,60 @@ async fn set_device_ai_processing_done_wait(
 }
 
 fn set_device_ai_processing_warning_async(
-    inner: &Arc<Inner>,
+    inner: &Arc<Inner>, expected_session_id: SessionId,
     reason: &'static str,
     delay: Duration,
 ) {
     if !should_sync_device_ai_processing(inner) {
         return;
     }
-    let expected_session_id = inner.state.lock().session_id;
+    let Some(ticket) = claim_device_ai_processing_ticket(inner, expected_session_id) else { return; };
     let inner = Arc::clone(inner);
     async_runtime::spawn_blocking(move || {
         if delay > Duration::from_millis(0) {
             std::thread::sleep(delay);
         }
-        let session_id = inner.state.lock().session_id;
-        if session_id != expected_session_id {
-            log::info!(
-                "[embedded-ble] skipped stale device AI processing LED warning reason={reason} expected_session_id={expected_session_id} current_session_id={session_id}"
-            );
-            return;
-        }
-        match crate::embedded_ble::send_recording_processing_warning(Duration::from_secs(2)) {
-            Ok(()) => log::info!(
+        let session_id = expected_session_id;
+        match dispatch_device_ai_processing_ticket(&inner, ticket, || crate::embedded_ble::send_recording_processing_warning(Duration::from_secs(2))) {
+            Some(Ok(())) => log::info!(
                 "[embedded-ble] device AI processing LED warning reason={reason} session_id={session_id} delayed_ms={}",
                 delay.as_millis()
             ),
-            Err(err) => log::warn!(
+            Some(Err(err)) => log::warn!(
                 "[embedded-ble] device AI processing LED warning sync failed reason={reason} session_id={session_id}: {err}"
             ),
+            None => log::info!("[embedded-ble] skipped superseded processing hint reason={reason} session_id={session_id}"),
         }
     });
 }
 
 async fn set_device_ai_processing_warning_wait(
-    inner: &Arc<Inner>,
+    inner: &Arc<Inner>, expected_session_id: SessionId,
     reason: &'static str,
     delay: Duration,
 ) {
     if !should_sync_device_ai_processing(inner) {
         return;
     }
-    let expected_session_id = inner.state.lock().session_id;
+    let Some(ticket) = claim_device_ai_processing_ticket(inner, expected_session_id) else { return; };
     if delay > Duration::from_millis(0) {
         tokio::time::sleep(delay).await;
     }
-    let session_id = inner.state.lock().session_id;
-    if session_id != expected_session_id {
-        log::info!(
-            "[embedded-ble] skipped stale device AI processing LED warning reason={reason} expected_session_id={expected_session_id} current_session_id={session_id}"
-        );
-        return;
-    }
+    let session_id = expected_session_id;
+    let inner = Arc::clone(inner);
     let result = async_runtime::spawn_blocking(move || {
-        crate::embedded_ble::send_recording_processing_warning(Duration::from_secs(2))
+        dispatch_device_ai_processing_ticket(&inner, ticket, || crate::embedded_ble::send_recording_processing_warning(Duration::from_secs(2)))
     })
     .await;
     match result {
-        Ok(Ok(())) => log::info!(
+        Ok(Some(Ok(()))) => log::info!(
             "[embedded-ble] device AI processing LED warning reason={reason} session_id={session_id} delayed_ms={}",
             delay.as_millis()
         ),
-        Ok(Err(err)) => log::warn!(
+        Ok(Some(Err(err))) => log::warn!(
             "[embedded-ble] device AI processing LED warning sync failed reason={reason} session_id={session_id}: {err}"
         ),
+        Ok(None) => log::info!("[embedded-ble] skipped superseded processing hint reason={reason} session_id={session_id}"),
         Err(err) => log::warn!(
             "[embedded-ble] device AI processing LED warning task failed reason={reason} session_id={session_id}: {err}"
         ),
@@ -541,6 +545,8 @@ fn device_ai_processing_completion_allowed(active: bool, completed: bool) -> boo
 
 struct DeviceAiProcessingGuard {
     inner: Arc<Inner>,
+    session_id: SessionId,
+    start_ticket: Option<DeviceAiProcessingTicket>,
     active: bool,
     completed: bool,
     started_at: Option<Instant>,
@@ -548,9 +554,11 @@ struct DeviceAiProcessingGuard {
 }
 
 impl DeviceAiProcessingGuard {
-    fn defer(inner: &Arc<Inner>) -> Self {
+    fn defer(inner: &Arc<Inner>, session_id: SessionId) -> Self {
         Self {
             inner: Arc::clone(inner),
+            session_id,
+            start_ticket: None,
             active: false,
             completed: false,
             started_at: None,
@@ -559,13 +567,14 @@ impl DeviceAiProcessingGuard {
     }
 
     fn start_if_needed(&mut self, reason: &'static str) {
-        if self.completed || self.active || !should_sync_device_ai_processing(&self.inner) {
+        if self.completed || self.active || !device_ai_processing_session_current(&self.inner, self.session_id) || !should_sync_device_ai_processing(&self.inner) {
             return;
         }
-        set_device_ai_processing_async(&self.inner, true, reason);
+        let Some(start_ticket) = set_device_ai_processing_async(&self.inner, self.session_id, true, reason) else { return; };
+        self.start_ticket = Some(start_ticket);
         let cancel = Arc::new(AtomicBool::new(false));
         schedule_device_ai_processing_max_visible_timeout(
-            &self.inner,
+            &self.inner, start_ticket,
             Arc::clone(&cancel),
             "dictation_processing_max_visible_timeout",
         );
@@ -584,7 +593,7 @@ impl DeviceAiProcessingGuard {
         if device_ai_processing_completion_allowed(self.active, self.completed) {
             self.cancel_max_visible_timeout();
             let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
-            set_device_ai_processing_done_wait(&self.inner, reason, delay).await;
+            set_device_ai_processing_done_wait(&self.inner, self.session_id, reason, delay).await;
             self.completed = true;
             self.active = false;
             self.started_at = None;
@@ -595,7 +604,7 @@ impl DeviceAiProcessingGuard {
         if device_ai_processing_completion_allowed(self.active, self.completed) {
             self.cancel_max_visible_timeout();
             let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
-            set_device_ai_processing_done_async(&self.inner, reason, delay);
+            set_device_ai_processing_done_async(&self.inner, self.session_id, reason, delay);
             self.completed = true;
             self.active = false;
             self.started_at = None;
@@ -606,7 +615,7 @@ impl DeviceAiProcessingGuard {
         if device_ai_processing_completion_allowed(self.active, self.completed) {
             self.cancel_max_visible_timeout();
             let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
-            set_device_ai_processing_warning_wait(&self.inner, reason, delay).await;
+            set_device_ai_processing_warning_wait(&self.inner, self.session_id, reason, delay).await;
             self.completed = true;
             self.active = false;
             self.started_at = None;
@@ -617,7 +626,7 @@ impl DeviceAiProcessingGuard {
         if device_ai_processing_completion_allowed(self.active, self.completed) {
             self.cancel_max_visible_timeout();
             let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
-            set_device_ai_processing_warning_async(&self.inner, reason, delay);
+            set_device_ai_processing_warning_async(&self.inner, self.session_id, reason, delay);
             self.completed = true;
             self.active = false;
             self.started_at = None;
@@ -629,7 +638,9 @@ impl Drop for DeviceAiProcessingGuard {
     fn drop(&mut self) {
         if self.active && !self.completed {
             self.cancel_max_visible_timeout();
-            set_device_ai_processing_async(&self.inner, false, "dictation_processing_end");
+            if let Some(start_ticket) = self.start_ticket.take() {
+                stop_device_ai_processing_for_ticket(&self.inner, start_ticket, "dictation_processing_end");
+            }
         }
     }
 }

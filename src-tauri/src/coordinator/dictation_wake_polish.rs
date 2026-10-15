@@ -4820,9 +4820,8 @@ async fn resolve_streaming_delivery_after_typer_drain(
                     });
                 }
             }
-            // When typing stops part-way through, history/clipboard/final
-            // result must describe the prefix that actually reached the
-            // target, not the provider's unseen tail.
+            // Submission keeps the emitted prefix. Recovery/history retain
+            // the complete final body even when typing was interrupted.
             StreamingDeliveryResolution::Prepared(build_streamed_nonempty_delivery(
                 text,
                 typed_text,
@@ -4849,9 +4848,9 @@ async fn resolve_streaming_delivery_after_typer_drain(
             }
             if typed_chars > 0 {
                 StreamingDeliveryResolution::Prepared(PreparedDeliveryText {
-                    intended_text: raw_text,
+                    intended_text: raw_text.clone(),
                     submitted_text: Some(typed_text.clone()),
-                    final_text: typed_text,
+                    final_text: raw_text,
                     polish_error: if auth_failure {
                         None
                     } else {
@@ -5122,13 +5121,8 @@ fn build_streamed_nonempty_delivery(
     typed_text: String,
     typer_failure: Option<String>,
 ) -> PreparedDeliveryText {
-    let (final_text, polish_error) = match typer_failure {
-        Some(error) => (
-            typed_text.clone(),
-            Some(format!("typing partially failed: {error}")),
-        ),
-        None => (intended_text.clone(), None),
-    };
+    let final_text = intended_text.clone();
+    let polish_error = typer_failure.map(|error| format!("typing partially failed: {error}"));
     PreparedDeliveryText {
         intended_text,
         submitted_text: Some(typed_text),

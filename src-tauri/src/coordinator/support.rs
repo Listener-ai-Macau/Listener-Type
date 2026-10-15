@@ -664,6 +664,18 @@ pub(super) fn apply_capsule_window_request<R: tauri::Runtime>(
     }
 }
 
+/// Commit display ownership with the current coordinator generation. Checking
+/// only at the caller is insufficient: a new recording may begin before this
+/// shared presentation cache is written. No app/window is needed for this step.
+pub(super) fn retain_current_capsule_payload(inner: &Arc<Inner>, payload: &CapsulePayload) -> bool {
+    let state = inner.state.lock();
+    if payload.session_id.as_deref().is_some_and(|id| id != state.session_id.to_string()) {
+        return false;
+    }
+    *inner.capsule_latest_payload.lock() = Some(payload.clone());
+    true
+}
+
 pub(super) fn emit_capsule_with_session(
     inner: &Arc<Inner>,
     event_session_id: Option<SessionId>,
@@ -725,7 +737,9 @@ pub(super) fn emit_capsule_with_session(
     // Keep one authoritative display snapshot so a hidden/recreated capsule
     // WebView can catch up after its event listener is re-established. This is
     // presentation state only; replay never calls a dictation or insertion API.
-    *inner.capsule_latest_payload.lock() = Some(payload.clone());
+    if !retain_current_capsule_payload(inner, &payload) {
+        return;
+    }
 
     let should_trace_emit = {
         let mut throttle = inner.capsule_ui_throttle.lock();

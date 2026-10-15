@@ -186,6 +186,11 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/asr/volcengine_transcript.rs` | Native row/word rendering reconciliation, recognition confirmation and transcript merging | Provider transcript contracts and saved missing-row response replay |
 | `src-tauri/src/asr/volcengine_speaker_ledger.rs` | Ordinary ASR source revisions, separate identity/activity protection and dual-evidence foreign tail projection | Owner preservation, valid empty occurrences, source revision, overlap and late positive evidence |
 | `src-tauri/src/asr/volcengine_native_identity.rs` | Enrollment-bound RAM natural reference and exact native PCM identity; separates raw activity from mixed context protection without owning STOP | Saved native/PCM replay, weak owner counterexamples, current source and profile lifecycle |
+| `src-tauri/src/asr/volcengine_native_cache.rs` | Retained unlinked candidate for capture/enrollment/PCM scoped observations; isolated while the History/clipboard fix is delivered, not compiled in current runtime | Candidate source ZIP and five ownership regressions in handoff work/source-evidence-cause-20261015; no installed interference claim |
+| `src-tauri/src/asr/tracked_source_audio.rs` | Retained, unlinked research candidate for source-audio tracking; not a production module or current model-research authorization | Historical candidate bindings in the Listener handoff progress record; no current runtime claim |
+| `src-tauri/src/asr/tracked_source_presence.rs` | Retained, unlinked research candidate for source presence; no default endpoint authority | Historical source/weak-owner failures and withdrawals; not included by the active module graph |
+| `src-tauri/src/asr/tracked_source_worker.rs` | Retained, unlinked research source worker; not reactivated by decoder lifecycle repairs | Historical candidate artifact/source bindings; do not treat file presence as installed functionality |
+| `src-tauri/src/coordinator/dictation_endpoint_probe.rs` | Retained, unlinked research endpoint probe, separate from the installed coordinator | Historical modeled receipts and source-evidence limitations; no editor or physical STOP claim |
 | `src-tauri/src/asr/volcengine_pending_source.rs` | Independent exact-suffix endpoint obligation evidence after body consumption; asynchronous bounded enrollment scoring, with no text deletion or STOP authority | Saved slow-tail and owner-continuation replay; capture/profile reset and detector-positive veto |
 | `src-tauri/src/asr/volcengine_untimed_merge.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/wav.rs` | ASR providers | Provider tests, dictation smoke |
@@ -212,7 +217,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator/dictation_asr_selection.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_content_probe.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_delivery_diagnostics.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation_device_ai.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_device_ai.rs` | Session-owned, revision-ordered device processing hints; conditional guard/timer cleanup | Build; queued stale/reordered hint and warning-preservation regressions |
 | `src-tauri/src/coordinator/dictation_embedded_candidate_begin.rs` | Candidate initialization with independent complete-local-intent state | Complete-intent behavioral regressions and product build |
 | `src-tauri/src/coordinator/dictation_embedded_detector_init.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_embedded_stream.rs` | BLE candidate lifecycle, shared phrase admission and recording handoff | Wake continuation, source provenance and terminal/live regressions |
@@ -246,7 +251,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator/recording_gate.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/resources.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/source_integrity.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/support.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/support.rs` | Shared capsule publishing with current-session cache ownership | Build and retired publisher regression |
 | `src-tauri/src/coordinator_state.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/correction.rs` | Core app | Build and targeted tests |
@@ -368,7 +373,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/lib/capsuleDisplayMessage.test.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleDisplayMessage.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleEventOrdering.test.ts` | Core app | Build and targeted tests |
-| `src/lib/capsuleEventOrdering.ts` | Core app | Build and targeted tests |
+| `src/lib/capsuleEventOrdering.ts` | Capsule sequence and superseded-session display ownership | Build and saved cross-session ordering reproduction |
 | `src/lib/capsuleLayout.test.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleLayout.ts` | Core app | Build and targeted tests |
 | `src/lib/capsulePreviewRules.test.ts` | Core app | Build and targeted tests |

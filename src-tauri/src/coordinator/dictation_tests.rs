@@ -37,6 +37,133 @@ use super::{
 };
 use crate::coordinator::Coordinator;
 use crate::coordinator::{PolishPrefetch, PolishPrefetchBuf};
+
+#[test]
+fn device_processing_hint_rejects_retired_producers_and_reordered_workers() {
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let old = new_session_id();
+    inner.state.lock().session_id = old;
+    let queued_start = super::claim_device_ai_processing_ticket(inner, old).unwrap();
+    let done = super::claim_device_ai_processing_ticket(inner, old).unwrap();
+    let writes = std::cell::RefCell::new(Vec::new());
+    assert_eq!(super::dispatch_device_ai_processing_ticket(inner, done, || {
+        writes.borrow_mut().push("done"); Ok(())
+    }), Some(Ok(())));
+    assert_eq!(super::dispatch_device_ai_processing_ticket(inner, queued_start, || {
+        writes.borrow_mut().push("late start"); Ok(())
+    }), None);
+    assert!(super::supersede_device_ai_processing_ticket(inner, queued_start).is_none());
+    let current = new_session_id();
+    inner.state.lock().session_id = current;
+    let new_start = super::claim_device_ai_processing_ticket(inner, current).unwrap();
+    assert!(super::claim_device_ai_processing_ticket(inner, old).is_none());
+    assert_eq!(super::dispatch_device_ai_processing_ticket(inner, done, || {
+        writes.borrow_mut().push("old done"); Ok(())
+    }), None);
+    assert_eq!(super::dispatch_device_ai_processing_ticket(inner, new_start, || {
+        writes.borrow_mut().push("new start"); Ok(())
+    }), Some(Ok(())));
+    assert_eq!(*writes.borrow(), ["done", "new start"]);
+}
+
+#[test]
+fn device_processing_hint_timeout_cannot_replace_a_newer_completion() {
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let session_id = new_session_id();
+    inner.state.lock().session_id = session_id;
+    let start = super::claim_device_ai_processing_ticket(inner, session_id).unwrap();
+    let cap = super::supersede_device_ai_processing_ticket(inner, start).unwrap();
+    assert!(!super::device_ai_processing_ticket_current(inner, start));
+    assert!(super::device_ai_processing_ticket_current(inner, cap));
+    let done = super::claim_device_ai_processing_ticket(inner, session_id).unwrap();
+    assert!(super::supersede_device_ai_processing_ticket(inner, cap).is_none());
+    assert!(super::device_ai_processing_ticket_current(inner, done));
+    assert_eq!(super::dispatch_device_ai_processing_ticket(inner, cap, || {
+        panic!("old max-visible timeout cannot clear a completed hint")
+    }), None);
+    let error = super::dispatch_device_ai_processing_ticket(inner, done, || Err("BLE unavailable".into()));
+    assert_eq!(error, Some(Err("BLE unavailable".into())), "IO errors must not become successful sync");
+}
+
+#[test]
+fn retired_capsule_publisher_cannot_replace_the_current_backend_snapshot() {
+    use crate::types::{CapsulePayload, CapsuleState};
+    let coordinator = Coordinator::new();
+    let current = new_session_id();
+    let old = new_session_id();
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = current;
+        state.phase = SessionPhase::Listening;
+    }
+    let recording = CapsulePayload { seq: 20, session_id: Some(current.to_string()),
+        state: CapsuleState::Recording, level: 0.2, elapsed_ms: 1100,
+        message: Some("当前正文".into()), inserted_chars: Some(4), translation: false };
+    assert!(crate::coordinator::support::retain_current_capsule_payload(&coordinator.inner, &recording));
+    for state in [CapsuleState::Done, CapsuleState::Error, CapsuleState::Cancelled] {
+        let late = CapsulePayload { seq: 21, session_id: Some(old.to_string()), state,
+            message: Some("旧录音迟到状态".into()), ..recording.clone() };
+        assert!(!crate::coordinator::support::retain_current_capsule_payload(&coordinator.inner, &late));
+        let cached = coordinator.capsule_latest_payload().unwrap();
+        assert_eq!(cached.seq, 20);
+        assert_eq!(cached.session_id, recording.session_id);
+        assert_eq!(cached.message, recording.message);
+        assert_eq!(coordinator.inner.state.lock().phase, SessionPhase::Listening);
+    }
+}
+
+#[tokio::test]
+async fn completion_auth_notice_cannot_publish_for_a_replaced_recording() {
+    use crate::types::{CapsulePayload, CapsuleState};
+    let coordinator = Coordinator::new();
+    let old = new_session_id();
+    let current = new_session_id();
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = current;
+        state.phase = SessionPhase::Listening;
+    }
+    *coordinator.inner.capsule_latest_payload.lock() = Some(CapsulePayload {
+        seq: 81, session_id: Some(current.to_string()), state: CapsuleState::Recording,
+        level: 0.3, elapsed_ms: 1200, message: Some("新的正文".into()),
+        inserted_chars: Some(4), translation: false,
+    });
+    let mut notice_claimed = false;
+    assert!(!super::publish_dictation_completion_with_notice(
+        &coordinator.inner, old, None, Some(10), || { notice_claimed = true; true }));
+    assert!(!notice_claimed, "retired completion must preserve the pending credential notice");
+    assert_eq!(coordinator.inner.state.lock().phase, SessionPhase::Listening);
+    let payload = coordinator.capsule_latest_payload().unwrap();
+    assert_eq!(payload.seq, 81);
+    assert_eq!(payload.session_id, Some(current.to_string()));
+    assert_eq!(payload.message.as_deref(), Some("新的正文"));
+    assert_eq!(payload.state, CapsuleState::Recording);
+}
+
+#[tokio::test]
+async fn completion_auth_notice_preserves_delivery_warning_and_normal_done_transition() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = session_id;
+        state.phase = SessionPhase::Inserting;
+    }
+    let delivery_warning = "TSF 未上屏，内容在剪贴板，请 Ctrl+V".to_string();
+    let combined = super::completion_message_with_auth_notice(Some(delivery_warning.clone()), true).unwrap();
+    assert!(combined.starts_with(&delivery_warning));
+    assert!(combined.contains("润色 API key 失效"));
+    assert!(!combined.contains("原文上屏"), "auth failure cannot certify editor delivery");
+    assert!(super::publish_dictation_completion_with_notice(
+        &coordinator.inner, session_id, Some(delivery_warning), None, || true));
+    assert_eq!(coordinator.inner.state.lock().phase, SessionPhase::Idle);
+    assert_eq!(coordinator.inner.state.lock().session_id, session_id);
+    assert!(!super::publish_dictation_completion_with_notice(
+        &coordinator.inner, session_id, None, None, || panic!("duplicate consumed notice")),
+        "duplicate completion is retired");
+}
 use crate::coordinator_state::{new_session_id, SessionPhase};
 use crate::embedded_audio::{
     build_audio_data_notification, build_session_start_notification,
@@ -15108,25 +15235,95 @@ fn clipboard_retention_takes_precedence_over_restore() {
     assert!(should_restore_clipboard_after_dictation(&prefs, false));
 }
 
-#[test]
-fn final_clipboard_retention_cannot_hold_capsule_completion_for_seconds() {
+#[tokio::test]
+async fn final_clipboard_retention_cannot_hold_capsule_completion_for_seconds() {
     assert!(
         super::FINAL_CLIPBOARD_RETENTION_FOREGROUND_BUDGET <= std::time::Duration::from_millis(100)
     );
-    let source = include_str!("dictation_session.rs");
-    let start = source
-        .find("async fn retain_final_clipboard_with_foreground_budget")
-        .expect("bounded final clipboard helper should exist");
-    let end = source[start..]
-        .find("pub(super) async fn handle_pressed_edge")
-        .map(|offset| start + offset)
-        .expect("session lifecycle should follow clipboard retention helper");
-    let body = &source[start..end];
-    assert!(body.find("clipboard_retention_ticket").unwrap() < body.find("spawn_blocking").unwrap());
-    assert!(body.contains("retain_session_clipboard(ticket, &text, unconfirmed_paste_uses_clipboard)"));
-    assert!(body.contains("spawn_blocking"));
-    assert!(body.contains("tokio::time::timeout"));
-    assert!(body.contains("(false, \"pending\")"));
+    let history = clipboard_recovery_history_record();
+    let (release, wait) = std::sync::mpsc::channel();
+    let result = super::retain_history_clipboard_with_foreground_budget(&history, move |_| {
+        wait.recv().unwrap();
+        crate::insertion::RetentionResult::Stored
+    }).await;
+    release.send(()).unwrap();
+    assert_eq!(result, (false, "pending"));
+}
+
+fn clipboard_recovery_history_record() -> crate::types::DictationSession {
+    if let Ok(path) = std::env::var("LISTENER_HISTORY_CLIPBOARD_RECORD") {
+        return serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    }
+    crate::types::DictationSession {
+        id: new_session_id().to_string(), created_at: chrono::Utc::now().to_rfc3339(),
+        raw_transcript: "这是已经说完的完整内容。The final sentence must survive. 最後の文も保存。".into(),
+        final_text: "这是已经说完的完整内容。The final sentence must survive. 最後の文も保存。".into(),
+        mode: PolishMode::Raw, app_bundle_id: None, app_name: None,
+        insert_status: InsertStatus::SubmittedUnconfirmed, error_code: None,
+        duration_ms: Some(15000), dictionary_entry_count: None,
+        has_audio_recording: Some(false), embedded_audio_stats: None,
+    }
+}
+
+#[tokio::test]
+async fn history_clipboard_retains_the_complete_same_record_after_input_interruption() {
+    let history = clipboard_recovery_history_record();
+    assert!(!history.final_text.trim().is_empty());
+    let saved = serde_json::to_value(&history).unwrap();
+    let clipboard = Arc::new(Mutex::new(String::new()));
+    let observed = Arc::clone(&clipboard);
+    let result = super::retain_history_clipboard_with_foreground_budget(&history, move |text| {
+        *observed.lock().unwrap() = text.into();
+        crate::insertion::RetentionResult::Stored
+    }).await;
+    assert_eq!(result, (true, "stored"));
+    assert_eq!(&*clipboard.lock().unwrap(), saved["finalText"].as_str().unwrap(),
+        "clipboard recovery and persisted History must not choose different bodies");
+    assert_eq!(history.id, saved["id"].as_str().unwrap());
+}
+
+#[tokio::test]
+async fn interrupted_streaming_preserves_full_recovery_without_resubmitting_the_body() {
+    use crate::coordinator::{dispatch_delivery_request, DeliveryDispatchPolicy, DeliveryRequest};
+    let prefix = "前半段已经输入。";
+    let full = "前半段已经输入。后半段虽然被打断，也必须保留在历史和剪贴板。";
+    for succeeded in [true, false] {
+        let outcome = if succeeded {
+            super::StreamingPolishOutcome::Streamed(full.into())
+        } else {
+            super::StreamingPolishOutcome::Failed("provider interrupted after a partial render".into())
+        };
+        let typer = tokio::spawn(async move { (prefix.into(), Some("cursor moved".into())) });
+        let prepared = match resolve_streaming_delivery_after_typer_drain(outcome, full.into(), typer).await {
+            super::StreamingDeliveryResolution::Prepared(value) => value,
+            _ => panic!("interrupted output needs a recoverable final body"),
+        };
+        assert_eq!(prepared.final_text, full);
+        assert_eq!(prepared.submitted_text.as_deref(), Some(prefix));
+        assert!(prepared.already_streamed);
+        let submission = dispatch_delivery_request(DeliveryRequest {
+            session_id: new_session_id(), delivery_id: uuid::Uuid::new_v4().to_string(),
+            text: prepared.final_text.clone(),
+        }, DeliveryDispatchPolicy {
+            already_streamed: prepared.already_streamed, wayland_session: false,
+            allow_clipboard_fallback: true, focus_ready_for_paste: false,
+            allow_foreground_insert_fallback: false,
+        }, prepared.submitted_text, |_, _| async {
+            panic!("a recovery copy must never reinsert the full body at the moved cursor")
+        }).await;
+        assert_eq!(submission.submitted_text.as_deref(), Some(prefix));
+        assert!(!submission.target_confirmed);
+        let mut history = clipboard_recovery_history_record();
+        history.final_text = prepared.final_text;
+        let expected = history.final_text.clone();
+        let (sent, received) = std::sync::mpsc::channel();
+        let result = super::retain_history_clipboard_with_foreground_budget(&history, move |text| {
+            sent.send(text.to_owned()).unwrap();
+            crate::insertion::RetentionResult::Stored
+        }).await;
+        assert_eq!(result, (true, "stored"));
+        assert_eq!(received.recv().unwrap(), expected);
+    }
 }
 
 #[test]
@@ -16446,13 +16643,19 @@ fn device_processing_max_visible_timeout_stops_without_done() {
     let end = body[1..].find("\nfn ").map(|i| i + 1).unwrap_or(body.len());
     let body = &body[..end];
     assert!(
-        body.contains("send_recording_processing_state(false"),
-        "max-visible must STOP AI LED"
+        body.contains("stop_device_ai_processing_for_ticket"),
+        "max-visible must request only its own still-current processing STOP"
     );
     assert!(
         !body.contains("send_recording_processing_done"),
         "max-visible must not send DONE (avoids intermittent double green OK)"
     );
+    let clear_start = source.find("fn stop_device_ai_processing_for_ticket").unwrap();
+    let clear_body = &source[clear_start..];
+    let clear_end = clear_body[1..].find("\nfn ").map(|i| i + 1).unwrap_or(clear_body.len());
+    let clear_body = &clear_body[..clear_end];
+    assert!(clear_body.contains("send_recording_processing_state(false"));
+    assert!(!clear_body.contains("send_recording_processing_done"));
 }
 
 #[test]

@@ -206,7 +206,9 @@ impl EmbeddedStreamingDictation {
         self.close_owned_product_lifecycle(inner);
         self.abort_accepted_wake_capture_ensure("stream_abort");
         self.activation_segment_race_guard = None;
-        set_device_ai_processing_async(inner, false, "embedded_stream_abort");
+        if let Some(session_id) = self.session.as_ref().map(|session| session.session_id) {
+            let _ = set_device_ai_processing_async(inner, session_id, false, "embedded_stream_abort");
+        }
         if matches!(
             self.speaker_candidate
                 .as_ref()
@@ -279,7 +281,9 @@ impl EmbeddedStreamingDictation {
         }
         self.close_owned_product_lifecycle(inner);
         self.abort_accepted_wake_capture_ensure("user_cancel");
-        set_device_ai_processing_async(inner, false, "embedded_stream_user_cancel");
+        if let Some(session_id) = self.session.as_ref().map(|session| session.session_id) {
+            let _ = set_device_ai_processing_async(inner, session_id, false, "embedded_stream_user_cancel");
+        }
         if matches!(
             self.speaker_candidate
                 .as_ref()
@@ -337,7 +341,9 @@ impl EmbeddedStreamingDictation {
     /// keep the GATT notify subscription alive for the next attempt.
     fn discard_active_session_after_stream_error(&mut self, inner: &Arc<Inner>, message: &str) {
         self.close_owned_product_lifecycle(inner);
-        set_device_ai_processing_async(inner, false, "embedded_stream_soft_error");
+        if let Some(session_id) = self.session.as_ref().map(|session| session.session_id) {
+            let _ = set_device_ai_processing_async(inner, session_id, false, "embedded_stream_soft_error");
+        }
         if matches!(
             self.speaker_candidate
                 .as_ref()
