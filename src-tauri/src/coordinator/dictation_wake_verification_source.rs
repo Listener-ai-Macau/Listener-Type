@@ -88,6 +88,11 @@ fn wake_pcm_digest(pcm: &[u8]) -> [u8; 32] {
 }
 
 impl WakeVerifierSnapshot {
+    fn same_input(&self, other: &Self) -> bool {
+        self.candidate_id == other.candidate_id && self.range == other.range
+            && self.pcm_sha256 == other.pcm_sha256 && self.source_facts == other.source_facts
+    }
+
     fn from_candidate(candidate: &BufferedSpeakerCandidate) -> Self {
         let range = candidate.current_candidate_range();
         let pcm: Arc<[u8]> = candidate.pcm.clone().into();
@@ -98,6 +103,22 @@ impl WakeVerifierSnapshot {
             pcm,
             source_facts: candidate.source_facts_for_range(range),
         }
+    }
+
+    fn from_candidate_range(candidate: &BufferedSpeakerCandidate,
+        range: crate::observability::CandidateRange) -> Option<Self> {
+        let current = candidate.current_candidate_range()?;
+        if range.start < current.start || range.end > current.end || range.start >= range.end
+            || range.start % 2 != 0 || range.end % 2 != 0 {
+            return None;
+        }
+        let start = usize::try_from(range.start.checked_sub(current.start)?).ok()?;
+        let end = usize::try_from(range.end.checked_sub(current.start)?).ok()?;
+        if start % 2 != 0 || end % 2 != 0 { return None; }
+        let pcm: Arc<[u8]> = Arc::from(candidate.pcm.get(start..end)?);
+        Some(Self {candidate_id:candidate.candidate_id,range:Some(range),
+            pcm_sha256:wake_pcm_digest(&pcm),pcm,
+            source_facts:candidate.source_facts_for_range(Some(range))})
     }
 
     fn observe_direct_result(

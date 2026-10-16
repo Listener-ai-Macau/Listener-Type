@@ -426,8 +426,7 @@ pub(super) fn hide_capsule_window_if_present() {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, SetWindowPos, ShowWindow, HWND_NOTOPMOST, SWP_HIDEWINDOW, SWP_NOACTIVATE,
-        SWP_NOMOVE, SWP_NOSIZE, SW_HIDE,
+        FindWindowW, ShowWindow, SW_HIDE,
     };
 
     let title: Vec<u16> = "Listener Type Capsule"
@@ -443,17 +442,7 @@ pub(super) fn hide_capsule_window_if_present() {
     }
 
     let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
-    let _ = unsafe {
-        SetWindowPos(
-            hwnd,
-            HWND_NOTOPMOST,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_HIDEWINDOW,
-        )
-    };
+    // Hiding is visibility only. Do not revoke the host's default topmost policy.
 }
 
 #[cfg(not(target_os = "windows"))]

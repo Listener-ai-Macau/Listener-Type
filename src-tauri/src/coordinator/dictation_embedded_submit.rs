@@ -570,11 +570,16 @@ async fn submit_embedded_audio_ble_stream_impl(
                 );
             }
         }
-        // Continuous: finalize STOP with missing packets so capture can keep
-        // TYPE:READY instead of waiting forever for a perfect drain.
-        if !emit_idle_capture_errors {
+        // Only an existing physical-STOP drain deadline can enter this path.
+        // Also settle a stopped predecessor after failed ENSURE, including in
+        // the foreground actor; no timer creates a recording STOP here.
+        {
             match streaming.force_finish_pending_stop_if_due(inner).await {
                 Ok(true) => {
+                    // Foreground capture owns a single submission. Preserve
+                    // its terminal result and exit through the common capture
+                    // cancellation/join cleanup, just like an ordinary STOP.
+                    if emit_idle_capture_errors { break; }
                     streaming.reset_for_next_session();
                     record_embedded_ble_session_actor_command(
                         inner,
@@ -607,7 +612,9 @@ async fn submit_embedded_audio_ble_stream_impl(
             }
         }
 
-        let maybe_signal = if session_abort.is_some() || !emit_idle_capture_errors {
+        let maybe_signal = if session_abort.is_some() || !emit_idle_capture_errors
+            || streaming.accepted_wake_capture_ensure.is_some()
+            || streaming.pending_stop_force_after.is_some() {
             tokio::select! {
                 signal = rx.recv() => signal,
                 _ = tokio::time::sleep(Duration::from_millis(40)) => {

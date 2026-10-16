@@ -247,11 +247,38 @@ struct SettledTargetEndpointClock {
     personal_presence_endpoint: Option<crate::personal_vad::PresenceEndpoint>,
 }
 
+/// A new VAD epoch is unclassified until personal analysis has consumed its
+/// source. Pending onset uses an exclusive boundary; a snapshot that missed
+/// the onset uses the completed-through boundary of its first observation.
+#[derive(Clone, Copy, Debug)]
+enum LocalVadEpochSourceFence {
+    Onset(u64),
+    ObservedThrough(u64),
+}
+
+impl LocalVadEpochSourceFence {
+    fn for_epoch(evidence: crate::asr::volcengine::LocalSpeechEvidence) -> Option<Self> {
+        (evidence.activity_epoch > 0).then(|| {
+            evidence.pending_speech_start_ms.map_or(
+                Self::ObservedThrough(evidence.analyzed_through_ms), Self::Onset,
+            )
+        })
+    }
+
+    fn is_unobserved(self, analyzed_end_ms: u64) -> bool {
+        match self {
+            Self::Onset(start_ms) => analyzed_end_ms <= start_ms,
+            Self::ObservedThrough(end_ms) => analyzed_end_ms < end_ms,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct LocalVadStopObservation {
     evidence: crate::asr::volcengine::LocalSpeechEvidence,
     observed_at: Instant,
     silence_since_ms: u64,
+    epoch_source_fence: Option<LocalVadEpochSourceFence>,
     valid: bool,
 }
 
@@ -268,6 +295,7 @@ impl LocalVadStopObservation {
             } else {
                 evidence.analyzed_through_ms
             },
+            epoch_source_fence: LocalVadEpochSourceFence::for_epoch(evidence),
             valid: evidence.revision > 0 && evidence.state != LocalSpeechActivityState::Unknown,
         }
     }
@@ -279,12 +307,17 @@ impl LocalVadStopObservation {
         }
         if evidence.revision <= self.evidence.revision
             || evidence.analyzed_through_ms < self.evidence.analyzed_through_ms
+            || evidence.activity_epoch < self.evidence.activity_epoch
         {
             // An out-of-order callback cannot revive old quiet evidence after
             // a speech onset. Retain the high-water revision until fresh input.
             self.valid = false;
             return;
         }
+        if evidence.activity_epoch > self.evidence.activity_epoch {
+            self.epoch_source_fence = LocalVadEpochSourceFence::for_epoch(evidence);
+        }
+        // Same-epoch background speech cannot continually renew this fence.
         self.silence_since_ms = self.silence_since_ms.max(
             if evidence.state == LocalSpeechActivityState::NonSpeech {
                 if evidence.activity_epoch > self.evidence.activity_epoch
@@ -497,7 +530,14 @@ impl SettledTargetEndpointClock {
             return false;
         }
         let Some(endpoint) = self.personal_presence_endpoint.as_ref() else { return false; };
-        if endpoint.due(captured_ms, now, timeout_ms) {
+        // A still-fresh negative can end before newly captured audio was
+        // analyzed. Revoke that authority for a new VAD source epoch, both
+        // when proposing STOP and when admitting the queued physical STOP.
+        let new_epoch_unobserved = self.local_vad_stop_observation.as_ref()
+            .and_then(|observation| observation.epoch_source_fence)
+            .zip(endpoint.analyzed_source_end_ms())
+            .is_some_and(|(fence, end_ms)| fence.is_unobserved(end_ms));
+        if !new_epoch_unobserved && endpoint.due(captured_ms, now, timeout_ms) {
             return true;
         }
         // Missing/stalled personal analysis is not silence. Only a separate
@@ -3468,5 +3508,114 @@ mod endpoint_clock_submission_tests {
         let mut clock = automatic_body_clock();
         assert_eq!(clock.begin_text_submission(Instant::now(), "。"), None);
         assert!(clock.pending_body_dispatch.is_none());
+    }
+
+    fn personal_frontier_clock(now: Instant) -> SettledTargetEndpointClock {
+        let mut clock = automatic_body_clock();
+        clock.note_personal_presence(Some(crate::personal_vad::PresenceObservation {
+            analyzed_end_ms: 108_000,
+            last_positive_end_ms: Some(72_000),
+            last_unresolved_end_ms: Some(103_200),
+            source_history_complete: true,
+            state: crate::personal_vad::PresenceState::ConfirmedOther,
+            observed_at: now,
+        }), now);
+        clock
+    }
+
+    fn frontier_vad(epoch: u64, revision: u64, end: u64,
+        onset: Option<u64>, state: crate::asr::volcengine::LocalSpeechActivityState,
+    ) -> crate::asr::volcengine::LocalSpeechEvidence {
+        crate::asr::volcengine::LocalSpeechEvidence {
+            analyzed_through_ms: end,
+            analyzed_through_samples: end * 16,
+            activity_epoch: epoch, revision, pending_speech_start_ms: onset, state,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn personal_source_frontier_revokes_stop_on_unanalyzed_new_onset() {
+        use crate::asr::volcengine::LocalSpeechActivityState::PendingSpeech;
+        let now = Instant::now();
+        for onset in [108_000, 108_080] {
+            let mut clock = personal_frontier_clock(now);
+            assert!(clock.personal_presence_stop_due(108_160, now, 3_000));
+            // This is the final admission's actual refresh, after a STOP was
+            // proposed. A pending onset does not advance canonical Speech.
+            clock.stop_proposed = true;
+            let generation = clock.generation;
+            clock.note_local_vad_evidence_at(frontier_vad(2, 4, 108_160,
+                Some(onset), PendingSpeech), now);
+            assert_eq!(clock.generation, generation);
+            assert!(!clock.personal_presence_stop_due(108_160, now, 3_000),
+                "old negative frontier cannot cover onset {onset}");
+        }
+    }
+
+    #[test]
+    fn personal_source_frontier_missed_short_epoch_waits_for_source_coverage() {
+        use crate::asr::volcengine::LocalSpeechActivityState::NonSpeech;
+        let now = Instant::now();
+        let mut clock = personal_frontier_clock(now);
+        clock.note_local_vad_evidence_at(frontier_vad(1, 1, 107_920, None, NonSpeech), now);
+        clock.note_local_vad_evidence_at(frontier_vad(2, 3, 108_160, None, NonSpeech), now);
+        assert!(!clock.personal_presence_stop_due(108_160, now, 3_000));
+        clock.note_personal_presence(Some(crate::personal_vad::PresenceObservation {
+            analyzed_end_ms: 108_160, last_positive_end_ms: Some(72_000),
+            last_unresolved_end_ms: Some(103_200), source_history_complete: true,
+            state: crate::personal_vad::PresenceState::ConfirmedOther, observed_at: now,
+        }), now);
+        assert!(clock.personal_presence_stop_due(108_160, now, 3_000),
+            "completed-through fence includes equality after actual analysis");
+    }
+
+    #[test]
+    fn personal_source_frontier_same_epoch_background_does_not_renew_fence() {
+        use crate::asr::volcengine::LocalSpeechActivityState::Speech;
+        let now = Instant::now();
+        let mut clock = personal_frontier_clock(now);
+        clock.note_local_vad_evidence_at(frontier_vad(2, 1, 107_920, Some(103_200), Speech), now);
+        clock.note_local_vad_evidence_at(frontier_vad(2, 2, 108_160, None, Speech), now);
+        assert!(clock.personal_presence_stop_due(108_160, now, 3_000),
+            "ongoing classified background does not buy an endless VAD hold");
+    }
+
+    #[test]
+    fn personal_source_frontier_rejected_callbacks_cannot_erase_new_epoch() {
+        use crate::asr::volcengine::LocalSpeechActivityState::{PendingSpeech, NonSpeech};
+        let now = Instant::now();
+        for stale in [frontier_vad(1, 3, 107_920, None, NonSpeech),
+            frontier_vad(1, 5, 108_160, None, NonSpeech)] {
+            let mut clock = personal_frontier_clock(now);
+            clock.note_local_vad_evidence_at(frontier_vad(2, 4, 108_160,
+                Some(108_080), PendingSpeech), now);
+            clock.note_local_vad_evidence_at(stale, now);
+            assert!(!clock.personal_presence_stop_due(108_160, now, 3_000));
+        }
+    }
+
+    #[test]
+    fn personal_source_frontier_fresh_independent_quiet_can_still_release_stall() {
+        use crate::asr::volcengine::LocalSpeechActivityState::{PendingSpeech, NonSpeech};
+        let now = Instant::now();
+        let mut clock = personal_frontier_clock(now);
+        clock.note_local_vad_evidence_at(frontier_vad(2, 4, 108_160,
+            Some(108_080), PendingSpeech), now);
+        let quiet_at = now + Duration::from_millis(160);
+        clock.note_local_vad_evidence_at(frontier_vad(2, 5, 108_320, None, NonSpeech), quiet_at);
+        assert!(!clock.personal_presence_stop_due(108_320, quiet_at, 3_000));
+        let later = quiet_at + Duration::from_secs(3);
+        clock.note_local_vad_evidence_at(frontier_vad(2, 6, 111_320, None, NonSpeech), later);
+        assert!(clock.personal_presence_stop_due(111_320, later, 3_000),
+            "independent completed new quiet must not wait forever for personal inference");
+    }
+
+    #[test]
+    fn personal_source_frontier_onset_is_exclusive_but_observation_is_inclusive() {
+        assert!(LocalVadEpochSourceFence::Onset(108_000).is_unobserved(108_000));
+        assert!(!LocalVadEpochSourceFence::Onset(108_000).is_unobserved(108_001));
+        assert!(LocalVadEpochSourceFence::ObservedThrough(108_160).is_unobserved(108_159));
+        assert!(!LocalVadEpochSourceFence::ObservedThrough(108_160).is_unobserved(108_160));
     }
 }

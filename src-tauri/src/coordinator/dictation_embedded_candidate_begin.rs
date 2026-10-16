@@ -1,4 +1,32 @@
 impl EmbeddedStreamingDictation {
+    fn arm_owned_capture_ensure(&mut self, request_id: u32, previous_segment_id: u32) {
+        self.ended_ensure_predecessor = None;
+        let now = Instant::now();
+        self.accepted_wake_capture_ensure = Some(AcceptedWakeCaptureEnsure {
+            request_id, previous_segment_id, requested_at: now,
+            deadline_at: now + EMBEDDED_ACCEPTED_WAKE_CAPTURE_REPLACEMENT_TIMEOUT,
+            replacement_wait_started_at: None, confirmed_segment_id: None,
+        });
+        self.activation_segment_race_guard = Some((previous_segment_id, now));
+    }
+
+    fn ensure_physical_candidate_capture(&mut self, previous_segment_id: u32) {
+        let request_id = next_accepted_wake_capture_request_id();
+        // A successful BLE write only queues ACTIVATE. It cannot prove that
+        // the hidden segment survived its deadline. Use the same acknowledged
+        // ownership / continuation transaction as an accepted voice wake.
+        self.arm_owned_capture_ensure(request_id, previous_segment_id);
+        #[cfg(not(test))]
+        tauri::async_runtime::spawn_blocking(move || {
+            match crate::embedded_ble::send_recording_control_ensure_wake_capture(
+                request_id, previous_segment_id, Duration::from_secs(2),
+            ) {
+                Ok(()) => log::info!("[embedded-ble] physical candidate capture ENSURE sent request_id={request_id} previous_segment_id={previous_segment_id}"),
+                Err(error) => log::warn!("[embedded-ble] physical candidate capture ENSURE failed request_id={request_id} previous_segment_id={previous_segment_id}: {error}"),
+            }
+        });
+    }
+
     fn awaiting_owned_capture_continuation(&self, incoming_id: u32) -> bool {
         self.session.is_some()
             && self.embedded_session_id.is_none()
@@ -33,6 +61,7 @@ impl EmbeddedStreamingDictation {
             self.pending_stop_force_after = None;
         }
         self.embedded_session_id = Some(embedded_session_id);
+        self.ended_ensure_predecessor = None;
         self.activation_segment_race_guard = None;
         // The replacement is still a hidden candidate on the device. Promote
         // it for the already accepted product session, including PCM-before-
@@ -60,6 +89,19 @@ impl EmbeddedStreamingDictation {
         embedded_session_id: u32,
         start_origin: crate::embedded_audio::SessionStartOrigin,
     ) -> Result<(), String> {
+        if self.accepted_wake_capture_ensure.is_none()
+            && matches!(start_origin, crate::embedded_audio::SessionStartOrigin::Unknown(value)
+                if value & EMBEDDED_ENSURE_START_ORIGIN_MARKER_MASK != 0)
+        {
+            // Request receipts cannot become new manual/automatic starts after
+            // the request has been retired. Also quarantine their orphan PCM;
+            // an absent SessionStart must not recreate that retired recording.
+            if self.embedded_session_id != Some(embedded_session_id) {
+                self.orphan_recovery_quarantine_session_id = Some(embedded_session_id);
+            }
+            log::info!("[wake-phrase] orphan ENSURE marker ignored embedded_session_id={embedded_session_id} origin={start_origin:?}");
+            return Ok(());
+        }
         if !recording_gate::try_admit_arc(
             inner,
             RecordIntent::BleBeginCandidateOrSession,
@@ -253,7 +295,7 @@ impl EmbeddedStreamingDictation {
                 owner_verification_task: None,
                 owner_verification_attempted: false,
                 owner_local_phrase_source_range: None,
-                complete_local_wake_intent: None,
+                complete_local_wake_intent: None, primary_owner_input: None,
                 #[cfg(target_os = "windows")]
                 primary_keyword_check: None,
                 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]

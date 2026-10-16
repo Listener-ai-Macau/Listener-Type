@@ -16,6 +16,7 @@ mod asr;
 mod audio_mute;
 mod audio_transport_codec;
 mod capsule_log;
+mod capsule_overlay;
 mod capsule_placement;
 mod cli;
 mod combo_hotkey;
@@ -3221,6 +3222,7 @@ pub(crate) fn prepare_capsule_window_for_overlay<R: tauri::Runtime>(
         log::warn!("[capsule] set_focusable(false) failed: {e}");
     }
     apply_capsule_windows_no_activate_style(window);
+    capsule_overlay::observe(window);
 }
 
 #[cfg(target_os = "windows")]

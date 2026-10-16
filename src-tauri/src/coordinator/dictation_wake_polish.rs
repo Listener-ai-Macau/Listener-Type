@@ -2271,6 +2271,7 @@ struct BufferedSpeakerCandidate {
     /// growth cannot move that proof's identity boundary.
     owner_local_phrase_source_range: Option<crate::observability::CandidateRange>,
     complete_local_wake_intent: Option<CompleteLocalWakeIntent>,
+    primary_owner_input: Option<PrimaryWakeOwnerInput>,
     #[cfg(target_os = "windows")]
     primary_keyword_check: Option<PrimaryKeywordCheck>,
     /// Strong continuous Mandarin can hide the owner's phrase from both raw
@@ -4579,6 +4580,10 @@ struct AcceptedWakeCaptureEnsure {
 
 struct EmbeddedStreamingDictation {
     collector: crate::embedded_audio::StreamingSessionCollector,
+    /// An actual owned STOP may await a tagged continuation. Keep its completed
+    /// source separate from unowned incoming segments until that transaction
+    /// either binds a replacement or settles at its existing deadline.
+    ended_ensure_predecessor: Option<(u32, u16, crate::embedded_audio::StreamingSessionCollector)>,
     /// Bounded source association evidence. This keeps the shared capture
     /// receipt alive across actor reset without affecting packet admission or
     /// any product qualification decision.
@@ -4629,6 +4634,7 @@ impl Default for EmbeddedStreamingDictation {
     fn default() -> Self {
         Self {
             collector: crate::embedded_audio::StreamingSessionCollector::default(),
+            ended_ensure_predecessor: None,
             capture_admission_bindings: VecDeque::new(),
             capture_admission_bindings_incomplete: false,
             session: None,

@@ -14356,7 +14356,8 @@ fn owner_snapshot_must_cover_the_same_wake_or_repeated_confirmation_audio() {
     // repeated confirmation. Identity decisions cannot cross that boundary.
     assert!(!super::owner_verification_covers_wake(range(0, 1102), range(0, 1680)));
     assert!(!super::owner_verification_covers_wake(range(0, 2086), range(0, 4445)));
-    assert!(super::owner_verification_covers_wake(range(0, 2086), range(0, 1680)));
+    // A longer max-over-window result may name unrelated body speech.
+    assert!(!super::owner_verification_covers_wake(range(0, 2086), range(0, 1680)));
     assert!(super::owner_verification_covers_wake(range(0, 4445), range(0, 4445)));
     assert!(!super::owner_verification_covers_wake(range(1000, 4445), range(0, 1680)));
     assert!(!super::owner_verification_covers_wake(None, range(0, 1680)));
@@ -17169,6 +17170,58 @@ async fn accepted_wake_ensure_binds_user_origin_continuation_without_reactivatio
         Some(94)
     );
     assert!(streaming.session.is_some());
+}
+
+#[tokio::test]
+async fn physical_candidate_takeover_keeps_saved_max_duration_stop_out_of_product_finalization() {
+    let source=include_str!("dictation_embedded_stream.rs");
+    let stop=source.find("crate::embedded_audio::StreamingSessionEvent::Stopped {").unwrap();
+    let stop_body=&source[stop..];
+    assert!(stop_body.find("promote_hidden_candidate_if_requested(inner, session_id)").unwrap()
+        < stop_body.find("let ensure_confirmed_same_segment").unwrap(),
+        "queued manual takeover must precede STOP ownership classification");
+    let coordinator=Coordinator::new();
+    let session_id=new_session_id();
+    {
+        let mut state=coordinator.inner.state.lock();
+        state.session_id=session_id;state.phase=SessionPhase::Listening;state.cancelled=false;
+    }
+    register_embedded_ble_cancel_flag(&coordinator.inner,&Arc::new(AtomicBool::new(false)));
+    let consumer=Arc::new(CountingConsumer::default());
+    let mut stream=EmbeddedStreamingDictation::background_listener();
+    let old=1808532560;
+    stream.embedded_session_id=Some(old);
+    stream.session=Some(embedded_audio_test_session(session_id,consumer.clone()));
+    // Production physical-promotion seam. Test builds suppress only the radio IO.
+    stream.ensure_physical_candidate_capture(old);
+    let ensure=stream.accepted_wake_capture_ensure.unwrap();
+    // The retained field log reports 145ms after the press and an unconfirmed
+    // hidden max-duration STOP. It is not the user's terminal command.
+    let handled=stream.handle_ble_packet_actor_command(&coordinator.inner,
+        StreamingSessionEvent::Stopped {session_id:old,expected_packet_count:647,
+            origin:crate::embedded_audio::SessionStopOrigin::VoiceActivationMaxDuration})
+        .await.unwrap();
+    assert!(!handled);
+    assert!(!stream.terminal_received);
+    assert!(stream.session.is_some());
+    assert_eq!(stream.pending_stop_expected_packet_count,None);
+    assert!(stream.accepted_wake_capture_ensure.unwrap().replacement_wait_started_at.is_some());
+    let next=old+1;
+    stream.handle_ble_packet_actor_command(&coordinator.inner,
+        StreamingSessionEvent::Started {session_id:next,
+            origin:crate::embedded_audio::SessionStartOrigin::VoiceActivation}).await.unwrap();
+    assert_eq!(stream.embedded_session_id,None,"an unrelated background segment is not the owned continuation");
+    stream.handle_ble_packet_actor_command(&coordinator.inner,
+        StreamingSessionEvent::Started {session_id:next,
+            origin:crate::embedded_audio::SessionStartOrigin::Unknown(
+                super::embedded_ensure_start_origin_marker(ensure.request_id))}).await.unwrap();
+    let body=pcm_from_samples(&samples_for_ms(400,2500));
+    stream.handle_ble_packet_actor_command(&coordinator.inner,
+        StreamingSessionEvent::PcmChunk(StreamingPcmChunk {session_id:next,packet_sequence:0,
+            pcm:body.clone(),raw_input_level_percent:Some(30),after_stop_boundary:false,metadata:None}))
+        .await.unwrap();
+    assert_eq!(stream.embedded_session_id,Some(next));
+    assert_eq!(consumer.bytes.load(Ordering::SeqCst),body.len());
 }
 
 #[tokio::test]
@@ -21515,4 +21568,91 @@ fn raw_body_consumption_timed_continuation_renders_only_the_unsubmitted_suffix()
     assert!(super::pause_early_timed_continuation(inner,session,
         "今天检查这台设备，就是，下一句。",&key,Some(&revised_timing)).is_none(),
         "a transformed display cannot impersonate the native source occurrence");
+}
+
+async fn check_ended_ensure_source_settles_without_cancelling_body(pcm: Vec<u8>, confirm_successor: bool, recognized_body: bool) {
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let id = new_session_id();
+    { let mut st=inner.state.lock();st.session_id=id;st.phase=SessionPhase::Listening;st.cancelled=false; }
+    register_embedded_ble_cancel_flag(inner, &Arc::new(AtomicBool::new(false)));
+    let consumer:Arc<dyn crate::recorder::AudioConsumer> = Arc::new(CountingConsumer::default());
+    let mut stream = EmbeddedStreamingDictation::background_listener();
+    stream.session = Some(embedded_audio_test_session(id,consumer));
+    stream.session.as_mut().unwrap().archive_pcm = Some(pcm.clone());
+    stream.embedded_session_id = Some(93);
+    stream.arm_owned_capture_ensure(11,93);
+    arm_automatic_wake_text_guard(inner,id,"开始录音".into(),900);
+    { let mut guard=inner.embedded_audio_automatic_wake_guard.lock();let guard=guard.as_mut().unwrap();guard.body_started=recognized_body;guard.body_started_at=Some(Instant::now()); }
+    stream.collector.handle_notification(&build_session_start_notification(93)).unwrap();
+    let mut packets=0;
+    for (n,chunk) in pcm.chunks(320).enumerate() {
+        stream.collector.handle_notification(&build_audio_data_notification(93,n as u16,chunk).unwrap()).unwrap();packets+=1;
+    }
+    let stop=crate::embedded_audio::build_session_stop_notification_with_origin(93,packets,
+        crate::embedded_audio::SessionStopOrigin::VoiceActivationMaxDuration);
+    assert!(!stream.handle_notification(inner,&stop).await.unwrap());
+    assert!(stream.ended_ensure_predecessor.is_some());
+    assert!(stream.session.is_some());
+    assert!(stream.embedded_session_id.is_none());
+    let unknown=crate::embedded_audio::build_session_start_notification_with_origin(94,
+        crate::embedded_audio::SessionStartOrigin::VoiceActivation);
+    assert!(!stream.handle_notification(inner,&unknown).await.unwrap());
+    assert!(stream.embedded_session_id.is_none(), "an unrelated capture cannot inherit the session");
+    if confirm_successor {
+        stream.handle_ble_packet_actor_command(inner, StreamingSessionEvent::Started {
+            session_id:94,origin:crate::embedded_audio::SessionStartOrigin::Unknown(super::embedded_ensure_start_origin_marker(11)),
+        }).await.unwrap();
+        assert!(stream.ended_ensure_predecessor.is_none());
+        assert!(!stream.expire_accepted_wake_capture_if_due(inner));
+        assert!(stream.pending_stop_force_after.is_none());
+        assert_eq!(stream.embedded_session_id,Some(94));
+    } else {
+        stream.accepted_wake_capture_ensure.as_mut().unwrap().deadline_at=Instant::now()-Duration::from_millis(1);
+        assert!(!stream.expire_accepted_wake_capture_if_due(inner));
+        assert!(stream.accepted_wake_capture_ensure.is_none());
+        assert_eq!(stream.embedded_session_id,Some(93));
+        assert_eq!(stream.pending_stop_expected_packet_count,Some(packets));
+        assert!(stream.pending_stop_force_after.is_some_and(|due|due<=Instant::now()));
+        assert!(!super::take_embedded_ble_awaiting_post_activation_segment(inner,id),
+            "actual EOF must retire the alternate logical endpoint finalization owner");
+        assert_eq!(stream.collector.inner().stats().received_pcm_bytes,pcm.len());
+        assert!(stream.collector.inner().has_successful_complete_session());
+        assert!(stream.session.is_some(), "actual physical EOF must enter ordinary finalization, not Cancel");
+        assert!(!inner.state.lock().cancelled);
+    }
+    assert_eq!(stream.session.as_ref().unwrap().archive_pcm.as_ref().unwrap(),&pcm);
+    stream.reset_for_next_session();
+    assert!(stream.ended_ensure_predecessor.is_none());
+}
+
+#[tokio::test]
+async fn ended_ensure_transaction_restores_exact_stop_and_never_steals_successor() {
+    for (confirmed, recognized) in [(false,true),(true,true),(false,false)] {
+        check_ended_ensure_source_settles_without_cancelling_body(vec![7;6400],confirmed,recognized).await;
+    }
+}
+
+#[tokio::test]
+#[ignore = "saved actual six-second failure PCM; transport/state only, no cloud/editor/profile writes"]
+async fn saved_ensure_timeout_reaches_owned_physical_eof_with_complete_body_archive() {
+    let pcm=denzic_audio_v1_core::read_wav_pcm16le(&std::fs::read(
+        std::env::var("LISTENER_ENDED_ENSURE_WAV").unwrap()).unwrap()).unwrap();
+    assert_eq!(pcm.len(),192000);
+    check_ended_ensure_source_settles_without_cancelling_body(pcm,false,true).await;
+}
+
+#[tokio::test]
+async fn retired_ensure_receipt_cannot_create_a_fresh_candidate_or_orphan_pcm() {
+    let coordinator=Coordinator::new();
+    let mut stream=EmbeddedStreamingDictation::background_listener();
+    let marker=crate::embedded_audio::SessionStartOrigin::Unknown(super::embedded_ensure_start_origin_marker(11));
+    stream.handle_ble_packet_actor_command(&coordinator.inner,
+        StreamingSessionEvent::Started {session_id:94,origin:marker}).await.unwrap();
+    assert!(stream.session.is_none());assert!(stream.speaker_candidate.is_none());
+    assert_eq!(stream.orphan_recovery_quarantine_session_id,Some(94));
+    stream.handle_ble_packet_actor_command(&coordinator.inner,
+        StreamingSessionEvent::PcmChunk(StreamingPcmChunk {session_id:94,packet_sequence:0,
+            pcm:vec![7;640],raw_input_level_percent:Some(20),after_stop_boundary:false,metadata:None})).await.unwrap();
+    assert!(stream.session.is_none());assert!(stream.speaker_candidate.is_none());
 }

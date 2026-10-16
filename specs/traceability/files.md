@@ -185,7 +185,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/asr/volcengine_speaker_partition.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_transcript.rs` | Native row/word rendering reconciliation, recognition confirmation and transcript merging | Provider transcript contracts and saved missing-row response replay |
 | `src-tauri/src/asr/volcengine_speaker_ledger.rs` | Ordinary ASR source revisions, separate identity/activity protection and dual-evidence foreign tail projection | Owner preservation, valid empty occurrences, source revision, overlap and late positive evidence |
-| `src-tauri/src/asr/volcengine_native_identity.rs` | Enrollment-bound RAM natural reference and exact native PCM identity; separates raw activity from mixed context protection without owning STOP | Saved native/PCM replay, weak owner counterexamples, current source and profile lifecycle |
+| `src-tauri/src/asr/volcengine_native_identity.rs` | Enrollment-bound RAM natural reference with bounded non-starving acquisition and exact native PCM identity; separates raw activity from mixed context protection without owning STOP | Saved native/PCM replay, weak owner counterexamples, current source and profile lifecycle |
 | `src-tauri/src/asr/volcengine_native_cache.rs` | Retained unlinked candidate for capture/enrollment/PCM scoped observations; isolated while the History/clipboard fix is delivered, not compiled in current runtime | Candidate source ZIP and five ownership regressions in handoff work/source-evidence-cause-20261015; no installed interference claim |
 | `src-tauri/src/asr/tracked_source_audio.rs` | Retained, unlinked research candidate for source-audio tracking; not a production module or current model-research authorization | Historical candidate bindings in the Listener handoff progress record; no current runtime claim |
 | `src-tauri/src/asr/tracked_source_presence.rs` | Retained, unlinked research candidate for source presence; no default endpoint authority | Historical source/weak-owner failures and withdrawals; not included by the active module graph |
@@ -198,6 +198,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/audio_mute.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/audio_transport_codec.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/capsule_log.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/capsule_overlay.rs` | Non-activating Windows capsule Z-order observer | Native overlap/demotion/event regression and release build |
 | `src-tauri/src/capsule_placement.rs` | Capsule position and persistence | Build and targeted geometry/persistence tests |
 | `src-tauri/src/cli.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/combo_hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
@@ -286,6 +287,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/permissions.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/persistence.rs` | Local data and style packs | Rust unit tests, local import/export smoke |
 | `src-tauri/src/personal_vad.rs` | Exact sample coverage, original-coordinate context publication, typed projection/endpoint identity permissions and complete-history reconciliation | Packet/batch continuity, pending revisions, owner vetoes, partial-snapshot protection and editor-receipt timing |
+| `src-tauri/src/personal_vad_queue.rs` | Byte-bounded, source-coordinate personal activity mailbox; generation-owned publication and consumer lifetime | Original 54-second startup PCM, overrun/gap retirement, partial-chunk source windows and consumer unwind |
 | `src-tauri/src/personal_vad_windows.rs` | Same-window bounded parallel activity/identity inference; frozen enrollment and separate qualified projection/endpoint histories | Native score parity, selected private-history model replay, premature-stop preservation, foreign-tail submission and build |
 | `src-tauri/src/polish.rs` | Polish providers | Rust unit tests, provider smoke |
 | `src-tauri/src/protected_voice_profile.rs` | Atomic publication of a complete enrollment generation | Failed writes, binding integrity and replacement/delete regressions |

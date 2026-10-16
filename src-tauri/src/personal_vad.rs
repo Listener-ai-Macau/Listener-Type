@@ -2,6 +2,10 @@
 
 use std::time::{Duration, Instant};
 
+#[cfg(any(target_os = "windows", test))]
+#[path = "personal_vad_queue.rs"]
+mod input_queue;
+
 /// Exact capture coordinates, independent of message size and worker speed.
 /// A worker consumes every sample, but runs the model once for all complete
 /// chunks already waiting. The model window owns the natural batch bound.
@@ -26,6 +30,7 @@ pub(super) struct PresenceAudioWindow {
 impl PresenceAudioBuffer {
     pub(super) const CHUNK_SAMPLES: usize = 2_560;
     const WINDOW_CHUNKS: usize = 15;
+    pub(super) const MAX_NEW_PCM_BYTES: usize = Self::CHUNK_SAMPLES * 2 * Self::WINDOW_CHUNKS;
 
     pub(super) fn push(&mut self, pcm: &[u8], source_end_samples: u64) -> Result<(), String> {
         if pcm.len() % 2 != 0 { return Err("personal VAD received an incomplete PCM16 sample".into()); }
@@ -105,6 +110,14 @@ impl EndpointSourceTimeline {
 
     pub(crate) fn confirms_other(&self, start: u64, end: u64) -> bool {
         self.evidence.confirms_other(start, end)
+    }
+
+    pub(super) fn note_unobserved_gap(&mut self, start_ms: u64, end_ms: u64) {
+        if start_ms < end_ms {
+            self.evidence.note_presence(crate::asr::volcengine_speaker_ledger::SpeakerSpan {
+                start_ms, end_ms, kind: crate::asr::volcengine_speaker_ledger::EvidenceKind::Unknown,
+            });
+        }
     }
 
     pub(super) fn unresolved_after(&self, owner_end: u64) -> Option<u64> {
@@ -245,6 +258,11 @@ impl PresenceEndpoint {
 
     pub(crate) fn invalidate(&mut self) {
         self.invalidated = true;
+    }
+
+    /// Exclusive source frontier actually analyzed, never capture/wall time.
+    pub(crate) fn analyzed_source_end_ms(&self) -> Option<u64> {
+        self.latest.map(|frame| frame.analyzed_end_ms)
     }
 
     pub(crate) fn owner_activity_end_ms(&self) -> Option<u64> {

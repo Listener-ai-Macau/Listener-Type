@@ -2077,6 +2077,14 @@ mod platform {
         status_for_phrase("开始录音")
     }
 
+    #[cfg(test)]
+    pub(crate) fn has_bound_template_without_mutation(wake_phrase: &str) -> bool {
+        let Ok(phrase) = crate::wake_phrase::normalize_configured_phrase(wake_phrase) else {return false;};
+        let mut state=STATE.lock();
+        load_template_locked(&mut state);
+        state.template.as_ref().is_some_and(|template| template_matches_phrase(template,&phrase))
+    }
+
     pub fn is_enrolled_for_phrase(wake_phrase: &str) -> bool {
         let Ok(phrase) = crate::wake_phrase::normalize_configured_phrase(wake_phrase) else {
             return false;
@@ -3294,6 +3302,12 @@ mod platform {
                 Arc::make_mut(&mut candidate.embeddings).push(observed.embedding);
                 candidate
             });
+            // Diagnostic-only comparison: the automatically qualified source
+            // is evaluated alone as well as in the product's max-reference bank.
+            // It never replaces or persists the product reference.
+            let natural_profile = qualified_profile.as_ref().map(|candidate| SessionSpeakerProfile {
+                embeddings:Arc::new(vec![candidate.embeddings.last().unwrap().clone()]),adaptive:false,
+            });
             let rows: Vec<_> = fixture["windows"].as_array().unwrap().iter().map(|window| {
                 let pcm = std::fs::read(window["pcm_path"].as_str().unwrap()).unwrap();
                 let start = window["start_ms"].as_u64().unwrap() as usize * 32;
@@ -3326,12 +3340,24 @@ mod platform {
                         Err(error) => { row["qualified_reference_identity_unavailable"] = serde_json::json!(error); }
                     }
                 }
+                if let Some(candidate) = natural_profile.as_ref() {
+                    match observe_session_speaker(candidate, source) {
+                        Ok(observed) => {
+                            row["natural_only_score"] = serde_json::json!(observed.classification.score());
+                            row["natural_only_classification"] = serde_json::json!(format!("{:?}",observed.classification));
+                            row["natural_only_evidence"] = serde_json::json!(observed.transcript_speaker_evidence.label());
+                        }
+                        Err(error) => { row["natural_only_unavailable"] = serde_json::json!(error); }
+                    }
+                }
+                if fixture["skip_activity_encoder"].as_bool()!=Some(true) {
                 match crate::personal_vad::enrollment_reference(source) {
                     Ok(candidate) => {
                         let score: f32 = reference.values().iter().zip(candidate.values()).map(|(a,b)| a*b).sum();
                         row["activity_encoder_cosine"] = serde_json::json!(score);
                     }
                     Err(error) => { row["activity_encoder_unavailable"] = serde_json::json!(error); }
+                }
                 }
                 row
             }).collect();
@@ -5035,6 +5061,9 @@ pub use platform::{
     take_enrollment_arm, verify,
 };
 
+#[cfg(all(test, target_os = "windows"))]
+pub(crate) use platform::has_bound_template_without_mutation;
+
 #[cfg(not(target_os = "windows"))]
 pub fn status() -> VoiceprintStatus {
     VoiceprintStatus {
@@ -5712,5 +5741,53 @@ mod tests {
         assert_eq!(adapt_session_speaker_profile(&mut profile, &candidates), 3);
         assert_eq!(profile.embeddings.len(), 4);
         assert_eq!(adapt_session_speaker_profile(&mut profile, &candidates), 0);
+    }
+}
+
+#[cfg(all(test,target_os="windows"))]
+mod existing_background_projection_probe {
+    use super::*;
+    use serde_json::{Value,json};
+    use sha2::{Digest,Sha256};
+    #[test]
+    #[ignore="Explicit private exact-source embedding diagnostic; no new model, cloud or editor"]
+    fn existing_source_embedding_background_projection() {
+        let path=std::path::PathBuf::from(std::env::var("LISTENER_EMBEDDING_PROJECTION_FIXTURE").unwrap());
+        let fixture:Value=serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let phrase=fixture["phrase"].as_str().unwrap();assert!(has_bound_template_without_mutation(phrase));
+        let profile=native_word_profile_for_phrase(phrase).unwrap().unwrap();assert!(!profile.has_qualified_reference);
+        let mut observations=Vec::new();let mut measurements=Vec::new();
+        for row in fixture["inputs"].as_array().unwrap() {
+            let bytes=std::fs::read(row["pcm"].as_str().unwrap()).unwrap();
+            assert_eq!(format!("{:x}",Sha256::digest(&bytes)),row["pcmSha256"].as_str().unwrap());
+            let start=row["startMs"].as_u64().unwrap() as usize*32;let end=row["endMs"].as_u64().unwrap() as usize*32;
+            let began=std::time::Instant::now();let observation=profile.observe(&bytes[start..end]).unwrap();
+            measurements.push(json!({"id":row["id"],"sourceRangeMs":[start/32,end/32],"assessmentOnly":row["assessmentOnly"],
+                "baseClassification":format!("{:?}",observation.classification),"realSpeechMs":observation.real_speech_ms,
+                "quality":observation.signal_quality_sufficient,"computeMs":began.elapsed().as_secs_f64()*1000.0}));
+            observations.push(observation);
+        }
+        let cosine=|a:&[f32],b:&[f32]|normalized_cosine(a,b).map(f64::from);
+        let unit=|v:&[f32]| {let n=v.iter().map(|x|(*x as f64).powi(2)).sum::<f64>().sqrt();assert!(n>0.0);v.iter().map(|x|(*x as f64/n) as f32).collect::<Vec<_>>()};
+        let phone=fixture["inputs"].as_array().unwrap().iter().position(|r|r["role"]=="backgroundReference").unwrap();
+        let background=unit(&observations[phone].embedding);
+        let residual=|v:&[f32]| {let v=unit(v);let dot=v.iter().zip(&background).map(|(a,b)|a*b).sum::<f32>();v.iter().zip(&background).map(|(a,b)|a-dot*b).collect::<Vec<_>>()};
+        let ids:Vec<_>=fixture["inputs"].as_array().unwrap().iter().map(|r|r["id"].clone()).collect();
+        let mut relations=Vec::new();let mut residuals=Vec::new();
+        for (i,a) in observations.iter().enumerate() {
+            let ra=residual(&a.embedding);let norm=ra.iter().map(|x|(*x as f64).powi(2)).sum::<f64>().sqrt();
+            let bank_raw:Vec<_>=profile.base.embeddings.iter().map(|v|cosine(&a.embedding,v)).collect();
+            let bank_residual:Vec<_>=profile.base.embeddings.iter().map(|v|cosine(&ra,&residual(v))).collect();
+            residuals.push(json!({"id":ids[i],"residualNorm":norm,"phoneCosine":cosine(&a.embedding,&background),
+                "originalBankCosines":bank_raw,"phoneOrthogonalBankCosines":bank_residual}));
+            for (j,b) in observations.iter().enumerate().take(i+1) {
+                relations.push(json!({"a":ids[i],"b":ids[j],"cosine":cosine(&a.embedding,&b.embedding),"phoneOrthogonalCosine":cosine(&ra,&residual(&b.embedding))}));
+            }
+        }
+        std::fs::write(path.parent().unwrap().join("result.json"),serde_json::to_vec_pretty(&json!({
+            "scope":fixture["scope"],"measurements":measurements,"relations":relations,"residuals":residuals,
+            "sourceEncodingCount":observations.len(),"newWeights":false,"newModel":false,"vectorsExported":false,
+            "profileWrites":0,"cloudCalls":0,"actualEditor":false,"actualStop":false,
+        })).unwrap()).unwrap();
     }
 }

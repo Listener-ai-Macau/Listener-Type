@@ -28,6 +28,7 @@ fn primary_keyword_check_has_same_input(check: &PrimaryKeywordCheck, candidate: 
 fn begin_primary_keyword_check(candidate: &mut BufferedSpeakerCandidate, found: &crate::wake_phrase::Match,
     phrase: &str) -> bool {
     let Some(end) = found.audio_end_seconds.filter(|end| end.is_finite() && *end > 0.0) else { return false; };
+    freeze_primary_owner_input(candidate, found);
     let origin = candidate.kws_stream_origin_bytes;
     let Some(pcm) = candidate.pcm.get(origin..) else { return false; };
     let Some(range) = slice_candidate_range(candidate.current_candidate_range(), origin, pcm.len()) else { return false; };
@@ -128,6 +129,7 @@ fn continue_keyword_search_after_conflict(candidate: &mut BufferedSpeakerCandida
     candidate.kws_fed_bytes = end;
     candidate.kws_first_hit_at = None;
     candidate.pending_phrase_match = None;
+    candidate.primary_owner_input = None;
     candidate.kws_prompted_local_confirm = false;
     candidate.kws_local_absent_count = 0;
     candidate.local_confirmation_attempts = 0;

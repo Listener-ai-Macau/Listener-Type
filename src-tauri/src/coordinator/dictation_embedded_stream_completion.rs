@@ -57,10 +57,35 @@ impl EmbeddedStreamingDictation {
                 || current_embedded_audio_partial_preview(inner)
                     .is_some_and(|text| !text.trim().is_empty())
         });
+        if live_session_id.is_some() && self.embedded_session_id.is_none()
+            && ensure.replacement_wait_started_at.is_some()
+            && self.ended_ensure_predecessor.as_ref()
+                .is_some_and(|(id, _, _)| *id == ensure.previous_segment_id)
+        {
+            // The deadline settles an unconfirmed transport transaction,
+            // not whether the person is silent. EOF comes from the actual
+            // predecessor STOP, including its original packet accounting.
+            // Drain/final ASR/history/clipboard must run instead of Cancel.
+            let (id, packets, collector) = self.ended_ensure_predecessor.take().unwrap();
+            self.abort_accepted_wake_capture_ensure("ended_source_without_continuation");
+            self.collector = collector;
+            self.embedded_session_id = Some(id);
+            self.activation_segment_race_guard = None;
+            self.pending_stop_expected_packet_count = Some(packets);
+            self.pending_stop_force_after = Some(Instant::now());
+            // Physical EOF now owns finalization. A later endpoint callback
+            // must not also claim the old logical no-body hand-off.
+            if let Some(session_id) = live_session_id {
+                clear_embedded_ble_awaiting_post_activation_segment(inner, session_id);
+            }
+            log::warn!("[wake-phrase] continuation transport ended without owned successor; finalize actual STOP source embedded_session_id={id} expected_packets={packets} request_id={}", ensure.request_id);
+            return false;
+        }
         if body_live {
             let request_id = ensure.request_id;
             let previous_segment_id = ensure.previous_segment_id;
             self.accepted_wake_capture_ensure.take();
+            self.activation_segment_race_guard = None;
             log::warn!(
                 "[wake-phrase] accepted wake capture ensure timed out request_id={} previous_segment_id={} wait_ms={} replacement_wait_started={} action=keep_live_body_session",
                 request_id,
@@ -413,6 +438,7 @@ impl EmbeddedStreamingDictation {
     fn reset_for_next_session(&mut self) {
         self.abort_accepted_wake_capture_ensure("stream_reset");
         self.collector.reset();
+        self.ended_ensure_predecessor = None;
         if let Some(mut session) = self.session.take() {
             // Keep candidate provenance even when the host session is reset
             // before a final snapshot can be emitted.

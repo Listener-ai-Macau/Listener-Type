@@ -813,6 +813,10 @@ impl EmbeddedStreamingDictation {
                 expected_packet_count,
                 origin,
             } => {
+                // A press may be waiting while the final PCM/STOP is queued.
+                // Establish its owned continuation before classifying this
+                // predecessor STOP; promotion in finalization is too late.
+                self.promote_hidden_candidate_if_requested(inner, session_id).await?;
                 if self.awaiting_owned_capture_continuation(session_id) {
                     log::info!(
                         "[wake-phrase] ignoring unconfirmed continuation STOP embedded_session_id={session_id}; logical owner remains pending"
@@ -898,7 +902,8 @@ impl EmbeddedStreamingDictation {
                                         coordinator_session_id,
                                     );
                                 }
-                                self.collector.reset();
+                                self.ended_ensure_predecessor = Some((session_id,
+                                    expected_packet_count, std::mem::take(&mut self.collector)));
                                 self.embedded_session_id = None;
                                 self.pending_stop_expected_packet_count = None;
                                 // This STOP completed only the pre-activation wake
@@ -1575,9 +1580,33 @@ impl EmbeddedStreamingDictation {
                 }
                 }
             }
-            let verification_input = WakeVerifierSnapshot::from_candidate(&candidate);
-            let (enrolled_owner_matched, verification, voiceprint_ms) =
-                terminal_owner_verification_for_recall(&verification_input.pcm, &phrase).await;
+            // Freeze complete primary intent before identity. A rejected primary
+            // must fall back to the ordinary full-source recall verification.
+            let mut terminal_wake_match = wake_match
+                .map(|found| offset_streaming_wake_match(found, stream_origin_bytes));
+            #[cfg(target_os = "windows")]
+            if let Ok(Some(found)) = terminal_wake_match.as_ref() {
+                if found.complete_phrase_signal(&phrase)
+                    != denzic_voice_activation_v1_core::PhraseSignal::None
+                {
+                    let found = found.clone();
+                    if candidate.primary_keyword_check.is_none() {
+                        begin_primary_keyword_check(&mut candidate, &found, &phrase);
+                    }
+                    if candidate.primary_keyword_check.is_some() {
+                        terminal_wake_match = Ok(finish_primary_keyword_check(&mut candidate, true).await);
+                    }
+                }
+            }
+            let verification_input = match terminal_wake_match.as_ref().ok().and_then(|found| found.as_ref()) {
+                Some(found) => wake_verification_input(&candidate, found, false)?,
+                None => WakeVerifierSnapshot::from_candidate(&candidate),
+            };
+            let (verification_input, verification, voiceprint_ms) =
+                join_candidate_owner_verification(&mut candidate, verification_input, &phrase).await;
+            let verified_pcm_ms = verification_input.pcm.len() / 32;
+            let enrolled_owner_matched = crate::speaker_verification::is_enrolled_for_phrase(&phrase)
+                && verification.as_ref().is_ok_and(|result| result.enrolled_owner_matched());
             let retained_verification_source =
                 verification_input.observe_direct_result(&verification, &candidate);
             let mut phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
@@ -1586,27 +1615,13 @@ impl EmbeddedStreamingDictation {
             if let Some((result, _, _, _)) = terminal_completed_local_confirmation.as_ref() {
                 local_confirmation_ms = local_confirmation_ms.saturating_add(result.inference_ms);
             }
-            let mut wake_match = match wake_match
-                .map(|found| offset_streaming_wake_match(found, stream_origin_bytes))
-            {
+            let mut wake_match = match terminal_wake_match {
                 Ok(Some(found))
                     if found.complete_phrase_signal(&phrase)
                         != denzic_voice_activation_v1_core::PhraseSignal::None =>
                 {
-                    #[cfg(target_os = "windows")]
-                    let admitted = {
-                        if candidate.primary_keyword_check.is_none() {
-                            begin_primary_keyword_check(&mut candidate, &found, &phrase);
-                        }
-                        if candidate.primary_keyword_check.is_some() {
-                            finish_primary_keyword_check(&mut candidate, true).await
-                        } else { Some(found) }
-                    };
-                    #[cfg(not(target_os = "windows"))]
-                    let admitted = Some(found);
-                    phrase_signal = admitted.as_ref().map(|found| found.complete_phrase_signal(&phrase))
-                        .unwrap_or(denzic_voice_activation_v1_core::PhraseSignal::None);
-                    admitted
+                    phrase_signal = found.complete_phrase_signal(&phrase);
+                    Some(found)
                 }
                 Ok(Some(found)) => {
                     #[cfg(target_os = "windows")]
@@ -2222,7 +2237,6 @@ impl EmbeddedStreamingDictation {
                 .as_ref()
                 .map(|_| phrase_signal)
                 .unwrap_or(denzic_voice_activation_v1_core::PhraseSignal::None);
-            let verified_pcm_ms = candidate.pcm.len() / 32;
             let (owner_gate, arbitration, effective_phrase_signal) = arbitrate_candidate_wake(
                 &mut candidate,
                 effective_phrase_signal,
@@ -2939,6 +2953,7 @@ impl EmbeddedStreamingDictation {
             .as_mut()
             .ok_or_else(|| "物理录音接管 session 尚未创建".to_string())?;
         crate::observability::record_embedded_audio_first_packet(session.session_id);
+        self.ensure_physical_candidate_capture(embedded_session_id);
         log::info!(
             "[speaker-verification] physical recording promoted hidden candidate at post-press boundary embedded_session_id={} discarded_pre_press_pcm_bytes={}",
             embedded_session_id,
@@ -3372,7 +3387,8 @@ impl EmbeddedStreamingDictation {
                             KWS_SECONDARY_CONFIRM_BUDGET_MS
                         );
                     }
-                    maybe_prefetch_owner_verification(candidate, &phrase, embedded_session_id);
+                    // Bind the concrete keyword input directly. Do not first
+                    // launch a full-candidate job that would compete with it.
                     refresh_owner_verification_prefetch_for_wake(
                         candidate,
                         &phrase,
@@ -3966,41 +3982,11 @@ impl EmbeddedStreamingDictation {
         let voiceprint_phrase = phrase.clone();
         // Identity reuse covers the actual admitted phrase source. Near
         // guesses stay hidden and cannot supply an identity or command range.
-        let required_wake_range = owner_verification_required_wake_range(
-            candidate,
-            &wake_match,
-            false,
-        );
-        let prefetched = candidate
-            .owner_verification_task
-            .take()
-            .filter(|prefetched| {
-                owner_verification_covers_wake(prefetched.source_range, required_wake_range)
-            });
-        let verified_pcm_ms = prefetched
-            .as_ref()
-            .and_then(|prefetched| prefetched.source_range)
-            .map(|range| ((range.end - range.start) / 32) as usize)
-            .unwrap_or(pcm_ms);
+        let expected_input = wake_verification_input(candidate, &wake_match, false)?;
         let owner_join_started = Instant::now();
-        let (verification_input, verification_task) = match prefetched {
-            Some(prefetched) => (prefetched.input, prefetched.task.await),
-            None => {
-                let input = WakeVerifierSnapshot::from_candidate(candidate);
-                let pcm = input.pcm.clone();
-                let completed = tauri::async_runtime::spawn_blocking(move || {
-                    let started = Instant::now();
-                    let result = crate::speaker_verification::verify(&pcm, &voiceprint_phrase);
-                    (result, started.elapsed().as_millis() as u64)
-                })
-                .await;
-                (input, completed)
-            }
-        };
-        let (verification, voiceprint_ms) = match verification_task {
-            Ok(result) => result,
-            Err(err) => (Err(format!("声纹验证任务失败: {err}")), 0),
-        };
+        let (verification_input, verification, voiceprint_ms) =
+            join_candidate_owner_verification(candidate, expected_input, &voiceprint_phrase).await;
+        let verified_pcm_ms = verification_input.pcm.len() / 32;
         let retained_wake_verification_source =
             verification_input.observe_direct_result(&verification, candidate);
         let owner_join_wait_ms = owner_join_started.elapsed().as_millis() as u64;
@@ -4322,18 +4308,10 @@ impl EmbeddedStreamingDictation {
             &source_integrity_ledger,
         );
         self.session = Some(session);
-        self.accepted_wake_capture_ensure = Some(AcceptedWakeCaptureEnsure {
-            request_id: ensure_request_id,
-            previous_segment_id,
-            requested_at: Instant::now(),
-            deadline_at: Instant::now() + EMBEDDED_ACCEPTED_WAKE_CAPTURE_REPLACEMENT_TIMEOUT,
-            replacement_wait_started_at: None,
-            confirmed_segment_id: None,
-        });
+        self.arm_owned_capture_ensure(ensure_request_id, previous_segment_id);
         // 2026-08-09 12:46:59 激活竞态：ENSURE 发出后旧唤醒段可能立即 complete
         // （仅含唤醒词）；竞态窗口内该段的 STOP 不得 finalize 本会话，正文在激活后
         // 的新设备段里。绑定由 Started/PcmChunk 处理分支完成。
-        self.activation_segment_race_guard = Some((embedded_session_id, Instant::now()));
         let session = self
             .session
             .as_mut()

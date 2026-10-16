@@ -4,6 +4,60 @@ Listener Type is a Tauri desktop app with a Rust backend and React frontend. The
 
 ## Runtime Shape
 
+Primary keyword owner verification freezes the actual rotated decoder input at
+its hit. The range, original PCM digest, candidate identity and capture facts
+travel together through parallel identity prefetch, later actor appends and
+terminal admission. A containing prefix cannot substitute a max-over-window
+identity result. Both admission paths construct inference PCM from that source;
+source mutation or replacement invalidates reuse. Missing reliable model audio
+coordinates retain the existing full/local-confirmation source rules. This
+changes neither the phrase/identity arbitration thresholds nor transcript or
+STOP authority. Terminal primary conflict assessment precedes source selection;
+a veto falls back to the full-source recall path. The inference input can be
+shorter than the retained ASR body, which is never cropped by this ownership.
+
+A primary hit shorter than the existing 1.1-second identity input window keeps
+its exact lexical receipt but cannot freeze all identity retries below the
+verifier's minimum. Identity may consume exactly 1.1 seconds from that decoder
+origin when contiguous collector facts prove the same capture. It never grows
+with later body, crosses captures, substitutes a long prefix or relaxes identity
+thresholds. Mutation of the original keyword receipt still invalidates reuse;
+live and terminal-first selection share this contract.
+
+Wake identity prefetch has one outstanding job per candidate. Partial keyword
+hits have no immutable complete phrase source and cannot refresh that job on
+every PCM append. The bounded local-confirmation ladder remains independent.
+Live admission and terminal recall join the outstanding job before replacing an
+incompatible source; stale results never acquire identity authority.
+
+An actual owned predecessor STOP is retained while ENSURE waits for a tagged
+successor. A matching successor retires that closed source. If the existing
+transaction deadline expires after the physical source ended,
+the original collector/packet accounting enters ordinary ASR finalization,
+history and clipboard closeout. Timeout alone cannot stop an active capture or
+cancel recognized body. Unrelated segments never inherit the request.
+
+Physical-key takeover of a hidden candidate uses the same request-tagged ENSURE
+ownership/continuation transaction as an accepted voice wake. A successful
+ACTIVATE write is only transport acceptance, not device ownership proof. An
+unconfirmed predecessor's automatic STOP cannot finalize the product recording;
+only the matching request marker can bind its successor. Pre-press ambient PCM
+is still discarded and the existing continuation deadline remains bounded.
+
+
+Personal activity owns a source-coordinate PCM mailbox independent of transport
+packet count. A retained 54-second wake/startup burst is analysis backlog rather
+than a fatal input failure. The mailbox bounds queued PCM bytes and feeds at
+most one 2.4-second model window at a time, keeping backlog out of an unbounded
+worker-local pending buffer. A real overrun or forward source gap retires the
+unfinished generation, preserves earlier qualified evidence, records the skipped
+span as Unknown, and resumes fresh PCM. Publication and invalidation share the
+generation lock; inference holds no mailbox lock. Retired positives, negatives
+and errors cannot publish into the successor. Consumer lifetime closes the input
+on normal exit or unwind, replacing the old channel's disconnect notification.
+This changes no model/reference, text admission, silence threshold or STOP rule.
+
+
 Device AI processing hints carry the originating dictation ID and a logical
 revision from request time through the blocking queue. Retired producers cannot
 claim the current recording's identity or invalidate its latest hint. Hint IO
@@ -64,6 +118,17 @@ flowchart TB
 The recording capsule renders the newest accepted preview in one update. It
 does not replay provider text through a separate character-reveal timer; clause
 commitment and provisional text remain backend decisions.
+
+On Windows, capsule topmost ownership is independent of preview/PCM updates.
+The native overlay observer receives foreground, top-level show and Z-order
+notifications on its own WinEvent message-loop thread. It inspects actual
+visible overlap and repairs only its own visible host with non-activating,
+asynchronous SetWindowPos; it cannot show a hidden capsule, change editor focus,
+move/resize the host or call dictation APIs. Hiding retains the default topmost
+style. The observer follows the current native handle and validates its process
+before use; no periodic ASR/level tick is required to keep the overlay above
+ordinary windows. Secure desktops and exclusive fullscreen are outside this
+ordinary desktop Z-order contract.
 
 Capsule visibility uses the existing `showCapsule` preference and refreshes the
 native host immediately without replaying a dictation state or changing recording.
@@ -164,7 +229,13 @@ and capture audio cannot adapt either endpoint reference. The worker preserves s
 history and the original owner frontier so missed snapshots cannot turn uncertain
 speech into a proven absence span. STOP requires current confirmed-other coverage
 after the last owner/unknown frontier, or independently completed actual silence,
-and retains the editor-receipt continuation contract.
+and retains the editor-receipt continuation contract. A new local-VAD epoch
+also fences prior negative personal evidence until its source onset has actually
+been analyzed. Missed short epochs fence the first completed snapshot instead;
+source end is exclusive for an onset and inclusive for completed coverage.
+Repeated observations of the same background epoch cannot renew this fence.
+Proposal and physical-STOP admission share it; independently completed new quiet
+remains a separate release path when personal inference is stalled.
 
 The source publisher also retains independently qualified Other revisions for
 older model-context chunks at their original coordinates. Rejection without
@@ -461,7 +532,12 @@ one exclusive definite native speaker in its actual words, and positive raw
 personal activity there. Mixed/provisional sources, open wake, absent source PCM,
 and matches obtained only through the extra exemplar cannot learn. Enrollment,
 deletion, phrase/profile changes invalidate its permission; reset discards capture
-observations. Neither the protected bank nor wake/endpoint reference is modified.
+observations. Neither the protected bank nor wake/endpoint reference is modified. Acquisition enumerates
+all source-qualified candidates: a cached short/low-quality rejection cannot
+monopolize the reference slot. At most one new reference inference is attempted
+per provider packet, reusing earlier acoustic observations before advancing to
+the next candidate. The original quality, immutable-bank, source exclusivity and
+raw-positive requirements remain unchanged.
 
 The provider receive actor executes cached exact-source row inference on a blocking
 worker before publishing that packet. BLE ingestion and endpoint workers remain
