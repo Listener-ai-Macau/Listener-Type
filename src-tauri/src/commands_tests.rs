@@ -986,9 +986,9 @@ fn device_ble_name_change_path_refreshes_windows_cache_after_apply() {
     );
     assert!(
         helper.contains("wait_for_device_ble_name_recovery_pairing_ready(&expected_ble_name)")
-            && helper.contains("previous_address == Some(address)")
-            && helper.contains("refusing stale-address PairAsync"),
-        "rename recovery must require a freshly observed applied-name identity and reject the pre-rename address"
+            && helper.contains("!identity.accepts_observed_address(address)")
+            && helper.contains("did not match the owned rename identity"),
+        "rename recovery requires an actual applied-name advertisement matching its owned stable/fresh identity"
     );
     assert!(
         helper.contains("firmware_name_confirmed")
@@ -1021,8 +1021,8 @@ fn firmware_confirmed_rename_handoff_retires_exact_predecessor_before_pairing() 
         .find("recover_listener_pairing_after_type_recovery_with_cleanup_for_addresses")
         .expect("rename should retire the exact predecessor and pair the fresh address");
     let stale_address_rejection = helper
-        .find("previous_address == Some(address)")
-        .expect("the pre-rename address must be rejected after the advertisement scan");
+        .find("!identity.accepts_observed_address(address)")
+        .expect("a mismatched identity must be rejected after the advertisement scan");
     assert!(verified_address < advertisement_wait);
     assert!(
         advertisement_wait < stale_address_rejection && stale_address_rejection < atomic_recovery
@@ -2133,7 +2133,7 @@ fn ble_name_refresh_and_one_click_use_type_controlled_pairasync_recovery() {
     );
     assert!(
         rename_helper.contains("wait_for_device_ble_name_recovery_pairing_ready(&expected_ble_name)")
-            && rename_helper.contains("previous_address == Some(address)")
+            && rename_helper.contains("!identity.accepts_observed_address(address)")
             && !rename_helper.contains(".or(verified_handoff_address)"),
         "rename recovery must use only a newly observed applied-name identity and never fall back to the old handoff address"
     );
@@ -2185,7 +2185,7 @@ fn ble_name_refresh_uses_silent_recovery_while_one_click_keeps_user_prompt() {
     assert!(
         rename_helper.contains("send_recording_control_silent_fresh_identity_recovery")
             && rename_helper.contains("EmbeddedBleWindowsPairingPromptPolicy::SuppressUserPrompt"),
-        "BLE rename must use the silent fresh-identity firmware recovery command and suppress local user pairing prompts"
+        "BLE rename keeps silent stable/fresh recovery and suppresses user pairing prompts"
     );
     assert!(
         !rename_helper.contains("send_recording_control_recovery("),
@@ -4127,4 +4127,63 @@ fn is_valid_local_pack_id_rejects_path_traversal() {
     assert!(!is_valid_local_pack_id("with space"));
     assert!(!is_valid_local_pack_id("with\x00null"));
     assert!(!is_valid_local_pack_id(&"a".repeat(129)));
+}
+
+#[test]
+fn owned_rename_restores_stable_identity_without_trusting_unobserved_old_addresses() {
+    let old = 0xEF0F18FC9E4D;
+    let wrong = 0xFB9D73A1D201;
+    let stable = DeviceBleNameRecoveryIdentity::from_confirmed_handoff(Some(old));
+    assert!(stable.preserves_identity());
+    assert!(stable.accepts_observed_address(old));
+    assert!(!stable.accepts_observed_address(wrong));
+    assert!(!stable.accepts_observed_address(0));
+    let unknown = DeviceBleNameRecoveryIdentity::from_confirmed_handoff(None);
+    assert!(!unknown.preserves_identity());
+    assert!(unknown.accepts_observed_address(wrong));
+    assert!(!unknown.accepts_observed_address(0));
+    let forced_fresh = DeviceBleNameRecoveryIdentity::Fresh(Some(old));
+    assert!(!forced_fresh.accepts_observed_address(old));
+    assert!(forced_fresh.accepts_observed_address(wrong));
+}
+
+#[test]
+fn ble_name_missing_usb_restores_only_verified_owned_recovery() {
+    let owned = DeviceBleNameRecoveryIdentity::from_confirmed_handoff(Some(0xDA72222CD30A));
+    assert!(owned.permits_owned_recovery(false));
+    assert!(owned.permits_owned_recovery(true));
+    let unknown = DeviceBleNameRecoveryIdentity::from_confirmed_handoff(None);
+    assert!(!unknown.permits_owned_recovery(false));
+    assert!(unknown.permits_owned_recovery(true));
+    assert!(!DeviceBleNameRecoveryIdentity::from_confirmed_handoff(Some(0))
+        .permits_owned_recovery(false));
+    // Authorization to recover the owned radio never authorizes cleanup of a
+    // different device, or substitutes for the actual applied-name observation.
+    assert!(!owned.accepts_observed_address(0xC892FFDD3BCA));
+    assert!(!owned.accepts_observed_address(0));
+}
+
+#[test]
+fn ble_name_skipped_pairing_does_not_suspend_the_preserved_connection() {
+    let mut outcome = DeviceBleNameWindowsRefreshOutcome {
+        recovery_error: Some("USB unavailable; preserved Windows pairing".to_string()),
+        unpair_result: crate::embedded_ble::BleDeviceUnpairResult {
+            status: crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean,
+            attempted: false, matched_devices: 0, unpaired_devices: 0,
+            already_unpaired_devices: 0, failed_devices: 0, needs_user_action: false,
+            details: Vec::new(),
+        },
+        pairing_prompt_result: crate::embedded_ble::BleDevicePairingPromptResult {
+            status: crate::embedded_ble::BleDevicePairingPromptStatus::NotFound,
+            attempted: false, matched_devices: 0, prompted_devices: 0,
+            already_paired_devices: 0, failed_devices: 0, open_bluetooth_settings: false,
+            details: Vec::new(),
+        },
+    };
+    assert!(device_ble_name_windows_refresh_should_release_hold_for_followup(&outcome));
+    outcome.unpair_result.attempted = true;
+    assert!(!device_ble_name_windows_refresh_should_release_hold_for_followup(&outcome));
+    outcome.unpair_result.attempted = false;
+    outcome.pairing_prompt_result.attempted = true;
+    assert!(!device_ble_name_windows_refresh_should_release_hold_for_followup(&outcome));
 }

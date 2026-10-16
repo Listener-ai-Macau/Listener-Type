@@ -773,16 +773,57 @@ pub fn wait_for_device_ble_name_recovery_pairing_ready(expected_ble_name: &str) 
     }
 }
 
+/// An owned live rename may keep the same identity, but only a newly observed
+/// applied-name advertisement may confirm it. Unknown handoffs retain the fresh
+/// identity path; a cached previous address is never a substitute observation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceBleNameRecoveryIdentity {
+    Stable(u64),
+    Fresh(Option<u64>),
+}
+
+impl DeviceBleNameRecoveryIdentity {
+    pub fn from_confirmed_handoff(previous_address: Option<u64>) -> Self {
+        match previous_address.filter(|address| *address != 0) {
+            Some(address) => Self::Stable(address),
+            None => Self::Fresh(None),
+        }
+    }
+
+    pub fn accepts_observed_address(self, observed: u64) -> bool {
+        observed != 0 && match self {
+            Self::Stable(address) => observed == address,
+            Self::Fresh(previous_address) => previous_address != Some(observed),
+        }
+    }
+
+    pub fn preserves_identity(self) -> bool { matches!(self, Self::Stable(_)) }
+
+    pub fn permits_owned_recovery(self, firmware_name_confirmed: bool) -> bool {
+        // The measured legacy handoff recovered our existing paired device even
+        // when USB readback was absent. This permits only that recovery command;
+        // exact applied-name advertising is still required before Windows cleanup.
+        firmware_name_confirmed || self.preserves_identity()
+    }
+}
+
 pub fn apply_device_ble_name_windows_refresh_blocking(
     expected_ble_name: String,
     cleanup_target_names: Vec<String>,
     firmware_name_confirmed: bool,
 ) -> DeviceBleNameWindowsRefreshOutcome {
     let previous_address = crate::embedded_ble::verified_bluetooth_target_rename_handoff_address();
-    let mut recovery_error = if firmware_name_confirmed {
-        match crate::embedded_ble::send_recording_control_silent_fresh_identity_recovery(
-            DEVICE_SETTINGS_BLE_WRITE_TIMEOUT,
-        ) {
+    let identity = DeviceBleNameRecoveryIdentity::from_confirmed_handoff(previous_address);
+    let mut recovery_error = if identity.permits_owned_recovery(firmware_name_confirmed) {
+        // Restore the measured same-address handoff for the device this process
+        // actually owned. A missing handoff still uses explicit fresh identity.
+        let recovery = if identity.preserves_identity() {
+            crate::embedded_ble::send_recording_control_silent_recovery(DEVICE_SETTINGS_BLE_WRITE_TIMEOUT)
+        } else {
+            crate::embedded_ble::send_recording_control_silent_fresh_identity_recovery(DEVICE_SETTINGS_BLE_WRITE_TIMEOUT)
+        };
+        log::info!("[device-settings] BLE rename recovery identity={identity:?}; applied-name advertisement remains required");
+        match recovery {
             Ok(()) => None,
             Err(err) => {
                 log::warn!(
@@ -800,9 +841,9 @@ pub fn apply_device_ble_name_windows_refresh_blocking(
 
     let observed_recovery_addresses = if recovery_error.is_none() {
         match wait_for_device_ble_name_recovery_pairing_ready(&expected_ble_name) {
-            Some(address) if previous_address == Some(address) => {
+            Some(address) if !identity.accepts_observed_address(address) => {
                 let err = format!(
-                    "applied-name advertisement reused the pre-rename address {address:012X}; preserving Windows pairing and refusing stale-address PairAsync"
+                    "applied-name advertisement {address:012X} did not match the owned rename identity {identity:?}; preserving Windows pairing"
                 );
                 log::warn!("[device-settings] {err}");
                 recovery_error = Some(err);
@@ -810,7 +851,7 @@ pub fn apply_device_ble_name_windows_refresh_blocking(
             }
             Some(address) => {
                 log::info!(
-                    "[device-settings] BLE name recovery confirmed fresh pairing identity name={expected_ble_name:?} previous_address={previous_address:?} fresh_address={address:012X}"
+                    "[device-settings] BLE name recovery confirmed observed pairing identity name={expected_ble_name:?} previous_address={previous_address:?} fresh_address={address:012X}"
                 );
                 vec![address]
             }
@@ -832,7 +873,7 @@ pub fn apply_device_ble_name_windows_refresh_blocking(
         recovery_error.as_deref().unwrap_or("none")
     );
     let exact_predecessor_cleanup_addresses = previous_address
-        .filter(|address| !observed_recovery_addresses.contains(address))
+        .filter(|address| identity.preserves_identity() || !observed_recovery_addresses.contains(address))
         .into_iter()
         .collect::<Vec<_>>();
     let pre_pair_cleanup_addresses = exact_predecessor_cleanup_addresses.as_slice();
@@ -1025,7 +1066,11 @@ pub fn device_ble_name_pairing_retry_result_is_better(
 pub fn device_ble_name_windows_refresh_should_release_hold_for_followup(
     outcome: &DeviceBleNameWindowsRefreshOutcome,
 ) -> bool {
-    outcome.recovery_error.is_none()
+    // No maintenance was started: the existing Windows bond was deliberately
+    // preserved. No PairAsync can complete this hold, so restore the listener
+    // immediately instead of leaving its producer paused for three minutes.
+    (!outcome.unpair_result.attempted && !outcome.pairing_prompt_result.attempted)
+        || outcome.recovery_error.is_none()
         && !device_ble_name_windows_refresh_confirmed(outcome)
         && (matches!(
             outcome.pairing_prompt_result.status,

@@ -988,34 +988,16 @@ fn windows_pairing_uses_standard_pairasync_by_default() {
 }
 
 #[test]
-fn windows_pairing_uses_custom_first_only_for_exact_type_recovery() {
+fn owned_rename_uses_default_ceremony_before_custom_fallback() {
     let source = include_str!("embedded_ble.rs");
-    let start = source
-        .find("fn pair_unpaired_listener_candidate")
-        .expect("pairing helper should exist");
-    let end = source[start..]
-        .find("fn run_default_pairing_once")
-        .map(|offset| start + offset)
-        .expect("pairing helper boundary should exist");
+    let start = source.find("fn pair_unpaired_listener_candidate_with_adapter_recovery").unwrap();
+    let end = source[start..].find("fn run_default_pairing_once").unwrap() + start;
     let body = &source[start..end];
-    let custom_first_index = body
-        .find("if retry_failed_pairasync_once")
-        .expect("fresh Type recovery should have a dedicated first ceremony");
-    let custom_index = body[custom_first_index..]
-        .find("custom_pair_listener_candidate")
-        .map(|offset| custom_first_index + offset)
-        .expect("fresh Type recovery should register custom pairing first");
-    let standard_index = body
-        .find("run_default_pairing_once")
-        .expect("pairing helper must attempt standard PairAsync");
-
-    assert!(
-        custom_first_index < custom_index && custom_index < standard_index,
-        "exact Type-owned fresh recovery must register ConfirmOnly before its first security ceremony"
-    );
-    assert!(body.contains(
-        "if !retry_failed_pairasync_once && pairing_status_should_try_custom_fallback(status)"
-    ));
+    let default = body.find("let mut status = run_default_pairing_once").unwrap();
+    let fallback = body.find("if pairing_status_should_try_custom_fallback(status)").unwrap();
+    let custom = body[fallback..].find("custom_pair_listener_candidate").unwrap() + fallback;
+    assert!(default < fallback && fallback < custom);
+    assert!(!body[..default].contains("custom_pair_listener_candidate"));
 }
 
 #[test]
@@ -2784,8 +2766,11 @@ fn verified_rename_handoff_address_requires_matching_name_and_rename_grace() {
         .lock()
         .ok()
         .and_then(|slot| slot.clone());
+    let previous_handoff = OWNED_BLUETOOTH_RENAME_HANDOFF
+        .get_or_init(|| Mutex::new(None)).lock().unwrap().clone();
 
     set_configured_bluetooth_target_name("RenameTarget");
+    remember_owned_bluetooth_rename_handoff(None, "RenameTarget");
     remember_runtime_bluetooth_target_address_for_name(
         0xA4CB8FF2B512,
         "RenameTarget",
@@ -2794,9 +2779,18 @@ fn verified_rename_handoff_address_requires_matching_name_and_rename_grace() {
     );
     assert_eq!(
         verified_bluetooth_target_rename_handoff_address(),
-        Some(0xA4CB8FF2B512),
-        "a current target address learned for the rename grace window is safe only after firmware confirms the name transition"
+        None,
+        "an ordinary route cannot mint rename authority merely by using a grace duration"
     );
+
+    remember_owned_bluetooth_rename_handoff(Some(0xA4CB8FF2B512), "RenameTarget");
+    // Reproduce the actual pure-BLE failure: SET opens the old named route,
+    // APPLY then opens the configured new route. Neither is a new handoff.
+    remember_runtime_bluetooth_target_address_for_name(
+        0xA4CB8FF2B512, "Blistener", BLE_TARGET_ADDRESS_CACHE_WINDOW,
+        "audio control SET path",
+    );
+    assert_eq!(verified_bluetooth_target_rename_handoff_address(), Some(0xA4CB8FF2B512));
 
     remember_runtime_bluetooth_target_address_for_name(
         0xA4CB8FF2B512,
@@ -2806,9 +2800,19 @@ fn verified_rename_handoff_address_requires_matching_name_and_rename_grace() {
     );
     assert_eq!(
         verified_bluetooth_target_rename_handoff_address(),
-        None,
-        "an ordinary runtime cache address must not become a rename recovery shortcut"
+        Some(0xA4CB8FF2B512),
+        "APPLY route refresh must not erase the operation's existing handoff"
     );
+    set_configured_bluetooth_target_name("OtherTarget");
+    assert_eq!(verified_bluetooth_target_rename_handoff_address(), None);
+    set_configured_bluetooth_target_name("RenameTarget");
+    {
+        let mut slot = OWNED_BLUETOOTH_RENAME_HANDOFF.get().unwrap().lock().unwrap();
+        slot.as_mut().unwrap().learned_at = Instant::now() - BLE_RENAME_ADDRESS_GRACE_WINDOW;
+    }
+    assert_eq!(verified_bluetooth_target_rename_handoff_address(), None);
+    remember_owned_bluetooth_rename_handoff(Some(0), "RenameTarget");
+    assert_eq!(verified_bluetooth_target_rename_handoff_address(), None);
 
     match previous_name {
         Some(name) => set_configured_bluetooth_target_name(&name),
@@ -2820,6 +2824,7 @@ fn verified_rename_handoff_address_requires_matching_name_and_rename_grace() {
     {
         *slot = previous_address;
     }
+    *OWNED_BLUETOOTH_RENAME_HANDOFF.get().unwrap().lock().unwrap() = previous_handoff;
 }
 
 #[test]
@@ -3292,4 +3297,32 @@ fn active_capture_recovery_invalid_without_terminal_keeps_original_expiry() {
         active_capture_recovery_fact(false, None),
         ActiveCaptureRecoveryFact::ParseRejected
     );
+}
+
+
+#[test]
+fn shared_transport_pnp_nodes_do_not_grant_listener_pairing_or_cleanup_identity() {
+    // Captured Windows shape: another product exposes the same platform OTA
+    // service, but has no Listener audio service. Friendly names are not proof.
+    let address = 0xC892FFDD3BCA;
+    for uuid in [OTA_SERVICE_UUID_TEXT, crate::embedded_ble::DIAGNOSTIC_SERVICE_UUID_TEXT] {
+        let instance_id = format!(r"BTHLEDEVICE\{{{uuid}}}_{address:012X}\9&15D4BEAA&32&0055");
+        let signature = pnp_instance_has_listener_service_signature(&instance_id);
+        assert!(!signature, "shared transport cannot identify the product: {uuid}");
+        let entry = ListenerPnpEntry {
+            name: "Companion".into(), instance_id, address: Some(address),
+            is_ble_device_root: false, is_listener_hid_keyboard: false,
+            has_listener_service_signature: signature,
+        };
+        assert!(!listener_pnp_entry_matches_cleanup(&entry, false, false, false));
+        // Cleanup still requires separately established exact-address authority.
+        assert!(listener_pnp_entry_matches_cleanup(&entry, true, false, true));
+        assert!(native_windows_hid_pairing_addresses_from_entries(&[entry]).is_empty());
+    }
+    // The real Listener-specific source remains discoverable even if its
+    // Windows display name is stale or empty after a rename.
+    for uuid in [SERVICE_UUID_TEXT.to_string(), SERVICE_UUID_TEXT.to_ascii_uppercase()] {
+        let id = format!(r"BTHLEDEVICE\{{{uuid}}}_EF0F18FC9E4D\9&30F&0&0001");
+        assert!(pnp_instance_has_listener_service_signature(&id));
+    }
 }

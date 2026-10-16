@@ -1,13 +1,17 @@
-## Download RC1 / 下载当前候选版本
+## Download Listener Type for Windows
 
-| 用途 / Purpose | 直接下载 / Direct download |
+Start with the MSI for normal app use. Hardware flashing and OTA packages are separate downloads.
+
+| What you want to do | Direct download |
 | --- | --- |
-| **USB有线烧写固件 / USB firmware flashing** | **[下载烧写 ZIP / Download USB flashing ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/listener-usb-flash-1.0.6-rc1-9d92421e915196b4.zip)** |
-| Type Windows软件 / Windows app | [下载 MSI / Download MSI — build20](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi) |
-| Type内蓝牙OTA升级 / Bluetooth OTA | [下载 OTA ZIP / Download OTA ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/listener-ota-1.0.6-rc1-20261015-135227.zip) |
+| **Install the Windows app** | **[Download MSI · RC1 / build22](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Flash firmware over USB** | **[Download USB flashing ZIP · RC1](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/listener-usb-flash-1.0.6-rc1-9d92421e915196b4.zip)** |
+| Update firmware over Bluetooth in Type | [Download OTA ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/listener-ota-1.0.6-rc1-20261015-135227.zip) |
 
-Firmware **9d92421e915196b4**, ESP32-S3 N16R8. RC1 is a prerelease / RC1为候选版本。
-[固件发布页 / Firmware release](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1) · [软件发布页 / Type release](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1)
+Firmware target: **ESP32-S3 N16R8**, build `9d92421e915196b4`. RC1 is a prerelease; see the release notes for known issues.
+[App release and changes](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware release and flashing instructions](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
+
+---
 
 <picture>
   <source media="(prefers-color-scheme: dark) and (max-width: 600px)" srcset="docs/assets/listener/type-hero-en-mobile-dark.png">

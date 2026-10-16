@@ -4,6 +4,25 @@ Listener Type is a Tauri desktop app with a Rust backend and React frontend. The
 
 ## Runtime Shape
 
+An owned BLE-name change can retain the address of the firmware-confirmed
+rename handoff and use Windows' default-first HID pairing ceremony, as in the
+measured earlier path. A new advertisement carrying the applied name must still
+match that address; a cached address cannot stand in for the observation.
+Unknown handoffs retain explicit fresh-identity recovery. Only exact owned
+predecessor cleanup is allowed; unrelated ghost cleanup remains post-ready.
+Shared platform OTA/diagnostic services cannot establish Listener identity,
+pairing success or cleanup authority; only the product audio service may
+discover an otherwise unknown address.
+
+The settings rename operation retains its own bounded handoff. Normal SET and
+APPLY GATT route discovery must not overwrite its name, lifetime or identity.
+An owned paired handoff can enter the measured silent recovery path without a
+USB-only settings readback; missing ownership still requires firmware evidence.
+Neither path can clean Windows pairing before observing the applied-name
+advertisement. If neither cleanup nor pairing actually started, the operation
+releases its listener hold and restores reception instead of waiting for an
+unstarted PairAsync.
+
 Primary keyword owner verification freezes the actual rotated decoder input at
 its hit. The range, original PCM digest, candidate identity and capture facts
 travel together through parallel identity prefetch, later actor appends and

@@ -243,11 +243,10 @@ const ATT_WRITE_HEADER_BYTES: usize = 3;
 const ATT_DEFAULT_PAYLOAD_BYTES: usize = 20;
 const SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3091a";
 const OTA_SERVICE_UUID_TEXT: &str = denzic_ota_core::GATT_SERVICE_UUID;
-const LISTENER_SERVICE_UUID_TEXTS: [&str; 3] = [
-    SERVICE_UUID_TEXT,
-    OTA_SERVICE_UUID_TEXT,
-    crate::embedded_ble::DIAGNOSTIC_SERVICE_UUID_TEXT,
-];
+// OTA and diagnostic transports are shared across Denzic products. Their
+// presence grants no Listener identity, pairing or cache-cleanup authority.
+// Only the Listener audio service can discover an otherwise unknown address.
+const LISTENER_SERVICE_UUID_TEXTS: [&str; 1] = [SERVICE_UUID_TEXT];
 // Catch-up status after each SYNC: short interval so flash lag resolves without
 // counting a full-window recovery.
 const LISTENER_OTA_V1_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(8);
@@ -302,6 +301,10 @@ static OTA_REBOOT_NEW_GENERATION_CONNECTED: AtomicBool = AtomicBool::new(false);
 static OTA_REBOOT_NEW_GENERATION_ATT_READY: AtomicBool = AtomicBool::new(false);
 static RUNTIME_BLUETOOTH_TARGET_NAME: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static RUNTIME_BLUETOOTH_TARGET_ADDRESS: OnceLock<Mutex<Option<RuntimeBluetoothTargetAddress>>> =
+    OnceLock::new();
+// A rename handoff belongs to the settings operation. Ordinary discovery may
+// refresh the runtime route, but cannot replace or create this authority.
+static OWNED_BLUETOOTH_RENAME_HANDOFF: OnceLock<Mutex<Option<RuntimeBluetoothTargetAddress>>> =
     OnceLock::new();
 static RECENT_RECOVERY_ADDRESS_TYPE: OnceLock<Mutex<Option<RecoveryAddressTypeState>>> =
     OnceLock::new();
@@ -3694,6 +3697,30 @@ pub(super) fn remember_current_bluetooth_target_address_for_name(
     timeout: Duration,
     context: &str,
 ) -> Option<u64> {
+    let address = find_current_bluetooth_target_address_for_name(next_target_name, timeout, context);
+    remember_owned_bluetooth_rename_handoff(address, next_target_name);
+    address
+}
+
+fn remember_owned_bluetooth_rename_handoff(address: Option<u64>, next_target_name: &str) {
+    let state = address.filter(|address| *address != 0).and_then(|address| {
+        normalize_bluetooth_target_name(next_target_name).map(|target_name| {
+            RuntimeBluetoothTargetAddress {
+                address, target_name, learned_at: Instant::now(),
+                valid_for: BLE_RENAME_ADDRESS_GRACE_WINDOW,
+            }
+        })
+    });
+    if let Ok(mut slot) = OWNED_BLUETOOTH_RENAME_HANDOFF.get_or_init(|| Mutex::new(None)).lock() {
+        *slot = state;
+    }
+}
+
+fn find_current_bluetooth_target_address_for_name(
+    next_target_name: &str,
+    timeout: Duration,
+    context: &str,
+) -> Option<u64> {
     let next_target_name = normalize_bluetooth_target_name(next_target_name)?;
     if let Some(address) = configured_bluetooth_address_from_env() {
         remember_runtime_bluetooth_target_address_for_name(
@@ -4152,7 +4179,7 @@ fn runtime_bluetooth_target_address() -> Option<u64> {
 pub(super) fn verified_bluetooth_target_rename_handoff_address() -> Option<u64> {
     let target_name = effective_bluetooth_target_name(None);
     let now = Instant::now();
-    let mut slot = RUNTIME_BLUETOOTH_TARGET_ADDRESS
+    let mut slot = OWNED_BLUETOOTH_RENAME_HANDOFF
         .get_or_init(|| Mutex::new(None))
         .lock()
         .ok()?;

@@ -2054,20 +2054,9 @@ fn pair_unpaired_listener_candidate_with_adapter_recovery(
         );
     }
 
-    if retry_failed_pairasync_once {
-        log::info!(
-            "[embedded-ble] fresh Type recovery registering custom ConfirmOnly handler before the first Windows pairing ceremony for {}",
-            candidate.label
-        );
-        match custom_pair_listener_candidate(pairing, &candidate.label, expected_name) {
-            Ok(outcome) => return Ok(outcome),
-            Err(err) => log::warn!(
-                "[embedded-ble] fresh Type recovery first custom PairAsync failed for {}: {err}; retaining bounded generic fallback",
-                candidate.label
-            ),
-        }
-    }
-
+    // Restore the measured default-first Windows HID ceremony. A failed
+    // default still gets the existing custom handler; a silent rename must not
+    // begin with an unnecessary thirty-second custom ceremony.
     let mut status = run_default_pairing_once(pairing, &candidate.label, "standard pairing")?;
     match pairing_status_or_reachable(status, expected_name, "") {
         Ok(outcome) => return Ok(outcome),
@@ -2088,7 +2077,7 @@ fn pair_unpaired_listener_candidate_with_adapter_recovery(
         }
     }
     let mut custom_pairing_already_in_progress = false;
-    if !retry_failed_pairasync_once && pairing_status_should_try_custom_fallback(status) {
+    if pairing_status_should_try_custom_fallback(status) {
         log::warn!(
             "[embedded-ble] Windows standard pairing returned status={status:?} for {}; trying custom PairAsync fallback",
             candidate.label
