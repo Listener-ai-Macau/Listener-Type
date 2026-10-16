@@ -1037,8 +1037,8 @@ fn firmware_confirmed_rename_handoff_retires_exact_predecessor_before_pairing() 
         helper.contains("let exact_predecessor_cleanup_addresses = previous_address")
             && helper.contains("let pre_pair_cleanup_addresses = exact_predecessor_cleanup_addresses.as_slice()")
             && helper.contains("only the now-invalid exact predecessor is retired before PairAsync")
-            && helper.contains("all non-predecessor ghost cleanup remains deferred until TYPE:READY keep-address prune"),
-        "the exact predecessor must be retired after fresh advertising is proven while unrelated ghost cleanup stays post-ready"
+            && helper.contains("all non-predecessor pairings remain preserved; notify-ready grants no cleanup authority"),
+        "the exact predecessor must be retired after fresh advertising is proven while unrelated physical boards remain preserved"
     );
     assert!(!helper.contains(".or(verified_handoff_address)"));
     assert!(!helper.contains("unpair_listener_devices_for_names"));

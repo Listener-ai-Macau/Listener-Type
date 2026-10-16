@@ -80,6 +80,8 @@ For Windows IME edits, select the affected static scripts under `scripts/windows
 
 ## Product delivery
 
+- 2026-10-16已复现跨物理板配对误清理：当前notify-ready、相同产品UUID/名称、其它设备离线，均不证明其它地址是当前板的旧身份。连接成功不得批量删除非当前地址；自动改名/恢复只能清理该事务已验证的精确前驱。精确地址边界必须贯穿BLE DeviceInformation配对枚举、PnP和BTHPORT全部阶段，不能在BLE枚举中用同名OR条件扩大范围；用户主动广域清理是单独的操作语义。不得为减少缓存探测等待重新引入该越权清理。
+
 - Follow the user's current scope and the product behavior in this repository. AIW Goal contracts, archives and blocking acceptance popups are not development prerequisites.
 - Preserve existing uncommitted work. Use focused behavioral regressions while iterating; run release checks once a candidate is ready.
 - 用户2026-10-14要求后台开发保持安装版Type可用：分析、编译及隔离回放不得退出用户的主进程、占用设备或实际输入焦点；确有安装需要才正常退出，完成后立即重启并核对。诊断进程只按本次PID/命令行管理，不得按程序名批量结束Type及唤醒辅助进程。

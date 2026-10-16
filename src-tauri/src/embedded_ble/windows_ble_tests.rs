@@ -3022,11 +3022,8 @@ fn winrt_bluetooth_targets_release_without_synchronous_close_after_handler_detac
         "WinRT Bluetooth target release policy must remain explicit"
     );
     assert!(
-        source.contains("last_ghost_prune_at")
-            && source.contains("last_ghost_prune_keep_address")
-            && source.contains("persisted_ghost_pairing_prune_is_recent_for_keep")
-            && source.contains("persisted cross-process cooldown active"),
-        "automatic ghost pairing cleanup must retain its address-scoped cooldown across Type restarts"
+        !source.contains("pub fn prune_listener_ghost_pairings_keeping"),
+        "notify readiness must not expose cross-board destructive cleanup"
     );
     for forbidden in ["session.Close()", "service.Close()", "device.Close()"] {
         assert!(
@@ -3325,4 +3322,34 @@ fn shared_transport_pnp_nodes_do_not_grant_listener_pairing_or_cleanup_identity(
         let id = format!(r"BTHLEDEVICE\{{{uuid}}}_EF0F18FC9E4D\9&30F&0&0001");
         assert!(pnp_instance_has_listener_service_signature(&id));
     }
+}
+
+#[test]
+fn known_address_cleanup_preserves_other_listener_boards_even_with_matching_names() {
+    // Actual addresses from the failed automatic cleanup and subsequent switch.
+    let old = 0xDA72_222C_D30A;
+    let other = 0xEBF9_DA39_D2DA;
+    let current = 0xD74B_13D9_81C3;
+    let names = vec!["listener".to_string(), "listenerB".to_string()];
+    let entries = [
+        (format!(r"BTHLE\Dev_{old:012x}\root"), "old-cached-name", old),
+        (format!(r"BTHLE\Dev_{other:012x}\root"), "listener", other),
+        (format!(r"BTHLE\Dev_{current:012x}\root"), "listener", current),
+        ("missing-address".to_string(), "listenerB", 0),
+    ];
+    let selected: Vec<_> = entries.iter().filter(|(id,name,_)|
+        listener_ble_cleanup_candidate_matches(id,name,&[old],&names,true)
+    ).map(|(_,_,address)| *address).collect();
+    assert_eq!(selected, vec![old]);
+    assert!(entries.iter().all(|(id,name,_)|
+        !listener_ble_cleanup_candidate_matches(id,name,&[],&names,true)));
+    assert!(!listener_ble_cleanup_candidate_matches(
+        r"BTHLE\Dev_000000000000\root", "listener", &[0], &names, true));
+    // Explicit user-wide unpair keeps its distinct name-discovery permission.
+    assert!(listener_ble_cleanup_candidate_matches(
+        &entries[1].0, entries[1].1, &[old], &names, false));
+    let source = include_str!("embedded_ble.rs");
+    let start=source.find("fn unpair_listener_devices_for_known_addresses_inner(").unwrap();
+    let body=&source[start..source[start..].find("fn clear_listener_bthport_cache_for_known_addresses_inner").unwrap()+start];
+    assert!(body.contains("&target_names,\n        true,\n    )"));
 }

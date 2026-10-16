@@ -2493,6 +2493,7 @@ fn listener_unpair_candidates(
         &mut seen_ids,
         target_addresses,
         target_names,
+        false,
     ) {
         Ok(()) => {}
         Err(err) => errors.push(err),
@@ -2728,11 +2729,27 @@ fn push_address_unpair_candidates(
     Ok(())
 }
 
+// Product/name discovery is not authority to retire another board. The exact
+// recovery path must apply its address boundary at BLE pairing enumeration too,
+// not only at the later PnP/BTHPORT stages.
+fn listener_ble_cleanup_candidate_matches(
+    id: &str,
+    name: &str,
+    target_addresses: &[u64],
+    target_names: &[String],
+    exact_address_only: bool,
+) -> bool {
+    let address_matches = parse_bluetooth_address_from_device_id(id)
+        .is_some_and(|address| address != 0 && target_addresses.contains(&address));
+    address_matches || (!exact_address_only && bluetooth_name_matches_any(name, target_names))
+}
+
 fn push_ble_device_unpair_candidates(
     candidates: &mut Vec<ListenerUnpairCandidate>,
     seen_ids: &mut Vec<String>,
     target_addresses: &[u64],
     target_names: &[String],
+    exact_address_only: bool,
 ) -> Result<(), String> {
     let selector = BluetoothLEDevice::GetDeviceSelector()
         .map_err(|err| format!("BLE device selector failed: {err}"))?;
@@ -2754,9 +2771,9 @@ fn push_ble_device_unpair_candidates(
             .Id()
             .map(|value| value.to_string_lossy())
             .unwrap_or_default();
-        let address_matches = parse_bluetooth_address_from_device_id(&id)
-            .is_some_and(|address| target_addresses.contains(&address));
-        if address_matches || bluetooth_name_matches_any(&name, target_names) {
+        if listener_ble_cleanup_candidate_matches(
+            &id, &name, target_addresses, target_names, exact_address_only,
+        ) {
             push_unpair_candidate(candidates, seen_ids, info, "BLE device");
         }
     }

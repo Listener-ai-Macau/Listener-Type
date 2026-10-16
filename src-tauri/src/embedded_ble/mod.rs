@@ -939,13 +939,6 @@ pub fn unpair_listener_devices_for_names(extra_names: &[String]) -> BleDeviceUnp
     windows_ble::unpair_listener_devices_for_names(extra_names)
 }
 
-#[cfg(target_os = "windows")]
-pub fn prune_listener_ghost_pairings_keeping(
-    extra_names: &[String],
-    keep_addresses: &[u64],
-) -> BleDeviceUnpairResult {
-    windows_ble::prune_listener_ghost_pairings_keeping(extra_names, keep_addresses)
-}
 
 #[cfg(target_os = "windows")]
 pub fn current_notify_keep_address() -> Option<u64> {
@@ -1566,13 +1559,6 @@ pub fn unpair_listener_devices_for_names(_extra_names: &[String]) -> BleDeviceUn
     unpair_listener_devices()
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn prune_listener_ghost_pairings_keeping(
-    _extra_names: &[String],
-    _keep_addresses: &[u64],
-) -> BleDeviceUnpairResult {
-    unpair_listener_devices()
-}
 
 #[cfg(not(target_os = "windows"))]
 pub fn unpair_listener_devices_for_known_addresses(

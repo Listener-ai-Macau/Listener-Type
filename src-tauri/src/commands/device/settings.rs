@@ -911,7 +911,7 @@ pub fn apply_device_ble_name_windows_refresh_blocking(
             "[device-settings] BLE name pre-pair exhaustive ghost prune deferred; exact_predecessor_cleanup_address(es)={exact_predecessor_cleanup_addresses:?} protected_fresh_address(es)={observed_recovery_addresses:?}; only the now-invalid exact predecessor is retired before PairAsync"
         );
         log::info!(
-            "[device-settings] BLE name atomic Windows handoff starting after the recovery-advertisement scan cleanup_name(s)={cleanup_target_names:?} exact_predecessor_cleanup_address(es)={exact_predecessor_cleanup_addresses:?} fresh_address(es)={observed_recovery_addresses:?}; all non-predecessor ghost cleanup remains deferred until TYPE:READY keep-address prune"
+            "[device-settings] BLE name atomic Windows handoff starting after the recovery-advertisement scan cleanup_name(s)={cleanup_target_names:?} exact_predecessor_cleanup_address(es)={exact_predecessor_cleanup_addresses:?} fresh_address(es)={observed_recovery_addresses:?}; all non-predecessor pairings remain preserved; notify-ready grants no cleanup authority"
         );
         let (atomic_cleanup_result, pairing_result) =
             crate::embedded_ble::recover_listener_pairing_after_type_recovery_with_cleanup_for_addresses(

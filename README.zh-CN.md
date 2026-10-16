@@ -4,7 +4,7 @@
 
 | 我想做什么 | 点击下载 |
 | --- | --- |
-| **Windows 电脑安装软件** | **[下载 MSI · RC1 / build22](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 电脑安装软件** | **[下载 MSI · RC1 / build23](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **USB 有线烧写固件** | **[下载 USB 烧写 ZIP · RC1](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/listener-usb-flash-1.0.6-rc1-9d92421e915196b4.zip)** |
 | 在 Type 内通过蓝牙升级固件 | [下载 OTA 升级 ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/listener-ota-1.0.6-rc1-20261015-135227.zip) |
 

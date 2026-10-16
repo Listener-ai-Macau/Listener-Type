@@ -3788,9 +3788,10 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
         flush_pending_device_key_ble_action(inner, "notify_ready");
         log::info!("[embedded-ble] background listener notify ready");
         schedule_embedded_ble_runtime_identity_probe(inner, generation);
-        // After a live notify identity is proven, prune same-name Windows ghosts
-        // so the next OTA/reboot reconnect does not time out dead HID roots first.
-        maybe_prune_listener_ghost_pairings_after_notify_ready(inner, generation);
+        // Notify readiness proves this link only. Other Listener addresses may
+        // belong to real boards, even when their names match or they are offline.
+        // Retire only exact identities owned by an explicit recovery transaction.
+        log::info!("[embedded-ble] notify ready: preserving other Listener pairings; no transaction-owned retirement authority");
     }
 }
 
@@ -3874,79 +3875,6 @@ fn schedule_embedded_ble_runtime_identity_probe(inner: &Arc<Inner>, generation: 
 
 #[cfg(not(target_os = "windows"))]
 fn schedule_embedded_ble_runtime_identity_probe(_inner: &Arc<Inner>, _generation: u64) {}
-
-fn maybe_prune_listener_ghost_pairings_after_notify_ready(
-    inner: &Arc<Inner>,
-    generation: u64,
-) {
-    let keep = crate::embedded_ble::current_notify_keep_address();
-    let Some(keep) = keep else {
-        return;
-    };
-    let expected_name = inner.prefs.get().device_ble_name;
-    // Immediate PnP/BTHPORT ghost prune after TYPE:READY has bounced the live GATT
-    // link (logs: notify ready → prune removes old "listener" root → Disconnected →
-    // capsule "接不上 Type" while firmware LED still shows type_ready). Always settle
-    // first, and cooldown so reconnect flaps do not prune every generation.
-    const GHOST_PRUNE_SETTLE: Duration = Duration::from_secs(8);
-    const GHOST_PRUNE_COOLDOWN: Duration = Duration::from_secs(180);
-    static LAST_GHOST_PRUNE: std::sync::Mutex<Option<(u64, Instant)>> =
-        std::sync::Mutex::new(None);
-    let inner = Arc::clone(inner);
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Ok(last) = LAST_GHOST_PRUNE.lock() {
-            if let Some((last_keep, at)) = *last {
-                if last_keep == keep && at.elapsed() < GHOST_PRUNE_COOLDOWN {
-                    log::info!(
-                        "[embedded-ble] skipping ghost pairing prune keep={keep:012X}: cooldown {} ms remaining",
-                        GHOST_PRUNE_COOLDOWN
-                            .saturating_sub(at.elapsed())
-                            .as_millis()
-                    );
-                    return;
-                }
-            }
-        }
-        log::info!(
-            "[embedded-ble] deferring ghost pairing prune {} ms after TYPE:READY keep={keep:012X}",
-            GHOST_PRUNE_SETTLE.as_millis()
-        );
-        std::thread::sleep(GHOST_PRUNE_SETTLE);
-        if !embedded_ble_listener_generation_is_current(&inner, generation) {
-            log::info!(
-                "[embedded-ble] skipping stale ghost pairing prune generation={generation} keep={keep:012X}: background listener generation was superseded"
-            );
-            return;
-        }
-        let current_keep = crate::embedded_ble::current_notify_keep_address();
-        let current_name = inner.prefs.get().device_ble_name;
-        if current_keep != Some(keep) || !current_name.eq_ignore_ascii_case(&expected_name) {
-            log::info!(
-                "[embedded-ble] skipping stale ghost pairing prune generation={generation} keep={keep:012X}: current_keep={current_keep:?} scheduled_name={expected_name:?} current_name={current_name:?}"
-            );
-            return;
-        }
-        // OTA exclusive transfer can start during the settle window. Pruning
-        // PnP/BTHPORT mid-transfer races GATT BEGIN/WWR (logs: dual-lane start →
-        // ghost-prune → ota_gatt_transfer_failed ~10s). Skip while OTA owns BLE.
-        if inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
-            log::info!(
-                "[embedded-ble] skipping ghost pairing prune keep={keep:012X}: firmware OTA exclusive transfer active"
-            );
-            return;
-        }
-        let mut names = vec![expected_name];
-        for fallback in ["listener", "Blistener"] {
-            if !names.iter().any(|n| n.eq_ignore_ascii_case(fallback)) {
-                names.push(fallback.to_string());
-            }
-        }
-        let _ = crate::embedded_ble::prune_listener_ghost_pairings_keeping(&names, &[keep]);
-        if let Ok(mut last) = LAST_GHOST_PRUNE.lock() {
-            *last = Some((keep, Instant::now()));
-        }
-    });
-}
 
 fn install_embedded_ble_listener_cancel(inner: &Arc<Inner>, generation: u64) -> Arc<AtomicBool> {
     let cancel = Arc::new(AtomicBool::new(false));

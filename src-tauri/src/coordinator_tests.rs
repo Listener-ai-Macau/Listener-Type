@@ -4090,32 +4090,14 @@ fn embedded_ble_recent_type_pairing_skips_redundant_startup_pairing_enumeration(
 }
 
 #[test]
-fn embedded_ble_deferred_ghost_prune_cannot_delete_a_superseding_rename_identity() {
+fn embedded_ble_notify_readiness_does_not_authorize_other_board_cleanup() {
     let source = include_str!("coordinator.rs");
-    let start = source
-        .find("fn maybe_prune_listener_ghost_pairings_after_notify_ready")
-        .expect("post-ready ghost prune helper should exist");
-    let end = source[start..]
-        .find("fn install_embedded_ble_listener_cancel")
-        .map(|offset| start + offset)
-        .expect("post-ready ghost prune helper boundary should exist");
-    let body = &source[start..end];
-    let settle = body
-        .find("std::thread::sleep(GHOST_PRUNE_SETTLE)")
-        .expect("ghost prune must retain its live-link settle window");
-    let generation_guard = body
-        .find("embedded_ble_listener_generation_is_current(&inner, generation)")
-        .expect("a delayed prune must prove its notify generation still owns cleanup");
-    let identity_guard = body
-        .find("current_keep != Some(keep)")
-        .expect("a delayed prune must revalidate its keep address and target name");
-    let prune = body
-        .find("prune_listener_ghost_pairings_keeping")
-        .expect("current-generation cleanup should still prune historical identities");
-    assert!(
-        settle < generation_guard && generation_guard < identity_guard && identity_guard < prune,
-        "generation and identity ownership must be revalidated after settle and before destructive Windows cleanup"
-    );
+    assert!(!source.contains("prune_listener_ghost_pairings_keeping"));
+    assert!(source.contains("preserving other Listener pairings"));
+    assert!(source.contains("schedule_embedded_ble_runtime_identity_probe(inner, generation)"));
+    let settings = std::include_str!("commands/device/settings.rs");
+    assert!(settings.contains("let exact_predecessor_cleanup_addresses = previous_address"));
+    assert!(settings.contains("observed_recovery_addresses.as_slice()"));
 }
 
 #[test]

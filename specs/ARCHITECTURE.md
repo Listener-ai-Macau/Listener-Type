@@ -9,7 +9,11 @@ rename handoff and use Windows' default-first HID pairing ceremony, as in the
 measured earlier path. A new advertisement carrying the applied name must still
 match that address; a cached address cannot stand in for the observation.
 Unknown handoffs retain explicit fresh-identity recovery. Only exact owned
-predecessor cleanup is allowed; unrelated ghost cleanup remains post-ready.
+predecessor cleanup is allowed. Notify readiness proves only its current link;
+it cannot identify other physical boards as ghosts. Other addresses are preserved,
+including disconnected or same-name Listener devices. Exact recovery cleanup
+applies its address boundary to BLE pairing enumeration as well as PnP/BTHPORT;
+name-only discovery remains a separate explicit user-wide unpair operation.
 Shared platform OTA/diagnostic services cannot establish Listener identity,
 pairing success or cleanup authority; only the product audio service may
 discover an otherwise unknown address.
