@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "updated_at": "2026-10-17",
-  "purpose": "Machine-readable index from critical Listener regression guards to the exact repository commit that introduced or hardened the guard. Use this first when a protected behavior regresses: git show the linked commit, inspect the guard, then rerun the listed validation commands.",
+  "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
       "path": "Listener-Type"
@@ -578,6 +578,42 @@
       "guards": [
         "python tools/test_recovery_execution_result.py"
       ]
+    },
+    {
+      "id": "type_native_writable_document_paste_observation",
+      "repo": "type",
+      "commit": "4cdcd5044e3e0422093431ed763e303433e54f86",
+      "subject": "Writable native Document ordinary-paste receipts without granting range mutation",
+      "state": "saved_native_capability_checks_passed_installed_field_pending",
+      "protects": [
+        "Explicit native VT_BOOL read-only=false plus Document/TextPattern/foreground/focus/enabled is sufficient for ordinary-paste observation without ValuePattern.",
+        "Mixed, NotSupported, numeric/string coercion and conflicting read-only evidence stay rejected; no new whole-range editing permission."
+      ],
+      "guards": [
+        "cargo test --manifest-path ./src-tauri/Cargo.toml saved_writable_document_supports_paste_receipts_without_value_pattern --lib",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml native_readonly_attribute_requires_a_boolean_not_coercible_or_reserved_values --lib"
+      ],
+      "evidence": "listener-repair-handoff/work/clipboard-history-repair-20261017/document-receipt37",
+      "limits": "Natural build37 histories match archived intended final text; no complete same-recording clipboard recovery field certificate yet."
+    },
+    {
+      "id": "type_same_response_native_clause_finality",
+      "repo": "type",
+      "commit": "4cdcd5044e3e0422093431ed763e303433e54f86",
+      "subject": "Native finalized clause rendering does not depend on an editor consumed-spelling seam",
+      "state": "saved_native_decoder_failure_passed_installed_field_pending",
+      "protects": [
+        "Current definite=true two_pass clauses with valid nonempty timed occurrences can certify complete already-admitted rendering, including short/ITN-corrected clauses.",
+        "Per-word source and identity certificates remain strict; provisional/missing/conflicting/overlapping occurrences remain unresolved; delivery and STOP are separate."
+      ],
+      "guards": [
+        "cargo test --manifest-path ./src-tauri/Cargo.toml short_native_confirmed_rendering_is_not_an_editor_seam_or_word_permission --lib",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml native_rendering_certificate_requires_complete_current_response_not_another_occurrence --lib",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml admitted_corrected_last_clause_streams_before_protocol_final --lib",
+        "Set LISTENER_PENDING_BODY_REPLAY to the archived type38-candidate1 case directory; run recorded_pending_body_keeps_native_finality_separate_from_settling with --ignored"
+      ],
+      "evidence": "listener-repair-handoff/work/daily-latency-20261017-1152/pending-close-20261017-1557/type38-candidate1/actual-decoder-summary.json",
+      "limits": "Retained 73-frame native tail only. Last recognition_pending true -> false, body delivery still pending. No actual editor consumption or physical STOP replay."
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
@@ -682,14 +718,16 @@
       "accepted_scope": "Historical recording latency/preview guards are anchors, not proof of all later clipboard and endpoint combinations.",
       "guard_entries": [
         "type_recording_latency_and_ble_audio_control",
-        "type_recording_preview_text_stability"
+        "type_recording_preview_text_stability",
+        "type_native_writable_document_paste_observation"
       ],
       "paths": {
         "type": [
           "src-tauri/src/coordinator/dictation.rs",
           "src-tauri/src/coordinator/dictation_endpoint_clock.rs",
           "src-tauri/src/coordinator/dictation_embedded_stream_completion.rs",
-          "src-tauri/src/insertion"
+          "src-tauri/src/insertion",
+          "src-tauri/src/selection/windows_uia.rs"
         ],
         "firmware": [
           "components/voice_recording_control"
@@ -697,7 +735,14 @@
       },
       "known_failures": [
         "Restore clipboard from this same session History.final_text; do not substitute submitted prefixes or a later latest-history row. Preserve new user clipboard ownership."
-      ]
+      ],
+      "latest_installed_candidate": {
+        "build": 38,
+        "source": "4cdcd5044e3e0422093431ed763e303433e54f86",
+        "exe_sha256": "F6B0DCAF8CCE58B28DC693408B79ACF52676A47F40119F41F893187EA335444B",
+        "installed_at": "2026-10-17T16:37:20.3284227+08:00",
+        "scope": "Natural build37 histories match archived intended final text; no complete same-recording clipboard recovery field certificate yet."
+      }
     },
     {
       "id": "false-wake",
@@ -718,6 +763,30 @@
       "known_failures": [
         "Use the actual saved raw trigger and activation-origin receipt. Do not weaken phrase/identity criteria to improve latency."
       ]
+    },
+    {
+      "id": "asr-native-recognition-finality",
+      "baseline_state": "saved_native_decoder_failure_passed_installed_field_pending",
+      "accepted_scope": "Saved exact native tail resolves recognition-only wait; no human end-to-end endpoint acceptance.",
+      "guard_entries": [
+        "type_same_response_native_clause_finality"
+      ],
+      "paths": {
+        "type": [
+          "src-tauri/src/asr/volcengine_transcript.rs",
+          "src-tauri/src/asr/volcengine.rs"
+        ]
+      },
+      "known_failures": [
+        "Original 792d2dd path borrowed editor revised_terminal_suffix minimum-eight-character anchor for a six-character native confirmed clause; full597-character rendering capped at134.",
+        "The separate intermittent ENSURE handoff/early-end defect is not fixed by this recognition-finality change."
+      ],
+      "latest_installed_candidate": {
+        "build": 38,
+        "source": "4cdcd5044e3e0422093431ed763e303433e54f86",
+        "exe_sha256": "F6B0DCAF8CCE58B28DC693408B79ACF52676A47F40119F41F893187EA335444B",
+        "installed_at": "2026-10-17T16:37:20.3284227+08:00"
+      }
     }
   ]
 }
