@@ -614,6 +614,33 @@
       ],
       "evidence": "listener-repair-handoff/work/daily-latency-20261017-1152/pending-close-20261017-1557/type38-candidate1/actual-decoder-summary.json",
       "limits": "Retained 73-frame native tail only. Last recognition_pending true -> false, body delivery still pending. No actual editor consumption or physical STOP replay."
+    },
+    {
+      "id": "firmware_same_predecessor_ensure_source_lease",
+      "repo": "firmware",
+      "commit": "376e9749e81361bb7ebb69429ce5f1d354b71554",
+      "subject": "Pin original wake source while the same predecessor BLE tail drains",
+      "state": "production_replay_passed_field_pending",
+      "humanAccepted": false,
+      "baseCommit": "3cb8221b5aa8bb7b2090d93748a14584a802ed63",
+      "buildId": "57431b05a4e7d6e9",
+      "installedAt": "2026-10-17T09:17:59.906253+00:00",
+      "protects": [
+        "Same predecessor physical EOF/TRANSFERRING and Idle-before-transport-ready retain the already qualified original source under the same request.",
+        "The ordinary unowned checkpoint age and fixed ENSURE deadline do not increase.",
+        "Cancellation, expiry and unavailable original source revoke only the matching pending continuation; explicit/manual/enrollment owners stay protected."
+      ],
+      "guards": [
+        "python tools/test_wake_capture_ownership.py",
+        "python tools/test_audio_wake_continuity.py"
+      ],
+      "evidence": {
+        "directory": "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\early-end-20261017-latest\\fw21-source-lease-candidate1",
+        "oldProductionIntegration": "before-production-api-integration.log",
+        "candidateProductionIntegration": "after-production-api-integration.log",
+        "actualPcm": "actual-pcm-transfer-lease.log"
+      },
+      "limits": "Actual capture selector/reserve/release run with the production controller; numbered source geometry and BLE readiness are simulated. Natural 15:05/16:55 firmware execution cause was not retained; full field attribution/stability remain unproven."
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
@@ -647,8 +674,10 @@
     {
       "id": "wake-continuation",
       "baseline_state": "exact_failure_not_human_accepted",
-      "accepted_scope": "No known-good human-accepted commit is registered for late ENSURE after the next hidden physical segment already started. Do not promote a source test or candidate build to acceptance.",
-      "guard_entries": [],
+      "accepted_scope": "No human-accepted good commit is registered for these unconfirmed ENSURE/source-EOF failure branches. Keep actual source replay evidence separate from field acceptance; normal endpoint/latency guards do not prove this boundary.",
+      "guard_entries": [
+        "firmware_same_predecessor_ensure_source_lease"
+      ],
       "paths": {
         "type": [
           "src-tauri/src/coordinator/dictation_embedded_candidate_begin.rs",
@@ -669,7 +698,8 @@
         "de85367e082f16c34ef79d02535f201f1e975b0f: known failed adoption plus real EOF now closes out instead of hanging. Reverting closeout does not restore missing capture.",
         "Run python tools/test_audio_wake_continuity.py and python tools/test_wake_capture_ownership.py in Listener-Firmware for the source/capture-owner boundaries; firmware15 remains a candidate until installed evidence.",
         "2026-10-17 firmware16 source snapshot54741272bccfd12ae76bffd3c21510f7aae5fcfa: fixes FIFO ownership receipt backlog and queued-STOP/DRAINING revocation; installed identity b8f21838a6d41bbc. Focused production checks passed; natural ENSURE timing and overall field acceptance remain pending.",
-        "2026-10-17 15:05 Type34/FW19: ENSURE writes25/22ms, no matching marker, original VoiceActivationMaxDuration then ended_source_without_continuation. Same binaries natural15:09 ENSURE confirmed/long recording completed. Original device rejection/omission not retained; not proven root-fixed. FW20 candidate adds persistent actor result only, no endpoint policy workaround."
+        "2026-10-17 15:05 Type34/FW19: ENSURE writes25/22ms, no matching marker, original VoiceActivationMaxDuration then ended_source_without_continuation. Same binaries natural15:09 ENSURE confirmed/long recording completed. Original device rejection/omission not retained; not proven root-fixed. FW20 candidate adds persistent actor result only, no endpoint policy workaround.",
+        "2026-10-17 FW20c2 source3cb8221 same-predecessor tail-drain/Idle path did not reserve original PCM. Original controller plus actual capture selector fails at a 2.2s readiness wait within its existing 3s deadline; FW21 source376e9749e81361bb7ebb69429ce5f1d354b71554 pins the same source/request and passes. Installed 57431b05a4e7d6e9, field pending; do not label all early termination fixed."
       ]
     },
     {
