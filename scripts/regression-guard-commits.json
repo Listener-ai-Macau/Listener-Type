@@ -673,6 +673,36 @@
       ],
       "installedAt": "2026-10-17T17:45:00.3474676+08:00",
       "exeSha256": "09303329962a9223f8d00e333d324e1a60a8ad450246110c34d83c9ee77b4fb4"
+    },
+    {
+      "id": "firmware_audio_real_block_media_credit",
+      "repo": "firmware",
+      "commit": "368d320ef9ea0ed634de2eda5d2c37d502326ab0",
+      "subject": "Reuse actual same-media transport/job blocking in the bounded pacing allowance",
+      "state": "production_replay_passed_installed_partial_timing_observed",
+      "humanAccepted": false,
+      "baseCommit": "376e9749e81361bb7ebb69429ce5f1d354b71554",
+      "buildId": "5b5d72adef4bd602",
+      "installedAt": "2026-10-17T10:13:39.406635+00:00",
+      "protects": [
+        "An admission/retry or post-job real Blocked interval must not be charged again for the same ordinary media quantum.",
+        "Credit stays bounded to the existing single early tick; no banking of a long pause, cross-worker/source/link grant or borrowing from exempt preroll.",
+        "Keep controller/msys admission, actual IDLE0 opportunities, original PCM/sequence, source leases and endpoint/keyword/identity policy."
+      ],
+      "guards": [
+        "python tools/test_audio_pacing.py"
+      ],
+      "evidence": [
+        "listener-repair-handoff/work/audio-wait-accounting-20261017/before-accounting.log",
+        "listener-repair-handoff/work/audio-wait-accounting-20261017/after-accounting-with-timing.log",
+        "listener-repair-handoff/work/audio-wait-accounting-20261017/after22-end-to-end-receipt.json",
+        "listener-repair-handoff/work/audio-wait-accounting-20261017/after22-wait-summary.json"
+      ],
+      "limits": [
+        "Seven natural physical audio sessions match device counts/PCM at actual application reception, including one cancel; activation intent and semantic text/endpoint correctness are not human-confirmed.",
+        "First2s historical audio still arrives in743..2057ms; new BLE connection/content differs from pre22, so no controlled causal end-to-end speedup claimed.",
+        "Raw OTA160KB/s and full interference/early-end stability remain incomplete."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
@@ -683,7 +713,8 @@
       "accepted_scope": "The existing accepted wake-tail/recording guard scopes; not a claim that every later capture-continuation path passed.",
       "guard_entries": [
         "type_wake_tail_and_cross_restart_diagnostic_retention",
-        "type_recording_latency_and_ble_audio_control"
+        "type_recording_latency_and_ble_audio_control",
+        "firmware_audio_real_block_media_credit"
       ],
       "paths": {
         "type": [
@@ -700,7 +731,8 @@
       },
       "known_failures": [
         "2026-10-16/17: delayed ownership confirmation and closed physical source; build20 fixes EOF closeout, not every device adoption failure.",
-        "2026-10-17 firmware16 source snapshot54741272bccfd12ae76bffd3c21510f7aae5fcfa: fixes FIFO ownership receipt backlog and queued-STOP/DRAINING revocation; installed identity b8f21838a6d41bbc. Focused production checks passed; natural ENSURE timing and overall field acceptance remain pending."
+        "2026-10-17 firmware16 source snapshot54741272bccfd12ae76bffd3c21510f7aae5fcfa: fixes FIFO ownership receipt backlog and queued-STOP/DRAINING revocation; installed identity b8f21838a6d41bbc. Focused production checks passed; natural ENSURE timing and overall field acceptance remain pending.",
+        "09c3b67 credits early small-packet IDLE0 waits but omits real transport admission/retry and post-job Blocked waits; FW22 reuses the existing bounded credit. This does not certify all cold/KWS/ENSURE latency."
       ]
     },
     {
