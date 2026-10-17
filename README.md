@@ -1,15 +1,13 @@
-## Download Listener Type for Windows
+## Download Listener · RC1
 
-Start with the MSI for normal app use. Hardware flashing and OTA packages are separate downloads.
-
-| What you want to do | Direct download |
+| Purpose | Direct download |
 | --- | --- |
-| **Install the Windows app** | **[Download MSI · RC1 / build23](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
-| **Flash firmware over USB** | **[Download USB flashing ZIP · RC1](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/listener-usb-flash-1.0.6-rc1-9d92421e915196b4.zip)** |
-| Update firmware over Bluetooth in Type | [Download OTA ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/listener-ota-1.0.6-rc1-20261015-135227.zip) |
+| **Windows app** | **[Download MSI · Type build36](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
-Firmware target: **ESP32-S3 N16R8**, build `9d92421e915196b4`. RC1 is a prerelease; see the release notes for known issues.
-[App release and changes](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware release and flashing instructions](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
+Firmware: **ESP32-S3 N16R8**, build `c187a2cf42ab1d76`. Select the same ZIP for USB flashing or Bluetooth OTA in Type.
+RC1 remains a prerelease; intermittent early close and strong-interference limits are documented in the release notes.
+[App release notes and checksum](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware notes and flashing instructions](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 ---
 

@@ -264,6 +264,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/embedded_ble/windows_ble/mod.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/windows_ble/notify_open.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/windows_ble/ota_open.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/windows_ble/ota_wire.rs` | Negotiated bounded OTA transport encoding; canonical image integrity | OTA wire codec and capability tests |
 | `src-tauri/src/embedded_ble/windows_ble/ota_transfer.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/windows_ble/pairing.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/windows_ble/pnp_cache.rs` | Core app | Build and targeted tests |

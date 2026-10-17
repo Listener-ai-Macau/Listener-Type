@@ -3524,6 +3524,13 @@ fn should_emit_embedded_ble_recovered_capsule_for_reason(
     ) {
         return false;
     }
+    // An explicit rename deliberately closes this link. Classifying only radio
+    // failures suppressed its completion notice, even after the actual notify
+    // subscription and TYPE:READY succeeded. record_notify_ready consumes the
+    // reason once; PairAsync/settings write alone must never show success.
+    if normalized == "ble name apply handoff" {
+        return true;
+    }
     let failure = crate::embedded_ble::classify_ble_failure(reason);
     let automatic_recovery = is_embedded_ble_link_loss_error(reason) || failure.automatic_recovery;
     let repeated_automatic_recovery = automatic_recovery && reconnect_attempts > 1;

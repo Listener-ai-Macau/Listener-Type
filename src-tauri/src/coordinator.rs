@@ -2896,7 +2896,12 @@ async fn insert_with_windows_ime_first(
     ime_target: Option<ImeSubmitTarget>,
     delivery_window: Option<usize>,
     continue_paste_route: bool,
+    paste_scope: crate::insertion::SessionPasteScope,
 ) -> WindowsInsertionResult {
+    // All terminal TSF exits retain this recording's append identity. Dropping
+    // it here disables fresh native readback recovery in the clipboard worker.
+    let fallback = || insert_via_non_tsf_fallback_scoped(inner, polished,
+        restore_clipboard, paste_shortcut, Some(paste_scope.clone()));
     let prepared = {
         let mut slot = inner.prepared_windows_ime_session.lock();
         take_matching_prepared_windows_ime_session(&mut slot, session_id)
@@ -2907,7 +2912,7 @@ async fn insert_with_windows_ime_first(
             allow_non_tsf_insertion_fallback,
             InsertStatus::Failed,
         ) {
-            return insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut);
+            return fallback();
         }
         log::warn!("[windows-ime] non-TSF insertion fallback is disabled; failing insert");
         return WindowsInsertionResult {
@@ -2925,7 +2930,7 @@ async fn insert_with_windows_ime_first(
             polished.chars().count()
         );
         inner.windows_ime.restore_session(prepared);
-        return insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut);
+        return fallback();
     }
 
     // Recording-start activate often fails (0x80004005) while many windows
@@ -2965,7 +2970,7 @@ async fn insert_with_windows_ime_first(
                 "[windows-ime] TSF still not activated at insert; using non-TSF insert path immediately"
             );
             inner.windows_ime.restore_session(retried);
-            return insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut);
+            return fallback();
         }
     };
 
@@ -2977,7 +2982,7 @@ async fn insert_with_windows_ime_first(
         );
         inner.windows_ime.restore_session(prepared);
         return if allow_non_tsf_insertion_fallback {
-            insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut)
+            fallback()
         } else {
             WindowsInsertionResult {
             receipt: None,
@@ -3016,7 +3021,7 @@ async fn insert_with_windows_ime_first(
                     submitted_text: None,
                 };
             }
-            return insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut);
+            return fallback();
         }
         Err(error) => {
             log::warn!("[windows-ime] TSF submit failed: {error}");
@@ -3034,7 +3039,7 @@ async fn insert_with_windows_ime_first(
             submitted_text: Some(polished.to_string()),
         }
     } else if should_try_non_tsf_insertion_fallback(allow_non_tsf_insertion_fallback, ime_status) {
-        insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut)
+        fallback()
     } else {
         log::warn!("[windows-ime] TSF did not insert; non-TSF insertion fallback is disabled");
         WindowsInsertionResult {
@@ -3053,16 +3058,6 @@ fn should_try_non_tsf_insertion_fallback(
     ime_status: InsertStatus,
 ) -> bool {
     allow_non_tsf_insertion_fallback && ime_status != InsertStatus::Inserted
-}
-
-#[cfg(target_os = "windows")]
-fn insert_via_non_tsf_fallback(
-    inner: &Arc<Inner>,
-    polished: &str,
-    restore_clipboard: bool,
-    paste_shortcut: PasteShortcut,
-) -> WindowsInsertionResult {
-    insert_via_non_tsf_fallback_scoped(inner, polished, restore_clipboard, paste_shortcut, None)
 }
 
 #[cfg(target_os = "windows")]
@@ -3086,7 +3081,7 @@ fn insert_via_non_tsf_fallback_scoped(inner: &Arc<Inner>, polished: &str,
     // targets.
     let (paste_status, receipt) = if crate::insertion::clipboard_transport_is_reversible() {
         let submission = match scope {
-            Some(scope) => inner.inserter.insert_session_paste(polished, paste_shortcut, scope),
+            Some(scope) => inner.inserter.insert_session_paste_with_restore(polished, restore_clipboard, paste_shortcut, scope),
             None => inner.inserter.insert_via_clipboard_fallback_with_receipt(
                 polished, restore_clipboard, paste_shortcut),
         };

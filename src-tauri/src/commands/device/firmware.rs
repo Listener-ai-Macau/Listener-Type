@@ -2263,8 +2263,8 @@ pub fn trim_command_output(text: &str, max_chars: usize) -> String {
     format!("... output truncated ...\n{tail}")
 }
 
-pub async fn transfer_firmware_ota_ble(
-    app: AppHandle,
+pub async fn transfer_firmware_ota_ble<R: tauri::Runtime>(
+    app: AppHandle<R>,
     coord: CoordinatorState<'_>,
     manifest: Value,
     firmware_bytes: Vec<u8>,
@@ -2304,6 +2304,15 @@ pub async fn transfer_firmware_ota_ble(
             FIRMWARE_OTA_PRETRANSFER_READY_TIMEOUT,
         )
         .await?;
+    crate::embedded_ble::wait_for_listener_ota_control_ready(
+        FIRMWARE_OTA_PRETRANSFER_READY_TIMEOUT.saturating_sub(pretransfer_type_ready_started.elapsed()),
+    ).await?;
+    let phase = coord.dictation_phase_for_cli();
+    if phase != SessionPhase::Idle {
+        return Err(format!(
+            "Recording or dictation became active while waiting for OTA ({phase:?}). Stop it before updating firmware."
+        ));
+    }
     let pretransfer_type_ready_elapsed_ms = elapsed_ms_u64(pretransfer_type_ready_started);
     log::info!(
         "[firmware-ota] pre-transfer Listener notify ready={} elapsed_ms={}",
@@ -2321,13 +2330,18 @@ pub async fn transfer_firmware_ota_ble(
         log::warn!(
             "[firmware-ota] Listener OTA handoff lost the ready capture; waiting once for notify recovery: {first_error}"
         );
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        let retry_started = Instant::now();
         let retry_result = coord
             .wait_for_embedded_ble_listener_ready_before_firmware_ota(
                 FIRMWARE_OTA_HANDOFF_RETRY_TIMEOUT,
             )
-            .await
-            .and_then(|_| crate::embedded_ble::request_listener_ota_v1_active_link(None));
+            .await;
+        let retry_result = match retry_result {
+            Ok(_) => crate::embedded_ble::wait_for_listener_ota_control_ready(
+                FIRMWARE_OTA_HANDOFF_RETRY_TIMEOUT.saturating_sub(retry_started.elapsed()),
+            ).await.and_then(|_| crate::embedded_ble::request_listener_ota_v1_active_link(None)),
+            Err(error) => Err(error),
+        };
         if let Err(retry_error) = retry_result {
             let error = format!(
                 "Listener OTA control handoff failed after one notify-ready retry: first={first_error}; retry={retry_error}"

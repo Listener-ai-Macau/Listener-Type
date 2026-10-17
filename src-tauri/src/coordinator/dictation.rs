@@ -4435,7 +4435,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         // finalizing. Only a fresh editor witness can authorize this suffix;
         // the historical paste receipt still belongs to clipboard closeout.
         execute_delivery_submission(delivery_request.clone(), |_| async {
-        let result = inner.inserter.insert_terminal_suffix(expected, &insert_text, restore_clipboard, paste_shortcut);
+        let result = inner.inserter.insert_terminal_suffix_scoped(current_session_id, expected, &insert_text, restore_clipboard, paste_shortcut);
         let status = match result {
             Ok(status) => status,
             Err(crate::insertion::TerminalAppendDecision::AlreadyPresent) => InsertStatus::PasteSent,
@@ -4480,6 +4480,13 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         let post_key_for_send = Arc::clone(&post_key_delivery_target);
         #[cfg(target_os = "macos")]
         let post_key_app_for_send = Arc::clone(&post_key_delivery_app);
+        #[cfg(target_os = "windows")]
+        let final_paste_scope = crate::insertion::SessionPasteScope {
+            session_id: current_session_id,
+            previous_body: pause_early_delivered.as_ref()
+                .map(|(body, _)| body.clone()).unwrap_or_default(),
+            replace: false,
+        };
         dispatch_delivery_request(
             delivery_request.clone(),
             DeliveryDispatchPolicy {
@@ -4541,6 +4548,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                                 ime_target,
                                 delivery_window,
                                 pause_early_paste,
+                                final_paste_scope,
                             )
                             .await;
                             if result.status == InsertStatus::Inserted {

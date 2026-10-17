@@ -3359,6 +3359,7 @@ dependencies = [
  "env_logger",
  "espflash",
  "ferrous-opencc",
+ "flate2",
  "foundry-local-sdk",
  "futures-util",
  "global-hotkey",

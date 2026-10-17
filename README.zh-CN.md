@@ -1,15 +1,13 @@
-## 下载 Windows 软件
+## 下载 Listener · RC1
 
-普通使用先安装 MSI；硬件烧写和 OTA 的用途分别见下表。
-
-| 我想做什么 | 点击下载 |
+| 用途 | 直接下载 |
 | --- | --- |
-| **Windows 电脑安装软件** | **[下载 MSI · RC1 / build23](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
-| **USB 有线烧写固件** | **[下载 USB 烧写 ZIP · RC1](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/listener-usb-flash-1.0.6-rc1-9d92421e915196b4.zip)** |
-| 在 Type 内通过蓝牙升级固件 | [下载 OTA 升级 ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/listener-ota-1.0.6-rc1-20261015-135227.zip) |
+| **Windows 软件** | **[下载 MSI · Type build36](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
-固件适用 **ESP32-S3 N16R8**，构建 `9d92421e915196b4`。RC1 为候选版本，已知问题见发布说明。
-[软件 Release 与更新说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [固件 Release 与烧写说明](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
+固件适用 **ESP32-S3 N16R8**，构建 `c187a2cf42ab1d76`。USB 和蓝牙更新选择同一个 ZIP，无需再猜下载哪一个。
+RC1 仍为候选版本，偶发提前结束及强干扰限制见发布说明。
+[软件发布说明与校验](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [固件发布说明与烧写方法](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 ---
 

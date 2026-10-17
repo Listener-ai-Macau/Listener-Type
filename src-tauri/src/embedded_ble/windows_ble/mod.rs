@@ -392,6 +392,74 @@ struct AudioControlRequest {
 struct ActiveAudioControlSender {
     capture_id: u64,
     tx: mpsc::Sender<AudioControlRequest>,
+    readiness: Arc<CaptureControlReadiness>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum CaptureControlState {
+    Opening,
+    Ready,
+    Unavailable,
+    Quarantined,
+    Closed,
+}
+
+struct CaptureControlReadiness(std::sync::atomic::AtomicU8);
+
+impl CaptureControlReadiness {
+    fn new() -> Self {
+        Self(std::sync::atomic::AtomicU8::new(CaptureControlState::Opening as u8))
+    }
+
+    fn is_ready(&self) -> bool {
+        self.0.load(Ordering::Acquire) == CaptureControlState::Ready as u8
+    }
+
+    fn transition(&self, next: CaptureControlState) {
+        let mut previous = self.0.load(Ordering::Acquire);
+        loop {
+            if previous == CaptureControlState::Closed as u8
+                || (previous == CaptureControlState::Quarantined as u8
+                    && next != CaptureControlState::Closed)
+                || previous == next as u8
+            {
+                return;
+            }
+            match self.0.compare_exchange_weak(
+                previous, next as u8, Ordering::AcqRel, Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    audio_control_readiness_notification().send_replace(());
+                    return;
+                }
+                Err(current) => previous = current,
+            }
+        }
+    }
+}
+
+fn audio_control_readiness_notification() -> &'static tokio::sync::watch::Sender<()> {
+    static CHANGED: OnceLock<tokio::sync::watch::Sender<()>> = OnceLock::new();
+    CHANGED.get_or_init(|| tokio::sync::watch::channel(()).0)
+}
+
+pub(super) async fn wait_for_listener_ota_control_ready(timeout: Duration) -> Result<(), String> {
+    let mut changed = audio_control_readiness_notification().subscribe();
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        changed.borrow_and_update();
+        if active_audio_control_sender().is_some_and(|active| active.readiness.is_ready()) {
+            return Ok(());
+        }
+        tokio::time::timeout_at(deadline, changed.changed())
+            .await
+            .map_err(|_| format!(
+                "Listener OTA control capture did not become writable within {} ms",
+                timeout.as_millis()
+            ))?
+            .map_err(|_| "Listener OTA control readiness observer closed".to_string())?;
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -476,6 +544,12 @@ fn active_audio_control_sender() -> Option<ActiveAudioControlSender> {
     active_audio_control_slot().lock().ok()?.clone()
 }
 
+fn ota_control_dispatch_allowed(capture_id: u64) -> bool {
+    active_audio_control_sender().is_some_and(|active| {
+        active.capture_id == capture_id && active.readiness.is_ready()
+    })
+}
+
 fn accepted_wake_capture_owner_slot() -> &'static Mutex<Option<AcceptedWakeCaptureOwner>> {
     static SLOT: OnceLock<Mutex<Option<AcceptedWakeCaptureOwner>>> = OnceLock::new();
     SLOT.get_or_init(|| Mutex::new(None))
@@ -522,6 +596,9 @@ fn clear_active_audio_control_sender(capture_id: u64) {
         .as_ref()
         .is_some_and(|active| active.capture_id == capture_id)
     {
+        if let Some(active) = slot.as_ref() {
+            active.readiness.transition(CaptureControlState::Closed);
+        }
         *slot = None;
         clear_accepted_wake_capture_owner(capture_id);
         log::info!("[embedded-ble] capture #{capture_id}: audio control sender cleared");
@@ -530,20 +607,24 @@ fn clear_active_audio_control_sender(capture_id: u64) {
 
 struct ActiveAudioControlRegistration {
     capture_id: u64,
+    readiness: Arc<CaptureControlReadiness>,
 }
 
 impl ActiveAudioControlRegistration {
     fn install(capture_id: u64, tx: mpsc::Sender<AudioControlRequest>) -> Self {
+        let readiness = Arc::new(CaptureControlReadiness::new());
         if let Ok(mut slot) = active_audio_control_slot().lock() {
-            *slot = Some(ActiveAudioControlSender { capture_id, tx });
+            *slot = Some(ActiveAudioControlSender { capture_id, tx, readiness: Arc::clone(&readiness) });
+            audio_control_readiness_notification().send_replace(());
             log::info!("[embedded-ble] capture #{capture_id}: audio control sender registered");
         }
-        Self { capture_id }
+        Self { capture_id, readiness }
     }
 }
 
 impl Drop for ActiveAudioControlRegistration {
     fn drop(&mut self) {
+        self.readiness.transition(CaptureControlState::Closed);
         clear_accepted_wake_capture_owner(self.capture_id);
         clear_active_audio_control_sender(self.capture_id);
     }
@@ -2489,6 +2570,7 @@ struct OpenListenerOtaV1Target {
     status: GattCharacteristic,
     data_write_option: GattWriteOption,
     data_chunk_payload_bytes: usize,
+    supports_block_deflate: bool,
     service: Option<GattDeviceService>,
     session: Option<GattSession>,
     device: Option<BluetoothLEDevice>,
@@ -2552,6 +2634,7 @@ struct PreparedListenerOtaV1Characteristics {
     status: GattCharacteristic,
     data_write_option: GattWriteOption,
     data_chunk_payload_bytes: usize,
+    supports_block_deflate: bool,
     session: Option<GattSession>,
 }
 
@@ -2710,7 +2793,12 @@ impl PreparedListenerOtaV1Transfer {
 /// held ota_in_progress.
 pub(super) fn is_retryable_listener_ota_v1_transfer_error(err: &str) -> bool {
     let lowered = err.to_ascii_lowercase();
-    if is_listener_ota_v1_progress_stall_error(err) {
+    if is_listener_ota_v1_progress_stall_error(err)
+        || err
+            .strip_prefix("OTA sync failed: ")
+            .unwrap_or(err)
+            .starts_with("OTA device session ended:")
+    {
         return false;
     }
     err.contains("protocol_error")
@@ -2731,6 +2819,33 @@ pub(super) fn is_listener_ota_v1_progress_stall_error(err: &str) -> bool {
         .contains("ota transfer progress stalled")
 }
 
+fn listener_ota_v1_retired_sync_session(
+    confirmed_image_size: Option<u32>,
+    fresh_bytes: &[u8],
+) -> Option<denzic_ota_core::OtaStatus> {
+    // A failed WinRT operation is not cancellation evidence. This helper is
+    // called only with an uncached read from the exclusive transfer's target,
+    // after this target acknowledged a receiving image through read_status.
+    let image_size = confirmed_image_size.filter(|size| *size > 0)?;
+    let status = denzic_ota_core::parse_status(fresh_bytes).ok()?;
+    // A late SYNC reaches the core after its async reset and changes IDLE to
+    // ERROR/BAD_STATE before this read. Both retain the reset's zero image,
+    // byte and write counters; BAD_STATE on a still-owned image is different.
+    let reset_state = (status.state == denzic_ota_core::STATE_IDLE
+        && status.last_error == denzic_ota_core::ERROR_NONE)
+        || (status.state == denzic_ota_core::STATE_ERROR
+            && status.last_error == denzic_ota_core::ERROR_BAD_STATE);
+    let reset_to_idle = reset_state
+        && status.expected_size == 0
+        && status.bytes_written == 0
+        && status.data_write_count == 0;
+    let image_failed = status.state == denzic_ota_core::STATE_ERROR
+        && status.expected_size == image_size
+        && status.bytes_written <= image_size
+        && status.last_error != denzic_ota_core::ERROR_NONE;
+    (reset_to_idle || image_failed).then_some(status)
+}
+
 struct ListenerOtaV1Transport<'a> {
     target: &'a OpenListenerOtaV1Target,
     transfer_id: u64,
@@ -2739,9 +2854,31 @@ struct ListenerOtaV1Transport<'a> {
     pending_wwr_b: Vec<IAsyncOperation<GattCommunicationStatus>>,
     status_error_started: Option<std::time::Instant>,
     control_sequence: u32,
+    confirmed_image_size: Option<u32>,
+    encoded_raw_size: Option<u32>,
 }
 
 impl ListenerOtaV1Transport<'_> {
+    fn probe_retired_sync_session(&self, remaining: Duration) -> Option<denzic_ota_core::OtaStatus> {
+        self.confirmed_image_size?;
+        let timeout = remaining.min(LISTENER_OTA_V1_STATUS_READ_TIMEOUT);
+        if timeout.is_zero() {
+            return None;
+        }
+        // Do not call read_status here: this is a one-shot observation inside
+        // the original SYNC recovery deadline, not a second retry budget or
+        // permission to reopen/restart a cancelled image. Failed/malformed
+        // observations retain the existing transient-error recovery policy.
+        let bytes = read_characteristic_bytes_with_timeout(
+            &self.target.status,
+            BluetoothCacheMode::Uncached,
+            "Denzic OTA v1 sync recovery state",
+            timeout,
+        )
+        .ok()?;
+        listener_ota_v1_retired_sync_session(self.confirmed_image_size, &bytes)
+    }
+
     fn cancel_pending_wwr(&mut self) {
         for pending in [&mut self.pending_wwr, &mut self.pending_wwr_b] {
             for operation in pending.drain(..) {
@@ -2900,6 +3037,7 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
             )
             .map(|_| ());
         }
+        let control_wire = listener_ota_v1_control_wire_packet(packet, self.encoded_raw_size)?;
         // Drain in-flight WWR before control so SYNC/status observe a settled
         // offset (skipping flush before SYNC caused HRESULT cancel mid-window).
         self.control_sequence = self.control_sequence.saturating_add(1);
@@ -2967,7 +3105,7 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
             let result = if use_status_write {
                 write_gatt_value_status_with_timeout(
                     &self.target.control,
-                    packet,
+                    &control_wire,
                     GattWriteOption::WriteWithResponse,
                     write_timeout,
                     label,
@@ -2975,7 +3113,7 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
             } else {
                 write_gatt_value_with_timeout(
                     &self.target.control,
-                    packet,
+                    &control_wire,
                     GattWriteOption::WriteWithResponse,
                     write_timeout,
                     label,
@@ -3011,6 +3149,27 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
                     if is_sync && retryable {
                         let started =
                             *sync_error_started.get_or_insert_with(std::time::Instant::now);
+                        let remaining =
+                            LISTENER_OTA_V1_PROGRESS_TIMEOUT.saturating_sub(started.elapsed());
+                        if let Some(status) = self.probe_retired_sync_session(remaining) {
+                            log::warn!(
+                                "[embedded-ble] Denzic OTA v1 #{}: fresh device status ended current image; state={} error={} bytes={}/{} recovery_ms={}",
+                                self.transfer_id,
+                                status.state,
+                                status.last_error,
+                                status.bytes_written,
+                                status.expected_size,
+                                started.elapsed().as_millis()
+                            );
+                            return Err(format!(
+                                "OTA device session ended: fresh state={} error={} bytes={}/{} after confirmed image={}; SYNC transport error: {err}",
+                                status.state,
+                                status.last_error,
+                                status.bytes_written,
+                                status.expected_size,
+                                self.confirmed_image_size.unwrap_or_default()
+                            ));
+                        }
                         let elapsed = started.elapsed();
                         if elapsed >= LISTENER_OTA_V1_PROGRESS_TIMEOUT {
                             return Err(format!(
@@ -3161,6 +3320,18 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
         match result {
             Ok(bytes) => {
                 self.status_error_started = None;
+                if let Ok(status) = denzic_ota_core::parse_status(&bytes) {
+                    if status.state == denzic_ota_core::STATE_RECEIVING
+                        && status.expected_size > 0
+                        && status.bytes_written <= status.expected_size
+                        && matches!(
+                            status.last_error,
+                            denzic_ota_core::ERROR_NONE | denzic_ota_core::ERROR_OFFSET_MISMATCH
+                        )
+                    {
+                        self.confirmed_image_size = Some(status.expected_size);
+                    }
+                }
                 Ok(bytes)
             }
             Err(error) => {
@@ -3239,6 +3410,7 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
     }
 }
 
+include!("ota_wire.rs");
 include!("ota_transfer.rs");
 
 fn read_dis_metadata_from_discovered_services(
@@ -5083,6 +5255,13 @@ impl NotifyCleanup {
 
     fn mark_type_heartbeat_open(&mut self) {
         self.type_heartbeat_open = true;
+        self.mark_control_readiness(CaptureControlState::Ready);
+    }
+
+    fn mark_control_readiness(&self, state: CaptureControlState) {
+        if let Some(registration) = self.audio_control_registration.as_ref() {
+            registration.readiness.transition(state);
+        }
     }
 
     fn defer_type_heartbeat_bye_until_processing_done(&mut self) {
@@ -5187,6 +5366,8 @@ impl NotifyCleanup {
     }
 
     fn finish(&mut self, teardown: NotifyCccdTeardown) {
+        // Revoke control readiness before BYE/CCCD/WinRT teardown can block.
+        self.mark_control_readiness(CaptureControlState::Closed);
         // An old pending HB must not renew readiness after BYE or an OTA handoff.
         self.pending_type_heartbeat.take();
         if let Some(pending) = self.pending_audio_control.take() {
@@ -5265,6 +5446,14 @@ impl NotifyCleanup {
         }
 
         while let Some(request) = next_live_audio_control_request(rx) {
+            if request.bytes == b"TYPE:OTA\n"
+                && !ota_control_dispatch_allowed(self.capture_id)
+            {
+                let _ = request.result_tx.send(Err(
+                    "Listener OTA handoff capture lost control readiness before dispatch".to_string(),
+                ));
+                continue;
+            }
             let queued_ms = request.queued_at.elapsed().as_millis();
             if request.label == "audio control stop" || queued_ms >= 50 {
                 log::info!(

@@ -468,6 +468,36 @@ fn is_diagnostic_snapshot_intent(intent: Option<&cli::CliIntent>) -> bool {
     )
 }
 
+fn is_owned_firmware_ota_transfer(intent: &cli::CliIntent) -> bool {
+    matches!(intent, cli::CliIntent::FirmwareOta { transfer: true, .. })
+}
+
+fn load_owned_cli_ota_package(
+    manifest_path: &std::path::Path,
+    firmware_path: &std::path::Path,
+) -> Result<(serde_json::Value, Vec<u8>, String), String> {
+    let manifest_text = String::from_utf8(commands::device::read_limited_file(manifest_path)?)
+        .map_err(|error| format!("OTA manifest is not UTF-8: {error}"))?;
+    let bytes = commands::device::read_limited_file(firmware_path)?;
+    let validation = firmware_ota::validate_package(
+        &manifest_text,
+        &bytes,
+        &firmware_ota::FirmwareOtaValidationContext {
+            desktop_version: env!("CARGO_PKG_VERSION").to_string(),
+            expected_hardware_revision: "keyboard-v2-n16r8".to_string(),
+            current_firmware_version: None,
+        },
+    );
+    if !validation.ok {
+        return Err(validation.errors.join("; "));
+    }
+    let manifest = validation.manifest.ok_or("OTA validation returned no manifest")?;
+    let hash = validation.firmware_sha256.ok_or("OTA validation returned no image hash")?;
+    let manifest = serde_json::to_value(manifest)
+        .map_err(|error| format!("Encode normalized OTA manifest: {error}"))?;
+    Ok((manifest, bytes, hash))
+}
+
 fn construct_business_services() -> (
     Arc<coordinator::Coordinator>,
     Arc<asr::local::DownloadManager>,
@@ -545,6 +575,10 @@ fn run_diagnostic_snapshot_process(intent: cli::CliIntent) {
                 cli::CliIntent::DiagnosticDictationSnapshotRejected { reason } => {
                     exit_after_headless_cli(diagnostic_snapshot_rejected(reason));
                 }
+                cli::CliIntent::FirmwareOta { transfer: true, .. } => {
+                    eprintln!("firmware_ota_owned_result=ERROR no running Listener Type instance; transfer not started");
+                    exit_after_headless_cli(1);
+                }
                 _ => unreachable!("diagnostic process received a non-diagnostic intent"),
             }
         })
@@ -592,6 +626,12 @@ pub fn run() {
                 exit_after_headless_cli(run_embedded_ble_headless_cli(intent));
             }
             cli::CliIntent::FirmwareOta { .. } => {
+                if is_owned_firmware_ota_transfer(&intent) {
+                    // The minimal secondary forwards to the running coordinator.
+                    // It must never create an independent recorder/OTA owner.
+                    run_diagnostic_snapshot_process(intent);
+                    return;
+                }
                 exit_after_headless_cli(run_firmware_ota_headless_cli(intent));
             }
             cli::CliIntent::WiredFirmware { .. } => {
@@ -2399,7 +2439,32 @@ fn dispatch_cli_intent<R: Runtime>(
             transfer,
         } => {
             let phase = coordinator.dictation_phase_for_cli();
+            let app = app.clone();
             tauri::async_runtime::spawn(async move {
+                if transfer {
+                    let result = async {
+                        let (manifest, bytes, hash) =
+                            load_owned_cli_ota_package(&manifest_path, &firmware_path)?;
+                        let state = app.try_state::<Arc<coordinator::Coordinator>>()
+                            .ok_or_else(|| "Running Type coordinator is unavailable".to_string())?;
+                        // Exactly the UI transaction: idle check, live TYPE:OTA
+                        // lease, exclusive owner, notify release, verified image,
+                        // reboot confirmation and normal listener restoration.
+                        commands::device::transfer_firmware_ota_ble(
+                            app.clone(), state, manifest, bytes, hash,
+                        ).await
+                    }.await;
+                    let report = match result {
+                        Ok(result) => serde_json::json!({
+                            "status": "PASS", "servicePid": std::process::id(), "result": result,
+                        }),
+                        Err(error) => serde_json::json!({
+                            "status": "FAIL", "servicePid": std::process::id(), "error": error,
+                        }),
+                    };
+                    log::info!("firmware_ota_owned_result_json={report}");
+                    return;
+                }
                 let options = firmware_ota::FirmwareOtaHeadlessOptions {
                     manifest_path,
                     firmware_path,
@@ -4097,4 +4162,30 @@ mod tests {
             "test logger path should be visibly separated from runtime app logs"
         );
     }
+    #[test]
+    fn firmware_ota_transfer_cli_uses_the_running_ui_transaction_owner() {
+        for (flag, owned) in [
+            ("--firmware-ota-check", false),
+            ("--firmware-ota-preflight", false),
+            ("--firmware-ota-transfer", true),
+        ] {
+            let intent = crate::cli::parse_cli_intent(&[
+                "listener-type", flag, "ota_manifest.json", "firmware_ota.bin",
+            ]).expect("existing OTA CLI syntax");
+            assert_eq!(super::is_owned_firmware_ota_transfer(&intent), owned);
+        }
+        let source = include_str!("lib.rs");
+        let start = source.find("fn dispatch_cli_intent").unwrap();
+        let branch = source[start..].find("cli::CliIntent::FirmwareOta {").unwrap()+start;
+        let end = source[branch..].find("cli::CliIntent::WiredFirmware").unwrap()+branch;
+        let body = &source[branch..end];
+        let transfer = body.find("if transfer {").unwrap();
+        let owned_call = body.find("commands::device::transfer_firmware_ota_ble(").unwrap();
+        let done = body[owned_call..].find("return;").unwrap()+owned_call;
+        let headless = body.find("firmware_ota::run_headless(options)").unwrap();
+        assert!(transfer < owned_call && owned_call < done && done < headless);
+        assert!(!body.contains("show_main_window"));
+        assert!(source.contains("no running Listener Type instance; transfer not started"));
+    }
+
 }

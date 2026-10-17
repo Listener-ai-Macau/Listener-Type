@@ -1035,6 +1035,7 @@ fn open_listener_ota_v1_target_for_device_with_options(
                         status: prepared.status,
                         data_write_option: prepared.data_write_option,
                         data_chunk_payload_bytes: prepared.data_chunk_payload_bytes,
+                        supports_block_deflate: prepared.supports_block_deflate,
                         service: Some(service),
                         session: prepared.session,
                         device: Some(device),
@@ -1188,6 +1189,7 @@ fn open_listener_ota_v1_target_for_device_with_deadline_options(
                         status: prepared.status,
                         data_write_option: prepared.data_write_option,
                         data_chunk_payload_bytes: prepared.data_chunk_payload_bytes,
+                        supports_block_deflate: prepared.supports_block_deflate,
                         service: Some(service),
                         session: prepared.session,
                         device: Some(device),
@@ -1775,6 +1777,7 @@ fn open_listener_ota_v1_target_for_service_with_cache_policy(
                     status: prepared.status,
                     data_write_option: prepared.data_write_option,
                     data_chunk_payload_bytes: prepared.data_chunk_payload_bytes,
+                        supports_block_deflate: prepared.supports_block_deflate,
                     service: Some(service),
                     session: prepared.session,
                     device,
@@ -1847,6 +1850,7 @@ fn open_listener_ota_v1_target_for_service_with_deadline(
                     status: prepared.status,
                     data_write_option: prepared.data_write_option,
                     data_chunk_payload_bytes: prepared.data_chunk_payload_bytes,
+                        supports_block_deflate: prepared.supports_block_deflate,
                     service: Some(service),
                     session: prepared.session,
                     device,
@@ -2049,6 +2053,7 @@ fn open_listener_ota_v1_characteristics_from_service(
         status,
         data_write_option,
         data_chunk_payload_bytes: payload_bytes,
+        supports_block_deflate: listener_ota_v1_supports_block_deflate(&readiness_bytes),
         session,
     })
 }
@@ -2177,6 +2182,7 @@ fn open_listener_ota_v1_characteristics_from_service_with_deadline(
         status,
         data_write_option,
         data_chunk_payload_bytes: payload_bytes,
+        supports_block_deflate: listener_ota_v1_supports_block_deflate(&readiness_bytes),
         session,
     })
 }

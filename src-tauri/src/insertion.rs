@@ -175,7 +175,12 @@ impl TextInserter {
 
     pub(crate) fn insert_session_paste(&self, text: &str, shortcut: PasteShortcut,
         scope: SessionPasteScope) -> PasteSubmission {
-        clipboard_handoff::paste_scoped_with_receipt(text, false, shortcut, Some(scope))
+        self.insert_session_paste_with_restore(text, false, shortcut, scope)
+    }
+
+    pub(crate) fn insert_session_paste_with_restore(&self, text: &str, restore: bool,
+        shortcut: PasteShortcut, scope: SessionPasteScope) -> PasteSubmission {
+        clipboard_handoff::paste_scoped_with_receipt(text, restore, shortcut, Some(scope))
     }
 
     pub(crate) fn clipboard_retention_ticket(&self) -> ClipboardTicket {
@@ -186,10 +191,11 @@ impl TextInserter {
         clipboard_handoff::current_terminal_append_decision(expected, suffix)
     }
 
-    pub(crate) fn insert_terminal_suffix(&self, expected: &str, suffix: &str,
-        restore: bool, shortcut: PasteShortcut) -> Result<InsertStatus, TerminalAppendDecision>
-    {
-        clipboard_handoff::paste_terminal_suffix(expected, suffix, restore, shortcut, None)
+    pub(crate) fn insert_terminal_suffix_scoped(&self, session: uuid::Uuid,
+        expected: &str, suffix: &str, restore: bool, shortcut: PasteShortcut)
+        -> Result<InsertStatus, TerminalAppendDecision> {
+        clipboard_handoff::paste_terminal_suffix(expected, suffix, restore, shortcut,
+            Some(SessionPasteScope { session_id: session, previous_body: expected.into(), replace: false }))
     }
 
     pub(crate) fn insert_session_terminal_suffix(&self, session: uuid::Uuid,

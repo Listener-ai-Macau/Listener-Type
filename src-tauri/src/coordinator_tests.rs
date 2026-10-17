@@ -2619,6 +2619,20 @@ fn embedded_ble_notify_ready_suppresses_internal_refresh_capsule() {
 }
 
 #[test]
+fn embedded_ble_rename_notice_waits_for_notify_and_consumes_reason_once() {
+    let coordinator = Coordinator::new();
+    record_embedded_ble_listener_cancelled(&coordinator.inner, "BLE name apply handoff");
+    assert!(record_embedded_ble_notify_ready(&coordinator.inner));
+    assert!(!record_embedded_ble_notify_ready(&coordinator.inner));
+    assert!(should_emit_embedded_ble_recovered_capsule_for_reason(
+        "BLE name apply handoff", Some(true), 7,
+    ));
+    assert!(!should_emit_embedded_ble_recovered_capsule_for_reason(
+        "BLE name Windows cache refresh follow-up", Some(true), 7,
+    ));
+}
+
+#[test]
 fn embedded_ble_background_recovery_capsule_respects_power_state() {
     let coordinator = Coordinator::new();
 

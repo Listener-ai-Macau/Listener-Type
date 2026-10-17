@@ -53,6 +53,14 @@ every PCM append. The bounded local-confirmation ladder remains independent.
 Live admission and terminal recall join the outstanding job before replacing an
 incompatible source; stale results never acquire identity authority.
 
+The shared speaker runtime also has one initialization owner across candidates
+and startup preparation. A separate initialization mutex covers resource
+validation, extractor construction and publication, with a cache recheck after
+acquiring it. Profile/status state is held only for cache reads/publication;
+slow loading does not hold that lock. Initialization errors release ownership
+without populating the cache, so a later request can retry. This changes no
+model, identity threshold, transcript permission or recording-end evidence.
+
 An actual owned predecessor STOP is retained while ENSURE waits for a tagged
 successor. A matching successor retires that closed source. If the existing
 transaction deadline expires after the physical source ended,
@@ -105,7 +113,19 @@ a higher event sequence does not authorize an older recording to reclaim UI.
 Final dictation recovery uses the same session's `DictationSession.final_text`
 as History, including after an early checkmark or interrupted input. Submitted
 editor bytes remain separate delivery facts and never truncate the recovery
-body. The clipboard worker retains its paste-consumption and newer-copy
+body. Final TSF fallbacks and terminal-punctuation appends carry the same
+recording scope as streamed appends. A transient native lookup failure can
+therefore re-query that recording's consumed predecessor interface, with fresh
+focus, identity and text checks. It cannot borrow a different recording's
+receipt or authorize replacement, input confirmation or clipboard publication.
+The user's clipboard restore preference is preserved through scoped dispatch.
+Windows checks positive read-only/disabled facts for every focused UIA role,
+including Chromium Document. Focused native buttons/links with positively absent
+Text/Value input patterns are also NonEditable; an unavailable pattern query
+still stays Unknown. Such targets defer before a transport clipboard
+write, shortcut, receipt lease or streamed-source commit; History remains the
+complete recognized result for recovery. Missing facts remain Unknown.
+The clipboard worker retains its paste-consumption and newer-copy
 ownership checks; retaining a full recovery result grants no new insertion or
 target-confirmation permission. Streamed typer failures retain the complete
 provider final (or complete raw fallback), while reporting the emitted prefix
@@ -1481,3 +1501,14 @@ deadline. The new payload still requires its own observed editor change before
 replacing clipboard transport with the full transcript; a genuinely unreadable
 provider remains unconfirmed. Reusing this query capability alone cannot grant
 whole-range correction or a physical STOP.
+
+
+### Explicit rename completion notice
+
+An owned BLE rename intentionally closes the audio link. Its completion uses
+the existing nonactivating AudioRecovered capsule only after the real notify
+subscription, TYPE:READY and lossless capability path reaches notify-ready.
+A settings-write or PairAsync result cannot announce audio readiness. The
+rename disconnect reason is consumed at that boundary, so duplicate ready
+callbacks do not repeat the notice. Internal refresh, unconfirmed pairing
+follow-up and unrelated recording ownership conflicts retain suppression.
