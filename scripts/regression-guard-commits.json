@@ -803,7 +803,8 @@
         "Raw transfer15s/full20s/160decimalKBps targets remain unmet; this improves handoff overhead, not demonstrated pure-air throughput.",
         "HCI export has3902/3908 actual DATA; complete-window-only conservation analysis, not actual missing device data. Full encrypted RF capture still unavailable.",
         "Original wake tail-drain early-end and Document clipboard field ranges remain pending; ASR/audio/source-stop/rename settings code was unchanged."
-      ]
+      ],
+      "sourceChangeCommit": "46e164469ef7cc45ab198f10cd8767fcd1242820"
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
