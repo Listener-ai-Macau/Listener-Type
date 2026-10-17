@@ -335,6 +335,14 @@ async fn owner_prefetch_lane_never_replaces_running_work_and_weak_hits_do_not_re
 #[tokio::test]
 #[ignore = "saved 15:13 wake and protected existing profile; no cloud/device/editor writes"]
 async fn saved_slow_wake_runs_bounded_owner_lane_on_exact_local_phrase_source() {
+    // The test profile otherwise creates a new model directory for every PID.
+    // Resource downloading/extraction would corrupt the wake-latency comparison.
+    let cached_root = std::path::PathBuf::from(std::env::var_os("LISTENER_SPEAKER_MODEL_ROOT")
+        .expect("saved wake replay requires the explicit existing speaker resource directory"));
+    for name in ["3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx", "onnxruntime.dll",
+        "onnxruntime_providers_shared.dll", "sherpa-onnx-c-api.dll"] {
+        assert!(cached_root.join(name).is_file(), "saved replay cannot prepare missing resources: {name}");
+    }
     let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::Info).try_init();
     let fixture:serde_json::Value = serde_json::from_slice(&std::fs::read(
         std::env::var("LISTENER_SLOW_WAKE_FIXTURE").unwrap()).unwrap()).unwrap();

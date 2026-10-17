@@ -10,7 +10,7 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
 use windows::Win32::UI::Accessibility::{
-    CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern, IUIAutomationValuePattern, UIA_EditControlTypeId,
+    CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern, IUIAutomationValuePattern, UIA_EditControlTypeId, UIA_ButtonControlTypeId, UIA_CheckBoxControlTypeId, UIA_RadioButtonControlTypeId, UIA_HyperlinkControlTypeId,
     UIA_TextPatternId, UIA_WindowControlTypeId, UIA_CONTROLTYPE_ID,
     UIA_ValuePatternId, UIA_PATTERN_ID,
     TextPatternRangeEndpoint_Start, TextPatternRangeEndpoint_End,
@@ -43,8 +43,12 @@ fn focused_input_state(control: UIA_CONTROLTYPE_ID, keyboard_focusable: Option<b
         FocusedInputState::NonEditable
     } else if control == UIA_EditControlTypeId && read_only == Some(false) {
         FocusedInputState::Editable
-    } else if control == UIA_WindowControlTypeId && keyboard_focusable == Some(false)
-        && text_pattern == Some(false) && value_pattern == Some(false) {
+    } else if text_pattern == Some(false) && value_pattern == Some(false)
+        && (control == UIA_WindowControlTypeId && keyboard_focusable == Some(false)
+            || matches!(control, UIA_ButtonControlTypeId | UIA_CheckBoxControlTypeId
+                | UIA_RadioButtonControlTypeId | UIA_HyperlinkControlTypeId)) {
+        // A confirmed button/link without text/value input capabilities is
+        // not an opaque editor. Keyboard focus alone cannot authorize paste.
         FocusedInputState::NonEditable
     } else {
         FocusedInputState::Unknown
@@ -81,7 +85,15 @@ impl WindowsSelectionReader {
     pub(crate) fn capture_for_paste() -> (Option<Self>, FocusedInputState) {
         let target = unsafe { GetForegroundWindow().0 as usize };
         let mut state = FocusedInputState::Unknown;
-        let reader = Self::new_with_budget(target, true, true, &mut state).ok();
+        let reader = match Self::new_with_budget(target, true, true, &mut state) {
+            Ok(reader) => Some(reader),
+            Err(error) => {
+                // Capability failures have different causes (native provider,
+                // focus, readonly target). Record the reason without editor text.
+                log::info!("[insertion] native paste capture unavailable focus={state:?} reason={error}");
+                None
+            }
+        };
         (reader, state)
     }
 
@@ -121,34 +133,35 @@ impl WindowsSelectionReader {
         if require_editable {
             let control = unsafe { focused.CurrentControlType() }
                 .map_err(|err| format!("focused editor control type unavailable: {err}"))?;
-            if control == UIA_EditControlTypeId {
-                let value: Option<IUIAutomationValuePattern> =
-                    unsafe { focused.GetCurrentPatternAs(UIA_ValuePatternId) }.ok();
-                let read_only = value.as_ref()
-                    .and_then(|value| unsafe { value.CurrentIsReadOnly() }.ok())
-                    .map(|value| value.as_bool());
-                let enabled = unsafe { focused.CurrentIsEnabled() }.ok().map(|value| value.as_bool());
-                // Recheck focus after querying the native mutation permission.
-                if unsafe { GetForegroundWindow().0 as usize } != target_hwnd
-                    || !unsafe { focused.CurrentHasKeyboardFocus() }.ok().is_some_and(|v| v.as_bool()) {
-                    return Err("session target changed during editability lookup".into());
-                }
-                *state = focused_input_state(control, None, None, None, read_only, enabled);
-                if *state == FocusedInputState::NonEditable {
-                    return Err("focused text field is read-only or disabled".into());
-                }
-            } else {
+            // Read-only/disabled are mutation facts for every focused control,
+            // including Chromium's Document role. They cannot become Unknown
+            // just because its role differs from Edit; that would dispatch a
+            // paste with no input target and reserve a false delivered prefix.
+            let value: Option<IUIAutomationValuePattern> =
+                unsafe { focused.GetCurrentPatternAs(UIA_ValuePatternId) }.ok();
+            let read_only = value.as_ref()
+                .and_then(|value| unsafe { value.CurrentIsReadOnly() }.ok())
+                .map(|value| value.as_bool());
+            let enabled = unsafe { focused.CurrentIsEnabled() }.ok().map(|value| value.as_bool());
+            if unsafe { GetForegroundWindow().0 as usize } != target_hwnd
+                || !unsafe { focused.CurrentHasKeyboardFocus() }.ok().is_some_and(|v| v.as_bool()) {
+                return Err("session target changed during editability lookup".into());
+            }
+            *state = focused_input_state(control, None, None, None, read_only, enabled);
+            if *state == FocusedInputState::NonEditable {
+                return Err("focused control is read-only or disabled".into());
+            }
+            if control != UIA_EditControlTypeId {
                 // Positive container/capability facts, never a window title or
-                // a failed text read. Provider failure stays Unknown; only a
-                // successful native query can establish absent patterns.
+                // a failed text read. Missing mutation permission stays Unknown.
                 let focusable = unsafe { focused.CurrentIsKeyboardFocusable() }.ok().map(|v| v.as_bool());
                 let text = pattern_available(&focused, UIA_TextPatternId);
                 let value = pattern_available(&focused, UIA_ValuePatternId);
                 if unsafe { GetForegroundWindow().0 as usize } == target_hwnd
                     && unsafe { focused.CurrentHasKeyboardFocus() }.ok().is_some_and(|v| v.as_bool()) {
-                    *state = focused_input_state(control, focusable, text, value, None, None);
+                    *state = focused_input_state(control, focusable, text, value, read_only, enabled);
                 }
-                return Err("focused control is not an editable text field".into());
+                return Err(format!("focused control is not an editable text field: role={} readonly={read_only:?} enabled={enabled:?} text={text:?} value={value:?}", control.0));
             }
         }
         let pattern: IUIAutomationTextPattern =
@@ -354,6 +367,24 @@ fn native_text_matches_value(document: &str, value: &str) -> bool {
 #[cfg(test)]
 mod focus_tests {
     use super::*;
+
+    #[test]
+    fn readonly_documents_and_nontext_buttons_cannot_be_unknown_paste_targets() {
+        // Saved Codex native observations: Document+readonly and focused
+        // Button (50000)+no Text/Value patterns. Neither is an input target.
+        assert_eq!(focused_input_state(UIA_DocumentControlTypeId, Some(true),
+            Some(true), Some(true), Some(true), Some(true)), FocusedInputState::NonEditable);
+        for role in [UIA_ButtonControlTypeId, UIA_CheckBoxControlTypeId,
+            UIA_RadioButtonControlTypeId, UIA_HyperlinkControlTypeId] {
+            assert_eq!(focused_input_state(role, Some(true), Some(false),
+                Some(false), None, Some(true)), FocusedInputState::NonEditable);
+            assert_eq!(focused_input_state(role, Some(true), None,
+                Some(false), None, Some(true)), FocusedInputState::Unknown,
+                "a provider failure is not positive evidence that TextPattern is absent");
+        }
+        assert_eq!(focused_input_state(UIA_CustomControlTypeId, Some(true),
+            Some(false), Some(false), None, Some(true)), FocusedInputState::Unknown);
+    }
 
     #[test]
     fn reversible_baseline_requires_real_value_and_preserves_user_text() {

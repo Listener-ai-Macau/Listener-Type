@@ -2,6 +2,76 @@
 //! Loaded via `#[path = "windows_ble_tests.rs"]` from `windows_ble.rs`.
 
 use super::*;
+
+#[test]
+fn ota_wire_capability_is_unique_and_explicit_on_current_readiness() {
+    assert!(listener_ota_v1_supports_block_deflate(b"ready=1;ota_deflate_blocks_v1=1"));
+    for value in [
+        b"ready=1".as_slice(), b"ota_deflate_blocks_v1=0", b"ota_deflate_blocks_v1=2",
+        b"ota_deflate_blocks_v1=1;ota_deflate_blocks_v1=0",
+        b"ota_deflate_blocks_v1=1;ota_deflate_blocks_v1=1",
+        b"xota_deflate_blocks_v1=1", b"ota_deflate_blocks_v1=1extra", &[0xff],
+    ] {
+        assert!(!listener_ota_v1_supports_block_deflate(value), "{value:?}");
+    }
+}
+
+#[test]
+fn ota_wire_encoder_roundtrip_and_begin_preserve_canonical_identity() {
+    use sha2::Digest;
+    use std::io::Read;
+    let raw: Vec<u8> = (0..37_123).map(|n| ((n / 77 + n % 13) % 256) as u8).collect();
+    let wire = listener_ota_v1_encode_block_deflate(&raw).unwrap();
+    assert_eq!(&wire[..8], b"DOVZ\x01\x01\x30\x00");
+    assert_eq!(u32::from_le_bytes(wire[8..12].try_into().unwrap()) as usize, raw.len());
+    assert_eq!(&wire[16..48], sha2::Sha256::digest(&raw).as_slice());
+    let mut cursor = 48;
+    let mut decoded = Vec::new();
+    while cursor < wire.len() {
+        let size = u16::from_le_bytes(wire[cursor..cursor+2].try_into().unwrap()) as usize;
+        let decoded_size = u16::from_le_bytes(wire[cursor+2..cursor+4].try_into().unwrap()) as usize;
+        let kind = wire[cursor+4];
+        assert_eq!(&wire[cursor+5..cursor+8], &[0,0,0]);
+        cursor += 8;
+        let body = &wire[cursor..cursor+size];
+        let mut block = Vec::new();
+        if kind == 1 {
+            flate2::read::ZlibDecoder::new(body).read_to_end(&mut block).unwrap();
+        } else {
+            assert_eq!(kind, 0);
+            block.extend_from_slice(body);
+        }
+        assert_eq!(block.len(), decoded_size);
+        decoded.extend_from_slice(&block);
+        cursor += size;
+    }
+    assert_eq!(decoded, raw);
+    let mut begin = [0; denzic_ota_core::CONTROL_BYTES];
+    begin[..4].copy_from_slice(b"DOTA");
+    begin[4] = denzic_ota_core::OP_BEGIN;
+    begin[5] = 1;
+    begin[8..12].copy_from_slice(&(wire.len() as u32).to_le_bytes());
+    let extended = listener_ota_v1_control_wire_packet(&begin, Some(raw.len() as u32)).unwrap();
+    assert_eq!(extended.len(), 24);
+    assert_eq!(extended[6], 1);
+    assert_eq!(&extended[8..20], &begin[8..20]);
+    assert_eq!(&extended[20..], &(raw.len() as u32).to_le_bytes());
+    assert_eq!(listener_ota_v1_control_wire_packet(&begin, None).unwrap(), begin);
+    for op in [denzic_ota_core::OP_SYNC, denzic_ota_core::OP_ABORT, denzic_ota_core::OP_FINISH] {
+        let mut packet = begin;
+        packet[4] = op;
+        assert_eq!(listener_ota_v1_control_wire_packet(&packet, Some(raw.len() as u32)).unwrap(), packet);
+    }
+    assert!(listener_ota_v1_encode_block_deflate(&[]).is_err());
+    assert!(listener_ota_v1_control_wire_packet(&begin, Some(0)).is_err());
+    // Optional evidence export lets the actual C parser consume the Rust
+    // encoder's bytes, instead of validating two separate Python round trips.
+    if let Some(path) = std::env::var_os("LISTENER_OTA_WIRE_TEST_OUTPUT") {
+        let path = std::path::PathBuf::from(path);
+        std::fs::write(path.with_extension("raw"), &raw).unwrap();
+        std::fs::write(path.with_extension("dovz"), &wire).unwrap();
+    }
+}
 use crate::embedded_ble::STOP_DRAIN_TIMEOUT;
 
 macro_rules! include_str {
@@ -51,6 +121,97 @@ fn ota_wwr_depth_stays_within_the_device_acl_pool() {
         LISTENER_OTA_V1_WWR_PIPELINE_DEPTH * 2 <= 128 - 48,
         "the link-aligned 443-byte OTA pipeline must leave 48 of the PSRAM-backed 128-buffer controller ACL pool reserved"
     );
+}
+
+#[test]
+fn ota_sync_recovery_requires_confirmed_image_and_consistent_fresh_terminal_state() {
+    use denzic_ota_core::*;
+    let encode = |state: u8, error: u8, written: u32, expected: u32, writes: u32| {
+        let mut bytes = vec![0; STATUS_BYTES];
+        bytes[..4].copy_from_slice(&MAGIC);
+        bytes[4] = PROTOCOL_VERSION;
+        bytes[5] = state;
+        bytes[6] = error;
+        bytes[8..12].copy_from_slice(&written.to_le_bytes());
+        bytes[12..16].copy_from_slice(&expected.to_le_bytes());
+        bytes[16..18].copy_from_slice(&443u16.to_le_bytes());
+        bytes[18..20].copy_from_slice(&400u16.to_le_bytes());
+        bytes[20..24].copy_from_slice(&writes.to_le_bytes());
+        bytes
+    };
+    let idle = encode(STATE_IDLE, ERROR_NONE, 0, 0, 0);
+    assert!(listener_ota_v1_retired_sync_session(None, &idle).is_none());
+    assert!(listener_ota_v1_retired_sync_session(Some(0), &idle).is_none());
+    let retired = listener_ota_v1_retired_sync_session(Some(1_723_536), &idle).unwrap();
+    assert_eq!(retired.state, STATE_IDLE);
+    // Captured failure flow, reproduced by the production C core: BEGIN,
+    // async reset, then the host's next SYNC. It returns ERROR/BAD_STATE with
+    // all image counters zero before the following uncached status read.
+    let reset_then_sync = encode(STATE_ERROR, ERROR_BAD_STATE, 0, 0, 0);
+    assert_eq!(
+        listener_ota_v1_retired_sync_session(Some(1_723_536), &reset_then_sync)
+            .unwrap().last_error,
+        ERROR_BAD_STATE
+    );
+    assert!(listener_ota_v1_retired_sync_session(None, &reset_then_sync).is_none());
+
+    for (state, error, written, expected, writes, description) in [
+        (STATE_RECEIVING, ERROR_NONE, 273_331, 1_723_536, 617, "active transfer"),
+        (STATE_RECEIVING, ERROR_OFFSET_MISMATCH, 273_331, 1_723_536, 617, "recoverable offset"),
+        (STATE_ERASING, ERROR_NONE, 0, 1_723_536, 0, "still acquiring writer"),
+        (STATE_COMPLETE, ERROR_NONE, 1_723_536, 1_723_536, 3891, "finish belongs to another phase"),
+        (STATE_IDLE, ERROR_NONE, 0, 1_723_536, 0, "contradictory idle image"),
+        (STATE_IDLE, ERROR_NONE, 1, 0, 0, "contradictory idle byte count"),
+        (STATE_IDLE, ERROR_NONE, 0, 0, 1, "contradictory idle data count"),
+        (STATE_IDLE, ERROR_STORAGE_WRITE, 0, 0, 0, "contradictory idle error"),
+        (STATE_ERROR, ERROR_STORAGE_WRITE, 273_331, 1000, 617, "another image"),
+        (STATE_ERROR, ERROR_NONE, 273_331, 1_723_536, 617, "missing explicit error"),
+        (STATE_ERROR, ERROR_BAD_STATE, 1, 0, 0, "nonzero bytes after alleged reset"),
+        (STATE_ERROR, ERROR_BAD_STATE, 0, 0, 1, "nonzero writes after alleged reset"),
+        (STATE_ERROR, ERROR_STORAGE_WRITE, 0, 0, 0, "other error with unknown image"),
+        (STATE_ERROR, ERROR_STORAGE_WRITE, 1_723_537, 1_723_536, 3891, "impossible offset"),
+        (255, ERROR_NONE, 0, 0, 0, "unknown state"),
+    ] {
+        assert!(
+            listener_ota_v1_retired_sync_session(
+                Some(1_723_536), &encode(state, error, written, expected, writes)
+            ).is_none(),
+            "{description} cannot replace the transient recovery budget"
+        );
+    }
+    for code in [ERROR_BAD_SIZE, ERROR_STORAGE_WRITE, ERROR_STORAGE_FINISH] {
+        let failed = encode(STATE_ERROR, code, 273_331, 1_723_536, 617);
+        assert_eq!(
+            listener_ota_v1_retired_sync_session(Some(1_723_536), &failed).unwrap().last_error,
+            code
+        );
+    }
+    for invalid in [vec![], idle[..23].to_vec(), {
+        let mut bytes = idle.clone(); bytes[0] ^= 1; bytes
+    }, {
+        let mut bytes = idle; bytes[4] += 1; bytes
+    }] {
+        assert!(listener_ota_v1_retired_sync_session(Some(1_723_536), &invalid).is_none());
+    }
+}
+
+#[test]
+fn ota_sync_confirmed_terminal_error_never_reopens_even_with_native_retryable_cause() {
+    for cause in [
+        "BLE Denzic OTA v1 sync write async error: Some(HRESULT(0x800704C7))",
+        "BLE Denzic OTA v1 sync write timed out",
+        "BLE Denzic OTA v1 sync protocol_error=14 authentication",
+    ] {
+        assert!(is_retryable_listener_ota_v1_transfer_error(cause));
+        let terminal = format!(
+            "OTA device session ended: fresh state=0 error=0 bytes=0/0 after confirmed image=1723536; SYNC transport error: {cause}"
+        );
+        assert!(!is_retryable_listener_ota_v1_transfer_error(&terminal));
+        // The real core wraps a transport failure with this exact phase prefix.
+        assert!(!is_retryable_listener_ota_v1_transfer_error(
+            &format!("OTA sync failed: {terminal}")
+        ));
+    }
 }
 
 #[test]
@@ -2398,6 +2559,74 @@ fn recovery_advertisement_scan_prefers_configured_current_name() {
         scan_names,
         vec!["listenerC".to_string(), "listenerB".to_string()]
     );
+}
+
+#[test]
+fn ota_handoff_preserves_transport_failure_and_optional_context_semantics() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    *active_audio_control_slot().lock().unwrap() = None;
+    let absent = request_listener_ota_v1_active_link(None).unwrap_err();
+    assert!(absent.contains("no active audio capture"));
+
+    for (context, context_result, handoff_result) in [
+        (None, Ok(()), Err("BLE handoff write timed out after 800 ms")),
+        (Some(7), Ok(()), Err("write returned status=ProtocolError protocol_error=14")),
+        (Some(8), Err("older firmware does not support context"), Ok(())),
+    ] {
+        let (tx, rx) = mpsc::channel::<AudioControlRequest>();
+        let registration = ActiveAudioControlRegistration::install(91, tx);
+        registration.readiness.transition(CaptureControlState::Ready);
+        let worker = std::thread::spawn(move || {
+            if context.is_some() {
+                let request = rx.recv().unwrap();
+                assert!(request.bytes.starts_with(b"TYPE:OBS:OTA:"));
+                request.result_tx.send(context_result.map_err(str::to_owned)).unwrap();
+            }
+            let request = rx.recv().unwrap();
+            assert_eq!(request.bytes, b"TYPE:OTA\n");
+            request.result_tx.send(handoff_result.map_err(str::to_owned)).unwrap();
+        });
+        let actual = request_listener_ota_v1_active_link(context);
+        worker.join().unwrap();
+        assert_eq!(actual, handoff_result.map_err(str::to_owned));
+        assert_eq!(active_audio_control_sender().unwrap().capture_id, 91);
+        drop(registration);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn ota_control_readiness_tracks_transport_ownership_and_revokes_stale_ready() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    *active_audio_control_slot().lock().unwrap() = None;
+    let (tx, rx) = mpsc::channel();
+    let old = ActiveAudioControlRegistration::install(101, tx);
+    assert!(request_listener_ota_v1_active_link(None).unwrap_err().contains("not control-ready"));
+    assert!(rx.try_recv().is_err(), "opening capture must not receive TYPE:OTA");
+    old.readiness.transition(CaptureControlState::Ready);
+    assert!(ota_control_dispatch_allowed(101));
+
+    // Saved failure: coordinator's old notify flag can still be true when
+    // heartbeat transport has failed. A new OTA must await writable evidence.
+    old.readiness.transition(CaptureControlState::Unavailable);
+    assert!(!ota_control_dispatch_allowed(101));
+    let mut waiting = Box::pin(wait_for_listener_ota_control_ready(Duration::from_secs(1)));
+    assert!(tokio::time::timeout(Duration::from_millis(1), &mut waiting).await.is_err());
+    old.readiness.transition(CaptureControlState::Quarantined);
+    old.readiness.transition(CaptureControlState::Ready);
+    assert!(!ota_control_dispatch_allowed(101), "recovered PCM/late HB cannot unquarantine old GATT");
+
+    let (tx, _rx) = mpsc::channel();
+    let new = ActiveAudioControlRegistration::install(102, tx);
+    assert!(!ota_control_dispatch_allowed(101));
+    assert!(!ota_control_dispatch_allowed(102));
+    new.readiness.transition(CaptureControlState::Ready);
+    tokio::time::timeout(Duration::from_millis(50), &mut waiting).await.unwrap().unwrap();
+    drop(old);
+    assert!(ota_control_dispatch_allowed(102), "retired cleanup cannot revoke the successor");
+    new.readiness.transition(CaptureControlState::Closed);
+    assert!(!ota_control_dispatch_allowed(102), "teardown revokes readiness before slow WinRT cleanup");
+    new.readiness.transition(CaptureControlState::Ready);
+    assert!(!ota_control_dispatch_allowed(102), "late HB cannot reopen a closed capture");
 }
 
 #[test]

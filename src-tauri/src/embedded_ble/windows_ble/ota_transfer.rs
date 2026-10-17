@@ -197,6 +197,22 @@ fn transfer_denzic_ota_v1_to_target(
         .min(u16::MAX as usize)
         .max(1) as u16;
     let window_chunks = configured_window.min(u16::MAX as usize).max(1) as u16;
+    let encode_started = Instant::now();
+    let encoded = if LISTENER_OTA_BLOCK_DEFLATE_ENABLED && target.supports_block_deflate {
+        let wire = listener_ota_v1_encode_block_deflate(firmware_bytes)?;
+        // A negotiated capability is permission, not an obligation to expand
+        // an incompressible image or change the canonical manifest artifact.
+        (wire.len() < firmware_bytes.len()).then_some(wire)
+    } else {
+        None
+    };
+    let wire_bytes = encoded.as_deref().unwrap_or(firmware_bytes);
+    let encoded_raw_size = encoded.as_ref().map(|_| firmware_bytes.len() as u32);
+    log::info!(
+        "[embedded-ble] Denzic OTA v1 #{transfer_id}: transport encoding={} canonical_bytes={} wire_bytes={} encode_ms={}",
+        if encoded.is_some() { "dovz1" } else { "raw" },
+        firmware_bytes.len(), wire_bytes.len(), encode_started.elapsed().as_millis()
+    );
     let mut transport = ListenerOtaV1Transport {
         target,
         transfer_id,
@@ -205,6 +221,8 @@ fn transfer_denzic_ota_v1_to_target(
         pending_wwr_b: Vec::with_capacity(LISTENER_OTA_V1_WWR_PIPELINE_DEPTH),
         status_error_started: None,
         control_sequence: 0,
+        confirmed_image_size: None,
+        encoded_raw_size,
     };
     if target.data_b.is_some() {
         log::info!(
@@ -218,7 +236,7 @@ fn transfer_denzic_ota_v1_to_target(
 
     let report = denzic_ota_core::transfer(
         &mut transport,
-        firmware_bytes,
+        wire_bytes,
         denzic_ota_core::TransferOptions {
             chunk_payload_bytes,
             window_chunks,
@@ -241,7 +259,7 @@ fn transfer_denzic_ota_v1_to_target(
     log::info!(
         "[embedded-ble] Denzic OTA v1 #{transfer_id}: transferred {}/{} bytes in {} data writes, {} status reads, {} offset recoveries, resumed_bytes={}, active_link_confirmed={}, elapsed_ms={}, bulk_kb_s={bulk_kb_s:.1}, data_write_ms={}, control_write_ms={}, status_read_ms={}, non_transfer_ms={}",
         report.firmware_bytes,
-        firmware_bytes.len(),
+        wire_bytes.len(),
         report.data_writes,
         report.status_reads,
         report.recovered_offsets,
@@ -267,22 +285,24 @@ fn transfer_denzic_ota_v1_to_target(
 pub(super) fn request_listener_ota_v1_active_link(
     observability_correlation_id: Option<u64>,
 ) -> Result<(), String> {
+    let active = active_audio_control_sender().ok_or_else(|| {
+        "Listener OTA v1 reconnect handoff skipped: no active audio capture".to_string()
+    })?;
+    if !active.readiness.is_ready() {
+        return Err("Listener OTA v1 capture is not control-ready".to_string());
+    }
     if let Some(correlation_id) = observability_correlation_id {
         let context = format!("TYPE:OBS:OTA:{correlation_id:016X}\n");
-        match send_audio_control_via_active_capture(
+        match send_audio_control_via_sender(
+            active.clone(),
             context.as_bytes(),
             Duration::from_millis(300),
             "Listener OTA observability context handoff",
         ) {
-            Some(Ok(())) => {}
-            Some(Err(error)) => {
+            Ok(()) => {}
+            Err(error) => {
                 log::info!(
                     "[embedded-ble] Listener OTA observability context handoff unavailable; continuing with compatible OTA handoff: {error}"
-                );
-            }
-            None => {
-                log::info!(
-                    "[embedded-ble] Listener OTA observability context handoff skipped: no active capture"
                 );
             }
         }
@@ -291,11 +311,12 @@ pub(super) fn request_listener_ota_v1_active_link(
     // open_audio_control advertisement/retry path here: after re-pair that
     // path can burn ~12–20s on a missing audio-service index and inflate
     // preflight while OTA GATT itself is already reachable.
-    if let Some(result) = send_audio_control_via_active_capture(
+    let result = send_audio_control_via_sender(
+        active.clone(),
         b"TYPE:OTA\n",
         Duration::from_millis(800),
         "Listener OTA v1 reconnect handoff",
-    ) {
+    );
         match result {
             Ok(()) => {
                 log::info!(
@@ -304,20 +325,17 @@ pub(super) fn request_listener_ota_v1_active_link(
                 return Ok(());
             }
             Err(err) => {
+                active.readiness.transition(CaptureControlState::Unavailable);
                 log::warn!(
                     "[embedded-ble] active Listener OTA v1 reconnect handoff failed; skipping long audio-control discovery: {err}"
                 );
+                // This capture did receive the request. Preserve its actual
+                // transport failure; the caller decides whether to retry or
+                // continue a read-only probe. Reporting a missing capture here
+                // hides timeouts and ATT errors behind the wrong lifecycle fact.
+                return Err(err);
             }
         }
-    } else {
-        log::info!(
-            "[embedded-ble] Listener OTA v1 reconnect handoff: no active capture; skipping long audio-control discovery"
-        );
-    }
-    Err(
-        "Listener OTA v1 reconnect handoff skipped: no active audio capture (prepare continues on OTA GATT)"
-            .to_string(),
-    )
 }
 
 pub(super) fn request_listener_ota_post_confirm_notify_fast_retry() {

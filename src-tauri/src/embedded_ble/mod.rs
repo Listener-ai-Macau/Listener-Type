@@ -741,6 +741,16 @@ pub fn transfer_stm32wb_st_ota(
 }
 
 #[cfg(target_os = "windows")]
+pub async fn wait_for_listener_ota_control_ready(timeout: Duration) -> Result<(), String> {
+    windows_ble::wait_for_listener_ota_control_ready(timeout).await
+}
+
+#[cfg(not(target_os = "windows"))]
+pub async fn wait_for_listener_ota_control_ready(_timeout: Duration) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
 pub fn request_listener_ota_v1_active_link(
     observability_correlation_id: Option<u64>,
 ) -> Result<(), String> {

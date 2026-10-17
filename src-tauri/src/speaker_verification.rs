@@ -895,6 +895,9 @@ mod platform {
     }
 
     static STATE: Lazy<Mutex<State>> = Lazy::new(|| Mutex::new(State::default()));
+    // Startup preparation and the first voice candidate may arrive together.
+    // Own initialization separately so profile/status reads remain responsive.
+    static RUNTIME_INIT_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
     static INFERENCE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1605,6 +1608,10 @@ mod platform {
     }
 
     fn ensure_runtime() -> Result<Arc<SpeakerRuntime>, String> {
+        if let Some(runtime) = STATE.lock().runtime.clone() {
+            return Ok(runtime);
+        }
+        let _initialization = RUNTIME_INIT_LOCK.lock();
         if let Some(runtime) = STATE.lock().runtime.clone() {
             return Ok(runtime);
         }
@@ -4235,6 +4242,29 @@ mod platform {
             assert!(same_score >= VERIFICATION_THRESHOLD);
             assert!(different_score < VERIFICATION_THRESHOLD);
             assert!(same_score > different_score);
+        }
+
+        #[test]
+        #[ignore = "explicit existing cached speaker assets; initialization only, no device/profile/editor"]
+        fn cached_runtime_has_one_owner_during_overlapping_startup_and_wake() {
+            let root = std::path::PathBuf::from(std::env::var_os("LISTENER_SPEAKER_MODEL_ROOT")
+                .expect("concurrent runtime replay requires existing cached resources"));
+            for name in [MODEL_NAME, "onnxruntime.dll", "onnxruntime_providers_shared.dll", "sherpa-onnx-c-api.dll"] {
+                assert!(root.join(name).is_file(), "missing cached resource: {name}");
+            }
+            assert_eq!(sha256(&root.join(MODEL_NAME)).unwrap(), MODEL_SHA256);
+            assert!(STATE.lock().runtime.is_none(), "requires an isolated fresh process");
+            let barrier = Arc::new(std::sync::Barrier::new(9));
+            let began = std::time::Instant::now();
+            let calls = (0..8).map(|_| {
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || { barrier.wait(); ensure_runtime().unwrap() })
+            }).collect::<Vec<_>>();
+            barrier.wait();
+            let runtimes = calls.into_iter().map(|call| call.join().unwrap()).collect::<Vec<_>>();
+            assert!(runtimes.iter().all(|runtime| Arc::ptr_eq(runtime, &runtimes[0])));
+            assert!(Arc::ptr_eq(&ensure_runtime().unwrap(), &runtimes[0]));
+            println!("cached concurrent callers=8 unique_runtime=1 elapsed_ms={}", began.elapsed().as_millis());
         }
 
         #[test]

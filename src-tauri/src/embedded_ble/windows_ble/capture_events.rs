@@ -1303,6 +1303,7 @@ fn capture_notification_events_until_cancelled_impl(
         }
         if let Some(outcome) = heartbeat_outcome {
             if let Err(err) = outcome {
+                cleanup.mark_control_readiness(CaptureControlState::Unavailable);
                 consecutive_type_heartbeat_failures =
                     consecutive_type_heartbeat_failures.saturating_add(1);
                 let reason = format!("{err}; BLE audio/control response missing");
@@ -1579,6 +1580,7 @@ fn capture_notification_events_until_cancelled_impl(
                     );
                     continue;
                 }
+                cleanup.mark_control_readiness(CaptureControlState::Unavailable);
                 if ec11_recovery_disconnect_deadline.take().is_some() {
                     log::info!(
                         "[embedded-ble] capture #{capture_id}: firmware disconnect observed after EC11 recovery notice; releasing the retained GATT session for recovery arbitration"
@@ -1717,6 +1719,7 @@ fn capture_notification_events_until_cancelled_impl(
                 &mut notify_refresh_required_after_link_recovery,
             );
         if link_recovered_after_valid_pcm {
+            cleanup.mark_control_readiness(CaptureControlState::Quarantined);
             log::info!(
                 "[embedded-ble] capture #{capture_id}: link recovered after active-session disconnect through current-segment PCM; current recording may finish, but this notify/GATT target is quarantined: {}",
                 link_recovery_reason

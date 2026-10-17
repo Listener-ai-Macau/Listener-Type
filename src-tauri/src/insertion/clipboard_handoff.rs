@@ -547,7 +547,14 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                     continue;
                 }
                 let mut reader = if restore && expected.is_none() && scope.is_none() { None } else { captured_reader };
-                let mut before = reader.as_ref().and_then(|reader| reader.before().ok());
+                let mut before = reader.as_ref().and_then(|reader| match reader.before() {
+                    Ok(snapshot) => Some(snapshot),
+                    Err(error) => {
+                        log::info!("[insertion] native paste baseline unavailable session_id={:?} reason={error}",
+                            scope.as_ref().map(|scope| scope.session_id));
+                        None
+                    }
+                });
                 // Observe a prior dispatch before advancing the chain. Native
                 // object identity, exact document, empty selection and end
                 // caret all have to agree; matching text alone is not ownership.
@@ -556,7 +563,10 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                     paste_receipt = None;
                 }
                 if let Some(prior) = paste_receipt.as_mut() { prior.observe(); }
-                if before.is_none() && !revisable && expected.is_none()
+                // Ordinary final tails, including punctuation, have the same
+                // immutable session owner as streamed appends. A fresh native
+                // snapshot is still required; finalization is not a receipt.
+                if before.is_none() && !revisable
                     && scope.as_ref().is_some_and(|scope| !scope.replace) {
                     let recovered = recover_scoped_paste_snapshot(
                         scope.as_ref().map(|scope| scope.session_id),
@@ -1066,6 +1076,34 @@ mod tests {
     }
 
     #[test]
+    fn final_append_and_punctuation_recovery_need_a_new_edit_receipt() {
+        let session = uuid::Uuid::new_v4();
+        let capability = 73_u64;
+        // These are the two finalization producers which previously dropped
+        // this session scope (ordinary tail) or excluded recovery (punctuation).
+        for (before, payload, whole) in [
+            ("Already delivered. ", "Final words.", "Already delivered. Final words."),
+            ("最后一句", "。", "最后一句。"),
+        ] {
+            let scope = SessionPasteScope { session_id: session,
+                previous_body: before.into(), replace: false };
+            let recovered = recover_scoped_paste_snapshot(Some(scope.session_id),
+                Some((Some(session), true, &capability)), |reader|
+                    Some((*reader, (before.to_string(), String::new())))).unwrap();
+            if crate::transcript_boundary::terminal_punctuation_only(payload) {
+                assert_eq!(terminal_append_decision(Some((&recovered.1.0, &recovered.1.1)),
+                    Some(true), &scope.previous_body, payload), TerminalAppendDecision::Append);
+            }
+            let mut observation = PasteObservation::default();
+            observation.observe(&recovered.1.0, &recovered.1.1, payload, before);
+            assert!(!observation.consumed, "old consumed prefix is not the new tail's receipt");
+            observation.observe(&recovered.1.0, &recovered.1.1, payload, whole);
+            assert!(observation.consumed, "new observed tail releases complete same-session recovery");
+            assert_ne!(whole, payload, "retained History contains more than the transport suffix");
+        }
+    }
+
+    #[test]
     fn paste_recovery_requires_same_session_consumed_predecessor_and_fresh_native_success() {
         let session = uuid::Uuid::new_v4();
         let other = uuid::Uuid::new_v4();
@@ -1083,6 +1121,27 @@ mod tests {
         let mut observation = PasteObservation::default();
         observation.observe("prefix", "", "new tail", "different input prefixnew tail");
         assert!(!observation.consumed, "a substring in another document cannot release clipboard transport");
+    }
+
+    #[test]
+    fn noneditable_stream_and_final_do_not_borrow_clipboard_or_confirm_a_receipt() {
+        let before = ticket();
+        let (commands, receiver) = mpsc::channel();
+        let worker = std::thread::spawn(move || run_with_capture(receiver, None,
+            || (None, crate::selection::FocusedInputState::NonEditable)));
+        let session = uuid::Uuid::new_v4();
+        for (body, previous) in [("streamed words", ""), ("final words", "old prefix") ] {
+            let (reply, result) = mpsc::channel();
+            commands.send(Command::Paste(body.into(), false, PasteShortcut::CtrlV,
+                None, Some(SessionPasteScope { session_id: session,
+                    previous_body: previous.into(), replace: false }), reply)).unwrap();
+            let result = result.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert_eq!(result.status, InsertStatus::DeferredNoTarget);
+            assert!(result.receipt.is_none(), "readonly Codex document cannot create a fake paste lease");
+            assert_eq!(ticket(), before, "deferring a non-editor cannot write clipboard or acquire its owner");
+        }
+        drop(commands);
+        worker.join().unwrap();
     }
 
     #[test]

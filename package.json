@@ -55,7 +55,9 @@
     "test": "npm run test:rules && npm run test:capsule-actions && npm run test:capsule-ordering && npm run test:layout && npm run test:capsule-display && npm run test:device-health && npm run test:device-settings-mock && npm run test:device-settings-focus && npm run test:ble-recovery-ui && npm run test:first-run-pairing && npm run test:provider-setup && npm run test:demo-mode && npm run test:firmware-ota && npm run test:marketplace-discovery",
     "check:dark-mode": "node scripts/check-dark-mode.mjs",
     "verify": "node scripts/verify-frontend.mjs",
-    "release:check": "node scripts/release-check.mjs"
+    "release:check": "node scripts/release-check.mjs",
+    "regression:trace": "python scripts/regression-history.py trace",
+    "check:regression-history": "python scripts/regression-history.test.py"
   },
   "dependencies": {
     "@denzic/ota-core": "file:third_party/denzic-platform/ota/host/typescript",
