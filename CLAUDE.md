@@ -1,3 +1,3 @@
 # Listener development
 
-Read `AGENTS.md`. It is the single active rule entry and contains only the anti-regression and chronological development mechanisms.
+Read AGENTS.md for this project's requirements. General development mechanisms follow the global rules.

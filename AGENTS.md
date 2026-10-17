@@ -1,13 +1,5 @@
-# Listener Type：两项开发底线
+# Listener Type 项目约定
 
-按用户 2026-10-17 要求，仅保留以下两项工作机制。旧版长规则、临时版本状态和重复流程已归档，不再自动执行。
-
-## 1. 防回退机制（必须遵守）
-
-修改前按功能回看已验收提交/标签、实际 Type/固件组合及正常/失败证据；复发时对照最后好版本，定位首次错误决定并修源头，必要时可重构。保留关键功能可用锚点及真实失败定向检查，跨端契约一起核对；只验证本次未通过或证据已失效的受影响行为，不重复全量测试，不把编译/安装当修好。防回退索引在 `scripts/regression-guard-commits.json`，使用 `python scripts/regression-history.py trace --feature <功能>` 查对应提交与检查入口。
-
-保住现用 Type、用户数据和未提交工作；后台开发不关软件、不抢输入焦点。实际更新待录音收尾完成后执行，立即恢复并核对身份；不得用旧基线撤销后续已有效的修复。
-
-## 2. 开发时间线机制（必须遵守）
-
-完整时间线复用 `C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/outputs/Listener-修复进度.md`。每次实际候选、构建、安装和回退留下时间、源码/基线、产物哈希、故障根因、变化、验证证据、新增收益/退步及未解决项；失败记录保留。已解决、部分改善、未改善、回归、回退、待验证分别说明，不能把文档或测试数量算进展。当前状态以时间线顶部为准，仓库内的历史材料仅按任务需要查询。
+- 后台开发不得随意关闭用户正在用的 Type，也不得抢输入焦点。必要更新等录音收尾完成后进行，随后立即恢复主进程和唤醒助手。
+- 防回退索引：`scripts/regression-guard-commits.json`；用 `python scripts/regression-history.py trace --feature <功能>` 查历史。
+- 完整开发时间线：`C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/outputs/Listener-修复进度.md`。

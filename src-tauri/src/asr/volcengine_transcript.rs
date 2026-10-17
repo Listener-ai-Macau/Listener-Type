@@ -205,12 +205,16 @@ fn complete_confirmed_result_rendering(result: &Value) -> Option<String> {
             previous_end = Some(end);
             words_key.push_str(&key);
         }
-        // The provider's corrected clause can contain a rendering edit absent
-        // from its timed tokens (e.g. a restored hesitation or a written
-        // number). Use the existing full-body seam only for this same fully
-        // confirmed response. The strict per-word ownership path above keeps
-        // its exact token/range checks and gains no new word permission.
-        revised_terminal_suffix(rendering, &words_key)?;
+        // Recognition finality belongs to this native second-pass clause,
+        // not to an editor's previously consumed spelling. Native clause text
+        // may include ITN, restored fillers or other post-processing absent
+        // from its timed word rendering. An editor seam's minimum anchor must
+        // not turn a confirmed short clause into permanently pending speech.
+        // Still require actual nonempty, ordered timed words: a missing audio
+        // occurrence cannot disappear from whole-response confirmation.
+        if words_key.is_empty() { return None; }
+        // This certifies only the complete same-response rendering below.
+        // The strict per-word source/ownership path remains unchanged.
         row_text.push_str(rendering);
     }
     if content_key(&row_text).is_empty() { return None; }
@@ -3320,6 +3324,46 @@ mod recognition_boundary_tests {
             assert_eq!(boundary.confirmed_admitted_prefix(corrected, Some(&timed_transcript_from_result(&result))),
                 Some(corrected.to_string()));
         }
+    }
+
+
+    #[test]
+    fn short_native_confirmed_rendering_is_not_an_editor_seam_or_word_permission() {
+        for (tokens, rendering) in [
+            ("请保留正文", "嗯，请保留正文。"),
+            ("yes", "yes indeed"),
+            ("はい", "ええ、はい。"),
+            ("twelve", "12"),
+        ] {
+            let mut clause=second_pass_row(rendering, 0);
+            clause["words"][0]["text"]=json!(tokens);
+            let mut result=response(vec![clause]);
+            let mut boundary=RecognitionBoundary::default();
+            boundary.update(&result);
+            let timing=timed_transcript_from_result(&result);
+            assert_eq!(boundary.confirmed_admitted_prefix(rendering,Some(&timing)),Some(rendering.into()));
+            assert!(boundary.confirmed_prefix(rendering,Some(&timing)).is_none(),
+                "native recognition finality grants no word/audio identity");
+            result["utterances"][0]["definite"]=json!(false);
+            boundary.update(&result);
+            assert!(!boundary.complete_rendering_matches(rendering));
+        }
+    }
+
+    #[test]
+    fn native_rendering_certificate_requires_complete_current_response_not_another_occurrence() {
+        let mut clause=second_pass_row("嗯，保留正文。", 0);
+        clause["words"][0]["text"]=json!("保留正文");
+        let base=response(vec![clause]);
+        let mut boundary=RecognitionBoundary::default();
+        boundary.update(&base);
+        assert!(!boundary.complete_rendering_matches("保留正文"),"not a prefix or token certificate");
+        let mut missing=base.clone();
+        missing["utterances"][0]["words"]=json!([]);
+        boundary.update(&missing);
+        assert!(!boundary.complete_rendering_matches(base["text"].as_str().unwrap()));
+        boundary.update(&json!({"text":base["text"]}));
+        assert!(!boundary.complete_rendering_matches(base["text"].as_str().unwrap()));
     }
 
     fn row(text: &str, start: u64, definite: bool) -> Value {

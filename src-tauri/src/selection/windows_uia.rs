@@ -12,11 +12,39 @@ use windows::Win32::System::Com::{
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern, IUIAutomationValuePattern, UIA_EditControlTypeId, UIA_ButtonControlTypeId, UIA_CheckBoxControlTypeId, UIA_RadioButtonControlTypeId, UIA_HyperlinkControlTypeId,
     UIA_TextPatternId, UIA_WindowControlTypeId, UIA_CONTROLTYPE_ID,
-    UIA_ValuePatternId, UIA_PATTERN_ID,
+    UIA_ValuePatternId, UIA_PATTERN_ID, UIA_DocumentControlTypeId, UIA_IsReadOnlyAttributeId,
     TextPatternRangeEndpoint_Start, TextPatternRangeEndpoint_End,
 };
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 use super::FocusedInputState;
+
+fn native_boolean_attribute(value: &windows::core::VARIANT) -> Option<bool> {
+    // VARIANT equality first checks the native type. Do not coerce numbers,
+    // strings, MixedAttribute or NotSupported into permission to edit.
+    if value == &windows::core::VARIANT::from(true) { Some(true) }
+    else if value == &windows::core::VARIANT::from(false) { Some(false) }
+    else { None }
+}
+
+fn text_pattern_read_only(pattern: &IUIAutomationTextPattern) -> Option<bool> {
+    let range = unsafe { pattern.DocumentRange() }.ok()?;
+    let value = unsafe { range.GetAttributeValue(UIA_IsReadOnlyAttributeId) }.ok()?;
+    native_boolean_attribute(&value)
+}
+
+fn combined_read_only(value: Option<bool>, text: Option<bool>) -> Option<bool> {
+    match (value, text) {
+        (Some(true), _) | (_, Some(true)) => Some(true),
+        (Some(false), _) | (_, Some(false)) => Some(false),
+        _ => None,
+    }
+}
+
+fn document_receipt_allowed(allow: bool, control: UIA_CONTROLTYPE_ID,
+    read_only: Option<bool>, enabled: Option<bool>, text_available: bool) -> bool {
+    allow && control == UIA_DocumentControlTypeId && read_only == Some(false)
+        && enabled == Some(true) && text_available
+}
 
 fn pattern_available(element: &IUIAutomationElement, pattern: UIA_PATTERN_ID) -> Option<bool> {
     use windows::core::{Interface, IUnknown};
@@ -41,7 +69,8 @@ fn focused_input_state(control: UIA_CONTROLTYPE_ID, keyboard_focusable: Option<b
     // remains Unknown and keeps the existing paste fallback.
     if read_only == Some(true) || enabled == Some(false) {
         FocusedInputState::NonEditable
-    } else if control == UIA_EditControlTypeId && read_only == Some(false) {
+    } else if matches!(control, UIA_EditControlTypeId | UIA_DocumentControlTypeId)
+        && read_only == Some(false) {
         FocusedInputState::Editable
     } else if text_pattern == Some(false) && value_pattern == Some(false)
         && (control == UIA_WindowControlTypeId && keyboard_focusable == Some(false)
@@ -60,6 +89,7 @@ pub(crate) struct WindowsSelectionReader {
     focused: IUIAutomationElement,
     automation: IUIAutomation,
     target_hwnd: usize,
+    paste_observation_only: bool,
     _apartment: ComApartment,
 }
 
@@ -79,13 +109,13 @@ impl WindowsSelectionReader {
     }
 
     fn new_with_control_policy(target_hwnd: usize, require_editable: bool) -> Result<Self, String> {
-        Self::new_with_budget(target_hwnd, require_editable, false, &mut FocusedInputState::Unknown)
+        Self::new_with_budget(target_hwnd, require_editable, false, false, &mut FocusedInputState::Unknown)
     }
 
     pub(crate) fn capture_for_paste() -> (Option<Self>, FocusedInputState) {
         let target = unsafe { GetForegroundWindow().0 as usize };
         let mut state = FocusedInputState::Unknown;
-        let reader = match Self::new_with_budget(target, true, true, &mut state) {
+        let reader = match Self::new_with_budget(target, true, true, true, &mut state) {
             Ok(reader) => Some(reader),
             Err(error) => {
                 // Capability failures have different causes (native provider,
@@ -98,6 +128,7 @@ impl WindowsSelectionReader {
     }
 
     fn new_with_budget(target_hwnd: usize, require_editable: bool, bounded: bool,
+        allow_document_receipt: bool,
         state: &mut FocusedInputState) -> Result<Self, String> {
         let init = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         let apartment = if init.is_ok() {
@@ -130,6 +161,8 @@ impl WindowsSelectionReader {
         {
             return Err("accessibility editor does not have keyboard focus".into());
         }
+        let mut document_pattern: Option<IUIAutomationTextPattern> = None;
+        let mut paste_observation_only = false;
         if require_editable {
             let control = unsafe { focused.CurrentControlType() }
                 .map_err(|err| format!("focused editor control type unavailable: {err}"))?;
@@ -139,9 +172,17 @@ impl WindowsSelectionReader {
             // paste with no input target and reserve a false delivered prefix.
             let value: Option<IUIAutomationValuePattern> =
                 unsafe { focused.GetCurrentPatternAs(UIA_ValuePatternId) }.ok();
-            let read_only = value.as_ref()
+            let value_read_only = value.as_ref()
                 .and_then(|value| unsafe { value.CurrentIsReadOnly() }.ok())
                 .map(|value| value.as_bool());
+            // Contenteditable Chromium documents may expose TextPattern and
+            // IsReadOnly=false while legitimately having no ValuePattern.
+            // Read this native fact; neither a role nor pattern presence is
+            // evidence that an unavailable readonly attribute means false.
+            let read_only = if control == UIA_DocumentControlTypeId {
+                document_pattern = unsafe { focused.GetCurrentPatternAs(UIA_TextPatternId) }.ok();
+                combined_read_only(value_read_only, document_pattern.as_ref().and_then(text_pattern_read_only))
+            } else { value_read_only };
             let enabled = unsafe { focused.CurrentIsEnabled() }.ok().map(|value| value.as_bool());
             if unsafe { GetForegroundWindow().0 as usize } != target_hwnd
                 || !unsafe { focused.CurrentHasKeyboardFocus() }.ok().is_some_and(|v| v.as_bool()) {
@@ -151,7 +192,10 @@ impl WindowsSelectionReader {
             if *state == FocusedInputState::NonEditable {
                 return Err("focused control is read-only or disabled".into());
             }
-            if control != UIA_EditControlTypeId {
+            if document_receipt_allowed(allow_document_receipt, control, read_only,
+                enabled, document_pattern.is_some()) {
+                paste_observation_only = true;
+            } else if control != UIA_EditControlTypeId {
                 // Positive container/capability facts, never a window title or
                 // a failed text read. Missing mutation permission stays Unknown.
                 let focusable = unsafe { focused.CurrentIsKeyboardFocusable() }.ok().map(|v| v.as_bool());
@@ -164,15 +208,18 @@ impl WindowsSelectionReader {
                 return Err(format!("focused control is not an editable text field: role={} readonly={read_only:?} enabled={enabled:?} text={text:?} value={value:?}", control.0));
             }
         }
-        let pattern: IUIAutomationTextPattern =
-            unsafe { focused.GetCurrentPatternAs(UIA_TextPatternId) }
-                .map_err(|err| format!("focused editor has no safe selection readback: {err}"))?;
+        let pattern: IUIAutomationTextPattern = match document_pattern {
+            Some(pattern) => pattern,
+            None => unsafe { focused.GetCurrentPatternAs(UIA_TextPatternId) }
+                .map_err(|err| format!("focused editor has no safe selection readback: {err}"))?,
+        };
         Ok(Self {
             _apartment: apartment,
             pattern,
             focused,
             automation,
             target_hwnd,
+            paste_observation_only,
         })
     }
 
@@ -185,7 +232,8 @@ impl WindowsSelectionReader {
             else if init == RPC_E_CHANGED_MODE { ComApartment(false) }
             else { return Err(format!("accessibility COM duplication failed: {init}")); };
         Ok(Self { pattern: self.pattern.clone(), focused: self.focused.clone(),
-            automation: self.automation.clone(), target_hwnd: self.target_hwnd, _apartment: apartment })
+            automation: self.automation.clone(), target_hwnd: self.target_hwnd,
+            paste_observation_only: self.paste_observation_only, _apartment: apartment })
     }
 
     pub(crate) fn read_selected_text(&self) -> Result<String, String> {
@@ -249,6 +297,7 @@ impl WindowsSelectionReader {
     }
 
     pub(crate) fn revisable_document_agrees(&self, document: &str) -> Result<bool, String> {
+        if self.paste_observation_only { return Ok(false); }
         let value: IUIAutomationValuePattern = unsafe { self.focused.GetCurrentPatternAs(UIA_ValuePatternId) }
             .map_err(|error| error.to_string())?;
         let value = unsafe { value.CurrentValue() }.map_err(|error| error.to_string())?.to_string();
@@ -305,6 +354,14 @@ impl WindowsSelectionReader {
                 || !self.focused.CurrentIsEnabled().map_err(|error| error.to_string())?.as_bool() {
                 return Ok(false);
             }
+            if self.paste_observation_only {
+                if self.focused.CurrentControlType().map_err(|error| error.to_string())? != UIA_DocumentControlTypeId {
+                    return Ok(false);
+                }
+                let value: Option<IUIAutomationValuePattern> = self.focused.GetCurrentPatternAs(UIA_ValuePatternId).ok();
+                let value_read_only = value.as_ref().and_then(|v| v.CurrentIsReadOnly().ok()).map(|v| v.as_bool());
+                return Ok(combined_read_only(value_read_only, text_pattern_read_only(&self.pattern)) == Some(false));
+            }
             let value: IUIAutomationValuePattern = self.focused.GetCurrentPatternAs(UIA_ValuePatternId)
                 .map_err(|error| error.to_string())?;
             Ok(!value.CurrentIsReadOnly().map_err(|error| error.to_string())?.as_bool())
@@ -314,6 +371,7 @@ impl WindowsSelectionReader {
     /// Select only the receipted session suffix; never synthesize Ctrl+A or
     /// move focus. UIA's character units must expose the exact expected bytes.
     pub(crate) fn select_owned_suffix(&self, document: &str, expected: &str) -> Result<(), String> {
+        if self.paste_observation_only { return Err("paste observation does not grant native selection mutation".into()); }
         if expected.is_empty() || !self.is_current() || self.paste_snapshot()? != (document.into(), String::new())
             || !self.caret_at_end()? { return Err("session editor changed".into()); }
         unsafe {
@@ -369,6 +427,52 @@ mod focus_tests {
     use super::*;
 
     #[test]
+    fn saved_writable_document_supports_paste_receipts_without_value_pattern() {
+        // 14:53 failed paste: Document=50030, enabled and TextPattern present,
+        // ValuePattern absent. At 14:55 the same native provider exposed a
+        // Boolean TextPattern.IsReadOnly=false. No title/text heuristic is used.
+        let read_only = combined_read_only(None, native_boolean_attribute(&windows::core::VARIANT::from(false)));
+        assert_eq!(focused_input_state(UIA_DocumentControlTypeId, Some(true),
+            Some(true), Some(false), read_only, Some(true)), FocusedInputState::Editable);
+        assert!(document_receipt_allowed(true, UIA_DocumentControlTypeId,
+            read_only, Some(true), true));
+        assert!(!document_receipt_allowed(false, UIA_DocumentControlTypeId,
+            read_only, Some(true), true), "ordinary selection/range mutation does not gain this capability");
+        for (readonly, enabled, text) in [(None, Some(true), true),
+            (Some(true), Some(true), true), (Some(false), None, true),
+            (Some(false), Some(false), true), (Some(false), Some(true), false)] {
+            assert!(!document_receipt_allowed(true, UIA_DocumentControlTypeId, readonly, enabled, text));
+        }
+        assert_eq!(combined_read_only(Some(true), Some(false)), Some(true));
+        assert_eq!(combined_read_only(Some(false), Some(true)), Some(true));
+        assert_eq!(focused_input_state(UIA_DocumentControlTypeId, Some(true),
+            Some(true), Some(false), Some(true), Some(true)), FocusedInputState::NonEditable,
+            "the saved readonly transcript must remain excluded");
+    }
+
+    #[test]
+    fn native_readonly_attribute_requires_a_boolean_not_coercible_or_reserved_values() {
+        use windows::core::VARIANT;
+        assert_eq!(native_boolean_attribute(&VARIANT::from(true)), Some(true));
+        assert_eq!(native_boolean_attribute(&VARIANT::from(false)), Some(false));
+        for value in [VARIANT::new(), VARIANT::from(0i32), VARIANT::from(-1i32),
+            VARIANT::from(0.0f64), VARIANT::from("false"), VARIANT::from("true")] {
+            assert_eq!(native_boolean_attribute(&value), None,
+                "numeric/string/default attributes cannot grant paste permission");
+        }
+        let init = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        assert!(init.is_ok() || init == RPC_E_CHANGED_MODE);
+        let _apartment = ComApartment(init.is_ok());
+        use windows::Win32::UI::Accessibility::{UiaGetReservedMixedAttributeValue,
+            UiaGetReservedNotSupportedValue};
+        for reserved in [unsafe { UiaGetReservedMixedAttributeValue() }.unwrap(),
+            unsafe { UiaGetReservedNotSupportedValue() }.unwrap()] {
+            assert_eq!(native_boolean_attribute(&VARIANT::from(reserved)), None,
+                "native UIA MixedAttribute/NotSupported cannot grant paste permission");
+        }
+    }
+
+    #[test]
     fn readonly_documents_and_nontext_buttons_cannot_be_unknown_paste_targets() {
         // Saved Codex native observations: Document+readonly and focused
         // Button (50000)+no Text/Value patterns. Neither is an input target.
@@ -396,7 +500,7 @@ mod focus_tests {
             assert!(!native_text_matches_value(&format!("{text} extra"), text));
         }
     }
-    use windows::Win32::UI::Accessibility::{UIA_CustomControlTypeId, UIA_DocumentControlTypeId};
+    use windows::Win32::UI::Accessibility::UIA_CustomControlTypeId;
 
     #[test]
     fn exposed_window_container_is_distinct_from_unreadable_or_custom_editor() {

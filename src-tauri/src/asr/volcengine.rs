@@ -12929,6 +12929,10 @@ mod tests {
                 let consumed = asr.pending_body_delivery_after("").unwrap().key;
                 assert!(asr.pending_body_delivery_after(&consumed).is_none(), "consumed body must release its obligation");
             }
+            if let Some(expected) = case.get("expectedLastRecognitionPending").and_then(Value::as_bool) {
+                assert_eq!(rows.last().and_then(|row| row["pending"]["recognitionPending"].as_bool()),
+                    Some(expected), "saved final native response must resolve the same recognition obligation: {}", case["id"]);
+            }
             output.push(json!({"id":case["id"],"frames":rows}));
         }
         std::fs::write(root.join("native-pending-body.json"),serde_json::to_vec_pretty(&json!({"cases":output,"cloudCalls":0,"actualEditor":false})).unwrap()).unwrap();
