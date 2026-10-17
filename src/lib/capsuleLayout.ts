@@ -24,6 +24,10 @@ export interface CapsuleMessageLayout {
 }
 
 const PROCESSING_ICON_WIDTH = 17;
+// Both status badges fit a fixed 13px line, 6px padding and rounded borders.
+// Reserve their full painted box in the native host, including top shadow room.
+export const CAPSULE_BADGE_HEIGHT = 21;
+export const CAPSULE_BADGE_STACK_STEP = 26;
 
 export function getCapsulePillMetrics(os: OS): CapsulePillMetrics {
   if (os === 'win') {
@@ -50,12 +54,16 @@ export function getCapsuleHostMetrics(
   if (os === 'win') {
     const horizontalInset = 12;
     const pill = getCapsulePillMetrics(os);
+    const bottomInset = 12;
+    const badgeGap = 8;
+    const topInset = 12;
     return {
       width: pill.width + horizontalInset * 2,
-      height: translationActive ? 118 : 84,
+      height: pill.height + bottomInset + badgeGap + CAPSULE_BADGE_HEIGHT + topInset
+        + (translationActive ? CAPSULE_BADGE_STACK_STEP : 0),
       horizontalInset,
-      bottomInset: 12,
-      badgeGap: 8,
+      bottomInset,
+      badgeGap,
       boxSizing: 'border-box',
     };
   }

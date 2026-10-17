@@ -3483,9 +3483,17 @@ fn capsule_bottom_center_position(
     #[cfg(not(target_os = "windows"))]
     let local_x = ((logical_w - bounds.width) / 2.0).max(0.0);
     #[cfg(target_os = "windows")]
-    let bottom_margin = 96.0;
+    let bottom_margin = 88.0;
     #[cfg(not(target_os = "windows"))]
     let bottom_margin = 80.0;
+    // Anchor the visible pill's bottom, not the top of a variable-height host.
+    // 88px preserves the old normal Windows pill position (84px host, 20px
+    // top inset); status/translation space must grow upward from this anchor.
+    #[cfg(target_os = "windows")]
+    let local_y = (logical_h - bounds.height - bottom_margin + bounds.bottom_inset).max(0.0);
+    #[cfg(target_os = "windows")]
+    let _ = visual_height;
+    #[cfg(not(target_os = "windows"))]
     let local_y = (logical_h - visual_height - bottom_margin - bounds.bottom_inset).max(0.0);
 
     // Tauri monitor origins are physical desktop coordinates. Convert the origin too,
@@ -3527,7 +3535,9 @@ fn capsule_window_bounds(translation_active: bool) -> CapsuleWindowBounds {
             // Keep the Windows hitbox in sync with the frontend pill width plus
             // symmetric side insets for shadow room.
             width: WINDOWS_CAPSULE_PILL_WIDTH + WINDOWS_CAPSULE_SIDE_INSET * 2.0,
-            height: if translation_active { 118.0 } else { 84.0 },
+            // Frontend: pill52 + bottom12 + gap8 + badge21 + top12.
+            // The second badge adds 26px; keep src/lib/capsuleLayout.ts in sync.
+            height: if translation_active { 131.0 } else { 105.0 },
             bottom_inset: 12.0,
         }
     }
@@ -3910,7 +3920,7 @@ mod tests {
         #[cfg(target_os = "windows")]
         assert_eq!(
             (bounds.width, bounds.height, bounds.bottom_inset),
-            (304.0, 84.0, 12.0)
+            (304.0, 105.0, 12.0)
         );
 
         #[cfg(not(target_os = "windows"))]
@@ -3926,7 +3936,7 @@ mod tests {
         #[cfg(target_os = "windows")]
         assert_eq!(
             (bounds.width, bounds.height, bounds.bottom_inset),
-            (304.0, 118.0, 12.0)
+            (304.0, 131.0, 12.0)
         );
 
         #[cfg(not(target_os = "windows"))]
@@ -3958,7 +3968,7 @@ mod tests {
         );
 
         #[cfg(target_os = "windows")]
-        assert_eq!((x, y), (-328.0, 920.0));
+        assert_eq!((x, y), (-328.0, 899.0));
         #[cfg(not(target_os = "windows"))]
         assert_eq!((x, y), (-1070.0, 904.0));
     }
@@ -3976,7 +3986,7 @@ mod tests {
         );
 
         #[cfg(target_os = "windows")]
-        assert_eq!((x, y), (3512.0, -40.0));
+        assert_eq!((x, y), (3512.0, -61.0));
         #[cfg(not(target_os = "windows"))]
         assert_eq!((x, y), (2770.0, -56.0));
     }
@@ -3995,6 +4005,24 @@ mod tests {
         assert_eq!(position, (5268, -60));
         #[cfg(not(target_os = "windows"))]
         assert_eq!(position, (4092, -36));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn capsule_badge_space_grows_upward_without_moving_the_visible_pill() {
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let mut bottoms = Vec::new();
+            for translation in [false, true] {
+                let bounds = capsule_window_bounds(translation);
+                let (_, y) = capsule_bottom_center_position(
+                    -1920, 0, 1920, 1080, scale, bounds, 52.0,
+                );
+                bottoms.push(y + bounds.height - bounds.bottom_inset);
+            }
+            assert_eq!(bottoms[0], bottoms[1]);
+            // The old normal host had y = screen - 160 and pill bottom y+72.
+            assert_eq!(bottoms[0], 1080.0 / scale - 88.0);
+        }
     }
 
     #[test]

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { detectOS, type OS } from './WindowChrome';
 import {
+  CAPSULE_BADGE_HEIGHT,
+  CAPSULE_BADGE_STACK_STEP,
   getCapsuleHostMetrics,
   getCapsuleMessageLayout,
   getCapsulePillMetrics,
@@ -579,7 +581,7 @@ export function Capsule() {
   const [stopAcknowledged, setStopAcknowledged] = useState<boolean>(false);
   // 录音开始先显示音波：预览文本现在一秒内就会到，但 owner 验收过的视觉合同是
   // 「先音波、有正文再上字」，给音波一个短暂节拍再切换。
-  // Windows 端 host 在翻译模式从 84 长到 118；macOS / Linux 上 capsuleLayout 已固定 42 忽略此参数。
+  // Windows reserves the full network badge and an additional translation row.
   const hostMetrics = getCapsuleHostMetrics(os, translation);
 
   const clearStopAcknowledgement = () => {
@@ -966,44 +968,53 @@ export function Capsule() {
       }}
     >
       {/* 网络状态徽章：断网/识别不可达时挂在胶囊上方（"正在翻译"徽章
-          再往上叠一层，两者同现不重叠）。圆点呼吸闪烁表示持续状态。 */}
+          再往上叠一层，两者同现不重叠）。居中定位与入场动画分层。 */}
       {netBadge && (
         <div
+          data-capsule-status="network"
           style={{
             position: 'absolute',
             left: '50%',
             bottom: os === 'win'
-              ? `${hostMetrics.bottomInset + metrics.height + hostMetrics.badgeGap + (translation ? 26 : 0)}px`
+              ? `${hostMetrics.bottomInset + metrics.height + hostMetrics.badgeGap + (translation ? CAPSULE_BADGE_STACK_STEP : 0)}px`
               : `calc(50% + 21px + 8px + ${(translation ? 26 : 0)}px)`,
             transform: 'translateX(-50%)',
             pointerEvents: 'none',
+            display: 'flex',
+          }}
+        >
+          <div style={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: 5,
             padding: '3px 10px',
             borderRadius: 999,
-            fontSize: 10.5,
-            fontWeight: 600,
-            color: netBadgeTone === 'bad' ? '#8C2F23' : '#8A5410',
-            background: netBadgeTone === 'bad'
-              ? 'rgba(255, 226, 218, 0.92)'
-              : 'rgba(255, 231, 195, 0.92)',
-            border: `0.5px solid ${netBadgeTone === 'bad' ? 'rgba(210, 74, 58, 0.4)' : 'rgba(232, 139, 30, 0.4)'}`,
-            boxShadow: '0 4px 12px -4px rgba(120, 70, 20, 0.28), 0 0 0 0.5px rgba(0,0,0,0.04)',
+            fontSize: 11,
+            height: CAPSULE_BADGE_HEIGHT,
+            boxSizing: 'border-box',
+            lineHeight: '13px',
+            fontWeight: 500,
+            color: netBadgeTone === 'bad' ? 'var(--ol-err)' : 'var(--ol-warn, #B25E09)',
+            background: 'var(--ol-glass-bg-strong)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            border: `0.5px solid ${netBadgeTone === 'bad' ? 'rgba(189, 98, 89, 0.22)' : 'rgba(178, 94, 9, 0.22)'}`,
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.10)',
             letterSpacing: 0,
             whiteSpace: 'nowrap',
             animation: 'cap-state-enter 220ms var(--ol-motion-soft) both',
           }}
-        >
-          <span
-            style={{
-              width: 5,
-              height: 5,
-              borderRadius: 999,
-              background: netBadgeTone === 'bad' ? '#D24A3A' : '#E88B1E',
-            }}
-          />
-          {netBadge}
+          >
+            <span
+              style={{
+                width: 5,
+                height: 5,
+                borderRadius: 999,
+                background: 'currentColor',
+              }}
+            />
+            {netBadge}
+          </div>
         </div>
       )}
       {/* "正在翻译" 徽章 — 嵌套两层：
@@ -1011,6 +1022,7 @@ export function Capsule() {
           内层只负责"垂直位移 + 渐变透明度"——这样不会跟 translateX(-50%) 冲突，
           也不存在 keyframe 与 inline transform 互相覆盖导致的视觉跳变。 */}
       <div
+        data-capsule-status="translation"
         style={{
           position: 'absolute',
           left: '50%',
@@ -1021,6 +1033,7 @@ export function Capsule() {
             : 'calc(50% + 21px + 8px)',
           transform: 'translateX(-50%)',
           pointerEvents: 'none',
+          display: 'flex',
         }}
       >
         <div
@@ -1030,14 +1043,17 @@ export function Capsule() {
             gap: 5,
             padding: '3px 10px',
             borderRadius: 999,
-            fontSize: 10.5,
-            fontWeight: 600,
+            fontSize: 11,
+            height: CAPSULE_BADGE_HEIGHT,
+            boxSizing: 'border-box',
+            lineHeight: '13px',
+            fontWeight: 500,
             color: 'var(--ol-blue)',
-            background: 'rgba(255, 255, 255, 0.78)',
+            background: 'var(--ol-glass-bg-strong)',
             backdropFilter: 'blur(20px) saturate(180%)',
             WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-            border: '0.5px solid rgba(101, 123, 112, 0.25)',
-            boxShadow: '0 4px 12px -4px rgba(101, 123, 112, 0.25), 0 0 0 0.5px rgba(0,0,0,0.04)',
+            border: '0.5px solid rgba(101, 123, 112, 0.22)',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.10)',
             letterSpacing: 0,
             whiteSpace: 'nowrap',
             // 隐藏：从 pill 中线偏下出发；显示：归位到 wrapper（pill 上方 25px）

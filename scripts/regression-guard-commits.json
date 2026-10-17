@@ -641,6 +641,36 @@
         "actualPcm": "actual-pcm-transfer-lease.log"
       },
       "limits": "Actual capture selector/reserve/release run with the production controller; numbered source geometry and BLE readiness are simulated. Natural 15:05/16:55 firmware execution cause was not retained; full field attribution/stability remain unproven."
+    },
+    {
+      "id": "type_capsule_complete_status_badge_geometry",
+      "repo": "type",
+      "commit": "4e42c42d39b18b7c406790a50328bb679a4ab2b5",
+      "subject": "Fit whole status badges and grow the native host upward without moving the visible pill",
+      "state": "actual_render_passed_built_install_pending",
+      "humanAccepted": false,
+      "baseCommit": "1643c861183a8c8a11a6f476e36c942b5bec1bff",
+      "build": 39,
+      "protects": [
+        "Full 21px network badge with top shadow clearance at normal and translation layouts",
+        "Network animation does not overwrite horizontal centering",
+        "Default normal pill position and saved user drag bottom remain stable while status space grows upward",
+        "No ASR, dictation, clipboard, BLE or network policy change"
+      ],
+      "guards": [
+        "npm run test:layout"
+      ],
+      "evidence": [
+        "listener-repair-handoff/work/capsule-layout39-20261017/user-reported-clipped-badge.png",
+        "listener-repair-handoff/work/capsule-layout39-20261017/render-results.json",
+        "listener-repair-handoff/work/capsule-layout39-20261017/native-results.log",
+        "listener-repair-handoff/work/capsule-layout39-20261017/source-provenance.json"
+      ],
+      "limits": [
+        "Exact production React rendered in isolated headless Edge with mocked IPC; no field visual acceptance yet",
+        "MSI built; installation deferred while Type is Listening",
+        "Legacy 732a863 host84 leaves only12px for21px badge; translation stacking also lacked top room"
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
@@ -816,6 +846,33 @@
         "source": "4cdcd5044e3e0422093431ed763e303433e54f86",
         "exe_sha256": "F6B0DCAF8CCE58B28DC693408B79ACF52676A47F40119F41F893187EA335444B",
         "installed_at": "2026-10-17T16:37:20.3284227+08:00"
+      }
+    },
+    {
+      "id": "capsule-status-layout",
+      "baseline_state": "actual_render_passed_built_install_pending",
+      "accepted_scope": "Geometry and source-bound package only; no human field acceptance. Existing topmost/drag behavior retained.",
+      "guard_entries": [
+        "type_capsule_complete_status_badge_geometry"
+      ],
+      "paths": {
+        "type": [
+          "src/components/Capsule.tsx",
+          "src/lib/capsuleLayout.ts",
+          "src-tauri/src/lib.rs",
+          "src-tauri/src/capsule_placement.rs"
+        ]
+      },
+      "known_failures": [
+        "732a863 fixed normal host84px leaves12px for a21px network badge; same-element entrance transform replaces translateX centering.",
+        "Default native placement formerly anchored host top from visual height, shifting the visible pill when host height grew."
+      ],
+      "latest_built_candidate": {
+        "build": 39,
+        "source": "4e42c42d39b18b7c406790a50328bb679a4ab2b5",
+        "exe_sha256": "09303329962a9223f8d00e333d324e1a60a8ad450246110c34d83c9ee77b4fb4",
+        "package_completed_at": "2026-10-17T17:42:51.642092+08:00",
+        "installed": false
       }
     }
   ]

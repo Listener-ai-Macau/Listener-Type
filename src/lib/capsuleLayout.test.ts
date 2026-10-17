@@ -3,6 +3,8 @@ import {
   getCapsulePillMetrics,
   getCapsuleHostMetrics,
   getCapsuleMessageLayout,
+  CAPSULE_BADGE_HEIGHT,
+  CAPSULE_BADGE_STACK_STEP,
 } from './capsuleLayout.ts';
 
 // ── Pill metrics ──────────────────────────────────────────────
@@ -31,7 +33,7 @@ import {
 {
   const h = getCapsuleHostMetrics('win', false);
   assert.strictEqual(h.width, 304, 'win host width = pill(280) + insets(24)');
-  assert.strictEqual(h.height, 84, 'win host height without translation');
+  assert.strictEqual(h.height, 105, 'win host includes the complete network badge');
   assert.strictEqual(h.horizontalInset, 12, 'win horizontal inset');
   assert.strictEqual(h.bottomInset, 12, 'win bottom inset');
   assert.strictEqual(
@@ -44,7 +46,22 @@ import {
 {
   const h = getCapsuleHostMetrics('win', true);
   assert.strictEqual(h.width, 304, 'translation keeps same width');
-  assert.strictEqual(h.height, 118, 'translation grows height');
+  assert.strictEqual(h.height, 131, 'translation grows upward by one badge row');
+}
+
+// The reported network badge was only given 12px of a 21px box in the old
+// 84px host. Fit both badges and their shadows without depending on font metrics.
+for (const translation of [false, true]) {
+  const host = getCapsuleHostMetrics('win', translation);
+  const pill = getCapsulePillMetrics('win');
+  const lowerBadgeBottom = host.bottomInset + pill.height + host.badgeGap;
+  const networkBottom = lowerBadgeBottom + (translation ? CAPSULE_BADGE_STACK_STEP : 0);
+  assert.ok(host.height - networkBottom - CAPSULE_BADGE_HEIGHT >= 12,
+    'the complete upper badge and shadow fit inside the native window');
+  if (translation) {
+    assert.ok(networkBottom >= lowerBadgeBottom + CAPSULE_BADGE_HEIGHT + 5,
+      'network and translation rows have their own non-overlapping space');
+  }
 }
 
 // macOS host
