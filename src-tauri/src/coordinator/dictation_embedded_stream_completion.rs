@@ -6,6 +6,9 @@ impl EmbeddedStreamingDictation {
         let Some(ensure) = self.accepted_wake_capture_ensure.take() else {
             return;
         };
+        if let Some(trace) = self.session.as_ref().and_then(|s| s.capture_control_trace.as_ref()) {
+            trace.retired(ensure.request_id, reason);
+        }
         log::info!(
             "[wake-phrase] aborting accepted wake capture ensure request_id={} previous_segment_id={} reason={reason}",
             ensure.request_id,
@@ -85,6 +88,9 @@ impl EmbeddedStreamingDictation {
             let request_id = ensure.request_id;
             let previous_segment_id = ensure.previous_segment_id;
             self.accepted_wake_capture_ensure.take();
+            if let Some(trace) = self.session.as_ref().and_then(|s| s.capture_control_trace.as_ref()) {
+                trace.retired(ensure.request_id, "unconfirmed_live_body");
+            }
             self.activation_segment_race_guard = None;
             log::warn!(
                 "[wake-phrase] accepted wake capture ensure timed out request_id={} previous_segment_id={} wait_ms={} replacement_wait_started={} action=keep_live_body_session",
@@ -342,6 +348,7 @@ impl EmbeddedStreamingDictation {
                             "normalizedPcmBytes": session.normalized_pcm_bytes,
                             "archivePcmBytes": session.archive_pcm.as_ref().map_or(0, Vec::len),
                             "audioDelivery": asr.diagnostic_audio_delivery(),
+                            "captureControl": session.capture_control_trace.as_ref().map(CaptureControlTrace::snapshot),
                             "trace": asr.take_diagnostic_trace(),
                         });
                         if let Ok(bytes) = serde_json::to_vec(&payload) {

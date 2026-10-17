@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-17",
+  "updated_at": "2026-10-17T20:49:31.631768+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -805,6 +805,35 @@
         "Original wake tail-drain early-end and Document clipboard field ranges remain pending; ASR/audio/source-stop/rename settings code was unchanged."
       ],
       "sourceChangeCommit": "46e164469ef7cc45ab198f10cd8767fcd1242820"
+    },
+    {
+      "id": "type_session_capture_control_archive",
+      "repo": "type",
+      "commit": "ad6b8388f0b82e430576a36938a8676abdae3d0a",
+      "subject": "Archive accepted ENSURE request/write outcome/validated marker with the original recording instead of only rotating application logs",
+      "state": "diagnostic_preservation_only_installed_root_cause_pending",
+      "humanAccepted": false,
+      "build": 43,
+      "installedAt": "2026-10-17T20:47:36.2368879+08:00",
+      "exeSha256": "10bb3b079d781231b320201ce4ea3f2fb3fc3aef20f014dacdd321800d25231d",
+      "protects": [
+        "No recording/identity/endpoint authority from trace fields; no changed command bytes or timeouts.",
+        "Same recording owns its async write result; sent does not mean device-confirmed.",
+        "Normal and cancel ASR archives retain the transaction; mismatched request cannot confirm or retire it.",
+        "Keep42 OTA ownership,40 network,39 layout,38 finality,37 clipboard and firmware22 unchanged."
+      ],
+      "guards": [
+        "python scripts/check-capture-control-trace.py"
+      ],
+      "evidence": [
+        "listener-repair-handoff/work/capture-control-trace43-20261017/diagnostic-replay.log",
+        "listener-repair-handoff/work/capture-control-trace43-20261017/build43-installed.json",
+        "listener-repair-handoff/work/audio-dle-source-review-20261017/review-result.json"
+      ],
+      "limits": [
+        "Missing original7548 control result cannot be recreated; this is not a correction of the unidentified failure.",
+        "Only trace retention/ownership tested. Natural installed control failure and original source-EOF field acceptance still pending."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
@@ -842,13 +871,15 @@
       "baseline_state": "exact_failure_not_human_accepted",
       "accepted_scope": "No human-accepted good commit is registered for these unconfirmed ENSURE/source-EOF failure branches. Keep actual source replay evidence separate from field acceptance; normal endpoint/latency guards do not prove this boundary.",
       "guard_entries": [
-        "firmware_same_predecessor_ensure_source_lease"
+        "firmware_same_predecessor_ensure_source_lease",
+        "type_session_capture_control_archive"
       ],
       "paths": {
         "type": [
           "src-tauri/src/coordinator/dictation_embedded_candidate_begin.rs",
           "src-tauri/src/coordinator/dictation_embedded_stream.rs",
-          "src-tauri/src/coordinator/dictation_embedded_stream_completion.rs"
+          "src-tauri/src/coordinator/dictation_embedded_stream_completion.rs",
+          "src-tauri/src/coordinator/dictation_capture_control_trace.rs"
         ],
         "firmware": [
           "ports/esp32/audio_capture",
@@ -865,7 +896,8 @@
         "Run python tools/test_audio_wake_continuity.py and python tools/test_wake_capture_ownership.py in Listener-Firmware for the source/capture-owner boundaries; firmware15 remains a candidate until installed evidence.",
         "2026-10-17 firmware16 source snapshot54741272bccfd12ae76bffd3c21510f7aae5fcfa: fixes FIFO ownership receipt backlog and queued-STOP/DRAINING revocation; installed identity b8f21838a6d41bbc. Focused production checks passed; natural ENSURE timing and overall field acceptance remain pending.",
         "2026-10-17 15:05 Type34/FW19: ENSURE writes25/22ms, no matching marker, original VoiceActivationMaxDuration then ended_source_without_continuation. Same binaries natural15:09 ENSURE confirmed/long recording completed. Original device rejection/omission not retained; not proven root-fixed. FW20 candidate adds persistent actor result only, no endpoint policy workaround.",
-        "2026-10-17 FW20c2 source3cb8221 same-predecessor tail-drain/Idle path did not reserve original PCM. Original controller plus actual capture selector fails at a 2.2s readiness wait within its existing 3s deadline; FW21 source376e9749e81361bb7ebb69429ce5f1d354b71554 pins the same source/request and passes. Installed 57431b05a4e7d6e9, field pending; do not label all early termination fixed."
+        "2026-10-17 FW20c2 source3cb8221 same-predecessor tail-drain/Idle path did not reserve original PCM. Original controller plus actual capture selector fails at a 2.2s readiness wait within its existing 3s deadline; FW21 source376e9749e81361bb7ebb69429ce5f1d354b71554 pins the same source/request and passes. Installed 57431b05a4e7d6e9, field pending; do not label all early termination fixed.",
+        "20:08 Type42/FW22 physical7548 ended at6s without newer retained device ENSURE. Actual write outcome rotated out.43 adds session-owned control evidence only; not root-fixed."
       ]
     },
     {

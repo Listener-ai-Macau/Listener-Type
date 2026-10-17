@@ -2936,6 +2936,7 @@ fn embedded_audio_test_session(
         consumer,
         volcengine_asr: None,
         pipeline_observation: None,
+        capture_control_trace: None,
         pcm_stage_ledger: crate::observability::PcmStageMappingLedger::default(),
         pcm_stage_operation_id: Some(1),
         source_admission_operation_id: Some(1),

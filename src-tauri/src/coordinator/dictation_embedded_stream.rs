@@ -1187,6 +1187,7 @@ impl EmbeddedStreamingDictation {
                             "normalizedPcmBytes": session.normalized_pcm_bytes,
                             "archivePcmBytes": session.archive_pcm.as_ref().map_or(0, Vec::len),
                             "audioDelivery": asr.diagnostic_audio_delivery(),
+                            "captureControl": session.capture_control_trace.as_ref().map(CaptureControlTrace::snapshot),
                             "trace": trace,
                         });
                         if let Ok(bytes) = serde_json::to_vec(&payload) {
@@ -4112,13 +4113,17 @@ impl EmbeddedStreamingDictation {
 
         let ensure_request_id = next_accepted_wake_capture_request_id();
         let previous_segment_id = embedded_session_id;
+        let capture_control_trace = CaptureControlTrace::new(ensure_request_id, previous_segment_id);
+        let control_trace_for_write = capture_control_trace.clone();
         let recording_control_task = tauri::async_runtime::spawn_blocking(move || {
             let started = Instant::now();
+            control_trace_for_write.write_started();
             let result = crate::embedded_ble::send_recording_control_ensure_wake_capture(
                 ensure_request_id,
                 previous_segment_id,
                 Duration::from_secs(2),
             );
+            control_trace_for_write.write_completed(&result);
             (result, started.elapsed().as_millis() as u64)
         });
         let mut candidate = self
@@ -4308,7 +4313,7 @@ impl EmbeddedStreamingDictation {
             &source_integrity_ledger,
         );
         self.session = Some(session);
-        self.arm_owned_capture_ensure(ensure_request_id, previous_segment_id);
+        self.arm_owned_capture_ensure_with_trace(ensure_request_id, previous_segment_id, capture_control_trace);
         // 2026-08-09 12:46:59 激活竞态：ENSURE 发出后旧唤醒段可能立即 complete
         // （仅含唤醒词）；竞态窗口内该段的 STOP 不得 finalize 本会话，正文在激活后
         // 的新设备段里。绑定由 Started/PcmChunk 处理分支完成。

@@ -1769,6 +1769,8 @@ fn take_latest_embedded_audio_final_result(
     inner.embedded_audio_final_result.lock().take()
 }
 
+include!("dictation_capture_control_trace.rs");
+
 struct EmbeddedAudioDictationSession {
     session_id: SessionId,
     candidate_id: Option<u64>,
@@ -1777,6 +1779,7 @@ struct EmbeddedAudioDictationSession {
     consumer: Arc<dyn crate::recorder::AudioConsumer>,
     volcengine_asr: Option<Arc<VolcengineStreamingASR>>,
     pipeline_observation: Option<Arc<crate::observability::EmbeddedAudioPipelineObservation>>,
+    capture_control_trace: Option<CaptureControlTrace>,
     pcm_stage_ledger: crate::observability::PcmStageMappingLedger,
     pcm_stage_operation_id: Option<u64>,
     source_admission_operation_id: Option<u64>,
@@ -1953,6 +1956,7 @@ async fn begin_embedded_audio_dictation_session(
         consumer,
         volcengine_asr,
         pipeline_observation: None,
+        capture_control_trace: None,
         pcm_stage_ledger: crate::observability::PcmStageMappingLedger::default(),
         pcm_stage_operation_id: Some(1),
         source_admission_operation_id: Some(1),

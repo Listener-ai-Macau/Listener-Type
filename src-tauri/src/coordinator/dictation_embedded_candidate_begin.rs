@@ -1,5 +1,11 @@
 impl EmbeddedStreamingDictation {
-    fn arm_owned_capture_ensure(&mut self, request_id: u32, previous_segment_id: u32) {
+    fn arm_owned_capture_ensure(&mut self, request_id: u32, previous_segment_id: u32) -> CaptureControlTrace {
+        let trace = CaptureControlTrace::new(request_id, previous_segment_id);
+        self.arm_owned_capture_ensure_with_trace(request_id, previous_segment_id, trace.clone());
+        trace
+    }
+
+    fn arm_owned_capture_ensure_with_trace(&mut self, request_id: u32, previous_segment_id: u32, trace: CaptureControlTrace) {
         self.ended_ensure_predecessor = None;
         let now = Instant::now();
         self.accepted_wake_capture_ensure = Some(AcceptedWakeCaptureEnsure {
@@ -8,6 +14,9 @@ impl EmbeddedStreamingDictation {
             replacement_wait_started_at: None, confirmed_segment_id: None,
         });
         self.activation_segment_race_guard = Some((previous_segment_id, now));
+        if let Some(session) = self.session.as_mut() {
+            session.capture_control_trace = Some(trace);
+        }
     }
 
     fn ensure_physical_candidate_capture(&mut self, previous_segment_id: u32) {
@@ -15,12 +24,15 @@ impl EmbeddedStreamingDictation {
         // A successful BLE write only queues ACTIVATE. It cannot prove that
         // the hidden segment survived its deadline. Use the same acknowledged
         // ownership / continuation transaction as an accepted voice wake.
-        self.arm_owned_capture_ensure(request_id, previous_segment_id);
+        let trace = self.arm_owned_capture_ensure(request_id, previous_segment_id);
         #[cfg(not(test))]
         tauri::async_runtime::spawn_blocking(move || {
-            match crate::embedded_ble::send_recording_control_ensure_wake_capture(
+            trace.write_started();
+            let result = crate::embedded_ble::send_recording_control_ensure_wake_capture(
                 request_id, previous_segment_id, Duration::from_secs(2),
-            ) {
+            );
+            trace.write_completed(&result);
+            match result {
                 Ok(()) => log::info!("[embedded-ble] physical candidate capture ENSURE sent request_id={request_id} previous_segment_id={previous_segment_id}"),
                 Err(error) => log::warn!("[embedded-ble] physical candidate capture ENSURE failed request_id={request_id} previous_segment_id={previous_segment_id}: {error}"),
             }
@@ -156,6 +168,9 @@ impl EmbeddedStreamingDictation {
                         if let Some(active_ensure) = self.accepted_wake_capture_ensure.as_mut() {
                             active_ensure.confirmed_segment_id = Some(embedded_session_id);
                         }
+                        if let Some(trace) = self.session.as_ref().and_then(|s| s.capture_control_trace.as_ref()) {
+                            trace.confirmed(ensure.request_id, embedded_session_id);
+                        }
                         self.activation_segment_race_guard = None;
                         log::info!(
                             "[wake-phrase] ENSURE confirmed existing segment embedded_session_id={embedded_session_id} request_id={}",
@@ -169,6 +184,9 @@ impl EmbeddedStreamingDictation {
                     {
                         if let Some(active_ensure) = self.accepted_wake_capture_ensure.as_mut() {
                             active_ensure.confirmed_segment_id = Some(embedded_session_id);
+                        }
+                        if let Some(trace) = self.session.as_ref().and_then(|s| s.capture_control_trace.as_ref()) {
+                            trace.confirmed(ensure.request_id, embedded_session_id);
                         }
                         self.bind_post_activation_segment(inner, embedded_session_id, false);
                         log::info!(
