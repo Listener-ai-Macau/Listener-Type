@@ -4510,12 +4510,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                 let delivery_id = request.delivery_id;
                 let polished = request.text;
                 match operation {
-                    DeliveryExternalOperation::CopyOnly => DeliveryExternalResult {
-                        status: inner.inserter.copy_fallback(&polished),
-                        target_confirmed: false,
-                        route: DeliveryRoute::CopyOnly,
-                        submitted_text: None,
-                    },
+                    DeliveryExternalOperation::CopyOnly =>
+                        copy_only_final_delivery(inner, &polished, retain_plain_dictation),
                     DeliveryExternalOperation::CurrentTarget
                     | DeliveryExternalOperation::ForegroundFallback => {
                         #[cfg(target_os = "windows")]

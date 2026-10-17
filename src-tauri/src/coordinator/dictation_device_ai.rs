@@ -248,6 +248,8 @@ fn clear_embedded_audio_stats(inner: &Arc<Inner>) {
 }
 
 fn begin_embedded_audio_preview_session(inner: &Arc<Inner>, session_id: SessionId) {
+    #[cfg(target_os = "windows")]
+    begin_recording_clipboard_scope(inner, session_id);
     inner.embedded_audio_preview.lock().begin_session(session_id);
     *inner.embedded_audio_last_capsule_level.lock() = 0.0;
 }

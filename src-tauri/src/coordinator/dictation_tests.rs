@@ -15267,6 +15267,66 @@ fn clipboard_recovery_history_record() -> crate::types::DictationSession {
     }
 }
 
+/// Runs in a separate, noninteractive Windows window station so the real
+/// production clipboard APIs cannot touch the user's clipboard or focus.
+#[cfg(target_os = "windows")]
+#[tokio::test]
+#[ignore = "requires an isolated clipboard window station"]
+async fn final_history_retention_cannot_adopt_copy_made_after_recording_started() {
+    use std::ffi::c_void;
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetProcessWindowStation() -> *mut c_void;
+        fn GetUserObjectInformationW(handle: *mut c_void, index: i32,
+            info: *mut c_void, length: u32, needed: *mut u32) -> i32;
+    }
+    let mut name = [0u16; 128];
+    let mut needed = 0;
+    assert_ne!(unsafe { GetUserObjectInformationW(GetProcessWindowStation(), 2,
+        name.as_mut_ptr().cast(), (name.len() * 2) as u32, &mut needed) }, 0);
+    let end = name.iter().position(|c| *c == 0).unwrap_or(name.len());
+    assert!(String::from_utf16_lossy(&name[..end]).starts_with("ListenerClipboardCase_"),
+        "refusing to use the interactive clipboard");
+    let coordinator = Coordinator::new();
+    let mut history = clipboard_recovery_history_record();
+    let session = new_session_id();
+    history.id = session.to_string();
+    let mut board = arboard::Clipboard::new().unwrap();
+    board.set_text("clipboard present before this recording").unwrap();
+    begin_embedded_audio_preview_session(&coordinator.inner, session);
+    board.set_text("new user copy while recording").unwrap();
+    // Reattaching the same recording may refresh its preview, never its
+    // clipboard start boundary. Copy-only must not write before retention.
+    begin_embedded_audio_preview_session(&coordinator.inner, session);
+    let delivery = super::copy_only_final_delivery(&coordinator.inner, "dispatch body", true);
+    assert_eq!(delivery.status, InsertStatus::DeferredNoTarget);
+    assert_eq!(board.get_text().unwrap(), "new user copy while recording");
+    let result = super::retain_final_clipboard_with_foreground_budget(
+        &coordinator.inner, &history, false).await;
+    assert_eq!(result, (false, "superseded"),
+        "finalization must not acquire the newer copy's revision");
+    assert_eq!(board.get_text().unwrap(), "new user copy while recording");
+
+    // A new recording with no new copy can publish its complete History body;
+    // protection must not disable no-editor recovery or retain dispatch text.
+    let next = new_session_id();
+    begin_embedded_audio_preview_session(&coordinator.inner, next);
+    let old = history.clone();
+    history.id = next.to_string();
+    assert_eq!(super::copy_only_final_delivery(&coordinator.inner, "partial", true).status,
+        InsertStatus::DeferredNoTarget);
+    let result = super::retain_final_clipboard_with_foreground_budget(
+        &coordinator.inner, &history, false).await;
+    assert_eq!(result, (true, "stored"));
+    assert_eq!(board.get_text().unwrap(), history.final_text);
+    assert_eq!(super::final_clipboard_insert_status(delivery.status, true, result.1),
+        InsertStatus::CopiedFallback);
+    // A late old finalizer cannot acquire the newer recording's origin.
+    assert_eq!(super::retain_final_clipboard_with_foreground_budget(
+        &coordinator.inner, &old, false).await, (false, "unavailable"));
+    assert_eq!(board.get_text().unwrap(), history.final_text);
+}
+
 #[tokio::test]
 async fn history_clipboard_retains_the_complete_same_record_after_input_interruption() {
     let history = clipboard_recovery_history_record();

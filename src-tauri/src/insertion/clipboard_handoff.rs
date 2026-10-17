@@ -16,6 +16,10 @@ use crate::types::{InsertStatus, PasteShortcut};
 #[path = "clipboard_handoff/native_supplement_test.rs"]
 mod native_supplement_test;
 
+#[cfg(all(test, target_os = "windows"))]
+#[path = "clipboard_handoff/native_recording_retention_test.rs"]
+mod native_recording_retention_test;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RetentionResult {
     Stored,
@@ -133,6 +137,7 @@ enum Command {
     Paste(String, bool, PasteShortcut, Option<String>, Option<SessionPasteScope>, Sender<PasteResult>),
     Copy(String, Sender<bool>),
     Retain(ClipboardTicket, String, bool, Sender<RetentionResult>),
+    RetainRecording(ClipboardTicket, uuid::Uuid, String, bool, Sender<RetentionResult>),
     Revisable(String, PasteShortcut, SessionPasteScope, Sender<PasteResult>),
 }
 
@@ -318,6 +323,15 @@ pub(crate) fn retain(ticket: ClipboardTicket, text: &str, needs_receipt: bool) -
         .send(Command::Retain(ticket, text.into(), needs_receipt, sender))
         .is_err()
     {
+        return RetentionResult::Failed;
+    }
+    receiver.recv().unwrap_or(RetentionResult::Failed)
+}
+
+pub(crate) fn retain_recording(origin: ClipboardTicket, session: uuid::Uuid,
+    text: &str, needs_receipt: bool) -> RetentionResult {
+    let (sender, receiver) = mpsc::channel();
+    if WORKER.send(Command::RetainRecording(origin, session, text.into(), needs_receipt, sender)).is_err() {
         return RetentionResult::Failed;
     }
     receiver.recv().unwrap_or(RetentionResult::Failed)
@@ -527,6 +541,16 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
         let (command, revisable) = match command {
             Some(Command::Revisable(text, shortcut, scope, reply)) =>
                 (Some(Command::Paste(text, false, shortcut, None, Some(scope), reply)), true),
+            Some(Command::RetainRecording(origin, session, text, needs_receipt, reply)) => {
+                // The worker's actual paste lease owns its original revision.
+                // A later user copy must not be adopted by querying the live
+                // clipboard here. No paste in this recording uses its start
+                // ticket, never another recording's most recent paste.
+                let ticket = paste_receipt.as_ref()
+                    .filter(|receipt| receipt.dispatch_session == Some(session))
+                    .map(PasteReceipt::ticket).unwrap_or(origin);
+                (Some(Command::Retain(ticket, text, needs_receipt, reply)), false)
+            }
             command => (command, false),
         };
         match command {
@@ -859,6 +883,7 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
             }
             None => {}
             Some(Command::Revisable(..)) => unreachable!("revisable command normalized before dispatch"),
+            Some(Command::RetainRecording(..)) => unreachable!("recording retention normalized before dispatch"),
         }
         if let Some(receipt) = paste_receipt.as_mut() {
             if still_owns_transport(

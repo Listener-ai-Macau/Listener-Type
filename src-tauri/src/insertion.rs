@@ -213,6 +213,12 @@ impl TextInserter {
         clipboard_handoff::retain(ticket, text, needs_paste_receipt)
     }
 
+    #[cfg(target_os = "windows")]
+    pub(crate) fn retain_recording_clipboard(&self, origin: ClipboardTicket,
+        session: uuid::Uuid, text: &str, needs_paste_receipt: bool) -> RetentionResult {
+        clipboard_handoff::retain_recording(origin, session, text, needs_paste_receipt)
+    }
+
     /// Correct a provisional paste only when the target itself confirms that
     /// the text immediately before the caret is exactly this session's paste.
     /// A final ASR rewrite must never blindly backspace into user content.

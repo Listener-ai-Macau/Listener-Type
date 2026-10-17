@@ -35,13 +35,46 @@ async fn retain_final_clipboard_with_foreground_budget(
     history: &DictationSession,
     unconfirmed_paste_uses_clipboard: bool,
 ) -> (bool, &'static str) {
-    // Capture ownership before scheduling, so an old task cannot adopt a newer
-    // session's clipboard while waiting for its blocking worker to run.
+    #[cfg(target_os = "windows")]
+    let origin = {
+        let slot = inner.dictation_clipboard_origin.lock();
+        let Some((session, ticket)) = slot.as_ref()
+            .filter(|(session, _)| session.to_string() == history.id).copied() else {
+                log::warn!("[coord] final clipboard retention has no recording origin session_id={}", history.id);
+                return (false, "unavailable");
+            };
+        (session, ticket)
+    };
+    #[cfg(not(target_os = "windows"))]
     let ticket = inner.inserter.clipboard_retention_ticket();
     let inner = Arc::clone(inner);
     retain_history_clipboard_with_foreground_budget(history, move |text| {
+        #[cfg(target_os = "windows")]
+        { inner.inserter.retain_recording_clipboard(origin.1, origin.0, text, unconfirmed_paste_uses_clipboard) }
+        #[cfg(not(target_os = "windows"))]
         inner.inserter.retain_session_clipboard(ticket, text, unconfirmed_paste_uses_clipboard)
     }).await
+}
+
+#[cfg(target_os = "windows")]
+fn begin_recording_clipboard_scope(inner: &Arc<Inner>, session: SessionId) {
+    let mut slot = inner.dictation_clipboard_origin.lock();
+    // Attach/repeated preview setup cannot move the start boundary past a copy.
+    if slot.as_ref().is_some_and(|(owner, _)| *owner == session) { return; }
+    *slot = Some((session, inner.inserter.clipboard_retention_ticket()));
+}
+
+fn copy_only_final_delivery(inner: &Arc<Inner>, text: &str,
+    retain_plain_dictation: bool) -> DeliveryExternalResult {
+    DeliveryExternalResult {
+        // The immutable History body is published once by scoped retention.
+        // An early unguarded CopyOnly write would already destroy a user's
+        // newer copy before the retention worker could reject it.
+        status: if cfg!(target_os = "windows") && retain_plain_dictation {
+            InsertStatus::DeferredNoTarget
+        } else { inner.inserter.copy_fallback(text) },
+        target_confirmed: false, route: DeliveryRoute::CopyOnly, submitted_text: None,
+    }
 }
 
 /// Recovery owns the same immutable final body as this recording's History

@@ -292,6 +292,10 @@ struct Inner {
     vocab: DictionaryStore,
     correction_rules: CorrectionRuleStore,
     inserter: TextInserter,
+    /// Clipboard ownership originates before this recording can be delayed by
+    /// ASR/finalization. Never acquire a user's newer copy at completion time.
+    #[cfg(target_os = "windows")]
+    dictation_clipboard_origin: Mutex<Option<(SessionId, crate::insertion::ClipboardTicket)>>,
     #[cfg(target_os = "windows")]
     windows_ime: WindowsImeSessionController,
     #[cfg(target_os = "windows")]
@@ -1212,6 +1216,7 @@ impl Coordinator {
                 vocab,
                 correction_rules,
                 inserter: TextInserter::new(),
+                dictation_clipboard_origin: Mutex::new(None),
                 windows_ime: WindowsImeSessionController::new(),
                 prepared_windows_ime_session: Arc::new(Mutex::new(Vec::new())),
                 state: Mutex::new(SessionState::default()),
