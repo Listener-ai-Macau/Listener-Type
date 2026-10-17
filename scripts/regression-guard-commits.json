@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-17T21:11:41.152144+08:00",
+  "updated_at": "2026-10-17T22:51:53.166217+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -866,6 +866,37 @@
         "Old callback750ms versus new0 synchronous wait is actual callback with fake WinRT boundary, not measured end-to-end latency.",
         "New43 natural7583 timeout occurred before44 and shows no recovery capability branch. Do not assign it to this omission.",
         "Native queued ATT cancellation/air behavior and overall early ending remain field pending."
+      ]
+    },
+    {
+      "id": "type_windows_log_rotation_recovery",
+      "repo": "type",
+      "commit": "543254dfccc852115c815b8cadaf20131a54e1bf",
+      "subject": "Recover live logging after transient Windows archive/active sharing violations",
+      "state": "installed_native_failure_replay_passed_field_rotation_pending",
+      "humanAccepted": false,
+      "build": 45,
+      "installedAt": "2026-10-17T22:47:58.4446609+08:00",
+      "exeSha256": "a10caef7c168cbc64f3ba1e6e31e086597b482b1bcabce934a423a92d0938f41",
+      "protects": [
+        "Failed archive deletion or active rename must retain the usable active log handle.",
+        "A renamed archive handle cannot become the writer for a later active record; failed replacement open is retried against the active path.",
+        "Windows capture readers share DELETE and follow file identity changes; an absent OTA log result is not success or transfer failure."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml log_recovers_after_reader_ --lib",
+        "cargo test --manifest-path src-tauri/Cargo.toml online_log_rotation_bounds_three_times_cap_and_preserves_retained_order --lib"
+      ],
+      "evidence": [
+        "listener-repair-handoff/work/logger-rotation-recovery45-20261017/old-result.txt",
+        "listener-repair-handoff/work/logger-rotation-recovery45-20261017/new-result.txt",
+        "listener-repair-handoff/work/logger-rotation-recovery45-20261017/production-tests.log",
+        "listener-repair-handoff/work/logger-rotation-recovery45-20261017/python-reader-check.json",
+        "listener-repair-handoff/work/logger-rotation-recovery45-20261017/build45-installed.json"
+      ],
+      "limits": [
+        "During an actual denied I/O operation the failed record may still be lost. This fixes persistent subsequent failure, not every storage failure.",
+        "No changed Bluetooth/audio/ASR/endpoint/clipboard behavior. Natural rotation under other software and complete raw OTA air throughput remain unverified."
       ]
     }
   ],

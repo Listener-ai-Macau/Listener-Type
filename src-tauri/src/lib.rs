@@ -1706,6 +1706,12 @@ impl OnlineRotatingLogWriter {
             return Ok(());
         }
         let record = std::mem::take(&mut self.pending_record);
+        // A previous rotation may have renamed the old file successfully but
+        // failed to open its replacement. Retry the active path, never write
+        // through a handle that now belongs to the archive.
+        if self.file.is_none() {
+            self.open_active_file()?;
+        }
         if self.active_len > 0
             && self.active_len.saturating_add(record.len() as u64) > LOG_SEGMENT_LIMIT_BYTES
         {
@@ -1721,22 +1727,30 @@ impl OnlineRotatingLogWriter {
     }
 
     fn rotate(&mut self) -> std::io::Result<()> {
-        if let Some(mut file) = self.file.take() {
-            std::io::Write::flush(&mut file)?;
+        if let Some(file) = self.file.as_mut() {
+            std::io::Write::flush(file)?;
         }
         match std::fs::remove_file(&self.archive) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
+        // Keep the usable active handle if removal/rename is denied by a
+        // Windows reader. Taking it before these fallible operations made a
+        // transient sharing violation permanently disable subsequent logging.
         std::fs::rename(&self.path, &self.archive)?;
-        self.file = Some(
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&self.path)?,
-        );
-        self.active_len = 0;
+        self.file = None;
+        self.open_active_file()?;
+        Ok(())
+    }
+
+    fn open_active_file(&mut self) -> std::io::Result<()> {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        self.active_len = file.metadata()?.len();
+        self.file = Some(file);
         Ok(())
     }
 }
@@ -4097,6 +4111,48 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    fn assert_log_recovers_after_windows_rotation_lock(archive_locked: bool) {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "listener-type-log-sharing-{}-{archive_locked}", std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("listener-type.log");
+        let archive = dir.join("listener-type.log.1");
+        let mut writer = OnlineRotatingLogWriter::open(log.clone()).unwrap();
+        std::fs::OpenOptions::new().write(true).open(&log).unwrap()
+            .set_len(LOG_SEGMENT_LIMIT_BYTES - 10).unwrap();
+        writer.active_len = LOG_SEGMENT_LIMIT_BYTES - 10;
+        std::fs::write(&archive, b"previous archive\n").unwrap();
+        // Reproduce a Windows reader that allows other reads/writes but denies
+        // deletion/rename, as the original live OTA log collector did.
+        let reader = std::fs::OpenOptions::new().read(true).share_mode(3)
+            .open(if archive_locked { &archive } else { &log }).unwrap();
+        assert!(writer.write_all(b"rotation-needed-now\n").is_err());
+        assert!(writer.file.is_some(), "failed rotation must retain the active writer");
+        drop(reader);
+        writer.write_all(b"ok\n").unwrap();
+        writer.flush().unwrap();
+        drop(writer);
+        assert!(std::fs::read(&log).unwrap().ends_with(b"ok\n"));
+        assert!(std::fs::metadata(&log).unwrap().len() <= LOG_SEGMENT_LIMIT_BYTES);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn log_recovers_after_reader_denies_active_file_rename() {
+        assert_log_recovers_after_windows_rotation_lock(false);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn log_recovers_after_reader_denies_archive_removal() {
+        assert_log_recovers_after_windows_rotation_lock(true);
     }
 
     #[test]
