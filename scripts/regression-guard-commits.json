@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-17T23:22:30.962929+08:00",
+  "updated_at": "2026-10-18T01:25:04.355208+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -954,7 +954,37 @@
       "limits": [
         "Candidate had7213/7213 image-matching HCI writes and19 conserved windows, each neighboring baseline3902/3908 observed and8 conserved windows.",
         "All3 nRF captures missed handshake material and yielded0 independently authenticated OTA frames; no global airtime/retry claim.",
-        "Only apparent local3-4percent window improvement, not statistically established whole-transfer gain; no input/ASR/firmware policy change."
+        "Only apparent local3-4percent window improvement, not statistically established whole-transfer gain; no input/ASR/firmware policy change.",
+        "Peer set differed: firstA PowerOptimized two actual peers, B/A2 one; HCI shows negotiated180ms. A/B/A was same board/image, not a fixed entire radio environment."
+      ]
+    },
+    {
+      "id": "firmware_sniffer_fresh_target_link_and_usb_timing",
+      "repo": "firmware",
+      "commit": "b2372ef6406d9ef6f118d45c6496e3afcf066241",
+      "subject": "Bind sniffer observations to admitted timestamp and actual target CONNECT; independently constrain USB/HCI delay",
+      "state": "tool_source_fixed_saved_rf_checked_live_gate_rejected_no_ota",
+      "humanAccepted": false,
+      "guards": [],
+      "protects": [
+        "Reject stale/out-of-run RF before it affects MIC or key-refresh observations.",
+        "Only actual target CONNECT seeds a link; fresh same-link matching ENC request and MIC observations precede diagnostic OTA. Type-owned handoff is not proof of a new physical connection.",
+        "Do not turn missing pre-capture handshake into a receiver failure. Partial air data is not full link coverage.",
+        "Keep Type46 and original FW22 unchanged; no driver/registry/peer-disconnect change."
+      ],
+      "evidence": [
+        "listener-repair-handoff/work/collector-link-gate-20261018/saved-rf-check.json",
+        "listener-repair-handoff/work/usb-ota-credit-20261018/usb-read-availability.json",
+        "listener-repair-handoff/work/usb-ota-credit-20261018/correlation-summary.log",
+        "listener-repair-handoff/work/usb-preconnection-credit-20261018/ota-type46-raw443/capture.json",
+        "listener-repair-handoff/work/collector-link-gate-20261018/after-device.log"
+      ],
+      "limits": [
+        "Current USB run OTA reused a pre-capture connection; only post-OTA CONNECT was observed, so cannot supply full-air metrics.",
+        "Next actual fresh target connection had no captured matching ENC request/MIC data; OTA correctly skipped. Live following unresolved.",
+        "USB interrupt completion to HCI median8.1us, out URB median0.328ms, >=2 queued interrupt reads, next data dispatch median43.9us. Metadata/time/length matching only, not per-packet USB payload identity.",
+        "RF ACK-to-credit2-3ms belongs to prior23:11 capture; cannot subtract these separate-run USB numbers and claim a uniquely measured controller-only delay.",
+        "No stable throughput improvement: same FW22 raw transfer16.573s/total22.188s, protected46/22 retained."
       ]
     }
   ],
@@ -1204,7 +1234,8 @@
       "guard_entries": [
         "type_raw215_current40_comparison_rejected",
         "type_exclusive_ota_prepared_target_ownership",
-        "type_raw240_current46_comparison_unproven"
+        "type_raw240_current46_comparison_unproven",
+        "firmware_sniffer_fresh_target_link_and_usb_timing"
       ],
       "paths": {
         "type": [
@@ -1215,7 +1246,8 @@
         ],
         "firmware": [
           "ports/esp32/ble_firmware_ota",
-          "ports/esp32/ble_hid_gap"
+          "ports/esp32/ble_hid_gap",
+          "tools/capture_listener_air.py"
         ]
       },
       "known_failures": [
@@ -1223,7 +1255,8 @@
         "Candidate33/35 raw215 was finally tested as41 on current40/FW22 and showed no gain; not still untried.",
         "Calibrated bulk single-reader raw analyzer still misses alternate connection events. Wireshark-only conversion cannot recover absent receiver data.",
         "1b25bb6 always dropped prepared GATT after ownership handoff. Current GUI already released notify but kept legacy staging.42 acquires exclusive guards before construction, eliminating duplicate open without removing legacy security fallback.",
-        "Current46 raw240 candidate47 actually measured once in A/B/A; neighboring slight benefit not stable or faster than prior46 best, exact46 restored. Further trial needs a new causal condition."
+        "Current46 raw240 candidate47 actually measured once in A/B/A; neighboring slight benefit not stable or faster than prior46 best, exact46 restored. Further trial needs a new causal condition.",
+        "Later owned-handoff capture runners omitted the earlier actual-preconnection gate: the OTA could reuse a pre-capture physical link. Reintroduce fresh captured CONNECT/same-link crypto observations, not merely start the receiver earlier."
       ],
       "latest_observed_baseline": {
         "type_build": 42,
