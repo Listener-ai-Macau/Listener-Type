@@ -787,30 +787,38 @@ export function Capsule() {
     };
   }, []);
 
-  // 网络状态徽章数据源：灯线程每次分级变化 + 每次巡检（60s）都重发，
-  // 这里幂等收敛——all_good 隐藏徽章，其余按分级上色。
+  // Subscribe before replaying; a late snapshot/probe cannot restore an old warning.
   useEffect(() => {
     if (!isTauri) return;
     let unlisten: (() => void) | undefined;
     let cancelled = false;
+    let latestSeq = 0;
+    const apply = (view: { seq: number; class: string; badge: string }, source: string) => {
+      if (cancelled || !Number.isSafeInteger(view.seq) || view.seq <= latestSeq) return;
+      latestSeq = view.seq;
+      setNetBadge(view.badge || null);
+      setNetBadgeTone(view.class === 'all_bad' ? 'bad' : 'warn');
+      traceCapsule('network_health_applied', {
+        detail: { seq: view.seq, class: view.class, badge: view.badge, source },
+      });
+    };
     (async () => {
       const { listen } = await import('@tauri-apps/api/event');
-      const handle = await listen<{ class: string; badge: string }>('net-health:changed', event => {
-        const cls = event.payload.class;
-        if (cls === 'all_good' || !event.payload.badge) {
-          setNetBadge(null);
-          return;
-        }
-        setNetBadge(event.payload.badge);
-        setNetBadgeTone(cls === 'all_bad' ? 'bad' : 'warn');
-      });
-      if (cancelled) handle();
-      else unlisten = handle;
+      const handle = await listen<{ seq: number; class: string; badge: string }>(
+        'net-health:changed', event => apply(event.payload, 'event'),
+      );
+      if (cancelled) { handle(); return; }
+      unlisten = handle;
+      try {
+        const latest = await invokeOrMock<{ seq: number; class: string; badge: string } | null>(
+          'get_network_health_state', undefined, () => null,
+        );
+        if (latest) apply(latest, 'snapshot');
+      } catch (error) {
+        traceCapsule('network_health_snapshot_failed', { detail: { error: String(error) } });
+      }
     })();
-    return () => {
-      cancelled = true;
-      if (unlisten) unlisten();
-    };
+    return () => { cancelled = true; unlisten?.(); };
   }, []);
 
   // Stop feedback: common voice UIs acknowledge the stop action immediately by

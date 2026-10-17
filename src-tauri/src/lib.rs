@@ -36,6 +36,7 @@ mod insertion;
 mod llm_gemini;
 mod marketplace_backend;
 mod net_health;
+mod network_health_state;
 mod observability;
 #[cfg(all(target_os = "windows", test))]
 mod original_speaker_identity;
@@ -941,6 +942,7 @@ pub fn run() {
             commands::list_installed_applications,
             commands::record_ui_timeline_event,
             commands::get_capsule_state,
+            commands::get_network_health_state,
             commands::reset_capsule_position,
             commands::move_capsule,
             commands::set_settings,
@@ -1381,92 +1383,47 @@ pub(crate) fn refresh_tray_microphone_menu(app: &AppHandle) -> tauri::Result<()>
     Ok(())
 }
 
-/// 网络状态灯（2026-09-23 用户拍板"没网要让人一眼知道"）：常驻裸 TCP
-/// 探测（火山/对照站，不耗额度），两个呈现面——胶囊上方橙/红"网络不佳/
-/// 无网络"徽章（用户录音时盯的就是胶囊）+ 托盘图标变色（录音之外看
-/// 角落，但 Windows 11 常把托盘折叠进 ^，只当辅助）。正常态恢复原样。
-///
-/// tkl 教训：探测子线程的 getaddrinfo 有不归路径，收集必须带上界，否则
-/// 灯线程被 join 拖死、永不复绿（见 net_health.rs）；托盘 Shell 调用一律
-/// 回主线程。每次巡检都记心跳行——只记变化的话，"灯死"和"持续断网"
-/// 在日志里长得一模一样（2026-09-23 上午误判根源）。
+/// Provider observations publish immediately; blocking DNS probes never hold up UI recovery.
 fn start_network_health_light<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
-    let default_icon = app
-        .default_window_icon()
+    let default_icon = app.default_window_icon()
         .map(|icon| tauri::image::Image::new_owned(icon.rgba().to_vec(), icon.width(), icon.height()));
-    std::thread::Builder::new()
-        .name("net-health-light".to_string())
-        .spawn(move || {
-            // 胶囊徽章数据源：分级变化即发；每次巡检也重发一遍，漏掉一次
-            // 事件的后端→webview 通路下一分钟自愈。
-            let emit_state = |class: crate::net_health::NetworkHealthClass| {
-                let _ = app.emit(
-                    "net-health:changed",
-                    serde_json::json!({
-                        "class": class.label(),
-                        "badge": class.short_label(),
-                    }),
-                );
-            };
-            let update_light = |class: crate::net_health::NetworkHealthClass| {
-                emit_state(class);
-                use crate::net_health::NetworkHealthClass;
-                let tooltip = match class {
-                    NetworkHealthClass::AllGood => "Listener Type · 网络正常",
-                    NetworkHealthClass::AsrUnreachable
-                    | NetworkHealthClass::GeneralUnreachable => {
-                        "Listener Type · 网络不佳（识别服务不可达）"
-                    }
-                    NetworkHealthClass::AllBad => "Listener Type · 无网络（请检查网络连接）",
-                };
-                let icon = match class {
-                    NetworkHealthClass::AllGood => default_icon.clone(),
-                    NetworkHealthClass::AsrUnreachable
-                    | NetworkHealthClass::GeneralUnreachable => Some(network_light_icon(0xE8, 0x8B, 0x1E)),
-                    NetworkHealthClass::AllBad => Some(network_light_icon(0xD2, 0x4A, 0x3A)),
-                };
-                // 托盘的 Shell 调用不在灯线程直接做——非属主线程上有罕见
-                // 阻塞路径，卡住即灯死。统一回主线程执行。
-                let app_for_tray = app.clone();
-                let _ = app.run_on_main_thread(move || {
-                    let Some(tray) = app_for_tray.tray_by_id("main-tray") else {
-                        return;
-                    };
-                    let _ = tray.set_tooltip(Some(tooltip));
-                    if let Some(icon) = icon {
-                        if let Err(err) = tray.set_icon(Some(icon)) {
-                            log::warn!("[net-health] tray light icon set failed: {err}");
-                        }
-                    }
-                });
-            };
-            let mut next_probe = std::time::Instant::now();
-            loop {
-                if std::time::Instant::now() >= next_probe {
-                    let mut snapshot = crate::net_health::probe_network_health();
-                    if snapshot.classify() != crate::net_health::NetworkHealthClass::AllGood {
-                        // 单次失败不翻脸（2026-09-23 用户拍板"不要一直闪"）：
-                        // 微断/瞬时抖动 2s 后复核一次，两次都坏才点亮灯。
-                        std::thread::sleep(std::time::Duration::from_secs(2));
-                        let recheck = crate::net_health::probe_network_health();
-                        if recheck.classify() == crate::net_health::NetworkHealthClass::AllGood {
-                            snapshot = recheck;
-                        }
-                    }
-                    crate::net_health::record_network_health_class(snapshot.classify());
-                    log::info!("{} reason=ambient", snapshot.log_line());
-                    emit_state(snapshot.classify());
-                    next_probe = std::time::Instant::now() + std::time::Duration::from_secs(60);
-                }
-                if crate::net_health::take_network_health_change_pending() {
-                    if let Some(class) = crate::net_health::latest_network_health_class() {
-                        update_light(class);
-                    }
-                }
-                std::thread::sleep(std::time::Duration::from_secs(2));
+    crate::net_health::set_change_listener(move |view| {
+        let _ = app.emit("net-health:changed", &view);
+        let icon = match view.class {
+            "all_good" | "general_unreachable" => default_icon.clone(),
+            "asr_unreachable" => Some(network_light_icon(0xE8, 0x8B, 0x1E)),
+            _ => Some(network_light_icon(0xD2, 0x4A, 0x3A)),
+        };
+        let app_for_tray = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            // An older queued Shell update cannot undo a newer provider recovery.
+            if crate::net_health::latest_network_health_payload().is_none_or(|p| p.seq != view.seq) {
+                return;
             }
-        })
-        .expect("spawn net-health-light");
+            if let Some(tray) = app_for_tray.tray_by_id("main-tray") {
+                let _ = tray.set_tooltip(Some(format!("Listener Type · {}", view.message)));
+                if let Some(icon) = icon {
+                    if let Err(err) = tray.set_icon(Some(icon)) {
+                        log::warn!("[net-health] tray light icon set failed: {err}");
+                    }
+                }
+            }
+        });
+    });
+    std::thread::Builder::new().name("net-health-light".to_string()).spawn(move || {
+        loop {
+            let mut snapshot = crate::net_health::probe_network_health();
+            if snapshot.classify() != crate::net_health::NetworkHealthClass::AllGood {
+                // Keep the existing transient-failure recheck, but publish the newer
+                // observation rather than retaining the first failed sample.
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                snapshot = crate::net_health::probe_network_health();
+            }
+            log::info!("{} reason=ambient", snapshot.log_line());
+            crate::net_health::record_network_health_probe(snapshot);
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
+    }).expect("spawn net-health-light");
 }
 
 /// 32×32 纯色圆角方块（托盘"灯"）。RGBA8，四角透明。

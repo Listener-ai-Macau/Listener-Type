@@ -399,6 +399,11 @@ pub fn get_capsule_state(coord: CoordinatorState<'_>) -> Option<CapsulePayload> 
 }
 
 #[tauri::command]
+pub fn get_network_health_state() -> Option<crate::net_health::NetworkHealthPayload> {
+    crate::net_health::latest_network_health_payload()
+}
+
+#[tauri::command]
 pub fn reset_capsule_position(coord: CoordinatorState<'_>, app: AppHandle) -> Result<(), String> {
     coord.reset_capsule_position(&app)
 }

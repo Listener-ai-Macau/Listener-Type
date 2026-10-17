@@ -10911,6 +10911,8 @@ impl VolcengineStreamingASR {
         };
 
         if parsed.message_type == Some(MessageType::ErrorMessage) {
+            // A provider rejection is reachable service, not evidence of no Internet.
+            crate::net_health::record_asr_response();
             let body = String::from_utf8_lossy(&parsed.payload).to_string();
             let code = parsed.error_code.unwrap_or(0);
             log::error!(
@@ -10947,6 +10949,7 @@ impl VolcengineStreamingASR {
             Ok(v) => v,
             Err(_) => return true,
         };
+        crate::net_health::record_asr_response();
         if let Some(duration_ms) = server_audio_duration_ms(&json) {
             let mut state = self.state.lock();
             state.last_server_audio_duration_ms = Some(

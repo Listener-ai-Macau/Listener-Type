@@ -703,6 +703,38 @@
         "First2s historical audio still arrives in743..2057ms; new BLE connection/content differs from pre22, so no controlled causal end-to-end speedup claimed.",
         "Raw OTA160KB/s and full interference/early-end stability remain incomplete."
       ]
+    },
+    {
+      "id": "type_network_health_response_freshness",
+      "repo": "type",
+      "commit": "70aabc376015e7116dfd4c9dac37bcc7e3679b82",
+      "subject": "Publish actual provider recovery immediately and reject stale probe or UI replay",
+      "state": "production_race_checks_passed_installed_startup_observed",
+      "humanAccepted": false,
+      "baseCommit": "4e42c42d39b18b7c406790a50328bb679a4ab2b5",
+      "build": 40,
+      "installedAt": "2026-10-17T19:13:13.2799449+08:00",
+      "exeSha256": "57f4135cc429691f59f6db673774a8219e5b9ce67e1e00f2d8ff347c0246ed36",
+      "protects": [
+        "A valid provider response immediately clears previous ASR reachability failure, without claiming the independent control site recovered.",
+        "Probe observations are ordered separately for each endpoint by probe start; an older late result cannot undo a newer response.",
+        "State publishes without waiting for a blocking ambient probe or two-second polling; queued tray updates and capsule snapshot/events reject old revisions.",
+        "Control-site-only failure does not display no-network; later genuine failed probes still display connection anomaly. Existing ASR/endpoint/BLE/settings behavior is preserved."
+      ],
+      "guards": [
+        "python scripts/check-network-health-state.py"
+      ],
+      "evidence": [
+        "listener-repair-handoff/work/network-badge-freshness-20261017/rust-results.log",
+        "listener-repair-handoff/work/network-badge-freshness-20261017/frontend-results.json",
+        "listener-repair-handoff/work/network-badge-freshness-20261017/installed-network-events.json",
+        "listener-repair-handoff/work/network-badge-freshness-20261017/build40-installed.json"
+      ],
+      "limits": [
+        "Original 313128e independent probe path lacked provider success feedback and front-end network snapshot/revision replay. Exact reported stale badge is not tied to a unique saved frontend transition.",
+        "Seven actual production Rust checks and seven isolated actual React IPC/order cases pass. Actual installed startup backend/UI seq1 matches; natural outage-to-response recovery field transition not yet observed.",
+        "A TCP probe is reachability evidence for its targets, not proof of total Internet connectivity. No route changes, paid calls, ASR content/stop permission changes, or forced disconnection tests."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
@@ -908,6 +940,33 @@
         "package_completed_at": "2026-10-17T17:42:51.642092+08:00",
         "installed": true,
         "installed_at": "2026-10-17T17:45:00.3474676+08:00"
+      }
+    },
+    {
+      "id": "network-health",
+      "baseline_state": "production_race_checks_passed_installed_startup_observed",
+      "accepted_scope": "Saved production publisher/race failures and actual installed startup only; live recovery transition field pending.",
+      "guard_entries": [
+        "type_network_health_response_freshness"
+      ],
+      "paths": {
+        "type": [
+          "src-tauri/src/net_health.rs",
+          "src-tauri/src/network_health_state.rs",
+          "src-tauri/src/asr/volcengine.rs",
+          "src-tauri/src/lib.rs",
+          "src/components/Capsule.tsx"
+        ]
+      },
+      "known_failures": [
+        "The independent60-second probe path did not consume real provider success; late probes and stale frontend views could retain or restore an old no-network warning.",
+        "Type39 repaired geometry only; keep that layout while fixing status freshness."
+      ],
+      "latest_installed_candidate": {
+        "build": 40,
+        "source": "70aabc376015e7116dfd4c9dac37bcc7e3679b82",
+        "exe_sha256": "57f4135cc429691f59f6db673774a8219e5b9ce67e1e00f2d8ff347c0246ed36",
+        "installed_at": "2026-10-17T19:13:13.2799449+08:00"
       }
     }
   ]
