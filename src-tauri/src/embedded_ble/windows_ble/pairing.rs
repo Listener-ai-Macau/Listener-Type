@@ -630,7 +630,14 @@ pub fn native_windows_hid_pairing_active_connection(
 pub fn passively_connected_listener_address(expected_name: &str, timeout: Duration) -> Result<Option<u64>, String> {
     let selector = BluetoothLEDevice::GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus::Connected)
         .map_err(|err| format!("connected BLE selector failed: {err}"))?;
-    let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+    // IsPaired belongs to the association endpoint. The implicit-kind query
+    // can return the connected endpoint with Pairing.IsPaired == false, making
+    // a real Windows reconnection sleep through the entire offline hold.
+    let devices = DeviceInformation::FindAllAsyncWithKindAqsFilterAndAdditionalProperties(
+        &selector,
+        None::<&windows::Foundation::Collections::IIterable<HSTRING>>,
+        DeviceInformationKind::AssociationEndpoint,
+    )
         .map_err(|err| format!("connected BLE query failed: {err}"))
         .and_then(|op| wait_async_operation(op, timeout, "connected BLE query"))?;
     for index in 0..devices.Size().map_err(|err| format!("connected BLE query size failed: {err}"))? {

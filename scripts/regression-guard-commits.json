@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-17T22:51:53.166217+08:00",
+  "updated_at": "2026-10-17T23:22:30.962929+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -897,6 +897,34 @@
       "limits": [
         "During an actual denied I/O operation the failed record may still be lost. This fixes persistent subsequent failure, not every storage failure.",
         "No changed Bluetooth/audio/ASR/endpoint/clipboard behavior. Natural rotation under other software and complete raw OTA air throughput remain unverified."
+      ]
+    },
+    {
+      "id": "type_passive_connected_endpoint_pairing",
+      "repo": "type",
+      "commit": "73e0545175304b6392e4f7521bad358817429fb0",
+      "subject": "Use association endpoint pairing facts to observe real Windows reconnection during offline hold",
+      "state": "installed_single_usb_reboot_automatic_ready_field_scope",
+      "humanAccepted": false,
+      "build": 46,
+      "installedAt": "2026-10-17T23:11:14.0932496+08:00",
+      "exeSha256": "d9ed1d1debd6d882e32d298e837642a2a9d01210b32235532409e627d656e596",
+      "protects": [
+        "Current Connected enumeration explicitly requests AssociationEndpoint before reading Pairing.IsPaired.",
+        "Preserve same paired/name/address checks; no active BLE/GATT read, PairAsync, unpair or changed power/offline timeout in the passive probe.",
+        "Only a real Windows connection interrupts the existing disconnected-device wait, with generation/name rechecked."
+      ],
+      "evidence": [
+        "listener-repair-handoff/work/passive-connected-query46-20261017/native-before-and-correct-api.log",
+        "listener-repair-handoff/work/passive-connected-query46-20261017/build46-installed.json",
+        "listener-repair-handoff/work/sniffer-preconnection-ota46-20261017/ota-type46-raw443/capture.json",
+        "listener-repair-handoff/work/sniffer-preconnection-ota46-20261017/ota-type46-raw443/preconnection-readiness.log",
+        "listener-repair-handoff/work/sniffer-preconnection-ota46-20261017/air-review.json"
+      ],
+      "limits": [
+        "One controlled USB reboot reached device transport_ready1 without foreground refresh; elapsed13.386s from reset command includes esptool reset/boot, firmware uptime6.4s. Not a universal13s reconnect guarantee.",
+        "Original first field branch log rotated before collection; same-session device/HCI/air and no-refresh tool source retained. Do not claim every possible recovery or battery-off path field passed.",
+        "Same FW22 raw OTA transfer16.470s,total24.344s; no160KB/s claim. Analyzer refresh MIC failure independently verified offline; full-air coverage not achieved."
       ]
     }
   ],
