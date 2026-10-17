@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T01:59:53.625126+08:00",
+  "updated_at": "2026-10-18T02:32:39.213846+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -997,6 +997,39 @@
         "Temporary documented full-HCI registry logging values alone did not take effect on hot running stack; restored exact original absent keys, did not enable SSP/SMP debug or restart user radio.",
         "An explicitly scoped Windows logging diagnostic may reuse an existing physical link, but cannot claim complete-air/three-way throughput acceptance. Fresh-link gate remains necessary for actual RF qualification."
       ]
+    },
+    {
+      "id": "type_recording_origin_clipboard_retention",
+      "repo": "type",
+      "commit": "c567faafd8ccfd8c58fffaa70e920cacdbcef100",
+      "subject": "Retain immutable History final text under recording-start or same-recording paste ownership",
+      "state": "native_counterexample_fixed_build48_installed_original_document_field_recovery_pending",
+      "humanAccepted": false,
+      "guards": [
+        "Ignored native final_history_retention_cannot_adopt_copy_made_after_recording_started, isolated window station only",
+        "Ignored native recording_retention_uses_only_its_own_paste_lease, isolated window station only"
+      ],
+      "protects": [
+        "Do not acquire a user copy made during recording by querying a new final-time clipboard revision.",
+        "CopyOnly defers to same-recording History.final_text retention rather than unguarded intermediate writes.",
+        "Only the same recording actual paste lease can replace its origin ticket; preserve unconsumed transport and later user copies.",
+        "Repeated same-session preview attachment does not rebase ownership; old History cannot borrow a later session origin.",
+        "Retain original46 BLE, raw443 geometry, wake, ASR, STOP and firmware22; build47 rejected candidate remains rejected."
+      ],
+      "evidence": [
+        "listener-repair-handoff/work/clipboard-session-owner-20261018/before-failure.json",
+        "listener-repair-handoff/work/clipboard-session-owner-20261018/after-coordinator.json",
+        "listener-repair-handoff/work/clipboard-session-owner-20261018/after-paste-leases.json",
+        "listener-repair-handoff/work/clipboard-session-owner-20261018/source-provenance.json",
+        "listener-repair-handoff/work/clipboard-session-owner-20261018/binding.json",
+        "listener-repair-handoff/work/clipboard-session-owner-20261018/build48-installed.json"
+      ],
+      "limits": [
+        "New-copy counterexample native-before Stored vs native-after Superseded. This is distinct from old unsupported Document readback failure.",
+        "Receipt branches use real clipboard/worker with seeded dispatch facts and no focus or keyboard injection; not an interactive editor end-to-end certification.",
+        "Original ticket45 Document field recovery lacks direct new after-install consumption/clipboard evidence; ENSURE2004ms and complete Bluetooth air follow remain unresolved.",
+        "Exact MSI source snapshot ba01cd8e45e5a4f3204d264e1eba25cee947eeb0; installed EXE 4AF7B522E0A96AC9F99E9041CDE91FE7DF975B8F1D734279798EE703F13493D5. No public release or human acceptance claimed."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
@@ -1114,7 +1147,8 @@
       "guard_entries": [
         "type_recording_latency_and_ble_audio_control",
         "type_recording_preview_text_stability",
-        "type_native_writable_document_paste_observation"
+        "type_native_writable_document_paste_observation",
+        "type_recording_origin_clipboard_retention"
       ],
       "paths": {
         "type": [
