@@ -1287,7 +1287,17 @@ fn capture_notification_events_until_cancelled_impl(
             cleanup.disable_notify();
             return Err(background_listener_deferred_for_ota_error());
         }
-        let mut heartbeat_outcome = cleanup.poll_periodic_type_heartbeat();
+        let mut heartbeat_outcome = match cleanup.poll_periodic_type_heartbeat() {
+            Some((BackgroundTypeControlKind::Heartbeat, result)) => Some(result),
+            Some((BackgroundTypeControlKind::LosslessRecovery, result)) => {
+                match result {
+                    Ok(()) => log::info!("[embedded-ble] capture #{capture_id}: lossless audio capability restored after heartbeat recovery"),
+                    Err(err) => log::warn!("[embedded-ble] capture #{capture_id}: lossless audio capability recovery was not acknowledged; firmware will retain raw PCM: {err}"),
+                }
+                None
+            }
+            None => None,
+        };
         if heartbeat_outcome.is_none()
             && cleanup.pending_type_heartbeat.is_none()
             && !cleanup.has_pending_audio_control()
@@ -1344,18 +1354,7 @@ fn capture_notification_events_until_cancelled_impl(
                         consecutive_type_heartbeat_failures,
                         collector_has_active_recoverable_session(&collector),
                     ) {
-                        if let Err(err) = cleanup.write_type_heartbeat(
-                            b"TYPE:AUDIO:LOSSLESS_RICE:3\n",
-                            "Type lossless audio capability recovery",
-                        ) {
-                            log::warn!(
-                                "[embedded-ble] capture #{capture_id}: lossless audio capability recovery was not acknowledged; firmware will retain raw PCM: {err}"
-                            );
-                        } else {
-                            log::info!(
-                                "[embedded-ble] capture #{capture_id}: lossless audio capability restored after heartbeat recovery"
-                            );
-                        }
+                        cleanup.lossless_recovery_pending = true;
                     }
                 }
                 consecutive_type_heartbeat_failures = 0;
@@ -1376,6 +1375,7 @@ fn capture_notification_events_until_cancelled_impl(
             }
             next_type_heartbeat = Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL);
         }
+        cleanup.schedule_lossless_capability_recovery(collector_has_active_recoverable_session(&collector));
         if cancel_requested.load(Ordering::SeqCst) {
             log::info!(
                 "[embedded-ble] capture #{capture_id}: cancelled by caller; closing notify"

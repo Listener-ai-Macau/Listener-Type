@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-17T20:49:31.631768+08:00",
+  "updated_at": "2026-10-17T21:11:41.152144+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -811,7 +811,7 @@
       "repo": "type",
       "commit": "ad6b8388f0b82e430576a36938a8676abdae3d0a",
       "subject": "Archive accepted ENSURE request/write outcome/validated marker with the original recording instead of only rotating application logs",
-      "state": "diagnostic_preservation_only_installed_root_cause_pending",
+      "state": "installed_natural_write_error_and_confirmed_success_retained_root_cause_pending",
       "humanAccepted": false,
       "build": 43,
       "installedAt": "2026-10-17T20:47:36.2368879+08:00",
@@ -828,11 +828,44 @@
       "evidence": [
         "listener-repair-handoff/work/capture-control-trace43-20261017/diagnostic-replay.log",
         "listener-repair-handoff/work/capture-control-trace43-20261017/build43-installed.json",
-        "listener-repair-handoff/work/audio-dle-source-review-20261017/review-result.json"
+        "listener-repair-handoff/work/audio-dle-source-review-20261017/review-result.json",
+        "listener-repair-handoff/work/capability-recovery44-candidate2-20261017/natural-after-install/00e660a6-ff26-4e15-827a-00678bf41e15.asr-trace.json"
       ],
       "limits": [
-        "Missing original7548 control result cannot be recreated; this is not a correction of the unidentified failure.",
-        "Only trace retention/ownership tested. Natural installed control failure and original source-EOF field acceptance still pending."
+        "Original7548 outcome still missing; new43 natural7583 records real2004ms WinRT write timeout, no device confirmation; prior7582 sent202/confirmed237ms.",
+        "This is working diagnostic retention, not a repair of the WinRT/link failure."
+      ]
+    },
+    {
+      "id": "type_optional_capability_nonblocking_recovery",
+      "repo": "type",
+      "commit": "6730ed9433bf9fba10ee25ac9a5553e51f62822d",
+      "subject": "Keep optional lossless capability recovery off the live BLE receive/control thread",
+      "state": "production_callback_replay_passed_installed_original_link_failure_pending",
+      "humanAccepted": false,
+      "build": 44,
+      "candidate": 2,
+      "installedAt": "2026-10-17T21:07:56.8824050+08:00",
+      "exeSha256": "d8b5fe8080d4aaeb7a04ebf3bfe0e2d00f1722021b8b18c73ca3f496f43a3806",
+      "protects": [
+        "Background optional capability uses the existing single async slot and is canceled/closed before urgent ENSURE/STOP.",
+        "Optional failure keeps raw PCM and does not become a heartbeat/readiness failure; genuine heartbeat handling remains separate.",
+        "Original idle/active restoration qualification, initial ready/capability, command bytes and750ms deadline preserved.",
+        "Keep43 per-recording control evidence and42 OTA/network/layout/recognition/clipboard fixes; no changed endpoint/identity policy."
+      ],
+      "guards": [
+        "python scripts/test-background-type-control.py --output .artifacts/background-type-control"
+      ],
+      "evidence": [
+        "listener-repair-handoff/work/capability-recovery44-20261017/replay2.log",
+        "listener-repair-handoff/work/capability-recovery44-20261017/package44.log",
+        "listener-repair-handoff/work/capability-recovery44-candidate2-20261017/reused-behavior-source.json",
+        "listener-repair-handoff/work/capability-recovery44-candidate2-20261017/build44-installed.json"
+      ],
+      "limits": [
+        "Old callback750ms versus new0 synchronous wait is actual callback with fake WinRT boundary, not measured end-to-end latency.",
+        "New43 natural7583 timeout occurred before44 and shows no recovery capability branch. Do not assign it to this omission.",
+        "Native queued ATT cancellation/air behavior and overall early ending remain field pending."
       ]
     }
   ],
@@ -872,14 +905,17 @@
       "accepted_scope": "No human-accepted good commit is registered for these unconfirmed ENSURE/source-EOF failure branches. Keep actual source replay evidence separate from field acceptance; normal endpoint/latency guards do not prove this boundary.",
       "guard_entries": [
         "firmware_same_predecessor_ensure_source_lease",
-        "type_session_capture_control_archive"
+        "type_session_capture_control_archive",
+        "type_optional_capability_nonblocking_recovery"
       ],
       "paths": {
         "type": [
           "src-tauri/src/coordinator/dictation_embedded_candidate_begin.rs",
           "src-tauri/src/coordinator/dictation_embedded_stream.rs",
           "src-tauri/src/coordinator/dictation_embedded_stream_completion.rs",
-          "src-tauri/src/coordinator/dictation_capture_control_trace.rs"
+          "src-tauri/src/coordinator/dictation_capture_control_trace.rs",
+          "src-tauri/src/embedded_ble/windows_ble/mod.rs",
+          "src-tauri/src/embedded_ble/windows_ble/capture_events.rs"
         ],
         "firmware": [
           "ports/esp32/audio_capture",
@@ -897,7 +933,8 @@
         "2026-10-17 firmware16 source snapshot54741272bccfd12ae76bffd3c21510f7aae5fcfa: fixes FIFO ownership receipt backlog and queued-STOP/DRAINING revocation; installed identity b8f21838a6d41bbc. Focused production checks passed; natural ENSURE timing and overall field acceptance remain pending.",
         "2026-10-17 15:05 Type34/FW19: ENSURE writes25/22ms, no matching marker, original VoiceActivationMaxDuration then ended_source_without_continuation. Same binaries natural15:09 ENSURE confirmed/long recording completed. Original device rejection/omission not retained; not proven root-fixed. FW20 candidate adds persistent actor result only, no endpoint policy workaround.",
         "2026-10-17 FW20c2 source3cb8221 same-predecessor tail-drain/Idle path did not reserve original PCM. Original controller plus actual capture selector fails at a 2.2s readiness wait within its existing 3s deadline; FW21 source376e9749e81361bb7ebb69429ce5f1d354b71554 pins the same source/request and passes. Installed 57431b05a4e7d6e9, field pending; do not label all early termination fixed.",
-        "20:08 Type42/FW22 physical7548 ended at6s without newer retained device ENSURE. Actual write outcome rotated out.43 adds session-owned control evidence only; not root-fixed."
+        "20:08 Type42/FW22 physical7548 ended at6s without newer retained device ENSURE. Actual write outcome rotated out.43 adds session-owned control evidence only; not root-fixed.",
+        "21:06 Type43/FW22 natural7583: real WinRT ENSURE write timeout2004ms, no firmware execution/marker, other control writes also timeout, later notify/GATT discovery retries. Prior7582 sent202ms/confirmed237ms on same capture. Optional capability recovery not observed,44 is a separate blocking-branch repair."
       ]
     },
     {

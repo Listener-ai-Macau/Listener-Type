@@ -2294,32 +2294,55 @@ fn type_heartbeat_poll_decision(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BackgroundTypeControlKind {
+    Heartbeat,
+    LosslessRecovery,
+}
+
+impl BackgroundTypeControlKind {
+    fn command(self) -> &'static [u8] {
+        match self {
+            Self::Heartbeat => b"TYPE:HB\n",
+            Self::LosslessRecovery => b"TYPE:AUDIO:LOSSLESS_RICE:3\n",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Heartbeat => "Type heartbeat",
+            Self::LosslessRecovery => "Type lossless audio capability recovery",
+        }
+    }
+}
+
 struct PendingTypeHeartbeat {
     operation: IAsyncOperation<GattCommunicationStatus>,
     started_at: Instant,
+    kind: BackgroundTypeControlKind,
 }
 
 impl PendingTypeHeartbeat {
     fn poll(&self) -> Option<Result<(), String>> {
         let status = match self.operation.Status() {
             Ok(status) => status,
-            Err(err) => return Some(Err(format!("Type heartbeat status failed: {err}"))),
+            Err(err) => return Some(Err(format!("{} status failed: {err}", self.kind.label()))),
         };
         match type_heartbeat_poll_decision(status, self.started_at.elapsed()) {
             TypeHeartbeatPollDecision::Pending => None,
             TypeHeartbeatPollDecision::ReadResult => Some(
                 self.operation.GetResults()
-                    .map_err(|err| format!("Type heartbeat result failed: {err}"))
+                    .map_err(|err| format!("{} result failed: {err}", self.kind.label()))
                     .and_then(|status| {
                         if status == GattCommunicationStatus::Success {
                             Ok(())
                         } else {
-                            Err(format!("Type heartbeat write returned status={status:?}"))
+                            Err(format!("{} write returned status={status:?}", self.kind.label()))
                         }
                     }),
             ),
             TypeHeartbeatPollDecision::Failed(reason) => {
-                Some(Err(format!("Type heartbeat {reason}")))
+                Some(Err(format!("{} {reason}", self.kind.label())))
             }
         }
     }
@@ -5227,6 +5250,7 @@ struct NotifyCleanup {
     type_heartbeat_preempted: bool,
     type_heartbeat_open: bool,
     pending_type_heartbeat: Option<PendingTypeHeartbeat>,
+    lossless_recovery_pending: bool,
     notify_disabled: bool,
     skip_explicit_target_close: bool,
 }
@@ -5244,6 +5268,7 @@ impl NotifyCleanup {
             type_heartbeat_preempted: false,
             type_heartbeat_open: false,
             pending_type_heartbeat: None,
+            lossless_recovery_pending: false,
             notify_disabled: false,
             skip_explicit_target_close: false,
         }
@@ -5310,30 +5335,59 @@ impl NotifyCleanup {
     }
 
     fn begin_periodic_type_heartbeat(&mut self) -> Result<(), String> {
+        self.begin_background_type_control(BackgroundTypeControlKind::Heartbeat)
+    }
+
+    fn begin_background_type_control(&mut self, kind: BackgroundTypeControlKind) -> Result<(), String> {
         if self.pending_type_heartbeat.is_some() {
             return Ok(());
         }
         let control = self.target.control.as_ref()
-            .ok_or_else(|| "Type heartbeat audio control unavailable".to_string())?;
+            .ok_or_else(|| format!("{} audio control unavailable", kind.label()))?;
         let operation = start_gatt_write_with_option_async(
             control,
-            b"TYPE:HB\n",
-            type_heartbeat_write_option(control, "Type heartbeat"),
-            "Type heartbeat",
+            kind.command(),
+            type_heartbeat_write_option(control, kind.label()),
+            kind.label(),
         )?;
         self.pending_type_heartbeat = Some(PendingTypeHeartbeat {
             operation,
             started_at: Instant::now(),
+            kind,
         });
         Ok(())
     }
 
-    fn poll_periodic_type_heartbeat(&mut self) -> Option<Result<(), String>> {
-        let outcome = self.pending_type_heartbeat.as_ref()?.poll();
-        if outcome.is_some() {
-            self.pending_type_heartbeat.take();
+    fn poll_periodic_type_heartbeat(&mut self) -> Option<(BackgroundTypeControlKind, Result<(), String>)> {
+        let pending = self.pending_type_heartbeat.as_ref()?;
+        let outcome = pending.poll()?;
+        let kind = pending.kind;
+        self.pending_type_heartbeat.take();
+        Some((kind, outcome))
+    }
+
+    fn preempt_background_type_control(&mut self) {
+        if let Some(pending) = self.pending_type_heartbeat.take() {
+            match pending.kind {
+                BackgroundTypeControlKind::Heartbeat => self.type_heartbeat_preempted = true,
+                BackgroundTypeControlKind::LosslessRecovery => self.lossless_recovery_pending = true,
+            }
+            log::info!("[embedded-ble] capture #{}: pending {} preempted by active audio control", self.capture_id, pending.kind.label());
+            // PendingTypeHeartbeat::drop cancels/closes only this operation.
+            // Never synchronously wait for optional capability completion here.
         }
-        outcome
+    }
+
+    fn schedule_lossless_capability_recovery(&mut self, active_session: bool) {
+        if !self.lossless_recovery_pending || active_session
+            || self.pending_type_heartbeat.is_some() || self.has_pending_audio_control()
+        {
+            return;
+        }
+        self.lossless_recovery_pending = false;
+        if let Err(err) = self.begin_background_type_control(BackgroundTypeControlKind::LosslessRecovery) {
+            log::warn!("[embedded-ble] capture #{}: lossless audio capability recovery could not start; firmware will retain raw PCM: {err}", self.capture_id);
+        }
     }
 
     fn write_ec11_recovery_acknowledgement(&self) -> Result<(), String> {
@@ -5474,6 +5528,9 @@ impl NotifyCleanup {
                     queued_ms
                 );
             }
+            // Release background ownership before borrowing this target for
+            // the urgent operation. Preemption does not replace the target.
+            self.preempt_background_type_control();
             let Some(control) = self.target.control.as_ref() else {
                 let _ = request.result_tx.send(Err(
                     "active Listener BLE capture has no audio control characteristic".to_string(),
@@ -5483,13 +5540,6 @@ impl NotifyCleanup {
             // Urgent recording control owns the characteristic. A readiness
             // heartbeat is disposable and must not serialize ENSURE/STOP
             // behind its WinRT timeout.
-            if self.pending_type_heartbeat.take().is_some() {
-                self.type_heartbeat_preempted = true;
-                log::info!(
-                    "[embedded-ble] capture #{}: pending Type heartbeat preempted by active audio control",
-                    self.capture_id
-                );
-            }
             match PendingAudioControlWrite::start(control, request) {
                 Ok(pending) => self.pending_audio_control = Some(pending),
                 Err((request, err)) => {
