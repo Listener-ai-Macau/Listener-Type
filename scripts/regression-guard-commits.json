@@ -926,6 +926,36 @@
         "Original first field branch log rotated before collection; same-session device/HCI/air and no-refresh tool source retained. Do not claim every possible recovery or battery-off path field passed.",
         "Same FW22 raw OTA transfer16.470s,total24.344s; no160KB/s claim. Analyzer refresh MIC failure independently verified offline; full-air coverage not achieved."
       ]
+    },
+    {
+      "id": "type_raw240_current46_comparison_unproven",
+      "repo": "type",
+      "commit": "079c11c89910de9e5c84ebd3e2771e3a30331bdf",
+      "subject": "Current46 raw240 full251 geometry physically tested; modest neighboring gain unproven, exact original46 restored",
+      "state": "physical_aba_partial_gain_not_stable_rolled_back",
+      "humanAccepted": false,
+      "build": 47,
+      "exeSha256": "8e88e878a234562c357eb418ad2a633d53c558bbc361d60daf04ce1d336cc497",
+      "installedAt": "2026-10-18T00:02:36.3754207+08:00",
+      "rolledBackAt": "2026-10-18T00:05:10.8753461+08:00",
+      "rollbackBuild": 46,
+      "protects": [
+        "Raw240 has now been physically tested, unlike its old manifest-preflight-only rejection. Do not relist it as untried.",
+        "SameFW22 raw A/B/A transfer18.735/16.641/17.136s; candidate did not beat protected46 prior16.470s, one B is not stable benefit.",
+        "Keep original46 passive endpoint query and45 logging recovery; original46 MSI restored, source also restored byte-for-byte including checkout CRLF.",
+        "Do not confuse lower HCI fragment count with complete RF or160KBps acceptance."
+      ],
+      "guards": [],
+      "evidence": [
+        "listener-repair-handoff/work/raw240-current46-20261017/comparison-summary.json",
+        "listener-repair-handoff/work/raw240-current46-20261017/build47-installed.json",
+        "listener-repair-handoff/work/raw240-current46-20261017/rollback46/build46-installed.json"
+      ],
+      "limits": [
+        "Candidate had7213/7213 image-matching HCI writes and19 conserved windows, each neighboring baseline3902/3908 observed and8 conserved windows.",
+        "All3 nRF captures missed handshake material and yielded0 independently authenticated OTA frames; no global airtime/retry claim.",
+        "Only apparent local3-4percent window improvement, not statistically established whole-transfer gain; no input/ASR/firmware policy change."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
@@ -1173,7 +1203,8 @@
       "accepted_scope": "Current40/FW22 actual same-image transfer16836/total24791ms; no human or160KB/s acceptance.",
       "guard_entries": [
         "type_raw215_current40_comparison_rejected",
-        "type_exclusive_ota_prepared_target_ownership"
+        "type_exclusive_ota_prepared_target_ownership",
+        "type_raw240_current46_comparison_unproven"
       ],
       "paths": {
         "type": [
@@ -1191,7 +1222,8 @@
         "Old491 and retained15ms/500 geometry failures remain valid; do not repeat without a changed causal condition.",
         "Candidate33/35 raw215 was finally tested as41 on current40/FW22 and showed no gain; not still untried.",
         "Calibrated bulk single-reader raw analyzer still misses alternate connection events. Wireshark-only conversion cannot recover absent receiver data.",
-        "1b25bb6 always dropped prepared GATT after ownership handoff. Current GUI already released notify but kept legacy staging.42 acquires exclusive guards before construction, eliminating duplicate open without removing legacy security fallback."
+        "1b25bb6 always dropped prepared GATT after ownership handoff. Current GUI already released notify but kept legacy staging.42 acquires exclusive guards before construction, eliminating duplicate open without removing legacy security fallback.",
+        "Current46 raw240 candidate47 actually measured once in A/B/A; neighboring slight benefit not stable or faster than prior46 best, exact46 restored. Further trial needs a new causal condition."
       ],
       "latest_observed_baseline": {
         "type_build": 42,
