@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T01:25:04.355208+08:00",
+  "updated_at": "2026-10-18T01:59:53.625126+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -968,7 +968,7 @@
       "guards": [],
       "protects": [
         "Reject stale/out-of-run RF before it affects MIC or key-refresh observations.",
-        "Only actual target CONNECT seeds a link; fresh same-link matching ENC request and MIC observations precede diagnostic OTA. Type-owned handoff is not proof of a new physical connection.",
+        "Only actual target CONNECT seeds a link; fresh same-link matching ENC request and MIC observations precede claiming an OTA capture has current RF coverage. Type-owned handoff is not proof of a new physical connection.",
         "Do not turn missing pre-capture handshake into a receiver failure. Partial air data is not full link coverage.",
         "Keep Type46 and original FW22 unchanged; no driver/registry/peer-disconnect change."
       ],
@@ -977,14 +977,25 @@
         "listener-repair-handoff/work/usb-ota-credit-20261018/usb-read-availability.json",
         "listener-repair-handoff/work/usb-ota-credit-20261018/correlation-summary.log",
         "listener-repair-handoff/work/usb-preconnection-credit-20261018/ota-type46-raw443/capture.json",
-        "listener-repair-handoff/work/collector-link-gate-20261018/after-device.log"
+        "listener-repair-handoff/work/collector-link-gate-20261018/after-device.log",
+        "listener-repair-handoff/work/sniffer-usb-cycle-20261018/clock-comparison.json",
+        "listener-repair-handoff/work/sniffer-initial-interval-20261018/comparison.json",
+        "listener-repair-handoff/work/usb-ota-credit-20261018/empty-bip-source-neighbor-check.json",
+        "listener-repair-handoff/work/usb-ota-credit-20261018/content-filter-shape-check.json",
+        "listener-repair-handoff/work/hci-full-log-source-20261018/logging-settings.json",
+        "listener-repair-handoff/work/hci-full-log-source-20261018/raw-hci-reassembly.json"
       ],
       "limits": [
         "Current USB run OTA reused a pre-capture connection; only post-OTA CONNECT was observed, so cannot supply full-air metrics.",
         "Next actual fresh target connection had no captured matching ENC request/MIC data; OTA correctly skipped. Live following unresolved.",
         "USB interrupt completion to HCI median8.1us, out URB median0.328ms, >=2 queued interrupt reads, next data dispatch median43.9us. Metadata/time/length matching only, not per-packet USB payload identity.",
         "RF ACK-to-credit2-3ms belongs to prior23:11 capture; cannot subtract these separate-run USB numbers and claim a uniquely measured controller-only delay.",
-        "No stable throughput improvement: same FW22 raw transfer16.573s/total22.188s, protected46/22 retained."
+        "No stable throughput improvement: same FW22 raw transfer16.573s/total22.188s, protected46/22 retained.",
+        "Targeted USB disable/enable did not reset nRF MCU clock; do not call it a verified cold restart.",
+        "Actual initial15ms connection still missed alternating events, so not solved by relaxing initial interval alone.",
+        "Independent H4 parsing and native BTHPORT402 prove6 zero-length source ACL records; same continuation CID6/7-shaped content predicts all6 omissions. This is trace data loss/suppression, not OTA device loss.",
+        "Temporary documented full-HCI registry logging values alone did not take effect on hot running stack; restored exact original absent keys, did not enable SSP/SMP debug or restart user radio.",
+        "An explicitly scoped Windows logging diagnostic may reuse an existing physical link, but cannot claim complete-air/three-way throughput acceptance. Fresh-link gate remains necessary for actual RF qualification."
       ]
     }
   ],
