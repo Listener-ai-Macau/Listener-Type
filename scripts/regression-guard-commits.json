@@ -647,7 +647,7 @@
       "repo": "type",
       "commit": "4e42c42d39b18b7c406790a50328bb679a4ab2b5",
       "subject": "Fit whole status badges and grow the native host upward without moving the visible pill",
-      "state": "actual_render_passed_built_install_pending",
+      "state": "actual_render_passed_installed_field_pending",
       "humanAccepted": false,
       "baseCommit": "1643c861183a8c8a11a6f476e36c942b5bec1bff",
       "build": 39,
@@ -668,9 +668,11 @@
       ],
       "limits": [
         "Exact production React rendered in isolated headless Edge with mocked IPC; no field visual acceptance yet",
-        "MSI built; installation deferred while Type is Listening",
-        "Legacy 732a863 host84 leaves only12px for21px badge; translation stacking also lacked top room"
-      ]
+        "Legacy 732a863 host84 leaves only12px for21px badge; translation stacking also lacked top room",
+        "Installed at fresh Idle; main/helper restored; physical user visual feedback pending. No recording feature acceptance implied."
+      ],
+      "installedAt": "2026-10-17T17:45:00.3474676+08:00",
+      "exeSha256": "09303329962a9223f8d00e333d324e1a60a8ad450246110c34d83c9ee77b4fb4"
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
@@ -850,7 +852,7 @@
     },
     {
       "id": "capsule-status-layout",
-      "baseline_state": "actual_render_passed_built_install_pending",
+      "baseline_state": "actual_render_passed_installed_field_pending",
       "accepted_scope": "Geometry and source-bound package only; no human field acceptance. Existing topmost/drag behavior retained.",
       "guard_entries": [
         "type_capsule_complete_status_badge_geometry"
@@ -867,12 +869,13 @@
         "732a863 fixed normal host84px leaves12px for a21px network badge; same-element entrance transform replaces translateX centering.",
         "Default native placement formerly anchored host top from visual height, shifting the visible pill when host height grew."
       ],
-      "latest_built_candidate": {
+      "latest_installed_candidate": {
         "build": 39,
         "source": "4e42c42d39b18b7c406790a50328bb679a4ab2b5",
         "exe_sha256": "09303329962a9223f8d00e333d324e1a60a8ad450246110c34d83c9ee77b4fb4",
         "package_completed_at": "2026-10-17T17:42:51.642092+08:00",
-        "installed": false
+        "installed": true,
+        "installed_at": "2026-10-17T17:45:00.3474676+08:00"
       }
     }
   ]
