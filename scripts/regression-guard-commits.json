@@ -735,6 +735,37 @@
         "Seven actual production Rust checks and seven isolated actual React IPC/order cases pass. Actual installed startup backend/UI seq1 matches; natural outage-to-response recovery field transition not yet observed.",
         "A TCP probe is reachability evidence for its targets, not proof of total Internet connectivity. No route changes, paid calls, ASR content/stop permission changes, or forced disconnection tests."
       ]
+    },
+    {
+      "id": "type_raw215_current40_comparison_rejected",
+      "repo": "type",
+      "commit": "89221f5af6f40ab5710552407c8d1cdfd00f19fe",
+      "subject": "Same-board raw215 comparison on current40 has no benefit; exact original40 restored",
+      "state": "physical_pair_no_gain_rolled_back",
+      "humanAccepted": false,
+      "build": 41,
+      "exeSha256": "b9cf35f43049cf3f98ee15e05c1c2bd596d54d3b08606006e9534163cd10e396",
+      "installedAt": "2026-10-17T19:31:30.1645137+08:00",
+      "rolledBackAt": "2026-10-17T19:35:49.1879719+08:00",
+      "rollbackBuild": 40,
+      "protects": [
+        "Do not repeat raw215 as an untried method: actual current40/FW22 pair was16.836s versus18.005s and restored original40.",
+        "Do not infer full-transfer radio fragmentation from initial965us: actual effective DLE becomes2120us in both captured runs.",
+        "Preserve40 network status,39 geometry,38 recognition and37 clipboard; frozen same40 MSI restored, no same-number rebuild."
+      ],
+      "guards": [],
+      "evidence": [
+        "listener-repair-handoff/work/raw215-current40-20261017/comparison-summary.json",
+        "listener-repair-handoff/work/raw215-current40-20261017/pair-current-evidence.json",
+        "listener-repair-handoff/work/raw215-current40-20261017/pair-negotiation-and-completions.json",
+        "listener-repair-handoff/work/raw215-current40-20261017/rollback40/build40-installed.json"
+      ],
+      "limits": [
+        "BaselineHCI exported3902 of3908 actual DATA; analyze only8 complete conserved windows, never call missing trace records lost device packets. CandidateHCI8052/8052,21 complete conserved windows.",
+        "Independent single-reader calibrated analyzer still skips every other event and captures only75..405ms per connection, zero authenticated nonempty packets. Full encrypted OTA not captured.",
+        "No mouse/keyboard disconnect, driver changes, analyzer firmware flash or extra paid/model service.",
+        "Early-end original tail-drain branch and originalDocument clipboard restoration still field pending."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
@@ -967,6 +998,38 @@
         "source": "70aabc376015e7116dfd4c9dac37bcc7e3679b82",
         "exe_sha256": "57f4135cc429691f59f6db673774a8219e5b9ce67e1e00f2d8ff347c0246ed36",
         "installed_at": "2026-10-17T19:13:13.2799449+08:00"
+      }
+    },
+    {
+      "id": "ble-raw-throughput",
+      "baseline_state": "partial_physical_timing_observed_target_incomplete",
+      "accepted_scope": "Current40/FW22 actual same-image transfer16836/total24791ms; no human or160KB/s acceptance.",
+      "guard_entries": [
+        "type_raw215_current40_comparison_rejected"
+      ],
+      "paths": {
+        "type": [
+          "src-tauri/src/embedded_ble/windows_ble/ota_open.rs",
+          "src-tauri/src/embedded_ble/windows_ble/ota_transfer.rs",
+          "src-tauri/src/embedded_ble/windows_ble/mod.rs"
+        ],
+        "firmware": [
+          "ports/esp32/ble_firmware_ota",
+          "ports/esp32/ble_hid_gap"
+        ]
+      },
+      "known_failures": [
+        "Old491 and retained15ms/500 geometry failures remain valid; do not repeat without a changed causal condition.",
+        "Candidate33/35 raw215 was finally tested as41 on current40/FW22 and showed no gain; not still untried.",
+        "Calibrated bulk single-reader raw analyzer still misses alternate connection events. Wireshark-only conversion cannot recover absent receiver data."
+      ],
+      "latest_observed_baseline": {
+        "type_build": 40,
+        "type_source": "70aabc376015e7116dfd4c9dac37bcc7e3679b82",
+        "firmware_build_id": "5b5d72adef4bd602",
+        "source": "comparison-summary.json",
+        "transfer_ms": 16836,
+        "total_ms": 24791
       }
     }
   ]
