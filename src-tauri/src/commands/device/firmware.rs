@@ -2390,7 +2390,9 @@ pub async fn transfer_firmware_ota_ble<R: tauri::Runtime>(
                 }),
             );
         };
-        crate::embedded_ble::transfer_listener_ota_v1_after_active_link_hint_staged(
+        // The coordinator has released notify. Acquire both transfer guards
+        // before opening the target, so ready/start does not cross ownership.
+        crate::embedded_ble::transfer_listener_ota_v1_after_listener_release_staged(
             target_ready_tx,
             start_transfer_rx,
             FIRMWARE_OTA_TARGET_PREPARE_TIMEOUT,

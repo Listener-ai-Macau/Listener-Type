@@ -824,6 +824,27 @@ pub fn transfer_listener_ota_v1_after_active_link_hint_staged(
 }
 
 #[cfg(target_os = "windows")]
+pub fn transfer_listener_ota_v1_after_listener_release_staged(
+    target_ready: std::sync::mpsc::SyncSender<Result<(), String>>,
+    start_transfer: std::sync::mpsc::Receiver<()>,
+    target_prepare_timeout: std::time::Duration,
+    firmware_sha256: &str,
+    firmware_bytes: &[u8],
+    manifest_chunk_bytes: usize,
+    on_progress: Option<&dyn Fn(usize, usize)>,
+) -> Result<FirmwareOtaTransferStats, String> {
+    windows_ble::transfer_listener_ota_v1_after_listener_release_staged(
+        target_ready,
+        start_transfer,
+        target_prepare_timeout,
+        firmware_sha256,
+        firmware_bytes,
+        manifest_chunk_bytes,
+        on_progress,
+    )
+}
+
+#[cfg(target_os = "windows")]
 pub struct Stm32wbStOtaPreparedTransfer;
 
 #[cfg(target_os = "windows")]
@@ -1410,6 +1431,19 @@ pub fn transfer_listener_ota_v1_after_active_link_hint(
 
 #[cfg(not(target_os = "windows"))]
 pub fn transfer_listener_ota_v1_after_active_link_hint_staged(
+    _target_ready: std::sync::mpsc::SyncSender<Result<(), String>>,
+    _start_transfer: std::sync::mpsc::Receiver<()>,
+    _target_prepare_timeout: std::time::Duration,
+    _firmware_sha256: &str,
+    _firmware_bytes: &[u8],
+    _manifest_chunk_bytes: usize,
+    _on_progress: Option<&dyn Fn(usize, usize)>,
+) -> Result<FirmwareOtaTransferStats, String> {
+    Err("Listener OTA v1 over BLE is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn transfer_listener_ota_v1_after_listener_release_staged(
     _target_ready: std::sync::mpsc::SyncSender<Result<(), String>>,
     _start_transfer: std::sync::mpsc::Receiver<()>,
     _target_prepare_timeout: std::time::Duration,

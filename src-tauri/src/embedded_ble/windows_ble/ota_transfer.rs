@@ -510,12 +510,43 @@ pub fn transfer_listener_ota_v1_after_active_link_hint_staged(
     manifest_chunk_bytes: usize,
     on_progress: Option<&dyn Fn(usize, usize)>,
 ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
+    transfer_listener_ota_v1_signaled(
+        target_ready, start_transfer, target_prepare_timeout, firmware_sha256,
+        firmware_bytes, manifest_chunk_bytes, on_progress, false,
+    )
+}
+
+pub fn transfer_listener_ota_v1_after_listener_release_staged(
+    target_ready: mpsc::SyncSender<Result<(), String>>,
+    start_transfer: mpsc::Receiver<()>,
+    target_prepare_timeout: Duration,
+    firmware_sha256: &str,
+    firmware_bytes: &[u8],
+    manifest_chunk_bytes: usize,
+    on_progress: Option<&dyn Fn(usize, usize)>,
+) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
+    transfer_listener_ota_v1_signaled(
+        target_ready, start_transfer, target_prepare_timeout, firmware_sha256,
+        firmware_bytes, manifest_chunk_bytes, on_progress, true,
+    )
+}
+
+fn transfer_listener_ota_v1_signaled(
+    target_ready: mpsc::SyncSender<Result<(), String>>,
+    start_transfer: mpsc::Receiver<()>,
+    target_prepare_timeout: Duration,
+    firmware_sha256: &str,
+    firmware_bytes: &[u8],
+    manifest_chunk_bytes: usize,
+    on_progress: Option<&dyn Fn(usize, usize)>,
+    exclusive_before_prepare: bool,
+) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
     if firmware_bytes.is_empty() {
         return Err("firmware_ota.bin is empty.".to_string());
     }
 
-    let prepared = match prepare_listener_ota_v1_transfer_staged_after_active_link_hint(
-        target_prepare_timeout,
+    let prepared = match prepare_listener_ota_v1_transfer_impl(
+        false, exclusive_before_prepare, Some(target_prepare_timeout),
     ) {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -525,13 +556,13 @@ pub fn transfer_listener_ota_v1_after_active_link_hint_staged(
     };
     if target_ready.send(Ok(())).is_err() {
         return Err(
-            "Listener OTA v1 target staging was canceled before listener pause.".to_string(),
+            "Listener OTA v1 target preparation was canceled before transfer start.".to_string(),
         );
     }
     start_transfer
         .recv_timeout(Duration::from_secs(2))
         .map_err(|_| {
-            "Listener OTA v1 target staging timed out before transfer start.".to_string()
+            "Listener OTA v1 target preparation timed out before transfer start.".to_string()
         })?;
     prepared.transfer(
         firmware_sha256,

@@ -766,6 +766,44 @@
         "No mouse/keyboard disconnect, driver changes, analyzer firmware flash or extra paid/model service.",
         "Early-end original tail-drain branch and originalDocument clipboard restoration still field pending."
       ]
+    },
+    {
+      "id": "type_exclusive_ota_prepared_target_ownership",
+      "repo": "type",
+      "commit": "b7d6c9751d5986269b484de068d843968b8c5e0d",
+      "subject": "Prepare after exclusive ownership and retain that target through begin; preserve legacy secure reopen",
+      "state": "production_ownership_replay_passed_installed_physical_overhead_improved",
+      "humanAccepted": false,
+      "baseCommit": "70aabc376015e7116dfd4c9dac37bcc7e3679b82",
+      "build": 42,
+      "installedAt": "2026-10-17T20:03:24.1126410+08:00",
+      "exeSha256": "ece201e32bd7d13ac258a9a825620e301f0ad2365b45296cc6d7b531da7b9cae",
+      "protects": [
+        "Released-listener entry acquires both original OTA process/capture guards before target construction, retaining them across ready/start/BEGIN/reboot proof.",
+        "Only the exclusively constructed target can be used as first attempt; legacy pre-ownership staged target still gets its original secure reopen and150/700ms settling.",
+        "Authentication/active-link failure still uses bounded reopen; genuine cancel never restarts image, ready/start failure releases all guards.",
+        "Existing500ms DLE prime, active-link confirmation, exact identity, original image checks, reboot generation and final response-bearing TYPE:READY are preserved.",
+        "Raw443/40/400/data/codec/reorder/firmware22, network40/layout39/recognition38/clipboard37 stay unchanged."
+      ],
+      "guards": [
+        "python scripts/test-ota-exclusive-prepare.py"
+      ],
+      "evidence": [
+        "listener-repair-handoff/work/ota-exclusive-prepare-20261017/before-replay.log",
+        "listener-repair-handoff/work/ota-exclusive-prepare-20261017/after2.log",
+        "listener-repair-handoff/work/ota-exclusive-prepare-20261017/reused-protection-source.json",
+        "listener-repair-handoff/work/ota-exclusive-prepare-20261017/physical-result.json",
+        "listener-repair-handoff/work/ota-exclusive-prepare-20261017/build42-installed.json"
+      ],
+      "limits": [
+        "Single physical changed-lifecycle run plus eight production control-flow checks; not full long-term field certification.",
+        "Same board/image, but concurrent connected peers were not held fixed: old40 retained Qwerty PowerOptimized whereas42 enumerated no such connected peer. Do not attribute small raw-transfer timing difference to this code.",
+        "Repeated GATT setup disappeared in actual trace; full wall gap2.69s is observed, not a promise for every radio/Windows condition.",
+        "Old historical fast full22.4s is close to current22.101s, so do not claim a2.69s gain over the original goal baseline.",
+        "Raw transfer15s/full20s/160decimalKBps targets remain unmet; this improves handoff overhead, not demonstrated pure-air throughput.",
+        "HCI export has3902/3908 actual DATA; complete-window-only conservation analysis, not actual missing device data. Full encrypted RF capture still unavailable.",
+        "Original wake tail-drain early-end and Document clipboard field ranges remain pending; ASR/audio/source-stop/rename settings code was unchanged."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
@@ -1002,16 +1040,18 @@
     },
     {
       "id": "ble-raw-throughput",
-      "baseline_state": "partial_physical_timing_observed_target_incomplete",
+      "baseline_state": "partial_physical_overhead_improved_target_incomplete",
       "accepted_scope": "Current40/FW22 actual same-image transfer16836/total24791ms; no human or160KB/s acceptance.",
       "guard_entries": [
-        "type_raw215_current40_comparison_rejected"
+        "type_raw215_current40_comparison_rejected",
+        "type_exclusive_ota_prepared_target_ownership"
       ],
       "paths": {
         "type": [
           "src-tauri/src/embedded_ble/windows_ble/ota_open.rs",
           "src-tauri/src/embedded_ble/windows_ble/ota_transfer.rs",
-          "src-tauri/src/embedded_ble/windows_ble/mod.rs"
+          "src-tauri/src/embedded_ble/windows_ble/mod.rs",
+          "src-tauri/src/commands/device/firmware.rs"
         ],
         "firmware": [
           "ports/esp32/ble_firmware_ota",
@@ -1021,15 +1061,17 @@
       "known_failures": [
         "Old491 and retained15ms/500 geometry failures remain valid; do not repeat without a changed causal condition.",
         "Candidate33/35 raw215 was finally tested as41 on current40/FW22 and showed no gain; not still untried.",
-        "Calibrated bulk single-reader raw analyzer still misses alternate connection events. Wireshark-only conversion cannot recover absent receiver data."
+        "Calibrated bulk single-reader raw analyzer still misses alternate connection events. Wireshark-only conversion cannot recover absent receiver data.",
+        "1b25bb6 always dropped prepared GATT after ownership handoff. Current GUI already released notify but kept legacy staging.42 acquires exclusive guards before construction, eliminating duplicate open without removing legacy security fallback."
       ],
       "latest_observed_baseline": {
-        "type_build": 40,
-        "type_source": "70aabc376015e7116dfd4c9dac37bcc7e3679b82",
+        "type_build": 42,
+        "type_source": "b7d6c9751d5986269b484de068d843968b8c5e0d",
         "firmware_build_id": "5b5d72adef4bd602",
-        "source": "comparison-summary.json",
-        "transfer_ms": 16836,
-        "total_ms": 24791
+        "transfer_ms": 16574,
+        "total_ms": 22101,
+        "evidence": "listener-repair-handoff/work/ota-exclusive-prepare-20261017/physical-result.json",
+        "scope": "Same current raw image; overhead improved, RF throughput not proven improved."
       }
     }
   ]

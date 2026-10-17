@@ -2671,50 +2671,62 @@ impl PreparedListenerOtaV1Transfer {
             _preparation_guard,
             ownership,
         } = self;
-        let (transfer_guard, _ota_process_guard) = match ownership {
+        let (transfer_guard, _ota_process_guard, prepared_under_exclusive_owner) = match ownership {
             PreparedListenerOtaV1TransferOwnership::Exclusive {
                 transfer_guard,
                 _ota_process_guard,
-            } => (transfer_guard, _ota_process_guard),
+            } => (transfer_guard, _ota_process_guard, true),
             PreparedListenerOtaV1TransferOwnership::Staged => {
                 let ota_process_guard = acquire_ble_ota_process_mutex("listener_ota_v1")?;
                 let transfer_guard = BleCaptureGuard::enter(None)?;
-                (transfer_guard, ota_process_guard)
+                (transfer_guard, ota_process_guard, false)
             }
         };
 
-        // Always drop the prepare-time OTA GATT and reopen a secure target before
-        // BEGIN. Exclusive capture / TYPE:OTA handoff commonly drops Windows
-        // link encryption on the prepare handle (protocol_error=3/14); reusing it
-        // fails BEGIN and never reaches the bulk WWR path.
-        let mut pre_bulk_maintain_handoff = OtaPreBulkMaintainHandoff::take_from(&mut target);
-        drop(target);
+        // Only a target opened while both transfer guards were already owned
+        // can cross the ready/start signal without another GATT open. Legacy
+        // staging opened before capture ownership: keep its secure reopen path.
+        let mut pre_bulk_maintain_handoff = OtaPreBulkMaintainHandoff { session: None };
+        let mut exclusive_prepared_target = if prepared_under_exclusive_owner {
+            Some(target)
+        } else {
+            pre_bulk_maintain_handoff = OtaPreBulkMaintainHandoff::take_from(&mut target);
+            drop(target);
+            None
+        };
 
         const SECURE_REOPEN_ROUNDS: usize = 3;
         let mut last_error: Option<String> = None;
         for round in 1..=SECURE_REOPEN_ROUNDS {
-            // First round needs settle after capture-gate handoff; later rounds wait longer
-            // for Windows to re-establish the encrypted GATT session.
-            // TYPE:OTA is now sent while notify is still live; exclusive settle
-            // only needs a short capture-gate quiet window (was 750/1200ms).
-            // Round 1: short settle after exclusive handoff so encryption is up
-            // before BEGIN. Prefer device 7.5 ms CI over WinRT 15 ms pin.
-            let settle_ms = if round == 1 { 150 } else { 700 };
-            std::thread::sleep(Duration::from_millis(settle_ms));
-            let mut fresh = match open_listener_ota_v1_target_after_active_link_handoff() {
-                Ok(fresh) => {
-                    log::info!(
-                        "[embedded-ble] Listener OTA v1: reopened secure OTA target after exclusive handoff before BEGIN round={round}/{SECURE_REOPEN_ROUNDS} (avoids protocol_error=14)"
-                    );
-                    pre_bulk_maintain_handoff.transfer_to_fresh_target(&fresh, round);
-                    fresh
-                }
-                Err(err) => {
-                    log::warn!(
-                        "[embedded-ble] Listener OTA v1: secure reopen after exclusive handoff failed round={round}/{SECURE_REOPEN_ROUNDS}: {err}"
-                    );
-                    last_error = Some(err);
-                    continue;
+            let mut fresh = if let Some(prepared) = exclusive_prepared_target.take() {
+                log::info!(
+                    "[embedded-ble] Listener OTA v1: using target prepared under exclusive ownership round={round}/{SECURE_REOPEN_ROUNDS}"
+                );
+                prepared
+            } else {
+                // First round needs settle after capture-gate handoff; later rounds wait longer
+                // for Windows to re-establish the encrypted GATT session.
+                // TYPE:OTA is now sent while notify is still live; exclusive settle
+                // only needs a short capture-gate quiet window (was 750/1200ms).
+                // Round 1: short settle after exclusive handoff so encryption is up
+                // before BEGIN. Prefer device 7.5 ms CI over WinRT 15 ms pin.
+                let settle_ms = if round == 1 { 150 } else { 700 };
+                std::thread::sleep(Duration::from_millis(settle_ms));
+                match open_listener_ota_v1_target_after_active_link_handoff() {
+                    Ok(fresh) => {
+                        log::info!(
+                            "[embedded-ble] Listener OTA v1: reopened secure OTA target after exclusive handoff before BEGIN round={round}/{SECURE_REOPEN_ROUNDS} (avoids protocol_error=14)"
+                        );
+                        pre_bulk_maintain_handoff.transfer_to_fresh_target(&fresh, round);
+                        fresh
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "[embedded-ble] Listener OTA v1: secure reopen after exclusive handoff failed round={round}/{SECURE_REOPEN_ROUNDS}: {err}"
+                        );
+                        last_error = Some(err);
+                        continue;
+                    }
                 }
             };
             let _concurrent_ble_power_guard =
