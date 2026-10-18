@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T09:38:59.102099+08:00",
+  "updated_at": "2026-10-18T15:55:53.452050+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1077,6 +1077,70 @@
       "known_scope": "Windows stale-cache mutation before/after verified with isolated real Credential Manager; build49 installed, new app restored and one synthetic100ms provider final accepted. No human field acceptance or all historical quota failures resolved claim.",
       "failing_source_commit": "ccfeae332f22d7e492f0ee88dcb042d3a6e67aaf",
       "commit_subject": "Preserve latest Windows credentials during settings saves and report quota errors live"
+    },
+    {
+      "id": "firmware_ble_only_ota_timing_summary",
+      "repo": "firmware",
+      "commit": "f3e249d",
+      "subject": "Persist OTA queue service and flash timings for BLE-only diagnostics",
+      "state": "clean_fw22_based_instrumentation_physically_exported_original_fw22_restored",
+      "humanAccepted": false,
+      "guards": [],
+      "protects": [
+        "Existing bounded counters are exported once per transfer, never per DATA packet.",
+        "Separate RX gaps, queue residence, worker/lock service and Flash service; preserve units.",
+        "No change to raw payload, connection parameters, recording or pairing policies."
+      ],
+      "evidence": [
+        "listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/triad-current-peer-live01/three-way-analysis.json",
+        "listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/triad-current-peer-live01/telemetry-decoder-proof.json",
+        "listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/triad-current-peer-live01/telemetry-build-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\telemetry-clean26\\source-proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\telemetry-clean26\\build-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\triad-restore22-live06\\firmware-timing-summary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\ota-optional-lane-20261018\\restored-firmware-identity.json"
+      ],
+      "limits": [
+        "Clean telemetry-only image was installed and four actual numeric events recovered; original FW22 then restored.",
+        "Counters overlap; totals/maxima do not establish exclusive RF stalls or a Flash root cause.",
+        "Original mixed working-tree compile artifact remains unsuitable for telemetry-only installation."
+      ],
+      "validation_kind": "evidence_only",
+      "cleanCandidateCommit": "5f2581bdbc6ce9121499e9bfed322da03665673c",
+      "cleanSourceSnapshot": "81254852a60abc23a0c9e6df164d6f3d5634065d"
+    },
+    {
+      "id": "type_optional_ota_data_lane_discovery_errors",
+      "repo": "type",
+      "commit": "42c628ac54204d6498765d9dfc6b4d9ce462f7f1",
+      "subject": "Retry optional OTA data lane discovery errors instead of silently degrading",
+      "state": "native_counterexample_fixed_installed_dual_lane_observed_no_stable_gain",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "failing_source_commit": "1b25bb6301e452cdf1eaf3e97f41bb710ba3b7c8",
+      "protects": [
+        "Only successful empty discovery means optional DATA_B absence.",
+        "Disconnect, timeout, property errors and deadline exhaustion retain failure and use existing bounded retry.",
+        "Keep real legacy single-lane compatibility; do not add sleeps, timeout budget or transport parameter changes."
+      ],
+      "guards": [
+        "python scripts/test-ota-optional-data-lane.py"
+      ],
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\ota-optional-lane-20261018\\discovery-root-evidence.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\ota-optional-lane-20261018\\before\\proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\ota-optional-lane-20261018\\after\\proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\ota-optional-lane-20261018\\source-provenance.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\ota-optional-lane-20261018\\build50-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\triad-type50-live03\\live-run.json"
+      ],
+      "limits": [
+        "Mock WinRT edge replay proves classification and bounded retry, not RF throughput.",
+        "First physical build50 run used dual lane but 21822ms was not faster; actual DATA_B-specific transient was not observed in that run.",
+        "160KB/s and continuous encrypted RF coverage remain incomplete; no human overall acceptance."
+      ],
+      "source_snapshot": "0c350ce1dc7b624b77411489467d2eec53732415",
+      "installed_exe_sha256": "92818735318a4169bdf8376f1d447027f3ac3aa97f23bcc110990c78d11c9bad"
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
@@ -1327,7 +1391,9 @@
         "type_raw215_current40_comparison_rejected",
         "type_exclusive_ota_prepared_target_ownership",
         "type_raw240_current46_comparison_unproven",
-        "firmware_sniffer_fresh_target_link_and_usb_timing"
+        "firmware_sniffer_fresh_target_link_and_usb_timing",
+        "type_optional_ota_data_lane_discovery_errors",
+        "firmware_ble_only_ota_timing_summary"
       ],
       "paths": {
         "type": [
@@ -1348,7 +1414,8 @@
         "Calibrated bulk single-reader raw analyzer still misses alternate connection events. Wireshark-only conversion cannot recover absent receiver data.",
         "1b25bb6 always dropped prepared GATT after ownership handoff. Current GUI already released notify but kept legacy staging.42 acquires exclusive guards before construction, eliminating duplicate open without removing legacy security fallback.",
         "Current46 raw240 candidate47 actually measured once in A/B/A; neighboring slight benefit not stable or faster than prior46 best, exact46 restored. Further trial needs a new causal condition.",
-        "Later owned-handoff capture runners omitted the earlier actual-preconnection gate: the OTA could reuse a pre-capture physical link. Reintroduce fresh captured CONNECT/same-link crypto observations, not merely start the receiver earlier."
+        "Later owned-handoff capture runners omitted the earlier actual-preconnection gate: the OTA could reuse a pre-capture physical link. Reintroduce fresh captured CONNECT/same-link crypto observations, not merely start the receiver earlier.",
+        "Optional DATA_B .ok() hid discovery failures since1b25bb6.42c628a fixes classification with native before/after evidence; build50 dual-lane field observation does not establish a stable throughput gain."
       ],
       "latest_observed_baseline": {
         "type_build": 42,
