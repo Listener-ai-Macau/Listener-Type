@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T18:14:32.770717+08:00",
+  "updated_at": "2026-10-18T20:38:57.914685+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -11,6 +11,9 @@
     },
     "platform": {
       "path": "../Denzic-Platform"
+    },
+    "sniffer": {
+      "path": "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\source"
     }
   },
   "required_guards": [
@@ -1252,9 +1255,60 @@
         "python scripts/test_windows_credential_scope.py"
       ],
       "known_scope": "Native fixture before reselects old/new by unrelated write persistence; shared repair primitive keeps new in four alternations and fresh readers. Actual active vault repaired without Type restart; same logical document retained, Local physical files removed; current original provider final succeeds. Negative regression is for CI/idle isolated app environment and must not require closing the user app. No forced Windows reboot, cloud quota guarantee, human ASR quality acceptance or BLE gain claim."
+    },
+    {
+      "id": "sniffer_initial_window_packet_completion_and_anchored_acquisition",
+      "repo": "sniffer",
+      "commit": "5223c91d41dee05a4d637efa0be453c50a892c32",
+      "subject": "Do not truncate a legal first PDU; acquire through bounded anchored windows and expose latest acquisition failure metadata",
+      "state": "installed118_basic_rx_passed_live_initial_path_not_exercised_missing_connect",
+      "protects": [
+        "First PDU may start inside and end beyond transmit window; wait for full pre-DLE LE1M airtime and widening.",
+        "Six missed initial windows preserve CSA2 event numbers and fixed deadlines under IRQ delay, then stop.",
+        "Ordinary first packet and legacy repeated timer still work;117 DMA snapshot and duplicate START guard retained.",
+        "AA/start_us-tagged latest-acquisition metadata differentiates no address, bad CRC, valid callback, timeout, synchronized and capture stop."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\before117-cases.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\after118-final.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-radio\\after118-final.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-118.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\custom-candidate118-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver118-radio-quality-202558\\quality-summary.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-202630\\capture-gap.json"
+      ],
+      "guards": [
+        "python tools/replay_initial_follow.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-follow/current-guard.json --expect-fixed"
+      ],
+      "known_scope": "Actual ARM functions with disclosed MMIO/time and export-buffer fixture. Installed118 received1098/1098 independentlyCRC-matching advertisements. Not a full peer-link, encryptedOTA or throughput baseline; do not infer RF silence or device packet loss from analyzer gaps."
+    },
+    {
+      "id": "sniffer_advertising_hop_preserves_inflight_packet",
+      "repo": "sniffer",
+      "commit": "3981407a016be68a384f153fe4e3578811bd8fb2",
+      "subject": "Do not disableRX for advertising hop while a matched PDU is still arriving; preserve nextADDRESS under delayed IRQ/callback",
+      "state": "arm_before_after_passed_candidate119_not_installed",
+      "protects": [
+        "A matched unfinished PDU blocks retune; idle scanning still advances channel.",
+        "Fresh END clears old ADDRESS before slow callbacks; lateENDIRQ preserves possible nextADDRESS.",
+        "A newADDRESS during callback is not cleared after callback.",
+        "No product parameters or Type process changes; retain118 firstPDU boundary and anchored acquisition."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\before119-advertising.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\after119-final.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-radio\\after119-final.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-119.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-202630\\capture-gap.json"
+      ],
+      "guards": [
+        "python tools/replay_initial_follow.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-follow/current-guard.json --expect-fixed --expect-advertising-guard",
+        "python tools/replay_radio_dma_snapshot.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-radio/current-guard.json --expect-fixed --expect-address-latch"
+      ],
+      "known_scope": "Actual ARM source counterexample with modeled packet arrival.119 not installed yet; cannot attribute live missedCONNECT uniquely or claim completeOTA/throughput gain. adv_holds counts loop deferrals, not packet loss; adv_us excludes earlierIRQ work."
     }
   ],
-  "feature_routes_updated_at": "2026-10-18",
+  "feature_routes_updated_at": "2026-10-18T20:38:57.914685+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1562,6 +1616,50 @@
         "Long-running build48 can overwrite the new1773/bigasr grant with cached old9292/seedasr while saving unrelated preferences.",
         "Maintenance tools wrote Local persistence2 while keyring-rs writes Roaming3. Different same-target copies survived; unrelated credential writes selected an old ASR configuration without changing its LastWritten time. Commit2cff1cf and the scope guard retain the actual before/after evidence.",
         "Unique fixture target names do not isolate OS scope selection. Negative reproduction must refuse a running user Type process; do not close the user app to run it."
+      ]
+    },
+    {
+      "id": "ble-sniffer-initial-follow",
+      "paths": {
+        "sniffer": [
+          "src/controllers/blecontroller.cpp",
+          "src/radio.cpp",
+          "src/timer.cpp",
+          "src/timer.h",
+          "tools/replay_initial_follow.py",
+          "tools/replay_radio_dma_snapshot.py"
+        ]
+      },
+      "guard_entries": [
+        "sniffer_initial_window_packet_completion_and_anchored_acquisition",
+        "sniffer_advertising_hop_preserves_inflight_packet"
+      ],
+      "baseline_state": "candidate119_offline_only_installed118_initial_path_not_exercised",
+      "accepted_scope": "Actual ARM functions with disclosed MMIO/time and export-buffer fixture. Installed118 received1098/1098 independentlyCRC-matching advertisements. Not a full peer-link, encryptedOTA or throughput baseline; do not infer RF silence or device packet loss from analyzer gaps.",
+      "known_failures": [
+        "117 actual savedCONNECT followed by0DATA while Windows established link.",
+        "117 actualARM legal late-ending firstPDU is discarded at8750us; old single-window acquisition exits immediately.",
+        "Intermediate118 repeated scheduling drifted11us per event in deterministic delayedIRQ replay; anchored deadlines replace it only for passive initial acquisition."
+      ]
+    },
+    {
+      "id": "ble-sniffer-advertising-inflight",
+      "paths": {
+        "sniffer": [
+          "src/controllers/blecontroller.cpp",
+          "src/radio.cpp",
+          "tools/replay_initial_follow.py",
+          "tools/replay_radio_dma_snapshot.py"
+        ]
+      },
+      "guard_entries": [
+        "sniffer_advertising_hop_preserves_inflight_packet"
+      ],
+      "baseline_state": "arm_before_after_passed_candidate119_not_installed",
+      "accepted_scope": "Actual ARM source counterexample with modeled packet arrival.119 not installed yet; cannot attribute live missedCONNECT uniquely or claim completeOTA/throughput gain. adv_holds counts loop deferrals, not packet loss; adv_us excludes earlierIRQ work.",
+      "known_failures": [
+        "118 live currentpeer connected inHCI but receiver had112advertisements and noCONNECT.",
+        "Actual118 ARM passiveAdvertisingHop disablesRX despite ADDRESS matched and END not reached. Modeled interleaving, not unique live attribution."
       ]
     }
   ]
