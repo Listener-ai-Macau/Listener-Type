@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T21:16:41.471742+08:00",
+  "updated_at": "2026-10-18T21:35:46.592903+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1338,9 +1338,36 @@
         "python tools/replay_radio_dma_snapshot.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-radio/current-guard.json --expect-fixed --expect-address-latch"
       ],
       "known_scope": "ActualARM with disclosed MMIO/time fixtures.120 basicRX1422/1422 independentCRC, but live29advertisements/noCONNECT while Windows connected.adv_ifs2 proves code executed, not successful capture or speed gain. CompleteOTA remains unqualified. Historical peer-specific comparison: currentF0 has verifiedCONNECT on37 in117; olderD7 success on38 cannot automatically be reused across peers. Fixed37+120 live comparison pending, not wholecapture acceptance."
+    },
+    {
+      "id": "sniffer_known_csa2_counter_survives_missing_event_before_future_map",
+      "repo": "sniffer",
+      "commit": "68c1b91b54a67b8ecc9eb509794295874728e12d",
+      "subject": "Do not fast-forward a known passive CSA2 counter to a future map instant after a missed packet; anchor repeat deadlines",
+      "state": "candidate121_offline750_pdu_prefix_and_tail_guards_passed_not_installed",
+      "protects": [
+        "Complete750-PDU recorded prefix matches actualARM selected channels, with independently validatedCRC and MIC control metadata.",
+        "Known CONNECT counter advances366to367 after one miss, map staysold before372 and changes at372; unknowncounter legacy fallback preserved.",
+        "Known passive repeated deadlines do not accumulate11us/event drift; loss metadata describes most recent consecutive misses.",
+        "Do not claim unique cause of initial missedevent, live fullcapture or throughput from modeled tail."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-211533\\connection-progress.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-211533\\rf-private\\current-bond-independent-rf-proof.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\saved-link120-final.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\saved-link121-final.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\saved-link121-worker1307.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\after121-final.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-radio\\after121-final.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-121.json"
+      ],
+      "guards": [
+        "python tools/replay_saved_link.py --workspace .. --elf build/nrf52840_xxaa.out --capture ../passive-current-20261018-211533/rf-private --output ../native-arm-follow/current-saved-link.json --expect-known-counter"
+      ],
+      "known_scope": "ActualARM recorded750-PDU prefix. Modeled MMIO/IRQ and verified control publication replace radio and CCM worker. Tail noRX or abstract packetpresence is explicitly hypothetical. Installed120 fixed37 capturesCONNECT/handshake+750CRC/21MIC only2.7s;121 not installed; noOTA/voice load captured, fullcapture and speed goal remain incomplete."
     }
   ],
-  "feature_routes_updated_at": "2026-10-18T21:14:02.071831+08:00",
+  "feature_routes_updated_at": "2026-10-18T21:35:46.592903+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1694,6 +1721,26 @@
       "known_failures": [
         "118 live currentpeer connected inHCI but receiver had112advertisements and noCONNECT.",
         "Actual118 ARM passiveAdvertisingHop disablesRX despite ADDRESS matched and END not reached. Modeled interleaving, not unique live attribution."
+      ]
+    },
+    {
+      "id": "ble-sniffer-channel-map-loss",
+      "paths": {
+        "sniffer": [
+          "src/controllers/blecontroller.cpp",
+          "src/controllers/blecontroller.h",
+          "src/timer.cpp",
+          "tools/replay_saved_link.py"
+        ]
+      },
+      "guard_entries": [
+        "sniffer_known_csa2_counter_survives_missing_event_before_future_map"
+      ],
+      "baseline_state": "candidate121_offline750_pdu_prefix_and_tail_guards_passed_not_installed",
+      "accepted_scope": "ActualARM recorded750-PDU prefix. Modeled MMIO/IRQ and verified control publication replace radio and CCM worker. Tail noRX or abstract packetpresence is explicitly hypothetical. Installed120 fixed37 capturesCONNECT/handshake+750CRC/21MIC only2.7s;121 not installed; noOTA/voice load captured, fullcapture and speed goal remain incomplete.",
+      "known_failures": [
+        "120 live fixed37 receives750PDUs then stops after mapinstant372 message; Windows staysconnected.",
+        "ActualARM120 fullrecordedprefix matches but noRX tail jumps366to373 and applies map early. First actual RFmiss cause remainsunknown."
       ]
     }
   ]
