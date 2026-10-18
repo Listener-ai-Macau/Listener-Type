@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T20:55:36.255209+08:00",
+  "updated_at": "2026-10-18T21:14:02.071831+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1287,7 +1287,7 @@
       "repo": "sniffer",
       "commit": "3981407a016be68a384f153fe4e3578811bd8fb2",
       "subject": "Do not disableRX for advertising hop while a matched PDU is still arriving; preserve nextADDRESS under delayed IRQ/callback",
-      "state": "installed119_basic_rx_passed_live_connection_pending",
+      "state": "installed119_live_gap_then_installed120_live_connect_still_missing",
       "protects": [
         "A matched unfinished PDU blocks retune; idle scanning still advances channel.",
         "Fresh END clears old ADDRESS before slow callbacks; lateENDIRQ preserves possible nextADDRESS.",
@@ -1302,16 +1302,44 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-202630\\capture-gap.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\custom-candidate119-installed.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver119-radio-quality-204429\\quality-summary.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-204508\\interruption.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-204508\\interruption.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-205448\\capture-gap.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-210837\\capture-gap.json"
       ],
       "guards": [
         "python tools/replay_initial_follow.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-follow/current-guard.json --expect-fixed --expect-advertising-guard",
         "python tools/replay_radio_dma_snapshot.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-radio/current-guard.json --expect-fixed --expect-address-latch"
       ],
       "known_scope": "Actual ARM source counterexample with modeled packet arrival.119 installed;1857/1857 independentCRC basicRX passed, live connection pending; cannot attribute live missedCONNECT uniquely or claim completeOTA/throughput gain. adv_holds counts loop deferrals, not packet loss; adv_us excludes earlierIRQ work."
+    },
+    {
+      "id": "sniffer_advertising_response_window_before_address",
+      "repo": "sniffer",
+      "commit": "a779465b82db9d8cf95abda6c45c01cc47f285c3",
+      "subject": "Preserve selected legacy connectable advertisement response interval before ADDRESS can be observed",
+      "state": "installed120_basic_rx_passed_live_connect_still_missing",
+      "protects": [
+        "Hold same channel during post-ADV150usIFS and40us preamble/access address plus20us margin, using hardwareEND.",
+        "Existing longerdeadline preserved; no response releases hop; unrelatedadvertiser/nonconnectable/fixedmode and32bitwrap preserved.",
+        "Do not treat source counterexamples as unique live cause or wholeOTA qualification."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\before120-response.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\after120-final.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-radio\\after120-final.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-120.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\custom-candidate120-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver120-radio-quality-210742\\quality-summary.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-210837\\capture-gap.json"
+      ],
+      "guards": [
+        "python tools/replay_initial_follow.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-follow/current-guard.json --expect-fixed --expect-advertising-guard --expect-response-window",
+        "python tools/replay_radio_dma_snapshot.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-radio/current-guard.json --expect-fixed --expect-address-latch"
+      ],
+      "known_scope": "ActualARM with disclosed MMIO/time fixtures.120 basicRX1422/1422 independentCRC, but live29advertisements/noCONNECT while Windows connected.adv_ifs2 proves code executed, not successful capture or speed gain. CompleteOTA remains unqualified."
     }
   ],
-  "feature_routes_updated_at": "2026-10-18T20:48:52.956511+08:00",
+  "feature_routes_updated_at": "2026-10-18T21:14:02.071831+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1635,10 +1663,11 @@
       },
       "guard_entries": [
         "sniffer_initial_window_packet_completion_and_anchored_acquisition",
-        "sniffer_advertising_hop_preserves_inflight_packet"
+        "sniffer_advertising_hop_preserves_inflight_packet",
+        "sniffer_advertising_response_window_before_address"
       ],
-      "baseline_state": "installed119_basic_rx_passed_live_connection_pending",
-      "accepted_scope": "Actual ARM functions with disclosed MMIO/time and export-buffer fixture. Installed118 received1098/1098 independentlyCRC-matching advertisements. Not a full peer-link, encryptedOTA or throughput baseline; do not infer RF silence or device packet loss from analyzer gaps.",
+      "baseline_state": "installed120_basic_rx_passed_live_connect_still_missing",
+      "accepted_scope": "ActualARM with disclosed MMIO/time fixtures.120 basicRX1422/1422 independentCRC, but live29advertisements/noCONNECT while Windows connected.adv_ifs2 proves code executed, not successful capture or speed gain. CompleteOTA remains unqualified.",
       "known_failures": [
         "117 actual savedCONNECT followed by0DATA while Windows established link.",
         "117 actualARM legal late-ending firstPDU is discarded at8750us; old single-window acquisition exits immediately.",
@@ -1656,10 +1685,11 @@
         ]
       },
       "guard_entries": [
-        "sniffer_advertising_hop_preserves_inflight_packet"
+        "sniffer_advertising_hop_preserves_inflight_packet",
+        "sniffer_advertising_response_window_before_address"
       ],
-      "baseline_state": "installed119_basic_rx_passed_live_connection_pending",
-      "accepted_scope": "Actual ARM source counterexample with modeled packet arrival.119 installed;1857/1857 independentCRC basicRX passed, live connection pending; cannot attribute live missedCONNECT uniquely or claim completeOTA/throughput gain. adv_holds counts loop deferrals, not packet loss; adv_us excludes earlierIRQ work.",
+      "baseline_state": "installed120_basic_rx_passed_live_connect_still_missing",
+      "accepted_scope": "ActualARM with disclosed MMIO/time fixtures.120 basicRX1422/1422 independentCRC, but live29advertisements/noCONNECT while Windows connected.adv_ifs2 proves code executed, not successful capture or speed gain. CompleteOTA remains unqualified.",
       "known_failures": [
         "118 live currentpeer connected inHCI but receiver had112advertisements and noCONNECT.",
         "Actual118 ARM passiveAdvertisingHop disablesRX despite ADDRESS matched and END not reached. Modeled interleaving, not unique live attribution."
