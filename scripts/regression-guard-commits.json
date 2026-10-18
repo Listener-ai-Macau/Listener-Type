@@ -1254,7 +1254,7 @@
       "known_scope": "Native fixture before reselects old/new by unrelated write persistence; shared repair primitive keeps new in four alternations and fresh readers. Actual active vault repaired without Type restart; same logical document retained, Local physical files removed; current original provider final succeeds. Negative regression is for CI/idle isolated app environment and must not require closing the user app. No forced Windows reboot, cloud quota guarantee, human ASR quality acceptance or BLE gain claim."
     }
   ],
-  "feature_routes_updated_at": "2026-10-17",
+  "feature_routes_updated_at": "2026-10-18",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1542,6 +1542,8 @@
       "id": "asr-quota-resource-recovery",
       "paths": {
         "type": [
+          "scripts/windows_credential_scope.py",
+          "scripts/test_windows_credential_scope.py",
           "src-tauri/src/persistence.rs",
           "src-tauri/src/asr/volcengine.rs",
           "src-tauri/src/net_health.rs",
@@ -1551,12 +1553,15 @@
         ]
       },
       "guard_entries": [
-        "type_windows_credential_mutation_preserves_latest_resource"
+        "type_windows_credential_mutation_preserves_latest_resource",
+        "type_windows_credential_persistence_scope_does_not_resurrect_old_configuration"
       ],
-      "baseline_state": "machine_validated_installed_not_human_accepted",
-      "accepted_scope": "No human field acceptance yet. Before/after isolated real Windows Credential Manager proves stale-cache mutation; real09:20 vault recurrence retained.",
+      "baseline_state": "root_cause_reproduced_live_repaired_machine_verified_not_reboot_retested",
+      "accepted_scope": "Actual Local2/Roaming3 same-target duplicate selection reproduced, canonical live vault repaired without restarting Type; unrelated writes and fresh process retain the authorized document, original provider final succeeds. Natural Windows reboot observation remains pending. Do not run the negative scope fixture while Type is running.",
       "known_failures": [
-        "Long-running build48 can overwrite the new1773/bigasr grant with cached old9292/seedasr while saving unrelated preferences."
+        "Long-running build48 can overwrite the new1773/bigasr grant with cached old9292/seedasr while saving unrelated preferences.",
+        "Maintenance tools wrote Local persistence2 while keyring-rs writes Roaming3. Different same-target copies survived; unrelated credential writes selected an old ASR configuration without changing its LastWritten time. Commit2cff1cf and the scope guard retain the actual before/after evidence.",
+        "Unique fixture target names do not isolate OS scope selection. Negative reproduction must refuse a running user Type process; do not close the user app to run it."
       ]
     }
   ]
