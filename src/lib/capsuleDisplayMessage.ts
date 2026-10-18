@@ -29,6 +29,11 @@ export function isCapsuleQuotaErrorMessage(message: string | null | undefined): 
   return Boolean(message && /当前识别资源额度不可用（错误码 \d+）/.test(message));
 }
 
+/** A provider failure must remain visible even when a partial preview exists. */
+export function shouldShowCapsuleQuotaError(state: CapsuleState, quotaExceeded: boolean): boolean {
+  return quotaExceeded && (state === 'recording' || state === 'transcribing' || state === 'polishing');
+}
+
 export function getCapsuleDisplayMessage(
   state: CapsuleState,
   message: string | null | undefined,

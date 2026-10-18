@@ -11,7 +11,7 @@ import {
 } from '../lib/capsuleLayout';
 import { invokeOrMock, isTauri } from '../lib/ipc';
 import { capsuleCancelEnabled, capsuleConfirmEnabled } from '../lib/capsuleActionRules';
-import { getCapsuleDisplayMessage, isCapsuleQuotaErrorMessage, shouldRetainCapsulePreview } from '../lib/capsuleDisplayMessage';
+import { getCapsuleDisplayMessage, isCapsuleQuotaErrorMessage, shouldRetainCapsulePreview, shouldShowCapsuleQuotaError } from '../lib/capsuleDisplayMessage';
 import {
   buildPreviewRevealFrames,
   CAPSULE_APPEARANCE,
@@ -249,6 +249,7 @@ interface PillProps {
   stopAcknowledged?: boolean;
   netBadge?: string | null;
   netBadgeTone?: 'warn' | 'bad';
+  providerQuotaExceeded?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
   onDismiss: () => void;
@@ -264,6 +265,7 @@ function Pill({
   stopAcknowledged = false,
   netBadge = null,
   netBadgeTone = 'warn',
+  providerQuotaExceeded = false,
   onCancel,
   onConfirm,
   onDismiss,
@@ -440,6 +442,10 @@ function Pill({
       break;
     default:
       center = <AudioBars level={0} />;
+  }
+
+  if (shouldShowCapsuleQuotaError(state, providerQuotaExceeded)) {
+    center = <CenterText os={os} kind="error" text={t('capsule.asrQuotaExceeded', '识别额度不足')} color="var(--ol-err)" />;
   }
 
   const ambient = state === 'recording' ? Math.min(1, Math.max(0, level)) : 0;
@@ -1086,6 +1092,7 @@ export function Capsule() {
         message={message}
         netBadge={netBadge}
         netBadgeTone={netBadgeTone}
+        providerQuotaExceeded={providerQuotaExceeded}
         stopRequested={!leaving && renderedState === 'recording' && stopRequested}
         stopAcknowledged={!leaving && shouldShowStopAcknowledgement(renderedState, stopAcknowledged)}
         onCancel={onCancel}
