@@ -326,7 +326,7 @@ function DeviceFirmwareSettingsCard() {
     voiceAutoStopEnabled: true,
     pluggedAutoShutdownMinutes: 0,
     batteryAutoShutdownMinutes: DEFAULT_BATTERY_AUTO_SHUTDOWN_MINUTES,
-    bleName: 'listener',
+    bleName: prefs?.deviceBleName ?? '',
   });
   const [status, setStatus] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('loading');
   const [message, setMessage] = useState('');
@@ -448,6 +448,11 @@ function DeviceFirmwareSettingsCard() {
         t('settings.device.readTimeout', '读取超时，请确认设备仍连接后重试。'),
       );
       setSnapshot(value);
+      if (value.source !== 'firmware') {
+        setStatus('error');
+        setMessage(t('settings.device.readRequired', '未能读取设备当前设置；保留原有内容，重新读取成功后才能写入。'));
+        return;
+      }
       setForm(snapshotToForm(value));
       setStatus('idle');
     } catch (error) {
@@ -477,7 +482,7 @@ function DeviceFirmwareSettingsCard() {
   const validationError = validateDeviceSettingsForm(form, t);
   const writeDisabled = status === 'loading' || status === 'saving' || !!validationError || !snapshot?.writeSupported;
   const readDisabled = status === 'loading' || status === 'saving';
-  const controlsDisabled = !snapshot?.writeSupported || status === 'saving';
+  const controlsDisabled = !snapshot?.writeSupported || status === 'loading' || status === 'saving';
   const busyText = status === 'loading'
     ? t('settings.device.readingDetail', '正在读取设备设置...')
     : status === 'saving'

@@ -13,11 +13,24 @@ pub enum NetworkHealthClass {
 pub struct NetworkHealthState {
     asr: Option<(Instant, bool)>,
     general: Option<(Instant, bool)>,
+    quota: Option<(Instant, bool)>,
     pub revision: u64,
 }
 
 impl NetworkHealthState {
-    pub const fn new() -> Self { Self { asr: None, general: None, revision: 0 } }
+    pub const fn new() -> Self { Self { asr: None, general: None, quota: None, revision: 0 } }
+
+    pub fn quota_exceeded(&self) -> bool { self.quota.is_some_and(|(_, blocked)| blocked) }
+
+    // Connectivity probes never clear a provider billing rejection. Only a
+    // later accepted recognition response can establish quota recovery.
+    pub fn observe_quota(&mut self, at: Instant, exceeded: bool) -> bool {
+        if self.quota.is_some_and(|(previous, _)| at < previous) { return false; }
+        let changed = self.quota_exceeded() != exceeded;
+        self.quota = Some((at, exceeded));
+        if changed { self.revision += 1; }
+        changed
+    }
 
     pub fn class(&self) -> Option<NetworkHealthClass> {
         match (self.asr.map(|v| v.1), self.general.map(|v| v.1)) {

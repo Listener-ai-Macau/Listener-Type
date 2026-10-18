@@ -674,7 +674,7 @@ pub fn device_settings_readback_unavailable_detail(error: &str) -> String {
         summary = "unknown error".to_string();
     }
     format!(
-        "Firmware DEVICE readback is unavailable ({summary}); showing defaults. Writes still use DEVICE:SET."
+        "Firmware DEVICE readback is unavailable ({summary}); writing is disabled until authoritative readback succeeds."
     )
 }
 
@@ -1165,15 +1165,11 @@ pub async fn set_device_settings(
     request: DeviceSettingsUpdateRequest,
 ) -> Result<DeviceSettingsSnapshot, String> {
     validate_device_settings_request(&request)?;
-    let previous_snapshot = match read_device_settings_snapshot_from_firmware().await {
-        Ok(snapshot) => Some(snapshot),
-        Err(_) => {
-            tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
-                .await
-                .ok()
-                .map(device_settings_snapshot_from_device)
-        }
-    };
+    // A display fallback is never a write baseline: otherwise an unrelated
+    // setting can submit the placeholder BLE name and rename the real device.
+    let previous_snapshot = Some(read_device_settings_snapshot_from_firmware().await.map_err(
+        |err| format!("未能读取设备当前设置，未写入任何设置，也未更改蓝牙名称。请重新读取后再保存：{err}"),
+    )?);
     let plugged_low_power_enabled =
         request.plugged_low_power_enabled && request.plugged_low_power_idle_minutes > 0;
     let led_zone_brightness_supported = previous_snapshot
@@ -1586,7 +1582,7 @@ pub fn device_settings_snapshot_from_device(
     };
     let detail = if device.connected {
         Some(
-            "Type can send DEVICE:SET, but firmware DEVICE readback is not currently available; showing defaults.".to_string(),
+            "Firmware DEVICE readback is unavailable; placeholder settings cannot be written.".to_string(),
         )
     } else {
         device.detail.or_else(|| {
@@ -1596,7 +1592,7 @@ pub fn device_settings_snapshot_from_device(
     DeviceSettingsSnapshot {
         schema: DEVICE_SETTINGS_SCHEMA,
         connected: device.connected,
-        write_supported: device.connected,
+        write_supported: false,
         source: if device.connected {
             "defaults"
         } else {

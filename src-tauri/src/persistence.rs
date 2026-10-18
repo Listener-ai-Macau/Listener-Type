@@ -717,8 +717,17 @@ fn keyring_entry() -> Result<keyring::Entry> {
 }
 
 fn keyring_entry_for(account: &str) -> Result<keyring::Entry> {
+    #[cfg(test)]
+    if let Some(service) = TEST_CREDENTIAL_SERVICE.with(|value| value.borrow().clone()) {
+        return keyring::Entry::new(&service, account).context("open isolated test credential vault");
+    }
     keyring::Entry::new(CredentialsVault::SERVICE_NAME, account)
         .context("open system credential vault")
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_CREDENTIAL_SERVICE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
 fn clean_credentials(root: &CredsRoot) -> CredsRoot {
@@ -976,6 +985,11 @@ fn load_credentials() -> CredsRoot {
 }
 
 fn load_credentials_for_update() -> Result<CredsRoot> {
+    // Windows tray and helper processes can outlive a credential edit. Never
+    // publish a whole cached vault during an unrelated settings save: merge
+    // the requested change into the current OS vault, or fail without writing.
+    // macOS retains the cache to avoid repeated per-entry Keychain ACL prompts.
+    #[cfg(not(target_os = "windows"))]
     if let Some(cached) = credentials_cache().lock().as_ref().cloned() {
         return Ok(cached);
     }
@@ -3238,4 +3252,42 @@ mod tests {
         assert_eq!(prefs.style_system_prompts.formal, packs[3].prompt);
         assert_eq!(prefs.custom_style_prompts, CustomStylePrompts::default());
     }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+#[test]
+#[ignore = "native isolated Credential Manager namespace; no real app credentials"]
+fn native_unrelated_settings_save_preserves_newer_resource_credentials() {
+    let service = format!("com.listener.type.test.resource.{}", uuid::Uuid::new_v4());
+    TEST_CREDENTIAL_SERVICE.with(|value| *value.borrow_mut() = Some(service));
+    struct Cleanup;
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            delete_keyring_password("credentials.v1");
+            for i in 0..3 { delete_keyring_password(&format!("credentials.v1.chunk.{i}")); }
+            *credentials_cache().lock() = None;
+            TEST_CREDENTIAL_SERVICE.with(|value| *value.borrow_mut() = None);
+        }
+    }
+    let _cleanup = Cleanup;
+    let mut old = CredsRoot::default();
+    write_account(&mut old, CredentialAccount::VolcengineAppKey, Some("test-old-app".into()));
+    write_account(&mut old, CredentialAccount::VolcengineAccessKey, Some("test-old-secret".into()));
+    write_account(&mut old, CredentialAccount::VolcengineResourceId, Some("volc.seedasr.sauc.duration".into()));
+    save_credentials(&old).unwrap();
+    let mut newer = old.clone();
+    write_account(&mut newer, CredentialAccount::VolcengineAppKey, Some("test-new-app".into()));
+    write_account(&mut newer, CredentialAccount::VolcengineAccessKey, Some("test-new-secret".into()));
+    write_account(&mut newer, CredentialAccount::VolcengineResourceId, Some("volc.bigasr.sauc.duration".into()));
+    save_credentials(&newer).unwrap();
+    // A long-running tray process still has its old cache when a native helper
+    // has updated the vault. Saving an unrelated preference syncs active IDs.
+    store_credentials_cache(&old);
+    CredentialsVault::set_active_asr_provider("volcengine").unwrap();
+    CredentialsVault::set_active_llm_provider("deepseek").unwrap();
+    let actual = load_keyring_credentials().unwrap().unwrap();
+    assert_eq!(lookup_account(&actual, CredentialAccount::VolcengineAppKey), Some("test-new-app".into()));
+    assert_eq!(lookup_account(&actual, CredentialAccount::VolcengineAccessKey), Some("test-new-secret".into()));
+    assert_eq!(lookup_account(&actual, CredentialAccount::VolcengineResourceId), Some("volc.bigasr.sauc.duration".into()));
+    println!("isolated_native_vault=true;newer_app_token_resource_retained=true;user_credentials_touched=false");
 }

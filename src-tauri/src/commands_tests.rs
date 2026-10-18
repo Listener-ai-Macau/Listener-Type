@@ -359,6 +359,15 @@ fn ota_snapshot_with_version(version: Option<&str>) -> FirmwareOtaDeviceSnapshot
 }
 
 #[test]
+fn unread_device_settings_placeholders_cannot_authorize_writing_a_default_name() {
+    let snapshot = device_settings_snapshot_from_device(ota_snapshot_with_version(Some("1.0.6-rc1")));
+    assert!(snapshot.connected);
+    assert_eq!(snapshot.source, "defaults");
+    assert!(!snapshot.write_supported,
+        "a BLE connection is not proof the placeholder name/settings were read from firmware");
+}
+
+#[test]
 fn firmware_ota_confirmation_uses_fast_service_probe_before_full_gatt_fallback() {
     let source = normalized_commands_source();
     let start = source

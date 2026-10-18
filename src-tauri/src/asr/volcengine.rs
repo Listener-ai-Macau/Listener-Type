@@ -122,11 +122,9 @@ pub struct VolcengineCredentials {
 
 impl VolcengineCredentials {
     pub fn default_resource_id() -> &'static str {
-        // 2026-09-21: the gateway now rejects "volc.seedasr.sauc.duration" at
-        // handshake for every caller (HTTP 400 "resourceId ... is not allowed",
-        // verified with garbage credentials). "volc.bigasr.sauc.duration" is the
-        // accepted id for the Doubao Seed-ASR streaming 2.0 hour pack and serves
-        // the same /api/v3/sauc/bigmodel endpoint.
+        // Compatibility default for existing bigasr hourly grants. Explicit
+        // saved resource IDs take precedence; seedasr/bigasr are distinct
+        // resources and acceptance must be checked on the configured account.
         "volc.bigasr.sauc.duration"
     }
 }
@@ -147,7 +145,7 @@ pub enum VolcengineASRError {
     AuthRejected(u16),
     #[error("authentication failed")]
     AuthenticationFailed,
-    #[error("识别额度已用完（错误码 {0}）；请在火山引擎补充 ASR 时长，或在设置中切换识别服务")]
+    #[error("当前识别资源额度不可用（错误码 {0}）；请核对资源 ID 对应的额度，并确认它与已开通的服务一致")]
     QuotaExceeded(u32),
     #[error("no final result")]
     NoFinalResult,
@@ -10921,8 +10919,13 @@ impl VolcengineStreamingASR {
                 body.chars().take(200).collect::<String>()
             );
             // 断流类错误帧（45000081 等）顺带探测网络分层，定位数据。
-            crate::net_health::log_network_health_probe_async("provider_error_frame");
-            self.fallback_to_partial_or_error(classify_provider_error(code, &body));
+            let error = classify_provider_error(code, &body);
+            if matches!(error, VolcengineASRError::QuotaExceeded(_)) {
+                crate::net_health::record_asr_quota_exceeded();
+            } else {
+                crate::net_health::log_network_health_probe_async("provider_error_frame");
+            }
+            self.fallback_to_partial_or_error(error);
             self.state.lock().is_connected = false;
             *self.audio_tx.lock() = None;
             return false;
@@ -10949,7 +10952,7 @@ impl VolcengineStreamingASR {
             Ok(v) => v,
             Err(_) => return true,
         };
-        crate::net_health::record_asr_response();
+        crate::net_health::record_asr_recognition_response();
         if let Some(duration_ms) = server_audio_duration_ms(&json) {
             let mut state = self.state.lock();
             state.last_server_audio_duration_ms = Some(
@@ -25961,7 +25964,7 @@ mod tests {
             exact,
             VolcengineASRError::QuotaExceeded(VOLCENGINE_AUDIO_DURATION_QUOTA_EXCEEDED)
         ));
-        assert!(exact.to_string().contains("补充 ASR 时长"));
+        assert!(exact.to_string().contains("资源 ID"));
         assert!(!exact.permits_full_audio_replay());
 
         let future_code = classify_provider_error(45_999_999, "Quota Exceeded");
@@ -25973,6 +25976,28 @@ mod tests {
         let transport = classify_provider_error(45_000_001, "temporary server error");
         assert!(matches!(transport, VolcengineASRError::ConnectionFailed(_)));
         assert!(transport.permits_full_audio_replay());
+    }
+
+    #[test]
+    fn quota_error_frame_publishes_live_warning_before_finalization_and_tcp_cannot_clear_it() {
+        crate::net_health::record_asr_recognition_response();
+        let asr = uplink_stall_test_asr();
+        let body = br#"{"error":"quota exceeded for types: audio_duration_lifetime"}"#;
+        let mut bytes = vec![0x11, 0xf0, 0x10, 0];
+        bytes.extend_from_slice(&VOLCENGINE_AUDIO_DURATION_QUOTA_EXCEEDED.to_be_bytes());
+        bytes.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(body);
+        // No stop, final-result wait, device, credentials, or cloud request.
+        assert!(!asr.handle_frame(&bytes));
+        let warning = crate::net_health::latest_network_health_payload().unwrap();
+        assert!(warning.provider_quota_exceeded);
+        assert!(matches!(warning.class, "all_good" | "general_unreachable"));
+        crate::net_health::record_asr_response();
+        assert!(crate::net_health::latest_network_health_payload().unwrap().provider_quota_exceeded);
+        crate::net_health::record_asr_recognition_response();
+        let recovered = crate::net_health::latest_network_health_payload().unwrap();
+        assert!(!recovered.provider_quota_exceeded);
+        assert!(recovered.seq > warning.seq);
     }
 
     #[tokio::test]

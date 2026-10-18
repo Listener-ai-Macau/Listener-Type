@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T02:32:39.213846+08:00",
+  "updated_at": "2026-10-18T09:25:13.355490+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1030,6 +1030,28 @@
         "Original ticket45 Document field recovery lacks direct new after-install consumption/clipboard evidence; ENSURE2004ms and complete Bluetooth air follow remain unresolved.",
         "Exact MSI source snapshot ba01cd8e45e5a4f3204d264e1eba25cee947eeb0; installed EXE 4AF7B522E0A96AC9F99E9041CDE91FE7DF975B8F1D734279798EE703F13493D5. No public release or human acceptance claimed."
       ]
+    },
+    {
+      "id": "type_windows_credential_mutation_preserves_latest_resource",
+      "repo": "type",
+      "commit": "ccfeae332f22d7e492f0ee88dcb042d3a6e67aaf",
+      "subject": "Windows stale process vault overwrites newer app and ASR resource on unrelated settings save",
+      "state": "before_failure_reproduced_fix_native_passed_pending_install",
+      "protects": [
+        "On Windows, all credential mutations merge into the latest readable OS vault, not a stale tray/helper cache.",
+        "Unrelated active-provider saves retain the newly configured app, token and resource.",
+        "Provider quota errors update the capsule immediately and remain separate from TCP reachability."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/name-readback-20261018-0850/credential-cache-before.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/name-readback-20261018-0850/credential-cache-after.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/name-readback-20261018-0850/quota-recurrence-current.json"
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib native_unrelated_settings_save_preserves_newer_resource_credentials -- --ignored --nocapture",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib quota_error_frame_publishes_live_warning_before_finalization_and_tcp_cannot_clear_it"
+      ],
+      "known_scope": "commit is the exact failing before-fix snapshot, not a known-good or human-accepted release; fixed build source will be bound separately"
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
@@ -1312,6 +1334,27 @@
         "evidence": "listener-repair-handoff/work/ota-exclusive-prepare-20261017/physical-result.json",
         "scope": "Same current raw image; overhead improved, RF throughput not proven improved."
       }
+    },
+    {
+      "id": "asr-quota-resource-recovery",
+      "paths": {
+        "type": [
+          "src-tauri/src/persistence.rs",
+          "src-tauri/src/asr/volcengine.rs",
+          "src-tauri/src/net_health.rs",
+          "src-tauri/src/network_health_state.rs",
+          "src/components/Capsule.tsx",
+          "src/pages/settings/ProvidersSection.tsx"
+        ]
+      },
+      "guard_entries": [
+        "type_windows_credential_mutation_preserves_latest_resource"
+      ],
+      "baseline_state": "native_counterexample_fixed_pending_install",
+      "accepted_scope": "No human field acceptance yet. Before/after isolated real Windows Credential Manager proves stale-cache mutation; real09:20 vault recurrence retained.",
+      "known_failures": [
+        "Long-running build48 can overwrite the new1773/bigasr grant with cached old9292/seedasr while saving unrelated preferences."
+      ]
     }
   ]
 }

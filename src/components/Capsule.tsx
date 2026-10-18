@@ -793,24 +793,25 @@ export function Capsule() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     let latestSeq = 0;
-    const apply = (view: { seq: number; class: string; badge: string }, source: string) => {
+    type AvailabilityView = { seq: number; class: string; badge: string; providerQuotaExceeded?: boolean };
+    const apply = (view: AvailabilityView, source: string) => {
       if (cancelled || !Number.isSafeInteger(view.seq) || view.seq <= latestSeq) return;
       latestSeq = view.seq;
-      setNetBadge(view.badge || null);
-      setNetBadgeTone(view.class === 'all_bad' ? 'bad' : 'warn');
+      setNetBadge(view.providerQuotaExceeded ? t('capsule.asrQuotaExceeded', '识别额度不足') : view.badge || null);
+      setNetBadgeTone(view.providerQuotaExceeded || view.class === 'all_bad' ? 'bad' : 'warn');
       traceCapsule('network_health_applied', {
         detail: { seq: view.seq, class: view.class, badge: view.badge, source },
       });
     };
     (async () => {
       const { listen } = await import('@tauri-apps/api/event');
-      const handle = await listen<{ seq: number; class: string; badge: string }>(
+      const handle = await listen<AvailabilityView>(
         'net-health:changed', event => apply(event.payload, 'event'),
       );
       if (cancelled) { handle(); return; }
       unlisten = handle;
       try {
-        const latest = await invokeOrMock<{ seq: number; class: string; badge: string } | null>(
+        const latest = await invokeOrMock<AvailabilityView | null>(
           'get_network_health_state', undefined, () => null,
         );
         if (latest) apply(latest, 'snapshot');

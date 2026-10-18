@@ -159,6 +159,8 @@ pub struct NetworkHealthPayload {
     pub class: &'static str,
     pub badge: &'static str,
     pub message: &'static str,
+    #[serde(rename = "providerQuotaExceeded")]
+    pub provider_quota_exceeded: bool,
 }
 
 fn payload(state: &NetworkHealthState) -> Option<NetworkHealthPayload> {
@@ -166,6 +168,7 @@ fn payload(state: &NetworkHealthState) -> Option<NetworkHealthPayload> {
     Some(NetworkHealthPayload {
         seq: state.revision, class: class.label(), badge: class.short_label(),
         message: class.user_message(),
+        provider_quota_exceeded: state.quota_exceeded(),
     })
 }
 
@@ -200,6 +203,29 @@ pub fn record_network_health_probe(snapshot: NetworkHealthSnapshot) {
 /// It does not claim the independent control site recovered or alter ASR results.
 pub fn record_asr_response() {
     record_observation(Instant::now(), Some(true), None, "provider_response");
+}
+
+/// A provider rejection is shown immediately while capture/audio retention
+/// continues. It is separate from reachability and survives successful TCP probes.
+pub fn record_asr_quota_exceeded() { record_asr_quota(true); }
+
+pub fn record_asr_recognition_response() {
+    record_asr_response();
+    record_asr_quota(false);
+}
+
+fn record_asr_quota(exceeded: bool) {
+    let changed = {
+        let mut state = HEALTH.lock().unwrap_or_else(|p| p.into_inner());
+        let at = Instant::now();
+        let connectivity_changed = state.observe(at, Some(true), None);
+        let quota_changed = state.observe_quota(at, exceeded);
+        if connectivity_changed || quota_changed { payload(&state) } else { None }
+    };
+    if let Some(view) = changed {
+        log::info!("[asr-availability] publish seq={} quota_exceeded={exceeded}", view.seq);
+        if let Some(listener) = CHANGE_LISTENER.get() { listener(view); }
+    }
 }
 
 #[cfg(test)]

@@ -8,9 +8,9 @@ import {
 
 const providersSectionSource = readFileSync('src/pages/settings/ProvidersSection.tsx', 'utf8');
 if (!providersSectionSource.includes(
-  "const ASR_DEFAULT_RESOURCE_ID = 'volc.seedasr.sauc.duration';",
+  "const ASR_DEFAULT_RESOURCE_ID = 'volc.bigasr.sauc.duration';",
 )) {
-  throw new Error('Volcengine UI default must use the owner-provisioned Seed ASR 2.0 hourly quota');
+  throw new Error('Volcengine UI fallback must match the restored backend resource; saved explicit resources remain authoritative');
 }
 
 function assertEqual(actual: boolean, expected: boolean, name: string) {
