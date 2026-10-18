@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T09:34:55.420276+08:00",
+  "updated_at": "2026-10-18T09:38:59.102099+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -594,7 +594,8 @@
         "cargo test --manifest-path ./src-tauri/Cargo.toml native_readonly_attribute_requires_a_boolean_not_coercible_or_reserved_values --lib"
       ],
       "evidence": "listener-repair-handoff/work/clipboard-history-repair-20261017/document-receipt37",
-      "limits": "Natural build37 histories match archived intended final text; no complete same-recording clipboard recovery field certificate yet."
+      "limits": "Natural build37 histories match archived intended final text; no complete same-recording clipboard recovery field certificate yet.",
+      "commit_subject": "Fix confirmed short-clause finality and writable Document paste receipts"
     },
     {
       "id": "type_same_response_native_clause_finality",
@@ -613,7 +614,8 @@
         "Set LISTENER_PENDING_BODY_REPLAY to the archived type38-candidate1 case directory; run recorded_pending_body_keeps_native_finality_separate_from_settling with --ignored"
       ],
       "evidence": "listener-repair-handoff/work/daily-latency-20261017-1152/pending-close-20261017-1557/type38-candidate1/actual-decoder-summary.json",
-      "limits": "Retained 73-frame native tail only. Last recognition_pending true -> false, body delivery still pending. No actual editor consumption or physical STOP replay."
+      "limits": "Retained 73-frame native tail only. Last recognition_pending true -> false, body delivery still pending. No actual editor consumption or physical STOP replay.",
+      "commit_subject": "Fix confirmed short-clause finality and writable Document paste receipts"
     },
     {
       "id": "firmware_same_predecessor_ensure_source_lease",
@@ -640,7 +642,8 @@
         "candidateProductionIntegration": "after-production-api-integration.log",
         "actualPcm": "actual-pcm-transfer-lease.log"
       },
-      "limits": "Actual capture selector/reserve/release run with the production controller; numbered source geometry and BLE readiness are simulated. Natural 15:05/16:55 firmware execution cause was not retained; full field attribution/stability remain unproven."
+      "limits": "Actual capture selector/reserve/release run with the production controller; numbered source geometry and BLE readiness are simulated. Natural 15:05/16:55 firmware execution cause was not retained; full field attribution/stability remain unproven.",
+      "commit_subject": "Listener build source snapshot"
     },
     {
       "id": "type_capsule_complete_status_badge_geometry",
@@ -672,7 +675,8 @@
         "Installed at fresh Idle; main/helper restored; physical user visual feedback pending. No recording feature acceptance implied."
       ],
       "installedAt": "2026-10-17T17:45:00.3474676+08:00",
-      "exeSha256": "09303329962a9223f8d00e333d324e1a60a8ad450246110c34d83c9ee77b4fb4"
+      "exeSha256": "09303329962a9223f8d00e333d324e1a60a8ad450246110c34d83c9ee77b4fb4",
+      "commit_subject": "Listener build source snapshot"
     },
     {
       "id": "firmware_audio_real_block_media_credit",
@@ -702,7 +706,8 @@
         "Seven natural physical audio sessions match device counts/PCM at actual application reception, including one cancel; activation intent and semantic text/endpoint correctness are not human-confirmed.",
         "First2s historical audio still arrives in743..2057ms; new BLE connection/content differs from pre22, so no controlled causal end-to-end speedup claimed.",
         "Raw OTA160KB/s and full interference/early-end stability remain incomplete."
-      ]
+      ],
+      "commit_subject": "Listener build source snapshot"
     },
     {
       "id": "type_network_health_response_freshness",
@@ -734,7 +739,8 @@
         "Original 313128e independent probe path lacked provider success feedback and front-end network snapshot/revision replay. Exact reported stale badge is not tied to a unique saved frontend transition.",
         "Seven actual production Rust checks and seven isolated actual React IPC/order cases pass. Actual installed startup backend/UI seq1 matches; natural outage-to-response recovery field transition not yet observed.",
         "A TCP probe is reachability evidence for its targets, not proof of total Internet connectivity. No route changes, paid calls, ASR content/stop permission changes, or forced disconnection tests."
-      ]
+      ],
+      "commit_subject": "Listener build source snapshot"
     },
     {
       "id": "type_raw215_current40_comparison_rejected",
@@ -765,7 +771,9 @@
         "Independent single-reader calibrated analyzer still skips every other event and captures only75..405ms per connection, zero authenticated nonempty packets. Full encrypted OTA not captured.",
         "No mouse/keyboard disconnect, driver changes, analyzer firmware flash or extra paid/model service.",
         "Early-end original tail-drain branch and originalDocument clipboard restoration still field pending."
-      ]
+      ],
+      "commit_subject": "Listener build source snapshot",
+      "validation_kind": "evidence_only"
     },
     {
       "id": "type_exclusive_ota_prepared_target_ownership",
@@ -804,7 +812,8 @@
         "HCI export has3902/3908 actual DATA; complete-window-only conservation analysis, not actual missing device data. Full encrypted RF capture still unavailable.",
         "Original wake tail-drain early-end and Document clipboard field ranges remain pending; ASR/audio/source-stop/rename settings code was unchanged."
       ],
-      "sourceChangeCommit": "46e164469ef7cc45ab198f10cd8767fcd1242820"
+      "sourceChangeCommit": "46e164469ef7cc45ab198f10cd8767fcd1242820",
+      "commit_subject": "Listener build source snapshot"
     },
     {
       "id": "type_session_capture_control_archive",
@@ -834,7 +843,8 @@
       "limits": [
         "Original7548 outcome still missing; new43 natural7583 records real2004ms WinRT write timeout, no device confirmation; prior7582 sent202/confirmed237ms.",
         "This is working diagnostic retention, not a repair of the WinRT/link failure."
-      ]
+      ],
+      "commit_subject": "Listener build source snapshot"
     },
     {
       "id": "type_optional_capability_nonblocking_recovery",
@@ -866,7 +876,8 @@
         "Old callback750ms versus new0 synchronous wait is actual callback with fake WinRT boundary, not measured end-to-end latency.",
         "New43 natural7583 timeout occurred before44 and shows no recovery capability branch. Do not assign it to this omission.",
         "Native queued ATT cancellation/air behavior and overall early ending remain field pending."
-      ]
+      ],
+      "commit_subject": "Listener build source snapshot"
     },
     {
       "id": "type_windows_log_rotation_recovery",
@@ -897,7 +908,8 @@
       "limits": [
         "During an actual denied I/O operation the failed record may still be lost. This fixes persistent subsequent failure, not every storage failure.",
         "No changed Bluetooth/audio/ASR/endpoint/clipboard behavior. Natural rotation under other software and complete raw OTA air throughput remain unverified."
-      ]
+      ],
+      "commit_subject": "Listener build source snapshot"
     },
     {
       "id": "type_passive_connected_endpoint_pairing",
@@ -925,7 +937,10 @@
         "One controlled USB reboot reached device transport_ready1 without foreground refresh; elapsed13.386s from reset command includes esptool reset/boot, firmware uptime6.4s. Not a universal13s reconnect guarantee.",
         "Original first field branch log rotated before collection; same-session device/HCI/air and no-refresh tool source retained. Do not claim every possible recovery or battery-off path field passed.",
         "Same FW22 raw OTA transfer16.470s,total24.344s; no160KB/s claim. Analyzer refresh MIC failure independently verified offline; full-air coverage not achieved."
-      ]
+      ],
+      "commit_subject": "Listener build source snapshot",
+      "guards": [],
+      "validation_kind": "evidence_only"
     },
     {
       "id": "type_raw240_current46_comparison_unproven",
@@ -956,7 +971,9 @@
         "All3 nRF captures missed handshake material and yielded0 independently authenticated OTA frames; no global airtime/retry claim.",
         "Only apparent local3-4percent window improvement, not statistically established whole-transfer gain; no input/ASR/firmware policy change.",
         "Peer set differed: firstA PowerOptimized two actual peers, B/A2 one; HCI shows negotiated180ms. A/B/A was same board/image, not a fixed entire radio environment."
-      ]
+      ],
+      "commit_subject": "Listener build source snapshot",
+      "validation_kind": "evidence_only"
     },
     {
       "id": "firmware_sniffer_fresh_target_link_and_usb_timing",
@@ -996,7 +1013,9 @@
         "Independent H4 parsing and native BTHPORT402 prove6 zero-length source ACL records; same continuation CID6/7-shaped content predicts all6 omissions. This is trace data loss/suppression, not OTA device loss.",
         "Temporary documented full-HCI registry logging values alone did not take effect on hot running stack; restored exact original absent keys, did not enable SSP/SMP debug or restart user radio.",
         "An explicitly scoped Windows logging diagnostic may reuse an existing physical link, but cannot claim complete-air/three-way throughput acceptance. Fresh-link gate remains necessary for actual RF qualification."
-      ]
+      ],
+      "commit_subject": "fix(tools): bind sniffer readiness to captured fresh target link",
+      "validation_kind": "evidence_only"
     },
     {
       "id": "type_recording_origin_clipboard_retention",
@@ -1029,7 +1048,8 @@
         "Receipt branches use real clipboard/worker with seeded dispatch facts and no focus or keyboard injection; not an interactive editor end-to-end certification.",
         "Original ticket45 Document field recovery lacks direct new after-install consumption/clipboard evidence; ENSURE2004ms and complete Bluetooth air follow remain unresolved.",
         "Exact MSI source snapshot ba01cd8e45e5a4f3204d264e1eba25cee947eeb0; installed EXE 4AF7B522E0A96AC9F99E9041CDE91FE7DF975B8F1D734279798EE703F13493D5. No public release or human acceptance claimed."
-      ]
+      ],
+      "commit_subject": "Bind final clipboard retention to recording and paste ownership"
     },
     {
       "id": "type_windows_credential_mutation_preserves_latest_resource",
@@ -1055,7 +1075,8 @@
         "cargo test --manifest-path src-tauri/Cargo.toml --lib quota_error_frame_publishes_live_warning_before_finalization_and_tcp_cannot_clear_it"
       ],
       "known_scope": "Windows stale-cache mutation before/after verified with isolated real Credential Manager; build49 installed, new app restored and one synthetic100ms provider final accepted. No human field acceptance or all historical quota failures resolved claim.",
-      "failing_source_commit": "ccfeae332f22d7e492f0ee88dcb042d3a6e67aaf"
+      "failing_source_commit": "ccfeae332f22d7e492f0ee88dcb042d3a6e67aaf",
+      "commit_subject": "Preserve latest Windows credentials during settings saves and report quota errors live"
     }
   ],
   "feature_routes_updated_at": "2026-10-17",

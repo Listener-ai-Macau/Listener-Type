@@ -8,7 +8,9 @@ import process from 'node:process';
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const typeRoot = normalize(join(scriptDir, '..'));
 const listenerRoot = normalize(join(typeRoot, '..'));
-const manifestPath = join(scriptDir, 'regression-guard-commits.json');
+const args = process.argv.slice(2);
+if (args.length && (args.length !== 2 || args[0] !== '--manifest')) throw new Error('Usage: check-regression-guard-commits.mjs [--manifest path]');
+const manifestPath = args.length ? resolve(args[1]) : join(scriptDir, 'regression-guard-commits.json');
 
 function fail(message) {
   throw new Error(message);
@@ -66,7 +68,15 @@ for (const [index, entry] of manifest.entries.entries()) {
     requireString(entry[field], `entries[${index}].${field}`);
   }
   requireStringArray(entry.protects, `entries[${index}].protects`);
-  requireStringArray(entry.guards, `entries[${index}].guards`);
+  if (entry.validation_kind === 'evidence_only') {
+    if (!Array.isArray(entry.guards) || entry.guards.length !== 0) fail(`evidence-only ${entry.id} must not masquerade as executable guards`);
+    if (entry.humanAccepted !== false || (/human_accepted/.test(entry.state) && !/not_human_accepted/.test(entry.state))) {
+      fail(`evidence-only ${entry.id} cannot claim human acceptance`);
+    }
+    requireStringArray(entry.evidence, `entries[${index}].evidence`);
+  } else {
+    requireStringArray(entry.guards, `entries[${index}].guards`);
+  }
   if (seenIds.has(entry.id)) fail(`duplicate regression guard entry id: ${entry.id}`);
   seenIds.add(entry.id);
   if (!/^[0-9a-f]{40}$/i.test(entry.commit)) {
@@ -76,8 +86,10 @@ for (const [index, entry] of manifest.entries.entries()) {
   if (!repoRoot) fail(`entry ${entry.id} references unknown repo: ${entry.repo}`);
   runGit(repoRoot, ['cat-file', '-e', `${entry.commit}^{commit}`]);
   const actualSubject = runGit(repoRoot, ['show', '-s', '--format=%s', entry.commit]);
-  if (actualSubject !== entry.subject) {
-    fail(`entry ${entry.id} subject mismatch for ${entry.commit}: expected '${entry.subject}', got '${actualSubject}'`);
+  const expectedCommitSubject = entry.commit_subject ?? entry.subject;
+  requireString(expectedCommitSubject, `entries[${index}].commit_subject`);
+  if (actualSubject !== expectedCommitSubject) {
+    fail(`entry ${entry.id} subject mismatch for ${entry.commit}: expected '${expectedCommitSubject}', got '${actualSubject}'`);
   }
   for (const guard of entry.guards) {
     const guardKey = `${entry.repo}:${guard}`;
@@ -94,7 +106,8 @@ for (const requiredGuard of manifest.required_guards ?? []) {
   }
 }
 
-console.log(`PASS: ${manifest.entries.length} regression guard entries map to existing repository commits.`);
+const evidenceOnly = manifest.entries.filter(entry => entry.validation_kind === 'evidence_only').length;
+console.log(`PASS: ${manifest.entries.length} history entries map to existing repository commits (${evidenceOnly} evidence-only; this is not a current-runtime feature acceptance).`);
 for (const entry of manifest.entries) {
   console.log(`- ${entry.repo} ${entry.commit.slice(0, 7)} ${entry.id}: ${entry.subject}`);
 }
