@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T21:57:40.203797+08:00",
+  "updated_at": "2026-10-18T22:24:34.187701+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1344,7 +1344,7 @@
       "repo": "sniffer",
       "commit": "68c1b91b54a67b8ecc9eb509794295874728e12d",
       "subject": "Do not fast-forward a known passive CSA2 counter to a future map instant after a missed packet; anchor repeat deadlines",
-      "state": "installed121_basic1284_crc_passed_live_full_transfer_pending",
+      "state": "installed121_2181_crc_and_arm_prefix_passed_usb_reenumeration_full_transfer_pending",
       "protects": [
         "Complete750-PDU recorded prefix matches actualARM selected channels, with independently validatedCRC and MIC control metadata.",
         "Known CONNECT counter advances366to367 after one miss, map staysold before372 and changes at372; unknowncounter legacy fallback preserved.",
@@ -1362,15 +1362,21 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-121.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\custom-candidate121-installed.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver121-radio-quality-215135\\quality-summary.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\stale-handshake-ota-admission-proof.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\stale-handshake-ota-admission-proof.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\saved-link121-2181.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\saved-link121-2181-worker1307.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\saved-link121-750-derived.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver121-usb-failure-before-reopen.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-221604\\actual-raw-ota\\transfer.json"
       ],
       "guards": [
         "python tools/replay_saved_link.py --workspace .. --elf build/nrf52840_xxaa.out --capture ../passive-current-20261018-211533/rf-private --output ../native-arm-follow/current-saved-link.json --expect-known-counter"
       ],
-      "known_scope": "ActualARM recorded750-PDU prefix. Modeled MMIO/IRQ and verified control publication replace radio and CCM worker. Tail noRX or abstract packetpresence is explicitly hypothetical. Installed120 fixed37 capturesCONNECT/handshake+750CRC/21MIC only2.7s;121 installed, basicRX1284/1284 independentCRC; noOTA/voice load captured, fullcapture and speed goal remain incomplete."
+      "known_scope": "Actual121 capture:2181 independentCRC DATA/34 nonemptyMIC, three authenticated maps, PHYinstant19. Captured prefix matches actualARM at modeled worker150/1307us. Live stopped with USB invalid handle and PnP re-enumeration, trigger unknown. No complete rawOTA or throughput gain. Do not require repeated user power cycles or claim RX stopped merely from a target-filtered empty file.",
+      "analysis_tool_commit": "f1e2a4ea2929d07f056f149877b1a33b5558afb7"
     }
   ],
-  "feature_routes_updated_at": "2026-10-18T21:57:40.203797+08:00",
+  "feature_routes_updated_at": "2026-10-18T22:24:34.187701+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1739,11 +1745,12 @@
       "guard_entries": [
         "sniffer_known_csa2_counter_survives_missing_event_before_future_map"
       ],
-      "baseline_state": "installed121_basic1284_crc_passed_live_full_transfer_pending",
-      "accepted_scope": "ActualARM recorded750-PDU prefix. Modeled MMIO/IRQ and verified control publication replace radio and CCM worker. Tail noRX or abstract packetpresence is explicitly hypothetical. Installed120 fixed37 capturesCONNECT/handshake+750CRC/21MIC only2.7s;121 installed, basicRX1284/1284 independentCRC; noOTA/voice load captured, fullcapture and speed goal remain incomplete.",
+      "baseline_state": "installed121_2181_crc_and_arm_prefix_passed_usb_reenumeration_full_transfer_pending",
+      "accepted_scope": "Actual121 capture:2181 independentCRC DATA/34 nonemptyMIC, three authenticated maps, PHYinstant19. Captured prefix matches actualARM at modeled worker150/1307us. Live stopped with USB invalid handle and PnP re-enumeration, trigger unknown. No complete rawOTA or throughput gain. Do not require repeated user power cycles or claim RX stopped merely from a target-filtered empty file.",
       "known_failures": [
         "120 live fixed37 receives750PDUs then stops after mapinstant372 message; Windows staysconnected.",
-        "ActualARM120 fullrecordedprefix matches but noRX tail jumps366to373 and applies map early. First actual RFmiss cause remainsunknown."
+        "ActualARM120 fullrecordedprefix matches but noRX tail jumps366to373 and applies map early. First actual RFmiss cause remainsunknown.",
+        "121 captured2181 validDATA then USB re-enumerated at22:01:09; host serial invalid handle. Trigger not uniquely located; not demonstrated BLE device loss."
       ]
     }
   ]
