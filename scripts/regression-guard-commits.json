@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T16:20:25.025690+08:00",
+  "updated_at": "2026-10-18T17:21:10.810436+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1011,7 +1011,16 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\triad-current-bond-live07\\live-run.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\radio-identity-after-failed-handoff.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-reappearance-current-bond\\observation.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current-availability.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current-availability.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver116-checkpoint.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\custom-candidate116-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-heap\\before-interrupt-proof.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-heap\\after-interrupt-proof.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\triad-recovered-current-bond-live08\\current-rekey-native-proof.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\triad-receiver116-live09\\live-run.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\triad-receiver116-live10\\live-run.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\triad-receiver116-live10\\live-air-private\\current-bond-independent-rf-proof.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\triad-receiver116-live10\\independent-crc-initial-analysis.json"
       ],
       "limits": [
         "Current USB run OTA reused a pre-capture connection; only post-OTA CONNECT was observed, so cannot supply full-air metrics.",
@@ -1044,8 +1053,20 @@
         "liveFollowingQualified": false,
         "fullOtaCoverageQualified": false,
         "stableGainVerified": false,
-        "currentDependency": "Listener absent from native connected AEP and90s3channel passive observation after OTA handoff; requested normal device power cycle, no sniffer RESET",
+        "currentDependency": "Normal power cycle restored Listener16:35; OTA08/10 pass. Full original DATA RF coverage remains missing. Quota recurrence is current priority.",
         "scope": "Current-key binding and actual C replay recovered; new live attempt failed before DATA. Do not treat this as successful continued OTA following."
+      },
+      "receiver_heap_concurrency_repair": {
+        "at": "2026-10-18T17:21:10.810436+08:00",
+        "toolRepository": "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\source",
+        "toolCommit": "986dfa324c09d3be33d14c5effa57fea245d667c",
+        "actualArmBeforeAliasing": true,
+        "actualArmAfterInterleavings": 68,
+        "receiverFirmware": "1.1.116",
+        "fullOtaRfCoverageQualified": false,
+        "stableProductGainVerified": false,
+        "currentState": "116 installed, no USB loss in90s live09/live10; live10 OTA PASS but240 CRC mismatches and no original-image RF coverage remain",
+        "parserCorrection": "Same-AA pause/rekey starts a new nonce epoch; saved08 now80MIC/18controls; actual C18/18 using explicitly recorded PHY replay assumption"
       }
     },
     {
@@ -1107,7 +1128,13 @@
       ],
       "known_scope": "Windows stale-cache mutation before/after verified with isolated real Credential Manager; build49 installed, new app restored and one synthetic100ms provider final accepted. No human field acceptance or all historical quota failures resolved claim.",
       "failing_source_commit": "ccfeae332f22d7e492f0ee88dcb042d3a6e67aaf",
-      "commit_subject": "Preserve latest Windows credentials during settings saves and report quota errors live"
+      "commit_subject": "Preserve latest Windows credentials during settings saves and report quota errors live",
+      "latest_recurrence": {
+        "at": "2026-10-18T17:21:10.810436+08:00",
+        "evidence": "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\name-readback-20261018-0850\\quota-recurrence50-observations.json",
+        "resolved": false,
+        "scope": "17:11 actual45000292 with later old9292/seed read. Vault manifest view changed to original09:34 authorized generation before recovery manifest publish. Current1773/bigasr synthetic final succeeds; unique writer/view root not proven."
+      }
     },
     {
       "id": "firmware_ble_only_ota_timing_summary",

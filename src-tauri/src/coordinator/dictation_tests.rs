@@ -16859,8 +16859,8 @@ fn windows_volcengine_session_refreshes_external_credential_updates_before_readi
         .find("CredentialsVault::refresh_from_system()")
         .expect("Windows sessions must refresh the OS credential document");
     let first_read = reader
-        .find("CredentialsVault::get(CredentialAccount::VolcengineAppKey)")
-        .expect("Volcengine App ID read must exist");
+        .find("CredentialsVault::snapshot()")
+        .expect("Volcengine fields must come from one credential document");
     assert!(
         refresh < first_read,
         "the external vault refresh must happen before any cached Volcengine field is read"

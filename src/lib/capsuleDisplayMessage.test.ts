@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import {
   getCapsuleDisplayMessage,
+  isCapsuleQuotaErrorMessage,
   shouldRetainCapsulePreview,
 } from './capsuleDisplayMessage.ts';
+
+assert.equal(isCapsuleQuotaErrorMessage('当前识别资源额度不可用（错误码 45000292）；请核对资源 ID'), true);
+assert.equal(isCapsuleQuotaErrorMessage('凭据被拒（403）'), false);
+assert.equal(isCapsuleQuotaErrorMessage('今天讨论识别额度不足的问题'), false);
+assert.equal(isCapsuleQuotaErrorMessage(undefined), false);
 
 assert.equal(
   getCapsuleDisplayMessage('recording', 'Listener 录音已启动，正在接收音频...'),

@@ -3925,19 +3925,19 @@ pub(crate) fn read_volc_credentials() -> VolcengineCredentials {
         // Credential Manager failure, but make the stale-read risk observable.
         log::warn!("[asr] refresh Volcengine credentials from system vault failed: {err}");
     }
-    let app_id = CredentialsVault::get(CredentialAccount::VolcengineAppKey)
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let access_token = CredentialsVault::get(CredentialAccount::VolcengineAccessKey)
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let resource_id = CredentialsVault::get(CredentialAccount::VolcengineResourceId)
-        .ok()
-        .flatten()
+    // Read one document under the vault lock. Three independent lookups could
+    // mix fields if another settings operation refreshed the process cache.
+    let snapshot = CredentialsVault::snapshot();
+    let app_id = snapshot.volcengine_app_key.unwrap_or_default();
+    let access_token = snapshot.volcengine_access_key.unwrap_or_default();
+    let resource_id = snapshot.volcengine_resource_id
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| VolcengineCredentials::default_resource_id().to_string());
+    let suffix: String = app_id.chars().rev().take(4).collect::<Vec<_>>()
+        .into_iter().rev().collect();
+    // Never log the token or full application ID. This identifies the actual
+    // recording resource when the OS vault view changes between sessions.
+    log::info!("[asr] selected configured resource app_suffix={suffix} resource_id={resource_id}");
     VolcengineCredentials {
         app_id,
         access_token,

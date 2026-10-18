@@ -24,6 +24,11 @@ function normalizeCapsuleStatusMessage(message: string): string {
   return message.trim().replace(/\s+/g, ' ');
 }
 
+/** Backend quota errors remain detailed in logs; the capsule uses local copy. */
+export function isCapsuleQuotaErrorMessage(message: string | null | undefined): boolean {
+  return Boolean(message && /当前识别资源额度不可用（错误码 \d+）/.test(message));
+}
+
 export function getCapsuleDisplayMessage(
   state: CapsuleState,
   message: string | null | undefined,

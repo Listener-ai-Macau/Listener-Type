@@ -11,7 +11,7 @@ import {
 } from '../lib/capsuleLayout';
 import { invokeOrMock, isTauri } from '../lib/ipc';
 import { capsuleCancelEnabled, capsuleConfirmEnabled } from '../lib/capsuleActionRules';
-import { getCapsuleDisplayMessage, shouldRetainCapsulePreview } from '../lib/capsuleDisplayMessage';
+import { getCapsuleDisplayMessage, isCapsuleQuotaErrorMessage, shouldRetainCapsulePreview } from '../lib/capsuleDisplayMessage';
 import {
   buildPreviewRevealFrames,
   CAPSULE_APPEARANCE,
@@ -436,7 +436,7 @@ function Pill({
       center = <CenterText os={os} kind="default" text={t('capsule.cancelled')} />;
       break;
     case 'error':
-      center = <CenterText os={os} kind="error" text={message || t('capsule.error')} color="var(--ol-err)" />;
+      center = <CenterText os={os} kind="error" text={isCapsuleQuotaErrorMessage(message) ? t('capsule.asrQuotaExceeded', '识别额度不足') : message || t('capsule.error')} color="var(--ol-err)" />;
       break;
     default:
       center = <AudioBars level={0} />;
@@ -556,6 +556,7 @@ export function Capsule() {
   // 托盘图标变色只当辅助（Windows 11 常把托盘折叠进 ^ 隐藏区）。
   const [netBadge, setNetBadge] = useState<string | null>(null);
   const [netBadgeTone, setNetBadgeTone] = useState<'warn' | 'bad'>('warn');
+  const [providerQuotaExceeded, setProviderQuotaExceeded] = useState(false);
   // `leaving` 与 `lastVisibleState` 协同实现「退出动画」：
   // - 当 state 从非 idle 变成 idle 时，不立即卸载，而是把 leaving 置为 true 并保留
   //   最后一帧的可见 state（lastVisibleState），让胶囊用 capsule-out 动画收缩淡出。
@@ -797,6 +798,7 @@ export function Capsule() {
     const apply = (view: AvailabilityView, source: string) => {
       if (cancelled || !Number.isSafeInteger(view.seq) || view.seq <= latestSeq) return;
       latestSeq = view.seq;
+      setProviderQuotaExceeded(view.providerQuotaExceeded === true);
       setNetBadge(view.providerQuotaExceeded ? t('capsule.asrQuotaExceeded', '识别额度不足') : view.badge || null);
       setNetBadgeTone(view.providerQuotaExceeded || view.class === 'all_bad' ? 'bad' : 'warn');
       traceCapsule('network_health_applied', {
@@ -978,7 +980,7 @@ export function Capsule() {
     >
       {/* 网络状态徽章：断网/识别不可达时挂在胶囊上方（"正在翻译"徽章
           再往上叠一层，两者同现不重叠）。居中定位与入场动画分层。 */}
-      {netBadge && (
+      {netBadge && !providerQuotaExceeded && (
         <div
           data-capsule-status="network"
           style={{
