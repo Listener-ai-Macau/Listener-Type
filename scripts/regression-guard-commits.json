@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T21:35:46.592903+08:00",
+  "updated_at": "2026-10-18T21:57:40.203797+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1344,7 +1344,7 @@
       "repo": "sniffer",
       "commit": "68c1b91b54a67b8ecc9eb509794295874728e12d",
       "subject": "Do not fast-forward a known passive CSA2 counter to a future map instant after a missed packet; anchor repeat deadlines",
-      "state": "candidate121_offline750_pdu_prefix_and_tail_guards_passed_not_installed",
+      "state": "installed121_basic1284_crc_passed_live_full_transfer_pending",
       "protects": [
         "Complete750-PDU recorded prefix matches actualARM selected channels, with independently validatedCRC and MIC control metadata.",
         "Known CONNECT counter advances366to367 after one miss, map staysold before372 and changes at372; unknowncounter legacy fallback preserved.",
@@ -1359,15 +1359,18 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\saved-link121-worker1307.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\after121-final.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-radio\\after121-final.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-121.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-121.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\custom-candidate121-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver121-radio-quality-215135\\quality-summary.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\stale-handshake-ota-admission-proof.json"
       ],
       "guards": [
         "python tools/replay_saved_link.py --workspace .. --elf build/nrf52840_xxaa.out --capture ../passive-current-20261018-211533/rf-private --output ../native-arm-follow/current-saved-link.json --expect-known-counter"
       ],
-      "known_scope": "ActualARM recorded750-PDU prefix. Modeled MMIO/IRQ and verified control publication replace radio and CCM worker. Tail noRX or abstract packetpresence is explicitly hypothetical. Installed120 fixed37 capturesCONNECT/handshake+750CRC/21MIC only2.7s;121 not installed; noOTA/voice load captured, fullcapture and speed goal remain incomplete."
+      "known_scope": "ActualARM recorded750-PDU prefix. Modeled MMIO/IRQ and verified control publication replace radio and CCM worker. Tail noRX or abstract packetpresence is explicitly hypothetical. Installed120 fixed37 capturesCONNECT/handshake+750CRC/21MIC only2.7s;121 installed, basicRX1284/1284 independentCRC; noOTA/voice load captured, fullcapture and speed goal remain incomplete."
     }
   ],
-  "feature_routes_updated_at": "2026-10-18T21:35:46.592903+08:00",
+  "feature_routes_updated_at": "2026-10-18T21:57:40.203797+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1736,8 +1739,8 @@
       "guard_entries": [
         "sniffer_known_csa2_counter_survives_missing_event_before_future_map"
       ],
-      "baseline_state": "candidate121_offline750_pdu_prefix_and_tail_guards_passed_not_installed",
-      "accepted_scope": "ActualARM recorded750-PDU prefix. Modeled MMIO/IRQ and verified control publication replace radio and CCM worker. Tail noRX or abstract packetpresence is explicitly hypothetical. Installed120 fixed37 capturesCONNECT/handshake+750CRC/21MIC only2.7s;121 not installed; noOTA/voice load captured, fullcapture and speed goal remain incomplete.",
+      "baseline_state": "installed121_basic1284_crc_passed_live_full_transfer_pending",
+      "accepted_scope": "ActualARM recorded750-PDU prefix. Modeled MMIO/IRQ and verified control publication replace radio and CCM worker. Tail noRX or abstract packetpresence is explicitly hypothetical. Installed120 fixed37 capturesCONNECT/handshake+750CRC/21MIC only2.7s;121 installed, basicRX1284/1284 independentCRC; noOTA/voice load captured, fullcapture and speed goal remain incomplete.",
       "known_failures": [
         "120 live fixed37 receives750PDUs then stops after mapinstant372 message; Windows staysconnected.",
         "ActualARM120 fullrecordedprefix matches but noRX tail jumps366to373 and applies map early. First actual RFmiss cause remainsunknown."
