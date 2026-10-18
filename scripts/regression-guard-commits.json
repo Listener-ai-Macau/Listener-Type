@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T17:42:47.240840+08:00",
+  "updated_at": "2026-10-18T18:14:32.770717+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1113,7 +1113,7 @@
       "repo": "type",
       "commit": "ee3a9cbb0999ded6936ed746abce10b8acf0097f",
       "subject": "Windows stale process vault overwrites newer app and ASR resource on unrelated settings save",
-      "state": "machine_validated_installed_with_unresolved_recurrence",
+      "state": "installed_cache_fix_plus_reproduced_persistence_scope_repair",
       "protects": [
         "On Windows, all credential mutations merge into the latest readable OS vault, not a stale tray/helper cache.",
         "Unrelated active-provider saves retain the newly configured app, token and resource.",
@@ -1141,8 +1141,10 @@
       "latest_recurrence": {
         "at": "2026-10-18T17:21:10.810436+08:00",
         "evidence": "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\name-readback-20261018-0850\\quota-recurrence50-observations.json",
-        "resolved": false,
-        "scope": "17:11 actual45000292 with later old9292/seed read. Vault manifest view changed to original09:34 authorized generation before recovery manifest publish. Current1773/bigasr synthetic final succeeds; unique writer/view root not proven."
+        "resolved": true,
+        "scope": "17:11 and17:57 recurrence identified as duplicate Local/Roaming target selection; exact fixture reproduces it, canonical live repair and four scope switches/fresh process checks pass. No forced whole-Windows reboot test.",
+        "resolvedBy": "type_windows_credential_persistence_scope_does_not_resurrect_old_configuration",
+        "resolvedAt": "2026-10-18T18:04:29.251219+08:00"
       },
       "capsule51Candidate2": {
         "commits": [
@@ -1223,6 +1225,33 @@
       ],
       "source_snapshot": "0c350ce1dc7b624b77411489467d2eec53732415",
       "installed_exe_sha256": "92818735318a4169bdf8376f1d447027f3ac3aa97f23bcc110990c78d11c9bad"
+    },
+    {
+      "id": "type_windows_credential_persistence_scope_does_not_resurrect_old_configuration",
+      "repo": "type",
+      "commit": "2cff1cf3f6113176cd6e4eddb47b46f719246809",
+      "subject": "Match native keyring persistence and remove same-target Local shadows; unrelated writes must not resurrect old ASR credentials",
+      "state": "root_cause_reproduced_live_repaired_machine_verified_not_reboot_retested",
+      "protects": [
+        "Normal Listener configuration tooling uses CRED_PERSIST_ENTERPRISE(3), identical to keyring-rs3.6.3.",
+        "Retain only one canonical copy of active pointer/chunks, preserving protected recovery and the authorized document.",
+        "Unrelated Local/Roaming writes and a fresh process cannot switch the ASR account/resource back.",
+        "Do not run negative persistence-scope experiments while the user Type process is active; fixture names alone do not isolate OS view selection."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\quota-root52-20261018\\root-cause-and-fix.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\quota-root52-20261018\\reproduce_duplicate_store.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\quota-root52-20261018\\encrypted-store-file-metadata.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\quota-root52-20261018\\live-canonical-repair.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\quota-root52-20261018\\live-scope-switch-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\quota-root52-20261018\\postcanonical_provider_probe.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\quota-root52-20261018\\configuration-writer-scope-fix.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\quota-root52-20261018\\security-audit-summary.json"
+      ],
+      "guards": [
+        "python scripts/test_windows_credential_scope.py"
+      ],
+      "known_scope": "Native fixture before reselects old/new by unrelated write persistence; shared repair primitive keeps new in four alternations and fresh readers. Actual active vault repaired without Type restart; same logical document retained, Local physical files removed; current original provider final succeeds. Negative regression is for CI/idle isolated app environment and must not require closing the user app. No forced Windows reboot, cloud quota guarantee, human ASR quality acceptance or BLE gain claim."
     }
   ],
   "feature_routes_updated_at": "2026-10-17",
