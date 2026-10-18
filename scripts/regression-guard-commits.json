@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T15:55:53.452050+08:00",
+  "updated_at": "2026-10-18T16:20:25.025690+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1000,7 +1000,18 @@
         "listener-repair-handoff/work/usb-ota-credit-20261018/empty-bip-source-neighbor-check.json",
         "listener-repair-handoff/work/usb-ota-credit-20261018/content-filter-shape-check.json",
         "listener-repair-handoff/work/hci-full-log-source-20261018/logging-settings.json",
-        "listener-repair-handoff/work/hci-full-log-source-20261018/raw-hci-reassembly.json"
+        "listener-repair-handoff/work/hci-full-log-source-20261018/raw-hci-reassembly.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\tracking-phy-boundary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current-bond-backup-status.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current-bond-offline-metadata.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current-bond-mic-proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current-bond-binding-check.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-passive-crypto\\current-peer-real-rf-proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver-session-v4-provenance.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\triad-current-bond-live07\\live-run.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\radio-identity-after-failed-handoff.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-reappearance-current-bond\\observation.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current-availability.json"
       ],
       "limits": [
         "Current USB run OTA reused a pre-capture connection; only post-OTA CONNECT was observed, so cannot supply full-air metrics.",
@@ -1015,7 +1026,27 @@
         "An explicitly scoped Windows logging diagnostic may reuse an existing physical link, but cannot claim complete-air/three-way throughput acceptance. Fresh-link gate remains necessary for actual RF qualification."
       ],
       "commit_subject": "fix(tools): bind sniffer readiness to captured fresh target link",
-      "validation_kind": "evidence_only"
+      "validation_kind": "evidence_only",
+      "current_peer_capture_recovery": {
+        "at": "2026-10-18T16:20:25.025690+08:00",
+        "currentPeer": "F0:51:5B:AF:B8:6A",
+        "localAdapter": "68:34:21:92:02:24",
+        "source": "exact peer-only read-only Windows registry backup, private offline parsing",
+        "independentMicVerified": 44,
+        "authenticatedEpochs": 5,
+        "actualCVerifiedControls": 35,
+        "receiverFirmware": "1.1.115",
+        "hostOwnerProtocol": 4,
+        "hostSourceSha256": {
+          "receiver_session.py": "10870a81f9d00bfe49f0cafb666c3d10533e3fefdb1ec01691f35a9c61e53d51",
+          "butterfly_passive_capture.py": "a44805634183ffa33a777d9719e4b1006b66f010e59d19be975ec437475efeb0"
+        },
+        "liveFollowingQualified": false,
+        "fullOtaCoverageQualified": false,
+        "stableGainVerified": false,
+        "currentDependency": "Listener absent from native connected AEP and90s3channel passive observation after OTA handoff; requested normal device power cycle, no sniffer RESET",
+        "scope": "Current-key binding and actual C replay recovered; new live attempt failed before DATA. Do not treat this as successful continued OTA following."
+      }
     },
     {
       "id": "type_recording_origin_clipboard_retention",
