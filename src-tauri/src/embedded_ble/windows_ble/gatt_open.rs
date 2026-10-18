@@ -23,6 +23,22 @@ fn open_write_characteristic_from_service_with_timeout(
     cache_mode: BluetoothCacheMode,
     timeout: Duration,
 ) -> Result<GattCharacteristic, String> {
+    open_optional_write_characteristic_from_service_with_timeout(
+        service, uuid, label, cache_mode, timeout,
+    )?
+    .ok_or_else(|| format!("{label} characteristic {uuid:?} not found"))
+}
+
+// Only a successful, empty discovery proves that an optional characteristic
+// is absent. Disconnects and timeouts must retain their error so the caller's
+// existing bounded target retry can recover instead of silently losing a lane.
+fn open_optional_write_characteristic_from_service_with_timeout(
+    service: &GattDeviceService,
+    uuid: GUID,
+    label: &str,
+    cache_mode: BluetoothCacheMode,
+    timeout: Duration,
+) -> Result<Option<GattCharacteristic>, String> {
     let result = service
         .GetCharacteristicsForUuidWithCacheModeAsync(uuid, cache_mode)
         .map_err(|err| format!("BLE {label} characteristic discovery failed: {err}"))?
@@ -43,7 +59,7 @@ fn open_write_characteristic_from_service_with_timeout(
         .map_err(|err| format!("BLE {label} characteristic list size failed: {err}"))?
         == 0
     {
-        return Err(format!("{label} characteristic {uuid:?} not found"));
+        return Ok(None);
     }
 
     let characteristic = characteristics
@@ -57,7 +73,7 @@ fn open_write_characteristic_from_service_with_timeout(
     {
         return Err(format!("{label} characteristic is not writable"));
     }
-    Ok(characteristic)
+    Ok(Some(characteristic))
 }
 
 fn open_indicate_characteristic_from_service(

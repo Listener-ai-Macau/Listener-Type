@@ -2019,13 +2019,13 @@ fn open_listener_ota_v1_characteristics_from_service(
         "Listener OTA v1 data",
         cache_mode,
     )?;
-    let data_b = open_write_characteristic_from_service(
+    let data_b = open_optional_write_characteristic_from_service_with_timeout(
         service,
         LISTENER_OTA_V1_DATA_B_UUID,
         "Listener OTA v1 data_b",
         cache_mode,
-    )
-    .ok();
+        BLE_DISCOVERY_TIMEOUT,
+    )?;
     let status = if LISTENER_OTA_V1_STATUS_UUID == LISTENER_OTA_V1_CONTROL_UUID {
         control.clone()
     } else {
@@ -2134,22 +2134,18 @@ fn open_listener_ota_v1_characteristics_from_service_with_deadline(
             "Listener OTA v1 data characteristic",
         )?,
     )?;
-    let data_b = remaining_ble_timeout(
+    let data_b_timeout = remaining_ble_timeout(
         deadline,
         BLE_DISCOVERY_TIMEOUT,
         "Listener OTA v1 data_b characteristic",
-    )
-    .ok()
-    .and_then(|timeout| {
-        open_write_characteristic_from_service_with_timeout(
-            service,
-            LISTENER_OTA_V1_DATA_B_UUID,
-            "Listener OTA v1 data_b",
-            cache_mode,
-            timeout,
-        )
-        .ok()
-    });
+    )?;
+    let data_b = open_optional_write_characteristic_from_service_with_timeout(
+        service,
+        LISTENER_OTA_V1_DATA_B_UUID,
+        "Listener OTA v1 data_b",
+        cache_mode,
+        data_b_timeout,
+    )?;
     let status = if LISTENER_OTA_V1_STATUS_UUID == LISTENER_OTA_V1_CONTROL_UUID {
         control.clone()
     } else {
