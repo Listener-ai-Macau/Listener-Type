@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T22:24:34.187701+08:00",
+  "updated_at": "2026-10-18T22:57:14.251688+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1374,9 +1374,32 @@
       ],
       "known_scope": "Actual121 capture:2181 independentCRC DATA/34 nonemptyMIC, three authenticated maps, PHYinstant19. Captured prefix matches actualARM at modeled worker150/1307us. Live stopped with USB invalid handle and PnP re-enumeration, trigger unknown. No complete rawOTA or throughput gain. Do not require repeated user power cycles or claim RX stopped merely from a target-filtered empty file.",
       "analysis_tool_commit": "f1e2a4ea2929d07f056f149877b1a33b5558afb7"
+    },
+    {
+      "id": "sniffer_usb_sdk_backpressure_returns_without_dropping_transport_bytes",
+      "repo": "sniffer",
+      "commit": "2a38d153d4d0ca68c942851596007f6ab9c8ed64",
+      "subject": "Return USB SDK busy/not-ready to event pump; preserve transport bytes until accepted",
+      "state": "candidate122_compiled_actual_arm_before_after_passed_not_installed",
+      "protects": [
+        "SDK BUSY/INVALID_STATE cannot spin forever inside SerialComm::send.",
+        "Rejected optional try-send leaves all transport bytes queued; outstanding send is not duplicated; actual CDC completion releases the next batch.",
+        "Current750/2181 saved-link ARM channel replay remains matched; no claim of unique liveUSB fault or throughput gain."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\usb-before122.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\usb-after122.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\saved-link122-750.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-follow\\saved-link122-2181-worker1307.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-122.json"
+      ],
+      "guards": [
+        "python tools/replay_usb_backpressure.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-follow/current-usb.json --expect-nonblocking"
+      ],
+      "known_scope": "Actual compiledARM send/WHAD/CDC callbacks with modeled SDK acceptance and completion delivery. Candidate only; live remains121. Does not prove why22:01 USB re-enumerated, fullOTA air coverage, or a speed improvement."
     }
   ],
-  "feature_routes_updated_at": "2026-10-18T22:24:34.187701+08:00",
+  "feature_routes_updated_at": "2026-10-18T22:57:14.251688+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1751,6 +1774,26 @@
         "120 live fixed37 receives750PDUs then stops after mapinstant372 message; Windows staysconnected.",
         "ActualARM120 fullrecordedprefix matches but noRX tail jumps366to373 and applies map early. First actual RFmiss cause remainsunknown.",
         "121 captured2181 validDATA then USB re-enumerated at22:01:09; host serial invalid handle. Trigger not uniquely located; not demonstrated BLE device loss."
+      ]
+    },
+    {
+      "id": "ble-sniffer-usb-backpressure",
+      "baseline_state": "candidate122_compiled_actual_arm_before_after_passed_not_installed",
+      "accepted_scope": "Actual compiledARM send/WHAD/CDC callbacks with modeled SDK acceptance and completion delivery. Candidate only; live remains121. Does not prove why22:01 USB re-enumerated, fullOTA air coverage, or a speed improvement.",
+      "guard_entries": [
+        "sniffer_usb_sdk_backpressure_returns_without_dropping_transport_bytes"
+      ],
+      "paths": {
+        "sniffer": [
+          "src/serial.cpp",
+          "src/core.cpp",
+          "whad-lib/src/transport.c",
+          "tools/replay_usb_backpressure.py"
+        ]
+      },
+      "known_failures": [
+        "Actual121 ARM SDK17/8 repeatedly callswrite1714times within12000instructions without returning.",
+        "Live12122:01 USB re-enumeration is observed but not uniquely attributed to this modeled condition."
       ]
     }
   ]
