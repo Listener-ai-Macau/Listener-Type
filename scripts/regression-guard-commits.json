@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T21:14:02.071831+08:00",
+  "updated_at": "2026-10-18T21:16:41.471742+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1330,13 +1330,14 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-120.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\custom-candidate120-installed.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver120-radio-quality-210742\\quality-summary.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-210837\\capture-gap.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-210837\\capture-gap.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\history-connection-acquisition-comparison.json"
       ],
       "guards": [
         "python tools/replay_initial_follow.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-follow/current-guard.json --expect-fixed --expect-advertising-guard --expect-response-window",
         "python tools/replay_radio_dma_snapshot.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-radio/current-guard.json --expect-fixed --expect-address-latch"
       ],
-      "known_scope": "ActualARM with disclosed MMIO/time fixtures.120 basicRX1422/1422 independentCRC, but live29advertisements/noCONNECT while Windows connected.adv_ifs2 proves code executed, not successful capture or speed gain. CompleteOTA remains unqualified."
+      "known_scope": "ActualARM with disclosed MMIO/time fixtures.120 basicRX1422/1422 independentCRC, but live29advertisements/noCONNECT while Windows connected.adv_ifs2 proves code executed, not successful capture or speed gain. CompleteOTA remains unqualified. Historical peer-specific comparison: currentF0 has verifiedCONNECT on37 in117; olderD7 success on38 cannot automatically be reused across peers. Fixed37+120 live comparison pending, not wholecapture acceptance."
     }
   ],
   "feature_routes_updated_at": "2026-10-18T21:14:02.071831+08:00",
