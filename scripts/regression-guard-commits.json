@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-18T22:57:14.251688+08:00",
+  "updated_at": "2026-10-19T10:32:39+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1380,7 +1380,7 @@
       "repo": "sniffer",
       "commit": "2a38d153d4d0ca68c942851596007f6ab9c8ed64",
       "subject": "Return USB SDK busy/not-ready to event pump; preserve transport bytes until accepted",
-      "state": "installed122_basic_rx_crc_and_bounded_passive_stop_passed_load_pending",
+      "state": "installed122_nonblocking_source_proof_valid_but_live_load_usb_reenumerates",
       "protects": [
         "SDK BUSY/INVALID_STATE cannot spin forever inside SerialComm::send.",
         "Rejected optional try-send leaves all transport bytes queued; outstanding send is not duplicated; actual CDC completion releases the next batch.",
@@ -1395,15 +1395,38 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\custom-candidate122-installed.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver122-installed-info.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver122-radio-check-20261018-2326\\independent-crc.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-232652\\collection.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261018-232652\\collection.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261019-083630\\collection.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261019-084508\\collection.json"
       ],
       "guards": [
         "python tools/replay_usb_backpressure.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-follow/current-usb.json --expect-nonblocking"
       ],
-      "known_scope": "Installed2026-10-18T23:25:41+08:00 exact analyzer serial; actual info1.1.122;1089/1089 independentCRC advertisements;90s bounded passive collection and stop passed, same COM owner, USB counters zero. No new connection or actual audio in that window; SDK busy/not-ready not exercised live, complete rawOTA and stable throughput gain still pending. CompiledARM modeled SDK backpressure proof remains separate from liveUSB re-enumeration root cause."
+      "known_scope": "Installed2026-10-18T23:25:41+08:00 exact analyzer serial; actual info1.1.122;1089/1089 independentCRC advertisements;90s bounded passive collection and stop passed, same COM owner, USB counters zero. No new connection or actual audio in that window; SDK busy/not-ready not exercised live, complete rawOTA and stable throughput gain still pending. CompiledARM modeled SDK backpressure proof remains separate from liveUSB re-enumeration root cause. 2026-10-19 live08:36 and08:45 USB port disconnected and re-enumerated during actual OTA. Full RF coverage remains zero; initial basics do not qualify load stability."
+    },
+    {
+      "id": "sniffer_rf_export_bounded_without_per_packet_heap",
+      "repo": "sniffer",
+      "commit": "150621a5d021febee6623c96932e885bf22904e5",
+      "subject": "Fixed raw BLE export ring and one reusable protobuf; bounded heap and reset cause fallback",
+      "state": "candidate123_compiled_arm_passed_not_installed_live_reset_root_unproven",
+      "protects": [
+        "BLE raw output cannot accumulate one 7008-byte heap object per packet.",
+        "Busy preserves packet and STOP acknowledgement follows raw output drain.",
+        "Overflow is counted and disqualifies complete capture; allocator cannot grow through reserved stack."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-export-before122\\bounded-export123-proof.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-export-before122\\usb-backpressure123-proof.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-123.json"
+      ],
+      "guards": [
+        "python tools/replay_bounded_export.py --workspace .."
+      ],
+      "known_scope": "Actual ARM with modeled USB admission and RAM loss. No complete OTA or live USB stability acceptance, hardware still122."
     }
   ],
-  "feature_routes_updated_at": "2026-10-19T08:28:08.342137+08:00",
+  "feature_routes_updated_at": "2026-10-19T10:32:39+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1783,22 +1806,28 @@
     },
     {
       "id": "ble-sniffer-usb-backpressure",
-      "baseline_state": "installed122_basic_rx_crc_and_bounded_passive_stop_passed_load_pending",
-      "accepted_scope": "Installed2026-10-18T23:25:41+08:00 exact analyzer serial; actual info1.1.122;1089/1089 independentCRC advertisements;90s bounded passive collection and stop passed, same COM owner, USB counters zero. No new connection or actual audio in that window; SDK busy/not-ready not exercised live, complete rawOTA and stable throughput gain still pending. CompiledARM modeled SDK backpressure proof remains separate from liveUSB re-enumeration root cause.",
+      "baseline_state": "installed122_nonblocking_source_proof_valid_but_live_load_usb_reenumerates",
+      "accepted_scope": "Installed2026-10-18T23:25:41+08:00 exact analyzer serial; actual info1.1.122;1089/1089 independentCRC advertisements;90s bounded passive collection and stop passed, same COM owner, USB counters zero. No new connection or actual audio in that window; SDK busy/not-ready not exercised live, complete rawOTA and stable throughput gain still pending. CompiledARM modeled SDK backpressure proof remains separate from liveUSB re-enumeration root cause. 2026-10-19 live08:36 and08:45 USB port disconnected and re-enumerated during actual OTA. Full RF coverage remains zero; initial basics do not qualify load stability.",
       "guard_entries": [
-        "sniffer_usb_sdk_backpressure_returns_without_dropping_transport_bytes"
+        "sniffer_usb_sdk_backpressure_returns_without_dropping_transport_bytes",
+        "sniffer_rf_export_bounded_without_per_packet_heap"
       ],
       "paths": {
         "sniffer": [
           "src/serial.cpp",
           "src/core.cpp",
           "whad-lib/src/transport.c",
-          "tools/replay_usb_backpressure.py"
+          "tools/replay_usb_backpressure.py",
+          "src/receiver_export.c",
+          "src/receiver_heap_lock.c",
+          "src/receiver_diag.c",
+          "tools/replay_bounded_export.py"
         ]
       },
       "known_failures": [
         "Actual121 ARM SDK17/8 repeatedly callswrite1714times within12000instructions without returning.",
-        "Live12122:01 USB re-enumeration is observed but not uniquely attributed to this modeled condition."
+        "Live12122:01 USB re-enumeration is observed but not uniquely attributed to this modeled condition.",
+        "Installed122 actual08:36/08:45 USB re-enumeration under OTA; raw image only prefix captured. Candidate123 pending hardware validation."
       ]
     }
   ]
