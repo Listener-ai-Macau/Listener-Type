@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T10:35:06+08:00",
+  "updated_at": "2026-10-19T11:03:59+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1409,7 +1409,7 @@
       "repo": "sniffer",
       "commit": "c2679878fe71725ef9864b41e25dd150c586b81d",
       "subject": "Fixed raw BLE export ring and one reusable protobuf; bounded heap and reset cause fallback",
-      "state": "candidate123_compiled_arm_passed_not_installed_live_reset_root_unproven",
+      "state": "installed123_usb_stable_in_actual_ota_load_raw_drops13_and_follow_incomplete",
       "protects": [
         "BLE raw output cannot accumulate one 7008-byte heap object per packet.",
         "Busy preserves packet and STOP acknowledgement follows raw output drain.",
@@ -1419,16 +1419,44 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-export-before122\\bounded-export123-proof.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-export-before122\\usb-backpressure123-proof.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-123.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-export-before122\\saved-link123-2181.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-export-before122\\saved-link123-2181.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\custom-candidate123-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver123-installed-info.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261019-105154\\collection.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver123-load-evidence\\final-live-info.json"
       ],
       "guards": [
         "python tools/replay_bounded_export.py --workspace .."
       ],
-      "known_scope": "Actual ARM with modeled USB admission and RAM loss. No complete OTA or live USB stability acceptance, hardware still122. Final123 candidate also aligns all2181 recorded channel selections; all-mode start/stop drain lifecycle included. Pending exact analyzer DFU.",
+      "known_scope": "Installed10:47:57 exact analyzer. Same COM owner completes three captures and actual original-image OTA load without USB re-enumeration, heap used64676/available94404/denied0. RF still only38 imagechunks16834B; output peak128/drops13 and control following incomplete. Not full RF or throughput acceptance.",
       "candidatePackageSha256": "6013bdf73c8edf913376304967aa118dd96cf57e2148881a2734c5859deeb4ab"
+    },
+    {
+      "id": "sniffer_recover_verified_channel_map_counter_gap_and_batch_output",
+      "repo": "sniffer",
+      "commit": "5429d796fa6ee9827c629caf31fb74b532268b1d",
+      "state": "candidate124_arm_before19_after20_verified_not_installed",
+      "subject": "Recover observed +35 control nonce gap with MIC verification; batch bounded RF output",
+      "protects": [
+        "Recorded authenticated channel-map update with counter171 is not rejected when observation estimate is136.",
+        "Output admits up to4 frames per loop, retaining pending frame on USB pressure; no queue enlargement.",
+        "Current capture counters reset only with empty queue; explicit first-drop and drain/gap timing remain visible."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver123-load-evidence\\control-counter123-arm.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver123-load-evidence\\control-counter124-arm.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver123-load-evidence\\bounded-export124-proof.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-124.json"
+      ],
+      "guards": [
+        "python tools/replay_control_counter_arm.py --workspace .. --elf build/nrf52840_xxaa.out --output ../receiver123-load-evidence/control-counter-current.json",
+        "python tools/replay_bounded_export.py --workspace .."
+      ],
+      "candidatePackageSha256": "1863b2661a2f09533a32cb9349bf0c13294497e11084890179483920f1da8514",
+      "known_scope": "Actual ARM counter search/AES/MIC uses modeled zeroed cipher allocation on saved RF;512 encoded packets verified with modeled USB pressure. Output recording omits13 internally received frames. Live internal nonce state, MCU duration and complete RF remain unproven. Candidate124 pending exact DFU."
     }
   ],
-  "feature_routes_updated_at": "2026-10-19T10:32:39+08:00",
+  "feature_routes_updated_at": "2026-10-19T11:03:59+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1808,11 +1836,12 @@
     },
     {
       "id": "ble-sniffer-usb-backpressure",
-      "baseline_state": "installed122_nonblocking_source_proof_valid_but_live_load_usb_reenumerates",
-      "accepted_scope": "Installed2026-10-18T23:25:41+08:00 exact analyzer serial; actual info1.1.122;1089/1089 independentCRC advertisements;90s bounded passive collection and stop passed, same COM owner, USB counters zero. No new connection or actual audio in that window; SDK busy/not-ready not exercised live, complete rawOTA and stable throughput gain still pending. CompiledARM modeled SDK backpressure proof remains separate from liveUSB re-enumeration root cause. 2026-10-19 live08:36 and08:45 USB port disconnected and re-enumerated during actual OTA. Full RF coverage remains zero; initial basics do not qualify load stability.",
+      "baseline_state": "installed123_usb_stable_in_actual_ota_load_raw_drops13_and_follow_incomplete",
+      "accepted_scope": "Installed10:47:57 exact analyzer. Same COM owner completes three captures and actual original-image OTA load without USB re-enumeration, heap used64676/available94404/denied0. RF still only38 imagechunks16834B; output peak128/drops13 and control following incomplete. Not full RF or throughput acceptance.",
       "guard_entries": [
         "sniffer_usb_sdk_backpressure_returns_without_dropping_transport_bytes",
-        "sniffer_rf_export_bounded_without_per_packet_heap"
+        "sniffer_rf_export_bounded_without_per_packet_heap",
+        "sniffer_recover_verified_channel_map_counter_gap_and_batch_output"
       ],
       "paths": {
         "sniffer": [
@@ -1823,13 +1852,16 @@
           "src/receiver_export.c",
           "src/receiver_heap_lock.c",
           "src/receiver_diag.c",
-          "tools/replay_bounded_export.py"
+          "tools/replay_bounded_export.py",
+          "src/passive_crypto.c",
+          "tools/replay_control_counter_arm.py"
         ]
       },
       "known_failures": [
         "Actual121 ARM SDK17/8 repeatedly callswrite1714times within12000instructions without returning.",
         "Live12122:01 USB re-enumeration is observed but not uniquely attributed to this modeled condition.",
-        "Installed122 actual08:36/08:45 USB re-enumeration under OTA; raw image only prefix captured. Candidate123 pending hardware validation."
+        "Installed122 actual08:36/08:45 USB re-enumeration under OTA; raw image only prefix captured. Candidate123 pending hardware validation.",
+        "123 real load no USB reset, but raw queue128/drops13; native and actual ARM saved RF reject valid map counter171 when estimate136 (+4 search).124 corrects this saved counterexample; not yet live accepted."
       ]
     }
   ]
