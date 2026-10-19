@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T12:30:43.302864+08:00",
+  "updated_at": "2026-10-19T13:14:22.338370+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1168,7 +1168,7 @@
     {
       "id": "firmware_ble_only_ota_timing_summary",
       "repo": "firmware",
-      "commit": "f3e249d",
+      "commit": "f3e249ddafc232ad767590543b0fda1098e85aeb",
       "subject": "Persist OTA queue service and flash timings for BLE-only diagnostics",
       "state": "clean_fw22_based_instrumentation_physically_exported_original_fw22_restored",
       "humanAccepted": false,
@@ -1202,7 +1202,7 @@
       "commit": "42c628ac54204d6498765d9dfc6b4d9ce462f7f1",
       "subject": "Retry optional OTA data lane discovery errors instead of silently degrading",
       "state": "native_counterexample_fixed_installed_dual_lane_observed_no_stable_gain",
-      "validation_kind": "evidence_only",
+      "validation_kind": "native_counterexample_and_recorded_field_evidence",
       "humanAccepted": false,
       "failing_source_commit": "1b25bb6301e452cdf1eaf3e97f41bb710ba3b7c8",
       "protects": [
@@ -1254,7 +1254,8 @@
       "guards": [
         "python scripts/test_windows_credential_scope.py"
       ],
-      "known_scope": "Native fixture before reselects old/new by unrelated write persistence; shared repair primitive keeps new in four alternations and fresh readers. Actual active vault repaired without Type restart; same logical document retained, Local physical files removed; current original provider final succeeds. Negative regression is for CI/idle isolated app environment and must not require closing the user app. No forced Windows reboot, cloud quota guarantee, human ASR quality acceptance or BLE gain claim."
+      "known_scope": "Native fixture before reselects old/new by unrelated write persistence; shared repair primitive keeps new in four alternations and fresh readers. Actual active vault repaired without Type restart; same logical document retained, Local physical files removed; current original provider final succeeds. Negative regression is for CI/idle isolated app environment and must not require closing the user app. No forced Windows reboot, cloud quota guarantee, human ASR quality acceptance or BLE gain claim.",
+      "commit_subject": "fix(credentials): eliminate Local scope shadows in configuration maintenance"
     },
     {
       "id": "sniffer_initial_window_packet_completion_and_anchored_acquisition",
@@ -1280,7 +1281,8 @@
       "guards": [
         "python tools/replay_initial_follow.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-follow/current-guard.json --expect-fixed"
       ],
-      "known_scope": "Actual ARM functions with disclosed MMIO/time and export-buffer fixture. Installed118 received1098/1098 independentlyCRC-matching advertisements. Not a full peer-link, encryptedOTA or throughput baseline; do not infer RF silence or device packet loss from analyzer gaps."
+      "known_scope": "Actual ARM functions with disclosed MMIO/time and export-buffer fixture. Installed118 received1098/1098 independentlyCRC-matching advertisements. Not a full peer-link, encryptedOTA or throughput baseline; do not infer RF silence or device packet loss from analyzer gaps.",
+      "commit_subject": "fix(receiver): retain legal first packets and trace bounded acquisition"
     },
     {
       "id": "sniffer_advertising_hop_preserves_inflight_packet",
@@ -1310,7 +1312,8 @@
         "python tools/replay_initial_follow.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-follow/current-guard.json --expect-fixed --expect-advertising-guard",
         "python tools/replay_radio_dma_snapshot.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-radio/current-guard.json --expect-fixed --expect-address-latch"
       ],
-      "known_scope": "Actual ARM source counterexample with modeled packet arrival.119 installed;1857/1857 independentCRC basicRX passed, live connection pending; cannot attribute live missedCONNECT uniquely or claim completeOTA/throughput gain. adv_holds counts loop deferrals, not packet loss; adv_us excludes earlierIRQ work."
+      "known_scope": "Actual ARM source counterexample with modeled packet arrival.119 installed;1857/1857 independentCRC basicRX passed, live connection pending; cannot attribute live missedCONNECT uniquely or claim completeOTA/throughput gain. adv_holds counts loop deferrals, not packet loss; adv_us excludes earlierIRQ work.",
+      "commit_subject": "fix(receiver): defer advertising hop until the current packet ends"
     },
     {
       "id": "sniffer_advertising_response_window_before_address",
@@ -1337,7 +1340,8 @@
         "python tools/replay_initial_follow.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-follow/current-guard.json --expect-fixed --expect-advertising-guard --expect-response-window",
         "python tools/replay_radio_dma_snapshot.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-radio/current-guard.json --expect-fixed --expect-address-latch"
       ],
-      "known_scope": "ActualARM with disclosed MMIO/time fixtures.120 basicRX1422/1422 independentCRC, but live29advertisements/noCONNECT while Windows connected.adv_ifs2 proves code executed, not successful capture or speed gain. CompleteOTA remains unqualified. Historical peer-specific comparison: currentF0 has verifiedCONNECT on37 in117; olderD7 success on38 cannot automatically be reused across peers. Fixed37+120 live comparison pending, not wholecapture acceptance."
+      "known_scope": "ActualARM with disclosed MMIO/time fixtures.120 basicRX1422/1422 independentCRC, but live29advertisements/noCONNECT while Windows connected.adv_ifs2 proves code executed, not successful capture or speed gain. CompleteOTA remains unqualified. Historical peer-specific comparison: currentF0 has verifiedCONNECT on37 in117; olderD7 success on38 cannot automatically be reused across peers. Fixed37+120 live comparison pending, not wholecapture acceptance.",
+      "commit_subject": "fix: preserve legacy advertising response interval before CONNECT address match"
     },
     {
       "id": "sniffer_known_csa2_counter_survives_missing_event_before_future_map",
@@ -1373,7 +1377,8 @@
         "python tools/replay_saved_link.py --workspace .. --elf build/nrf52840_xxaa.out --capture ../passive-current-20261018-211533/rf-private --output ../native-arm-follow/current-saved-link.json --expect-known-counter"
       ],
       "known_scope": "Actual121 capture:2181 independentCRC DATA/34 nonemptyMIC, three authenticated maps, PHYinstant19. Captured prefix matches actualARM at modeled worker150/1307us. Live stopped with USB invalid handle and PnP re-enumeration, trigger unknown. No complete rawOTA or throughput gain. Do not require repeated user power cycles or claim RX stopped merely from a target-filtered empty file.",
-      "analysis_tool_commit": "f1e2a4ea2929d07f056f149877b1a33b5558afb7"
+      "analysis_tool_commit": "f1e2a4ea2929d07f056f149877b1a33b5558afb7",
+      "commit_subject": "fix: preserve known passive CSA2 counter across missed events and future map updates"
     },
     {
       "id": "sniffer_usb_sdk_backpressure_returns_without_dropping_transport_bytes",
@@ -1402,7 +1407,8 @@
       "guards": [
         "python tools/replay_usb_backpressure.py --workspace .. --elf build/nrf52840_xxaa.out --output ../native-arm-follow/current-usb.json --expect-nonblocking"
       ],
-      "known_scope": "Installed2026-10-18T23:25:41+08:00 exact analyzer serial; actual info1.1.122;1089/1089 independentCRC advertisements;90s bounded passive collection and stop passed, same COM owner, USB counters zero. No new connection or actual audio in that window; SDK busy/not-ready not exercised live, complete rawOTA and stable throughput gain still pending. CompiledARM modeled SDK backpressure proof remains separate from liveUSB re-enumeration root cause. 2026-10-19 live08:36 and08:45 USB port disconnected and re-enumerated during actual OTA. Full RF coverage remains zero; initial basics do not qualify load stability."
+      "known_scope": "Installed2026-10-18T23:25:41+08:00 exact analyzer serial; actual info1.1.122;1089/1089 independentCRC advertisements;90s bounded passive collection and stop passed, same COM owner, USB counters zero. No new connection or actual audio in that window; SDK busy/not-ready not exercised live, complete rawOTA and stable throughput gain still pending. CompiledARM modeled SDK backpressure proof remains separate from liveUSB re-enumeration root cause. 2026-10-19 live08:36 and08:45 USB port disconnected and re-enumerated during actual OTA. Full RF coverage remains zero; initial basics do not qualify load stability.",
+      "commit_subject": "Return USB busy and not-ready to the event pump without losing queued bytes"
     },
     {
       "id": "sniffer_rf_export_bounded_without_per_packet_heap",
@@ -1429,7 +1435,8 @@
         "python tools/replay_bounded_export.py --workspace .."
       ],
       "known_scope": "Installed10:47:57 exact analyzer. Same COM owner completes three captures and actual original-image OTA load without USB re-enumeration, heap used64676/available94404/denied0. RF still only38 imagechunks16834B; output peak128/drops13 and control following incomplete. Not full RF or throughput acceptance.",
-      "candidatePackageSha256": "6013bdf73c8edf913376304967aa118dd96cf57e2148881a2734c5859deeb4ab"
+      "candidatePackageSha256": "6013bdf73c8edf913376304967aa118dd96cf57e2148881a2734c5859deeb4ab",
+      "commit_subject": "Apply export drain lifecycle to every BLE capture mode"
     },
     {
       "id": "sniffer_recover_verified_channel_map_counter_gap_and_batch_output",
@@ -1459,7 +1466,8 @@
         "python tools/replay_bounded_export.py --workspace .."
       ],
       "candidatePackageSha256": "1863b2661a2f09533a32cb9349bf0c13294497e11084890179483920f1da8514",
-      "known_scope": "Installed124 actual11:22 original OTA PASS18242ms/Type947ms; noUSB reset, but raw export18drops/crypto20drops/37101us max worker.472CRC/182MIC/39image chunks only. Peer naturally recovered; outage cause not unique. Full RF and stable speed remain unqualified."
+      "known_scope": "Installed124 actual11:22 original OTA PASS18242ms/Type947ms; noUSB reset, but raw export18drops/crypto20drops/37101us max worker.472CRC/182MIC/39image chunks only. Peer naturally recovered; outage cause not unique. Full RF and stable speed remain unqualified.",
+      "commit_subject": "Account for bounded four-frame ARM export work in replay budget"
     },
     {
       "id": "sniffer_direction_hint_drift_and_near_counter_probe_priority",
@@ -1486,7 +1494,8 @@
         "python tools/replay_control_counter_arm.py --workspace .. --elf build/nrf52840_xxaa.out --output ../control-current.json --capture-round passive-current-20261019-112214 --phy-switch-us 918935775"
       ],
       "candidatePackageSha256": "0d14ba09e02710dc4c987d80655c828ea8b253e34517a11639ddb3c843f29034",
-      "known_scope": "Actual125 fixed38 captures fresh link,18 authenticated controls/0rejections/max1304us and24s to authenticated terminate during original OTA16756ms/Type928ms. RF export14572drops/crypto4852drops, only130908 image bytes; full RF not qualified. Previous three hop captures missed CONNECT, no USB failure."
+      "known_scope": "Actual125 fixed38 captures fresh link,18 authenticated controls/0rejections/max1304us and24s to authenticated terminate during original OTA16756ms/Type928ms. RF export14572drops/crypto4852drops, only130908 image bytes; full RF not qualified. Previous three hop captures missed CONNECT, no USB failure.",
+      "commit_subject": "Fix passive counter drift from unreliable packet direction hints"
     },
     {
       "id": "sniffer_raw_export_cached_wire_identical_fast_encoding",
@@ -1512,12 +1521,13 @@
         "python tools/replay_bounded_export.py --workspace .. --output ../queue-current.json"
       ],
       "candidatePackageSha256": "05fadc843fecba1164b1aceccdc3bcb4e51840a1b43653d5e25dada5c2e68113",
-      "known_scope": "125 real OTA follows24s through authenticated terminate, controls18/rejected0/max1304us, USB stable; raw export drops14572 and crypto queue4852.126 replaces generic per-record encoding/retry with cached direct protobuf;192 actual ARM wire-byte matches and512 queue records pass. Instruction counts are not hardware time or BLE throughput; actual USB/raw queues/full image remain pending. Installed11:49:07; actual fixed38 RF/HCI/USB capture in progress, not yet qualified. Later126 basic radio check377/377 CRC passes; two target-offline attempts request no OTA. User is flashing/new board; no126 full-load acceptance."
+      "known_scope": "125 real OTA follows24s through authenticated terminate, controls18/rejected0/max1304us, USB stable; raw export drops14572 and crypto queue4852.126 replaces generic per-record encoding/retry with cached direct protobuf;192 actual ARM wire-byte matches and512 queue records pass. Instruction counts are not hardware time or BLE throughput; actual USB/raw queues/full image remain pending. Installed11:49:07; actual fixed38 RF/HCI/USB capture in progress, not yet qualified. Later126 basic radio check377/377 CRC passes; two target-offline attempts request no OTA. User is flashing/new board; no126 full-load acceptance.",
+      "commit_subject": "Encode passive raw records once with wire-identical bounded fast path"
     },
     {
       "id": "wired_native_s3_rom_default_and_explicit_segment_verification",
       "repo": "type",
-      "commit": "09d8558",
+      "commit": "09d855854a9a48cf24960d84f52c2cc644d002ed",
       "state": "installed52c2_source_backend_full_flash_pass_board_usb_only_power_unresolved",
       "subject": "Default wired mode; native S3 USB ROM download, explicit MD5 before reset, preserve failure causes",
       "protects": [
@@ -1541,10 +1551,39 @@
       "guards": [
         "npm run test:firmware-ota"
       ],
-      "known_scope": "Current COM17 actual product backend writes FW22 at921600 in16.641s, explicitly compares4 MD5 values and resets. Final MSI installed and hash-matched, main/helper restored, installed read-only package check passes. Candidate raw executable hash differs from final bundle metadata; source09d8558 same, final exact binary not reflashed due uncertain supply. User clarified no battery; brownout9/USB error observed after write, later power_on1/crash0/>100s uptime. ADC2.866V is not an actual battery reading. Not all-board validation, not proof hardware supply is fixed, not a uniquely established RAM-stub internal cause."
+      "known_scope": "Current COM17 actual product backend writes FW22 at921600 in16.641s, explicitly compares4 MD5 values and resets. Final MSI installed and hash-matched, main/helper restored, installed read-only package check passes. Candidate raw executable hash differs from final bundle metadata; source09d8558 same, final exact binary not reflashed due uncertain supply. User clarified no battery; brownout9/USB error observed after write, later power_on1/crash0/>100s uptime. ADC2.866V is not an actual battery reading. Not all-board validation, not proof hardware supply is fixed, not a uniquely established RAM-stub internal cause.",
+      "commit_subject": "Fix native USB wired flashing with ROM download and verified reset"
+    },
+    {
+      "id": "sniffer_ifs_jitter_preserves_direction_for_authenticated_map",
+      "repo": "sniffer",
+      "commit": "cb455ae25a8701530f0c51d49172b672e33ebc9e",
+      "state": "installed127_actual_full_original_image_rf_3908_chunks_once_no_speed_gain",
+      "subject": "Keep passive BLE direction tracking within measured RX timestamp jitter",
+      "protects": [
+        "Exact recorded126 counter671 channel-map frame remains MIC-accepted after a78us adjacent-packet gap; realARM before22/23 after23/23, historical21/21 and20/20.",
+        "Same-pass raw RF independently authenticates and reconstructs all3908 originalFW22 chunks without HCI fill; zero output/crypto queue drops.",
+        "No larger nonce search, no product firmware/Type/radio/channel changes; failed runs remain recorded and complete-image success is not a stable throughput guarantee."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver126-load-evidence\\arm-before127.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver126-load-evidence\\arm-after127.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver126-load-evidence\\arm-history21-127.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver126-load-evidence\\arm-history20-127.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\custom-candidate127-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver127-installed-info.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver126-load-evidence\\live-result127.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261019-130914\\rf-private\\current-bond-independent-rf-proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver126-load-evidence\\air-budget127-full.json"
+      ],
+      "guards": [
+        "python tools/replay_control_counter_arm.py --workspace .. --elf build/nrf52840_xxaa.out --capture-round passive-current-20261019-125012 --phy-switch-us 77521442 --output ../receiver126-load-evidence/control-regression-current.json"
+      ],
+      "candidatePackageSha256": "ad42b6c400b7a253f123b96474db57f43c218aa29778bfc4065baf4cf524ec70",
+      "known_scope": "One complete real rawOTA RF3908/3908; preceding127 run3906/3908. Full coverage means observed CRC/MIC exact image bytes, not every emptyACK or universal zero loss. Product original transfer21706ms; exact RF image span20.9445s≈82.65decimalKB/s. No160KB/s or speed-gain acceptance."
     }
   ],
-  "feature_routes_updated_at": "2026-10-19T12:30:43.302864+08:00",
+  "feature_routes_updated_at": "2026-10-19T13:14:22.338370+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1908,18 +1947,22 @@
           "src/controllers/blecontroller.cpp",
           "src/controllers/blecontroller.h",
           "src/timer.cpp",
-          "tools/replay_saved_link.py"
+          "tools/replay_saved_link.py",
+          "src/passive_crypto.c",
+          "tools/replay_control_counter_arm.py"
         ]
       },
       "guard_entries": [
-        "sniffer_known_csa2_counter_survives_missing_event_before_future_map"
+        "sniffer_known_csa2_counter_survives_missing_event_before_future_map",
+        "sniffer_ifs_jitter_preserves_direction_for_authenticated_map"
       ],
-      "baseline_state": "installed121_2181_crc_and_arm_prefix_passed_usb_reenumeration_full_transfer_pending",
-      "accepted_scope": "Actual121 capture:2181 independentCRC DATA/34 nonemptyMIC, three authenticated maps, PHYinstant19. Captured prefix matches actualARM at modeled worker150/1307us. Live stopped with USB invalid handle and PnP re-enumeration, trigger unknown. No complete rawOTA or throughput gain. Do not require repeated user power cycles or claim RX stopped merely from a target-filtered empty file.",
+      "baseline_state": "installed127_actual_full_original_image_rf_3908_chunks_once_no_speed_gain",
+      "accepted_scope": "One complete real rawOTA RF3908/3908; preceding127 run3906/3908. Full coverage means observed CRC/MIC exact image bytes, not every emptyACK or universal zero loss. Product original transfer21706ms; exact RF image span20.9445s≈82.65decimalKB/s. No160KB/s or speed-gain acceptance.",
       "known_failures": [
         "120 live fixed37 receives750PDUs then stops after mapinstant372 message; Windows staysconnected.",
         "ActualARM120 fullrecordedprefix matches but noRX tail jumps366to373 and applies map early. First actual RFmiss cause remainsunknown.",
-        "121 captured2181 validDATA then USB re-enumerated at22:01:09; host serial invalid handle. Trigger not uniquely located; not demonstrated BLE device loss."
+        "121 captured2181 validDATA then USB re-enumerated at22:01:09; host serial invalid handle. Trigger not uniquely located; not demonstrated BLE device loss.",
+        "126 exact live output/crypto drops0 still missed encrypted channel-map counter671; realARM22/23 vs12723/23. First127 run has2missingimagechunks; second rawRF run proves3908/3908. Do not call all captures perfect or reuse this as speed-gain evidence."
       ]
     },
     {
