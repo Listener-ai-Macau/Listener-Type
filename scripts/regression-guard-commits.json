@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T10:32:39+08:00",
+  "updated_at": "2026-10-19T10:35:06+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1407,7 +1407,7 @@
     {
       "id": "sniffer_rf_export_bounded_without_per_packet_heap",
       "repo": "sniffer",
-      "commit": "150621a5d021febee6623c96932e885bf22904e5",
+      "commit": "c2679878fe71725ef9864b41e25dd150c586b81d",
       "subject": "Fixed raw BLE export ring and one reusable protobuf; bounded heap and reset cause fallback",
       "state": "candidate123_compiled_arm_passed_not_installed_live_reset_root_unproven",
       "protects": [
@@ -1418,12 +1418,14 @@
       "machine_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-export-before122\\bounded-export123-proof.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-export-before122\\usb-backpressure123-proof.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-123.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-123.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\native-arm-export-before122\\saved-link123-2181.json"
       ],
       "guards": [
         "python tools/replay_bounded_export.py --workspace .."
       ],
-      "known_scope": "Actual ARM with modeled USB admission and RAM loss. No complete OTA or live USB stability acceptance, hardware still122."
+      "known_scope": "Actual ARM with modeled USB admission and RAM loss. No complete OTA or live USB stability acceptance, hardware still122. Final123 candidate also aligns all2181 recorded channel selections; all-mode start/stop drain lifecycle included. Pending exact analyzer DFU.",
+      "candidatePackageSha256": "6013bdf73c8edf913376304967aa118dd96cf57e2148881a2734c5859deeb4ab"
     }
   ],
   "feature_routes_updated_at": "2026-10-19T10:32:39+08:00",
