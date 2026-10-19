@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T03:30:16.205691+08:00",
+  "updated_at": "2026-10-20T03:49:29.200783+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -2185,9 +2185,36 @@
       "machine_accepted_scope": [
         "44 full-image zeroOTAFlash-DATA proof, CSA2 allobserved1812events/0mismatch,107.877KBps. Related40control105.546/104.890;43preliminary106.730. Small effect unqualified as stable gain."
       ]
+    },
+    {
+      "id": "firmware45_pre_hci_allocator_retry_absent_actual_full_rf",
+      "repo": "firmware",
+      "commit": "94e52afdaf6ea8787ac94ff9281f768307acc269",
+      "subject": "Bound exact-mbuf allocator/copy timing before HCI with complete raw-image RF",
+      "state": "actual8862_allocations_zero_failures_tail_before_allocator_not_promoted",
+      "protects": [
+        "Forward real allocator and HCI originals exactly once with same return/pointer/bytes; no retry, pool-size, radio, Flash, core or interval policy change.",
+        "Match original mbuf pointer, not FIFO; generation changes, failure, overwrite, inactive, out-of-order allocation and old callback cases retain explicit counters.",
+        "Actual45 field:8862calls,0failures,8862pointer matches,0missing/overwrites;maxallocator26us,sampled success-to-HCIentry<=26us. Do not repeat pool growth as explanation of this run.",
+        "Actual offset-free9 near2.25ms extra waits persist before allocation, not absolute original receipt rejection proof. Missing ACK does not mean no ACK transmitted.",
+        "Current raw32 full1734832B/3917 chunks,RF105.925KBps,protocol17190ms; not stable gain, not original CD/FW22 qualification. Restore32/profile5 and preserve daily Type62."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-033920/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-033920/pre-hci-allocation-analysis.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-033920/clocked-tail.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/alloc45-observer-native.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/alloc45-linked-proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/post-alloc45-daily62-restored.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-alloc45-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "Engineering diagnosis excludes allocation retry waiting in this measured run.57HCI/24GATT and exact-pointer timing;1068CSA2 events/0channel mismatch.572 adjacent repeats remain. No speed or controller-limit qualification."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T03:30:16.205691+08:00",
+  "feature_routes_updated_at": "2026-10-20T03:49:29.200783+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -2429,8 +2456,8 @@
     },
     {
       "id": "ble-raw-throughput",
-      "baseline_state": "installed62_default443_fw32_restored_after_actual42_no_stable_gain",
-      "accepted_scope": "Current62/FW32/E1 restored with profile5/core and Type preserved. Isolated40/41/42 complete3917chunk/1734832B RF. Offset-free timing identifies2.25ms extra before HCI at sampled repeats; absolute receive acceptance unresolved. Actual42 peripheralTX/hostRX1064 versus control2120 yields106.285760 vs105.546401KBps, no stable gain; hostTX remains2120. Earlier originalCD/FW22 same-board and160 exploration remain unfinished. Prior62 actual491 A/B/A passed, no stable gain, default443 retained. RAM44 actual whole1734832B PSRAM/zeroOTAFlash DATA passed;1812events CSA2/0mismatch,947adjacent repeats persist. RAM106.730/107.877 versus40controls105.546/104.890KBps not yet stable product gain. Daily62/32/profile5 restored.",
+      "baseline_state": "installed62_default443_fw32_restored_after_actual45_allocation_trace_no_stable_gain",
+      "accepted_scope": "Current62/FW32/E1 restored with profile5/core and Type preserved. Isolated40/41/42 complete3917chunk/1734832B RF. Offset-free timing identifies2.25ms extra before HCI at sampled repeats; absolute receive acceptance unresolved. Actual42 peripheralTX/hostRX1064 versus control2120 yields106.285760 vs105.546401KBps, no stable gain; hostTX remains2120. Earlier originalCD/FW22 same-board and160 exploration remain unfinished. Prior62 actual491 A/B/A passed, no stable gain, default443 retained. RAM44 actual whole1734832B PSRAM/zeroOTAFlash DATA passed;1812events CSA2/0mismatch,947adjacent repeats persist. RAM106.730/107.877 versus40controls105.546/104.890KBps not yet stable product gain. Daily62/32/profile5 restored. Alloc45 actual8862 allocations/0failures/max26us,57exact-pointer samples,complete raw32 RF105.925KBps. Offset-free sampled2.25ms wait already before allocation. No stable speed gain;normal62/32/profile5restored.",
       "guard_entries": [
         "type_raw215_current40_comparison_rejected",
         "type_exclusive_ota_prepared_target_ownership",
@@ -2455,7 +2482,8 @@
         "firmware41_timing_intent_not_actual_rejected",
         "firmware42_actual_local1064_no_stable_gain",
         "firmware43_ram_stage_snapshot_evicted",
-        "firmware44_zero_ota_flash_data_tail_persists"
+        "firmware44_zero_ota_flash_data_tail_persists",
+        "firmware45_pre_hci_allocator_retry_absent_actual_full_rf"
       ],
       "paths": {
         "type": [
@@ -2493,7 +2521,8 @@
         "42 initial04b745d made1M readiness1064 and failed3PHY ownership assertions before installation; corrected7f0fe72 preserves1M2120. Actual42 no stable gain; do not repeat localTX timing alone.",
         "43 fullRAM phase guard was INCOMPLETE because256-entry ring evicted pre-drain record during9.18s drain.44 snapshots scalar values and emits after drain; do not weaken the phase gate.",
         "44 actual zeroOTAFlash-DATA and worker-only receive still show947 adjacent-event repeats,5.505ms observed eventtail/1.995ms to nextanchor. EntireRAM staging alone does not solve main tail behavior; observed small rate difference not a stable product gain.",
-        "032426 same daily62/32 preparation timed out before receiver40 installed; recovery32 succeeded withoutTypequit. Retry on confirmed new generation032527 completed fullRF control. Keep failure and pending root-cause work, do not label it a RAM-code regression."
+        "032426 same daily62/32 preparation timed out before receiver40 installed; recovery32 succeeded withoutTypequit. Retry on confirmed new generation032527 completed fullRF control. Keep failure and pending root-cause work, do not label it a RAM-code regression.",
+        "Actual45 allocator retry hypothesis is negative in this run:8862/0failed,copy+entry<=26us in57samples;do not simply enlarge mbufs. Windows first-SYNC release1.193s is expected for15ms-to7.5ms policy, not a new regression. HCI has only selected handle ACL duringDATA but does not rule out empty polls or prove enabled scanning owns air gaps."
       ],
       "latest_observed_baseline": {
         "type_build": 42,
