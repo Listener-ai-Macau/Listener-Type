@@ -200,6 +200,21 @@ pub fn read(io: &mut dyn SettingsIo) -> Result<Option<OnboardKeys>, String> {
     }
     let checksum = u32::from_str_radix(f.get("kc").ok_or("Missing profile CRC")?, 16)
         .map_err(|_| "Invalid profile CRC")?;
+    // Reuse only a body already read from this exact hardware UID, after an
+    // uncached metadata read proves revision, length and checksum unchanged.
+    // This does not cache names/power/brightness or push anything to a board.
+    {
+        let cache = profiles().lock().unwrap_or_else(|p| p.into_inner());
+        if cache.wire.get(&device_uid) == Some(&(revision, len, checksum)) {
+            if let Some(keys) = cache
+                .values
+                .get(&device_uid)
+                .filter(|keys| keys.revision == revision)
+            {
+                return Ok(Some(keys.clone()));
+            }
+        }
+    }
     let mut bytes = Vec::with_capacity(len);
     while bytes.len() < len {
         io.write(&format!("DEVICE:KEY R {:04x}", bytes.len()))?;
@@ -228,11 +243,19 @@ pub fn read(io: &mut dyn SettingsIo) -> Result<Option<OnboardKeys>, String> {
     let mut profile: DeviceKeyProfile =
         serde_json::from_slice(&bytes).map_err(|e| format!("Invalid stored device keys: {e}"))?;
     profile.compile()?;
-    Ok(Some(OnboardKeys {
+    let keys = OnboardKeys {
         device_uid,
         revision,
         profile,
-    }))
+    };
+    {
+        let mut cache = profiles().lock().unwrap_or_else(|p| p.into_inner());
+        cache
+            .wire
+            .insert(keys.device_uid.clone(), (revision, len, checksum));
+        cache.values.insert(keys.device_uid.clone(), keys.clone());
+    }
+    Ok(Some(keys))
 }
 fn compact_profile_bytes(profile: &DeviceKeyProfile) -> Result<Vec<u8>, String> {
     let mut value = serde_json::to_value(profile).map_err(|e| e.to_string())?;
@@ -333,6 +356,7 @@ pub fn write(
 struct Profiles {
     values: HashMap<String, OnboardKeys>,
     aliases: HashMap<String, String>,
+    wire: HashMap<String, (u32, usize, u32)>,
 }
 fn profiles() -> &'static Mutex<Profiles> {
     static V: OnceLock<Mutex<Profiles>> = OnceLock::new();
