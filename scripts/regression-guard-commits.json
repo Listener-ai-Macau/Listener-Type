@@ -1403,7 +1403,7 @@
       "known_scope": "Installed2026-10-18T23:25:41+08:00 exact analyzer serial; actual info1.1.122;1089/1089 independentCRC advertisements;90s bounded passive collection and stop passed, same COM owner, USB counters zero. No new connection or actual audio in that window; SDK busy/not-ready not exercised live, complete rawOTA and stable throughput gain still pending. CompiledARM modeled SDK backpressure proof remains separate from liveUSB re-enumeration root cause."
     }
   ],
-  "feature_routes_updated_at": "2026-10-18T23:29:52.296152+08:00",
+  "feature_routes_updated_at": "2026-10-19T08:28:08.342137+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1675,7 +1675,8 @@
         "1b25bb6 always dropped prepared GATT after ownership handoff. Current GUI already released notify but kept legacy staging.42 acquires exclusive guards before construction, eliminating duplicate open without removing legacy security fallback.",
         "Current46 raw240 candidate47 actually measured once in A/B/A; neighboring slight benefit not stable or faster than prior46 best, exact46 restored. Further trial needs a new causal condition.",
         "Later owned-handoff capture runners omitted the earlier actual-preconnection gate: the OTA could reuse a pre-capture physical link. Reintroduce fresh captured CONNECT/same-link crypto observations, not merely start the receiver earlier.",
-        "Optional DATA_B .ok() hid discovery failures since1b25bb6.42c628a fixes classification with native before/after evidence; build50 dual-lane field observation does not establish a stable throughput gain."
+        "Optional DATA_B .ok() hid discovery failures since1b25bb6.42c628a fixes classification with native before/after evidence; build50 dual-lane field observation does not establish a stable throughput gain.",
+        "2026-10-19 08:20:48 exact Listener PnP restart returned0 but did not obtain a fresh link: RF CONNECT0, exported HCI no Disconnect/ConnectionComplete, same0x0800 ACL before104/after124, boundary112.421ms. OTA admission refused; OTA not sent. Do not retry PnP restart as proof of physical reconnect. Evidence E:/ListenerAnalysisState/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/target-restart-20261019-082046/restart-link-result.json. Original executed controller is frozen with receipt hash. Next two-original-OTA prime/measured candidate requires separate authorization; prime never qualifies as RF measurement."
       ],
       "latest_observed_baseline": {
         "type_build": 42,
