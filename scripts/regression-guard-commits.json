@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T02:25:21.981071+08:00",
+  "updated_at": "2026-10-20T03:02:22.974053+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -2079,9 +2079,70 @@
       "machine_accepted_scope": [
         "Actual core1/prio21/controller0/config1, entire1734832B/3917chunk unchanged32 RF,110.220928KBps versus110.326119KBps core0. Settings/Type preserved; exact32 restored, then daily62 restored. No stable gain or originalCD qualification."
       ]
+    },
+    {
+      "id": "firmware40_receive_clock_actual_full_rf",
+      "repo": "firmware",
+      "commit": "2e1b845",
+      "subject": "Bounded receive clock observes delay before GATT, not a throughput fix",
+      "state": "actual53_hci24_gatt_full_image_rf_restored32",
+      "protects": [
+        "Observer must forward the untouched mbuf once, allocate nothing in hot path, and export bounded records only after verification.",
+        "Require raw CRC/MIC/exact image plus actual trace geometry/CRC; keep calibration uncertainty, do not turn missing ACK into silence.",
+        "Five offset-free comparisons add2.233-2.266ms before HCI and align with2.251-2.253ms RF repeats. Not unique controller rejection proof."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-rxclock40-time42-field-evidence.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current62-measure-20261020-024433\\receive-clock-relative.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\post-time42-daily62-restored.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "Full1734832B/3917chunks;105.546401KBps;53HCI24GATT/overflow0. CurrentE1 only, no stable gain."
+      ]
+    },
+    {
+      "id": "firmware41_timing_intent_not_actual_rejected",
+      "repo": "firmware",
+      "commit": "dfbceb2",
+      "subject": "Nominal timing change skipped by prior sufficient link state",
+      "state": "full_rf_actual2120_not_intended1064_no_performance_qualification",
+      "protects": [
+        "Never count a source constant as an effective radio setting.",
+        "Retain ready/configured early-return evidence and do not call41 a failed1064 performance trial."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current62-measure-20261020-025220\\actual-budget-rejected.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "Actual image and restoration passed; actual1064 was absent."
+      ]
+    },
+    {
+      "id": "firmware42_actual_local1064_no_stable_gain",
+      "repo": "firmware",
+      "commit": "7f0fe72",
+      "subject": "One real-generation exact request, actual bidirectional budget distinction",
+      "state": "actual_local_tx1064_full_rf_no_stable_gain_restored32",
+      "protects": [
+        "One exact request per real connection generation; retain live pending ownership and old-completion isolation.",
+        "1M full encrypted251 requires2120us; do not conflate2M1064 request with1M readiness.",
+        "Qualification requires authenticated peripheral1064 and same-peer HCI hostRx1064. HostTx/peripheralRx remains2120.",
+        "No performance promotion:106.285760KBps versus105.546401 observer control, tail repeats remain."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current62-measure-20261020-025750\\actual-budget-qualified.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\post-time42-daily62-restored.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-rxclock40-time42-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "Actual full image/currentE1, configuration andType preserved; native source command-ownership fixture passed with explicit research constants. Original CD/stable gain incomplete."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T02:25:21.981071+08:00",
+  "feature_routes_updated_at": "2026-10-20T03:02:22.974053+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -2323,8 +2384,8 @@
     },
     {
       "id": "ble-raw-throughput",
-      "baseline_state": "installed61_default443_current_e1_full_rf_no_stable_speed_gain",
-      "accepted_scope": "Current Type60/FW32/E1 engineering image1734832B/3917chunks fully RF reconstructed:16.504183s105.114685KB/s, protocol17.309s. DATA251/2120 both directions; later RX1590 belongs next connection, not this DATA ceiling. Original CD/52c2/22 same-board evidence and stable product gain remain pending. Previous full F8 long34 cold/warm evidence retained separately. Current61 exact-peer-only/default443 actual fullRF105.329605KB/s, unchanged protocol17.310s; NVS/core preserved. Candidate62 capacity fix pending field491 measurement.",
+      "baseline_state": "installed62_default443_fw32_restored_after_actual42_no_stable_gain",
+      "accepted_scope": "Current62/FW32/E1 restored with profile5/core and Type preserved. Isolated40/41/42 complete3917chunk/1734832B RF. Offset-free timing identifies2.25ms extra before HCI at sampled repeats; absolute receive acceptance unresolved. Actual42 peripheralTX/hostRX1064 versus control2120 yields106.285760 vs105.546401KBps, no stable gain; hostTX remains2120. Earlier originalCD/FW22 same-board and160 exploration remain unfinished. Prior62 actual491 A/B/A passed, no stable gain, default443 retained.",
       "guard_entries": [
         "type_raw215_current40_comparison_rejected",
         "type_exclusive_ota_prepared_target_ownership",
@@ -2344,7 +2405,10 @@
         "ota_native63_full_same_link_budget_diagnostic",
         "firmware37_long_interval_full_rf_negative",
         "firmware38_configured_affinity_not_runtime_rejected",
-        "firmware39_honor_host_core_actual_no_gain"
+        "firmware39_honor_host_core_actual_no_gain",
+        "firmware40_receive_clock_actual_full_rf",
+        "firmware41_timing_intent_not_actual_rejected",
+        "firmware42_actual_local1064_no_stable_gain"
       ],
       "paths": {
         "type": [
@@ -2376,7 +2440,10 @@
         "20261020 fixed38 receives98 current E1 directed advertisements but0CONNECT; no measured transfer admitted. Existing hopping acquisition then obtained full image without any RESET/physical reboot.",
         "Global connected-peer PowerOptimized policy from3f84ed7 can modify unrelated products;61 source removes it but speed effect not yet measured.",
         "Filtered whole lib test compilation still fails ten old ActiveAudioControlRegistration::install two-argument test sites. Do not report library tests passed or weaken production identity requirement.",
-        "Actual61 aligned251 trial fully RF-qualified as240-byte packing/7229chunks104.325859KB/s. Getter had applied daily443 before alignment. Next491 requires62 capacity fix, actual3534chunks, exact receipt and fullRF; not another identical240 repeat."
+        "Actual61 aligned251 trial fully RF-qualified as240-byte packing/7229chunks104.325859KB/s. Getter had applied daily443 before alignment. Next491 requires62 capacity fix, actual3534chunks, exact receipt and fullRF; not another identical240 repeat.",
+        "40 probes have7.6ms RTT brackets and25.6ms absolute extrapolated uncertainty; use offset-free comparisons, never midpoint-fit as precise acceptance proof.",
+        "41 macro1064 was skipped by old ready/configured short-circuit; actualLL2120.42 actually changes localTX/hostRX only, not hostTX2120.",
+        "42 initial04b745d made1M readiness1064 and failed3PHY ownership assertions before installation; corrected7f0fe72 preserves1M2120. Actual42 no stable gain; do not repeat localTX timing alone."
       ],
       "latest_observed_baseline": {
         "type_build": 42,
