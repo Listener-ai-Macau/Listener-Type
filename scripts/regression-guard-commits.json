@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T11:50:17.364971+08:00",
+  "updated_at": "2026-10-19T12:30:43.302864+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1492,7 +1492,7 @@
       "id": "sniffer_raw_export_cached_wire_identical_fast_encoding",
       "repo": "sniffer",
       "commit": "fbdcc86b26d769fec59c1bcd7ed8e969202d6f5b",
-      "state": "installed126_actual_arm_pass_live_capture_in_progress",
+      "state": "installed126_basic377_crc_pass_target_was_flashing_no_ota_load",
       "subject": "Remove per-record generic protobuf traversal and repeated encoding under FULL",
       "protects": [
         "Raw protobuf wire is byte-identical for192 actual ARM cases including metadata boundaries.",
@@ -1512,10 +1512,39 @@
         "python tools/replay_bounded_export.py --workspace .. --output ../queue-current.json"
       ],
       "candidatePackageSha256": "05fadc843fecba1164b1aceccdc3bcb4e51840a1b43653d5e25dada5c2e68113",
-      "known_scope": "125 real OTA follows24s through authenticated terminate, controls18/rejected0/max1304us, USB stable; raw export drops14572 and crypto queue4852.126 replaces generic per-record encoding/retry with cached direct protobuf;192 actual ARM wire-byte matches and512 queue records pass. Instruction counts are not hardware time or BLE throughput; actual USB/raw queues/full image remain pending. Installed11:49:07; actual fixed38 RF/HCI/USB capture in progress, not yet qualified."
+      "known_scope": "125 real OTA follows24s through authenticated terminate, controls18/rejected0/max1304us, USB stable; raw export drops14572 and crypto queue4852.126 replaces generic per-record encoding/retry with cached direct protobuf;192 actual ARM wire-byte matches and512 queue records pass. Instruction counts are not hardware time or BLE throughput; actual USB/raw queues/full image remain pending. Installed11:49:07; actual fixed38 RF/HCI/USB capture in progress, not yet qualified. Later126 basic radio check377/377 CRC passes; two target-offline attempts request no OTA. User is flashing/new board; no126 full-load acceptance."
+    },
+    {
+      "id": "wired_native_s3_rom_default_and_explicit_segment_verification",
+      "repo": "type",
+      "commit": "09d8558",
+      "state": "installed52c2_source_backend_full_flash_pass_board_usb_only_power_unresolved",
+      "subject": "Default wired mode; native S3 USB ROM download, explicit MD5 before reset, preserve failure causes",
+      "protects": [
+        "Wired mode is initial and first; BLE remains an explicit choice.",
+        "Native303A:1001 ESP32-S3 uses ROM with no external customer tool/runtime dependency. Other serial paths keep their stub selection.",
+        "Reset is deferred until every written segment is compared against device MD5; espflash3.2 bulk API verify flag alone is insufficient.",
+        "Preserve OTA skips reset artifact; otherwise reset uses an explicit bounded all-FF artifact. FW22 writes0/8000/f000/20000 and excludes NVS.",
+        "Retain full nested wired failure and stage evidence."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/wired-flash-com17-20261019/type51-cli-write.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/wired-flash-com17-20261019/type52-cli-write.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/wired-flash-com17-20261019/native-type-sequence.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/wired-flash-com17-20261019/native-rom-explicit-verify.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/wired-flash-com17-20261019/type52c2-cli-write.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/wired-flash-com17-20261019/installed52c2.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/wired-flash-com17-20261019/conclusion.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/wired-flash-com17-20261019/type52c2-boot.log",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/wired-flash-com17-20261019/health-after52c2.log"
+      ],
+      "guards": [
+        "npm run test:firmware-ota"
+      ],
+      "known_scope": "Current COM17 actual product backend writes FW22 at921600 in16.641s, explicitly compares4 MD5 values and resets. Final MSI installed and hash-matched, main/helper restored, installed read-only package check passes. Candidate raw executable hash differs from final bundle metadata; source09d8558 same, final exact binary not reflashed due uncertain supply. User clarified no battery; brownout9/USB error observed after write, later power_on1/crash0/>100s uptime. ADC2.866V is not an actual battery reading. Not all-board validation, not proof hardware supply is fixed, not a uniquely established RAM-stub internal cause."
     }
   ],
-  "feature_routes_updated_at": "2026-10-19T11:50:17.364971+08:00",
+  "feature_routes_updated_at": "2026-10-19T12:30:43.302864+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1895,8 +1924,8 @@
     },
     {
       "id": "ble-sniffer-usb-backpressure",
-      "baseline_state": "installed126_wire_arm_pass_actual_capture_in_progress",
-      "accepted_scope": "Actual125 fixed38 captures fresh link,18 authenticated controls/0rejections/max1304us and24s to authenticated terminate during original OTA16756ms/Type928ms. RF export14572drops/crypto4852drops, only130908 image bytes; full RF not qualified. Previous three hop captures missed CONNECT, no USB failure.126 installed;192 byte-equivalence and512 queue records pass, live full-image qualification pending.",
+      "baseline_state": "installed126_basic_rx_pass_full_load_pending_new_board_supply_and_bond",
+      "accepted_scope": "Actual125 fixed38 captures fresh link,18 authenticated controls/0rejections/max1304us and24s to authenticated terminate during original OTA16756ms/Type928ms. RF export14572drops/crypto4852drops, only130908 image bytes; full RF not qualified. Previous three hop captures missed CONNECT, no USB failure.126 installed;192 byte-equivalence and512 queue records pass, live full-image qualification pending. Later126 basic377/377 CRC passes, target-offline attempts send no OTA. Current replacement7C4FAD13D67E has0 bonds; old F0 target absent. Do not reuse old bond key on replacement.",
       "guard_entries": [
         "sniffer_usb_sdk_backpressure_returns_without_dropping_transport_bytes",
         "sniffer_rf_export_bounded_without_per_packet_heap",
@@ -1927,6 +1956,27 @@
         "2026-10-19 11:08 product OTA handoff ACK then prepare timeout before image; target fails to return, no target advertisements in three short unfiltered channels. Treat peer recovery as separate from receiver USB/RF acceptance, do not repeat PnP restart or infer power cause.",
         "124 actual11:22 noUSB reset but37ms control worker and queue18/20drops; raw image17277B only. Direction/source hints corrupt counter estimates. Skipping wide non-scheduling control recovery loses checkpoint and yields16/21; rejected before installation.",
         "125 real fixed38 follows24s through encrypted terminate but outputs7119 records and drops14572; generic nested protobuf encodes every packet and repeats on FULL, batch max10897us.126 caches wire-identical fixed raw-message encoding; actual complete capture pending."
+      ]
+    },
+    {
+      "id": "wired-firmware",
+      "baseline_state": "installed52c2_source_backend_full_flash_pass_board_usb_only_power_unresolved",
+      "accepted_scope": "Current COM17 actual product backend writes FW22 at921600 in16.641s, explicitly compares4 MD5 values and resets. Final MSI installed and hash-matched, main/helper restored, installed read-only package check passes. Candidate raw executable hash differs from final bundle metadata; source09d8558 same, final exact binary not reflashed due uncertain supply. User clarified no battery; brownout9/USB error observed after write, later power_on1/crash0/>100s uptime. ADC2.866V is not an actual battery reading. Not all-board validation, not proof hardware supply is fixed, not a uniquely established RAM-stub internal cause.",
+      "guard_entries": [
+        "wired_native_s3_rom_default_and_explicit_segment_verification"
+      ],
+      "paths": {
+        "type": [
+          "src-tauri/src/commands/device/firmware.rs",
+          "src-tauri/Cargo.toml",
+          "src/pages/settings/FirmwareOtaPanel.tsx",
+          "src/lib/firmwareOta.test.ts"
+        ]
+      },
+      "known_failures": [
+        "Type51/native RAM-stub full sequence fails with wrapped USB Windows31. One minimal stub run succeeds; do not assert universal stub failure.",
+        "Bundled espflash3.2 bulk write hardcodes verifyfalse and resets; explicit checksum before reset is required.",
+        "Current replacement has no battery. USB-only power and3V3 stability remain hardware checks; no software brownout bypass."
       ]
     }
   ]
