@@ -251,9 +251,38 @@ const LISTENER_SERVICE_UUID_TEXTS: [&str; 1] = [SERVICE_UUID_TEXT];
 // counting a full-window recovery.
 const LISTENER_OTA_V1_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(8);
 const LISTENER_OTA_V1_PROTOCOL_MAX_CHUNK_PAYLOAD_BYTES: usize = 500;
-// 443 data + 4 OTA + 3 ATT + 4 L2CAP = 454 bytes, exactly two 2M packets at the
-// release Windows controller's measured 251-octet / 965-us envelope.
+// Preserve the measured daily profile until an independently RF-qualified
+// aligned-profile trial demonstrates a gain. The old965-us envelope fits only
+// 226 encrypted plaintext octets; a configured251-octet limit alone is not
+// proof that the controller can emit a full encrypted251-octet packet.
 const LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES: usize = 443;
+const LISTENER_OTA_V1_LL_PAYLOAD_BYTES: usize = 251;
+const LISTENER_OTA_V1_L2CAP_ATT_OFFSET_BYTES: usize = 4 + ATT_WRITE_HEADER_BYTES + 4;
+const LISTENER_OTA_V1_PACKET_PROFILE_ENV: &str = "LISTENER_OTA_PACKET_PROFILE";
+
+// One bounded, explicit trial profile; old packages and the daily default stay
+// compatible. This changes packing within v1's existing offset/max500 contract,
+// not its wire headers, image identity, reordering or checksum semantics.
+fn listener_ota_v1_packet_payload(
+    manifest_max: usize,
+    gatt_max: usize,
+    profile: Option<&str>,
+) -> Result<usize, String> {
+    let limit = manifest_max.min(gatt_max).min(LISTENER_OTA_V1_PROTOCOL_MAX_CHUNK_PAYLOAD_BYTES);
+    if limit == 0 { return Err("OTA payload capacity is zero".to_string()); }
+    match profile {
+        None | Some("") | Some("daily") => Ok(limit.min(LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES)),
+        Some("aligned251") => {
+            let packets = (limit + LISTENER_OTA_V1_L2CAP_ATT_OFFSET_BYTES)
+                / LISTENER_OTA_V1_LL_PAYLOAD_BYTES;
+            if packets == 0 {
+                return Err("aligned251 requires capacity for one complete251-octet LL payload".to_string());
+            }
+            Ok(packets * LISTENER_OTA_V1_LL_PAYLOAD_BYTES - LISTENER_OTA_V1_L2CAP_ATT_OFFSET_BYTES)
+        }
+        Some(value) => Err(format!("Unsupported {LISTENER_OTA_V1_PACKET_PROFILE_ENV}={value}; use daily or aligned251")),
+    }
+}
 // Dual-lane DATA+DATA_B + device reorder. The first response-bearing status
 // hands Windows' 15 ms firmware-update request back to the firmware-owned
 // 7.5 ms link. A 64-chunk first window bounds that warm-up while still exceeding

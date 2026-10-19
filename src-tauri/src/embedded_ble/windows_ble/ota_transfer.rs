@@ -191,11 +191,20 @@ fn transfer_denzic_ota_v1_to_target(
         ));
     }
     let configured_window = listener_ota_v1_window_chunks()?;
-    let chunk_payload_bytes = manifest_chunk_bytes
-        .min(LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES)
-        .min(target.data_chunk_payload_bytes)
-        .min(u16::MAX as usize)
-        .max(1) as u16;
+    let packet_profile = match std::env::var(LISTENER_OTA_V1_PACKET_PROFILE_ENV) {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(error) => return Err(format!("Invalid {LISTENER_OTA_V1_PACKET_PROFILE_ENV}: {error}")),
+    };
+    let chunk_payload_bytes = listener_ota_v1_packet_payload(
+        manifest_chunk_bytes, target.data_chunk_payload_bytes, packet_profile.as_deref(),
+    )? as u16;
+    log::info!(
+        "[embedded-ble] Denzic OTA v1 #{transfer_id}: packet profile={} image_payload={} l2cap_sdu={} ll251_packets={} (actual negotiated time/event limits still apply)",
+        packet_profile.as_deref().unwrap_or("daily"), chunk_payload_bytes,
+        usize::from(chunk_payload_bytes) + LISTENER_OTA_V1_L2CAP_ATT_OFFSET_BYTES,
+        (usize::from(chunk_payload_bytes) + LISTENER_OTA_V1_L2CAP_ATT_OFFSET_BYTES).div_ceil(LISTENER_OTA_V1_LL_PAYLOAD_BYTES),
+    );
     let window_chunks = configured_window.min(u16::MAX as usize).max(1) as u16;
     let encode_started = Instant::now();
     let encoded = if LISTENER_OTA_BLOCK_DEFLATE_ENABLED && target.supports_block_deflate {
