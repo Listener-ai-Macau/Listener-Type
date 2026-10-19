@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T03:02:22.974053+08:00",
+  "updated_at": "2026-10-20T03:30:16.205691+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -2140,9 +2140,54 @@
       "machine_accepted_scope": [
         "Actual full image/currentE1, configuration andType preserved; native source command-ownership fixture passed with explicit research constants. Original CD/stable gain incomplete."
       ]
+    },
+    {
+      "id": "firmware43_ram_stage_snapshot_evicted",
+      "repo": "firmware",
+      "commit": "be20323",
+      "subject": "Full raw PSRAM receive; pre-Flash proof evicted",
+      "state": "product_full_image_rf_passed_strict_phase_gate_incomplete_restored32",
+      "protects": [
+        "Do not call43 strict phase gate passed: received snapshot missing after9-second drain.",
+        "Keep transport RAM progress distinct from durable Flash progress. Whole image may drain only on original internal-stack worker, with feed/yield, followed by original verification and boot switch.",
+        "Whole image buffer cleanup remains on begin/abort/finish/core reset; bounded2MiB research receiver only."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-ram43.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current62-measure-20261020-031101\\measurement.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-ramstage43-44-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "Actual staging header native bounds/abort checks; product transfer/normal32 reboot succeeded. Runtime zeroOTAFlash boundary proof was missing, not falsely passed."
+      ]
+    },
+    {
+      "id": "firmware44_zero_ota_flash_data_tail_persists",
+      "repo": "firmware",
+      "commit": "b3c0897",
+      "subject": "Preserved pre-Flash snapshot and complete RF refute Flash as sole explanation",
+      "state": "actual_whole_psram_zero_ota_flash_data_full_rf_tail_persists_not_promoted",
+      "protects": [
+        "Preserve pre-drain scalar snapshot and publish after long drain; event timestamp is publication time, not receive boundary.",
+        "Require actual1734832B capacity/received and0 OTA Flash calls before drain, complete exact image RF, normal32 restore and settings/Type preservation.",
+        "947 authenticated repeats still cross adjacent uniquely CSA2-checked events after OTA Flash removed from DATA. Missing ACK remains an observation gap, no unique Windows-versus-ESP attribution.",
+        "Do not promote wholeRAM staging for these small preliminary rate differences; finish cost includes explicit safety yields. First observed radio copy is not guaranteed first physical transmission."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current62-measure-20261020-031506\\measurement.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current62-measure-20261020-031506\\clocked-tail.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current62-measure-20261020-032527\\measurement.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\post-ram44-control40-daily-restored.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-ramstage43-44-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "44 full-image zeroOTAFlash-DATA proof, CSA2 allobserved1812events/0mismatch,107.877KBps. Related40control105.546/104.890;43preliminary106.730. Small effect unqualified as stable gain."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T03:02:22.974053+08:00",
+  "feature_routes_updated_at": "2026-10-20T03:30:16.205691+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -2385,7 +2430,7 @@
     {
       "id": "ble-raw-throughput",
       "baseline_state": "installed62_default443_fw32_restored_after_actual42_no_stable_gain",
-      "accepted_scope": "Current62/FW32/E1 restored with profile5/core and Type preserved. Isolated40/41/42 complete3917chunk/1734832B RF. Offset-free timing identifies2.25ms extra before HCI at sampled repeats; absolute receive acceptance unresolved. Actual42 peripheralTX/hostRX1064 versus control2120 yields106.285760 vs105.546401KBps, no stable gain; hostTX remains2120. Earlier originalCD/FW22 same-board and160 exploration remain unfinished. Prior62 actual491 A/B/A passed, no stable gain, default443 retained.",
+      "accepted_scope": "Current62/FW32/E1 restored with profile5/core and Type preserved. Isolated40/41/42 complete3917chunk/1734832B RF. Offset-free timing identifies2.25ms extra before HCI at sampled repeats; absolute receive acceptance unresolved. Actual42 peripheralTX/hostRX1064 versus control2120 yields106.285760 vs105.546401KBps, no stable gain; hostTX remains2120. Earlier originalCD/FW22 same-board and160 exploration remain unfinished. Prior62 actual491 A/B/A passed, no stable gain, default443 retained. RAM44 actual whole1734832B PSRAM/zeroOTAFlash DATA passed;1812events CSA2/0mismatch,947adjacent repeats persist. RAM106.730/107.877 versus40controls105.546/104.890KBps not yet stable product gain. Daily62/32/profile5 restored.",
       "guard_entries": [
         "type_raw215_current40_comparison_rejected",
         "type_exclusive_ota_prepared_target_ownership",
@@ -2408,7 +2453,9 @@
         "firmware39_honor_host_core_actual_no_gain",
         "firmware40_receive_clock_actual_full_rf",
         "firmware41_timing_intent_not_actual_rejected",
-        "firmware42_actual_local1064_no_stable_gain"
+        "firmware42_actual_local1064_no_stable_gain",
+        "firmware43_ram_stage_snapshot_evicted",
+        "firmware44_zero_ota_flash_data_tail_persists"
       ],
       "paths": {
         "type": [
@@ -2443,7 +2490,10 @@
         "Actual61 aligned251 trial fully RF-qualified as240-byte packing/7229chunks104.325859KB/s. Getter had applied daily443 before alignment. Next491 requires62 capacity fix, actual3534chunks, exact receipt and fullRF; not another identical240 repeat.",
         "40 probes have7.6ms RTT brackets and25.6ms absolute extrapolated uncertainty; use offset-free comparisons, never midpoint-fit as precise acceptance proof.",
         "41 macro1064 was skipped by old ready/configured short-circuit; actualLL2120.42 actually changes localTX/hostRX only, not hostTX2120.",
-        "42 initial04b745d made1M readiness1064 and failed3PHY ownership assertions before installation; corrected7f0fe72 preserves1M2120. Actual42 no stable gain; do not repeat localTX timing alone."
+        "42 initial04b745d made1M readiness1064 and failed3PHY ownership assertions before installation; corrected7f0fe72 preserves1M2120. Actual42 no stable gain; do not repeat localTX timing alone.",
+        "43 fullRAM phase guard was INCOMPLETE because256-entry ring evicted pre-drain record during9.18s drain.44 snapshots scalar values and emits after drain; do not weaken the phase gate.",
+        "44 actual zeroOTAFlash-DATA and worker-only receive still show947 adjacent-event repeats,5.505ms observed eventtail/1.995ms to nextanchor. EntireRAM staging alone does not solve main tail behavior; observed small rate difference not a stable product gain.",
+        "032426 same daily62/32 preparation timed out before receiver40 installed; recovery32 succeeded withoutTypequit. Retry on confirmed new generation032527 completed fullRF control. Keep failure and pending root-cause work, do not label it a RAM-code regression."
       ],
       "latest_observed_baseline": {
         "type_build": 42,
