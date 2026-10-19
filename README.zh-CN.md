@@ -2,11 +2,12 @@
 
 | 用途 | 直接下载 |
 | --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build52 candidate2](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 软件** | **[下载 MSI · Type build60](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
-固件适用 **ESP32-S3 N16R8**，构建 `5b5d72adef4bd602`。USB 和蓝牙更新选择同一个 ZIP，无需再猜下载哪一个。
+固件适用 **ESP32-S3 N16R8**，构建 `ad73e1113e429ca7`。USB 和蓝牙更新选择同一个 ZIP，无需再猜下载哪一个。
 Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
+设备设置各自独立：选择一台有线／蓝牙设备，读取后修改并写入；名称、灯光、电源、按键和旋钮设置保存在该设备中。请配套使用本页 MSI 与固件 ZIP。
 RC1 仍为候选版本，偶发提前结束及强干扰限制见发布说明。
 [软件发布说明与校验](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [固件发布说明与烧写方法](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

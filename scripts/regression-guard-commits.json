@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T22:51:08.893281+08:00",
+  "updated_at": "2026-10-20T00:00:51.995380+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1803,9 +1803,83 @@
         "npm run test:device-settings-focus",
         "npm run build"
       ]
+    },
+    {
+      "id": "device_onboard_profiles59_timeout_failure",
+      "repo": "type",
+      "commit": "e889bb7cfe956fdccad1f07bafffd79acb799822",
+      "subject": "First onboard profile candidate: do not reuse its redundant full JSON/readback and early IPC timeout",
+      "state": "installed59_failed_long_write_timeout_not_released",
+      "known_failures": [
+        "20-second IPC timeout returned while blocking mutation continued; revision2 was actually committed. One original-profile restoration was then confirmed at revision3. This is not an accepted onboard-key implementation."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\device-profile59-installed-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\device-profile59-restoration.json"
+      ]
+    },
+    {
+      "id": "device_onboard_keys60_exact_uid_and_bounded_transaction",
+      "repo": "type",
+      "commit": "1ceb21a09d7bbf62ab670d7a6717570f08d651e9",
+      "subject": "Device-owned key/knob profiles, exact target writes, compact codec and real transaction deadline",
+      "state": "installed60_fw32_single_peer_write_read_restore_passed",
+      "protects": [
+        "Names/brightness/power continue to come from the selected board; generic preferences and connection never push global device settings.",
+        "Onboard key/knob profile is atomic in NVS, bounded, revision guarded and CRC verified. USB/BLE aliases use board UID, never display name.",
+        "Native HID shortcuts execute on the device. Type actions carry board UID/revision and do not borrow another board global key map.",
+        "Drop only exact serde defaults; reconstruct every key/gesture exactly. Metadata-only body reuse requires fresh UID/revision/length/CRC. Core values remain live reads.",
+        "Fixed target/generation and read lease/CAS retained; selected operation has60s real I/O deadline,8s lock-wait cap,75s IPC limit. No indefinite post-timeout write queue."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\device-profile60-installed-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\device-profile32-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\device-profile-native-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\device-profile32-persistence.json"
+      ],
+      "machine_accepted_scope": [
+        "Installed60/FW32 E1 peer: real selected key change, fresh readback, original keys restored, unrelated core values preserved. GET203/500/469ms; key writes11704/10921ms. Zero focus or generated key events.",
+        "Actual firmware C and simulated two-bank NVS prove identity separation, reboot load, CAS/transaction/CRC and commit-failure preservation. Actual OTA firmware update preserved core settings.",
+        "00:00:35 same-image normal OTA reboot: onboard profile UID/revision5/content and core settings persisted; Type main/helper unchanged. No physical power-loss or two-board HID claim."
+      ],
+      "pending_human_scope": [
+        "Two distinct physical boards operated together and actual physical HID presses were not exercised; no full authenticated RF/160KB/s claim."
+      ],
+      "guards": [
+        "node --experimental-strip-types src/lib/deviceSettingsDraft.test.ts",
+        "npm run test:device-settings-focus",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib device_key_profile",
+        "python tools/test_device_key_profile.py (firmware repo)",
+        "python tools/test_ble_settings_snapshot.py (firmware repo)"
+      ]
+    },
+    {
+      "id": "firmware32_device_owned_profiles_atomic_nvs",
+      "repo": "firmware",
+      "commit": "d2cd2dd",
+      "subject": "Board NVS keys, bounded existing-GATT page protocol, native HID and identity-bound Type events",
+      "state": "built32_actual_ota_installed_profile_roundtrip_passed",
+      "protects": [
+        "Atomic single NVS blob on existing internal-stack flash worker; no partial upload activation, wrong-transaction/CAS/CRC rejection, abandoned upload timeout.",
+        "Existing GATT layout retained.48-byte profile pages plus worst core/name fields fit ATT512. No report-map change; modifier-only native shortcuts are supported.",
+        "Knob double-click recovery and hold-to-power-off remain fixed hardware actions."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\device-profile-native-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\device-profile32-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\device-profile60-installed-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\device-profile32-persistence.json"
+      ],
+      "guards": [
+        "python tools/test_device_key_profile.py",
+        "python tools/test_ble_settings_snapshot.py"
+      ],
+      "machine_accepted_scope": [
+        "00:00:35 same-image normal OTA reboot: onboard profile UID/revision5/content and core settings persisted; Type main/helper unchanged. No physical power-loss or two-board HID claim."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-19T21:12:28.631218+08:00",
+  "feature_routes_updated_at": "2026-10-20T00:00:51.995380+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -2309,6 +2383,37 @@
         "Type54 fff0bf2 clears snapshot/name then disables all edits if read fails.",
         "2026-10-19 old F8 target fails while connected same-name Listener is F3371BC799AF.",
         "Current F3 audio-service open returns SharingViolation4/AccessDenied3; DIS read succeeds. Holder remains unproven until update verification."
+      ]
+    },
+    {
+      "id": "device-onboard-key-profiles",
+      "baseline_state": "installed60_fw32_single_peer_write_read_restore_passed",
+      "accepted_scope": "Independent board-owned configuration and installed single-peer read/write/restore. Native actual C two-NVS-bank separation. Two physical boards and physical key presses remain unclaimed.",
+      "guard_entries": [
+        "device_onboard_profiles59_timeout_failure",
+        "device_onboard_keys60_exact_uid_and_bounded_transaction",
+        "firmware32_device_owned_profiles_atomic_nvs"
+      ],
+      "paths": {
+        "type": [
+          "src-tauri/src/device_key_profile.rs",
+          "src-tauri/src/commands/device/settings_selection.rs",
+          "src-tauri/src/commands/mod.rs",
+          "src-tauri/src/coordinator/embedded_ble_runtime.rs",
+          "src-tauri/src/embedded_ble/settings_target.rs",
+          "src-tauri/src/embedded_ble/windows_ble/settings_target.rs",
+          "src/pages/settings/DeviceSection.tsx"
+        ],
+        "firmware": [
+          "components/device_settings/device_key_profile.c",
+          "components/device_settings/device_settings.c",
+          "components/keyboard/keyboard.c",
+          "ports/esp32/voice_key_input/voice_key_input_esp32.c"
+        ]
+      },
+      "known_failures": [
+        "Legacy UserPreferences were global, and unrelated save/connect could push prior-board knob settings.",
+        "Installed59 e889bb7 persisted keys despite20s IPC timeout. Never restore that redundant-transfer/background-write path."
       ]
     }
   ]
