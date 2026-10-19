@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T05:04:23+08:00",
+  "updated_at": "2026-10-20T06:16:15.021404+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1746,7 +1746,7 @@
     {
       "id": "device_settings_editable_draft_shared_selected_peer",
       "repo": "type",
-      "commit": "876e45c",
+      "commit": "876e45c144ee8b791f409048510fad74277e945c",
       "subject": "Restore editable selected-device drafts and shared settings service access",
       "state": "installed57_failed_sharing_violation_retained",
       "protects": [
@@ -1771,7 +1771,8 @@
       ],
       "pending_human_scope": [
         "Installed physical single-device read/write pending; no complete RF claim."
-      ]
+      ],
+      "commit_subject": "Prefer physically connected settings peers and open their service in shared mode"
     },
     {
       "id": "device_settings_live_service_exact_peer_and_draft58",
@@ -1802,7 +1803,8 @@
         "node --experimental-strip-types src/lib/deviceSettingsDraft.test.ts",
         "npm run test:device-settings-focus",
         "npm run build"
-      ]
+      ],
+      "commit_subject": "Reuse the exact active notify service for selected-device settings without a second GATT open"
     },
     {
       "id": "device_onboard_profiles59_timeout_failure",
@@ -1817,7 +1819,18 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\device-profile59-installed-verification.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\device-profile59-restoration.json"
       ],
-      "guards": []
+      "guards": [],
+      "commit_subject": "Keep key and knob settings on each selected Listener, never push global preferences",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\device-profile59-installed-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\device-profile59-restoration.json"
+      ],
+      "protects": [
+        "Preserve this failed installed59 timeout case; never restore it as an accepted configuration-write path.",
+        "20-second IPC timeout returned while blocking mutation continued; revision2 was actually committed. One original-profile restoration was then confirmed at revision3. This is not an accepted onboard-key implementation."
+      ]
     },
     {
       "id": "device_onboard_keys60_exact_uid_and_bounded_transaction",
@@ -1852,12 +1865,13 @@
         "cargo test --manifest-path src-tauri/Cargo.toml --lib device_key_profile",
         "python tools/test_device_key_profile.py (firmware repo)",
         "python tools/test_ble_settings_snapshot.py (firmware repo)"
-      ]
+      ],
+      "commit_subject": "Reuse key bodies only after fresh exact-device revision and checksum confirmation"
     },
     {
       "id": "firmware32_device_owned_profiles_atomic_nvs",
       "repo": "firmware",
-      "commit": "d2cd2dd",
+      "commit": "d2cd2dd0175bf63ce13f4abd5e9bc9cf42132390",
       "subject": "Board NVS keys, bounded existing-GATT page protocol, native HID and identity-bound Type events",
       "state": "built32_actual_ota_installed_profile_roundtrip_passed",
       "protects": [
@@ -1877,7 +1891,8 @@
       ],
       "machine_accepted_scope": [
         "00:00:35 same-image normal OTA reboot: onboard profile UID/revision5/content and core settings persisted; Type main/helper unchanged. No physical power-loss or two-board HID claim."
-      ]
+      ],
+      "commit_subject": "Reserve ATT snapshot space for maximum core settings and onboard key pages"
     },
     {
       "id": "current60_e1_current32_full_rf_image",
@@ -1901,7 +1916,8 @@
       ],
       "machine_accepted_scope": [
         "Actual1734832B/3917blocks, RF16.504183s105.114685 decimalKB/s. HCI3911 matched,6missing. Type/pairing/device settings preserved. No product gain/originalCD qualification."
-      ]
+      ],
+      "commit_subject": "Reuse key bodies only after fresh exact-device revision and checksum confirmation"
     },
     {
       "id": "ota_selected_peer_parameters_only61",
@@ -1927,12 +1943,13 @@
       ],
       "machine_accepted_scope": [
         "Actual current E1 full1734832B/3917blocks,0exportloss,105.329605KB/s first-start-to-last-start. Protocol17.310s versus60 17.309s: no speed gain claim. Profile/core preserved. Daily profile restored after the explicit240 packing trial. Full cargo lib test callers still unresolved."
-      ]
+      ],
+      "commit_subject": "Scope OTA connection policy to the selected Listener"
     },
     {
       "id": "ota_capacity62_not_daily_packing",
       "repo": "type",
-      "commit": "d5a8ff6",
+      "commit": "d5a8ff650ebda22731fabce0c450051a7fa7958f",
       "subject": "Keep negotiated link capacity separate from unchanged daily443 policy",
       "state": "installed62_actual443_491_443_full_rf_passed_daily_restored_no_stable_gain",
       "protects": [
@@ -1954,12 +1971,13 @@
       ],
       "machine_accepted_scope": [
         "Installed62/source d5a8ff6: actual3917/3534/3917 chunks, sealed unchanged32 whole-image RF in A/B/A.108.356825/109.859318/107.172175 decimalKB/s; single B +1.944% versus mean A does not establish a stable gain. Daily443 and FW32 restored, onboard profile/core preserved. Original22/CD scope remains open."
-      ]
+      ],
+      "commit_subject": "Separate negotiated OTA capacity from daily packet packing"
     },
     {
       "id": "firmware35_isolated_receiver_trial",
       "repo": "firmware",
-      "commit": "66f5daf",
+      "commit": "66f5daf3697f1bf606f38066681facfb38db76b6",
       "subject": "Exact FW32-base additive receiver timing, actual full-image telemetry",
       "state": "timing35_full_rf_actual_3917_processed_restored32",
       "protects": [
@@ -1972,12 +1990,19 @@
       "machine_accepted_scope": [
         "Received/processed3917; Flash442calls5569ms/max178485us and queue max32. Actual full incoming32 image, fresh32 runtime restoration."
       ],
-      "guards": []
+      "guards": [],
+      "commit_subject": "Preserve original header bytes around added timing definitions",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-011642/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-011642/csa2-events.json"
+      ]
     },
     {
       "id": "firmware36_isolated_receiver_trial",
       "repo": "firmware",
-      "commit": "3a51995",
+      "commit": "3a5199507d34fc11ddd797238f5be74cb28d4fb4",
       "subject": "Isolated PSRAM96 payload queue, actual backend confirmed, no steady throughput gain",
       "state": "queue36_actual_psram96_full_rf_no_steady_gain_not_promoted_restored32",
       "protects": [
@@ -1990,12 +2015,19 @@
       "machine_accepted_scope": [
         "Actual PSRAM=1/depth96/storage50304B, max queue50. RF107.573432KB/s remains within443 baseline; not promoted. Fresh32 restoration and onboard configuration preserved."
       ],
-      "guards": []
+      "guards": [],
+      "commit_subject": "Trial PSRAM receive buffering against measured Flash backpressure",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-012656/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-012656/csa2-events.json"
+      ]
     },
     {
       "id": "ota_native63_full_same_link_budget_diagnostic",
       "repo": "type",
-      "commit": "eb65f1a",
+      "commit": "eb65f1a1be5d093c24500797e75983b0edee55be",
       "subject": "ota native63 full same link budget diagnostic",
       "state": "explicit_native_trial_field_passed_returned_daily62_no_gain",
       "protects": [
@@ -2015,12 +2047,13 @@
       ],
       "machine_accepted_scope": [
         "Actual30ms conflict observed in HCI and safely recovered. Native63 default32 fullRF110.326KBps; not a speed gain over daily62. Returned62/default443/FW32 and board profile/core preserved."
-      ]
+      ],
+      "commit_subject": "Add explicit native-interval OTA trial with same-link full-packet readiness"
     },
     {
       "id": "firmware37_long_interval_full_rf_negative",
       "repo": "firmware",
-      "commit": "afb04cc",
+      "commit": "afb04cc55f70558e8dea87c8e4d61d1e49177889",
       "subject": "firmware37 long interval full rf negative",
       "state": "actual30ms_complete_raw32_rf_27kbps_rejected_restored32",
       "protects": [
@@ -2036,12 +2069,21 @@
       "guards": [],
       "machine_accepted_scope": [
         "Same host63/image/packing:30ms27.456KBps versus7.5ms110.326KBps. Events stay near6.1ms, tail repeated next event. No unique Windows/ESP blame from missing captured ACK."
+      ],
+      "commit_subject": "Preserve the exact base file bytes around interval trial macros",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/prepared-interval37.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/interval37-current63-comparison.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-020908/csa2-events.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-020908/clocked-tail.json"
       ]
     },
     {
       "id": "firmware38_configured_affinity_not_runtime_rejected",
       "repo": "firmware",
-      "commit": "d644821",
+      "commit": "d644821cf1799ec1eaf072da985af06e3c7b00a6",
       "subject": "firmware38 configured affinity not runtime rejected",
       "state": "actual_callback0_config1_core1_experiment_rejected",
       "protects": [
@@ -2055,12 +2097,19 @@
       "guards": [],
       "machine_accepted_scope": [
         "Image fullRF107.978KBps was real, but callback0/prio21/config1 contradicted intended experiment. It is not a core1 performance result."
+      ],
+      "commit_subject": "Confirm runtime host affinity and bind generated core1 configuration",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/prepared-host38.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current63-measure-20261020-021721/measurement.json"
       ]
     },
     {
       "id": "firmware39_honor_host_core_actual_no_gain",
       "repo": "firmware",
-      "commit": "d0f6b28",
+      "commit": "d0f6b28d421fc6f30197a840c086b42cef3e4cad",
       "subject": "firmware39 honor host core actual no gain",
       "state": "actual_host1_controller0_full_raw32_rf_no_gain_not_promoted",
       "protects": [
@@ -2078,12 +2127,22 @@
       "guards": [],
       "machine_accepted_scope": [
         "Actual core1/prio21/controller0/config1, entire1734832B/3917chunk unchanged32 RF,110.220928KBps versus110.326119KBps core0. Settings/Type preserved; exact32 restored, then daily62 restored. No stable gain or originalCD qualification."
+      ],
+      "commit_subject": "Honor configured NimBLE host affinity while keeping internal static stack",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/prepared-host39.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current63-measure-20261020-022224/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-022224/air-budget.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-022224/clocked-tail.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/post-native63-daily62-restored.json"
       ]
     },
     {
       "id": "firmware40_receive_clock_actual_full_rf",
       "repo": "firmware",
-      "commit": "2e1b845",
+      "commit": "2e1b845d276fdb2b3dfe8ddc72e35971dc5abdc3",
       "subject": "Bounded receive clock observes delay before GATT, not a throughput fix",
       "state": "actual53_hci24_gatt_full_image_rf_restored32",
       "protects": [
@@ -2099,12 +2158,20 @@
       "guards": [],
       "machine_accepted_scope": [
         "Full1734832B/3917chunks;105.546401KBps;53HCI24GATT/overflow0. CurrentE1 only, no stable gain."
+      ],
+      "commit_subject": "Observe bounded HCI and GATT receive times with a same-link diagnostic clock",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-rxclock40-time42-field-evidence.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current62-measure-20261020-024433\\receive-clock-relative.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\post-time42-daily62-restored.json"
       ]
     },
     {
       "id": "firmware41_timing_intent_not_actual_rejected",
       "repo": "firmware",
-      "commit": "dfbceb2",
+      "commit": "dfbceb24a51de16112f0fd95447f60a61bb40ca5",
       "subject": "Nominal timing change skipped by prior sufficient link state",
       "state": "full_rf_actual2120_not_intended1064_no_performance_qualification",
       "protects": [
@@ -2117,12 +2184,18 @@
       "guards": [],
       "machine_accepted_scope": [
         "Actual image and restoration passed; actual1064 was absent."
+      ],
+      "commit_subject": "Trial exact encrypted 2M packet time on the observed receive-clock baseline",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current62-measure-20261020-025220\\actual-budget-rejected.json"
       ]
     },
     {
       "id": "firmware42_actual_local1064_no_stable_gain",
       "repo": "firmware",
-      "commit": "7f0fe72",
+      "commit": "7f0fe72db0678fd45ad66578357e64e498d20634",
       "subject": "One real-generation exact request, actual bidirectional budget distinction",
       "state": "actual_local_tx1064_full_rf_no_stable_gain_restored32",
       "protects": [
@@ -2139,12 +2212,20 @@
       "guards": [],
       "machine_accepted_scope": [
         "Actual full image/currentE1, configuration andType preserved; native source command-ownership fixture passed with explicit research constants. Original CD/stable gain incomplete."
+      ],
+      "commit_subject": "Keep the encrypted 1M full-packet readiness boundary separate from the 2M trial request",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current62-measure-20261020-025750\\actual-budget-qualified.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\post-time42-daily62-restored.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-rxclock40-time42-field-evidence.json"
       ]
     },
     {
       "id": "firmware43_ram_stage_snapshot_evicted",
       "repo": "firmware",
-      "commit": "be20323",
+      "commit": "be203230dabfd67adc3747cec2ae939f50fe16cb",
       "subject": "Full raw PSRAM receive; pre-Flash proof evicted",
       "state": "product_full_image_rf_passed_strict_phase_gate_incomplete_restored32",
       "protects": [
@@ -2160,12 +2241,20 @@
       "guards": [],
       "machine_accepted_scope": [
         "Actual staging header native bounds/abort checks; product transfer/normal32 reboot succeeded. Runtime zeroOTAFlash boundary proof was missing, not falsely passed."
+      ],
+      "commit_subject": "Isolate complete raw DATA reception from Flash using bounded PSRAM staging on the existing worker",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-ram43.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current62-measure-20261020-031101\\measurement.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-ramstage43-44-field-evidence.json"
       ]
     },
     {
       "id": "firmware44_zero_ota_flash_data_tail_persists",
       "repo": "firmware",
-      "commit": "b3c0897",
+      "commit": "b3c08974cd99b119f6e1f6dca6cd94c8c6548833",
       "subject": "Preserved pre-Flash snapshot and complete RF refute Flash as sole explanation",
       "state": "actual_whole_psram_zero_ota_flash_data_full_rf_tail_persists_not_promoted",
       "protects": [
@@ -2184,6 +2273,16 @@
       "guards": [],
       "machine_accepted_scope": [
         "44 full-image zeroOTAFlash-DATA proof, CSA2 allobserved1812events/0mismatch,107.877KBps. Related40control105.546/104.890;43preliminary106.730. Small effect unqualified as stable gain."
+      ],
+      "commit_subject": "Retain the pre-Flash staging snapshot across the long final drain",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current62-measure-20261020-031506\\measurement.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current62-measure-20261020-031506\\clocked-tail.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\current62-measure-20261020-032527\\measurement.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\post-ram44-control40-daily-restored.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-ramstage43-44-field-evidence.json"
       ]
     },
     {
@@ -2211,6 +2310,18 @@
       "guards": [],
       "machine_accepted_scope": [
         "Engineering diagnosis excludes allocation retry waiting in this measured run.57HCI/24GATT and exact-pointer timing;1068CSA2 events/0channel mismatch.572 adjacent repeats remain. No speed or controller-limit qualification."
+      ],
+      "commit_subject": "Measure exact-mbuf receive allocation and copy delivery before the HCI observer",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-033920/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-033920/pre-hci-allocation-analysis.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-033920/clocked-tail.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/alloc45-observer-native.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/alloc45-linked-proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/post-alloc45-daily62-restored.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-alloc45-field-evidence.json"
       ]
     },
     {
@@ -2233,6 +2344,15 @@
       "guards": [],
       "machine_accepted_scope": [
         "actual_full_raw_rf_owned_iram_observer_no_event_reason_claim"
+      ],
+      "commit_subject": "Observe bounded controller event states only while callback ownership is empty",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-035544/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/event46-linked-proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/event46-observer-native.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-controller-events46-48-field-evidence.json"
       ]
     },
     {
@@ -2256,6 +2376,16 @@
       "guards": [],
       "machine_accepted_scope": [
         "actual_rom_counter_partial_alignment_preserved_not_full_window"
+      ],
+      "commit_subject": "Use the verified real ROM counter getter and remove an ineffective placement assumption",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-040513/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-040513/controller-radio-counter-join-v3.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/event47-linked-proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/event47-observer-native.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-controller-events46-48-field-evidence.json"
       ]
     },
     {
@@ -2281,6 +2411,16 @@
       "guards": [],
       "machine_accepted_scope": [
         "actual_all54_hci_32_event_counter_join_no_stable_speed_gain"
+      ],
+      "commit_subject": "Freeze controller trace after all sampled SDUs and their final event finish",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-041038/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-041038/controller-radio-counter-join.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-041038/controller-tail-covariation.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/post-event48-daily62-restored.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-controller-events46-48-field-evidence.json"
       ]
     },
     {
@@ -2304,6 +2444,15 @@
       "guards": [],
       "machine_accepted_scope": [
         "installed64_exact_peer_prepare_passed_data_path_unchanged"
+      ],
+      "commit_subject": "Keep OTA handoff discovery bound to the exact live Listener identity",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/budget49-irq51-type64-field-summary.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/identity64-installed.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/post-controller51-daily64-restored.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-budget49-irq51-type64-field-evidence.json"
       ]
     },
     {
@@ -2325,6 +2474,14 @@
       "guards": [],
       "machine_accepted_scope": [
         "actual8750_half_us_min_reservation_not_max_window"
+      ],
+      "commit_subject": "Snapshot controller minimum duration and raw policy once for the observed receive link",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/controller-unit-proof49/proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-042312/measurement.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-budget49-irq51-type64-field-evidence.json"
       ]
     },
     {
@@ -2346,6 +2503,14 @@
       "guards": [],
       "machine_accepted_scope": [
         "actual50_full_rf_but54declared36exported_incomplete"
+      ],
+      "commit_subject": "Observe original three-argument frame ISR notifications with bounded event joins",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-044750/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-044750/partial-controller-irq-evidence.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-budget49-irq51-type64-field-evidence.json"
       ]
     },
     {
@@ -2372,10 +2537,175 @@
       "guards": [],
       "machine_accepted_scope": [
         "actual51_full56hci_24gatt_32pairs_32irq_no_stable_gain"
+      ],
+      "commit_subject": "Pack validated controller pairs losslessly within the unchanged retained log",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-045825/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-045825/controller-irq-analysis.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-045825/controller-radio-counter-join.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/compact51-observer-native.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/post-controller51-daily64-restored.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-budget49-irq51-type64-field-evidence.json"
+      ]
+    },
+    {
+      "id": "firmware52_effective2m_fields_proved",
+      "repo": "firmware",
+      "commit": "8f757a53e5484c5c8c0841c71c730e5cac0f0f39",
+      "subject": "Read actual effective fields rather than infer them from HCI advertised times",
+      "state": "actual52_full_rf_effective1064_both_directions_no_gain",
+      "protects": [
+        "Actual52 full1734832B RF107.318600KBps with54HCI/24GATT/64states/32IRQ and allcounter joins. Raw136/138=1064/1064,147/148=1/1,118/120=0/0,100=24,92=8750;4us snapshot. Internal effective time is not stale2120 at this observed point.",
+        "Raw8750half-us minimum reservation is not maximum active event duration. Do not repeat old PHY/core/CE policy variants using this disproven assumption."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-051634/controller-radio-counter-join.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/fields52-linked-proof.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-fields52-rx56-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual52_full_rf_effective1064_both_directions_no_gain"
+      ],
+      "commit_subject": "Read exact controller time and PHY fields once under the pinned OSI guard",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-051634/controller-radio-counter-join.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/fields52-linked-proof.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-fields52-rx56-field-evidence.json"
+      ]
+    },
+    {
+      "id": "firmware53_margin_scalar_recovery_only",
+      "repo": "firmware",
+      "commit": "479cf64947016092a7366f39b08228b8dab1a25f",
+      "subject": "Keep the failed acquisition distinct from the restored scalar observation",
+      "state": "actual53_missed_connect_restore_only_scalar_not_full_pass",
+      "protects": [
+        "53 missed newCONNECT, formal measured transfer was never requested; measurement staysINCOMPLETE. Recovery retainedoption50=400half-us=200us, not a2ms guard. Normal32 restored and settings preserved.",
+        "Initial linear disassembly invented unreachable call after padding; branch-boundary walker proves actual reachable calls and original forwarding. Never alter product code to satisfy the false linear decode."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-052439/recovery-readonly-fields53.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/margin53-linear-verifier-failure.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-fields52-rx56-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual53_missed_connect_restore_only_scalar_not_full_pass"
+      ],
+      "commit_subject": "Observe the exact additive event guard term without changing controller policy",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-052439/recovery-readonly-fields53.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/margin53-linear-verifier-failure.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-fields52-rx56-field-evidence.json"
+      ]
+    },
+    {
+      "id": "firmware54_rx_descriptor_both_runtime_paths",
+      "repo": "firmware",
+      "commit": "069ae7f321aaea0b3e64c00513d7d949acb62c1a",
+      "subject": "Observe both initial and SDK runtime RX-check paths without nesting",
+      "state": "actual54_full_rx_raw_status_no_policy_change_no_gain",
+      "protects": [
+        "a690cef initial-only wrapper rejected by actual linked proof before fieldinstall.069ae7f covers initialIP2a4 and runtimeSDK hack; original ROM call remains once and not nested, return and packet/descriptor memory unchanged.",
+        "Actual54 full1734832B RF105.739344KBps, all sampledHCI/24GATT/64state/32IRQ retained.2397descriptors, maxobserver5us.19tail-repeat events all lastdescriptor mismatchedtail;17status0earlierpacket and2rawbit0reject. Software-time counter alone is not hardware acceptance time.",
+        "Losslessschema2 validates actual endSequence=startSequence+1, packsRXcount/header/status without enlargingRTC256; corruption/overrun rejects, no missing rows fabricated."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-055316/rx-descriptor-analysis.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/rx54-linked-proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/rx54-observer-native.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-fields52-rx56-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual54_full_rx_raw_status_no_policy_change_no_gain"
+      ],
+      "commit_subject": "Cover the SDK runtime RX-check patch while preserving the original ROM path once",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-055316/rx-descriptor-analysis.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/rx54-linked-proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/rx54-observer-native.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-fields52-rx56-field-evidence.json"
+      ]
+    },
+    {
+      "id": "firmware55_physical_rx_last_time_proved",
+      "repo": "firmware",
+      "commit": "efb8fc4cb6760abadc3e7a1b98d105c92b0f39b1",
+      "subject": "Keep actual hardware RX time distinct from software-check time",
+      "state": "actual55_last_descriptor_hardware_clock_sub_us_no_gain",
+      "protects": [
+        "Actual descriptor words8/10 low24 coarse andword12low10fine observed under same pinned guard; no clock-latch write or unbounded rwip_time_get call. Schema3 retains all original sequences/costs/IRQwords/flags or rejectsbounds; RTC rows unchanged.",
+        "55 strictfullRF andlocaltracePASS,14normal anchors align31valid lastdescriptors with max0.601797us residual using312.5us coarse andnegative0.5usfine.17repeat tails have lastnormalRX approximately1408us earlier. First-descriptor proof is separately required before excluding delayedoriginal copies.",
+        "Snapshot/current fields and raw before-decode logs preserved. No stable speed gain, controller ceiling or originalCD qualification."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-060220/physical-rx-clock-analysis.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/rx55-linked-proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/rx55-observer-native.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-fields52-rx56-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual55_last_descriptor_hardware_clock_sub_us_no_gain"
+      ],
+      "commit_subject": "Retain actual hardware RX coarse and fine time without enlarging the trace",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-060220/physical-rx-clock-analysis.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/rx55-linked-proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/rx55-observer-native.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-fields52-rx56-field-evidence.json"
+      ]
+    },
+    {
+      "id": "firmware56_first_rx_is_current_retransmission",
+      "repo": "firmware",
+      "commit": "82001889f60f64d81c660b8e4f2c3242b0c2816e",
+      "subject": "Resolve the previous-event DMA/HCI deferral alternative with first hardware RX time",
+      "state": "actual56_first_descriptor_current_rf_copy_not_deferred_original_no_gain",
+      "protects": [
+        "56 intentionally samplesFIRST descriptor, notLAST; explicitdecode_rx56 provenance is required despite identical schema3 wire shape. Same packet count/time/IRQ facts remain lossless, no radio/RTC policy changes.",
+        "Actual strictfull1734832B/3917chunkRF107.600681KBps, allHCIcounter/24GATT/64states/32IRQ.32valid firstdescriptors align16normal anchors with max0.626103us residual;16firstdata copies also observedearlier all hardware-time-match currentretransmission within1us, notprevious original at eventtail.",
+        "This locates sampled loss beforeHCI acceptance in controllerRX/ACK path. Actual programmedRX deadline/eventbudget stillunproven; do not call hardware-window hypothesis an exclusive rootcause or stablefix.",
+        "Fresh normal32/ad73 restored22:10:12.567Z; post-rx56 readback profile5/core kept, Type27932/34120 unchanged/default443/native flag absent,nRF129 owneridle. OriginalCD/22 same-board and160 exploration remainopen."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-060913/physical-rx-clock-analysis.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-060913/controller-radio-counter-join.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/rx56-linked-proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/rx56-observer-native.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/post-rx56-daily64-restored.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-fields52-rx56-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual56_first_descriptor_current_rf_copy_not_deferred_original_no_gain"
+      ],
+      "commit_subject": "Sample the first physical RX descriptor to distinguish deferred original copies from new retransmissions",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-060913/physical-rx-clock-analysis.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-060913/controller-radio-counter-join.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/rx56-linked-proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/rx56-observer-native.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/post-rx56-daily64-restored.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-fields52-rx56-field-evidence.json"
       ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T05:04:23+08:00",
+  "feature_routes_updated_at": "2026-10-20T06:16:15.021404+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -2617,8 +2947,8 @@
     },
     {
       "id": "ble-raw-throughput",
-      "baseline_state": "installed64_default443_fw32_restored_after51_full_irq_counter_alignment_no_stable_gain",
-      "accepted_scope": "Current62/FW32/E1 restored with profile5/core and Type preserved. Isolated40/41/42 complete3917chunk/1734832B RF. Offset-free timing identifies2.25ms extra before HCI at sampled repeats; absolute receive acceptance unresolved. Actual42 peripheralTX/hostRX1064 versus control2120 yields106.285760 vs105.546401KBps, no stable gain; hostTX remains2120. Earlier originalCD/FW22 same-board and160 exploration remain unfinished. Prior62 actual491 A/B/A passed, no stable gain, default443 retained. RAM44 actual whole1734832B PSRAM/zeroOTAFlash DATA passed;1812events CSA2/0mismatch,947adjacent repeats persist. RAM106.730/107.877 versus40controls105.546/104.890KBps not yet stable product gain. Daily62/32/profile5 restored. Alloc45 actual8862 allocations/0failures/max26us,57exact-pointer samples,complete raw32 RF105.925KBps. Offset-free sampled2.25ms wait already before allocation. No stable speed gain;normal62/32/profile5restored. Controller48 full54HCI/32eventcounter join complete,64states coverall24sampledSDUs. Median6074.5us recordedstate1to0 and1425usgap;repeat-tail intervals correlate,not proven endreason. 106.034KBps no stablegain;normal62/32restored. Type64 exact handoff identity fixes observedwrongCompanion prepare; DATA unchanged62.49raw8750half-us=4375us minimum reservation,notmaxwindow.50fullRFbut18HCIprefixrowslost staysINCOMPLETE.51losslessfinishencoding preservesRTC256 andall56HCI/24GATT/64states/32IRQs; strictfullRF107.476KBps,all32IRQsarg3zero,bothrepeatgroups~24usIRQtails. Default64/32/profile5restored,no stablegain/hardlimit/originalCDqualification.",
+      "baseline_state": "installed64_default443_fw32_restored_after56_physical_rx_no_stable_gain",
+      "accepted_scope": "Current62/FW32/E1 restored with profile5/core and Type preserved. Isolated40/41/42 complete3917chunk/1734832B RF. Offset-free timing identifies2.25ms extra before HCI at sampled repeats; absolute receive acceptance unresolved. Actual42 peripheralTX/hostRX1064 versus control2120 yields106.285760 vs105.546401KBps, no stable gain; hostTX remains2120. Earlier originalCD/FW22 same-board and160 exploration remain unfinished. Prior62 actual491 A/B/A passed, no stable gain, default443 retained. RAM44 actual whole1734832B PSRAM/zeroOTAFlash DATA passed;1812events CSA2/0mismatch,947adjacent repeats persist. RAM106.730/107.877 versus40controls105.546/104.890KBps not yet stable product gain. Daily62/32/profile5 restored. Alloc45 actual8862 allocations/0failures/max26us,57exact-pointer samples,complete raw32 RF105.925KBps. Offset-free sampled2.25ms wait already before allocation. No stable speed gain;normal62/32/profile5restored. Controller48 full54HCI/32eventcounter join complete,64states coverall24sampledSDUs. Median6074.5us recordedstate1to0 and1425usgap;repeat-tail intervals correlate,not proven endreason. 106.034KBps no stablegain;normal62/32restored. Type64 exact handoff identity fixes observedwrongCompanion prepare; DATA unchanged62.49raw8750half-us=4375us minimum reservation,notmaxwindow.50fullRFbut18HCIprefixrowslost staysINCOMPLETE.51losslessfinishencoding preservesRTC256 andall56HCI/24GATT/64states/32IRQs; strictfullRF107.476KBps,all32IRQsarg3zero,bothrepeatgroups~24usIRQtails. Default64/32/profile5restored,no stablegain/hardlimit/originalCDqualification. 52actualeffective1064/1064 and53recovery-only200us exclude stalePHY/2msguard guesses.54bothROM/SDKentrycoverage,55lastphysicalRX0.602us and56firstphysicalRX0.626us alignfullRF/HCI/events.16currentretransmissionsnotdeferredoriginal copies narrowlossbeforeHCIacceptance; actualRXwindowdeadlinecauseunproven.56raw107.600681KBps,no stablegain;64/32/profile5andTypepreserved.",
       "guard_entries": [
         "type_raw215_current40_comparison_rejected",
         "type_exclusive_ota_prepared_target_ownership",
@@ -2651,7 +2981,12 @@
         "ota64_handoff_exact_live_identity",
         "firmware49_readonly_budget_units_proved",
         "firmware50_irq_full_rf_hci_prefix_loss_retained",
-        "firmware51_lossless_controller_irq_full_alignment"
+        "firmware51_lossless_controller_irq_full_alignment",
+        "firmware52_effective2m_fields_proved",
+        "firmware53_margin_scalar_recovery_only",
+        "firmware54_rx_descriptor_both_runtime_paths",
+        "firmware55_physical_rx_last_time_proved",
+        "firmware56_first_rx_is_current_retransmission"
       ],
       "paths": {
         "type": [
