@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T04:16:28.485896+08:00",
+  "updated_at": "2026-10-20T05:04:23+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -2282,9 +2282,100 @@
       "machine_accepted_scope": [
         "actual_all54_hci_32_event_counter_join_no_stable_speed_gain"
       ]
+    },
+    {
+      "id": "ota64_handoff_exact_live_identity",
+      "repo": "type",
+      "commit": "6ea535aa3e7413c7da77a49c1d3b87d16eac5419",
+      "subject": "Keep active OTA handoff and fallback service discovery on the same exact board",
+      "state": "installed64_exact_peer_prepare_passed_data_path_unchanged",
+      "protects": [
+        "Actual043411 defaultlistener discovery tried Companion and exhausted6007ms before install. LiveTYPE:OTA success must carry active.bluetooth_address forward; name/service UUID alone is not target identity.",
+        "Successful active handoff refreshes current identity before notify pause. Both normal/deadline fallback discovery and nativeHID fallback remain on that same address; missing/zero active identity fails before handoff.",
+        "Four actual Rust policy tests reject foreign/missing/zero peers, preserve same address despite rename and retain unowned discovery policy. Existing generic cached-name recovery filter is unchanged.",
+        "Installed64 observed exactE1prepares626..678ms across6successful transfers; default443 DATA remains62. This is preparation reliability, not air-speed gain. Full cargo lib still has10oldinstall() fixture call mismatches."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/budget49-irq51-type64-field-summary.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/identity64-installed.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/post-controller51-daily64-restored.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-budget49-irq51-type64-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "installed64_exact_peer_prepare_passed_data_path_unchanged"
+      ]
+    },
+    {
+      "id": "firmware49_readonly_budget_units_proved",
+      "repo": "firmware",
+      "commit": "c0d19712d67c2ff2950a47879dc5c41d2334b703",
+      "subject": "Read actual minimum reservation without calling mutating policy setters",
+      "state": "actual8750_half_us_min_reservation_not_max_window",
+      "protects": [
+        "Actual8750half-us=4375us minimum reservation, derived from ROM arithmetic/known150usIFS and real Xtensa ADDX2 compiler output; never interpret as8750us maximum active event.",
+        "g_max_evt_env0/0 are raw policy bytes, not config.ce_len_type; private59=1 is not proof of the effective TX/RX field path.",
+        "Actual49 full1734832B/3917chunkRF107.975KBps,53/53HCI and32event joins, one6us getter. No stable speed gain; normal32restored."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/controller-unit-proof49/proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-042312/measurement.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-budget49-irq51-type64-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual8750_half_us_min_reservation_not_max_window"
+      ]
+    },
+    {
+      "id": "firmware50_irq_full_rf_hci_prefix_loss_retained",
+      "repo": "firmware",
+      "commit": "c8e12ffae693e155b7d39dc191b48bc10898df5b",
+      "subject": "Retain actual32 IRQ records but reject incomplete HCI prefix",
+      "state": "actual50_full_rf_but54declared36exported_incomplete",
+      "protects": [
+        "50compiles and installs; actual54HCI declarations but36exported due256RTC ring eviction. Keep original measurement INCOMPLETE even though all1734832BRF and32IRQ/state0 records exist.",
+        "Partial32IRQ third arguments all0 andentry->state0 23..25us only cover retained samples; not complete HCI or general endreason proof. Earlier043411 failedbeforeinstall andwas restored32.",
+        "Do not enlarge RTC retained layout only in trialreceiver: measured normal32 must still consume the same persisted representation."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-044750/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-044750/partial-controller-irq-evidence.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-budget49-irq51-type64-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual50_full_rf_but54declared36exported_incomplete"
+      ]
+    },
+    {
+      "id": "firmware51_lossless_controller_irq_full_alignment",
+      "repo": "firmware",
+      "commit": "61ce64f8053cb4dd556323b388f7bde09c48176f",
+      "subject": "Preserve full sample and IRQ data within the existing retained log layout",
+      "state": "actual51_full56hci_24gatt_32pairs_32irq_no_stable_gain",
+      "protects": [
+        "Only finish serialization changes; preflush source sampling, RTC256 layout and OTA policy byte-identical50. Validated3->2records per pair preserves original sequences/times/words/flag and3bounded costs. Mismatch/ambiguity/lateIRQ/overflow reject; never fill missing data.",
+        "Actual C memory256statewords and128IRQwords roundtrip exactly. Missingend/wrongsequence/badschema andcost/identity/time corruption fail. Explicit decode_compact51, no rewrite of failed50measurement.",
+        "045526 fixed38 missednew51CONNECT, no measuredtransfer requested; restore32.045825 three-channel acquisition captured full1734832B/3917chunks andstrictPASS,56HCI+24GATT+64states+32IRQs, all56actualeventcounter joins, no windowoutsides.",
+        "32IRQfinalargs0 in16tail-repeat and16no-observed-repeat groups. IRQentry->state0 med24/23.5us; device1->0med6077/6481us is correlation, not end-reason diagnosis. Raw107.476KBps still no stablegain/hardlimit/originalCDqualification.",
+        "Measured HCIhostTX251/2120 andhostRX251/1590,PHY2; do not swap directions or explain Windows->ESP speed by localTX-only evidence. Daily64/default443+32/profile5restored andType27932/34120preserved."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-045825/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-045825/controller-irq-analysis.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current64-measure-20261020-045825/controller-radio-counter-join.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/compact51-observer-native.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/post-controller51-daily64-restored.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-budget49-irq51-type64-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual51_full56hci_24gatt_32pairs_32irq_no_stable_gain"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T04:16:28.485896+08:00",
+  "feature_routes_updated_at": "2026-10-20T05:04:23+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -2526,8 +2617,8 @@
     },
     {
       "id": "ble-raw-throughput",
-      "baseline_state": "installed62_default443_fw32_restored_after48_full_sample_counter_alignment_no_stable_gain",
-      "accepted_scope": "Current62/FW32/E1 restored with profile5/core and Type preserved. Isolated40/41/42 complete3917chunk/1734832B RF. Offset-free timing identifies2.25ms extra before HCI at sampled repeats; absolute receive acceptance unresolved. Actual42 peripheralTX/hostRX1064 versus control2120 yields106.285760 vs105.546401KBps, no stable gain; hostTX remains2120. Earlier originalCD/FW22 same-board and160 exploration remain unfinished. Prior62 actual491 A/B/A passed, no stable gain, default443 retained. RAM44 actual whole1734832B PSRAM/zeroOTAFlash DATA passed;1812events CSA2/0mismatch,947adjacent repeats persist. RAM106.730/107.877 versus40controls105.546/104.890KBps not yet stable product gain. Daily62/32/profile5 restored. Alloc45 actual8862 allocations/0failures/max26us,57exact-pointer samples,complete raw32 RF105.925KBps. Offset-free sampled2.25ms wait already before allocation. No stable speed gain;normal62/32/profile5restored. Controller48 full54HCI/32eventcounter join complete,64states coverall24sampledSDUs. Median6074.5us recordedstate1to0 and1425usgap;repeat-tail intervals correlate,not proven endreason. 106.034KBps no stablegain;normal62/32restored.",
+      "baseline_state": "installed64_default443_fw32_restored_after51_full_irq_counter_alignment_no_stable_gain",
+      "accepted_scope": "Current62/FW32/E1 restored with profile5/core and Type preserved. Isolated40/41/42 complete3917chunk/1734832B RF. Offset-free timing identifies2.25ms extra before HCI at sampled repeats; absolute receive acceptance unresolved. Actual42 peripheralTX/hostRX1064 versus control2120 yields106.285760 vs105.546401KBps, no stable gain; hostTX remains2120. Earlier originalCD/FW22 same-board and160 exploration remain unfinished. Prior62 actual491 A/B/A passed, no stable gain, default443 retained. RAM44 actual whole1734832B PSRAM/zeroOTAFlash DATA passed;1812events CSA2/0mismatch,947adjacent repeats persist. RAM106.730/107.877 versus40controls105.546/104.890KBps not yet stable product gain. Daily62/32/profile5 restored. Alloc45 actual8862 allocations/0failures/max26us,57exact-pointer samples,complete raw32 RF105.925KBps. Offset-free sampled2.25ms wait already before allocation. No stable speed gain;normal62/32/profile5restored. Controller48 full54HCI/32eventcounter join complete,64states coverall24sampledSDUs. Median6074.5us recordedstate1to0 and1425usgap;repeat-tail intervals correlate,not proven endreason. 106.034KBps no stablegain;normal62/32restored. Type64 exact handoff identity fixes observedwrongCompanion prepare; DATA unchanged62.49raw8750half-us=4375us minimum reservation,notmaxwindow.50fullRFbut18HCIprefixrowslost staysINCOMPLETE.51losslessfinishencoding preservesRTC256 andall56HCI/24GATT/64states/32IRQs; strictfullRF107.476KBps,all32IRQsarg3zero,bothrepeatgroups~24usIRQtails. Default64/32/profile5restored,no stablegain/hardlimit/originalCDqualification.",
       "guard_entries": [
         "type_raw215_current40_comparison_rejected",
         "type_exclusive_ota_prepared_target_ownership",
@@ -2556,7 +2647,11 @@
         "firmware45_pre_hci_allocator_retry_absent_actual_full_rf",
         "firmware46_owned_controller_states_actual",
         "firmware47_rom_counter_and_partial_window_limits",
-        "firmware48_full_sample_controller_rf_event_alignment"
+        "firmware48_full_sample_controller_rf_event_alignment",
+        "ota64_handoff_exact_live_identity",
+        "firmware49_readonly_budget_units_proved",
+        "firmware50_irq_full_rf_hci_prefix_loss_retained",
+        "firmware51_lossless_controller_irq_full_alignment"
       ],
       "paths": {
         "type": [
