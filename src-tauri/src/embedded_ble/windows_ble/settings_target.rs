@@ -57,11 +57,6 @@ pub fn list_settings_devices() -> Result<Vec<SettingsDevice>, String> {
             }
         }
     }
-    if let Some(address) = runtime_bluetooth_target_address()
-        .or_else(persisted_successful_notify_target_address_for_current)
-    {
-        connected_addresses.insert(address);
-    }
     // Service-index discovery is local. It neither scans advertisements nor
     // opens every nearby device, and excludes keyboards/mice/sniffer serial.
     let selector =
@@ -77,6 +72,15 @@ pub fn list_settings_devices() -> Result<Vec<SettingsDevice>, String> {
                 let Some(address) = parse_bluetooth_address_from_device_id(&id) else {
                     continue;
                 };
+                // Runtime/persisted targets can refer to a powered-off board.
+                // This queries local connection state only; no GATT or scan.
+                if open_ble_device_with_timeout(address, Duration::from_millis(300))
+                    .ok()
+                    .and_then(|device| device.ConnectionStatus().ok())
+                    == Some(BluetoothConnectionStatus::Connected)
+                {
+                    connected_addresses.insert(address);
+                }
                 let name = paired_names.get(&address).cloned().unwrap_or_else(|| {
                     info.Name().map(|v| v.to_string_lossy()).unwrap_or_default()
                 });
@@ -315,6 +319,19 @@ pub fn with_settings_device<T>(
                 address,
                 Instant::now() + Duration::from_secs(5),
             )?;
+            // Explicit shared access lets settings coexist with audio/HID.
+            // FromIdAsync's default service opening must not become a hidden
+            // exclusive owner that blocks later reads in the same app.
+            use windows::Devices::Bluetooth::GenericAttributeProfile::{GattSharingMode, GattOpenStatus};
+            let opened = wait_async_operation(
+                target.service.OpenAsync(GattSharingMode::SharedReadAndWrite)
+                    .map_err(|e| format!("Selected settings shared service open failed: {e}"))?,
+                Duration::from_secs(2),
+                "selected settings shared service",
+            )?;
+            if opened != GattOpenStatus::Success && opened != GattOpenStatus::AlreadyOpened {
+                return Err(format!("Selected Listener settings service is unavailable: {opened:?}; draft retained, no settings written."));
+            }
             // Require our exact service, even if IPC was given a forged ID.
             if target.service.Uuid().map_err(|e| e.to_string())? != SERVICE_UUID {
                 return Err("Selected device is not a Listener settings service.".into());
