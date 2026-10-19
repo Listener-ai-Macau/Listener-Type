@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T21:12:28.631218+08:00",
+  "updated_at": "2026-10-19T22:51:08.893281+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1742,6 +1742,67 @@
       "evidence": [
         "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-long34-complete-field-evidence.json"
       ]
+    },
+    {
+      "id": "device_settings_editable_draft_shared_selected_peer",
+      "repo": "type",
+      "commit": "876e45c",
+      "subject": "Restore editable selected-device drafts and shared settings service access",
+      "state": "installed57_failed_sharing_violation_retained",
+      "protects": [
+        "Read failure must not disable draft editing; late reads preserve edits; switching device clears its draft.",
+        "Default display values never overwrite device settings. Saving merges only explicit edits with a fresh read of this exact target.",
+        "One-use read lease, per-packet revision CAS, fixed handle, and no cross-device fallback remain.",
+        "Prefer actual Connected state; explicitly share settings service with audio/HID."
+      ],
+      "known_failures": [
+        "Type54 fff0bf2 clears snapshot/name then disables all edits if read fails.",
+        "2026-10-19 old F8 target fails while connected same-name Listener is F3371BC799AF.",
+        "Current F3 audio-service open returns SharingViolation4/AccessDenied3; DIS read succeeds. Holder remains unproven until update verification.",
+        "Installed57 actual correct-F3 GET still returns SharingViolation4. This is not an accepted settings fix. See live-service reuse successor."
+      ],
+      "machine_evidence": [
+        "E:/ListenerAnalysisState/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/settings57-backend-verification.json"
+      ],
+      "guards": [
+        "node --experimental-strip-types src/lib/deviceSettingsDraft.test.ts",
+        "npm run test:device-settings-focus",
+        "npm run build"
+      ],
+      "pending_human_scope": [
+        "Installed physical single-device read/write pending; no complete RF claim."
+      ]
+    },
+    {
+      "id": "device_settings_live_service_exact_peer_and_draft58",
+      "repo": "type",
+      "commit": "58285fbc6b0a159519807d4cb27dcadf2f56166f",
+      "subject": "Reuse the exact live notify service for selected-device settings and preserve editable drafts",
+      "state": "installed58_fw31_single_peer_actual_read_write_restore_passed",
+      "protects": [
+        "Draft editing works before read or after failure; late reads retain explicit edits; default names/settings are never writes.",
+        "Each save reads this selected device afresh and merges explicit edits; one-use lease and per-packet revision CAS remain.",
+        "Borrow only identical Bluetooth address and still-ready capture generation. Audio retains ownership of its service; settings never closes a borrowed clone or opens a conflicting second handle.",
+        "Both firmware and client must be compatible: old 20261015 build9d92421e915196b4 lacks full settings snapshot, FW31 build8c549829226c9ed3 exposes it. Keep upgrade path and honest errors."
+      ],
+      "machine_evidence": [
+        "E:/ListenerAnalysisState/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/settings58-backend-verification.json",
+        "E:/ListenerAnalysisState/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/settings58-installed.json",
+        "E:/ListenerAnalysisState/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/settings58-fw31-ota.json"
+      ],
+      "machine_accepted_scope": [
+        "Installed58/FW31 currentF3371BC799AF: actual name read; status LED50->49 uncached confirmation->50; all baseline fields restored, revision1->3; zero UI navigation/focus operations.",
+        "Production draft six-case test and full TypeScript/release builds passed. OTA image update succeeded/confirmed/typeReady; generic speed gate FAIL remains, not a throughput win."
+      ],
+      "pending_human_scope": [
+        "Two-distinct-board simultaneous physical setting acceptance remains pending; name rename/reconnect was not exercised by brightness roundtrip.",
+        "No complete RF coverage claim for this session."
+      ],
+      "guards": [
+        "node --experimental-strip-types src/lib/deviceSettingsDraft.test.ts",
+        "npm run test:device-settings-focus",
+        "npm run build"
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-19T21:12:28.631218+08:00",
@@ -2223,11 +2284,13 @@
     },
     {
       "id": "device-settings-target-selection",
-      "baseline_state": "candidate54_fw31_single_board_both_transport_reads_two_board_physical_pending",
-      "accepted_scope": "Exact target/read lease/CAS logic checked with equal-name/equal-revision and stale-write counterexamples; physical USB and uncached BLE configuration match on COM16/F8. Not a claim of two distinct boards or all rename recovery acceptance.",
+      "baseline_state": "installed58_fw31_single_current_peer_read_write_restore_passed",
+      "accepted_scope": "Current F3 single-device complete BLE read/write/restore and editable-draft behavior. Exact address/capture-bound borrowed service; not two-board or rename/reconnect acceptance.",
       "guard_entries": [
         "explicit_device_settings_usb_ble_target_and_read_lease",
-        "firmware_full_ble_settings_snapshot_additive_revision_characteristic"
+        "firmware_full_ble_settings_snapshot_additive_revision_characteristic",
+        "device_settings_editable_draft_shared_selected_peer",
+        "device_settings_live_service_exact_peer_and_draft58"
       ],
       "paths": {
         "type": [
@@ -2242,7 +2305,10 @@
       },
       "known_failures": [
         "Original52c2 settings GET was USB-only while SET used active BLE / USB / fresh BLE fallback; a UI label alone cannot bind the destination.",
-        "Current peer is F83469CA5C53, not historical CDB2F668B535. 17:32 tracking-only capture has only3 target RF records and no connection follow; no old key reuse, full RF, speed or device-loss claim."
+        "Current peer is F83469CA5C53, not historical CDB2F668B535. 17:32 tracking-only capture has only3 target RF records and no connection follow; no old key reuse, full RF, speed or device-loss claim.",
+        "Type54 fff0bf2 clears snapshot/name then disables all edits if read fails.",
+        "2026-10-19 old F8 target fails while connected same-name Listener is F3371BC799AF.",
+        "Current F3 audio-service open returns SharingViolation4/AccessDenied3; DIS read succeeds. Holder remains unproven until update verification."
       ]
     }
   ]
