@@ -187,9 +187,22 @@ impl SettingsIo for SelectedUsbSettings {
 
 struct SelectedBleSettings {
     target: OpenEmbeddedAudioStatusTarget,
+    control: Option<GattCharacteristic>,
+    capture_id: Option<u64>,
+}
+impl SelectedBleSettings {
+    fn ensure_capture_current(&self) -> Result<(), String> {
+        if let Some(id) = self.capture_id {
+            if !active_audio_control_sender().is_some_and(|active| active.capture_id == id && active.readiness.is_ready()) {
+                return Err("Selected Listener connection changed; draft retained. Read this device again.".into());
+            }
+        }
+        Ok(())
+    }
 }
 impl SettingsIo for SelectedBleSettings {
     fn read(&mut self) -> Result<crate::embedded_ble::DeviceSettingsStatus, String> {
+        self.ensure_capture_current()?;
         let characteristic = open_read_characteristic_from_service_with_timeout(
             &self.target.service,
             DEVICE_SETTINGS_REVISION_UUID,
@@ -206,17 +219,19 @@ impl SettingsIo for SelectedBleSettings {
         parse_selected_ble_settings(&String::from_utf8(bytes).map_err(|e| e.to_string())?)
     }
     fn write(&mut self, command: &str) -> Result<(), String> {
+        self.ensure_capture_current()?;
         let payload = device_settings_payload(command)?;
         if payload.len() > 63 {
             return Err("Settings command exceeds BLE control limit.".into());
         }
-        let control = open_write_characteristic_from_service_with_timeout(
-            &self.target.service,
-            AUDIO_CONTROL_UUID,
-            "selected settings control",
-            BluetoothCacheMode::Cached,
-            Duration::from_secs(3),
-        )?;
+        let control = if let Some(control) = &self.control {
+            control.clone()
+        } else {
+            open_write_characteristic_from_service_with_timeout(
+                &self.target.service, AUDIO_CONTROL_UUID, "selected settings control",
+                BluetoothCacheMode::Cached, Duration::from_secs(3),
+            )?
+        };
         let status = write_gatt_value_with_timeout(
             &control,
             payload.as_bytes(),
@@ -315,6 +330,20 @@ pub fn with_settings_device<T>(
             // for this whole transaction. Never fall back to the voice target.
             let address = parse_bluetooth_address_from_device_id(id)
                 .ok_or("Invalid selected Bluetooth device address")?;
+            if let Some(active) = active_audio_control_sender().filter(|active| {
+                active.bluetooth_address == Some(address) && active.readiness.is_ready()
+            }) {
+                if let Some(service) = active.settings_service.clone() {
+                    log::info!("[device-settings] borrowing live selected peer service address={address:012X} capture_id={}", active.capture_id);
+                    // Borrow the same WinRT service object, not a second open.
+                    // The notify owner alone closes it; never close a clone.
+                    return task(&mut SelectedBleSettings {
+                        target: OpenEmbeddedAudioStatusTarget { service, device: active.settings_device.clone() },
+                        control: active.settings_control.clone(),
+                        capture_id: Some(active.capture_id),
+                    });
+                }
+            }
             let target = open_embedded_audio_status_target_for_device(
                 address,
                 Instant::now() + Duration::from_secs(5),
@@ -336,7 +365,7 @@ pub fn with_settings_device<T>(
             if target.service.Uuid().map_err(|e| e.to_string())? != SERVICE_UUID {
                 return Err("Selected device is not a Listener settings service.".into());
             }
-            task(&mut SelectedBleSettings { target })
+            task(&mut SelectedBleSettings { target, control: None, capture_id: None })
         }
         _ => Err("Unknown settings transport".into()),
     }

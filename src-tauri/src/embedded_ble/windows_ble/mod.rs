@@ -430,6 +430,10 @@ struct ActiveAudioControlSender {
     capture_id: u64,
     tx: mpsc::Sender<AudioControlRequest>,
     readiness: Arc<CaptureControlReadiness>,
+    bluetooth_address: Option<u64>,
+    settings_service: Option<GattDeviceService>,
+    settings_control: Option<GattCharacteristic>,
+    settings_device: Option<BluetoothLEDevice>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -648,10 +652,10 @@ struct ActiveAudioControlRegistration {
 }
 
 impl ActiveAudioControlRegistration {
-    fn install(capture_id: u64, tx: mpsc::Sender<AudioControlRequest>) -> Self {
+    fn install(capture_id: u64, tx: mpsc::Sender<AudioControlRequest>, target: &OpenNotifyTarget) -> Self {
         let readiness = Arc::new(CaptureControlReadiness::new());
         if let Ok(mut slot) = active_audio_control_slot().lock() {
-            *slot = Some(ActiveAudioControlSender { capture_id, tx, readiness: Arc::clone(&readiness) });
+            *slot = Some(ActiveAudioControlSender { capture_id, tx, readiness: Arc::clone(&readiness), bluetooth_address: target.bluetooth_address, settings_service: target.service.clone(), settings_control: target.control.clone(), settings_device: target.device.clone() });
             audio_control_readiness_notification().send_replace(());
             log::info!("[embedded-ble] capture #{capture_id}: audio control sender registered");
         }

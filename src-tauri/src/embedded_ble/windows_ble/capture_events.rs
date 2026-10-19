@@ -1100,7 +1100,7 @@ fn capture_notification_events_until_cancelled_impl(
     let mut cleanup = NotifyCleanup::new(capture_id, target);
     if cleanup.target.control.is_some() {
         cleanup.set_audio_control_registration(ActiveAudioControlRegistration::install(
-            capture_id, control_tx,
+            capture_id, control_tx, &cleanup.target,
         ));
     } else {
         log::warn!(
