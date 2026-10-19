@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T11:34:09.261130+08:00",
+  "updated_at": "2026-10-19T11:50:17.364971+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1465,7 +1465,7 @@
       "id": "sniffer_direction_hint_drift_and_near_counter_probe_priority",
       "repo": "sniffer",
       "commit": "00db1d48f6561b22494708c34114ccbe75933780",
-      "state": "candidate125_actual_arm_replay_pass_not_installed",
+      "state": "installed125_real24s_follow_usb_stable_but_export_losses",
       "subject": "Prefer conclusive RF spacing over unreliable source hints; try nearby counters on both streams first",
       "protects": [
         "Recorded actual124 21 authenticated controls are all recovered; reject wrong keys and MICs.",
@@ -1477,16 +1477,45 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver124-load-evidence\\control-after125.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver124-load-evidence\\control-historical125.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver124-load-evidence\\conclusion125.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-125.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-125.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\custom-candidate125-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver125-installed-info.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver125-load-evidence\\live-result125.json"
       ],
       "guards": [
         "python tools/replay_control_counter_arm.py --workspace .. --elf build/nrf52840_xxaa.out --output ../control-current.json --capture-round passive-current-20261019-112214 --phy-switch-us 918935775"
       ],
       "candidatePackageSha256": "0d14ba09e02710dc4c987d80655c828ea8b253e34517a11639ddb3c843f29034",
-      "known_scope": "124 actual RF stalls37ms, drops18 raw records/20 crypto entries and misses parameter instant112.125 fixes timing priority over unreliable source hints and probes nearby counters in both directions first. EmptyACK behavior remains the124baseline after an ablation showed changing it was unnecessary. Actual ARM replay21/21 plus historical20/20; instruction counts are not MCU time. Full OTA and live queue/follow timing remain unqualified."
+      "known_scope": "Actual125 fixed38 captures fresh link,18 authenticated controls/0rejections/max1304us and24s to authenticated terminate during original OTA16756ms/Type928ms. RF export14572drops/crypto4852drops, only130908 image bytes; full RF not qualified. Previous three hop captures missed CONNECT, no USB failure."
+    },
+    {
+      "id": "sniffer_raw_export_cached_wire_identical_fast_encoding",
+      "repo": "sniffer",
+      "commit": "fbdcc86b26d769fec59c1bcd7ed8e969202d6f5b",
+      "state": "installed126_actual_arm_pass_live_capture_in_progress",
+      "subject": "Remove per-record generic protobuf traversal and repeated encoding under FULL",
+      "protects": [
+        "Raw protobuf wire is byte-identical for192 actual ARM cases including metadata boundaries.",
+        "Busy retries preserve the same encoded bytes and fixed128-slot queue;512 actual ARM records/overflow/STOP checks pass.",
+        "Crypto, radio, USB and transport sources remain125; no queue enlargement or product changes."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver125-load-evidence\\live-result125.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver125-load-evidence\\export-wire126.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver125-load-evidence\\bounded-export126.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-126.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\custom-candidate126-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver126-installed-info.json"
+      ],
+      "guards": [
+        "python tools/replay_export_wire_speed.py --workspace .. --output ../export-current.json",
+        "python tools/replay_bounded_export.py --workspace .. --output ../queue-current.json"
+      ],
+      "candidatePackageSha256": "05fadc843fecba1164b1aceccdc3bcb4e51840a1b43653d5e25dada5c2e68113",
+      "known_scope": "125 real OTA follows24s through authenticated terminate, controls18/rejected0/max1304us, USB stable; raw export drops14572 and crypto queue4852.126 replaces generic per-record encoding/retry with cached direct protobuf;192 actual ARM wire-byte matches and512 queue records pass. Instruction counts are not hardware time or BLE throughput; actual USB/raw queues/full image remain pending. Installed11:49:07; actual fixed38 RF/HCI/USB capture in progress, not yet qualified."
     }
   ],
-  "feature_routes_updated_at": "2026-10-19T11:34:09.261130+08:00",
+  "feature_routes_updated_at": "2026-10-19T11:50:17.364971+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1866,13 +1895,14 @@
     },
     {
       "id": "ble-sniffer-usb-backpressure",
-      "baseline_state": "installed124_load_incomplete_candidate125_actual_arm_pass_pending_install",
-      "accepted_scope": "Installed124 actual11:22 original OTA PASS18242ms/Type947ms; noUSB reset, but raw export18drops/crypto20drops/37101us max worker.472CRC/182MIC/39image chunks only. Peer naturally recovered; outage cause not unique. Full RF and stable speed remain unqualified. Candidate125 actual ARM21/21 plus historical20/20, not installed or full RF qualified.",
+      "baseline_state": "installed126_wire_arm_pass_actual_capture_in_progress",
+      "accepted_scope": "Actual125 fixed38 captures fresh link,18 authenticated controls/0rejections/max1304us and24s to authenticated terminate during original OTA16756ms/Type928ms. RF export14572drops/crypto4852drops, only130908 image bytes; full RF not qualified. Previous three hop captures missed CONNECT, no USB failure.126 installed;192 byte-equivalence and512 queue records pass, live full-image qualification pending.",
       "guard_entries": [
         "sniffer_usb_sdk_backpressure_returns_without_dropping_transport_bytes",
         "sniffer_rf_export_bounded_without_per_packet_heap",
         "sniffer_recover_verified_channel_map_counter_gap_and_batch_output",
-        "sniffer_direction_hint_drift_and_near_counter_probe_priority"
+        "sniffer_direction_hint_drift_and_near_counter_probe_priority",
+        "sniffer_raw_export_cached_wire_identical_fast_encoding"
       ],
       "paths": {
         "sniffer": [
@@ -1885,7 +1915,8 @@
           "src/receiver_diag.c",
           "tools/replay_bounded_export.py",
           "src/passive_crypto.c",
-          "tools/replay_control_counter_arm.py"
+          "tools/replay_control_counter_arm.py",
+          "tools/replay_export_wire_speed.py"
         ]
       },
       "known_failures": [
@@ -1894,7 +1925,8 @@
         "Installed122 actual08:36/08:45 USB re-enumeration under OTA; raw image only prefix captured. Candidate123 pending hardware validation.",
         "123 real load no USB reset, but raw queue128/drops13; native and actual ARM saved RF reject valid map counter171 when estimate136 (+4 search).124 corrects this saved counterexample; not yet live accepted.",
         "2026-10-19 11:08 product OTA handoff ACK then prepare timeout before image; target fails to return, no target advertisements in three short unfiltered channels. Treat peer recovery as separate from receiver USB/RF acceptance, do not repeat PnP restart or infer power cause.",
-        "124 actual11:22 noUSB reset but37ms control worker and queue18/20drops; raw image17277B only. Direction/source hints corrupt counter estimates. Skipping wide non-scheduling control recovery loses checkpoint and yields16/21; rejected before installation."
+        "124 actual11:22 noUSB reset but37ms control worker and queue18/20drops; raw image17277B only. Direction/source hints corrupt counter estimates. Skipping wide non-scheduling control recovery loses checkpoint and yields16/21; rejected before installation.",
+        "125 real fixed38 follows24s through encrypted terminate but outputs7119 records and drops14572; generic nested protobuf encodes every packet and repeats on FULL, batch max10897us.126 caches wire-identical fixed raw-message encoding; actual complete capture pending."
       ]
     }
   ]
