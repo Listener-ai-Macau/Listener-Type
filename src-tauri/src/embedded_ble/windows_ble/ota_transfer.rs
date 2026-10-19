@@ -124,14 +124,16 @@ pub fn take_listener_ota_v1_reboot_att_ready() -> bool {
 
 impl OpenListenerOtaV1Target {
     fn converge_active_link_before_begin(&mut self, transfer_id: u64) -> Result<(), String> {
-        let Some(prime) = self.throughput_request.as_ref() else {
+        let native_trial = listener_ota_v1_native_interval_trial();
+        let prime = self.throughput_request.as_ref();
+        if prime.is_none() && !native_trial {
             return Err(
                 "Listener OTA cannot start bulk without a retained WinRT throughput request"
                     .to_string(),
             );
-        };
-        let remaining_hold = LISTENER_OTA_WINRT_DLE_PRIME_MIN_HOLD
-            .saturating_sub(prime.started_at.elapsed());
+        }
+        let remaining_hold = prime.map(|p| LISTENER_OTA_WINRT_DLE_PRIME_MIN_HOLD
+            .saturating_sub(p.started_at.elapsed())).unwrap_or_default();
         if !remaining_hold.is_zero() {
             std::thread::sleep(remaining_hold);
         }
@@ -140,6 +142,11 @@ impl OpenListenerOtaV1Target {
         // can leave the firmware unable to accept BEGIN. The first confirmed
         // SYNC progress owns release; errors still release via target Drop.
 
+        let native_readiness = if native_trial {
+            let service = self.service.as_ref().ok_or("Native-interval trial requires the exact retained OTA service")?;
+            Some(open_read_characteristic_from_service(service, OTA_READINESS_UUID,
+                "Listener OTA native-interval budget", BluetoothCacheMode::Uncached)?)
+        } else { None };
         let started = Instant::now();
         while started.elapsed() < LISTENER_OTA_PRE_BEGIN_LINK_TIMEOUT {
             let status_bytes = read_characteristic_bytes_with_timeout(
@@ -149,11 +156,17 @@ impl OpenListenerOtaV1Target {
                 LISTENER_OTA_V1_STATUS_READ_TIMEOUT,
             )?;
             let status = denzic_ota_core::parse_status(&status_bytes)?;
-            if status.active_link_confirmed() {
+            let native_budget_ready = match native_readiness.as_ref() {
+                Some(readiness) => listener_ota_v1_native_rx_budget_ready(&read_characteristic_bytes_with_timeout(
+                    readiness, BluetoothCacheMode::Uncached, "Listener OTA native RX budget",
+                    LISTENER_OTA_V1_STATUS_READ_TIMEOUT)?),
+                None => true,
+            };
+            if status.active_link_confirmed() && native_budget_ready {
                 log::info!(
                     "[embedded-ble] Denzic OTA v1 #{transfer_id}: device confirmed active BLE link before BEGIN elapsed_ms={} prime_held_ms={}",
                     started.elapsed().as_millis(),
-                    prime.started_at.elapsed().as_millis()
+                    prime.map(|p| p.started_at.elapsed().as_millis()).unwrap_or_default()
                 );
                 return Ok(());
             }

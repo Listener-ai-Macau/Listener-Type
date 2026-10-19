@@ -785,6 +785,10 @@ fn open_listener_ota_v1_target_for_verified_active_handoff(
 fn request_ota_ble_throughput_optimized(
     device: &BluetoothLEDevice,
 ) -> Option<OtaThroughputPrime> {
+    if listener_ota_v1_native_interval_trial() {
+        log::info!("[embedded-ble] Listener OTA native-interval diagnostic: no Windows15ms request; same-link RX budget and device-confirmed active status required before BEGIN");
+        return None;
+    }
     let params = match BluetoothLEPreferredConnectionParameters::ThroughputOptimized() {
         Ok(params) => params,
         Err(err) => {

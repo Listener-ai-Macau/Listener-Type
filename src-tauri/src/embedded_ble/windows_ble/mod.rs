@@ -2651,6 +2651,32 @@ struct OpenListenerOtaV1Target {
     bluetooth_address: Option<u64>,
 }
 
+// Explicit engineering opt-in. Normal installed behavior keeps the Windows
+// prime and the response-bearing first-SYNC release contract unchanged.
+fn listener_ota_v1_native_interval_trial() -> bool {
+    std::env::var("LISTENER_OTA_NATIVE_INTERVAL_TRIAL").as_deref() == Ok("1")
+}
+
+fn listener_ota_v1_native_rx_budget_ready(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else { return false; };
+    let mut fields = [None; 4];
+    for part in text.split(';') {
+        let Some((key, value)) = part.split_once('=') else { continue; };
+        let index = match key {
+            "ota_rx_budget_v1" => 0,
+            "ota_rx_octets" => 1,
+            "ota_rx_time_us" => 2,
+            "ota_rx_phy" => 3,
+            _ => continue,
+        };
+        if fields[index].is_some() { return false; }
+        let Ok(value) = value.parse::<u16>() else { return false; };
+        fields[index] = Some(value);
+    }
+    fields[0] == Some(1) && fields[1] == Some(251)
+        && fields[2].is_some_and(|us| us >= 1064) && fields[3] == Some(2)
+}
+
 struct OtaPreBulkMaintainHandoff {
     session: Option<GattSession>,
 }
