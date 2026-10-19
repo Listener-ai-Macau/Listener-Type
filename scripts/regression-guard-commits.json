@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T11:03:59+08:00",
+  "updated_at": "2026-10-19T11:14:30+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1435,7 +1435,7 @@
       "id": "sniffer_recover_verified_channel_map_counter_gap_and_batch_output",
       "repo": "sniffer",
       "commit": "5429d796fa6ee9827c629caf31fb74b532268b1d",
-      "state": "candidate124_arm_before19_after20_verified_not_installed",
+      "state": "installed124_peer_unavailable_after_product_prepare_timeout_load_not_qualified",
       "subject": "Recover observed +35 control nonce gap with MIC verification; batch bounded RF output",
       "protects": [
         "Recorded authenticated channel-map update with counter171 is not rejected when observation estimate is136.",
@@ -1446,17 +1446,21 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver123-load-evidence\\control-counter123-arm.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver123-load-evidence\\control-counter124-arm.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver123-load-evidence\\bounded-export124-proof.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-124.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-custom-124.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\custom-candidate124-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver124-installed-info.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261019-110811\\collection.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\receiver124-presence-20261019-111137.json"
       ],
       "guards": [
         "python tools/replay_control_counter_arm.py --workspace .. --elf build/nrf52840_xxaa.out --output ../receiver123-load-evidence/control-counter-current.json",
         "python tools/replay_bounded_export.py --workspace .."
       ],
       "candidatePackageSha256": "1863b2661a2f09533a32cb9349bf0c13294497e11084890179483920f1da8514",
-      "known_scope": "Actual ARM counter search/AES/MIC uses modeled zeroed cipher allocation on saved RF;512 encoded packets verified with modeled USB pressure. Output recording omits13 internally received frames. Live internal nonce state, MCU duration and complete RF remain unproven. Candidate124 pending exact DFU."
+      "known_scope": "Actual ARM counter search/AES/MIC uses modeled zeroed cipher allocation on saved RF;512 encoded packets verified with modeled USB pressure. Output recording omits13 internally received frames. Live internal nonce state, MCU duration and complete RF remain unproven. Candidate124 pending exact DFU. Installed11:07:02 exact serial, actual info1.1.124. Real prime stopped before image due6s product preparation timeout. Next diagnostic15s failed beforeOTA request; Windows peer disconnected, three unfiltered channels624/589/553 other packets/no target. Not actual124 OTA load or full RF acceptance; same Type processes preserved but voice link unavailable."
     }
   ],
-  "feature_routes_updated_at": "2026-10-19T11:03:59+08:00",
+  "feature_routes_updated_at": "2026-10-19T11:14:30+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1836,8 +1840,8 @@
     },
     {
       "id": "ble-sniffer-usb-backpressure",
-      "baseline_state": "installed123_usb_stable_in_actual_ota_load_raw_drops13_and_follow_incomplete",
-      "accepted_scope": "Installed10:47:57 exact analyzer. Same COM owner completes three captures and actual original-image OTA load without USB re-enumeration, heap used64676/available94404/denied0. RF still only38 imagechunks16834B; output peak128/drops13 and control following incomplete. Not full RF or throughput acceptance.",
+      "baseline_state": "installed124_peer_unavailable_after_product_prepare_timeout_load_not_qualified",
+      "accepted_scope": "Actual ARM counter search/AES/MIC uses modeled zeroed cipher allocation on saved RF;512 encoded packets verified with modeled USB pressure. Output recording omits13 internally received frames. Live internal nonce state, MCU duration and complete RF remain unproven. Candidate124 pending exact DFU. Installed11:07:02 exact serial, actual info1.1.124. Real prime stopped before image due6s product preparation timeout. Next diagnostic15s failed beforeOTA request; Windows peer disconnected, three unfiltered channels624/589/553 other packets/no target. Not actual124 OTA load or full RF acceptance; same Type processes preserved but voice link unavailable.",
       "guard_entries": [
         "sniffer_usb_sdk_backpressure_returns_without_dropping_transport_bytes",
         "sniffer_rf_export_bounded_without_per_packet_heap",
@@ -1861,7 +1865,8 @@
         "Actual121 ARM SDK17/8 repeatedly callswrite1714times within12000instructions without returning.",
         "Live12122:01 USB re-enumeration is observed but not uniquely attributed to this modeled condition.",
         "Installed122 actual08:36/08:45 USB re-enumeration under OTA; raw image only prefix captured. Candidate123 pending hardware validation.",
-        "123 real load no USB reset, but raw queue128/drops13; native and actual ARM saved RF reject valid map counter171 when estimate136 (+4 search).124 corrects this saved counterexample; not yet live accepted."
+        "123 real load no USB reset, but raw queue128/drops13; native and actual ARM saved RF reject valid map counter171 when estimate136 (+4 search).124 corrects this saved counterexample; not yet live accepted.",
+        "2026-10-19 11:08 product OTA handoff ACK then prepare timeout before image; target fails to return, no target advertisements in three short unfiltered channels. Treat peer recovery as separate from receiver USB/RF acceptance, do not repeat PnP restart or infer power cause."
       ]
     }
   ]
