@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T16:52:31.285159+08:00",
+  "updated_at": "2026-10-19T17:37:41.495061+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1618,9 +1618,54 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-security28.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\raw215-narrow-time\\security-order-comparison.json"
       ]
+    },
+    {
+      "id": "explicit_device_settings_usb_ble_target_and_read_lease",
+      "repo": "type",
+      "commit": "fff0bf2dc262bacf425c6144f9ba104d3f039ec6",
+      "subject": "Bind device settings reads and writes to an explicit USB or Bluetooth target",
+      "state": "built_candidate_single_board_transport_read_not_human_accepted",
+      "protects": [
+        "Settings UI explicitly selects USB/BLE and exact destination; no transport fallback to a different device.",
+        "Read result is generation-bound; one-use server read lease binds device ID and revision even when two boards have the same name/revision.",
+        "The same serial/GATT handle owns the write sequence; every packet uses firmware revision CAS and observed readback; unchanged forms do not apply name.",
+        "Viewing/configuring an unrelated selected device does not synchronize its BLE name into the voice target preferences."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\settings54-tests.log",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\settings31-ble-readback.log",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\settings31-usb-full-readback.log"
+      ],
+      "pending_human_scope": [
+        "New installed UI acceptance and simultaneous two-distinct-board physical acceptance remain pending."
+      ],
+      "guards": [
+        "cargo test --manifest-path ./src-tauri/Cargo.toml --lib settings_selection",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml --lib selected_settings_tests",
+        "npm run build"
+      ]
+    },
+    {
+      "id": "firmware_full_ble_settings_snapshot_additive_revision_characteristic",
+      "repo": "firmware",
+      "commit": "b8311a73fcf4e37c78d6d83273e96f9b34eb605a",
+      "subject": "Expose complete device settings snapshot on the existing BLE revision characteristic",
+      "state": "native_encoder_and_real_uncached_ble_read_accepted_scope_only",
+      "protects": [
+        "Existing settings-revision characteristic retains schema/revision and adds a complete bounded snapshot; old revision readers stay compatible.",
+        "Actual encoder rejects short buffers and does not overwrite sentinel bytes; old revision-only firmware cannot be used as a writable full snapshot."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\settings31-native-flash.log",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\settings31-ble-readback.log",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-settings31.json"
+      ],
+      "guards": [
+        "python tools/test_ble_settings_snapshot.py"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-19T16:52:31.285159+08:00",
+  "feature_routes_updated_at": "2026-10-19T17:37:41.495061+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -2080,6 +2125,30 @@
       },
       "known_failures": [
         "OriginalFW22 16:12 realWindows0x3D after ATT MTU response precedes second peripheral START_ENC_RSP; all observed nonempty packet MICs verify. Missing RF after actual disconnect is not analyzer packet loss."
+      ]
+    },
+    {
+      "id": "device-settings-target-selection",
+      "baseline_state": "candidate54_fw31_single_board_both_transport_reads_two_board_physical_pending",
+      "accepted_scope": "Exact target/read lease/CAS logic checked with equal-name/equal-revision and stale-write counterexamples; physical USB and uncached BLE configuration match on COM16/F8. Not a claim of two distinct boards or all rename recovery acceptance.",
+      "guard_entries": [
+        "explicit_device_settings_usb_ble_target_and_read_lease",
+        "firmware_full_ble_settings_snapshot_additive_revision_characteristic"
+      ],
+      "paths": {
+        "type": [
+          "src/pages/settings/DeviceSection.tsx",
+          "src-tauri/src/commands/device/settings_selection.rs",
+          "src-tauri/src/embedded_ble/windows_ble/settings_target.rs"
+        ],
+        "firmware": [
+          "components/device_settings/device_settings.c",
+          "ports/esp32/ble_audio_stream/ble_audio_stream_esp32.c"
+        ]
+      },
+      "known_failures": [
+        "Original52c2 settings GET was USB-only while SET used active BLE / USB / fresh BLE fallback; a UI label alone cannot bind the destination.",
+        "Current peer is F83469CA5C53, not historical CDB2F668B535. 17:32 tracking-only capture has only3 target RF records and no connection follow; no old key reuse, full RF, speed or device-loss claim."
       ]
     }
   ]
