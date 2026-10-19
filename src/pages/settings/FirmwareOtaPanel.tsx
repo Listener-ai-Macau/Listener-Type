@@ -61,7 +61,7 @@ export function FirmwareOtaPanel({
 }) {
   const { t, i18n } = useTranslation();
   const [state, dispatch] = useReducer(firmwareOtaReducer, initialFirmwareOtaState);
-  const [firmwareMode, setFirmwareMode] = useState<'ble' | 'wired'>('ble');
+  const [firmwareMode, setFirmwareMode] = useState<'ble' | 'wired'>('wired');
   const [wiredBusy, setWiredBusy] = useState(false);
   const wiredRef = useRef<FirmwareWiredFlashHandle>(null);
   const [wiredAction, setWiredAction] = useState<{ canFlash: boolean; isFlashing: boolean }>({ canFlash: false, isFlashing: false });
@@ -474,11 +474,11 @@ export function FirmwareOtaPanel({
 
       <div className="ol-firmware-control-bar">
         <div className="ol-firmware-mode-switch" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Btn variant={firmwareMode === 'ble' ? 'blue' : 'soft'} size="sm" icon="cloud" onClick={() => selectFirmwareMode('ble')} disabled={firmwareActionBusy}>
-            {t('settings.recording.firmwareModeBleOta', '蓝牙 OTA')}
-          </Btn>
           <Btn variant={firmwareMode === 'wired' ? 'blue' : 'soft'} size="sm" icon="bolt" onClick={() => selectFirmwareMode('wired')} disabled={firmwareActionBusy}>
             {t('settings.recording.firmwareModeWired', '有线刷机')}
+          </Btn>
+          <Btn variant={firmwareMode === 'ble' ? 'blue' : 'soft'} size="sm" icon="cloud" onClick={() => selectFirmwareMode('ble')} disabled={firmwareActionBusy}>
+            {t('settings.recording.firmwareModeBleOta', '蓝牙 OTA')}
           </Btn>
         </div>
 

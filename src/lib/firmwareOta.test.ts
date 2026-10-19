@@ -632,12 +632,12 @@ assert.ok(
   'selected firmware package summary must be outside the BLE/wired mode-specific panels',
 );
 assert.ok(
-  firmwareOtaPanelSource.includes("const [firmwareMode, setFirmwareMode] = useState<'ble' | 'wired'>('ble');")
+  firmwareOtaPanelSource.includes("const [firmwareMode, setFirmwareMode] = useState<'ble' | 'wired'>('wired');")
     && !firmwareOtaPanelSource.includes("setFirmwareMode('wired');")
     && !firmwareOtaPanelSource.includes('ports.some(item => item.isLikelyEsp32)')
     && firmwareOtaPanelSource.includes("selectFirmwareMode('ble')")
     && firmwareOtaPanelSource.includes("selectFirmwareMode('wired')"),
-  'the updater must always enter on BLE OTA and only switch to wired after an explicit user choice',
+  'the updater must enter on wired flashing by default and retain explicit BLE/wired choices',
 );
 assert.ok(
   firmwareOtaPanelSource.includes("const [baud, setBaud] = useState('921600');")

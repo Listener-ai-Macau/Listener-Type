@@ -673,6 +673,19 @@ pub const WIRED_BOOT_REPAIR_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 pub const WIRED_FLASH_CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(120);
 pub const WIRED_FLASH_SERIAL_IO_TIMEOUT: Duration = Duration::from_secs(5);
 
+// espflash wraps write, compression and serial failures in the same outer
+// "connecting" error. Preserve its sources so a mid-write failure is diagnosable.
+pub fn wired_firmware_error(context: &str, error: &dyn std::error::Error) -> String {
+    let mut detail = format!("{context}: {error}");
+    let mut source = error.source();
+    while let Some(cause) = source {
+        detail.push_str(&format!("; caused by: {cause}"));
+        source = cause.source();
+    }
+    log::error!("[wired-firmware] {detail}");
+    detail
+}
+
 pub struct PreparedWiredFlashArtifact {
     pub role: String,
     pub file: String,
@@ -797,6 +810,7 @@ impl WiredFlashProgressCallbacks {
 
 impl ProgressCallbacks for WiredFlashProgressCallbacks {
     fn init(&mut self, addr: u32, total: usize) {
+        log::info!("[wired-firmware] writing address=0x{addr:x} blocks={total}");
         let artifact = self
             .artifacts
             .iter()
@@ -824,6 +838,10 @@ impl ProgressCallbacks for WiredFlashProgressCallbacks {
     }
 
     fn finish(&mut self) {
+        if let Some(progress) = self.current.as_ref() {
+            log::info!("[wired-firmware] finished writing {} bytes={} (verification follows)",
+                progress.artifact.file, progress.artifact.size_bytes);
+        }
         if let Some(progress) = self.current.as_mut() {
             progress.current_units = progress.total_units;
         }
@@ -855,6 +873,7 @@ pub fn emit_wired_firmware_stage(
     percent: u8,
     message: impl Into<String>,
 ) {
+    log::info!("[wired-firmware] action={action} stage={stage} port={port:?} version={version:?}");
     emit_wired_firmware_progress(
         app,
         WiredFirmwareProgressPayload {
@@ -1397,14 +1416,23 @@ pub fn run_wired_firmware_flash_with_progress(
         8,
         "Connecting to ESP32-S3 serial flasher",
     );
+    let usb_info = usb_port_info_for(&port_hint);
+    // The bundled RAM stub reproducibly loses native S3 USB mid-write on the
+    // current board. The chip's ROM loader completes this same image/baud.
+    let use_stub = !(chip == Chip::Esp32s3 && usb_info.vid == 0x303a && usb_info.pid == 0x1001);
+    log.push_str(if use_stub {
+        "Download transport: RAM stub; reset deferred until explicit verification.\n"
+    } else {
+        "Download transport: ESP32-S3 native USB ROM; reset deferred until explicit verification.\n"
+    });
     let (mut flasher, port, connect_log) = connect_builtin_esp_flasher_with_wait(
         Some(&port_hint),
         baud,
         chip,
-        true,
+        use_stub,
         true,
         ResetBeforeOperation::DefaultReset,
-        ResetAfterOperation::HardReset,
+        ResetAfterOperation::NoResetNoStub,
         WIRED_FULL_FLASH_CONNECT_TIMEOUT,
         true,
     )?;
@@ -1437,34 +1465,31 @@ pub fn run_wired_firmware_flash_with_progress(
         "Boot handling: full factory flash writes bootloader.bin at 0x0 without a separate read probe.\n",
     );
 
+    let mut prepared = prepare_wired_flash_artifacts(&loaded, chip)?;
     if !preserve_ota_data {
         if let Some((offset, size)) = loaded.otadata_region.as_ref() {
             let offset = parse_flash_u32_arg(offset, "otadata offset", true)?;
             let size = parse_flash_u32_arg(size, "otadata size", false)?;
-            emit_wired_firmware_stage(
-                progress_app_ref,
-                "flash",
-                "erasing",
-                Some(&loaded.version),
-                Some(&port),
-                22,
-                "Erasing OTA state partition",
-            );
-            flasher
-                .erase_region(offset, size)
-                .map_err(|err| format!("Failed to erase otadata region: {err}"))?;
+            let end = offset.checked_add(size).ok_or("OTA state partition range overflow")?;
+            if size == 0 || size > 64 * 1024 || offset % 4096 != 0 || size % 4096 != 0
+                || end > 16 * 1024 * 1024 || prepared.iter().any(|artifact| {
+                    u64::from(offset) < u64::from(artifact.offset) + artifact.bytes.len() as u64
+                        && u64::from(artifact.offset) < u64::from(end)
+                }) {
+                return Err("Invalid or overlapping OTA state partition reset range".to_string());
+            }
+            // ERASE_REGION is a stub-only command. Normal ROM flash writes erase
+            // their range first, so an all-FF image has the same final state.
+            prepared.push(PreparedWiredFlashArtifact {
+                role: "otadata".to_string(),
+                file: "OTA state reset".to_string(),
+                offset,
+                bytes: vec![0xff; size as usize],
+                patch_report: None,
+            });
             log.push_str(&format!(
-                "Erased otadata region at 0x{offset:x}, size 0x{size:x}.\n"
+                "Queued verified OTA state reset at 0x{offset:x}, size 0x{size:x}.\n"
             ));
-            emit_wired_firmware_stage(
-                progress_app_ref,
-                "flash",
-                "erased",
-                Some(&loaded.version),
-                Some(&port),
-                26,
-                "OTA state partition erased",
-            );
         }
     } else {
         log.push_str("Preserved otadata region.\n");
@@ -1488,7 +1513,7 @@ pub fn run_wired_firmware_flash_with_progress(
         28,
         "Preparing firmware images",
     );
-    let prepared = prepare_wired_flash_artifacts(&loaded, chip)?;
+    prepared.sort_by_key(|artifact| artifact.offset);
     let segments = prepared
         .iter()
         .map(|artifact| RomSegment {
@@ -1509,22 +1534,34 @@ pub fn run_wired_firmware_flash_with_progress(
         );
         flasher
             .write_bins_to_flash(&segments, Some(&mut progress))
-            .map_err(|err| format!("Failed to write wired firmware image: {err}"))?;
+            .map_err(|err| wired_firmware_error("Failed to write wired firmware image", &err))?;
     } else {
         flasher
             .write_bins_to_flash(&segments, None)
-            .map_err(|err| format!("Failed to write wired firmware image: {err}"))?;
+            .map_err(|err| wired_firmware_error("Failed to write wired firmware image", &err))?;
     }
-    /* `write_bins_to_flash` requests a reset after the final segment, but the
-     * ESP32-S3 USB-Serial/JTAG port can remain in the stub on a board without a
-     * BOOT button. Repeat the idempotent run reset while the same port handle is
-     * still open so a successful Type flash always returns to the application. */
-    std::thread::sleep(Duration::from_millis(150));
-    flasher
-        .connection()
-        .reset_after(true)
-        .map_err(|err| format!("Firmware was written but the device did not restart: {err}"))?;
-    log.push_str("Issued explicit post-flash application reset.\n");
+    // espflash 3.2 write_bins_to_flash ignores the Flasher verify flag. Keep
+    // the loader alive and explicitly compare every segment before booting.
+    emit_wired_firmware_stage(progress_app_ref, "flash", "verifying", Some(&loaded.version),
+        Some(&port), 98, "Verifying written firmware");
+    for artifact in &prepared {
+        let actual = flasher.checksum_md5(artifact.offset, artifact.bytes.len() as u32)
+            .map_err(|err| wired_firmware_error(&format!("Failed to verify {}", artifact.file), &err))?
+            .to_be_bytes();
+        let expected = md5::Md5::digest(&artifact.bytes);
+        if actual.as_slice() != expected.as_slice() {
+            return Err(format!("Written firmware verification failed for {} at 0x{:x}; device was not started",
+                artifact.file, artifact.offset));
+        }
+        log.push_str(&format!("Verified {} at 0x{:x}, {} bytes (MD5).\n",
+            artifact.file, artifact.offset, artifact.bytes.len()));
+    }
+    let usb_pid = flasher.connection().get_usb_pid()
+        .map_err(|err| wired_firmware_error("Failed to identify flash reset transport", &err))?;
+    let mut serial_port = flasher.into_serial();
+    espflash::connection::reset::hard_reset(&mut serial_port, usb_pid)
+        .map_err(|err| wired_firmware_error("Firmware verified but the device did not restart", &err))?;
+    log.push_str("Issued explicit application reset after all written segments verified.\n");
     for artifact in &prepared {
         log.push_str(&format!(
             "Wrote {} ({}) at 0x{:x}, {} bytes",
@@ -2147,7 +2184,7 @@ pub fn connect_builtin_esp_flasher(
         after_operation,
         before_operation,
     )
-    .map_err(|err| format!("Failed to connect to ESP ROM/flasher on {port}: {err}"))
+    .map_err(|err| wired_firmware_error(&format!("Failed to connect to ESP ROM/flasher on {port}"), &err))
 }
 
 pub fn select_wired_flash_port_for_attempt(

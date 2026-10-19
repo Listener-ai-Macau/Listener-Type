@@ -3368,6 +3368,7 @@ dependencies = [
  "libc",
  "libloading 0.8.9",
  "log 0.4.29",
+ "md-5",
  "objc2 0.5.2",
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",
