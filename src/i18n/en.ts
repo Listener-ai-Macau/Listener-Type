@@ -930,6 +930,8 @@ export const en: typeof zhCN = {
       notSupported: 'Not yet supported',
     },
       deviceKeys: {
+        onboardDescription: "Key settings are stored on the selected device. Write changes to save them.",
+        firmwareRequired: "Update this device’s firmware to save independent key settings.",
         title: 'Device custom keys',
       description: 'Set a common action for each key.',
       restoreKeyboardDefaults: 'Restore default key output',

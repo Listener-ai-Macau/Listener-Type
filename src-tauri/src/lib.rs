@@ -66,6 +66,7 @@ mod startup_evidence;
 mod timeline;
 mod transcript_boundary;
 mod types;
+mod device_key_profile;
 mod unicode_keystroke;
 mod wake_phrase;
 mod windows_ime_ipc;
@@ -1005,6 +1006,7 @@ pub fn run() {
             commands::list_settings_devices,
             commands::get_selected_device_settings,
             commands::set_selected_device_settings,
+            commands::set_selected_device_key_profile,
             commands::set_device_settings,
             commands::get_firmware_ota_preflight_snapshot,
             commands::load_firmware_ota_package,

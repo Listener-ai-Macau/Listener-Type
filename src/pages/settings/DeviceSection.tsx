@@ -8,6 +8,7 @@ import {
   listSettingsDevices,
   getSelectedDeviceSettings,
   setSelectedDeviceSettings,
+  setSelectedDeviceKeyProfile,
   getEmbeddedBleRuntimeStatus,
   getVoiceprintStatus,
   listInstalledApplications,
@@ -21,6 +22,8 @@ import type {
   DeviceCustomKeyGesture,
   DeviceCustomKeyId,
   DeviceCustomKeys,
+  DeviceKeyProfile,
+  SelectedDeviceSettings,
   DeviceCustomKeyMapping,
   DeviceKnobRotationAction,
   DeviceSettingsSnapshot,
@@ -158,95 +161,68 @@ function isDeviceFallbackReservedPrimary(primary: string): boolean {
 }
 
 export function DeviceSection() {
+  const [selectedDevice, setSelectedDevice] = useState<SettingsDevice | null>(null);
+  const [selectedValue, setSelectedValue] = useState<SelectedDeviceSettings | null>(null);
+  return <>
+    <DeviceFirmwareSettingsCard onSelectedChange={device => { setSelectedDevice(device); setSelectedValue(null); }} onRead={setSelectedValue} />
+    <SelectedDeviceKeysCard key={selectedDevice?.id ?? 'none'} device={selectedDevice} value={selectedValue} onRead={setSelectedValue} />
+    <FirmwareOtaPanel supported={detectOS() === 'win'} />
+  </>;
+}
+function emptyDeviceKeyProfile(): DeviceKeyProfile {
+  const disabled = (): DeviceCustomKeys => {
+    const key = (): DeviceCustomKeyMapping => ({action:'disabled',appPage:'settingsDevice',externalAppPath:'',pasteTemplate:'',shortcut:null});
+    return {key1:key(),key2:key(),key3:key(),key4:key(),knob:key()};
+  };
+  return { schema:1, hid:[], deviceCustomKeys:{key1:defaultDeviceKeyboardKey('RightControl'),key2:defaultDeviceKeyboardKey('C',['ctrl']),key3:defaultDeviceKeyboardKey('V',['ctrl']),key4:defaultDeviceKeyboardKey('Enter'),knob:defaultDeviceDictationKey()},deviceCustomKeyDoubleClicks:disabled(),deviceCustomKeyLongPresses:disabled() };
+}
+function snapshotKnob(value: SelectedDeviceSettings | null): DeviceKnobRotationAction {
+  switch(value?.snapshot.knobRotationAction) { case 'screen_brightness': case 'screenBrightness': return 'screenBrightness';case 'disabled':return 'disabled';default:return 'systemVolume'; }
+}
+function SelectedDeviceKeysCard({device,value,onRead}:{device:SettingsDevice|null;value:SelectedDeviceSettings|null;onRead:(value:SelectedDeviceSettings)=>void}) {
   const { t } = useTranslation();
-  const { prefs, updatePrefs: savePrefs } = useHotkeySettings();
-  const [installedApps, setInstalledApps] = useState<InstalledApplication[]>([]);
-  const [installedAppsLoading, setInstalledAppsLoading] = useState(false);
-  const [bleStatus, setBleStatus] = useState<EmbeddedBleProbeStatus>('idle');
-  const bleSupported = detectOS() === 'win';
-  const autoOpenDeviceKeyActionMenu =
-    import.meta.env.DEV &&
-    new URLSearchParams(window.location.search).get('openDeviceKeyActionMenu') === '1';
-
-  useEffect(() => {
-    let cancelled = false;
-    setInstalledAppsLoading(true);
-    listInstalledApplications()
-      .then(apps => {
-        if (!cancelled) setInstalledApps(apps);
-      })
-      .catch(error => {
-        console.warn('[device-key] list installed applications failed', error);
-        if (!cancelled) setInstalledApps([]);
-      })
-      .finally(() => {
-        if (!cancelled) setInstalledAppsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = async () => {
-      if (!bleSupported) {
-        setBleStatus('error');
-        return;
-      }
-      setBleStatus('checking');
-      try {
-        const status = await getEmbeddedBleRuntimeStatus();
-        if (!cancelled) {
-          setBleStatus(status.backgroundListenerReady ? 'ok' : 'idle');
-        }
-      } catch (error) {
-        console.warn('[device] embedded BLE runtime status failed', error);
-        if (!cancelled) setBleStatus('error');
-      }
-    };
-    void refresh();
-    const timer = window.setInterval(refresh, DEVICE_SETTINGS_REFRESH_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [bleSupported]);
-
-  if (!prefs) {
-    return (
-      <Card>
-        <div style={{ fontSize: 12, color: 'var(--ol-ink-4)' }}>{t('common.loading')}</div>
-      </Card>
-    );
-  }
-
-  const knobRotationAction = prefs.deviceKnobRotationAction ?? 'systemVolume';
-  const updateKnobRotationAction = async (value: string) => {
-    await savePrefs(current => ({
-      ...current,
-      deviceKnobRotationAction: value as DeviceKnobRotationAction,
-    }));
+  const [profile,setProfile]=useState<DeviceKeyProfile>(value?.keys?.profile ?? emptyDeviceKeyProfile());
+  const [knobRotationAction,setKnob]=useState<DeviceKnobRotationAction>(snapshotKnob(value));
+  const [busy,setBusy]=useState(false);
+  const [dirty,setDirty]=useState(false);
+  const [message,setMessage]=useState('');
+  const [installedApps,setInstalledApps]=useState<InstalledApplication[]>([]);
+  const [installedAppsLoading,setInstalledAppsLoading]=useState(false);
+  const autoOpenDeviceKeyActionMenu=import.meta.env.DEV && new URLSearchParams(window.location.search).get('openDeviceKeyActionMenu')==='1';
+  const changes=useRef<Partial<Record<DeviceKeyMapKey,Partial<DeviceCustomKeys>>>>({});
+  const knobChanged=useRef(false);
+  const generation=useRef(0);
+  useEffect(()=>()=>{++generation.current;},[]);
+  useEffect(()=>{let cancelled=false;setInstalledAppsLoading(true);listInstalledApplications().then(v=>{if(!cancelled)setInstalledApps(v);}).catch(()=>{}).finally(()=>{if(!cancelled)setInstalledAppsLoading(false);});return()=>{cancelled=true;};},[]);
+  const merge=(base:DeviceKeyProfile):DeviceKeyProfile=>({...base,...Object.fromEntries(DEVICE_GESTURES.map(g=>[g.mapKey,{...base[g.mapKey],...changes.current[g.mapKey]}]))});
+  useEffect(()=>{if(value?.device.id!==device?.id)return;if(value?.keys)setProfile(merge(value.keys.profile));if(!knobChanged.current)setKnob(snapshotKnob(value));},[value]);
+  const editKey=(map:DeviceKeyMapKey,id:DeviceCustomKeyId,mapping:DeviceCustomKeyMapping)=>{
+    changes.current={...changes.current,[map]:{...changes.current[map],[id]:mapping}};
+    setProfile(p=>({...p,[map]:{...p[map],[id]:mapping}}));setDirty(true);
   };
-  const restoreDefaultDeviceKeyboardOutput = async () => {
-    await savePrefs(current => ({
-      ...current,
-      deviceCustomKeys: {
-        ...current.deviceCustomKeys,
-        key1: defaultDeviceKeyboardKey('RightControl'),
-        key2: defaultDeviceKeyboardKey('C', ['ctrl']),
-        key3: defaultDeviceKeyboardKey('V', ['ctrl']),
-        key4: defaultDeviceKeyboardKey('Enter'),
-        knob: defaultDeviceDictationKey(),
-      },
-    }));
+  const updateKnobRotationAction=async(value:string)=>{knobChanged.current=true;setKnob(value as DeviceKnobRotationAction);setDirty(true);};
+  const restoreDefaultDeviceKeyboardOutput=()=>{const keys=emptyDeviceKeyProfile().deviceCustomKeys;for(const id of ['key1','key2','key3','key4','knob'] as const)editKey('deviceCustomKeys',id,keys[id]);};
+  const read=async()=>{
+    if(!device || busy)return;const current=++generation.current;setBusy(true);setMessage('');
+    try {const result=await getSelectedDeviceSettings(device);if(current!==generation.current)return;onRead(result);setMessage(result.keysError ?? (result.keys ? '' : t('settings.deviceKeys.firmwareRequired','这台设备的固件尚不支持独立保存按键，请先更新固件。')));}
+    catch(e){if(current===generation.current)setMessage(String(e));}
+    finally{if(current===generation.current)setBusy(false);}
   };
-
+  const save=async()=>{
+    if(!device || busy)return;const current=++generation.current;setBusy(true);setMessage('');
+    try {
+      const baseline=await getSelectedDeviceSettings(device);if(current!==generation.current)return;
+      if(!baseline.keys)throw new Error(baseline.keysError ?? t('settings.deviceKeys.firmwareRequired','这台设备的固件尚不支持独立保存按键，请先更新固件。'));
+      const saved=await setSelectedDeviceKeyProfile(device,baseline.revision,baseline.readToken,baseline.keys.revision,merge(baseline.keys.profile),knobChanged.current ? knobRotationAction : snapshotKnob(baseline));
+      if(current!==generation.current)return;
+      changes.current={};knobChanged.current=false;setDirty(false);onRead(saved);
+      if(saved.keys)setProfile(saved.keys.profile);setKnob(snapshotKnob(saved));setMessage(t('settings.device.configSaved','已保存到当前设备'));
+    }catch(e){if(current===generation.current)setMessage(String(e));}
+    finally{if(current===generation.current)setBusy(false);}
+  };
   return (
-    <>
-      <DeviceFirmwareSettingsCard />
-
       <Card>
+        <fieldset disabled={busy} style={{border: 0, padding: 0, margin: 0, minWidth: 0}}>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'start', gap: 12 }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
@@ -260,7 +236,7 @@ export function DeviceSection() {
             variant="ghost"
             size="sm"
             icon="refresh"
-            onClick={() => void restoreDefaultDeviceKeyboardOutput()}
+            onClick={() => restoreDefaultDeviceKeyboardOutput()} disabled={busy}
             style={{ height: 32, whiteSpace: 'nowrap', justifyContent: 'center' }}
           >
             {t('settings.deviceKeys.restoreKeyboardDefaults')}
@@ -271,49 +247,36 @@ export function DeviceSection() {
             <DeviceKeyGestureGroup
               key={gesture.id}
               gesture={gesture}
-              keys={prefs[gesture.mapKey]}
+              keys={profile[gesture.mapKey]}
               installedApps={installedApps}
               installedAppsLoading={installedAppsLoading}
               autoOpenDeviceKeyActionMenu={autoOpenDeviceKeyActionMenu}
-              onChange={async (id, mapping) => {
-                await savePrefs(current => ({
-                  ...current,
-                  [gesture.mapKey]: {
-                    ...current[gesture.mapKey],
-                    [id]: mapping,
-                  },
-                }));
-              }}
+              onChange={async (id, mapping) => editKey(gesture.mapKey, id, mapping)}
             />
           ))}
         </div>
 
         <KnobActionsPanel
-          knobClickMapping={prefs.deviceCustomKeys.knob}
+          knobClickMapping={profile.deviceCustomKeys.knob}
           knobRotationAction={knobRotationAction}
           installedApps={installedApps}
           installedAppsLoading={installedAppsLoading}
-          onKnobClickMappingChange={async mapping => {
-            await savePrefs(current => ({
-              ...current,
-              deviceCustomKeys: {
-                ...current.deviceCustomKeys,
-                knob: mapping,
-              },
-            }));
-          }}
+          onKnobClickMappingChange={async mapping => editKey('deviceCustomKeys', 'knob', mapping)}
           onKnobRotationActionChange={updateKnobRotationAction}
         />
+        <div style={{fontSize: 12, color: 'var(--ol-ink-4)', marginTop: 12}}>{t('settings.deviceKeys.onboardDescription', '按键设置保存在当前选中的设备中；修改后请写入。')}</div>
+        {message && <div role="status" style={{fontSize: 12, marginTop: 10}}>{message}</div>}
+        <div style={{display: 'flex', gap: 8, marginTop: 12}}>
+          <Btn variant="ghost" size="sm" onClick={() => void read()} disabled={!device || busy}>{t('settings.device.readFromDevice', '读取')}</Btn>
+          <Btn variant="blue" size="sm" onClick={() => void save()} disabled={!device || busy || !dirty}>{busy ? t('settings.device.writing', '写入中') : t('settings.device.writeToDevice', '写入')}</Btn>
+        </div>
+        </fieldset>
       </Card>
 
-      <FirmwareOtaPanel
-        supported={bleSupported}
-      />
-    </>
   );
 }
 
-function DeviceFirmwareSettingsCard() {
+function DeviceFirmwareSettingsCard({onSelectedChange,onRead}:{onSelectedChange:(device:SettingsDevice|null)=>void;onRead:(value:SelectedDeviceSettings)=>void}) {
   const { t } = useTranslation();
   const { prefs, updatePrefs: savePrefs } = useHotkeySettings();
   const [snapshot, setSnapshot] = useState<DeviceSettingsSnapshot | null>(null);
@@ -466,6 +429,7 @@ function DeviceFirmwareSettingsCard() {
       );
       if (generation !== requestGeneration.current || value.device.id !== device.id) return;
       setSnapshot(value.snapshot);
+      onRead(value);
       if (value.snapshot.source !== 'firmware') {
         setStatus('error');
         setMessage(t('settings.device.readRequired', '未能读取设备当前设置；保留原有内容，重新读取成功后才能写入。'));
@@ -483,6 +447,7 @@ function DeviceFirmwareSettingsCard() {
   const chooseDevice = (device: SettingsDevice | null) => {
     ++requestGeneration.current;
     setSelectedDevice(device);
+    onSelectedChange(device);
     setSnapshot(null);
     draft.current = new DeviceSettingsDraft();
     // A new device must never inherit another board's draft. Defaults are
@@ -562,6 +527,7 @@ function DeviceFirmwareSettingsCard() {
       );
       if (generation !== requestGeneration.current || value.device.id !== device.id) return;
       setSnapshot(value.snapshot);
+      onRead(value);
       draft.current = new DeviceSettingsDraft();
       setForm(snapshotToForm(value.snapshot));
       setStatus('saved');

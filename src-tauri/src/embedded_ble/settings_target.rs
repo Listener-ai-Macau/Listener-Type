@@ -41,3 +41,8 @@ pub fn with_device<T>(
         Err("Device selection is currently supported on Windows.".into())
     }
 }
+
+pub fn peer_key(device: &SettingsDevice) -> String {
+    #[cfg(target_os="windows")] { super::windows_ble::settings_device_peer_key(device) }
+    #[cfg(not(target_os="windows"))] { device.id.clone() }
+}

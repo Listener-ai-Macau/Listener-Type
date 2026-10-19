@@ -670,6 +670,12 @@ async fn submit_embedded_audio_ble_stream_impl(
                 )
             }
         };
+        if notification.starts_with(b"DKEY:") {
+            if let Some((key,gesture,mapping))=crate::device_key_profile::notification_mapping(&notification) {
+                handle_device_custom_key_mapping(inner,key,gesture,mapping);
+            } else {log::warn!("[device-keys] ignored unknown/stale board key event; no global mapping substituted");}
+            continue;
+        }
         // Re-check soft cancel before applying a packet that may race the cancel.
         if let Some(session_abort) = session_abort.as_ref() {
             if session_abort.swap(false, Ordering::SeqCst) {

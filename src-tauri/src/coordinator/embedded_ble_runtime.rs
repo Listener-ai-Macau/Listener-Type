@@ -1371,7 +1371,8 @@ fn auto_select_embedded_ble_input_source_from_snapshot(
         });
     }
     refresh_embedded_ble_listener(inner);
-    sync_device_knob_rotation_action_to_firmware(inner, "auto_embedded_ble_input_source");
+    // Connecting a board reads its own profile; never hydrate it from a
+    // previous device's global computer preferences.
     true
 }
 
@@ -1488,48 +1489,6 @@ fn firmware_mode_for_device_knob_rotation_action(action: DeviceKnobRotationActio
     }
 }
 
-fn sync_device_knob_rotation_action_to_firmware(inner: &Arc<Inner>, reason: &'static str) {
-    let prefs = inner.prefs.get();
-    let action = prefs.device_knob_rotation_action;
-    let mode = firmware_mode_for_device_knob_rotation_action(action);
-    let ec11_fast_recording = prefs.dictation_input_source == DictationInputSource::EmbeddedBle
-        && prefs.device_custom_keys.knob.action == DeviceCustomKeyAction::Dictation;
-    async_runtime::spawn_blocking(move || {
-        let command = format!(
-            "DEVICE:SET knob_rotation={mode} e11r={}",
-            if ec11_fast_recording { 1 } else { 0 }
-        );
-        let deadline = Instant::now() + Duration::from_secs(90);
-        let mut attempt = 0u32;
-        let last_err = loop {
-            attempt = attempt.saturating_add(1);
-            match crate::embedded_ble::send_device_settings_command_via_active_capture_only(
-                &command,
-                Duration::from_secs(2),
-                "device knob rotation sync",
-            ) {
-                Ok(()) => {
-                    log::info!(
-                        "[device-knob] synced knob_rotation and EC11 fast-recording settings via active capture mode={mode} fast_recording={} reason={reason} attempts={attempt}",
-                        ec11_fast_recording as u8,
-                    );
-                    return;
-                }
-                Err(err) => {
-                    if Instant::now() >= deadline {
-                        break err;
-                    }
-                    std::thread::sleep(Duration::from_secs(2));
-                }
-            }
-        };
-        log::warn!(
-            "[device-knob] knob_rotation/EC11 fast-recording active-capture sync deferred reason={reason} mode={mode} fast_recording={} attempts={attempt} last_error={}",
-            ec11_fast_recording as u8,
-            last_err
-        );
-    });
-}
 
 fn record_embedded_ble_listener_cancelled(inner: &Arc<Inner>, reason: &str) {
     let mut snapshot = inner.embedded_ble_wake_recovery.lock();
@@ -3795,12 +3754,41 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
         flush_pending_device_key_ble_action(inner, "notify_ready");
         log::info!("[embedded-ble] background listener notify ready");
         schedule_embedded_ble_runtime_identity_probe(inner, generation);
+        schedule_onboard_key_read(inner, generation);
         // Notify readiness proves this link only. Other Listener addresses may
         // belong to real boards, even when their names match or they are offline.
         // Retire only exact identities owned by an explicit recovery transaction.
         log::info!("[embedded-ble] notify ready: preserving other Listener pairings; no transaction-owned retirement authority");
     }
 }
+
+#[cfg(target_os="windows")]
+fn schedule_onboard_key_read(inner:&Arc<Inner>,generation:u64) {
+    let inner=Arc::clone(inner);
+    async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        if inner.shutdown.load(Ordering::SeqCst) || !inner.embedded_ble_listener_ready.load(Ordering::SeqCst)
+            || inner.embedded_ble_listener_generation.load(Ordering::SeqCst)!=generation {return;}
+        let deadline=Instant::now()+Duration::from_secs(30);
+        while inner.state.lock().phase!=SessionPhase::Idle {
+            if Instant::now()>=deadline || inner.shutdown.load(Ordering::SeqCst) || inner.embedded_ble_listener_generation.load(Ordering::SeqCst)!=generation {return;}
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        let Some(address)=crate::embedded_ble::current_notify_keep_address() else{return;};
+        let result=async_runtime::spawn_blocking(move || {
+            let devices=crate::embedded_ble::settings_target::list()?;
+            let expected=format!("ble:{address:012X}");
+            let device=devices.into_iter().find(|d|crate::embedded_ble::settings_target::peer_key(d)==expected).ok_or("Current Listener settings identity missing")?;
+            crate::embedded_ble::settings_target::with_device(&device,|io| {
+                if let Some(keys)=crate::device_key_profile::read(io)? {crate::device_key_profile::remember(&device,&keys);}
+                Ok::<_,String>(())
+            })
+        }).await;
+        match result {Ok(Ok(()))=>log::info!("[device-keys] current board profile read; no preferences pushed"),other=>log::warn!("[device-keys] board read deferred: {other:?}")}
+    });
+}
+#[cfg(not(target_os="windows"))]
+fn schedule_onboard_key_read(_inner:&Arc<Inner>,_generation:u64) {}
 
 #[cfg(target_os = "windows")]
 fn schedule_embedded_ble_runtime_identity_probe(inner: &Arc<Inner>, generation: u64) {

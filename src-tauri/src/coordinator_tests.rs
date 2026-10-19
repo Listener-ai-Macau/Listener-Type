@@ -891,29 +891,12 @@ fn embedded_ble_refresh_waits_for_startup_name_sync_gate() {
 }
 
 #[test]
-fn device_knob_rotation_sync_uses_active_capture_without_fresh_gatt_fallback() {
-    let source = include_str!("coordinator.rs");
-    let start = source
-        .find("fn sync_device_knob_rotation_action_to_firmware")
-        .expect("device knob rotation sync helper should exist");
-    let end = source[start..]
-        .find("fn record_embedded_ble_listener_cancelled")
-        .map(|offset| start + offset)
-        .expect("device knob rotation sync helper boundary should exist");
-    let body = &source[start..end];
-
-    assert!(
-        body.contains("send_device_settings_command_via_active_capture_only"),
-        "startup/settings-save knob sync must use the existing BLE audio-control sender"
-    );
-    assert!(
-        !body.contains("send_device_settings_command(&command"),
-        "knob sync must not open a competing fresh GATT settings path while notify is connecting"
-    );
-    assert!(
-        !body.contains("send_ec11_rotation_mode"),
-        "knob sync must not fall back to legacy EC11 control during BLE startup"
-    );
+fn global_preference_save_and_connection_never_push_device_keys() {
+    let commands=include_str!("commands/mod.rs");
+    let start=commands.find("let input_source_changed =").unwrap();
+    let end=commands[start..].find("// refresh_tray_microphone_menu").unwrap()+start;
+    assert!(!commands[start..end].contains("sync_device_firmware_preferences"));
+    assert!(!include_str!("coordinator/embedded_ble_runtime.rs").contains("sync_device_knob_rotation_action_to_firmware"));
 }
 
 #[tokio::test]

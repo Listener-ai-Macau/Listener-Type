@@ -15,6 +15,8 @@ pub struct SelectedDeviceSettings {
     pub revision: u32,
     pub read_token: String,
     pub snapshot: DeviceSettingsSnapshot,
+    pub keys: Option<crate::device_key_profile::OnboardKeys>,
+    pub keys_error: Option<String>,
 }
 
 struct ReadLease {
@@ -72,18 +74,18 @@ pub async fn get_selected_device_settings(
     device: SettingsDevice,
 ) -> Result<SelectedDeviceSettings, String> {
     run_device_settings_blocking("selected readback", move || {
-        let result = settings_target::with_device(&device, |io| {
-            let status = io.read()?;
-            Ok(SelectedDeviceSettings {
-                read_token: issue_read_token(&device, status.settings_revision),
-                revision: status.settings_revision,
-                snapshot: device_settings_snapshot_from_status(status),
-                device: device.clone(),
-            })
-        });
+        let result = settings_target::with_device(&device, |io| selected_readback(io, &device));
         match &result {
-            Ok(_) => log::info!("[device-settings] selected read succeeded transport={} id={}", device.transport, device.id),
-            Err(error) => log::warn!("[device-settings] selected read failed transport={} id={} error={error}", device.transport, device.id),
+            Ok(_) => log::info!(
+                "[device-settings] selected read succeeded transport={} id={}",
+                device.transport,
+                device.id
+            ),
+            Err(error) => log::warn!(
+                "[device-settings] selected read failed transport={} id={} error={error}",
+                device.transport,
+                device.id
+            ),
         }
         result
     })
@@ -100,17 +102,66 @@ pub async fn set_selected_device_settings(
     claim_read_token(&read_token, &device, revision)?;
     run_device_settings_blocking("selected write", move || {
         settings_target::with_device(&device, |io| {
-            write_selected_settings(io, revision, &request).map(|(revision, snapshot)| {
-                SelectedDeviceSettings {
-                    read_token: issue_read_token(&device, revision),
-                    device: device.clone(),
-                    revision,
-                    snapshot,
-                }
-            })
+            write_selected_settings(io, revision, &request)?;
+            selected_readback(io, &device)
         })
     })
     .await
+}
+
+fn selected_readback(
+    io: &mut dyn SettingsIo,
+    device: &SettingsDevice,
+) -> Result<SelectedDeviceSettings, String> {
+    let status = io.read()?;
+    let (keys, keys_error) = match crate::device_key_profile::read(io) {
+        Ok(keys) => (keys, None),
+        Err(e) => (None, Some(e)),
+    };
+    if let Some(keys) = &keys {
+        crate::device_key_profile::remember(device, keys);
+    }
+    Ok(SelectedDeviceSettings {
+        device: device.clone(),
+        revision: status.settings_revision,
+        read_token: issue_read_token(device, status.settings_revision),
+        snapshot: device_settings_snapshot_from_status(status),
+        keys,
+        keys_error,
+    })
+}
+pub async fn set_selected_device_key_profile(
+    device: SettingsDevice,
+    revision: u32,
+    read_token: String,
+    profile_revision: u32,
+    profile: crate::device_key_profile::DeviceKeyProfile,
+    knob_rotation_action: Option<crate::types::DeviceKnobRotationAction>,
+) -> Result<SelectedDeviceSettings, String> {
+    claim_read_token(&read_token, &device, revision)?;
+    run_device_settings_blocking("selected keys write",move || settings_target::with_device(&device,|io| {
+        let before=io.read()?;
+        if before.settings_revision!=revision {return Err("Selected device changed since read; read it again.".into());}
+        crate::device_key_profile::write(io,profile_revision,profile.clone())?;
+        if let Some(action)=knob_rotation_action {
+            let mode=match action {crate::types::DeviceKnobRotationAction::SystemVolume=>"system_volume",crate::types::DeviceKnobRotationAction::ScreenBrightness=>"screen_brightness",crate::types::DeviceKnobRotationAction::Disabled=>"disabled"};
+            let fast=profile.device_custom_keys.knob.action==crate::types::DeviceCustomKeyAction::Dictation;
+            // e11r follows this board's explicit knob action, never global prefs.
+            let mut current=revision;
+            for assignment in [format!("knob_rotation={mode}"),format!("e11r={}",u8::from(fast))] {
+                let command=format!("DEVICE:SET rev={current} {assignment}");
+                if command.len()+1>63 {return Err("Guarded knob packet too long".into());}
+                io.write(&command)?;
+                let next=if current==u32::MAX{1}else{current+1};
+                let mut confirmed=false;
+                for _ in 0..10 {let status=io.read()?;if status.settings_revision==next {confirmed=true;break;}if status.settings_revision!=current {return Err("Device changed during knob save".into());}std::thread::sleep(Duration::from_millis(60));}
+                if !confirmed {return Err("Keys saved, but selected knob settings were not confirmed. Read this device again.".into());}
+                current=next;
+            }
+            if io.read()?.knob_rotation_action!=mode {return Err("Knob rotation readback mismatch".into());}
+        }
+        selected_readback(io,&device)
+    })).await
 }
 
 fn write_selected_settings(

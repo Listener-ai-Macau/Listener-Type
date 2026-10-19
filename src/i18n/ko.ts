@@ -888,6 +888,8 @@ export const ko: typeof zhCN = {
       notSupported: '지원되지 않음',
     },
     deviceKeys: {
+        onboardDescription: "키 설정은 선택한 기기에 저장됩니다. 변경 후 기기에 쓰기를 눌러 주세요.",
+        firmwareRequired: "키 설정을 기기별로 저장하려면 펌웨어를 업데이트하세요。",
       title: '장치 사용자 지정 키',
       description: '각 키에 자주 쓰는 동작을 설정합니다.',
       restoreKeyboardDefaults: '기본 키 출력 복원',

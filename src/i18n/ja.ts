@@ -888,6 +888,8 @@ export const ja: typeof zhCN = {
       notSupported: '未対応',
     },
     deviceKeys: {
+        onboardDescription: "キー設定は選択中のデバイスに保存されます。変更後に書き込んでください。",
+        firmwareRequired: "キー設定をデバイスごとに保存するには、ファームウェアを更新してください。",
       title: 'デバイスカスタムキー',
       description: '各キーによく使う操作を設定します。',
       restoreKeyboardDefaults: '既定のキー出力に戻す',

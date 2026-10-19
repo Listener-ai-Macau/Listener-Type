@@ -930,6 +930,8 @@ export const zhTW: typeof zhCN = {
       notSupported: '暫未支持',
     },
     deviceKeys: {
+        onboardDescription: "按鍵設定儲存在目前選取的裝置中；修改後請寫入。",
+        firmwareRequired: "請先更新這台裝置的韌體，以獨立儲存按鍵設定。",
       title: '設備自定義鍵',
       description: '為每個按鍵設定常用操作。',
       restoreKeyboardDefaults: '恢復預設按鍵輸出',

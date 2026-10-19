@@ -1637,6 +1637,15 @@ fn capture_notification_events_until_cancelled_impl(
                 return Err(reason);
             }
         };
+        if notification.starts_with(b"DKEY:") {
+            // Board identity/revision is checked by the coordinator; never feed
+            // a key-control notice through the audio collector or ASR.
+            on_event(crate::embedded_ble::BleNotificationEvent {
+                notification,terminal:false,capture_generation:capture_id,
+                capture_admission_fact:None,capture_admission_receipt:None,
+            })?;
+            continue;
+        }
         if super::is_ec11_hardware_recovery_prepare_notice(&notification) {
             log::info!(
                 "[embedded-ble] capture #{capture_id}: received EC11 recovery pre-authorization during the double-click window"

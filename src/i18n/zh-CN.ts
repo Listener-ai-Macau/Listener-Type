@@ -928,6 +928,8 @@ export const zhCN = {
       notSupported: '暂未支持',
     },
       deviceKeys: {
+        onboardDescription: "按键设置保存在当前选中的设备中；修改后请写入。",
+        firmwareRequired: "这台设备的固件尚不支持独立保存按键，请先更新固件。",
         title: '设备自定义键',
         description: '为每个按键设置常用操作。',
         restoreKeyboardDefaults: '恢复默认按键输出',

@@ -286,6 +286,9 @@ fn parse_selected_ble_settings(
             .ok_or_else(|| format!("Incomplete Bluetooth settings snapshot: {compact}"))?;
         line.push_str(&format!(" {serial}={field}"));
     }
+    for key in ["ki", "kr", "ks", "kc", "ko", "kd"] {
+        if let Some(field) = fields.get(key) { line.push_str(&format!(" {key}={field}")); }
+    }
     parse_device_settings_status_line(&line)
 }
 
@@ -420,4 +423,11 @@ mod selected_settings_tests {
         );
         assert!(s.voice_auto_start_enabled && s.usb_power_present);
     }
+}
+
+pub fn settings_device_peer_key(device: &SettingsDevice) -> String {
+    if device.transport == "ble" {
+        if let Some(address)=parse_bluetooth_address_from_device_id(&device.id) {return format!("ble:{address:012X}");}
+    }
+    device.id.clone()
 }

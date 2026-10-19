@@ -2413,9 +2413,6 @@ impl Coordinator {
         refresh_embedded_ble_listener_after_firmware_ota(&self.inner);
     }
 
-    pub fn sync_device_knob_rotation_action_to_firmware(&self, reason: &'static str) {
-        sync_device_knob_rotation_action_to_firmware(&self.inner, reason);
-    }
 
     /// 返回当前听写阶段（read-only 快照），供 CLI 入口在 dispatch toggle 时决策。
     /// 与原热键边沿走的 `handle_pressed` 分支完全相同的判定逻辑：Idle → start，

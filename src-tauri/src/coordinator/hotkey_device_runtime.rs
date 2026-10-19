@@ -513,6 +513,9 @@ fn handle_device_custom_key_pressed(
     gesture: DeviceCustomKeyGesture,
 ) {
     let mapping = device_custom_key_mapping(inner, key, gesture);
+    handle_device_custom_key_mapping(inner,key,gesture,mapping);
+}
+fn handle_device_custom_key_mapping(inner:&Arc<Inner>,key:DeviceCustomKeyId,gesture:DeviceCustomKeyGesture,mapping:DeviceCustomKeyMapping) {
     crate::timeline::mark(
         "backend.device_key",
         "pressed",
@@ -672,14 +675,8 @@ fn device_custom_key_mapping(
     key: DeviceCustomKeyId,
     gesture: DeviceCustomKeyGesture,
 ) -> DeviceCustomKeyMapping {
-    let prefs = inner.prefs.get();
-    match gesture {
-        DeviceCustomKeyGesture::SingleClick => prefs.device_custom_keys.get(key).clone(),
-        DeviceCustomKeyGesture::DoubleClick => {
-            prefs.device_custom_key_double_clicks.get(key).clone()
-        }
-        DeviceCustomKeyGesture::LongPress => prefs.device_custom_key_long_presses.get(key).clone(),
-    }
+    let _ = inner;
+    crate::device_key_profile::active_mapping(key, gesture)
 }
 
 fn device_key_action_debounced(

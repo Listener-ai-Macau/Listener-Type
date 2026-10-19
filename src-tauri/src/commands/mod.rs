@@ -598,12 +598,7 @@ pub fn set_settings(
     prefs.streaming_insert_save_clipboard = prefs.copy_dictation_to_clipboard;
     let next_input_source = prefs.dictation_input_source;
     let input_source_changed = next_input_source != previous_prefs.dictation_input_source;
-    let should_sync_device_firmware =
-        device::device_firmware_settings_changed(&previous_prefs, &prefs);
-    if should_sync_device_firmware {
-        device::validate_device_firmware_preferences(&prefs)?;
-        device::sync_device_firmware_preferences(&previous_prefs, &prefs)?;
-    }
+    // Hardware settings are written only through an explicitly selected device.
     // 广播给所有 webview。issue #205：QaPanel 跑在独立 webview，
     // 没有 HotkeySettingsContext，必须靠事件感知录音键变化，否则面板可见时
     // 用户改键会让浮窗里的 "{recordHotkey}" 文案一直停留在旧值。
@@ -616,9 +611,8 @@ pub fn set_settings(
     if input_source_changed {
         coord.refresh_embedded_ble_listener();
     }
-    if next_input_source == DictationInputSource::EmbeddedBle && !should_sync_device_firmware {
-        coord.sync_device_knob_rotation_action_to_firmware("settings_save");
-    }
+    // Device NVS is authoritative. A computer preference save must never
+    // push another board's cached knob/key settings to the current Listener.
     // refresh_tray_microphone_menu 内部会调用 NSStatusItem.set_menu，必须在主线程上跑。
     // set_settings 本身是同步 Tauri command，在 IPC handler 线程上执行；从这里直接调
     // 会触发 macOS 主线程断言或在 dispatch 队列上死锁，导致整个 UI 无响应（用户改
@@ -2228,7 +2222,7 @@ fn validate_device_custom_keys(keys: &DeviceCustomKeys) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_device_custom_key_mapping(mapping: &DeviceCustomKeyMapping) -> Result<(), String> {
+pub(crate) fn validate_device_custom_key_mapping(mapping: &DeviceCustomKeyMapping) -> Result<(), String> {
     if mapping.action != DeviceCustomKeyAction::SendShortcut {
         return Ok(());
     }
@@ -2400,6 +2394,13 @@ pub async fn get_selected_device_settings(device: crate::embedded_ble::settings_
 #[tauri::command]
 pub async fn set_selected_device_settings(device: crate::embedded_ble::settings_target::SettingsDevice, revision: u32, read_token: String, request: DeviceSettingsUpdateRequest) -> Result<device::SelectedDeviceSettings, String> {
     device::set_selected_device_settings(device, revision, read_token, request).await
+}
+
+#[tauri::command]
+pub async fn set_selected_device_key_profile(device:crate::embedded_ble::settings_target::SettingsDevice,
+    revision:u32,read_token:String,profile_revision:u32,profile:crate::device_key_profile::DeviceKeyProfile,
+    knob_rotation_action:Option<crate::types::DeviceKnobRotationAction>)->Result<device::SelectedDeviceSettings,String> {
+    device::set_selected_device_key_profile(device,revision,read_token,profile_revision,profile,knob_rotation_action).await
 }
 
 #[tauri::command]

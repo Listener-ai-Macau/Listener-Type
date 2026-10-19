@@ -699,7 +699,18 @@ export interface SettingsDevice {
   label: string;
 }
 
+export interface DeviceKeyProfile {
+  schema: number;
+  deviceCustomKeys: DeviceCustomKeys;
+  deviceCustomKeyDoubleClicks: DeviceCustomKeys;
+  deviceCustomKeyLongPresses: DeviceCustomKeys;
+  hid: number[][];
+}
+export interface OnboardKeys { deviceUid: string; revision: number; profile: DeviceKeyProfile }
+
 export interface SelectedDeviceSettings {
+  keys: OnboardKeys | null;
+  keysError: string | null;
   device: SettingsDevice;
   revision: number;
   readToken: string;
