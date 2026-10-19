@@ -142,7 +142,8 @@ pub async fn set_selected_device_key_profile(
     run_device_settings_blocking("selected keys write",move || settings_target::with_device(&device,|io| {
         let before=io.read()?;
         if before.settings_revision!=revision {return Err("Selected device changed since read; read it again.".into());}
-        crate::device_key_profile::write(io,profile_revision,profile.clone())?;
+        let keys=crate::device_key_profile::write(io,profile_revision,profile.clone())?;
+        crate::device_key_profile::remember(&device,&keys);
         if let Some(action)=knob_rotation_action {
             let mode=match action {crate::types::DeviceKnobRotationAction::SystemVolume=>"system_volume",crate::types::DeviceKnobRotationAction::ScreenBrightness=>"screen_brightness",crate::types::DeviceKnobRotationAction::Disabled=>"disabled"};
             let fast=profile.device_custom_keys.knob.action==crate::types::DeviceCustomKeyAction::Dictation;
@@ -160,7 +161,9 @@ pub async fn set_selected_device_key_profile(
             }
             if io.read()?.knob_rotation_action!=mode {return Err("Knob rotation readback mismatch".into());}
         }
-        selected_readback(io,&device)
+        let status=io.read()?;
+        Ok(SelectedDeviceSettings{device:device.clone(),revision:status.settings_revision,
+            read_token:issue_read_token(&device,status.settings_revision),snapshot:device_settings_snapshot_from_status(status),keys:Some(keys),keys_error:None})
     })).await
 }
 

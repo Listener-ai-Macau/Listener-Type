@@ -406,15 +406,16 @@ where
     T: Send + 'static,
     F: FnOnce() -> Result<T, String> + Send + 'static,
 {
+    let timeout=if label.starts_with("selected") { Duration::from_secs(75) } else { DEVICE_SETTINGS_BLE_TASK_TIMEOUT };
     let joined = tokio::time::timeout(
-        DEVICE_SETTINGS_BLE_TASK_TIMEOUT,
+        timeout,
         tauri::async_runtime::spawn_blocking(task),
     )
     .await
     .map_err(|_| {
         format!(
             "Listener device settings {label} timed out after {} ms",
-            DEVICE_SETTINGS_BLE_TASK_TIMEOUT.as_millis()
+            timeout.as_millis()
         )
     })?;
     joined.map_err(|err| format!("Listener device settings {label} task failed: {err}"))?

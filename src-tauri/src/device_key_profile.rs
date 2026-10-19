@@ -234,24 +234,64 @@ pub fn read(io: &mut dyn SettingsIo) -> Result<Option<OnboardKeys>, String> {
         profile,
     }))
 }
+fn compact_profile_bytes(profile: &DeviceKeyProfile) -> Result<Vec<u8>, String> {
+    let mut value = serde_json::to_value(profile).map_err(|e| e.to_string())?;
+    let defaults =
+        serde_json::to_value(DeviceCustomKeyMapping::default()).map_err(|e| e.to_string())?;
+    // Only omit values that the existing serde defaults reconstruct exactly.
+    // Keep each key object, including {} for a disabled key in double/long maps.
+    for group in [
+        "deviceCustomKeys",
+        "deviceCustomKeyDoubleClicks",
+        "deviceCustomKeyLongPresses",
+    ] {
+        if let Some(keys) = value.get_mut(group).and_then(|v| v.as_object_mut()) {
+            for key in keys.values_mut() {
+                if let Some(mapping) = key.as_object_mut() {
+                    mapping.retain(|k, v| defaults.get(k) != Some(v));
+                }
+            }
+        }
+    }
+    serde_json::to_vec(&value).map_err(|e| e.to_string())
+}
+
 pub fn write(
     io: &mut dyn SettingsIo,
     expected: u32,
     mut profile: DeviceKeyProfile,
 ) -> Result<OnboardKeys, String> {
     profile.compile()?;
-    let bytes = serde_json::to_vec(&profile).map_err(|e| e.to_string())?;
+    let bytes = compact_profile_bytes(&profile)?;
     if bytes.len() > MAX_BYTES {
         return Err(format!("Device key configuration is {} bytes; device capacity is {MAX_BYTES}. Shorten templates or application paths before saving.",bytes.len()));
     }
-    let current = read(io)?
-        .ok_or("This firmware does not support onboard keys. Update its firmware first.")?;
-    if current.revision != expected {
+    let status = io.read()?;
+    let header = fields(&status.raw_line);
+    let revision = number(&header, "kr")
+        .map_err(|_| "This firmware does not support onboard keys. Update its firmware first.")?;
+    let device_uid = header
+        .get("ki")
+        .filter(|s| s.len() == 12 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+        .ok_or("Missing stable onboard identity")?
+        .to_ascii_lowercase();
+    if revision != expected {
         return Err("Device keys changed since read. Read the selected device again.".into());
     }
-    if current.profile == profile {
-        return Ok(current);
+    let old_crc = u32::from_str_radix(header.get("kc").ok_or("Missing key checksum")?, 16)
+        .map_err(|_| "Invalid key checksum")?;
+    if number(&header, "ks")? as usize == bytes.len() && old_crc == crc(&bytes) {
+        return Ok(OnboardKeys {
+            device_uid,
+            revision,
+            profile,
+        });
     }
+    log::info!(
+        "[device-keys] selected profile write revision={expected} encoded_bytes={} chunks={}",
+        bytes.len(),
+        bytes.len().div_ceil(16)
+    );
     let tx = (uuid::Uuid::new_v4().as_u128() as u32).max(1);
     io.write(&format!(
         "DEVICE:KEY B {expected:08x} {:04x} {:08x} {tx:08x}",
@@ -406,6 +446,29 @@ mod tests {
             DeviceCustomKeyAction::Disabled
         );
         assert!(!cache.aliases.contains_key(&b.id));
+    }
+    #[test]
+    fn compact_profile_roundtrip_keeps_every_key_and_gesture() {
+        let mut profile = DeviceKeyProfile::default();
+        profile.compile().unwrap();
+        let full = serde_json::to_vec(&profile).unwrap();
+        let compact = compact_profile_bytes(&profile).unwrap();
+        assert!(compact.len() < full.len() / 2);
+        let decoded: DeviceKeyProfile = serde_json::from_slice(&compact).unwrap();
+        assert_eq!(decoded, profile);
+        let mut configured = profile.clone();
+        configured.device_custom_key_double_clicks.key4 = DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::SendShortcut,
+            shortcut: Some(ShortcutBinding {
+                primary: "F12".into(),
+                modifiers: vec![],
+            }),
+            ..DeviceCustomKeyMapping::default()
+        };
+        configured.compile().unwrap();
+        let decoded: DeviceKeyProfile =
+            serde_json::from_slice(&compact_profile_bytes(&configured).unwrap()).unwrap();
+        assert_eq!(decoded, configured);
     }
     #[test]
     fn compile_default_native_shortcuts_and_no_reserved_loop() {

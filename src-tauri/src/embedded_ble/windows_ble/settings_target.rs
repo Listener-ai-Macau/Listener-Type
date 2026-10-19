@@ -296,13 +296,20 @@ pub fn with_settings_device<T>(
     selected: &SettingsDevice,
     task: impl FnOnce(&mut dyn SettingsIo) -> Result<T, String>,
 ) -> Result<T, String> {
+    let deadline=Instant::now()+Duration::from_secs(60);
     // Serialize complete read/diff/write/readback sequences, rather than only
     // individual packets. Never hold this lock on the async UI thread.
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    let _lock = LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .map_err(|_| "Settings transaction lock poisoned")?;
+    let transaction_lock=LOCK.get_or_init(||Mutex::new(()));
+    let wait_started=Instant::now();
+    let _lock=loop {
+        match transaction_lock.try_lock() {
+            Ok(guard)=>break guard,
+            Err(std::sync::TryLockError::WouldBlock) if wait_started.elapsed()<Duration::from_secs(8)=>std::thread::sleep(Duration::from_millis(25)),
+            Err(std::sync::TryLockError::WouldBlock)=>return Err("Another selected-device operation is still finishing. Draft retained; no second write was queued.".into()),
+            Err(_)=>return Err("Settings transaction lock poisoned".into()),
+        }
+    };
     match selected.transport.as_str() {
         "usb" => {
             let ports = serialport::available_ports().map_err(|e| e.to_string())?;
@@ -319,7 +326,7 @@ pub fn with_settings_device<T>(
             let _ = handle.write_request_to_send(false);
             // Keep the same OS handle throughout: COM reuse cannot redirect
             // a later packet to a different board.
-            task(&mut SelectedUsbSettings { port: handle })
+            super::settings_target::bounded(&mut SelectedUsbSettings { port: handle },deadline,task)
         }
         "ble" => {
             let id = selected
@@ -340,11 +347,11 @@ pub fn with_settings_device<T>(
                     log::info!("[device-settings] borrowing live selected peer service address={address:012X} capture_id={}", active.capture_id);
                     // Borrow the same WinRT service object, not a second open.
                     // The notify owner alone closes it; never close a clone.
-                    return task(&mut SelectedBleSettings {
+                    return super::settings_target::bounded(&mut SelectedBleSettings {
                         target: OpenEmbeddedAudioStatusTarget { service, device: active.settings_device.clone() },
                         control: active.settings_control.clone(),
                         capture_id: Some(active.capture_id),
-                    });
+                    },deadline,task);
                 }
             }
             let target = open_embedded_audio_status_target_for_device(
@@ -368,7 +375,7 @@ pub fn with_settings_device<T>(
             if target.service.Uuid().map_err(|e| e.to_string())? != SERVICE_UUID {
                 return Err("Selected device is not a Listener settings service.".into());
             }
-            task(&mut SelectedBleSettings { target, control: None, capture_id: None })
+            super::settings_target::bounded(&mut SelectedBleSettings { target, control: None, capture_id: None },deadline,task)
         }
         _ => Err("Unknown settings transport".into()),
     }
