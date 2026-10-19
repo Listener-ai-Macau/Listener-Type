@@ -701,6 +701,13 @@ export const ko: typeof zhCN = {
     },
     device: {
       configTitle: '장치 설정',
+      connectionMethod: '연결 방식',
+      usbMethod: 'USB 유선',
+      bleMethod: 'Bluetooth 무선',
+      selectedDevice: '설정할 장치',
+      noSelectedDevices: '장치를 연결한 후 새로 고침하세요',
+      refreshDevices: '장치 새로 고침',
+      targetScope: '설정은 선택한 장치에만 적용됩니다. 음성 입력 장치는 변경되지 않습니다.',
       configDesc: '저전력 대기와 자동 전원 끄기는 연결/배터리 모드별로 따로 설정할 수 있습니다. Bluetooth 이름은 다시 연결해야 반영될 수 있습니다.',
       configSourceWritable: '쓰기 가능',
       configSourceReadOnly: '읽기 전용',

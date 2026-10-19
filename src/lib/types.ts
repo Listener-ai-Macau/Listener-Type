@@ -693,6 +693,19 @@ export interface DeviceSettingsSnapshot {
   lastUpdatedAt: string | null;
 }
 
+export interface SettingsDevice {
+  id: string;
+  transport: 'usb' | 'ble';
+  label: string;
+}
+
+export interface SelectedDeviceSettings {
+  device: SettingsDevice;
+  revision: number;
+  readToken: string;
+  snapshot: DeviceSettingsSnapshot;
+}
+
 export interface DeviceSettingsUpdateRequest {
   statusLedBrightnessPercent: number;
   keyLedBrightnessPercent: number;

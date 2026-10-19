@@ -743,6 +743,13 @@ export const en: typeof zhCN = {
     },
     device: {
       configTitle: 'Device settings',
+      connectionMethod: 'Connection',
+      usbMethod: 'USB wired',
+      bleMethod: 'Bluetooth wireless',
+      selectedDevice: 'Device to configure',
+      noSelectedDevices: 'No device found. Connect one and refresh.',
+      refreshDevices: 'Refresh devices',
+      targetScope: 'Settings apply only to the selected device. Voice input keeps using its current device.',
       configDesc: 'Low-power wait and auto-shutdown can be set separately for plugged and battery modes. Bluetooth name changes may require reconnecting.',
       configSourceWritable: 'Writable',
       configSourceReadOnly: 'Read only',

@@ -743,6 +743,13 @@ export const zhTW: typeof zhCN = {
     },
     device: {
       configTitle: '裝置設定',
+      connectionMethod: '連線方式',
+      usbMethod: 'USB 有線',
+      bleMethod: '藍牙無線',
+      selectedDevice: '設定裝置',
+      noSelectedDevices: '未發現裝置，請連接後重新整理',
+      refreshDevices: '重新整理裝置',
+      targetScope: '僅讀寫所選裝置的設定，語音輸入仍使用目前已連接的裝置。',
       configDesc: '低功耗等待與自動關機可依插電/電池模式分別設定；藍牙名稱寫入後可能需要重新連線。',
       configSourceWritable: '可寫',
       configSourceReadOnly: '唯讀',

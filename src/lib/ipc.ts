@@ -9,6 +9,8 @@ import type {
   CorrectionRule,
   CredentialsStatus,
   DeviceSettingsSnapshot,
+  SettingsDevice,
+  SelectedDeviceSettings,
   DeviceSettingsUpdateRequest,
   DictationSession,
   EmbeddedAudioInputFormat,
@@ -1310,6 +1312,24 @@ export function getDeviceSettings(): Promise<DeviceSettingsSnapshot> {
     undefined,
     () => ({ ...mockDeviceSettings }),
   );
+}
+
+const mockSettingsDevice: SettingsDevice = { id: 'usb:demo', transport: 'usb', label: 'Listener · USB' };
+let mockSettingsRevision = 1;
+export function listSettingsDevices(): Promise<SettingsDevice[]> {
+  return invokeOrMock('list_settings_devices', undefined, () => [mockSettingsDevice]);
+}
+export function getSelectedDeviceSettings(device: SettingsDevice): Promise<SelectedDeviceSettings> {
+  return invokeOrMock('get_selected_device_settings', { device }, () => ({ device, revision: mockSettingsRevision, readToken: `demo:${device.id}:${mockSettingsRevision}`, snapshot: { ...mockDeviceSettings } }));
+}
+export function setSelectedDeviceSettings(device: SettingsDevice, revision: number, readToken: string, request: DeviceSettingsUpdateRequest): Promise<SelectedDeviceSettings> {
+  return invokeOrMock('set_selected_device_settings', { device, revision, readToken, request }, () => {
+    if (revision !== mockSettingsRevision || readToken !== `demo:${device.id}:${revision}`) throw new Error('Device settings changed; read again.');
+    const next = applyMockDeviceSettingsWrite(mockSettings, mockDeviceSettings, request);
+    mockDeviceSettings = next.snapshot;
+    ++mockSettingsRevision;
+    return { device, revision: mockSettingsRevision, readToken: `demo:${device.id}:${mockSettingsRevision}`, snapshot: { ...mockDeviceSettings } };
+  });
 }
 
 export function setDeviceSettings(request: DeviceSettingsUpdateRequest): Promise<DeviceSettingsSnapshot> {

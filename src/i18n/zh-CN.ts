@@ -741,6 +741,13 @@ export const zhCN = {
     },
     device: {
       configTitle: '设备设置',
+      connectionMethod: '连接方式',
+      usbMethod: 'USB 有线',
+      bleMethod: '蓝牙无线',
+      selectedDevice: '设置设备',
+      noSelectedDevices: '未发现设备，请连接后刷新',
+      refreshDevices: '刷新设备',
+      targetScope: '仅读写所选设备的配置，语音输入仍使用当前已连接的设备。',
       configDesc: '低功耗等待和自动关机可按插电/电池模式分别设置；蓝牙名称写入后可能需要重连。',
       configSourceWritable: '可写',
       configSourceReadOnly: '只读',

@@ -2388,6 +2388,21 @@ pub async fn get_device_settings(
 }
 
 #[tauri::command]
+pub async fn list_settings_devices() -> Result<Vec<crate::embedded_ble::settings_target::SettingsDevice>, String> {
+    device::list_settings_devices().await
+}
+
+#[tauri::command]
+pub async fn get_selected_device_settings(device: crate::embedded_ble::settings_target::SettingsDevice) -> Result<device::SelectedDeviceSettings, String> {
+    device::get_selected_device_settings(device).await
+}
+
+#[tauri::command]
+pub async fn set_selected_device_settings(device: crate::embedded_ble::settings_target::SettingsDevice, revision: u32, read_token: String, request: DeviceSettingsUpdateRequest) -> Result<device::SelectedDeviceSettings, String> {
+    device::set_selected_device_settings(device, revision, read_token, request).await
+}
+
+#[tauri::command]
 pub async fn set_device_settings(
     coord: CoordinatorState<'_>,
     app: AppHandle,

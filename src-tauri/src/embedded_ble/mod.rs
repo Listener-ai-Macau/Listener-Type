@@ -19,6 +19,7 @@ pub const LISTENER_OTA_V1_SERVICE_UUID_TEXT: &str = denzic_ota_core::GATT_SERVIC
 pub const LISTENER_OTA_V1_CONTROL_UUID_TEXT: &str = denzic_ota_core::GATT_CONTROL_UUID;
 pub const LISTENER_OTA_V1_DATA_UUID_TEXT: &str = denzic_ota_core::GATT_DATA_UUID;
 pub const LISTENER_OTA_V1_STATUS_UUID_TEXT: &str = denzic_ota_core::GATT_STATUS_UUID;
+pub mod settings_target;
 pub const DIAGNOSTIC_EVENT_BYTES: usize = denzic_observability_v1_core::DIAG_LOG_EVENT_WIRE_BYTES;
 pub const DIAGNOSTIC_CHUNK_HEADER_BYTES: usize =
     denzic_observability_v1_core::DIAG_LOG_CHUNK_HEADER_BYTES;

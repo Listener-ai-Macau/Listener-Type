@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ShortcutRecorder } from '../../components/ShortcutRecorder';
 import { detectOS } from '../../components/WindowChrome';
 import { SelectLite } from '../../components/ui/SelectLite';
 import {
   cancelVoiceprintEnrollment,
-  getDeviceSettings,
+  listSettingsDevices,
+  getSelectedDeviceSettings,
+  setSelectedDeviceSettings,
   getEmbeddedBleRuntimeStatus,
   getVoiceprintStatus,
   listInstalledApplications,
   deleteVoiceprint,
-  setDeviceSettings,
   startVoiceprintEnrollment,
   retryVoiceprintSave,
 } from '../../lib/ipc';
@@ -24,6 +25,7 @@ import type {
   DeviceKnobRotationAction,
   DeviceSettingsSnapshot,
   DeviceSettingsUpdateRequest,
+  SettingsDevice,
   InstalledApplication,
   PostDictationKey,
   ShortcutBinding,
@@ -314,6 +316,15 @@ function DeviceFirmwareSettingsCard() {
   const { t } = useTranslation();
   const { prefs, updatePrefs: savePrefs } = useHotkeySettings();
   const [snapshot, setSnapshot] = useState<DeviceSettingsSnapshot | null>(null);
+  const [devices, setDevices] = useState<SettingsDevice[]>([]);
+  const [transport, setTransport] = useState<'usb' | 'ble'>('usb');
+  const [selectedDevice, setSelectedDevice] = useState<SettingsDevice | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [readToken, setReadToken] = useState('');
+  const [listing, setListing] = useState(false);
+  const listGeneration = useRef(0);
+  // Invalidates late reads after switching device or unmounting the page.
+  const requestGeneration = useRef(0);
   const [form, setForm] = useState<DeviceSettingsUpdateRequest>({
     statusLedBrightnessPercent: DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
     keyLedBrightnessPercent: DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
@@ -438,31 +449,69 @@ function DeviceFirmwareSettingsCard() {
     }
   };
 
-  const refresh = async () => {
+  const refresh = async (device = selectedDevice) => {
+    if (!device) return;
+    const generation = ++requestGeneration.current;
+    setSnapshot(null);
+    setRevision(0);
+    setReadToken('');
     setStatus(previous => (previous === 'saving' ? previous : 'loading'));
     setMessage('');
     try {
       const value = await withTimeout(
-        getDeviceSettings(),
+        getSelectedDeviceSettings(device),
         DEVICE_SETTINGS_READ_TIMEOUT_MS,
         t('settings.device.readTimeout', '读取超时，请确认设备仍连接后重试。'),
       );
-      setSnapshot(value);
-      if (value.source !== 'firmware') {
+      if (generation !== requestGeneration.current || value.device.id !== device.id) return;
+      setSnapshot(value.snapshot);
+      if (value.snapshot.source !== 'firmware') {
         setStatus('error');
         setMessage(t('settings.device.readRequired', '未能读取设备当前设置；保留原有内容，重新读取成功后才能写入。'));
         return;
       }
-      setForm(snapshotToForm(value));
+      setRevision(value.revision);
+      setReadToken(value.readToken);
+      setForm(snapshotToForm(value.snapshot));
       setStatus('idle');
     } catch (error) {
+      if (generation !== requestGeneration.current) return;
       setStatus('error');
       setMessage(error instanceof Error ? error.message : String(error));
     }
   };
 
+  const chooseDevice = (device: SettingsDevice | null) => {
+    ++requestGeneration.current;
+    setSelectedDevice(device);
+    setSnapshot(null);
+    setRevision(0);
+    setReadToken('');
+    setForm(current => ({ ...current, bleName: '' }));
+    setMessage('');
+    setStatus('idle');
+    if (device) { setTransport(device.transport); void refresh(device); }
+  };
+  const refreshDevices = async () => {
+    const generation = ++listGeneration.current;
+    setListing(true);
+    try {
+      const available = await listSettingsDevices();
+      if (generation !== listGeneration.current) return;
+      setDevices(available);
+      const current = selectedDevice && available.find(device => device.id === selectedDevice.id);
+      if (current) setSelectedDevice(current);
+      else if (selectedDevice) chooseDevice(null);
+      else chooseDevice(available.find(device => device.transport === transport) ?? available[0] ?? null);
+    } catch (error) {
+      if (generation !== listGeneration.current) return;
+      setMessage(error instanceof Error ? error.message : String(error));
+      setStatus('error');
+    } finally { if (generation === listGeneration.current) setListing(false); }
+  };
   useEffect(() => {
-    void refresh();
+    void refreshDevices();
+    return () => { ++requestGeneration.current; ++listGeneration.current; };
   }, []);
 
   useEffect(() => {
@@ -479,9 +528,9 @@ function DeviceFirmwareSettingsCard() {
     return () => window.removeEventListener('focus', refreshAuthoritativeDeviceState);
   }, [form, snapshot, status]);
 
-  const validationError = validateDeviceSettingsForm(form, t);
-  const writeDisabled = status === 'loading' || status === 'saving' || !!validationError || !snapshot?.writeSupported;
-  const readDisabled = status === 'loading' || status === 'saving';
+  const validationError = snapshot ? validateDeviceSettingsForm(form, t) : null;
+  const writeDisabled = listing || !selectedDevice || revision === 0 || status === 'loading' || status === 'saving' || !!validationError || !snapshot?.writeSupported;
+  const readDisabled = listing || !selectedDevice || status === 'loading' || status === 'saving';
   const controlsDisabled = !snapshot?.writeSupported || status === 'loading' || status === 'saving';
   const busyText = status === 'loading'
     ? t('settings.device.readingDetail', '正在读取设备设置...')
@@ -490,7 +539,9 @@ function DeviceFirmwareSettingsCard() {
       : '';
 
   const persistForm = async (nextForm: DeviceSettingsUpdateRequest) => {
-    if (writeDisabled) return;
+    if (writeDisabled || !selectedDevice) return;
+    const device = selectedDevice;
+    const generation = ++requestGeneration.current;
     const submittedForm: DeviceSettingsUpdateRequest = {
       ...nextForm,
       pluggedLowPowerEnabled: nextForm.pluggedLowPowerIdleMinutes > 0,
@@ -500,16 +551,21 @@ function DeviceFirmwareSettingsCard() {
     setMessage('');
     try {
       const value = await withTimeout(
-        setDeviceSettings(submittedForm),
+        setSelectedDeviceSettings(device, revision, readToken, submittedForm),
         DEVICE_SETTINGS_WRITE_TIMEOUT_MS,
         t('settings.device.writeTimeout', '写入超时，请确认设备仍连接后重试。'),
       );
-      setSnapshot(value);
-      setForm(snapshotToForm(value));
+      if (generation !== requestGeneration.current || value.device.id !== device.id) return;
+      setSnapshot(value.snapshot);
+      setRevision(value.revision);
+      setReadToken(value.readToken);
+      setForm(snapshotToForm(value.snapshot));
       setStatus('saved');
-      setMessage(t('settings.device.configSaved', '已发送到设备'));
+      setMessage(value.snapshot.detail ?? t('settings.device.configSaved', '已发送到设备'));
       window.setTimeout(() => setStatus(current => (current === 'saved' ? 'idle' : current)), 1800);
     } catch (error) {
+      if (generation !== requestGeneration.current) return;
+      setRevision(0);
       setStatus('error');
       setMessage(error instanceof Error ? error.message : String(error));
     }
@@ -564,6 +620,31 @@ function DeviceFirmwareSettingsCard() {
             </Btn>
           </div>
         </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, padding: '14px 0', borderTop: '1px solid var(--ol-line)' }}>
+        <label style={{ display: 'grid', gap: 6, fontSize: 12 }}>
+          {t('settings.device.connectionMethod', '连接方式')}
+          <SelectLite value={transport} disabled={status === 'saving' || listing}
+            ariaLabel={t('settings.device.connectionMethod', '连接方式')}
+            options={[{ value: 'usb', label: t('settings.device.usbMethod', 'USB 有线') }, { value: 'ble', label: t('settings.device.bleMethod', '蓝牙无线') }]}
+            onChange={method => { const next = method as 'usb' | 'ble'; setTransport(next); chooseDevice(devices.find(device => device.transport === next) ?? null); }} />
+        </label>
+        <label style={{ display: 'grid', gap: 6, fontSize: 12 }}>
+          {t('settings.device.selectedDevice', '设置设备')}
+          <SelectLite value={selectedDevice?.id ?? ''} disabled={status === 'saving' || listing}
+            ariaLabel={t('settings.device.selectedDevice', '设置设备')}
+            placeholder={t('settings.device.noSelectedDevices', '未发现设备，请连接后刷新')}
+            options={devices.filter(device => device.transport === transport).map(device => ({ value: device.id, label: device.label }))}
+            onChange={id => chooseDevice(devices.find(device => device.id === id) ?? null)} />
+        </label>
+        <Btn variant="ghost" size="sm" icon="refresh" disabled={status === 'saving' || listing} onClick={() => void refreshDevices()} style={{ alignSelf: 'end', justifySelf: 'start' }}>
+          {t('settings.device.refreshDevices', '刷新设备')}
+        </Btn>
+      </div>
+
+      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginBottom: 10 }}>
+        {t('settings.device.targetScope', '仅读写所选设备的配置，语音输入仍使用当前已连接的设备。')}
       </div>
 
       {busyText && (

@@ -701,6 +701,13 @@ export const ja: typeof zhCN = {
     },
     device: {
       configTitle: 'デバイス設定',
+      connectionMethod: '接続方法',
+      usbMethod: 'USB 有線',
+      bleMethod: 'Bluetooth 無線',
+      selectedDevice: '設定するデバイス',
+      noSelectedDevices: 'デバイスを接続して更新してください',
+      refreshDevices: 'デバイスを更新',
+      targetScope: '設定は選択したデバイスにのみ適用されます。音声入力の接続先は変わりません。',
       configDesc: '低電力待機と自動電源オフは、接続中/バッテリーの各モードで個別に設定できます。Bluetooth 名の反映には再接続が必要な場合があります。',
       configSourceWritable: '書き込み可',
       configSourceReadOnly: '読み取り専用',

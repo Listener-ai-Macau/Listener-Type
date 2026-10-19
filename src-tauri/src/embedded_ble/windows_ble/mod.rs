@@ -3487,6 +3487,7 @@ fn remaining_ble_timeout(
 }
 
 include!("notify_open.rs");
+include!("settings_target.rs");
 
 fn ensure_paired_listener_for_advertisement_gatt(
     context: &str,
