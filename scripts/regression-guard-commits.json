@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T01:01:43.505578+08:00",
+  "updated_at": "2026-10-20T01:48:38.815041+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1934,7 +1934,7 @@
       "repo": "type",
       "commit": "d5a8ff6",
       "subject": "Keep negotiated link capacity separate from unchanged daily443 policy",
-      "state": "candidate62_native_capacity_regression_passed_msi_build_live_not_installed",
+      "state": "installed62_actual443_491_443_full_rf_passed_daily_restored_no_stable_gain",
       "protects": [
         "MTU517 capacity is500 image bytes; daily443 remains selected by packing policy, aligned251 may select491.",
         "The real61 aligned mode produced240/7229chunks because opening clamped capacity443. Do not count this as a491 field trial.",
@@ -1943,17 +1943,57 @@
       "machine_evidence": [
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\capacity62-native.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\passive-current-20261020-005452\\rf-private\\current-bond-independent-rf-proof.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\ota-current60-61-comparison.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\ota-current60-61-comparison.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/prepared-type62-capacity.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/type62-actual491-aba.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-012656/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/daily-baseline-type62-fw32.json"
       ],
       "guards": [
         "Actual source capacity/profile functions plus exact MTU517 counterexample Rust test compiled and executed independently."
       ],
       "machine_accepted_scope": [
-        "Native capacity regression only.62 is building and uninstalled. Actual491 gain is unproven; original22/CD goal still open."
+        "Installed62/source d5a8ff6: actual3917/3534/3917 chunks, sealed unchanged32 whole-image RF in A/B/A.108.356825/109.859318/107.172175 decimalKB/s; single B +1.944% versus mean A does not establish a stable gain. Daily443 and FW32 restored, onboard profile/core preserved. Original22/CD scope remains open."
       ]
+    },
+    {
+      "id": "firmware35_isolated_receiver_trial",
+      "repo": "firmware",
+      "commit": "66f5daf",
+      "subject": "Exact FW32-base additive receiver timing, actual full-image telemetry",
+      "state": "timing35_full_rf_actual_3917_processed_restored32",
+      "protects": [
+        "Exact selected E1 board and raw incoming FW32 image; verify candidate runtime before measurement and exact FW32 after reboot. Preserve Type/pairing/profile/core. Overlapping queue/Flash timings must not be added to RF duration."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-011642/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-011642/csa2-events.json"
+      ],
+      "machine_accepted_scope": [
+        "Received/processed3917; Flash442calls5569ms/max178485us and queue max32. Actual full incoming32 image, fresh32 runtime restoration."
+      ],
+      "guards": []
+    },
+    {
+      "id": "firmware36_isolated_receiver_trial",
+      "repo": "firmware",
+      "commit": "3a51995",
+      "subject": "Isolated PSRAM96 payload queue, actual backend confirmed, no steady throughput gain",
+      "state": "queue36_actual_psram96_full_rf_no_steady_gain_not_promoted_restored32",
+      "protects": [
+        "Exact selected E1 board and raw incoming FW32 image; verify candidate runtime before measurement and exact FW32 after reboot. Preserve Type/pairing/profile/core. Overlapping queue/Flash timings must not be added to RF duration."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-012656/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-012656/csa2-events.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual PSRAM=1/depth96/storage50304B, max queue50. RF107.573432KB/s remains within443 baseline; not promoted. Fresh32 restoration and onboard configuration preserved."
+      ],
+      "guards": []
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T01:01:43.505578+08:00",
+  "feature_routes_updated_at": "2026-10-20T01:48:38.815041+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -2210,7 +2250,9 @@
         "sniffer129_current_peer_complete_long_image_cold_warm_separation",
         "current60_e1_current32_full_rf_image",
         "ota_selected_peer_parameters_only61",
-        "ota_capacity62_not_daily_packing"
+        "ota_capacity62_not_daily_packing",
+        "firmware35_isolated_receiver_trial",
+        "firmware36_isolated_receiver_trial"
       ],
       "paths": {
         "type": [
@@ -2439,13 +2481,15 @@
     },
     {
       "id": "device-settings-target-selection",
-      "baseline_state": "installed58_fw31_single_current_peer_read_write_restore_passed",
-      "accepted_scope": "Current F3 single-device complete BLE read/write/restore and editable-draft behavior. Exact address/capture-bound borrowed service; not two-board or rename/reconnect acceptance.",
+      "baseline_state": "installed60_fw32_single_peer_write_read_restore_and_reboot_persistence_passed",
+      "accepted_scope": "Selected-board name, LED zones, power, voice automation and onboard key/knob settings; exact target/read lease/revision guards. Real E1 single-board write/read/restore and normal-reboot persistence; native C two-NVS-bank isolation. Two physical boards together and physical HID presses remain unclaimed.",
       "guard_entries": [
         "explicit_device_settings_usb_ble_target_and_read_lease",
         "firmware_full_ble_settings_snapshot_additive_revision_characteristic",
         "device_settings_editable_draft_shared_selected_peer",
-        "device_settings_live_service_exact_peer_and_draft58"
+        "device_settings_live_service_exact_peer_and_draft58",
+        "device_onboard_keys60_exact_uid_and_bounded_transaction",
+        "firmware32_device_owned_profiles_atomic_nvs"
       ],
       "paths": {
         "type": [
@@ -2460,10 +2504,10 @@
       },
       "known_failures": [
         "Original52c2 settings GET was USB-only while SET used active BLE / USB / fresh BLE fallback; a UI label alone cannot bind the destination.",
-        "Current peer is F83469CA5C53, not historical CDB2F668B535. 17:32 tracking-only capture has only3 target RF records and no connection follow; no old key reuse, full RF, speed or device-loss claim.",
+        "Historical 2026-10-19 peer was F83469CA5C53, not historical CDB2F668B535. 17:32 tracking-only capture has only3 target RF records and no connection follow; no old key reuse, full RF, speed or device-loss claim.",
         "Type54 fff0bf2 clears snapshot/name then disables all edits if read fails.",
         "2026-10-19 old F8 target fails while connected same-name Listener is F3371BC799AF.",
-        "Current F3 audio-service open returns SharingViolation4/AccessDenied3; DIS read succeeds. Holder remains unproven until update verification."
+        "Historical57 F3 audio-service open returned SharingViolation4/AccessDenied3; DIS read succeeds. 58 later reused the exact active notify service; the old failure remains preserved."
       ]
     },
     {
