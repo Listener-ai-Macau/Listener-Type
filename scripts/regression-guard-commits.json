@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T13:14:22.338370+08:00",
+  "updated_at": "2026-10-19T15:48:01.835343+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1581,6 +1581,24 @@
       ],
       "candidatePackageSha256": "ad42b6c400b7a253f123b96474db57f43c218aa29778bfc4065baf4cf524ec70",
       "known_scope": "One complete real rawOTA RF3908/3908; preceding127 run3906/3908. Full coverage means observed CRC/MIC exact image bytes, not every emptyACK or universal zero loss. Product original transfer21706ms; exact RF image span20.9445s≈82.65decimalKB/s. No160KB/s or speed-gain acceptance."
+    },
+    {
+      "id": "sniffer_host_reapply_fixed_reconnect_channel_after_start",
+      "repo": "firmware",
+      "commit": "21f39cc2284705efbbbab0d43cc3899b664e02b5",
+      "subject": "Preserve verified fixed-channel sniffer reconnect correction",
+      "state": "host_patch_applied_post_terminate_channel38_verified_second_link_not_captured",
+      "humanAccepted": false,
+      "validation_kind": "evidence_only",
+      "protects": [
+        "Do not allow receiver start() remembered-channel37 override to contradict fixed38 acquisition after terminate. Reapply passive configuration after start before declaring ready; refuse to overwrite a synchronized link.",
+        "Preserve actual before206 target advertisements on37 and after151 on38. This is not a throughput improvement or full second-link capture acceptance."
+      ],
+      "guards": [],
+      "known_scope": "Actual host collector SHA d0ad66278c7fefd1d20505098056554a2c74366379e8af21e8a327f10d7d9ca7 retained by exact patch; application127 unchanged; current original Type52c2/FW22 restored.",
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/fixed-reconnect-channel-root127.json"
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-19T13:14:22.338370+08:00",
@@ -1950,11 +1968,16 @@
           "tools/replay_saved_link.py",
           "src/passive_crypto.c",
           "tools/replay_control_counter_arm.py"
+        ],
+        "firmware": [
+          "tools/sniffer-fixed-reconnect-channel.patch",
+          "tools/sniffer-fixed-reconnect-channel-evidence.json"
         ]
       },
       "guard_entries": [
         "sniffer_known_csa2_counter_survives_missing_event_before_future_map",
-        "sniffer_ifs_jitter_preserves_direction_for_authenticated_map"
+        "sniffer_ifs_jitter_preserves_direction_for_authenticated_map",
+        "sniffer_host_reapply_fixed_reconnect_channel_after_start"
       ],
       "baseline_state": "installed127_actual_full_original_image_rf_3908_chunks_once_no_speed_gain",
       "accepted_scope": "One complete real rawOTA RF3908/3908; preceding127 run3906/3908. Full coverage means observed CRC/MIC exact image bytes, not every emptyACK or universal zero loss. Product original transfer21706ms; exact RF image span20.9445s≈82.65decimalKB/s. No160KB/s or speed-gain acceptance.",
