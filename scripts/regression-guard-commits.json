@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T00:00:51.995380+08:00",
+  "updated_at": "2026-10-20T00:47:08.586268+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1878,9 +1878,54 @@
       "machine_accepted_scope": [
         "00:00:35 same-image normal OTA reboot: onboard profile UID/revision5/content and core settings persisted; Type main/helper unchanged. No physical power-loss or two-board HID claim."
       ]
+    },
+    {
+      "id": "current60_e1_current32_full_rf_image",
+      "repo": "type",
+      "commit": "1ceb21a09d7bbf62ab670d7a6717570f08d651e9",
+      "subject": "Exact current E1 peer independently authenticated whole unchanged FW32 image",
+      "state": "installed60_fw32_complete_engineering_rf_no_stable_gain",
+      "protects": [
+        "Exact-peer proof must load E1 current Windows bond; no CD/F8 key fallback.",
+        "Complete image requires actual CRC/MIC/L2CAP/byte coverage, zero export losses; capture ready or handshake alone is insufficient.",
+        "Current32 engineering data does not qualify original22/CD same-board baseline. Preserve daily Type60/FW32 profiles during measurement."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-003439/rf-private/current-bond-independent-rf-proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-003439/diagnosis-current60.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current60-measure-20261020-003439/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/daily-baseline-type60-fw32.json"
+      ],
+      "guards": [
+        "python verify_current_capture.py --capture <sealed-rf> --image-profile current32"
+      ],
+      "machine_accepted_scope": [
+        "Actual1734832B/3917blocks, RF16.504183s105.114685 decimalKB/s. HCI3911 matched,6missing. Type/pairing/device settings preserved. No product gain/originalCD qualification."
+      ]
+    },
+    {
+      "id": "ota_selected_peer_parameters_only61",
+      "repo": "type",
+      "commit": "dd096dd55a867956b4b44c1b2eb0bf059c07bc7a",
+      "subject": "Remove OTA PowerOptimized requests to unrelated BLE devices",
+      "state": "candidate61_source_guard_passed_build_running_not_installed",
+      "protects": [
+        "OTA may retain ThroughputOptimized for the exact selected Listener; it may not enumerate other Connected BLE peers and alter their connection parameters.",
+        "Retain pre-BEGIN active-link convergence, secure reopen settle and recording/exclusive handoff protections."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/ota-scope61-contract.json",
+        "C:/Users/Billy/Desktop/Denzic/Companion/docs/releases/20261020-concurrent-listener-power-policy.json"
+      ],
+      "guards": [
+        "Compile and execute exact listener_ota_never_changes_unrelated_device_connection_parameters source guard"
+      ],
+      "machine_accepted_scope": [
+        "Source-scope guard only. Product candidate still building; no actual rate or unrelated-device runtime guarantee claimed. Full cargo lib currently fails older ActiveAudioControlRegistration test callers."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T00:00:51.995380+08:00",
+  "feature_routes_updated_at": "2026-10-20T00:47:08.586268+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -2122,8 +2167,8 @@
     },
     {
       "id": "ble-raw-throughput",
-      "baseline_state": "installed129_current_f8_3x_image_byte_complete_cold_warm_gaps_unresolved",
-      "accepted_scope": "Receiver129 actual currentF8 long34 image5194512B/11726chunks fully matched. RF58.03914s89.50KB/s; protocol59.786s86.89KB/s. DLE340us20.521s/early56.33KB/s; warm35s108.206KB/s,811.54B per7.5ms vs1256.25B at official167.5KB/s. Restored FW31 uncached build8c549829. No product source change or stable throughput gain; not every new connection captured. HistoricalCD107..109KB/s remains separate, not a same-board product gain.",
+      "baseline_state": "current60_fw32_e1_complete_rf_105kbps_original_cd_same_board_unqualified",
+      "accepted_scope": "Current Type60/FW32/E1 engineering image1734832B/3917chunks fully RF reconstructed:16.504183s105.114685KB/s, protocol17.309s. DATA251/2120 both directions; later RX1590 belongs next connection, not this DATA ceiling. Original CD/52c2/22 same-board evidence and stable product gain remain pending. Previous full F8 long34 cold/warm evidence retained separately.",
       "guard_entries": [
         "type_raw215_current40_comparison_rejected",
         "type_exclusive_ota_prepared_target_ownership",
@@ -2134,7 +2179,9 @@
         "sniffer_host_peer_bound_modes_reload_and_audio_stream_discovery",
         "sniffer_hardware_rx_export_clock_separate_from_legacy_follow_time",
         "sniffer129_current_peer_mic_live_clock_and_guarded_measure_restore",
-        "sniffer129_current_peer_complete_long_image_cold_warm_separation"
+        "sniffer129_current_peer_complete_long_image_cold_warm_separation",
+        "current60_e1_current32_full_rf_image",
+        "ota_selected_peer_parameters_only61"
       ],
       "paths": {
         "type": [
@@ -2162,7 +2209,10 @@
         "2026-10-19 F8 current-peer fixed37/38/39/hopping/unfiltered primes miss CONNECT. Actual ARM8 real vectors with F8 address substitution pass parsing/filtering; HCI shows1M initiation/noRPA. Candidate128 adds CRC/pre-filter counters, not a speed fix; awaiting physical DFU. Daily31 must be restored after any comparison.",
         "2026-10-19 exported timestamps use IRQ time minus arbitrary100us despite PPI END capture. Candidate129 separates export clock from legacy follow clock; ARM counterexample/full receive paths pass, physical install pending. Old ACK role0 headers require adjacency inference; no-observed ACK is not proof of silence.",
         "2026-10-19 receiver129: new-link sampling still intermittent on hopping/fixed38 despite one4057-DATA continuous sample. Receive counters connect_good=connect_bad=0 on missed runs, no export/queue drops. Two formal measurements refused before original22; do not treat analyzer miss as device loss or declare tool fully stable.",
-        "2026-10-19 F8 full long run: DLE time downgrades to340us20.521s, warm rate remains108.206KB/s. Prime release395.491ms before downshift correlates but is not unique causation. Prior permanent15ms throughput lease failure remains rejected; restoring108 alone is not completion."
+        "2026-10-19 F8 full long run: DLE time downgrades to340us20.521s, warm rate remains108.206KB/s. Prime release395.491ms before downshift correlates but is not unique causation. Prior permanent15ms throughput lease failure remains rejected; restoring108 alone is not completion.",
+        "20261020 fixed38 receives98 current E1 directed advertisements but0CONNECT; no measured transfer admitted. Existing hopping acquisition then obtained full image without any RESET/physical reboot.",
+        "Global connected-peer PowerOptimized policy from3f84ed7 can modify unrelated products;61 source removes it but speed effect not yet measured.",
+        "Filtered whole lib test compilation still fails ten old ActiveAudioControlRegistration::install two-argument test sites. Do not report library tests passed or weaken production identity requirement."
       ],
       "latest_observed_baseline": {
         "type_build": 42,
