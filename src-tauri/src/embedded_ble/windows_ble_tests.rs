@@ -240,10 +240,10 @@ fn listener_ota_target_open_primes_the_bounded_firmware_prepare_lease() {
 fn listener_ota_confirms_the_device_link_before_begin() {
     let source = include_str!("embedded_ble.rs");
     assert!(
-        source.contains("prime.close(\"before_begin_device_link_convergence\")")
+        source.contains("prime.close(\"first_device_confirmed_sync_progress\")")
             && source.contains("status.active_link_confirmed()")
             && source.contains("device confirmed active BLE link before BEGIN"),
-        "Type must release the temporary WinRT request and await device link confirmation before BEGIN"
+        "Type must retain the WinRT request until device-confirmed SYNC progress and still confirm the link before BEGIN"
     );
 }
 

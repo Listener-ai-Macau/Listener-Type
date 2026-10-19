@@ -283,6 +283,14 @@ fn listener_ota_v1_packet_payload(
         Some(value) => Err(format!("Unsupported {LISTENER_OTA_V1_PACKET_PROFILE_ENV}={value}; use daily or aligned251")),
     }
 }
+
+fn listener_ota_v1_sync_progress_confirms_prime(
+    sync_pending: bool, state: u8, error: u8, written: u32, expected: u32,
+) -> bool {
+    sync_pending && state == denzic_ota_core::STATE_RECEIVING
+        && matches!(error, denzic_ota_core::ERROR_NONE | denzic_ota_core::ERROR_OFFSET_MISMATCH)
+        && expected > 0 && written > 0 && written <= expected
+}
 // Dual-lane DATA+DATA_B + device reorder. The first response-bearing status
 // hands Windows' 15 ms firmware-update request back to the firmware-owned
 // 7.5 ms link. A 64-chunk first window bounds that warm-up while still exceeding
@@ -2919,6 +2927,7 @@ struct ListenerOtaV1Transport<'a> {
     status_error_started: Option<std::time::Instant>,
     control_sequence: u32,
     confirmed_image_size: Option<u32>,
+    sync_progress_pending: bool,
     encoded_raw_size: Option<u32>,
 }
 
@@ -3185,6 +3194,9 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
             };
             match result {
                 Ok(_) => {
+                    if is_sync {
+                        self.sync_progress_pending = true;
+                    }
                     log::info!(
                         "[embedded-ble] Denzic OTA v1 #{}: control boundary seq={} op={} pending_a={} pending_b={} flush_ms={} air_drain_ms={} control_after_flush_ms={}",
                         self.transfer_id,
@@ -3394,6 +3406,15 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
                         )
                     {
                         self.confirmed_image_size = Some(status.expected_size);
+                    }
+                    if listener_ota_v1_sync_progress_confirms_prime(
+                        self.sync_progress_pending, status.state, status.last_error,
+                        status.bytes_written, status.expected_size,
+                    ) {
+                        if let Some(prime) = self.target.throughput_request.as_ref() {
+                            prime.close("first_device_confirmed_sync_progress");
+                        }
+                        self.sync_progress_pending = false;
                     }
                 }
                 Ok(bytes)

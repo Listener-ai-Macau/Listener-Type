@@ -135,7 +135,10 @@ impl OpenListenerOtaV1Target {
         if !remaining_hold.is_zero() {
             std::thread::sleep(remaining_hold);
         }
-        prime.close("before_begin_device_link_convergence");
+        // Keep the request alive while its negotiated link is being checked.
+        // Releasing first races Windows' asynchronous DLE/interval update and
+        // can leave the firmware unable to accept BEGIN. The first confirmed
+        // SYNC progress owns release; errors still release via target Drop.
 
         let started = Instant::now();
         while started.elapsed() < LISTENER_OTA_PRE_BEGIN_LINK_TIMEOUT {
@@ -231,6 +234,7 @@ fn transfer_denzic_ota_v1_to_target(
         status_error_started: None,
         control_sequence: 0,
         confirmed_image_size: None,
+        sync_progress_pending: false,
         encoded_raw_size,
     };
     if target.data_b.is_some() {

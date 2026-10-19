@@ -666,12 +666,12 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
             && source.contains("fresh.converge_active_link_before_begin(")
             && source.contains("first_window_chunks: Some(LISTENER_OTA_V1_FIRST_WINDOW_CHUNKS as u16)")
             && source.contains("self.throughput_request.as_ref()")
-            && source.contains("prime.close(\"before_begin_device_link_convergence\")")
+            && source.contains("prime.close(\"first_device_confirmed_sync_progress\")")
             && source.contains("status.active_link_confirmed()")
             && source.contains("device confirmed active BLE link before BEGIN")
             && source.contains("self.closed.swap(true, Ordering::SeqCst)")
             && source.contains("request.close(\"target_drop\")"),
-        "Windows OTA must release ThroughputOptimized after DLE priming and await device-confirmed 7.5 ms/2M/DLE before BEGIN"
+        "Windows OTA must retain ThroughputOptimized through device-confirmed SYNC progress and preserve pre-BEGIN link checks"
     );
     let retain = source
         .find("OtaPreBulkMaintainHandoff::take_from(&mut target)")
