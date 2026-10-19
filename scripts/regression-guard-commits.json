@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T15:48:01.835343+08:00",
+  "updated_at": "2026-10-19T16:41:54.926976+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1599,9 +1599,28 @@
       "evidence": [
         "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/fixed-reconnect-channel-root127.json"
       ]
+    },
+    {
+      "id": "bonded_security_central_first_grace_with_generation_guard",
+      "repo": "firmware",
+      "commit": "c0e28bcd695a19cfdd33989bc727bd2ab660141b",
+      "subject": "fix(ble): defer redundant bonded security request during central encryption",
+      "state": "isolated_candidate_two_full_rf_trials_original_runtime_restored",
+      "humanAccepted": false,
+      "validation_kind": "evidence_only",
+      "protects": [
+        "Preserve peer-specific bonded central-first encryption with500ms one-shot fallback; never disable security, delete bonds, alter unbonded/recovery path or apply an old callback to a replacement connection.",
+        "Retain actual failed MTU-before-second-START_ENC_RSP/Windows0x3D counterexample and both successful candidate traces. Do not claim stable speed gain or universal reliability."
+      ],
+      "guards": [],
+      "known_scope": "ExactFW22 parent368d320e/platform31746955, unchanged generated config, native actual production before/after, ESP-IDF build, twice complete3908/3908 original-image RF and original FW22 restored. Public Type52c2/FW22 release unchanged.",
+      "evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\prepared-security28.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\raw215-narrow-time\\security-order-comparison.json"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-19T13:14:22.338370+08:00",
+  "feature_routes_updated_at": "2026-10-19T16:41:54.926976+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -2043,6 +2062,23 @@
         "Type51/native RAM-stub full sequence fails with wrapped USB Windows31. One minimal stub run succeeds; do not assert universal stub failure.",
         "Bundled espflash3.2 bulk write hardcodes verifyfalse and resets; explicit checksum before reset is required.",
         "Current replacement has no battery. USB-only power and3V3 stability remain hardware checks; no software brownout bypass."
+      ]
+    },
+    {
+      "id": "ble-bonded-encryption-reconnect",
+      "baseline_state": "candidate28_two_real_central_first_reconnects_full_rf_not_publicly_installed",
+      "accepted_scope": "Candidatec0e28bcd has two observed central-first one-handshake/no duplicate SMP SecurityRequest connections and full original-image RF. Native fallback/generation checks pass; indefinite stability and causal throughput gain unproven.",
+      "guard_entries": [
+        "bonded_security_central_first_grace_with_generation_guard"
+      ],
+      "paths": {
+        "firmware": [
+          "ports/esp32/ble_hid_gap/ble_hid_gap_esp32.c",
+          "tools/test_bonded_security_grace.py"
+        ]
+      },
+      "known_failures": [
+        "OriginalFW22 16:12 realWindows0x3D after ATT MTU response precedes second peripheral START_ENC_RSP; all observed nonempty packet MICs verify. Missing RF after actual disconnect is not analyzer packet loss."
       ]
     }
   ]
