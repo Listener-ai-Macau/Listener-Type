@@ -260,6 +260,15 @@ const LISTENER_OTA_V1_LL_PAYLOAD_BYTES: usize = 251;
 const LISTENER_OTA_V1_L2CAP_ATT_OFFSET_BYTES: usize = 4 + ATT_WRITE_HEADER_BYTES + 4;
 const LISTENER_OTA_V1_PACKET_PROFILE_ENV: &str = "LISTENER_OTA_PACKET_PROFILE";
 
+// ATT capacity describes the link, not the daily packing policy. Applying
+// the daily443 ceiling here made aligned251 select240 even at MTU517.
+fn listener_ota_v1_link_payload_capacity(att_payload_bytes: usize) -> usize {
+    att_payload_bytes
+        .saturating_sub(denzic_ota_core::DATA_HEADER_BYTES)
+        .min(LISTENER_OTA_V1_PROTOCOL_MAX_CHUNK_PAYLOAD_BYTES)
+        .max(1)
+}
+
 // One bounded, explicit trial profile; old packages and the daily default stay
 // compatible. This changes packing within v1's existing offset/max500 contract,
 // not its wire headers, image identity, reordering or checksum semantics.

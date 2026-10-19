@@ -3572,3 +3572,18 @@ fn known_address_cleanup_preserves_other_listener_boards_even_with_matching_name
     let body=&source[start..source[start..].find("fn clear_listener_bthport_cache_for_known_addresses_inner").unwrap()+start];
     assert!(body.contains("&target_names,\n        true,\n    )"));
 }
+
+#[test]
+fn aligned_ota_uses_real_capacity_while_daily_packing_remains443() {
+    // Actual MTU517 gives514 ATT value bytes. The old getter capped this
+    // capacity at443, causing the field trial to send7229 chunks of240.
+    let capacity = listener_ota_v1_link_payload_capacity(514);
+    assert_eq!(capacity, 500);
+    assert_eq!(listener_ota_v1_packet_payload(500, capacity, None).unwrap(), 443);
+    assert_eq!(listener_ota_v1_packet_payload(500, capacity, Some("daily")).unwrap(), 443);
+    assert_eq!(listener_ota_v1_packet_payload(500, capacity, Some("aligned251")).unwrap(), 491);
+    assert_eq!(listener_ota_v1_link_payload_capacity(244), 240);
+    assert_eq!(listener_ota_v1_packet_payload(500, 240, Some("aligned251")).unwrap(), 240);
+    assert_eq!(listener_ota_v1_packet_payload(443, capacity, Some("aligned251")).unwrap(), 240);
+    assert!(listener_ota_v1_packet_payload(500, 0, Some("aligned251")).is_err());
+}

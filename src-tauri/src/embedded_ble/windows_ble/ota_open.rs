@@ -2311,17 +2311,11 @@ fn listener_ota_v1_data_chunk_payload_bytes(
             );
             // Use what the link actually allows (minus data header). Bulk will be
             // slower until MTU rises, but BEGIN/data writes stay legal.
-            return payload_bytes
-                .saturating_sub(denzic_ota_core::DATA_HEADER_BYTES)
-                .max(1)
-                .min(LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES);
+            return listener_ota_v1_link_payload_capacity(payload_bytes);
         }
     }
 
-    payload_bytes
-        .saturating_sub(denzic_ota_core::DATA_HEADER_BYTES)
-        .min(LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES)
-        .max(1)
+    listener_ota_v1_link_payload_capacity(payload_bytes)
 }
 
 fn ota_env_value(value: String) -> Option<String> {
