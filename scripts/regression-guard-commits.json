@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T19:25:14.382604+08:00",
+  "updated_at": "2026-10-19T20:33:13.004790+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1702,9 +1702,29 @@
       "evidence": [
         "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/sniffer-rx-export-time-evidence.json"
       ]
+    },
+    {
+      "id": "sniffer129_current_peer_mic_live_clock_and_guarded_measure_restore",
+      "repo": "firmware",
+      "commit": "2e591ec80ec2d0d3eba6b8989f92dc87a1bab61e",
+      "subject": "Preserve receiver129 live timing proof and guarded peer measurement workflow",
+      "commit_subject": "Preserve receiver129 live timing proof and guarded peer measurement workflow",
+      "state": "installed129_current_peer_continuous_sample_verified_whole_image_not_yet",
+      "humanAccepted": false,
+      "validation_kind": "evidence_only",
+      "guards": [],
+      "protects": [
+        "Receiver version and exact peer MIC proof must be real before loading a key; timestamps must use the recorded basis.",
+        "Formal throughput requires sustained current authenticated RF; missing CONNECT refuses the measured image.",
+        "Any original22 image attempt under the54/31 daily profile must restore exact31 in finally without quitting Type or cancelling recording."
+      ],
+      "known_scope": "Actual receiver129 installed;1437 clear CRCs pass, current F8 key9 unique nonempty MICs both directions,4057 CRC-valid DATA/159 MICs/8.407664s sample,2007 LE2M adjacency residuals149..151us. Whole current-peer original image and stable speed gain remain unproven; two gated measurements refused without product downgrade.",
+      "evidence": [
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/sniffer129-field-receive-evidence.json"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-19T19:25:14.382604+08:00",
+  "feature_routes_updated_at": "2026-10-19T20:33:13.004790+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1947,7 +1967,7 @@
     {
       "id": "ble-raw-throughput",
       "baseline_state": "complete_rf_three_current_peer_trials_event_tail_budget_not_uniquely_attributed_no_stable_speed_gain",
-      "accepted_scope": "Historical CD/Type52c2 full RF results remain108.44/107.33/109.25KB/s with5.31/2.19ms group/gap. Current daily Type54/FW31 peerF8 has no qualified full RF; do not compare boards as a speed gain. Prepared32/33 retain31 settings and are uninstalled.160KB/s and stable causal gain remain unproven.",
+      "accepted_scope": "Historical CD full image107..109KB/s remains distinct from current F8.129 installed/current F8 MIC proof and8.4s continuous sample are valid; hardware exported pair gaps149..151us. Current F8 full original-image coverage, stable speed improvement and160KB/s remain unproven. Type54/FW31 daily preserved.",
       "guard_entries": [
         "type_raw215_current40_comparison_rejected",
         "type_exclusive_ota_prepared_target_ownership",
@@ -1956,7 +1976,8 @@
         "type_optional_ota_data_lane_discovery_errors",
         "firmware_ble_only_ota_timing_summary",
         "sniffer_host_peer_bound_modes_reload_and_audio_stream_discovery",
-        "sniffer_hardware_rx_export_clock_separate_from_legacy_follow_time"
+        "sniffer_hardware_rx_export_clock_separate_from_legacy_follow_time",
+        "sniffer129_current_peer_mic_live_clock_and_guarded_measure_restore"
       ],
       "paths": {
         "type": [
@@ -1982,7 +2003,8 @@
         "2026-10-19 08:20:48 exact Listener PnP restart returned0 but did not obtain a fresh link: RF CONNECT0, exported HCI no Disconnect/ConnectionComplete, same0x0800 ACL before104/after124, boundary112.421ms. OTA admission refused; OTA not sent. Do not retry PnP restart as proof of physical reconnect. Evidence E:/ListenerAnalysisState/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/target-restart-20261019-082046/restart-link-result.json. Original executed controller is frozen with receipt hash. Next two-original-OTA prime/measured candidate requires separate authorization; prime never qualifies as RF measurement.",
         "2026-10-19 CE29 keeps verified security28, changes only CE1->ORIGINAL0. Actual full3908/3908 RF original-image, protocol16643ms/RF109.25KB/s; same5.31ms groups/2.19ms gaps vsCE1, no meaningful stable gain. OriginalFW22 restored. PriorSD2 failed retained; do not blind-cycle supported CE policies. Evidence prepared-ce29.json.",
         "2026-10-19 F8 current-peer fixed37/38/39/hopping/unfiltered primes miss CONNECT. Actual ARM8 real vectors with F8 address substitution pass parsing/filtering; HCI shows1M initiation/noRPA. Candidate128 adds CRC/pre-filter counters, not a speed fix; awaiting physical DFU. Daily31 must be restored after any comparison.",
-        "2026-10-19 exported timestamps use IRQ time minus arbitrary100us despite PPI END capture. Candidate129 separates export clock from legacy follow clock; ARM counterexample/full receive paths pass, physical install pending. Old ACK role0 headers require adjacency inference; no-observed ACK is not proof of silence."
+        "2026-10-19 exported timestamps use IRQ time minus arbitrary100us despite PPI END capture. Candidate129 separates export clock from legacy follow clock; ARM counterexample/full receive paths pass, physical install pending. Old ACK role0 headers require adjacency inference; no-observed ACK is not proof of silence.",
+        "2026-10-19 receiver129: new-link sampling still intermittent on hopping/fixed38 despite one4057-DATA continuous sample. Receive counters connect_good=connect_bad=0 on missed runs, no export/queue drops. Two formal measurements refused before original22; do not treat analyzer miss as device loss or declare tool fully stable."
       ],
       "latest_observed_baseline": {
         "type_build": 42,
@@ -2101,14 +2123,15 @@
     {
       "id": "ble-sniffer-usb-backpressure",
       "baseline_state": "installed127_three_historical_cd_full_images_current_f8_initial_capture_gap",
-      "accepted_scope": "127 actually captured three complete1731024B images on historicalCD, with CRC/MIC independent reconstruction. This does not certify every emptyACK or currentF8 capture.128 is only a receive-counter candidate; not installed. Preserve earlier126/125 failures below.",
+      "accepted_scope": "Historical CD full image107..109KB/s remains distinct from current F8.129 installed/current F8 MIC proof and8.4s continuous sample are valid; hardware exported pair gaps149..151us. Current F8 full original-image coverage, stable speed improvement and160KB/s remain unproven. Type54/FW31 daily preserved.",
       "guard_entries": [
         "sniffer_usb_sdk_backpressure_returns_without_dropping_transport_bytes",
         "sniffer_rf_export_bounded_without_per_packet_heap",
         "sniffer_recover_verified_channel_map_counter_gap_and_batch_output",
         "sniffer_direction_hint_drift_and_near_counter_probe_priority",
         "sniffer_raw_export_cached_wire_identical_fast_encoding",
-        "sniffer_host_peer_bound_modes_reload_and_audio_stream_discovery"
+        "sniffer_host_peer_bound_modes_reload_and_audio_stream_discovery",
+        "sniffer129_current_peer_mic_live_clock_and_guarded_measure_restore"
       ],
       "paths": {
         "sniffer": [
@@ -2132,7 +2155,8 @@
         "123 real load no USB reset, but raw queue128/drops13; native and actual ARM saved RF reject valid map counter171 when estimate136 (+4 search).124 corrects this saved counterexample; not yet live accepted.",
         "2026-10-19 11:08 product OTA handoff ACK then prepare timeout before image; target fails to return, no target advertisements in three short unfiltered channels. Treat peer recovery as separate from receiver USB/RF acceptance, do not repeat PnP restart or infer power cause.",
         "124 actual11:22 noUSB reset but37ms control worker and queue18/20drops; raw image17277B only. Direction/source hints corrupt counter estimates. Skipping wide non-scheduling control recovery loses checkpoint and yields16/21; rejected before installation.",
-        "125 real fixed38 follows24s through encrypted terminate but outputs7119 records and drops14572; generic nested protobuf encodes every packet and repeats on FULL, batch max10897us.126 caches wire-identical fixed raw-message encoding; actual complete capture pending."
+        "125 real fixed38 follows24s through encrypted terminate but outputs7119 records and drops14572; generic nested protobuf encodes every packet and repeats on FULL, batch max10897us.126 caches wire-identical fixed raw-message encoding; actual complete capture pending.",
+        "2026-10-19 receiver129: new-link sampling still intermittent on hopping/fixed38 despite one4057-DATA continuous sample. Receive counters connect_good=connect_bad=0 on missed runs, no export/queue drops. Two formal measurements refused before original22; do not treat analyzer miss as device loss or declare tool fully stable."
       ]
     },
     {
