@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T17:37:41.495061+08:00",
+  "updated_at": "2026-10-19T18:40:26.784513+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1663,9 +1663,28 @@
       "guards": [
         "python tools/test_ble_settings_snapshot.py"
       ]
+    },
+    {
+      "id": "sniffer_host_peer_bound_modes_reload_and_audio_stream_discovery",
+      "repo": "firmware",
+      "commit": "bc7837af390af0c01342c3bfc9a822a25331a55e",
+      "subject": "Retain exact receive-diagnostic source alongside host workflow",
+      "commit_subject": "Retain exact receive-diagnostic source alongside host workflow",
+      "state": "host_mode_and_idle_reload_physically_checked_rx128_candidate_not_installed",
+      "humanAccepted": false,
+      "validation_kind": "evidence_only",
+      "guards": [],
+      "protects": [
+        "Requested fixed/hop mode must reach the receiver unchanged; reload must not close COM or override active RX.",
+        "Do not restoreFW22 after daily54/FW31 settings update, reuse CD/F0 key on F8, label empty audio interval a pass, or assume old HCI handles."
+      ],
+      "known_scope": "Host source snapshot and concrete limited observations only; receiver127 remains installed.128 contains receive counters only and awaits DFU. No stable product speed gain or full new-F8 RF capture.",
+      "evidence": [
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/sniffer-host-workflow-evidence.json"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-19T17:37:41.495061+08:00",
+  "feature_routes_updated_at": "2026-10-19T18:40:26.784513+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1908,14 +1927,15 @@
     {
       "id": "ble-raw-throughput",
       "baseline_state": "complete_rf_three_current_peer_trials_event_tail_budget_not_uniquely_attributed_no_stable_speed_gain",
-      "accepted_scope": "Two FW28 CE1 complete3908/3908 original-image RF, protocol16778/16935ms and RF108.44/107.33KB/s, one CE29 CE0 complete with protocol16643ms/RF109.25KB/s. Same group5.31ms andgap2.19ms. Public/current original Type52c2/FW22 restored;160KB/s and causal stable gain not accepted.",
+      "accepted_scope": "Historical CD/Type52c2 full RF results remain108.44/107.33/109.25KB/s with5.31/2.19ms group/gap. Current daily Type54/FW31 peerF8 has no qualified full RF; do not compare boards as a speed gain. Prepared32/33 retain31 settings and are uninstalled.160KB/s and stable causal gain remain unproven.",
       "guard_entries": [
         "type_raw215_current40_comparison_rejected",
         "type_exclusive_ota_prepared_target_ownership",
         "type_raw240_current46_comparison_unproven",
         "firmware_sniffer_fresh_target_link_and_usb_timing",
         "type_optional_ota_data_lane_discovery_errors",
-        "firmware_ble_only_ota_timing_summary"
+        "firmware_ble_only_ota_timing_summary",
+        "sniffer_host_peer_bound_modes_reload_and_audio_stream_discovery"
       ],
       "paths": {
         "type": [
@@ -1939,7 +1959,8 @@
         "Later owned-handoff capture runners omitted the earlier actual-preconnection gate: the OTA could reuse a pre-capture physical link. Reintroduce fresh captured CONNECT/same-link crypto observations, not merely start the receiver earlier.",
         "Optional DATA_B .ok() hid discovery failures since1b25bb6.42c628a fixes classification with native before/after evidence; build50 dual-lane field observation does not establish a stable throughput gain.",
         "2026-10-19 08:20:48 exact Listener PnP restart returned0 but did not obtain a fresh link: RF CONNECT0, exported HCI no Disconnect/ConnectionComplete, same0x0800 ACL before104/after124, boundary112.421ms. OTA admission refused; OTA not sent. Do not retry PnP restart as proof of physical reconnect. Evidence E:/ListenerAnalysisState/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/target-restart-20261019-082046/restart-link-result.json. Original executed controller is frozen with receipt hash. Next two-original-OTA prime/measured candidate requires separate authorization; prime never qualifies as RF measurement.",
-        "2026-10-19 CE29 keeps verified security28, changes only CE1->ORIGINAL0. Actual full3908/3908 RF original-image, protocol16643ms/RF109.25KB/s; same5.31ms groups/2.19ms gaps vsCE1, no meaningful stable gain. OriginalFW22 restored. PriorSD2 failed retained; do not blind-cycle supported CE policies. Evidence prepared-ce29.json."
+        "2026-10-19 CE29 keeps verified security28, changes only CE1->ORIGINAL0. Actual full3908/3908 RF original-image, protocol16643ms/RF109.25KB/s; same5.31ms groups/2.19ms gaps vsCE1, no meaningful stable gain. OriginalFW22 restored. PriorSD2 failed retained; do not blind-cycle supported CE policies. Evidence prepared-ce29.json.",
+        "2026-10-19 F8 current-peer fixed37/38/39/hopping/unfiltered primes miss CONNECT. Actual ARM8 real vectors with F8 address substitution pass parsing/filtering; HCI shows1M initiation/noRPA. Candidate128 adds CRC/pre-filter counters, not a speed fix; awaiting physical DFU. Daily31 must be restored after any comparison."
       ],
       "latest_observed_baseline": {
         "type_build": 42,
@@ -2055,14 +2076,15 @@
     },
     {
       "id": "ble-sniffer-usb-backpressure",
-      "baseline_state": "installed126_basic_rx_pass_full_load_pending_new_board_supply_and_bond",
-      "accepted_scope": "Actual125 fixed38 captures fresh link,18 authenticated controls/0rejections/max1304us and24s to authenticated terminate during original OTA16756ms/Type928ms. RF export14572drops/crypto4852drops, only130908 image bytes; full RF not qualified. Previous three hop captures missed CONNECT, no USB failure.126 installed;192 byte-equivalence and512 queue records pass, live full-image qualification pending. Later126 basic377/377 CRC passes, target-offline attempts send no OTA. Current replacement7C4FAD13D67E has0 bonds; old F0 target absent. Do not reuse old bond key on replacement.",
+      "baseline_state": "installed127_three_historical_cd_full_images_current_f8_initial_capture_gap",
+      "accepted_scope": "127 actually captured three complete1731024B images on historicalCD, with CRC/MIC independent reconstruction. This does not certify every emptyACK or currentF8 capture.128 is only a receive-counter candidate; not installed. Preserve earlier126/125 failures below.",
       "guard_entries": [
         "sniffer_usb_sdk_backpressure_returns_without_dropping_transport_bytes",
         "sniffer_rf_export_bounded_without_per_packet_heap",
         "sniffer_recover_verified_channel_map_counter_gap_and_batch_output",
         "sniffer_direction_hint_drift_and_near_counter_probe_priority",
-        "sniffer_raw_export_cached_wire_identical_fast_encoding"
+        "sniffer_raw_export_cached_wire_identical_fast_encoding",
+        "sniffer_host_peer_bound_modes_reload_and_audio_stream_discovery"
       ],
       "paths": {
         "sniffer": [
