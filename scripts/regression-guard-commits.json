@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T06:16:15.021404+08:00",
+  "updated_at": "2026-10-20T07:06:51.689261+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -2703,9 +2703,130 @@
         "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/post-rx56-daily64-restored.json",
         "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-fields52-rx56-field-evidence.json"
       ]
+    },
+    {
+      "id": "firmware57_actual_cs_window_scalar_not_deadline",
+      "repo": "firmware",
+      "commit": "ea3136cba1d4b79084fcbd8ce1c884177655f7eb",
+      "subject": "Read actual controller CS event bounds and planner inputs without changing policy",
+      "commit_subject": "Read actual controller CS event bounds and planner inputs without changing policy",
+      "state": "actual57_recovery_scalar_cs7_plan8_no_formal_rf",
+      "protects": [
+        "Actual mapped CS+30/+32 are7/7, config21=1, progDelay3, planner8/8. Exact read-only pinned ROM access under guard.",
+        "Formal062929 RF admission failed; later recovery scalars cannot be called completeRF, packet-loss cause, hard4.375ms receive deadline or performance proof."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\window57-policy60-field-summary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\window57-linked-proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\window57-observer-native.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-window57-policy60-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual57_recovery_scalar_cs7_plan8_no_formal_rf"
+      ],
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\window57-policy60-field-summary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\window57-linked-proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\window57-observer-native.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-window57-policy60-field-evidence.json"
+      ]
+    },
+    {
+      "id": "firmware58_policy_ineligible_not_performance_failure",
+      "repo": "firmware",
+      "commit": "a2e2cd18264ff192751fd4772b9ad9ca71f11ce3",
+      "subject": "Trial a bounded raw-only vendor event window with exact feedback and ownership restore",
+      "commit_subject": "Trial a bounded raw-only vendor event window with exact feedback and ownership restore",
+      "state": "actual58_not_applied_reason5_rf_incomplete",
+      "protects": [
+        "Native feedback fixture does not prove the live policy applied. Actual recovery state2/reason5/old policy0/0, CS7/7; no measured transfer admitted.",
+        "Keep vendor ABI and guarded ownership restore, preserve original packet unchanged; do not retry this early one-shot latch as a valid performance comparison."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\window57-policy60-field-summary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\policy58-linked-proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\policy58-observer-native.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-window57-policy60-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual58_not_applied_reason5_rf_incomplete"
+      ],
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\window57-policy60-field-summary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\policy58-linked-proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\policy58-observer-native.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-window57-policy60-field-evidence.json"
+      ]
+    },
+    {
+      "id": "firmware59_initial_interval_and_readiness_latch_failure",
+      "repo": "firmware",
+      "commit": "2bb28e716addcdabcac0311c705519987bbfd390",
+      "subject": "Wait for the actual native OTA interval before claiming the one-shot window trial",
+      "commit_subject": "Wait for the actual native OTA interval before claiming the one-shot window trial",
+      "state": "actual59_initial48_67_deferrals_then_ineligible_no_policy_applied",
+      "protects": [
+        "Actual initial context100=48 with plan8/8;67 read-only deferrals then reason5 atoffset29681. No actual policy mutation and no formalRF measurement.",
+        "First-ineligible later inputs were not recorded: do not assert that a particular later CI or planner value was the live cause. Native58 and59 counterexamples separately prove readiness-latch defects in their exact sources."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\window57-policy60-field-summary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\policy59-linked-proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\policy59-observer-native.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-window57-policy60-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual59_initial48_67_deferrals_then_ineligible_no_policy_applied"
+      ],
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\window57-policy60-field-summary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\policy59-linked-proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\policy59-observer-native.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-window57-policy60-field-evidence.json"
+      ]
+    },
+    {
+      "id": "firmware60_actual_window8_feedback_restore_not_gain",
+      "repo": "firmware",
+      "commit": "1c7fb640bf8d02c6cec4e90ee35f5eba83796735",
+      "subject": "Bound readiness probes until all raw-window preconditions agree and retain final inputs",
+      "commit_subject": "Bound readiness probes until all raw-window preconditions agree and retain final inputs",
+      "state": "actual60_vendor_policy_applied_and_restored_recovery_scalar_only",
+      "protects": [
+        "At exact raw offset37655, actual policy0/0->2/1, CS7/7->8/8, duration8750->10000halfus, planner8/8 unchanged, operation10us, receipt state1/restore1/reason0/attempt1. Initial actualCI48, final24,84 bounded read-only deferrals.",
+        "Early first100-chunk readiness probes never mutate; unexpected mutation feedback rolls back immediately, stop/abort restores only owned original policy; exact IRAM/ROM ABI and original forwarding retained.",
+        "Recovery-only scalar observation, not formalfullRF or stable speed gain. CurrentE1 is not originalCD qualification; normal32 buildad73 and Type64/default443/PIDs/profile5 verified restored, public60/32 unchanged."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\window57-policy60-field-summary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\policy60-linked-proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\policy60-observer-native.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-window57-policy60-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual60_vendor_policy_applied_and_restored_recovery_scalar_only"
+      ],
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\window57-policy60-field-summary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\policy60-linked-proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\policy60-observer-native.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-window57-policy60-field-evidence.json"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T06:16:15.021404+08:00",
+  "feature_routes_updated_at": "2026-10-20T07:06:51.689261+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -2986,7 +3107,11 @@
         "firmware53_margin_scalar_recovery_only",
         "firmware54_rx_descriptor_both_runtime_paths",
         "firmware55_physical_rx_last_time_proved",
-        "firmware56_first_rx_is_current_retransmission"
+        "firmware56_first_rx_is_current_retransmission",
+        "firmware57_actual_cs_window_scalar_not_deadline",
+        "firmware58_policy_ineligible_not_performance_failure",
+        "firmware59_initial_interval_and_readiness_latch_failure",
+        "firmware60_actual_window8_feedback_restore_not_gain"
       ],
       "paths": {
         "type": [
@@ -3028,7 +3153,10 @@
         "Actual45 allocator retry hypothesis is negative in this run:8862/0failed,copy+entry<=26us in57samples;do not simply enlarge mbufs. Windows first-SYNC release1.193s is expected for15ms-to7.5ms policy, not a new regression. HCI has only selected handle ACL duringDATA but does not rule out empty polls or prove enabled scanning owns air gaps.",
         "47 early higher-offset freeze misses9of56HCI due actualdual-lane reordering. Do not extrapolate laststoredstart beyond minobservedperiod; v3 preservesonly47qualified partialjoins.48 actualall24GATT+final0 fixescoverage.",
         "PublicROM symbol takesprecedence over archive noflash intent. Initial47uninstalled52831fd placementassumption rejectedbeforedevicewrite; f441418checks realROMcode andremovesnoopconfiguration.",
-        "Do not infer runtimeeffectiveRxTime1064 solelyfromROMmax_eff_table source. ActualSDKprivatebranch,raw duration unitsandendcause remain tobe measured/read beforepolicychanges."
+        "Do not infer runtimeeffectiveRxTime1064 solelyfromROMmax_eff_table source. ActualSDKprivatebranch,raw duration unitsandendcause remain tobe measured/read beforepolicychanges.",
+        "2026-10-20 57/58/59/60 first-link RF acquisition misses retained: no measured OTA admitted, normal32 restored. Later recovery can have a different authenticated connection; do not merge it into a failed formal acquisition.",
+        "58/59 one-shot readiness latches can leave intended policy unapplied; native-positive feedback alone cannot claim live policy.60 actual raw CS7->8/restore is proved only by recovery scalar, not stable speed or full RF.",
+        "59 analysis-controller edit lost the independent allocator-only if; no59 physical run reached it due failed RF admission.60 restored its scope and preserved executed sources; do not repeat full-CHECK work from a mislabeled tool gate."
       ],
       "latest_observed_baseline": {
         "type_build": 42,
