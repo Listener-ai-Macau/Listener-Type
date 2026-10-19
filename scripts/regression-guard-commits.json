@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T03:49:29.200783+08:00",
+  "updated_at": "2026-10-20T04:16:28.485896+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -2212,9 +2212,79 @@
       "machine_accepted_scope": [
         "Engineering diagnosis excludes allocation retry waiting in this measured run.57HCI/24GATT and exact-pointer timing;1068CSA2 events/0channel mismatch.572 adjacent repeats remain. No speed or controller-limit qualification."
       ]
+    },
+    {
+      "id": "firmware46_owned_controller_states_actual",
+      "repo": "firmware",
+      "commit": "6bbec42b41894561718ac7f73bc999c043741e32",
+      "subject": "firmware46 owned controller states actual",
+      "state": "actual_full_raw_rf_owned_iram_observer_no_event_reason_claim",
+      "protects": [
+        "Install controller callback only if current pointer empty; stop on all original wire release paths anddetach only while stillself-owned. Foreign callbacks never replaced/cleared.",
+        "Actual callback+timer/critical codeIRAM andstateDRAM; native raw/foreign/lost-owner/stop-preserved/circular/freeze tests cover observer boundaries, not fulldevice concurrency.",
+        "Actual46 raw32RF107.877KBps/protocol16891ms;31complete1to0 pairs,median6074us andnextgap1426us,maxcallback3us. Opaque0 isafterframe/skipISR,not an end-reason enum."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-035544/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/event46-linked-proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/event46-observer-native.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-controller-events46-48-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual_full_raw_rf_owned_iram_observer_no_event_reason_claim"
+      ]
+    },
+    {
+      "id": "firmware47_rom_counter_and_partial_window_limits",
+      "repo": "firmware",
+      "commit": "f44141844c2c6817f1e3268ba9ef99f93d2a8f5a",
+      "subject": "firmware47 rom counter and partial window limits",
+      "state": "actual_rom_counter_partial_alignment_preserved_not_full_window",
+      "protects": [
+        "52831fd noflash intent didnot replace absoluteROM symbol; neverinstalled. f441418 removesplacementchange andchecks actualROM400041e8->4001c898, context124 read andISR-aware OSI20/24, exactSDK/ROM SHA pinned.",
+        "Counter getter onlyreads existing context through actualROM; do not guess a publicprototype or mutate controller tables. Nativeuint16 packing andforeigncallback guards remain.",
+        "47 fullrawRF105.853KBps/protocol17174ms and64states passed originalgate; higheroffset froze early due realdual-lane reorder. Only47of56 HCI fragments qualified inside stored events,9outside. V1/V2 postanalysis falsely reused lateststart beyondactualnextperiod; preserve them, usev3 explicitcoverage anddo not callfullalignment."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-040513/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-040513/controller-radio-counter-join-v3.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/event47-linked-proof.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/event47-observer-native.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-controller-events46-48-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual_rom_counter_partial_alignment_preserved_not_full_window"
+      ]
+    },
+    {
+      "id": "firmware48_full_sample_controller_rf_event_alignment",
+      "repo": "firmware",
+      "commit": "060531b72f765919e617abd241d3c81e17abd7d5",
+      "subject": "firmware48 full sample controller rf event alignment",
+      "state": "actual_all54_hci_32_event_counter_join_no_stable_speed_gain",
+      "protects": [
+        "Freeze after all24actualsampledGATTcallbacks thenfinalstate0,not onfirsthigheroffset. Higheroffset-before-earlierSDU nativecounterexample passes.",
+        "Actual64rows contain32completepairs,noedgepartials; earlieststart<=allHCI<=last0. Actual32devicecounters matchuniquelyCSA2-verifiedRF;all54HCI fragments insidewindow,48nonrepeat+6repeat exacteventcounter correspondence.",
+        "Current48raw32 full3917chunks/1734832B RF106.034KBps/protocol17197ms,callbackmax5us,interval7500us,median1to0=6074.5us,nextgap1425us. No stablegain or originalCD qualification.",
+        "Repeat-tail correlateddevice intervals median6070us(n17) versus6475us(n15)withoutnext-eventrepeat. Unknownstate1phase/processing remains; correlationnot a proven endcause or absolute airboundary.",
+        "Normal62/default443+32/profile5restored,sameTypeprocesses,noreset/rebond/UI focus/publicartifact change."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-041038/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-041038/controller-radio-counter-join.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current62-measure-20261020-041038/controller-tail-covariation.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/post-event48-daily62-restored.json",
+        "C:/Users/Billy/Desktop/Denzic/Listener/Listener-Firmware/tools/ble-controller-events46-48-field-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "actual_all54_hci_32_event_counter_join_no_stable_speed_gain"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T03:49:29.200783+08:00",
+  "feature_routes_updated_at": "2026-10-20T04:16:28.485896+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -2456,8 +2526,8 @@
     },
     {
       "id": "ble-raw-throughput",
-      "baseline_state": "installed62_default443_fw32_restored_after_actual45_allocation_trace_no_stable_gain",
-      "accepted_scope": "Current62/FW32/E1 restored with profile5/core and Type preserved. Isolated40/41/42 complete3917chunk/1734832B RF. Offset-free timing identifies2.25ms extra before HCI at sampled repeats; absolute receive acceptance unresolved. Actual42 peripheralTX/hostRX1064 versus control2120 yields106.285760 vs105.546401KBps, no stable gain; hostTX remains2120. Earlier originalCD/FW22 same-board and160 exploration remain unfinished. Prior62 actual491 A/B/A passed, no stable gain, default443 retained. RAM44 actual whole1734832B PSRAM/zeroOTAFlash DATA passed;1812events CSA2/0mismatch,947adjacent repeats persist. RAM106.730/107.877 versus40controls105.546/104.890KBps not yet stable product gain. Daily62/32/profile5 restored. Alloc45 actual8862 allocations/0failures/max26us,57exact-pointer samples,complete raw32 RF105.925KBps. Offset-free sampled2.25ms wait already before allocation. No stable speed gain;normal62/32/profile5restored.",
+      "baseline_state": "installed62_default443_fw32_restored_after48_full_sample_counter_alignment_no_stable_gain",
+      "accepted_scope": "Current62/FW32/E1 restored with profile5/core and Type preserved. Isolated40/41/42 complete3917chunk/1734832B RF. Offset-free timing identifies2.25ms extra before HCI at sampled repeats; absolute receive acceptance unresolved. Actual42 peripheralTX/hostRX1064 versus control2120 yields106.285760 vs105.546401KBps, no stable gain; hostTX remains2120. Earlier originalCD/FW22 same-board and160 exploration remain unfinished. Prior62 actual491 A/B/A passed, no stable gain, default443 retained. RAM44 actual whole1734832B PSRAM/zeroOTAFlash DATA passed;1812events CSA2/0mismatch,947adjacent repeats persist. RAM106.730/107.877 versus40controls105.546/104.890KBps not yet stable product gain. Daily62/32/profile5 restored. Alloc45 actual8862 allocations/0failures/max26us,57exact-pointer samples,complete raw32 RF105.925KBps. Offset-free sampled2.25ms wait already before allocation. No stable speed gain;normal62/32/profile5restored. Controller48 full54HCI/32eventcounter join complete,64states coverall24sampledSDUs. Median6074.5us recordedstate1to0 and1425usgap;repeat-tail intervals correlate,not proven endreason. 106.034KBps no stablegain;normal62/32restored.",
       "guard_entries": [
         "type_raw215_current40_comparison_rejected",
         "type_exclusive_ota_prepared_target_ownership",
@@ -2483,7 +2553,10 @@
         "firmware42_actual_local1064_no_stable_gain",
         "firmware43_ram_stage_snapshot_evicted",
         "firmware44_zero_ota_flash_data_tail_persists",
-        "firmware45_pre_hci_allocator_retry_absent_actual_full_rf"
+        "firmware45_pre_hci_allocator_retry_absent_actual_full_rf",
+        "firmware46_owned_controller_states_actual",
+        "firmware47_rom_counter_and_partial_window_limits",
+        "firmware48_full_sample_controller_rf_event_alignment"
       ],
       "paths": {
         "type": [
@@ -2522,7 +2595,10 @@
         "43 fullRAM phase guard was INCOMPLETE because256-entry ring evicted pre-drain record during9.18s drain.44 snapshots scalar values and emits after drain; do not weaken the phase gate.",
         "44 actual zeroOTAFlash-DATA and worker-only receive still show947 adjacent-event repeats,5.505ms observed eventtail/1.995ms to nextanchor. EntireRAM staging alone does not solve main tail behavior; observed small rate difference not a stable product gain.",
         "032426 same daily62/32 preparation timed out before receiver40 installed; recovery32 succeeded withoutTypequit. Retry on confirmed new generation032527 completed fullRF control. Keep failure and pending root-cause work, do not label it a RAM-code regression.",
-        "Actual45 allocator retry hypothesis is negative in this run:8862/0failed,copy+entry<=26us in57samples;do not simply enlarge mbufs. Windows first-SYNC release1.193s is expected for15ms-to7.5ms policy, not a new regression. HCI has only selected handle ACL duringDATA but does not rule out empty polls or prove enabled scanning owns air gaps."
+        "Actual45 allocator retry hypothesis is negative in this run:8862/0failed,copy+entry<=26us in57samples;do not simply enlarge mbufs. Windows first-SYNC release1.193s is expected for15ms-to7.5ms policy, not a new regression. HCI has only selected handle ACL duringDATA but does not rule out empty polls or prove enabled scanning owns air gaps.",
+        "47 early higher-offset freeze misses9of56HCI due actualdual-lane reordering. Do not extrapolate laststoredstart beyond minobservedperiod; v3 preservesonly47qualified partialjoins.48 actualall24GATT+final0 fixescoverage.",
+        "PublicROM symbol takesprecedence over archive noflash intent. Initial47uninstalled52831fd placementassumption rejectedbeforedevicewrite; f441418checks realROMcode andremovesnoopconfiguration.",
+        "Do not infer runtimeeffectiveRxTime1064 solelyfromROMmax_eff_table source. ActualSDKprivatebranch,raw duration unitsandendcause remain tobe measured/read beforepolicychanges."
       ],
       "latest_observed_baseline": {
         "type_build": 42,
