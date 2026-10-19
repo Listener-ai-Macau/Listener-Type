@@ -317,6 +317,9 @@ pub(super) fn request_listener_ota_v1_active_link(
     if !active.readiness.is_ready() {
         return Err("Listener OTA v1 capture is not control-ready".to_string());
     }
+    let handoff_address = active.bluetooth_address.filter(|address| *address != 0).ok_or_else(|| {
+        "Listener OTA handoff has no exact active device address; reconnect this Listener before updating.".to_string()
+    })?;
     if let Some(correlation_id) = observability_correlation_id {
         let context = format!("TYPE:OBS:OTA:{correlation_id:016X}\n");
         match send_audio_control_via_sender(
@@ -345,8 +348,14 @@ pub(super) fn request_listener_ota_v1_active_link(
     );
         match result {
             Ok(()) => {
+                // The live capture is authoritative even after its discovery
+                // cache has expired. Preserve its exact peer before notify is
+                // released; an OTA service UUID alone does not identify a board.
+                remember_runtime_bluetooth_target_address_for_current(
+                    handoff_address, "successful active Listener OTA handoff",
+                );
                 log::info!(
-                    "[embedded-ble] Listener OTA v1 reconnect handoff sent via active capture"
+                    "[embedded-ble] Listener OTA v1 reconnect handoff sent via active capture address={handoff_address:012X}"
                 );
                 return Ok(());
             }

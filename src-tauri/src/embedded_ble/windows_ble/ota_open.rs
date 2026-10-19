@@ -47,7 +47,7 @@ fn open_listener_ota_v1_target_after_active_link_handoff(
     let native_windows_hid_addresses = native_windows_hid_pairing_addresses_for_startup();
     if native_windows_hid_addresses.contains(&address) {
         match open_listener_ota_v1_target_for_current_native_windows_hid_service_endpoint(
-            &native_windows_hid_addresses,
+            &[address],
             BLE_DISCOVERY_TIMEOUT,
         ) {
             Ok(target) => {
@@ -68,11 +68,11 @@ fn open_listener_ota_v1_target_after_active_link_handoff(
         }
     }
     log::warn!(
-        "[embedded-ble] Listener OTA v1 handoff direct address path exhausted; falling back to normal service discovery: {direct_error}"
+        "[embedded-ble] Listener OTA v1 handoff direct address path exhausted; falling back to same-address service discovery: {direct_error}"
     );
-    open_listener_ota_v1_target().map_err(|fallback_error| {
+    open_listener_ota_v1_target_for_identity(Some(address)).map_err(|fallback_error| {
         format!(
-            "Listener OTA v1 handoff direct address path failed: {direct_error}; normal service discovery fallback failed: {fallback_error}"
+            "Listener OTA v1 handoff direct address path failed: {direct_error}; same-address service discovery fallback failed: {fallback_error}"
         )
     })
 }
@@ -125,9 +125,9 @@ fn open_listener_ota_v1_target_after_active_link_handoff_with_deadline(
     let direct_error = direct_error.unwrap_or_else(|| {
         "verified Listener address did not expose a writable OTA v1 service".to_string()
     });
-    open_listener_ota_v1_target_with_deadline(deadline).map_err(|fallback_error| {
+    open_listener_ota_v1_target_for_identity_with_deadline(Some(address), deadline).map_err(|fallback_error| {
         format!(
-            "Listener OTA v1 handoff preflight direct address path failed: {direct_error}; normal service discovery fallback failed: {fallback_error}"
+            "Listener OTA v1 handoff preflight direct address path failed: {direct_error}; same-address service discovery fallback failed: {fallback_error}"
         )
     })
 }
@@ -185,6 +185,12 @@ fn open_listener_ota_v1_target_for_current_native_windows_hid_service_endpoint(
 }
 
 fn open_listener_ota_v1_target() -> Result<OpenListenerOtaV1Target, String> {
+    open_listener_ota_v1_target_for_identity(None)
+}
+
+fn open_listener_ota_v1_target_for_identity(
+    expected_address: Option<u64>,
+) -> Result<OpenListenerOtaV1Target, String> {
     let selector = GattDeviceService::GetDeviceSelectorFromUuid(LISTENER_OTA_V1_SERVICE_UUID)
         .map_err(|err| format!("Listener OTA v1 service selector failed: {err}"))?;
     let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
@@ -200,6 +206,9 @@ fn open_listener_ota_v1_target() -> Result<OpenListenerOtaV1Target, String> {
         .Size()
         .map_err(|err| format!("Listener OTA v1 service collection size failed: {err}"))?;
     if count == 0 {
+        if let Some(address) = expected_address {
+            return open_listener_ota_v1_target_for_device(address);
+        }
         return open_listener_ota_v1_target_from_cached_address(format!(
             "Listener OTA v1 service {LISTENER_OTA_V1_SERVICE_UUID:?} not found in Windows service index"
         ));
@@ -226,6 +235,10 @@ fn open_listener_ota_v1_target() -> Result<OpenListenerOtaV1Target, String> {
             }
         };
         let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
+        if !super::ota_target_identity::matches_handoff(expected_address, address) {
+            log::info!("[embedded-ble] skipping OTA service outside exact handoff identity index={index}");
+            continue;
+        }
         if !ble_candidate_allowed("Listener OTA v1", index, &name, address) {
             continue;
         }
@@ -275,6 +288,11 @@ fn open_listener_ota_v1_target() -> Result<OpenListenerOtaV1Target, String> {
         }
     }
 
+    if let Some(address) = expected_address {
+        return open_listener_ota_v1_target_for_device(address).map_err(|error| {
+            format!("Exact Listener OTA identity {address:012X} could not be opened: {error}")
+        });
+    }
     match open_listener_ota_v1_target_from_cached_address(
         last_error.unwrap_or_else(|| "No writable Listener OTA v1 service found".to_string()),
     ) {
@@ -284,6 +302,13 @@ fn open_listener_ota_v1_target() -> Result<OpenListenerOtaV1Target, String> {
 }
 
 fn open_listener_ota_v1_target_with_deadline(
+    deadline: Instant,
+) -> Result<OpenListenerOtaV1Target, String> {
+    open_listener_ota_v1_target_for_identity_with_deadline(None, deadline)
+}
+
+fn open_listener_ota_v1_target_for_identity_with_deadline(
+    expected_address: Option<u64>,
     deadline: Instant,
 ) -> Result<OpenListenerOtaV1Target, String> {
     let selector = GattDeviceService::GetDeviceSelectorFromUuid(LISTENER_OTA_V1_SERVICE_UUID)
@@ -331,6 +356,10 @@ fn open_listener_ota_v1_target_with_deadline(
             }
         };
         let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
+        if !super::ota_target_identity::matches_handoff(expected_address, address) {
+            log::info!("[embedded-ble] skipping OTA service outside exact handoff identity index={index}");
+            continue;
+        }
         if !ble_candidate_allowed("Listener OTA v1", index, &name, address) {
             continue;
         }
