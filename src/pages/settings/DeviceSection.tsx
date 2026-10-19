@@ -45,6 +45,7 @@ import {
   DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
 } from '../../lib/deviceSettingsDefaults';
 import { shouldRefreshDeviceSettingsOnFocus } from '../../lib/deviceSettingsRefresh';
+import { DeviceSettingsDraft } from '../../lib/deviceSettingsDraft';
 
 const DEVICE_KEYS = [
   { id: 'key1' },
@@ -319,12 +320,11 @@ function DeviceFirmwareSettingsCard() {
   const [devices, setDevices] = useState<SettingsDevice[]>([]);
   const [transport, setTransport] = useState<'usb' | 'ble'>('usb');
   const [selectedDevice, setSelectedDevice] = useState<SettingsDevice | null>(null);
-  const [revision, setRevision] = useState(0);
-  const [readToken, setReadToken] = useState('');
   const [listing, setListing] = useState(false);
   const listGeneration = useRef(0);
   // Invalidates late reads after switching device or unmounting the page.
   const requestGeneration = useRef(0);
+  const draft = useRef(new DeviceSettingsDraft());
   const [form, setForm] = useState<DeviceSettingsUpdateRequest>({
     statusLedBrightnessPercent: DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
     keyLedBrightnessPercent: DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
@@ -337,8 +337,12 @@ function DeviceFirmwareSettingsCard() {
     voiceAutoStopEnabled: true,
     pluggedAutoShutdownMinutes: 0,
     batteryAutoShutdownMinutes: DEFAULT_BATTERY_AUTO_SHUTDOWN_MINUTES,
-    bleName: prefs?.deviceBleName ?? '',
+    bleName: '',
   });
+  const editForm = (patch: Partial<DeviceSettingsUpdateRequest>) => {
+    draft.current.edit(patch);
+    setForm(current => ({ ...current, ...patch }));
+  };
   const [status, setStatus] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('loading');
   const [message, setMessage] = useState('');
   const [voiceprint, setVoiceprint] = useState<VoiceprintStatus | null>(null);
@@ -452,9 +456,6 @@ function DeviceFirmwareSettingsCard() {
   const refresh = async (device = selectedDevice) => {
     if (!device) return;
     const generation = ++requestGeneration.current;
-    setSnapshot(null);
-    setRevision(0);
-    setReadToken('');
     setStatus(previous => (previous === 'saving' ? previous : 'loading'));
     setMessage('');
     try {
@@ -470,9 +471,7 @@ function DeviceFirmwareSettingsCard() {
         setMessage(t('settings.device.readRequired', '未能读取设备当前设置；保留原有内容，重新读取成功后才能写入。'));
         return;
       }
-      setRevision(value.revision);
-      setReadToken(value.readToken);
-      setForm(snapshotToForm(value.snapshot));
+      setForm(draft.current.merge(snapshotToForm(value.snapshot)));
       setStatus('idle');
     } catch (error) {
       if (generation !== requestGeneration.current) return;
@@ -485,9 +484,10 @@ function DeviceFirmwareSettingsCard() {
     ++requestGeneration.current;
     setSelectedDevice(device);
     setSnapshot(null);
-    setRevision(0);
-    setReadToken('');
-    setForm(current => ({ ...current, bleName: '' }));
+    draft.current = new DeviceSettingsDraft();
+    // A new device must never inherit another board's draft. Defaults are
+    // display-only until readback; only explicitly edited fields are saved.
+    setForm({ statusLedBrightnessPercent: DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT, keyLedBrightnessPercent: DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT, knobLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT, edgeLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT, pluggedLowPowerIdleMinutes: DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES, batteryLowPowerIdleMinutes: 1, pluggedLowPowerEnabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED, voiceAutoStartEnabled: true, voiceAutoStopEnabled: true, pluggedAutoShutdownMinutes: 0, batteryAutoShutdownMinutes: DEFAULT_BATTERY_AUTO_SHUTDOWN_MINUTES, bleName: '' });
     setMessage('');
     setStatus('idle');
     if (device) { setTransport(device.transport); void refresh(device); }
@@ -528,55 +528,57 @@ function DeviceFirmwareSettingsCard() {
     return () => window.removeEventListener('focus', refreshAuthoritativeDeviceState);
   }, [form, snapshot, status]);
 
-  const validationError = snapshot ? validateDeviceSettingsForm(form, t) : null;
-  const writeDisabled = listing || !selectedDevice || revision === 0 || status === 'loading' || status === 'saving' || !!validationError || !snapshot?.writeSupported;
+  const validationError = snapshot || draft.current.has('bleName') ? validateDeviceSettingsForm({ ...form, bleName: form.bleName || (draft.current.has('bleName') ? '' : 'listener') }, t) : null;
+  const writeDisabled = listing || !selectedDevice || status === 'loading' || status === 'saving' || !!validationError;
   const readDisabled = listing || !selectedDevice || status === 'loading' || status === 'saving';
-  const controlsDisabled = !snapshot?.writeSupported || status === 'loading' || status === 'saving';
+  // Read failures and a missing device must not disable local draft editing.
+  const controlsDisabled = status === 'saving';
   const busyText = status === 'loading'
     ? t('settings.device.readingDetail', '正在读取设备设置...')
     : status === 'saving'
       ? t('settings.device.writingDetail', '正在写入设备设置...')
       : '';
 
-  const persistForm = async (nextForm: DeviceSettingsUpdateRequest) => {
+  const persistForm = async () => {
     if (writeDisabled || !selectedDevice) return;
     const device = selectedDevice;
     const generation = ++requestGeneration.current;
-    const submittedForm: DeviceSettingsUpdateRequest = {
-      ...nextForm,
-      pluggedLowPowerEnabled: nextForm.pluggedLowPowerIdleMinutes > 0,
-      pluggedAutoShutdownMinutes: 0,
-    };
+    const pendingDraft = draft.current;
     setStatus('saving');
     setMessage('');
     try {
+      // Read this one target immediately before writing. A draft does not need
+      // a previous successful read, and cached/default values are never sent.
+      const baseline = await withTimeout(getSelectedDeviceSettings(device), DEVICE_SETTINGS_READ_TIMEOUT_MS,
+        t('settings.device.readTimeout', '读取超时，请确认设备仍连接后重试。'));
+      if (generation !== requestGeneration.current || baseline.device.id !== device.id) return;
+      const submittedForm = pendingDraft.merge(snapshotToForm(baseline.snapshot));
+      const invalid = validateDeviceSettingsForm(submittedForm, t);
+      if (invalid) throw new Error(invalid);
       const value = await withTimeout(
-        setSelectedDeviceSettings(device, revision, readToken, submittedForm),
+        setSelectedDeviceSettings(device, baseline.revision, baseline.readToken, submittedForm),
         DEVICE_SETTINGS_WRITE_TIMEOUT_MS,
         t('settings.device.writeTimeout', '写入超时，请确认设备仍连接后重试。'),
       );
       if (generation !== requestGeneration.current || value.device.id !== device.id) return;
       setSnapshot(value.snapshot);
-      setRevision(value.revision);
-      setReadToken(value.readToken);
+      draft.current = new DeviceSettingsDraft();
       setForm(snapshotToForm(value.snapshot));
       setStatus('saved');
       setMessage(value.snapshot.detail ?? t('settings.device.configSaved', '已发送到设备'));
       window.setTimeout(() => setStatus(current => (current === 'saved' ? 'idle' : current)), 1800);
     } catch (error) {
       if (generation !== requestGeneration.current) return;
-      setRevision(0);
       setStatus('error');
       setMessage(error instanceof Error ? error.message : String(error));
     }
   };
-  const save = async () => persistForm(form);
+  const save = async () => persistForm();
   const saveVoiceAutomation = (
     patch: Partial<Pick<DeviceSettingsUpdateRequest, 'voiceAutoStartEnabled' | 'voiceAutoStopEnabled'>>,
   ) => {
-    const nextForm = { ...form, ...patch };
-    setForm(nextForm);
-    void persistForm(nextForm);
+    editForm(patch);
+    void persistForm();
   };
   const handleSettingsKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) {
@@ -663,7 +665,8 @@ function DeviceFirmwareSettingsCard() {
             value={form.bleName}
             maxLength={29}
             disabled={controlsDisabled}
-            onChange={event => setForm(current => ({ ...current, bleName: event.target.value }))}
+            placeholder="listener"
+            onChange={event => editForm({ bleName: event.target.value })}
             style={{ ...inputStyle, flex: '0 1 320px', maxWidth: 320 }}
           />
         </div>
@@ -687,11 +690,7 @@ function DeviceFirmwareSettingsCard() {
             lowPowerDesc={t('settings.device.pluggedLowPowerIdleDesc', '无操作多久后进入低功耗空闲。')}
             lowPowerValue={form.pluggedLowPowerIdleMinutes}
             disabled={controlsDisabled}
-            onLowPowerChange={value => setForm(current => ({
-              ...current,
-              pluggedLowPowerIdleMinutes: value,
-              pluggedLowPowerEnabled: value > 0,
-            }))}
+            onLowPowerChange={value => editForm({ pluggedLowPowerIdleMinutes: value, pluggedLowPowerEnabled: value > 0 })}
             t={t}
           />
           <PowerModeTimingGroup
@@ -704,8 +703,8 @@ function DeviceFirmwareSettingsCard() {
             autoShutdownDesc={t('settings.device.batteryAutoShutdownDesc', '电池供电且长时间空闲时自动关机。')}
             autoShutdownValue={form.batteryAutoShutdownMinutes}
             disabled={controlsDisabled}
-            onLowPowerChange={value => setForm(current => ({ ...current, batteryLowPowerIdleMinutes: value }))}
-            onAutoShutdownChange={value => setForm(current => ({ ...current, batteryAutoShutdownMinutes: value }))}
+            onLowPowerChange={value => editForm({ batteryLowPowerIdleMinutes: value })}
+            onAutoShutdownChange={value => editForm({ batteryAutoShutdownMinutes: value })}
             t={t}
           />
         </div>
@@ -892,10 +891,10 @@ function DeviceFirmwareSettingsCard() {
       )}
 
       <DeviceLedBrightnessGroup
-        supported={snapshot?.ledZoneBrightnessSupported ?? false}
+        supported={snapshot?.ledZoneBrightnessSupported ?? true}
         disabled={controlsDisabled}
         values={form}
-        onChange={(field, value) => setForm(current => ({ ...current, [field]: value }))}
+        onChange={(field, value) => editForm({ [field]: value })}
         t={t}
       />
 

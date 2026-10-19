@@ -305,8 +305,14 @@ pub fn with_settings_device<T>(
                 .strip_prefix("ble:")
                 .ok_or("Invalid Bluetooth settings identity")?;
             let _gate = BleFreshGattGuard::enter("selected settings")?;
-            let target = open_embedded_audio_status_target_for_service(
-                &HSTRING::from(id),
+            // Service IDs are cached across firmware reconnects. Resolve the
+            // selected peer afresh by its immutable address, as the proven
+            // status path does, while retaining the same device and service
+            // for this whole transaction. Never fall back to the voice target.
+            let address = parse_bluetooth_address_from_device_id(id)
+                .ok_or("Invalid selected Bluetooth device address")?;
+            let target = open_embedded_audio_status_target_for_device(
+                address,
                 Instant::now() + Duration::from_secs(5),
             )?;
             // Require our exact service, even if IPC was given a forged ID.

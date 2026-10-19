@@ -72,7 +72,7 @@ pub async fn get_selected_device_settings(
     device: SettingsDevice,
 ) -> Result<SelectedDeviceSettings, String> {
     run_device_settings_blocking("selected readback", move || {
-        settings_target::with_device(&device, |io| {
+        let result = settings_target::with_device(&device, |io| {
             let status = io.read()?;
             Ok(SelectedDeviceSettings {
                 read_token: issue_read_token(&device, status.settings_revision),
@@ -80,7 +80,12 @@ pub async fn get_selected_device_settings(
                 snapshot: device_settings_snapshot_from_status(status),
                 device: device.clone(),
             })
-        })
+        });
+        match &result {
+            Ok(_) => log::info!("[device-settings] selected read succeeded transport={} id={}", device.transport, device.id),
+            Err(error) => log::warn!("[device-settings] selected read failed transport={} id={} error={error}", device.transport, device.id),
+        }
+        result
     })
     .await
 }
