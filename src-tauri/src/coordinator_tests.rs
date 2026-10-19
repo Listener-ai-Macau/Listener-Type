@@ -892,11 +892,11 @@ fn embedded_ble_refresh_waits_for_startup_name_sync_gate() {
 
 #[test]
 fn global_preference_save_and_connection_never_push_device_keys() {
-    let commands=include_str!("commands/mod.rs");
+    let commands=std::include_str!("commands/mod.rs");
     let start=commands.find("let input_source_changed =").unwrap();
     let end=commands[start..].find("// refresh_tray_microphone_menu").unwrap()+start;
     assert!(!commands[start..end].contains("sync_device_firmware_preferences"));
-    assert!(!include_str!("coordinator/embedded_ble_runtime.rs").contains("sync_device_knob_rotation_action_to_firmware"));
+    assert!(!std::include_str!("coordinator/embedded_ble_runtime.rs").contains("sync_device_knob_rotation_action_to_firmware"));
 }
 
 #[tokio::test]

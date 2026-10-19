@@ -2793,8 +2793,7 @@ impl PreparedListenerOtaV1Transfer {
                     }
                 }
             };
-            let _concurrent_ble_power_guard =
-                request_concurrent_ble_power_optimized(fresh.bluetooth_address);
+            // OTA owns only this exact target; do not alter unrelated BLE links.
             if let Err(err) = fresh.converge_active_link_before_begin(transfer_guard.session_id()) {
                 log::warn!(
                     "[embedded-ble] Listener OTA v1: pre-BEGIN active-link convergence failed round={round}/{SECURE_REOPEN_ROUNDS}: {err}"

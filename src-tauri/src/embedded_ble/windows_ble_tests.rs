@@ -248,34 +248,24 @@ fn listener_ota_confirms_the_device_link_before_begin() {
 }
 
 #[test]
-fn listener_ota_rebalances_other_connected_ble_peers_during_bulk() {
-    let source = include_str!("embedded_ble.rs");
+fn listener_ota_never_changes_unrelated_device_connection_parameters() {
+    let opening = std::include_str!("windows_ble/ota_open.rs");
+    let transfer = std::include_str!("windows_ble/mod.rs");
     assert!(
-        source.contains(
-            "GetDeviceSelectorFromConnectionStatus(\n        BluetoothConnectionStatus::Connected"
-        ) && source.contains("BluetoothLEPreferredConnectionParameters::PowerOptimized()")
-            && source.contains("request_concurrent_ble_power_optimized(fresh.bluetooth_address)")
-            && source.contains("released concurrent BLE PowerOptimized request"),
-        "OTA must temporarily rebalance other connected BLE peers without disconnecting them"
-    );
-    let rebalance = source
-        .find("request_concurrent_ble_power_optimized(fresh.bluetooth_address)")
-        .expect("connected BLE peer rebalance should exist");
-    let converge = source[rebalance..]
-        .find("fresh.converge_active_link_before_begin")
-        .map(|offset| rebalance + offset)
-        .expect("device active-link convergence should follow peer rebalance");
-    let begin = source[converge..]
-        .find("transfer_denzic_ota_v1_to_target")
-        .map(|offset| converge + offset)
-        .expect("bulk transfer should follow active-link convergence");
-    assert!(
-        rebalance < converge && converge < begin,
-        "Windows must receive peer scheduling requests before pre-BEGIN convergence"
+        !opening.contains("PowerOptimized()")
+            && !opening.contains("GetDeviceSelectorFromConnectionStatus")
+            && !transfer.contains("request_concurrent_ble_power_optimized"),
+        "Listener OTA must not enumerate and slow other products on the shared controller"
     );
     assert!(
-        source.contains("let settle_ms = if round == 1 { 150 } else { 700 };"),
-        "secure reopen must retain a bounded first-round encryption settle"
+        opening.contains("device.RequestPreferredConnectionParameters(&params)")
+            && opening.contains("BluetoothLEPreferredConnectionParameters::ThroughputOptimized()"),
+        "the exact selected Listener still requests its own throughput parameters"
+    );
+    assert!(
+        transfer.contains("fresh.converge_active_link_before_begin")
+            && transfer.contains("let settle_ms = if round == 1 { 150 } else { 700 };"),
+        "selected-peer active convergence and secure reopen protection remain"
     );
 }
 
