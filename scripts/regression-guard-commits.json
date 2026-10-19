@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T16:41:54.926976+08:00",
+  "updated_at": "2026-10-19T16:52:31.285159+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1620,7 +1620,7 @@
       ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-19T16:41:54.926976+08:00",
+  "feature_routes_updated_at": "2026-10-19T16:52:31.285159+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -1862,8 +1862,8 @@
     },
     {
       "id": "ble-raw-throughput",
-      "baseline_state": "partial_physical_overhead_improved_target_incomplete",
-      "accepted_scope": "Current40/FW22 actual same-image transfer16836/total24791ms; no human or160KB/s acceptance.",
+      "baseline_state": "complete_rf_three_current_peer_trials_event_tail_budget_not_uniquely_attributed_no_stable_speed_gain",
+      "accepted_scope": "Two FW28 CE1 complete3908/3908 original-image RF, protocol16778/16935ms and RF108.44/107.33KB/s, one CE29 CE0 complete with protocol16643ms/RF109.25KB/s. Same group5.31ms andgap2.19ms. Public/current original Type52c2/FW22 restored;160KB/s and causal stable gain not accepted.",
       "guard_entries": [
         "type_raw215_current40_comparison_rejected",
         "type_exclusive_ota_prepared_target_ownership",
@@ -1893,7 +1893,8 @@
         "Current46 raw240 candidate47 actually measured once in A/B/A; neighboring slight benefit not stable or faster than prior46 best, exact46 restored. Further trial needs a new causal condition.",
         "Later owned-handoff capture runners omitted the earlier actual-preconnection gate: the OTA could reuse a pre-capture physical link. Reintroduce fresh captured CONNECT/same-link crypto observations, not merely start the receiver earlier.",
         "Optional DATA_B .ok() hid discovery failures since1b25bb6.42c628a fixes classification with native before/after evidence; build50 dual-lane field observation does not establish a stable throughput gain.",
-        "2026-10-19 08:20:48 exact Listener PnP restart returned0 but did not obtain a fresh link: RF CONNECT0, exported HCI no Disconnect/ConnectionComplete, same0x0800 ACL before104/after124, boundary112.421ms. OTA admission refused; OTA not sent. Do not retry PnP restart as proof of physical reconnect. Evidence E:/ListenerAnalysisState/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/target-restart-20261019-082046/restart-link-result.json. Original executed controller is frozen with receipt hash. Next two-original-OTA prime/measured candidate requires separate authorization; prime never qualifies as RF measurement."
+        "2026-10-19 08:20:48 exact Listener PnP restart returned0 but did not obtain a fresh link: RF CONNECT0, exported HCI no Disconnect/ConnectionComplete, same0x0800 ACL before104/after124, boundary112.421ms. OTA admission refused; OTA not sent. Do not retry PnP restart as proof of physical reconnect. Evidence E:/ListenerAnalysisState/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/target-restart-20261019-082046/restart-link-result.json. Original executed controller is frozen with receipt hash. Next two-original-OTA prime/measured candidate requires separate authorization; prime never qualifies as RF measurement.",
+        "2026-10-19 CE29 keeps verified security28, changes only CE1->ORIGINAL0. Actual full3908/3908 RF original-image, protocol16643ms/RF109.25KB/s; same5.31ms groups/2.19ms gaps vsCE1, no meaningful stable gain. OriginalFW22 restored. PriorSD2 failed retained; do not blind-cycle supported CE policies. Evidence prepared-ce29.json."
       ],
       "latest_observed_baseline": {
         "type_build": 42,
