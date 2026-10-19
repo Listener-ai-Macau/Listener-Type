@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T01:48:38.815041+08:00",
+  "updated_at": "2026-10-20T02:25:21.981071+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -1991,9 +1991,97 @@
         "Actual PSRAM=1/depth96/storage50304B, max queue50. RF107.573432KB/s remains within443 baseline; not promoted. Fresh32 restoration and onboard configuration preserved."
       ],
       "guards": []
+    },
+    {
+      "id": "ota_native63_full_same_link_budget_diagnostic",
+      "repo": "type",
+      "commit": "eb65f1a",
+      "subject": "ota native63 full same link budget diagnostic",
+      "state": "explicit_native_trial_field_passed_returned_daily62_no_gain",
+      "protects": [
+        "Normal behavior retains Windows prime and device-confirmed SYNC release; native interval needs explicit process opt-in.",
+        "Native mode must read exact retained service uncached budget v1,251octets,PHY2,time>=1064us and actual active flag before BEGIN;965us or ambiguous/legacy fields are rejected."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/prepared-type63-native.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/interval37-actual-hci-transitions.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current63-measure-20261020-020908/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current63-measure-20261020-021143/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/post-native63-daily62-restored.json"
+      ],
+      "guards": [
+        "python scripts/test-ota-native-interval.py",
+        "python scripts/test-ota-lease-release.py"
+      ],
+      "machine_accepted_scope": [
+        "Actual30ms conflict observed in HCI and safely recovered. Native63 default32 fullRF110.326KBps; not a speed gain over daily62. Returned62/default443/FW32 and board profile/core preserved."
+      ]
+    },
+    {
+      "id": "firmware37_long_interval_full_rf_negative",
+      "repo": "firmware",
+      "commit": "afb04cc",
+      "subject": "firmware37 long interval full rf negative",
+      "state": "actual30ms_complete_raw32_rf_27kbps_rejected_restored32",
+      "protects": [
+        "Do not repeat30ms/fullCE alone as fixed2ms guard amortization. It was actually tested after resolving the15ms Windows request conflict.",
+        "Current32/E1 raw1734832B is engineering scope; original22/CD remains unqualified."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/prepared-interval37.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/interval37-current63-comparison.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-020908/csa2-events.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-020908/clocked-tail.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "Same host63/image/packing:30ms27.456KBps versus7.5ms110.326KBps. Events stay near6.1ms, tail repeated next event. No unique Windows/ESP blame from missing captured ACK."
+      ]
+    },
+    {
+      "id": "firmware38_configured_affinity_not_runtime_rejected",
+      "repo": "firmware",
+      "commit": "d644821",
+      "subject": "firmware38 configured affinity not runtime rejected",
+      "state": "actual_callback0_config1_core1_experiment_rejected",
+      "protects": [
+        "Never label core1 tested merely because SDK config says1. The custom static NimBLE task used literal0.",
+        "Preserve failed runtime evidence; do not weaken actual-core gate to pass."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/prepared-host38.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current63-measure-20261020-021721/measurement.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "Image fullRF107.978KBps was real, but callback0/prio21/config1 contradicted intended experiment. It is not a core1 performance result."
+      ]
+    },
+    {
+      "id": "firmware39_honor_host_core_actual_no_gain",
+      "repo": "firmware",
+      "commit": "d0f6b28",
+      "subject": "firmware39 honor host core actual no gain",
+      "state": "actual_host1_controller0_full_raw32_rf_no_gain_not_promoted",
+      "protects": [
+        "Custom NimBLE task must use official NIMBLE_CORE while retaining static INTERNAL stack and original priority; do not revert to literal0 or dynamic PSRAM stack.",
+        "Require actual callback core1/config1/controller0 telemetry; source/config alone is insufficient.",
+        "No throughput promotion from affinity alone: actual result matches native63/core0 baseline."
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/prepared-host39.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/current63-measure-20261020-022224/measurement.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-022224/air-budget.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/passive-current-20261020-022224/clocked-tail.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/sniffer-alternative-butterfly-20261018/post-native63-daily62-restored.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "Actual core1/prio21/controller0/config1, entire1734832B/3917chunk unchanged32 RF,110.220928KBps versus110.326119KBps core0. Settings/Type preserved; exact32 restored, then daily62 restored. No stable gain or originalCD qualification."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T01:48:38.815041+08:00",
+  "feature_routes_updated_at": "2026-10-20T02:25:21.981071+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -2252,7 +2340,11 @@
         "ota_selected_peer_parameters_only61",
         "ota_capacity62_not_daily_packing",
         "firmware35_isolated_receiver_trial",
-        "firmware36_isolated_receiver_trial"
+        "firmware36_isolated_receiver_trial",
+        "ota_native63_full_same_link_budget_diagnostic",
+        "firmware37_long_interval_full_rf_negative",
+        "firmware38_configured_affinity_not_runtime_rejected",
+        "firmware39_honor_host_core_actual_no_gain"
       ],
       "paths": {
         "type": [
