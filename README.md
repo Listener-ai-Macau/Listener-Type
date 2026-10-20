@@ -6,7 +6,7 @@
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build80](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build81](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <details>
@@ -19,7 +19,7 @@ Device settings are independent: select one USB/Bluetooth device, read its setti
 </details>
 
 RC1 remains a prerelease; intermittent early close and strong-interference limits are documented in the release notes.
-Type build80 fixes setup guidance hidden behind Settings and sends Device settings to the correct section. Guide and recording-setting labels describe the actual actions in five languages, with readable primary buttons in both themes. Firmware33 and the existing dictation path are unchanged.
+Type build81 refreshes Overview after successful service configuration saves or provider changes, so its readiness and Start action follow current status. Late older reads cannot replace newer status. Build80 guidance fixes and unchanged Firmware33 are retained.
 [App release notes and checksum](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware notes and flashing instructions](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 [English first setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [English user guide](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)

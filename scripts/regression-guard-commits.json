@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T21:28:26.530750+08:00",
+  "updated_at": "2026-10-20T22:01:30.359868+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3436,9 +3436,39 @@
         "Customer80 actually copied existing History and pasted via ordinary Ctrl+V into its own Style input; it did not open the repaired guide/device route.",
         "No new/live speech, external-editor insertion, physical hardware or market purchase; customer80 declines49USD under actual service/experience conditions."
       ]
+    },
+    {
+      "id": "customer81_overview_configuration_status_refresh",
+      "repo": "type",
+      "commit": "a002d65fd17b431698adaf01f27227ce9d47c33b",
+      "subject": "Refresh Overview availability after committed configuration changes; reject stale receipts",
+      "state": "installed81_browser_status_transitions_native_readonly_subscriptions_verified",
+      "protects": [
+        "Successful credential/ASR-provider/text-provider mutation invalidates Overview status without sending values.",
+        "Rejected writes do not announce success; only the latest mounted status read updates UI.",
+        "Start dictation availability follows the current returned ASR status."
+      ],
+      "guards": [
+        "Browser controlled save/clear/reject/late/provider switch; exact native readonly readiness, subscription and cleanup."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\readiness81-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\readiness81-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\readiness81-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build81\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build81\\type81-installed.json"
+      ],
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-80-native-20261020\\REPORT.txt"
+      ],
+      "unverified": [
+        "Report80 is prior-source feedback, not an81 configuration-save customer trial. Actual81 customer saving valid native keys is unqualified.",
+        "Native IPC properties are immutable: interception was unavailable, and the failed test stopped before writing dummy values. Native readonly display/subscription checks passed; real storage/validity/quota scope remains on earlier guards.",
+        "Live speech, external target insertion, physical hardware and purchase remain separate."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T21:18:58.836797+08:00",
+  "feature_routes_updated_at": "2026-10-20T22:01:30.359868+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -4041,7 +4071,7 @@
     },
     {
       "id": "customer-first-use",
-      "baseline_state": "installed80_affected_native_guide_routes_verified_independent_reuse_pending",
+      "baseline_state": "installed81_frontend_configuration_status_receipts_verified_independent81_reuse_unqualified",
       "accepted_scope": "First-use guidance and explicit personal-text trial navigation; precise native History copy proof is separate. No live speech, hardware or market qualification.",
       "guard_entries": [
         "customer_setup68_asr_ready_does_not_require_optional_llm",
@@ -4055,7 +4085,8 @@
         "customer77_trial_readiness_and_targeted_text_settings",
         "customer78_native_history_copy_and_honest_demo",
         "customer79_discoverable_trials_and_unique_history_body",
-        "customer80_reachable_guide_exact_setup_routes"
+        "customer80_reachable_guide_exact_setup_routes",
+        "customer81_overview_configuration_status_refresh"
       ],
       "paths": {
         "type": [
@@ -4106,7 +4137,8 @@
         "Frozen74 activates Foundry before any preparation; frontend86fd8f6 and native8a4f637b preserve the old source of this failure.",
         "Native78 Demo guidance has no entry to the existing text trials; customer78 found them later in Style.",
         "History since oldest visible ^732a863 renders two bodies unconditionally even when identical.",
-        "Source c53caee1 device guidance leaves the parent Settings sheet covering it and routes Pair device to Recording; actual79 browser counterexample retained."
+        "Source c53caee1 device guidance leaves the parent Settings sheet covering it and routes Pair device to Recording; actual79 browser counterexample retained.",
+        "Overview credential status since oldest visible732a was mount-only: config-save could leave Start hidden, clear could leave stale ready, and old reads could overwrite current status."
       ]
     },
     {
