@@ -1,5 +1,9 @@
 ## 下载 Listener · RC1
 
+**第一次使用 Type？** 先下載 Windows MSI，設定語音辨識，並選擇電腦麥克風或 Listener。把游標放進可編輯輸入框，按 **Right Ctrl** 說話，再按一次結束。
+
+**聽寫必需：** 可用的收音裝置與已設定的辨識服務。**可選：** 文字服務用於潤色或翻譯；韌體 ZIP 用於更新 Listener 硬體。
+
 | 用途 | 直接下载 |
 | --- | --- |
 | **Windows 软件** | **[下载 MSI · Type build80](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |

@@ -1,5 +1,9 @@
 ## Download Listener · RC1
 
+**First time using Type?** Download the Windows MSI, configure speech recognition, and select your computer microphone or Listener. Put the cursor in a writable field, press **Right Ctrl** to speak, then press it again to finish.
+
+**Required for dictation:** an audio input and a configured recognizer. **Optional:** a text service for polishing or translation. Use the firmware ZIP when updating Listener hardware.
+
 | Purpose | Direct download |
 | --- | --- |
 | **Windows app** | **[Download MSI · Type build80](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
