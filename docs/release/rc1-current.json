@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-20T17:10:24.188242+08:00",
+  "updatedAt": "2026-10-20T17:35:44.276898+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 75,
-    "source": "77554a1b9a24c69b1faf360f730df1022ec163dc",
-    "sourceTag": "build-source/type75-20261020",
+    "build": 76,
+    "source": "8eed884b9891d594163596ef5bc6e2bfee0490b5",
+    "sourceTag": "build-source/type76-20261020",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "e8576a268fa9b52773810c1eb0da2724ee94ccb7fdaf68255610caec76ab44ca",
-    "sizeBytes": 298532864,
-    "exeSha256": "e2e38a7f1fbb844c122bc50783a597b752a5429da2075d7c3297cb90faccac99",
+    "sha256": "061e0771682549eff70f14e6449aa4a41050851c21bf9399e4fd2824fefdfe17",
+    "sizeBytes": 298565632,
+    "exeSha256": "1f3164d07c59f4df2f058983444c948104829e4fa9bc42320e09e9925f76751c",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -59,7 +59,11 @@
     "history74IllustrationAndEmptyFilterUiVerified": true,
     "type75InstalledExeAndPreferencesVerified": true,
     "local75PrepareBeforeActivationAffectedUiVerified": true,
-    "local75ActualFirstDownloadInferenceVerified": false
+    "local75ActualFirstDownloadInferenceVerified": false,
+    "type76InstalledExeAndPreferencesVerified": true,
+    "style76TrialUiLifecycleVerified": true,
+    "style76NativeRawAndFailureStatePreserved": true,
+    "style76ActualPolishedTextServiceSuccessVerified": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -76,6 +80,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build75-20261020"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build76-20261020"
   }
 }
