@@ -804,19 +804,24 @@ const mockMicrophoneDevices: MicrophoneDevice[] = [
   { name: 'USB Microphone', isDefault: false },
 ];
 
-const mockHistory: DictationSession[] = OL_DATA.history.map((h, i) => ({
+// Hand-written browser examples explain the styles; they are not captured speech
+// or model results. Native list_history still reads only the user's own history.
+const mockHistory: DictationSession[] = [
+  { mode: 'raw' as const, rawTranscript: 'Please remind me about the design review tomorrow at 3 pm.', finalText: 'Please remind me about the design review tomorrow at 3 pm.' },
+  { mode: 'light' as const, rawTranscript: 'Um, can you, um, send the draft by Friday?', finalText: 'Can you send the draft by Friday?' },
+  { mode: 'structured' as const, rawTranscript: 'For tomorrow, review the draft, check the figures, and send the update.', finalText: 'Tomorrow:\n1. Review the draft.\n2. Check the figures.\n3. Send the update.' },
+  { mode: 'formal' as const, rawTranscript: 'Hey, could you send the updated schedule by Friday? Thanks.', finalText: 'Could you please send the updated schedule by Friday? Thank you.' },
+].map((h, i) => ({
   id: `mock-${i}`,
   createdAt: new Date().toISOString(),
-  rawTranscript: h.preview,
-  finalText: h.preview,
-  mode: 'structured',
+  ...h,
   appBundleId: null,
-  appName: 'VS Code',
-  insertStatus: 'inserted',
+  appName: null,
+  insertStatus: 'submittedUnconfirmed',
   errorCode: null,
-  durationMs: 600,
-  dictionaryEntryCount: 28,
-  hasAudioRecording: null,
+  durationMs: null,
+  dictionaryEntryCount: null,
+  hasAudioRecording: false,
 }));
 
 const mockVocab: DictionaryEntry[] = OL_DATA.vocab.map((v, i) => ({

@@ -283,6 +283,10 @@ export const ja: typeof zhCN = {
     quickStartDismiss: '閉じる',
   },
   history: {
+    illustrationNotice: '手書きの文体例です。表現や書式の説明であり、録音、モデルの生成結果、入力成功の記録ではありません。実際の認識・翻訳・入力は実使用で確認してください。',
+    noMatching: 'この文体の履歴はありません。他の履歴は残っています。',
+    showAll: 'すべての履歴を表示',
+    illustrationStatus: '手書きの例・録音と入力は未実施',
     kicker: 'HISTORY',
     title: '履歴',
     desc: '直近の認識結果はローカルにのみ保存されます。左側はタイムライン、右側は原文と整文の比較。',

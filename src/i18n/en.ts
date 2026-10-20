@@ -326,6 +326,10 @@ export const en: typeof zhCN = {
     quickStartDismiss: 'Dismiss',
   },
   history: {
+    illustrationNotice: 'Hand-written style examples. These illustrate wording and formatting; they are not recordings, model results or successful insertions. Real recognition, translation and insertion still need an actual try.',
+    noMatching: 'No entries match this style. Your other history is still available.',
+    showAll: 'Show all history',
+    illustrationStatus: 'Illustration · no recording or insertion',
     kicker: 'HISTORY',
     title: 'History',
     desc: 'Recent transcripts are stored only on this device. Timeline on the left, raw vs polished on the right.',

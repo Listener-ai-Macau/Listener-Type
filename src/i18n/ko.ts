@@ -283,6 +283,10 @@ export const ko: typeof zhCN = {
     quickStartDismiss: '닫기',
   },
   history: {
+    illustrationNotice: '직접 작성한 문체 예시입니다. 표현과 형식을 설명하며 녹음, 모델 생성 결과 또는 입력 성공 기록이 아닙니다. 실제 인식·번역·입력 효과는 직접 사용해 확인해야 합니다.',
+    noMatching: '이 문체에 해당하는 기록이 없습니다. 다른 기록은 그대로 남아 있습니다.',
+    showAll: '전체 기록 보기',
+    illustrationStatus: '직접 작성한 예시 · 녹음 및 입력 없음',
     kicker: 'HISTORY',
     title: '기록',
     desc: '최근 인식 결과는 로컬에만 저장됩니다. 왼쪽은 타임라인, 오른쪽은 원문과 정리 결과의 비교입니다.',

@@ -325,6 +325,10 @@ export const zhTW: typeof zhCN = {
     quickStartDismiss: '關閉',
   },
   history: {
+    illustrationNotice: '以下為手工編寫的風格範例，僅說明措辭和排版，不是錄音、模型生成結果或已輸入記錄。真實識別、翻譯和輸入效果仍需實際試用。',
+    noMatching: '目前風格下沒有記錄，其它歷史仍然保留。',
+    showAll: '查看全部歷史',
+    illustrationStatus: '手工範例 · 未錄音或輸入',
     kicker: 'HISTORY',
     title: '歷史記錄',
     desc: '最近的識別結果只保存在本機。左側爲時間線，右側爲原文與潤色對比。',

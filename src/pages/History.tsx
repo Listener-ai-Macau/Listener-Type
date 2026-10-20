@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { Icon } from '../components/Icon';
 import { detectOS } from '../components/WindowChrome';
 import { formatComboLabel } from '../lib/hotkey';
-import { clearHistory, deleteHistoryEntry, listHistory, readAudioRecording } from '../lib/ipc';
+import { clearHistory, deleteHistoryEntry, isTauri, listHistory, readAudioRecording } from '../lib/ipc';
 import type { DictationSession, PolishMode } from '../lib/types';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { Btn, Card, PageHeader, Pill } from './_atoms';
@@ -218,6 +218,11 @@ export function History() {
           </div>
         }
       />
+      {!isTauri && (
+        <div role="note" style={{ padding: '10px 14px', marginBottom: 14, borderRadius: 10, background: 'var(--ol-blue-soft)', color: 'var(--ol-ink-2)', fontSize: 12, lineHeight: 1.6, flexShrink: 0 }}>
+          {t('history.illustrationNotice')}
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 0.9fr) minmax(300px, 1.35fr)', gap: 12, marginBottom: 14, flexShrink: 0 }}>
         <Card padding={16} style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 12 }}>
@@ -277,6 +282,7 @@ export function History() {
               {FILTERS.map(f => (
                 <button
                   key={f.id}
+                  aria-pressed={filter === f.id}
                   onClick={() => setFilter(f.id)}
                   style={{
                     padding: '3px 9px', fontSize: 11, borderRadius: 999,
@@ -304,8 +310,13 @@ export function History() {
               </div>
             )}
             {!loading && !loadError && filtered.length === 0 && (
-              <div style={{ padding: 16, fontSize: 12, color: 'var(--ol-ink-4)' }}>
-                {t('history.empty', { trigger: prefs ? formatComboLabel(prefs.dictationHotkey) : '' })}
+              <div style={{ padding: 16, fontSize: 12, color: 'var(--ol-ink-4)', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10 }}>
+                {items.length > 0 ? (
+                  <>
+                    <span>{t('history.noMatching')}</span>
+                    <Btn size="sm" variant="ghost" onClick={() => setFilter('all')}>{t('history.showAll')}</Btn>
+                  </>
+                ) : t('history.empty', { trigger: prefs ? formatComboLabel(prefs.dictationHotkey) : '' })}
               </div>
             )}
             {!loadError && filtered.map(s => (
@@ -384,7 +395,9 @@ export function History() {
                   <span>{t('history.vocabHits', { count: item.dictionaryEntryCount })}</span>
                 )}
                 <span>{
-                  item.insertStatus === 'inserted'
+                  !isTauri
+                    ? t('history.illustrationStatus')
+                  : item.insertStatus === 'inserted'
                     ? t('history.inserted')
                     : item.insertStatus === 'pasteSent'
                       ? t('history.pasteSent')

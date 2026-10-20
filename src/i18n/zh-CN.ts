@@ -323,6 +323,10 @@ export const zhCN = {
     quickStartDismiss: '关闭',
   },
   history: {
+    illustrationNotice: '以下为手工编写的风格示例，仅说明措辞和排版，不是录音、模型生成结果或已上屏记录。真实识别、翻译和输入效果仍需实际试用。',
+    noMatching: '当前风格下没有记录，其它历史仍然保留。',
+    showAll: '查看全部历史',
+    illustrationStatus: '手工示例 · 未录音或上屏',
     kicker: 'HISTORY',
     title: '历史记录',
     desc: '最近的识别结果只保存在本机。左侧为时间线，右侧为原文与润色对比。',
