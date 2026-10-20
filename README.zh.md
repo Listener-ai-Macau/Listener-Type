@@ -2,7 +2,7 @@
 
 | 用途 | 直接下载 |
 | --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build78](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 软件** | **[下载 MSI · Type build79](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <details>
@@ -15,7 +15,7 @@ Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另
 </details>
 
 RC1 仍为候选版本，偶发提前结束及强干扰限制见发布说明。
-Type build78 的历史复制改走原生剪贴板，避免浏览器焦点或权限等待；过期排队复制不能迟写。Demo指引不再误报已配置服务。配套Firmware33及听写链路保持。
+Type build79 从Demo指引直接进入已有风格试用；历史正文相同只显示一份，有差异保留对照。保留78原生历史复制修复，配套Firmware33及听写链路保持。
 [软件发布说明与校验](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [固件发布说明与烧写方法](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 [English first setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [English user guide](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)

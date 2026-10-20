@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T19:27:32.146972+08:00",
+  "updated_at": "2026-10-20T19:49:52.694994+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3343,15 +3343,43 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build78-final\\type78-installed.json"
       ],
       "customer_evidence": [
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-77-native-20261020\\REPORT.txt"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-77-native-20261020\\REPORT.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-78-native-20261020\\REPORT.txt"
       ],
       "unverified": [
-        "Customer77 used previous source8e92b182. Native78 customer reuse is not yet recorded here.",
+        "Customer78 observed Copy acknowledgement and honest Demo guidance in actual native78; did not independently read/paste the clipboard. Root engineering clipboard proof is separate.",
         "Live speech, endpoint/editor insertion, real hardware and market purchase remain separate."
+      ]
+    },
+    {
+      "id": "customer79_discoverable_trials_and_unique_history_body",
+      "repo": "type",
+      "commit": "ec136a7055975c853ae5a2852d53ed8d88f094b0",
+      "subject": "Expose actual style trials from Demo and avoid duplicate identical history text",
+      "state": "installed79_affected_browser_and_exact_native_ui_verified",
+      "protects": [
+        "Both Demo guidance sources expose a real existing Style page entry without changing settings or starting services.",
+        "History shows identical source/final body once, preserves different bodies, and retains native78 copy ownership."
+      ],
+      "guards": [
+        "Affected UI: Demo to Style to personal text trial; History identical/different body presentation."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\customer79-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\customer79-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build79\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build79\\type79-installed.json"
+      ],
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-78-native-20261020\\REPORT.txt"
+      ],
+      "unverified": [
+        "Report78 is previous-source feedback; customer79 reuse is separate.",
+        "No new speech, editor insertion, physical or market purchase qualification."
       ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T19:27:32.146972+08:00",
+  "feature_routes_updated_at": "2026-10-20T19:49:52.694994+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -3965,7 +3993,8 @@
         "customer75_prepare_before_local_activation",
         "customer76_explicit_style_text_trial",
         "customer77_trial_readiness_and_targeted_text_settings",
-        "customer78_native_history_copy_and_honest_demo"
+        "customer78_native_history_copy_and_honest_demo",
+        "customer79_discoverable_trials_and_unique_history_body"
       ],
       "paths": {
         "type": [
@@ -4013,7 +4042,9 @@
         "Shared settings Toggle previously exposed no switch role, label or checked state.",
         "Frozen73 choosing microphone automatically opens unrelated pairing due to the old non-BLE input predicate (4c6f92df/3871166f).",
         "Frozen73 illustrative history has no Formal examples and labels an empty style filter as no history.",
-        "Frozen74 activates Foundry before any preparation; frontend86fd8f6 and native8a4f637b preserve the old source of this failure."
+        "Frozen74 activates Foundry before any preparation; frontend86fd8f6 and native8a4f637b preserve the old source of this failure.",
+        "Native78 Demo guidance has no entry to the existing text trials; customer78 found them later in Style.",
+        "History since oldest visible ^732a863 renders two bodies unconditionally even when identical."
       ]
     },
     {
