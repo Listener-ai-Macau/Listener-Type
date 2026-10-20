@@ -402,6 +402,10 @@ export const zhTW: typeof zhCN = {
   },
   style: {
     trial: {
+      needsService: "這個風格需要文字服務，設定後才能處理你的文字；現有語音辨識設定可以保持原樣。",
+      checking: "正在檢查試用條件…",
+      readinessFailed: "暫時無法確認試用條件。",
+      download: "下載 Windows 軟體",
       open: "試用{{name}}",
       title: "用自己的文字試用{{name}}",
       description: "看看已儲存的風格如何處理你的文字。這不是語音辨識測試。目前風格、歷史與剪貼簿保持不變。",

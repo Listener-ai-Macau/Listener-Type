@@ -20,6 +20,7 @@ export { AboutUpdateControl } from './settings/AboutUpdateControl';
 interface SettingsProps {
   embedded?: boolean;
   initialSection?: SettingsSectionId;
+  initialProviderFocus?: 'llm';
   onSetupListener?: () => void;
 }
 // "关于" tab 已移除（内容并入外层 SettingsModal 的 About 页，避免设置内外重复入口）。
@@ -28,13 +29,15 @@ export type SettingsSectionId = 'recording' | 'device' | 'providers' | 'localAsr
 // Local preparation has its own destination; opening it does not activate a model.
 const SECTION_ORDER: SettingsSectionId[] = ['device', 'recording', 'providers', 'localAsr', 'shortcuts', 'permissions', 'language', 'advanced'];
 
-export function Settings({ embedded = false, initialSection = 'device', onSetupListener }: SettingsProps) {
+export function Settings({ embedded = false, initialSection = 'device', initialProviderFocus, onSetupListener }: SettingsProps) {
   const { t } = useTranslation();
   const [section, setSection] = useState<SettingsSectionId>(initialSection);
+  const [providerFocus, setProviderFocus] = useState(initialProviderFocus);
 
   useEffect(() => {
     setSection(initialSection);
-  }, [initialSection]);
+    setProviderFocus(initialProviderFocus);
+  }, [initialSection, initialProviderFocus]);
 
   // 跟 sidebar / SettingsModal 同款滑动 pill：测当前 active section 的 offsetTop/height
   // → 用 absolute pill 平滑滑过去；--ol-motion-spring 是项目里的 Apple 风格 ease-out-quint。
@@ -106,7 +109,7 @@ export function Settings({ embedded = false, initialSection = 'device', onSetupL
               <button
                 key={s}
                 ref={el => { sectionRefs.current[i] = el; }}
-                onClick={() => setSection(s)}
+                onClick={() => { setSection(s); setProviderFocus(undefined); }}
                 className={active ? 'ol-nav-btn ol-nav-btn-active' : 'ol-nav-btn'}
                 style={{
                   padding: '8px 12px', textAlign: 'left',
@@ -139,7 +142,7 @@ export function Settings({ embedded = false, initialSection = 'device', onSetupL
         >
           {section === 'recording' && <RecordingSection onSetupListener={onSetupListener} />}
           {section === 'device' && <DeviceSection />}
-          {section === 'providers' && <ProvidersSection onOpenLocalAsr={() => {
+          {section === 'providers' && <ProvidersSection prioritizeTextService={providerFocus === 'llm'} onOpenLocalAsr={() => {
             setSection('localAsr');
             contentRef.current?.scrollTo({ top: 0, behavior: 'auto' });
           }} />}

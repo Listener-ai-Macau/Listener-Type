@@ -403,6 +403,10 @@ export const en: typeof zhCN = {
   },
   style: {
     trial: {
+      needsService: "This style needs a text service. Configure it to try your text; your speech-recognition setup can stay as it is.",
+      checking: "Checking trial availability…",
+      readinessFailed: "Could not check whether this trial is ready.",
+      download: "Download the Windows app",
       open: "Try {{name}}",
       title: "Try {{name}} with your text",
       description: "See how a saved style handles your own typed text. This does not test speech recognition. Your active style, history and clipboard stay unchanged.",

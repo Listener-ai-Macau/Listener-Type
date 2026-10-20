@@ -2527,6 +2527,11 @@ impl Coordinator {
         .map_err(|e| e.to_string())
     }
 
+    pub fn style_text_trial_requires_service(&self, id: &str) -> Result<bool, String> {
+        let pack = self.inner.style_packs.get(id).map_err(|e| e.to_string())?;
+        Ok(pack.base_mode != PolishMode::Raw || raw_style_pack_uses_llm(&pack))
+    }
+
     /// An explicit text-only trial; never changes active style, history or output targets.
     pub async fn try_style_pack_text(
         &self,

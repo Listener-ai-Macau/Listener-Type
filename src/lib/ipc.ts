@@ -38,6 +38,7 @@ import type {
   StylePackKind,
   StylePackRuntimeDiagnostics,
   StyleTextTrialResult,
+  StyleTextTrialReadiness,
   StyleSystemPrompts,
   UserPreferences,
   VoiceprintStatus,
@@ -1694,6 +1695,12 @@ export function tryStylePackText(stylePackId: string, rawText: string): Promise<
     // The ordinary browser preview cannot call the user's configured native text service.
     throw new Error('style_trial_native_required');
   });
+}
+
+export function getStyleTextTrialReadiness(stylePackId: string): Promise<StyleTextTrialReadiness> {
+  return invokeOrMock('get_style_text_trial_readiness', { stylePackId }, () => ({
+    available: false, requiresTextService: false, textServiceConfigured: false,
+  }));
 }
 
 export function setActiveStylePack(id: string): Promise<StylePack> {

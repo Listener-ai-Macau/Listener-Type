@@ -207,7 +207,7 @@ const ASR_PRESETS: ReadonlyArray<{ id: AsrPresetId; nameKey: string; baseUrl: st
 
 // ─── ProvidersSection ─────────────────────────────────────────────────
 
-export function ProvidersSection({ onOpenLocalAsr }: { onOpenLocalAsr: () => void }) {
+export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false }: { onOpenLocalAsr: () => void; prioritizeTextService?: boolean }) {
   const { t } = useTranslation();
   const { prefs, updatePrefs } = useHotkeySettings();
   // `*Provider` 立即跟随 <select> 改动（受控组件必须实时反映用户输入）；
@@ -352,12 +352,8 @@ export function ProvidersSection({ onOpenLocalAsr }: { onOpenLocalAsr: () => voi
   const preset = LLM_PRESETS.find(p => p.id === committedLlmProvider) ?? LLM_PRESETS[LLM_PRESETS.length - 1];
   const codexOAuthSelected = committedLlmProvider === 'codex_oauth';
   const asrPreset = visibleAsrPresets.find(p => p.id === committedAsrProvider);
-  return (
-    <>
-      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.6, marginBottom: 10 }}>
-        {t('settings.providers.credentialStorageNotice')}
-      </div>
-      <Card>
+  const asrCard = (
+    <Card key="asr">
         <div style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 13, fontWeight: 600 }}>{t('settings.providers.asrTitle')}</div>
           <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>{t('settings.providers.asrDesc')}</div>
@@ -479,8 +475,9 @@ export function ProvidersSection({ onOpenLocalAsr }: { onOpenLocalAsr: () => voi
           </>
         )}
       </Card>
-
-      <Card>
+  );
+  const llmCard = (
+    <Card key="llm">
         <div style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 13, fontWeight: 600 }}>{t('settings.providers.llmTitle')}</div>
           <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
@@ -524,6 +521,13 @@ export function ProvidersSection({ onOpenLocalAsr }: { onOpenLocalAsr: () => voi
         <ProviderProxySettings kind="llm" providerId={committedLlmProvider} />
         <ProviderTools key={committedLlmProvider} kind="llm" modelAccount="ark.model_id" onModelSelected={() => setLlmModelRevision(v => v + 1)} />
       </Card>
+  );
+  return (
+    <>
+      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.6, marginBottom: 10 }}>
+        {t('settings.providers.credentialStorageNotice')}
+      </div>
+      {prioritizeTextService ? [llmCard, asrCard] : [asrCard, llmCard]}
     </>
   );
 }

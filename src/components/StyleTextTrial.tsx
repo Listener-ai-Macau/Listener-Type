@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { tryStylePackText } from '../lib/ipc';
-import type { StylePack, StyleTextTrialResult } from '../lib/types';
+import { getStyleTextTrialReadiness, tryStylePackText } from '../lib/ipc';
+import type { StylePack, StyleTextTrialReadiness, StyleTextTrialResult } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import './StyleTextTrial.css';
 
@@ -19,6 +19,22 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<StyleTextTrialResult | null>(null);
   const [error, setError] = useState('');
+  const [readiness, setReadiness] = useState<StyleTextTrialReadiness | null>(null);
+  const [readinessError, setReadinessError] = useState(false);
+  const [readinessAttempt, setReadinessAttempt] = useState(0);
+  const canProcess = !!readiness?.available && (!readiness.requiresTextService || readiness.textServiceConfigured);
+
+  useEffect(() => {
+    let current = true;
+    setReadiness(null);
+    setReadinessError(false);
+    void getStyleTextTrialReadiness(pack.id).then(value => {
+      if (current) setReadiness(value);
+    }).catch(() => {
+      if (current) setReadinessError(true);
+    });
+    return () => { current = false; };
+  }, [pack.id, readinessAttempt]);
 
   useEffect(() => {
     const element = dialog.current;
@@ -30,7 +46,7 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
   }, []);
 
   const runTrial = async () => {
-    if (running.current || !draft.trim()) return;
+    if (running.current || !canProcess || !draft.trim()) return;
     running.current = true;
     const request = ++generation.current;
     setPending(true);
@@ -70,7 +86,11 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
         <Btn size="sm" variant="ghost" onClick={onClose}>{t('common.close')}</Btn>
       </div>
       <p id="style-trial-description" className="ol-style-trial-hint">{t('style.trial.description')}</p>
-      <p className="ol-style-trial-hint">{t('style.trial.serviceNotice')}</p>
+      {readiness?.available !== false && <p className="ol-style-trial-hint">{t('style.trial.serviceNotice')}</p>}
+      {readiness?.available === false && <p role="status" className="ol-style-trial-hint">{t('style.trial.nativeRequired')}</p>}
+      {readiness?.available && readiness.requiresTextService && !readiness.textServiceConfigured && <p role="status" className="ol-style-trial-hint">{t('style.trial.needsService')}</p>}
+      {!readiness && !readinessError && <p role="status" className="ol-style-trial-hint">{t('style.trial.checking')}</p>}
+      {readinessError && <p role="alert" className="ol-style-trial-hint">{t('style.trial.readinessFailed')} <Btn size="sm" onClick={() => setReadinessAttempt(value => value + 1)}>{t('common.retry')}</Btn></p>}
       <label htmlFor="style-trial-input" style={{ display: 'block', fontWeight: 600, marginTop: 20, marginBottom: 8 }}>
         {t('style.trial.input')}
       </label>
@@ -79,16 +99,17 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
         value={draft}
         maxLength={4000}
         rows={5}
-        disabled={pending}
+        disabled={pending || !readiness?.available}
         placeholder={t('style.trial.placeholder')}
         onChange={event => { onDraftChange(event.target.value); setResult(null); setError(''); }}
         style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', minHeight: 110, padding: 12, borderRadius: 12, border: '1px solid var(--ol-line-strong)', color: 'var(--ol-ink)', background: 'var(--ol-surface-2)', font: 'inherit', lineHeight: 1.65 }}
       />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginTop: 12 }}>
-        <Btn variant="blue" disabled={pending || !draft.trim()} onClick={() => void runTrial()}>
+        <Btn variant="blue" disabled={pending || !canProcess || !draft.trim()} onClick={() => void runTrial()}>
           {t(pending ? 'style.trial.running' : 'style.trial.run')}
         </Btn>
-        {onOpenProviders && <Btn variant="ghost" onClick={onOpenProviders}>{t('style.trial.providers')}</Btn>}
+        {readiness?.available && onOpenProviders && <Btn variant="ghost" onClick={onOpenProviders}>{t('style.trial.providers')}</Btn>}
+        {readiness?.available === false && <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1" target="_blank" rel="noreferrer noopener" style={{ color: 'var(--ol-blue)', fontSize: 13 }}>{t('style.trial.download')}</a>}
       </div>
       {pending && <p role="status" className="ol-style-trial-hint">{t('style.trial.pending')}</p>}
       {error && <p role="alert" style={{ color: 'var(--ol-err)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.6 }}>{error}</p>}

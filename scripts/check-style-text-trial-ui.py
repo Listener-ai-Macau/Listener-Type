@@ -16,9 +16,10 @@ def check(name, value):
 fixture_js = """
 localStorage.setItem('ol.locale','en');
 sessionStorage.setItem('ol.providerSetupPromptDeferredThisSession','1');
-window.__trialLog=[]; window.__trialOutcome='pending'; window.__trialResolvers=[];
+window.__trialLog=[]; window.__trialOutcome='pending'; window.__trialResolvers=[]; window.__trialConfigured=true;
 window.__trialFixture=(cmd,args,mock)=>{
  window.__trialLog.push({cmd,args});
+ if(cmd==='get_style_text_trial_readiness') return {available:window.__trialOutcome!=='preview',requiresTextService:args.stylePackId!=='builtin.raw',textServiceConfigured:window.__trialConfigured};
  if(cmd!=='try_style_pack_text') return mock();
  if(window.__trialOutcome==='preview') return mock();
  if(window.__trialOutcome==='reject') return Promise.reject(new Error('Sample service unavailable'));
@@ -78,9 +79,27 @@ with sync_playwright() as pw:
         page.get_by_role('button',name='Try 原文',exact=True).click()
         expect(entry).to_have_value('Changed draft')
         check('Opening service settings preserves the in-memory draft',True)
-        page.evaluate("window.__trialOutcome='preview'");run.click()
-        expect(dialog.get_by_role('alert')).to_contain_text('This browser preview does not simulate a result')
-        check('Ordinary preview never claims a real service result',output.count()==0)
+        dialog.get_by_role('button',name='Close',exact=True).click()
+        page.evaluate('window.__trialConfigured=false')
+        page.get_by_role('button',name='Try 轻度润色',exact=True).click()
+        expect(dialog.get_by_role('status')).to_contain_text('This style needs a text service')
+        expect(run).to_be_disabled()
+        check('Missing text service is disclosed before submission without replacing input',entry.input_value()=='Changed draft')
+        dialog.get_by_role('button',name='Text-service settings',exact=True).click()
+        llm=page.get_by_text('LLM (polishing)',exact=True)
+        asr=page.get_by_text('ASR (transcription)',exact=True)
+        expect(llm).to_be_visible()
+        check('The text-service action puts its LLM card first in both reading and visual order',llm.bounding_box()['y']<asr.bounding_box()['y'] and llm.evaluate('(a,b)=>!!(a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING)',asr.element_handle()))
+        llm_card=llm.locator('..').locator('..').element_handle()
+        page.get_by_role('button',name='Providers',exact=True).click()
+        check('Normal Providers navigation keeps the existing speech-first order',asr.bounding_box()['y']<llm.bounding_box()['y'])
+        check('Reordering preserves the existing credential-card component identity',llm_card.evaluate('(el)=>el.isConnected'))
+        page.get_by_role('button',name='Close',exact=True).click()
+        page.evaluate("window.__trialOutcome='preview'")
+        page.get_by_role('button',name='Try 原文',exact=True).click()
+        expect(dialog.get_by_role('status')).to_contain_text('This browser preview does not simulate a result')
+        expect(entry).to_be_disabled();expect(run).to_be_disabled()
+        check('Ordinary preview states its limit before typing or submitting',output.count()==0)
         log=page.evaluate('window.__trialLog')
         forbidden=['set_active_style_pack','set_settings','delete_history','clear_history','repolish','hotkey_recording_toggle','start_recording']
         check('Trial does not activate a style, save preferences or touch dictation/history',not any(x['cmd'] in forbidden for x in log))

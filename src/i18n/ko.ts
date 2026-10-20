@@ -360,6 +360,10 @@ export const ko: typeof zhCN = {
   },
   style: {
     trial: {
+      needsService: "이 스타일을 사용하려면 텍스트 서비스를 설정하세요. 음성 인식 설정은 그대로 유지할 수 있습니다.",
+      checking: "체험 가능 여부 확인 중…",
+      readinessFailed: "체험 준비 상태를 확인하지 못했습니다.",
+      download: "Windows 앱 다운로드",
       open: "{{name}} 체험",
       title: "내 글로 {{name}} 체험",
       description: "저장된 스타일이 직접 입력한 글을 어떻게 처리하는지 확인합니다. 음성 인식 테스트가 아닙니다. 현재 스타일, 기록, 클립보드는 바뀌지 않습니다.",

@@ -82,6 +82,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const { prefs, updatePrefs } = useHotkeySettings();
   const { currentTab, setCurrentTab, settingsOpen, setSettingsOpen } = useAppState(initialTab, initialSettings);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionId | undefined>();
+  const [settingsProviderFocus, setSettingsProviderFocus] = useState<'llm' | undefined>();
   const [providerPromptOpen, setProviderPromptOpen] = useState(false);
   const [blePairingPromptOpen, setBlePairingPromptOpen] = useState(false);
   const [demoModeSession, setDemoModeSession] = useState<DemoModeSession | null>(null);
@@ -166,8 +167,9 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     setBlePairingPromptOpen(false);
   };
 
-  const openSettings = (section?: SettingsSectionId) => {
+  const openSettings = (section?: SettingsSectionId, providerFocus?: 'llm') => {
     setSettingsInitialSection(section);
+    setSettingsProviderFocus(providerFocus);
     setSettingsOpen(true);
   };
 
@@ -466,7 +468,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                   onStartDemoMode={startProviderDemoMode}
                 />
               ) : displayTab === 'style' ? (
-                <Style onOpenProviders={() => openSettings('providers')} />
+                <Style onOpenProviders={() => openSettings('providers', 'llm')} />
               ) : (
                 <Page />
               )}
@@ -499,9 +501,10 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
       {/* Settings modal — rendered inside this window */}
       {settingsOpen &&
         <SettingsModal
-          key={settingsInitialSection ?? 'default'}
+          key={`${settingsInitialSection ?? 'default'}:${settingsProviderFocus ?? 'default'}`}
           os={os}
           initialSettingsSection={settingsInitialSection}
+          initialProviderFocus={settingsProviderFocus}
           onSetupListener={os === 'win' ? () => setBlePairingPromptOpen(true) : undefined}
           onClose={() => setSettingsOpen(false)}
         />

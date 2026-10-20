@@ -400,6 +400,10 @@ export const zhCN = {
   },
   style: {
     trial: {
+      needsService: "这个风格需要文本服务，配置后才能处理你的文字；已有语音识别配置可以保持原样。",
+      checking: "正在检查试用条件…",
+      readinessFailed: "暂时无法确认试用条件。",
+      download: "下载 Windows 软件",
       open: "试用{{name}}",
       title: "用自己的文字试用{{name}}",
       description: "看看已保存的风格如何处理你的文字。这不是语音识别测试。当前风格、历史和剪贴板保持不变。",

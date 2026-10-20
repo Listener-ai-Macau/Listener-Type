@@ -389,6 +389,12 @@ export interface StyleTextTrialResult {
   elapsedMs: number;
 }
 
+export interface StyleTextTrialReadiness {
+  available: boolean;
+  requiresTextService: boolean;
+  textServiceConfigured: boolean;
+}
+
 export interface CloudAccountStatus {
   configured: boolean;
   signedIn: boolean;

@@ -360,6 +360,10 @@ export const ja: typeof zhCN = {
   },
   style: {
     trial: {
+      needsService: "このスタイルにはテキストサービスの設定が必要です。音声認識の設定はそのまま使えます。",
+      checking: "試用できるか確認中…",
+      readinessFailed: "試用の準備状態を確認できませんでした。",
+      download: "Windowsアプリをダウンロード",
       open: "{{name}}を試す",
       title: "自分の文章で{{name}}を試す",
       description: "保存したスタイルで入力した文章を処理します。音声認識のテストではありません。現在のスタイル、履歴、クリップボードは変更しません。",

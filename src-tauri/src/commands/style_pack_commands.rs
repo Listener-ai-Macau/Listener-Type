@@ -56,6 +56,20 @@ pub fn save_style_pack(
 }
 
 #[tauri::command]
+pub fn get_style_text_trial_readiness(
+    coord: CoordinatorState<'_>,
+    style_pack_id: String,
+) -> Result<crate::types::StyleTextTrialReadiness, String> {
+    let requires_text_service = coord.style_text_trial_requires_service(&style_pack_id)?;
+    let status = get_credentials(coord);
+    Ok(crate::types::StyleTextTrialReadiness {
+        available: true,
+        requires_text_service,
+        text_service_configured: status.llm_configured,
+    })
+}
+
+#[tauri::command]
 pub async fn try_style_pack_text(
     coord: CoordinatorState<'_>,
     style_pack_id: String,
