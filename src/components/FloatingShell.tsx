@@ -1167,7 +1167,7 @@ const promptPrimaryButtonStyle: CSSProperties = {
   borderRadius: 8,
   border: 0,
   background: 'var(--ol-ink)',
-  color: '#fff',
+  color: 'var(--ol-white)',
   fontFamily: 'inherit',
   fontSize: 12.5,
   fontWeight: 500,
