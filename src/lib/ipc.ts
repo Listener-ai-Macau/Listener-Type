@@ -999,8 +999,10 @@ export function listHistory(): Promise<DictationSession[]> {
   return invokeOrMock('list_history', undefined, () => mockHistory);
 }
 
-export async function copyHistoryEntry(id: string, expectedText: string): Promise<void> {
-  if (isTauri) return invokeOrMock<void>('copy_history_entry', { id, expectedText }, () => undefined);
+export async function copyHistoryEntry(id: string, expectedText: string, nativeWindows: boolean): Promise<void> {
+  // This repair is qualified for Windows. Keep other platforms' existing
+  // browser clipboard lifetime/ownership until their native path is qualified.
+  if (isTauri && nativeWindows) return invokeOrMock<void>('copy_history_entry', { id, expectedText }, () => undefined);
   if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
   await navigator.clipboard.writeText(expectedText);
 }

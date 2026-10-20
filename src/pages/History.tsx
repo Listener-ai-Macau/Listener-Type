@@ -155,7 +155,7 @@ export function History() {
       copyTimerRef.current = null;
     }
     try {
-      await copyHistoryEntry(entry.id, entry.text);
+      await copyHistoryEntry(entry.id, entry.text, os === 'windows');
       if (!mountedRef.current) return;
       setActionError(null);
       setCopiedEntry(entry);
