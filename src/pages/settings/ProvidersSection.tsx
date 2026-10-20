@@ -207,7 +207,7 @@ const ASR_PRESETS: ReadonlyArray<{ id: AsrPresetId; nameKey: string; baseUrl: st
 
 // ─── ProvidersSection ─────────────────────────────────────────────────
 
-export function ProvidersSection() {
+export function ProvidersSection({ onOpenLocalAsr }: { onOpenLocalAsr: () => void }) {
   const { t } = useTranslation();
   const { prefs, updatePrefs } = useHotkeySettings();
   // `*Provider` 立即跟随 <select> 改动（受控组件必须实时反映用户输入）；
@@ -362,6 +362,16 @@ export function ProvidersSection() {
           <div style={{ fontSize: 13, fontWeight: 600 }}>{t('settings.providers.asrTitle')}</div>
           <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>{t('settings.providers.asrDesc')}</div>
         </div>
+        {(os === 'win' || os === 'mac') && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <div style={{ flex: '1 1 220px', fontSize: 11.5, color: 'var(--ol-ink-3)', lineHeight: 1.6 }}>
+              {t('settings.providers.localSetupHint')}
+            </div>
+            <Btn variant="ghost" size="sm" onClick={onOpenLocalAsr}>
+              {t('settings.providers.localSetupAction')}
+            </Btn>
+          </div>
+        )}
         {/* 下拉只放云端选项；本地引擎激活时锁住 + 在下方放一行"ASR 提供商已被接管"提示，
             未激活时不显示提示。 */}
         <SettingRow label={t('settings.providers.providerLabel')}>

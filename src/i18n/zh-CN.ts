@@ -423,11 +423,11 @@ export const zhCN = {
     statusDisabled: '未启用',
     working: {
       title: '工作语言',
-      desc: '勾选你日常会用到的语言（多选）。这组语言会作为前提注入 LLM 的 system prompt 头部，影响润色与翻译的判断（专名拼写、语气、行文习惯）。',
+      desc: '可选：选择日常使用的语言，用于辅助专名拼写和表达习惯。这不会改变翻译输出的语言。',
     },
     target: {
       title: '翻译目标语言',
-      desc: '选了某个语言后，录音过程中任意时刻按一下 Shift，停止后就会把转写翻译成该语言再插入到光标位置。选「不启用」则 Shift 没有任何效果，走普通润色管线。',
+      desc: '选择希望输出的语言。录音时按一次 Shift，就会翻译成这里选定的语言；选择“不启用”则保持普通听写。',
       disabled: '不启用（Shift 按下不触发翻译）',
     },
     save: {
@@ -837,6 +837,8 @@ export const zhCN = {
       llmProviderDesc: '选择后将自动填入 Base URL 默认值。',
       credentialStorageNotice: '凭据保存在系统凭据库中。旧版本地 JSON 凭据会迁移到系统凭据库，并在成功写入后删除。',
       codexOAuthNotice: 'Codex OAuth 使用本机 Codex 登录状态（~/.codex/auth.json），无需在 Listener Type 中保存 API Key 或 Base URL。',
+      localSetupHint: '也可以在这台电脑上识别，无需 ASR 密钥。首次需准备本地运行组件和模型，会下载文件并占用磁盘空间。',
+      localSetupAction: '准备本地识别',
       asrProviderDesc: '切换后将自动选用对应凭据。',
       asrTitle: 'ASR 语音（转写）',
       asrDesc: '用于将口述实时转写为文本。',

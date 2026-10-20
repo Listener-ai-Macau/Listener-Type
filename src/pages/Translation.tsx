@@ -4,7 +4,7 @@
 //   - 选一个翻译目标语言（单选；选"不启用"则 Shift 不触发翻译）
 //   - 看完整使用说明（怎么触发、按钮位置、胶囊显示）
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, PageHeader } from './_atoms';
 import { SavedToast } from '../components/SavedToast';
@@ -121,10 +121,10 @@ export function Translation() {
   const translationHotkeyLabel = formatComboLabel(prefs.translationHotkey);
   const enabled = prefs.translationTargetLanguage.trim() !== '';
 
-  const targetOptions = useMemo(() => ([
+  const targetOptions = [
     { value: '', label: t('translation.target.disabled') },
     ...SUPPORTED_LANGUAGES.map(lang => ({ value: lang, label: lang })),
-  ]), [t]);
+  ];
 
   return (
     <>
@@ -173,15 +173,50 @@ export function Translation() {
 
         <SavedToast saveState={saveState} message={saveMessage} />
 
-        {/* 1. 工作语言 */}
+        {/* The output choice comes first; working languages do not choose it. */}
         <Card>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{t('translation.working.title')}</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{t('translation.target.title')}</div>
+            <span
+              style={{
+                padding: '2px 8px',
+                fontSize: 10.5,
+                fontWeight: 600,
+                letterSpacing: 0,
+                borderRadius: 999,
+                background: enabled ? 'rgba(101,123,112,0.10)' : 'rgba(0,0,0,0.05)',
+                color: enabled ? 'var(--ol-blue)' : 'var(--ol-ink-4)',
+                textTransform: 'uppercase',
+              }}
+            >
+              {enabled ? t('translation.statusEnabled') : t('translation.statusDisabled')}
+            </span>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--ol-ink-3)', lineHeight: 1.6, marginBottom: 10 }}>
+            {t('translation.target.desc')}
+          </div>
+          <SelectLite
+            value={prefs.translationTargetLanguage}
+            onChange={onTargetChange}
+            options={targetOptions}
+            placeholder={t('translation.target.disabled')}
+            ariaLabel={t('translation.target.title')}
+            style={{ width: '100%', maxWidth: 360, fontSize: 13, background: 'var(--ol-white)' }}
+          />
+        </Card>
+
+        <Card>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{t('translation.working.title')}</div>
+          <div style={{ fontSize: 12, color: 'var(--ol-ink-3)', lineHeight: 1.6, marginBottom: 12 }}>
+            {t('translation.working.desc')}
+          </div>
+          <div role="group" aria-label={t('translation.working.title')} style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {SUPPORTED_LANGUAGES.map(lang => {
               const checked = prefs.workingLanguages.includes(lang);
               return (
                 <button
                   key={lang}
+                  aria-pressed={checked}
                   onClick={() => toggleWorkingLanguage(lang)}
                   style={{
                     padding: '6px 12px',
@@ -201,35 +236,6 @@ export function Translation() {
               );
             })}
           </div>
-        </Card>
-
-        {/* 2. 翻译目标语言 */}
-        <Card>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>{t('translation.target.title')}</div>
-            <span
-              style={{
-                padding: '2px 8px',
-                fontSize: 10.5,
-                fontWeight: 600,
-                letterSpacing: 0,
-                borderRadius: 999,
-                background: enabled ? 'rgba(101,123,112,0.10)' : 'rgba(0,0,0,0.05)',
-                color: enabled ? 'var(--ol-blue)' : 'var(--ol-ink-4)',
-                textTransform: 'uppercase',
-              }}
-            >
-              {enabled ? t('translation.statusEnabled') : t('translation.statusDisabled')}
-            </span>
-          </div>
-          <SelectLite
-            value={prefs.translationTargetLanguage}
-            onChange={onTargetChange}
-            options={targetOptions}
-            placeholder={t('translation.target.disabled')}
-            ariaLabel={t('translation.target.title')}
-            style={{ width: '100%', maxWidth: 360, fontSize: 13, background: 'var(--ol-white)' }}
-          />
         </Card>
 
         {/* 3. 使用方法 */}

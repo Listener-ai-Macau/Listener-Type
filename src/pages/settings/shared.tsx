@@ -1,7 +1,9 @@
 // 共享在 Settings 各 section 间的原子（SettingRow / Toggle / inputStyle）。
 // AsrPresetId 也放在这里，让 AdvancedSection 与 Settings.tsx 都从一处来源拿。
 
-import type { CSSProperties, ReactNode } from 'react';
+import { createContext, useContext, type CSSProperties, type ReactNode } from 'react';
+
+const SettingLabelContext = createContext<string | undefined>(undefined);
 
 interface SettingRowProps {
   label: string;
@@ -17,14 +19,21 @@ export function SettingRow({ label, desc, children, controlWidth }: SettingRowPr
         <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ol-ink)' }}>{label}</div>
         {desc && <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, lineHeight: 1.5 }}>{desc}</div>}
       </div>
-      <div className="ol-setting-row-control" style={{ display: 'flex', alignItems: 'flex-start', minWidth: 0, width: controlWidth ?? 'auto' }}>{children}</div>
+      <SettingLabelContext.Provider value={label}>
+        <div className="ol-setting-row-control" style={{ display: 'flex', alignItems: 'flex-start', minWidth: 0, width: controlWidth ?? 'auto' }}>{children}</div>
+      </SettingLabelContext.Provider>
     </div>
   );
 }
 
 export function Toggle({ on, onToggle, disabled = false }: { on: boolean; onToggle?: (next: boolean) => void; disabled?: boolean }) {
+  const label = useContext(SettingLabelContext);
   return (
     <button
+      type="button"
+      role="switch"
+      aria-label={label}
+      aria-checked={on}
       onClick={() => onToggle?.(!on)}
       disabled={disabled}
       style={{

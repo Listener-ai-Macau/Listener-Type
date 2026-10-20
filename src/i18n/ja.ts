@@ -383,11 +383,11 @@ export const ja: typeof zhCN = {
     statusDisabled: '無効',
     working: {
       title: '作業言語',
-      desc: '日常的に使用する言語（複数選択可）にチェックを入れてください。これらは前提として LLM の system prompt 冒頭に注入され、整文と翻訳の判断（固有名詞の表記、語気、文体習慣）に影響します。',
+      desc: '任意：普段使う言語を選ぶと、固有名詞の表記や文体の参考になります。翻訳の出力言語は変わりません。',
     },
     target: {
       title: '翻訳ターゲット言語',
-      desc: 'いずれかの言語を選択すると、録音中の任意のタイミングで Shift を 1 回押すだけで、停止後に転写をその言語に翻訳してカーソル位置に入力します。「無効」を選ぶと Shift は何の効果もなく、通常の整文パイプラインに進みます。',
+      desc: '出力したい言語を選びます。録音中に Shift を一度押すと、この言語に翻訳されます。無効を選ぶと通常の音声入力になります。',
       disabled: '無効（Shift で翻訳を発動しない）',
     },
     save: {
@@ -797,6 +797,8 @@ export const ja: typeof zhCN = {
       llmProviderDesc: '選択するとデフォルトの Base URL が自動入力されます。',
       credentialStorageNotice: '認証情報は OS の認証情報ストアに保存されます。旧バージョンのローカル JSON 認証情報はストアへ移行され、書き込み成功後に削除されます。',
       codexOAuthNotice: 'Codex OAuth はローカルの Codex ログイン状態（~/.codex/auth.json）を使用します。Listener Type は API Key や Base URL を保存しません。',
+      localSetupHint: 'このコンピューター上での認識も選べます。ASR API キーは不要ですが、初回に実行環境とモデルのダウンロードおよびディスク容量が必要です。',
+      localSetupAction: 'ローカル認識を準備',
       asrProviderDesc: '切り替えると対応する認証情報が自動選択されます。',
       asrTitle: 'ASR 音声（転写）',
       asrDesc: '口述をリアルタイムでテキストに転写。',

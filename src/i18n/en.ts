@@ -426,11 +426,11 @@ export const en: typeof zhCN = {
     statusDisabled: 'Disabled',
     working: {
       title: 'Working languages',
-      desc: 'Pick the languages you regularly use (multi-select). These are passed to the LLM as a premise so polish and translation know which spellings, tone, and conventions you expect.',
+      desc: 'Optional: select languages you regularly use to guide spelling and writing style. This does not choose the translation output language.',
     },
     target: {
       title: 'Translation target language',
-      desc: 'Pick a language and pressing Shift any time during recording will translate the transcript into it before insertion. Pick "Disabled" to make Shift a no-op (regular polish runs instead).',
+      desc: 'Choose the language you want to write in. During recording, press Shift once to translate into this language. Choose Disabled to keep normal dictation.',
       disabled: 'Disabled (Shift does nothing)',
     },
     save: {
@@ -842,6 +842,8 @@ export const en: typeof zhCN = {
       llmProviderDesc: 'Selecting a preset auto-fills the default Base URL.',
       credentialStorageNotice: 'Credentials are stored in the OS credential vault. Legacy local JSON credentials are migrated into the vault and removed after a successful write.',
       codexOAuthNotice: 'Codex OAuth uses the local Codex login state (~/.codex/auth.json). Listener Type does not store an API key or Base URL for this provider.',
+      localSetupHint: 'Prefer recognition on this computer? No ASR API key is needed. First prepare a local runtime and model; downloads and disk space are required.',
+      localSetupAction: 'Set up local recognition',
       asrProviderDesc: 'Switching providers automatically loads the matching credentials.',
       asrTitle: 'ASR (transcription)',
       asrDesc: 'Used to turn speech into text in real time.',

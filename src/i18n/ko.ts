@@ -383,11 +383,11 @@ export const ko: typeof zhCN = {
     statusDisabled: '비활성화됨',
     working: {
       title: '작업 언어',
-      desc: '일상적으로 사용하는 언어를 체크하세요(다중 선택). 이 언어 그룹은 LLM system prompt 시작 부분에 전제로 주입되어 정리와 번역의 판단(고유명사 표기, 어조, 문체 습관)에 영향을 줍니다.',
+      desc: '선택 사항: 평소 사용하는 언어를 선택하면 고유명사 표기와 문체에 참고합니다. 번역 출력 언어는 바뀌지 않습니다.',
     },
     target: {
       title: '번역 대상 언어',
-      desc: '하나의 언어를 선택하면 녹음 중 임의의 시점에 Shift 를 한 번 눌러 정지 후 전사를 해당 언어로 번역하여 커서 위치에 삽입합니다. "비활성화"를 선택하면 Shift 는 효과가 없으며 일반 정리 파이프라인을 따릅니다.',
+      desc: '출력할 언어를 선택하세요. 녹음 중 Shift를 한 번 누르면 이 언어로 번역됩니다. 비활성화를 선택하면 일반 받아쓰기가 유지됩니다.',
       disabled: '비활성화 (Shift 로 번역 발동 안 함)',
     },
     save: {
@@ -797,6 +797,8 @@ export const ko: typeof zhCN = {
       llmProviderDesc: '선택 시 Base URL 기본값이 자동 입력됩니다.',
       credentialStorageNotice: '자격 증명은 OS 자격 증명 저장소에 저장됩니다. 이전 로컬 JSON 자격 증명은 저장소로 마이그레이션되고, 쓰기 성공 후 삭제됩니다.',
       codexOAuthNotice: 'Codex OAuth는 로컬 Codex 로그인 상태(~/.codex/auth.json)를 사용합니다. Listener Type는 API Key나 Base URL을 저장하지 않습니다.',
+      localSetupHint: '이 컴퓨터에서 음성을 인식할 수도 있습니다. ASR API 키는 필요 없지만, 처음에 실행 구성 요소와 모델을 다운로드하고 디스크 공간을 준비해야 합니다.',
+      localSetupAction: '로컬 인식 준비',
       asrProviderDesc: '전환 시 해당하는 자격 증명이 자동 선택됩니다.',
       asrTitle: 'ASR 음성(전사)',
       asrDesc: '구술을 실시간으로 텍스트로 전사합니다.',

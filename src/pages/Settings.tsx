@@ -139,7 +139,10 @@ export function Settings({ embedded = false, initialSection = 'device' }: Settin
         >
           {section === 'recording' && <RecordingSection />}
           {section === 'device' && <DeviceSection />}
-          {section === 'providers' && <ProvidersSection />}
+          {section === 'providers' && <ProvidersSection onOpenLocalAsr={() => {
+            setSection('advanced');
+            contentRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+          }} />}
           {section === 'shortcuts' && <ShortcutsSection />}
           {section === 'permissions' && <PermissionsSection />}
           {section === 'language' && <LanguageSection />}
