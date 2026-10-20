@@ -205,6 +205,7 @@ export const zhTW: typeof zhCN = {
       deviceTitle: '設備使用指引',
       deviceBody: '此提示不會連接或中斷設備。請以實際設備狀態為準，也可到錄音設定選擇電腦麥克風。',
       configureProvider: '配置 API Key',
+      tryStyles: '試用風格',
       testAudio: '測試音訊',
       pairDevice: '配對設備',
       close: '關閉 Demo 提示',

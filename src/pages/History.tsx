@@ -114,6 +114,7 @@ export function History() {
     [filtered, selectedId],
   );
   const justCopied = !!item && copiedEntry?.id === item.id && copiedEntry.text === item.finalText;
+  const showRawComparison = !!item && item.rawTranscript !== item.finalText;
 
   const onClear = async () => {
     if (items.length === 0) return;
@@ -378,12 +379,12 @@ export function History() {
                 />
               )}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, minWidth: 0 }}>
-                <div style={{ padding: 14, border: '0.5px solid var(--ol-line)', borderRadius: 10, background: 'var(--ol-surface-2)', minWidth: 0, overflow: 'hidden' }}>
+                {showRawComparison && <div style={{ padding: 14, border: '0.5px solid var(--ol-line)', borderRadius: 10, background: 'var(--ol-surface-2)', minWidth: 0, overflow: 'hidden' }}>
                   <Pill size="sm" tone="outline" style={{ marginBottom: 10 }}>{t('history.rawLabel')}</Pill>
                   <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: 'var(--ol-ink-2)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                     {item.rawTranscript || t('history.rawEmpty')}
                   </p>
-                </div>
+                </div>}
                 <div style={{ padding: 14, border: '0.5px solid var(--ol-blue)', borderRadius: 10, background: 'var(--ol-blue-soft)', minWidth: 0, overflow: 'hidden' }}>
                   <Pill size="sm" tone="blue" style={{ marginBottom: 10 }}>{MODE_LABEL[item.mode]}</Pill>
                   <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: 'var(--ol-ink)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>

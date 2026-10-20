@@ -203,6 +203,7 @@ export const zhCN = {
       deviceTitle: '设备使用指引',
       deviceBody: '此提示不会连接或断开设备。请以实际设备状态为准，也可到录音设置选择电脑麦克风。',
       configureProvider: '配置 API Key',
+      tryStyles: '风格试用',
       testAudio: '测试音频',
       pairDevice: '配对设备',
       close: '关闭 Demo 提示',

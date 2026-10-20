@@ -163,6 +163,7 @@ export const ko: typeof zhCN = {
       deviceTitle: '장치 안내',
       deviceBody: '이 안내는 장치를 연결하거나 연결을 끊지 않습니다. 실제 연결 상태를 확인하거나 녹음 설정에서 컴퓨터 마이크를 선택하세요.',
       configureProvider: 'API Key 설정',
+      tryStyles: '스타일 체험',
       testAudio: '오디오 테스트',
       pairDevice: '장치 페어링',
       close: 'Demo 알림 닫기',

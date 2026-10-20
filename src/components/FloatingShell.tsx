@@ -458,6 +458,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                   onClose={() => setDemoModeSession(null)}
                   onOpenProviders={openDemoProviderSettings}
                   onOpenRecording={openDemoRecordingSettings}
+                  onOpenStyles={() => { setDemoModeSession(null); setCurrentTab('style'); }}
                 />
               ) : null}
               {displayTab === 'overview' ? (
@@ -574,11 +575,13 @@ function DemoModeBanner({
   onClose,
   onOpenProviders,
   onOpenRecording,
+  onOpenStyles,
 }: {
   source: DemoModeSession['source'];
   onClose: () => void;
   onOpenProviders: () => void;
   onOpenRecording: () => void;
+  onOpenStyles: () => void;
 }) {
   const { t } = useTranslation();
   const providerDemo = source === 'provider';
@@ -627,12 +630,15 @@ function DemoModeBanner({
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap', flex: '0 1 auto' }}>
+        <button onClick={onOpenStyles} style={promptPrimaryButtonStyle}>
+          {t('shell.demoMode.tryStyles')}
+        </button>
         {providerDemo ? (
-          <button onClick={onOpenProviders} style={promptPrimaryButtonStyle}>
+          <button onClick={onOpenProviders} style={promptSoftButtonStyle}>
             {t('shell.demoMode.configureProvider')}
           </button>
         ) : (
-          <button onClick={onOpenRecording} style={promptPrimaryButtonStyle}>
+          <button onClick={onOpenRecording} style={promptSoftButtonStyle}>
             {t('shell.demoMode.testAudio')}
           </button>
         )}

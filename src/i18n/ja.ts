@@ -163,6 +163,7 @@ export const ja: typeof zhCN = {
       deviceTitle: 'デバイスガイド',
       deviceBody: 'この案内はデバイスを接続・切断しません。実際の接続状態を確認するか、録音設定でパソコンのマイクを選択できます。',
       configureProvider: 'API Key を設定',
+      tryStyles: 'スタイルを試す',
       testAudio: '音声をテスト',
       pairDevice: 'デバイスをペアリング',
       close: 'Demo 通知を閉じる',

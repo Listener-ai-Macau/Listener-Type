@@ -206,6 +206,7 @@ export const en: typeof zhCN = {
       deviceTitle: 'Device guidance',
       deviceBody: 'This notice does not connect or disconnect hardware. Check the actual device status, or choose a microphone in Recording settings.',
       configureProvider: 'Configure API Key',
+      tryStyles: 'Try styles',
       testAudio: 'Test audio',
       pairDevice: 'Pair device',
       close: 'Close Demo notice',
