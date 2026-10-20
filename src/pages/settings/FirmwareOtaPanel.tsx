@@ -489,6 +489,14 @@ export function FirmwareOtaPanel({
         </div>
       </div>
 
+      {validationErrors.length > 0 && (
+        <div className="ol-firmware-package-errors" role="alert" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {validationErrors.map(error => (
+            <div key={error} style={{ fontSize: 11.5, color: 'var(--ol-err)', lineHeight: 1.5 }}>{error}</div>
+          ))}
+        </div>
+      )}
+
       {firmwareMode === 'ble' && (
         <div
           style={{
@@ -579,13 +587,8 @@ export function FirmwareOtaPanel({
             </div>
           )}
 
-          {(validationErrors.length > 0 || visiblePreflightBlockers.length > 0 || state.failureCode) && (
+          {(visiblePreflightBlockers.length > 0 || state.failureCode) && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {validationErrors.map(error => (
-                <div key={error} style={{ fontSize: 11.5, color: 'var(--ol-err)', lineHeight: 1.5 }}>
-                  {error}
-                </div>
-              ))}
               {visiblePreflightBlockers.map(item => (
                 <div key={item.code} style={{ fontSize: 11.5, color: 'var(--ol-err)', lineHeight: 1.5 }}>
                   {formatFirmwareOtaBlocker(item, i18n.resolvedLanguage ?? i18n.language)}
