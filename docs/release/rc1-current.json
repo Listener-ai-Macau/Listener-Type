@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-20T13:59:19.217573+08:00",
+  "updatedAt": "2026-10-20T14:26:26.623832+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 68,
-    "source": "cfa6c939a66356d8a40ddd2c5b4bc6806a45adc3",
-    "sourceTag": "build-source/type68-20261020",
+    "build": 69,
+    "source": "81318165f1dfedf15164718628cf0099d5542440",
+    "sourceTag": "build-source/type69-20261020",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "844c6b64f91bcefde0e4869c534aeb3d4ac9681febe1f38cd325063d6bf0a65b",
-    "sizeBytes": 298528768,
-    "exeSha256": "0ca7b2cd5f6dcc1f02802f6a85eae0a6080ed61e3d5d8ea6b05a6143fd5f6874",
+    "sha256": "095039ec9e97bbde8d6d5cff655a99ca89b5142407868ab2eac4f784a1c7b8b7",
+    "sizeBytes": 298524672,
+    "exeSha256": "01771b6c655dffecbff950d41e4cb3aa25e7710defd3216ac5ddfab4e6bbb7a7",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -40,7 +40,11 @@
     "customerSetup68IsolatedUiVerified": true,
     "type68InstalledExeAndPreferencesVerified": true,
     "customerSpeechOrHardwarePurchaseValueVerified": false,
-    "priorHardwareEvidenceScope": "USB/Bluetooth settings and Firmware33 OTA evidence retained from installed Type66/67; not rerun or requalified as Type68 full hardware/customer acceptance."
+    "priorHardwareEvidenceScope": "USB/Bluetooth settings and Firmware33 OTA evidence retained from installed Type66/67; not rerun or requalified as Type68 full hardware/customer acceptance.",
+    "type69InstalledExeAndPreferencesVerified": true,
+    "firstDictation69IsolatedUiVerified": true,
+    "independentFirstUse69ObservedClearStartAndSource": true,
+    "customerHelpLinkReexperienceCompleted": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -57,6 +61,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build68-20261020"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build69-20261020"
   }
 }

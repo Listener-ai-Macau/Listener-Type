@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T13:59:19.217573+08:00",
+  "updated_at": "2026-10-20T14:26:26.623832+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3027,7 +3027,7 @@
       "repo": "type",
       "commit": "cfa6c939a66356d8a40ddd2c5b4bc6806a45adc3",
       "subject": "Separate basic dictation readiness from optional polishing and make customer setup understandable",
-      "state": "installed68_exe_hash_preferences_listener_ready_and_isolated_ui_verified_customer_first_use_pending",
+      "state": "installed68_verified_first_use_feedback_received_home_discoverability_fixed_in69",
       "protects": [
         "An ASR-ready user is not blocked by the startup provider modal merely because optional LLM polishing is unconfigured.",
         "No-key setup opens local model preparation and never switches an unprepared recognition provider from the homepage.",
@@ -3049,12 +3049,44 @@
         "Type68 MSI embedded/built/installed EXE hashes agree; same-version upgrade completed, preferences and credential status preserved, main/helper restored and listener ready. No native speech or full hardware rerun."
       ],
       "unverified": [
-        "Fresh customer first-use review pending; original customer archive is retained, with a separate history-free temporary reviewer per round.",
         "Live native About UI, actual no-key local inference, customer speech, physical-device value, editor insertion and willingness to pay remain unqualified."
+      ]
+    },
+    {
+      "id": "customer69_first_dictation_visible_when_services_ready",
+      "repo": "type",
+      "commit": "81318165f1dfedf15164718628cf0099d5542440",
+      "subject": "Always show first-dictation steps, current shortcut and source revision; real documentation links",
+      "state": "installed69_hash_and_preferences_verified_independent_first_use_observed_clear_start_real_speech_unqualified",
+      "protects": [
+        "A fully configured customer still sees how to place the cursor, start, stop and cancel.",
+        "Displayed shortcut comes from current dictationHotkey; homepage does not change input source or provider merely by showing instructions.",
+        "Version footer identifies the actual compiled source; browser documentation links have real hrefs and native shell routing is retained."
+      ],
+      "guards": [
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\candidate69-ui-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build69\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build69\\type69-installed.json"
+      ],
+      "machine_accepted_scope": [
+        "Eight affected isolated frontend checks, exact packaged/installed EXE hash, preferences and credential status, main/helper and listener readiness."
+      ],
+      "customer_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-20/listener-customer-review-20261020/outputs/Listener_FIRST_USE_20261020_81318165f1df/customer-experience.txt"
+      ],
+      "customer_accepted_scope": [
+        "Actual fork_turns=none frontend-only first-use reviewer found the three basic steps clear and exact candidate source visible; not speech, hardware or purchase qualification."
+      ],
+      "unverified": [
+        "Customer did not re-use help links; engine navigation checks are separate.",
+        "Real speech, polishing and input to the intended editor, hardware value and commercial entitlement delivery remain unqualified."
       ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T13:59:19.217573+08:00",
+  "feature_routes_updated_at": "2026-10-20T14:26:26.623832+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -3656,10 +3688,11 @@
     },
     {
       "id": "customer-first-use",
-      "baseline_state": "installed68_exe_hash_preferences_listener_ready_and_isolated_ui_verified_customer_first_use_pending",
+      "baseline_state": "installed69_hash_and_preferences_verified_independent_first_use_observed_clear_start_real_speech_unqualified",
       "accepted_scope": "Customer setup readiness and localized maintenance UI; no speech/hardware/market qualification.",
       "guard_entries": [
-        "customer_setup68_asr_ready_does_not_require_optional_llm"
+        "customer_setup68_asr_ready_does_not_require_optional_llm",
+        "customer69_first_dictation_visible_when_services_ready"
       ],
       "paths": {
         "type": [
@@ -3675,7 +3708,8 @@
       },
       "known_failures": [
         "The legacy startup prompt required both ASR and LLM and incorrectly blocked basic dictation with ASR configured.",
-        "The prior homepage local-recognition action selected Foundry before model preparation."
+        "The prior homepage local-recognition action selected Foundry before model preparation.",
+        "Prior QuickStart was conditional on missing ASR/LLM; once both were configured the homepage lost all first-dictation guidance."
       ]
     }
   ]
