@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T15:55:14.154033+08:00",
+  "updated_at": "2026-10-20T16:34:35.987596+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3195,9 +3195,44 @@
       "unverified": [
         "New candidate customer review is separate. No live speech, real editor insertion, physical switch/hardware or market qualification."
       ]
+    },
+    {
+      "id": "customer74_uninterrupted_onboarding_and_honest_history",
+      "repo": "type",
+      "commit": "0d6b72fa5b865470d140354712f140af42d8e071",
+      "subject": "Keep microphone onboarding unobstructed and local preparation direct; label illustrative history",
+      "state": "installed74_exact_package_preferences_verified_affected_mock_ui_passed",
+      "protects": [
+        "Selecting microphone never automatically opens hardware pairing; the guide is an explicit optional action.",
+        "Choosing microphone in the guide persists that input before closing, and save failures stay visible.",
+        "All local setup entry points reach Local recognition directly without activating or downloading a model.",
+        "Browser history clearly distinguishes hand-written comparisons from recordings/model output/insertion.",
+        "Empty style filters recover to all stored history; truly empty history keeps first-recording guidance."
+      ],
+      "guards": [
+        "python scripts/check-onboarding-ui.py --url <isolated-browser-url> --report <output-json>",
+        "python scripts/check-history-example-ui.py --url <isolated-browser-url> --report <output-json>"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\onboarding73-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\onboarding74-frozen.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\history73-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\history74-after.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build74\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build74\\type74-installed.json"
+      ],
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-73-direct-20261020-1610\\customer-story.txt"
+      ],
+      "unverified": [
+        "Customer use of this candidate is recorded separately. No new live speech, physical-device or market qualification."
+      ],
+      "supersedes": {
+        "customer73_local_setup_translation_and_switch_state": "Only the preparation destination changes intentionally from Advanced to dedicated Local recognition. Prior translation/switch/loading protections remain."
+      }
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T15:55:14.154033+08:00",
+  "feature_routes_updated_at": "2026-10-20T16:34:35.987596+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -3806,7 +3841,8 @@
         "customer69_first_dictation_visible_when_services_ready",
         "customer71_input_aware_settings_and_visible_start_failure",
         "customer72_vocabulary_acknowledgements_and_cancelled_navigation",
-        "customer73_local_setup_translation_and_switch_state"
+        "customer73_local_setup_translation_and_switch_state",
+        "customer74_uninterrupted_onboarding_and_honest_history"
       ],
       "paths": {
         "type": [
@@ -3824,7 +3860,10 @@
           "scripts/check-vocabulary-ui.py",
           "src/pages/Translation.tsx",
           "src/pages/settings/shared.tsx",
-          "scripts/check-customer-settings-ui.py"
+          "scripts/check-customer-settings-ui.py",
+          "src/pages/History.tsx",
+          "scripts/check-history-example-ui.py",
+          "scripts/check-onboarding-ui.py"
         ]
       },
       "known_failures": [
@@ -3836,7 +3875,9 @@
         "At oldest visible ^732a863, returning before the 180ms page transition cleared its timer but left exiting active permanently.",
         "Frozen72 Providers has no local setup link despite the deliberate cloud-only dropdown.",
         "At oldest visible ^732a863, Translation renders no explanations and calls useMemo only after preferences exist; frozen72 delayed loading reproduces React error310.",
-        "Shared settings Toggle previously exposed no switch role, label or checked state."
+        "Shared settings Toggle previously exposed no switch role, label or checked state.",
+        "Frozen73 choosing microphone automatically opens unrelated pairing due to the old non-BLE input predicate (4c6f92df/3871166f).",
+        "Frozen73 illustrative history has no Formal examples and labels an empty style filter as no history."
       ]
     },
     {
