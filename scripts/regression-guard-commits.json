@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T20:06:01.551419+08:00",
+  "updated_at": "2026-10-20T20:35:26.909804+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3378,9 +3378,34 @@
         "Customer79 actually used Demo to Style to personal trial, saw explicit missing-text-service dependency and exact raw output; no history/copy action by this customer. Native History presentation/copy confirmation is root engineering evidence.",
         "No new live speech, editor insertion, physical hardware or market purchase qualification; customer79 declined purchase in the recorded conditions."
       ]
+    },
+    {
+      "id": "type79_recorded_audio_to_original_popup",
+      "repo": "type",
+      "commit": "ec136a7055975c853ae5a2852d53ed8d88f094b0",
+      "subject": "One actual recorded ASR result reaches the exact original popup input with focused editable control",
+      "state": "actual79_single_recorded_file_to_original_editor_verified_not_live",
+      "protects": [
+        "Exact installed79 on an explicitly coordinated interactive window sends recorded audio to existing ASR; actual writable input body equals its new saved final body.",
+        "Observe native UIA exact writable focus, not only top-level HWND; no production readonly or target protection is weakened to obtain acceptance."
+      ],
+      "guards": [
+        "Prepared real_editor79.py is read-only by default; foreground execution requires a separately coordinated input window."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\real-editor79-verified.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\real-editor79-20261020-203138\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\real-editor79-20261020-203138\\delivery-observations.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\real-editor79-20261020-202033\\result.json"
+      ],
+      "limits": [
+        "131-character actual input equals History, not a word-accuracy certificate for source audio. Product pasteSent is retained; independent owned-edit read proves this one delivery.",
+        "First uncontrolled focused-control failure remains; no claim that the original native SetFocus call necessarily caused it.",
+        "No independent customer use, live microphone/wake/automatic endpoint, real target app beyond this WinForms field, verified clipboard read, physical benefit or market purchase."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T20:06:01.551419+08:00",
+  "feature_routes_updated_at": "2026-10-20T20:35:26.909804+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -3497,7 +3522,8 @@
         "type_recording_latency_and_ble_audio_control",
         "type_recording_preview_text_stability",
         "type_native_writable_document_paste_observation",
-        "type_recording_origin_clipboard_retention"
+        "type_recording_origin_clipboard_retention",
+        "type79_recorded_audio_to_original_popup"
       ],
       "paths": {
         "type": [
