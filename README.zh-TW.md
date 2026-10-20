@@ -2,14 +2,20 @@
 
 | 用途 | 直接下载 |
 | --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build74](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 软件** | **[下载 MSI · Type build75](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
+
+<details>
+<summary>已有设备：固件与设置说明</summary>
 
 固件适用 **ESP32-S3 N16R8**，构建 `e7bd1f1619b696a1`。USB 和蓝牙更新选择同一个 ZIP，无需再猜下载哪一个。
 Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
 设备设置各自独立：选择一台有线／蓝牙设备，读取后修改并写入；名称、灯光、电源、按键和旋钮设置保存在该设备中。请配套使用本页 MSI 与固件 ZIP。
+
+</details>
+
 RC1 仍为候选版本，偶发提前结束及强干扰限制见发布说明。
-Type build74 不再因选择电脑麦克风而自动弹出硬件向导，本地准备直达独立设置页，并明确标注历史手工示例和无匹配筛选恢复。保留本地识别准备入口、区分翻译输出与工作语言、让开关状态可读，并修复设置未加载时翻译页报错。保留词条失败反馈和快速切回页面后的空白；设置按已选输入源打开，首次听写失败可见。保留历史复制状态归属修复。在首页常驻第一段听写与实际快捷键说明，直达输入来源，页脚显示构建来源；保留基础听写与英文维护修复。RC1 通过官方 MSI 下载更新。保留改名、按键保存及固件包提示修复，Firmware33 未变，不含实验测速程序。
+Type build75 在本地识别准备并加载成功后才切换服务；取消或失败保留原识别方式。现有较小模型的下载量与准确率取舍直接可见。配套 Firmware33 保持，历史修复与限制见发布说明。
 [软件发布说明与校验](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [固件发布说明与烧写方法](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 [English first setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [English user guide](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)
@@ -89,6 +95,11 @@ Type build74 不再因选择电脑麦克风而自动弹出硬件向导，本地�
 Light 清理獨立語氣詞並補標點，同時保留原意；Structured 整理需求和筆記；Formal 收拾商務表達；Raw 儘量保持辨識原文；翻譯按已選目標語言輸出。潤飾服務不可用時，Listener 會保住可用的辨識原文，不讓整段聽寫遺失。
 
 ## Listener 語音鍵盤
+
+**49 美元為硬體價格：** 包含裝置本身的麥克風、傳至 Type 的藍牙音訊、錄音／音量旋鈕、四個可自訂按鍵及六顆狀態燈。麥克風與控制可擺在工作時順手的位置，每台裝置保留各自設定。
+
+免費軟體可使用電腦麥克風與 Right Ctrl；選用 Listener 時，聲音來自裝置麥克風。兩種方式均使用電腦上設定的辨識服務或本機模型，硬體價格不包含雲端用量。完整裝置音訊路徑需 Windows Type；雜音或多人同說時仍需複核文字。
+
 
 <p align="center">
   <img src="docs/assets/readme/keyboard-front.jpg" alt="Listener 語音鍵盤：四顆透明鍵帽、金屬旋鈕和狀態燈" width="900" />

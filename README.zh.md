@@ -2,14 +2,20 @@
 
 | 用途 | 直接下载 |
 | --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build74](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 软件** | **[下载 MSI · Type build75](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
+
+<details>
+<summary>已有设备：固件与设置说明</summary>
 
 固件适用 **ESP32-S3 N16R8**，构建 `e7bd1f1619b696a1`。USB 和蓝牙更新选择同一个 ZIP，无需再猜下载哪一个。
 Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
 设备设置各自独立：选择一台有线／蓝牙设备，读取后修改并写入；名称、灯光、电源、按键和旋钮设置保存在该设备中。请配套使用本页 MSI 与固件 ZIP。
+
+</details>
+
 RC1 仍为候选版本，偶发提前结束及强干扰限制见发布说明。
-Type build74 不再因选择电脑麦克风而自动弹出硬件向导，本地准备直达独立设置页，并明确标注历史手工示例和无匹配筛选恢复。保留本地识别准备入口、区分翻译输出与工作语言、让开关状态可读，并修复设置未加载时翻译页报错。保留词条失败反馈和快速切回页面后的空白；设置按已选输入源打开，首次听写失败可见。保留历史复制状态归属修复。在首页常驻第一段听写与实际快捷键说明，直达输入来源，页脚显示构建来源；保留基础听写与英文维护修复。RC1 通过官方 MSI 下载更新。保留改名、按键保存及固件包提示修复，Firmware33 未变，不含实验测速程序。
+Type build75 在本地识别准备并加载成功后才切换服务；取消或失败保留原识别方式。现有较小模型的下载量与准确率取舍直接可见。配套 Firmware33 保持，历史修复与限制见发布说明。
 [软件发布说明与校验](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [固件发布说明与烧写方法](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 [English first setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [English user guide](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)
@@ -96,6 +102,11 @@ Windows 是主要安装与完整键盘音频路径。macOS / Linux 当前从源�
 > 整理示意：“提醒我明天下午三点开会。”
 
 ## 一只旋钮，四个按键，六颗状态灯
+
+**49 美元是硬件价格：** 包含设备自己的麦克风、传给 Type 的蓝牙音频、录音／音量旋钮、四个可自定义按键和六颗状态灯。麦克风与控制可以放在工作时顺手的位置，每台设备保留各自设置。
+
+免费软件可使用电脑麦克风和 Right Ctrl；选用 Listener 时，声音来自设备麦克风。两种方式都使用电脑上配置的识别服务或本地模型，硬件价格不包含云端用量。完整设备音频路径需要 Windows Type；噪声或多人同说时仍需复核文字。
+
 
 **键盘为可选配件，目前处于预售阶段，购买入口尚未公布。软件可先独立使用。**
 
