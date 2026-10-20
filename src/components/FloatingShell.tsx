@@ -257,6 +257,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const startDemoMode = (source: DemoModeSession['source']) => {
     setProviderPromptOpen(false);
     setBlePairingPromptOpen(false);
+    setSettingsOpen(false);
     setDemoModeSession(createDemoModeSession(source));
     setCurrentTab('overview');
   };
@@ -277,6 +278,11 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const openDemoRecordingSettings = () => {
     setDemoModeSession(null);
     openSettings('recording');
+  };
+
+  const openDemoDeviceSettings = () => {
+    setDemoModeSession(null);
+    openSettings('device');
   };
 
 
@@ -458,6 +464,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                   onClose={() => setDemoModeSession(null)}
                   onOpenProviders={openDemoProviderSettings}
                   onOpenRecording={openDemoRecordingSettings}
+                  onOpenDevice={openDemoDeviceSettings}
                   onOpenStyles={() => { setDemoModeSession(null); setCurrentTab('style'); }}
                 />
               ) : null}
@@ -575,12 +582,14 @@ function DemoModeBanner({
   onClose,
   onOpenProviders,
   onOpenRecording,
+  onOpenDevice,
   onOpenStyles,
 }: {
   source: DemoModeSession['source'];
   onClose: () => void;
   onOpenProviders: () => void;
   onOpenRecording: () => void;
+  onOpenDevice: () => void;
   onOpenStyles: () => void;
 }) {
   const { t } = useTranslation();
@@ -642,7 +651,7 @@ function DemoModeBanner({
             {t('shell.demoMode.testAudio')}
           </button>
         )}
-        <button onClick={onOpenRecording} style={promptSoftButtonStyle}>
+        <button onClick={providerDemo ? onOpenRecording : onOpenDevice} style={promptSoftButtonStyle}>
           {t(providerDemo ? 'shell.demoMode.testAudio' : 'shell.demoMode.pairDevice')}
         </button>
         <button
