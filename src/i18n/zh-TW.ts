@@ -108,6 +108,9 @@ export const zhTW: typeof zhCN = {
     },
   },
   shell: {
+    browserPreviewTitle: '介面預覽 · 範例資料。',
+    browserPreviewDescription: '服務、裝置與歷史狀態均為模擬。修改只在目前頁面工作階段保留；此預覽不錄音，也不會輸入真實語音。',
+    browserPreviewDownload: '下載 Windows 應用程式，使用真實聽寫',
     shortcutLabel: '錄音快捷鍵',
     shortcutHint: '開始 / 停止',
     footer: {
@@ -358,6 +361,7 @@ export const zhTW: typeof zhCN = {
     confirmClear: '確定清空全部 {{count}} 條記錄？此操作不可恢復。',
   },
   vocab: {
+    changeFailed: '無法儲存詞彙表修改：{{err}}',
     kicker: 'VOCABULARY',
     title: '詞彙表',
     desc: '告訴模型識別前可能出現的詞——生詞、新詞或專業詞彙。同時進入 ASR 熱詞與後期模型上下文。',

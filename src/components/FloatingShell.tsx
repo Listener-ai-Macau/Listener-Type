@@ -29,6 +29,7 @@ import {
   getCredentials,
   getEmbeddedBleRuntimeStatus,
   isMainWindowStartHidden,
+  isTauri,
   openSystemSettings,
   recoverEmbeddedBleDevice,
 } from '../lib/ipc';
@@ -89,7 +90,11 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const [displayTab, setDisplayTab] = useState<AppTab>(initialTab);
   const [tabPhase, setTabPhase] = useState<'idle' | 'exiting'>('idle');
   useEffect(() => {
-    if (currentTab === displayTab) return;
+    if (currentTab === displayTab) {
+      // Returning before the timeout cancels the transition, including its fade.
+      setTabPhase('idle');
+      return;
+    }
     setTabPhase('exiting');
     const id = window.setTimeout(() => {
       setDisplayTab(currentTab);
@@ -424,6 +429,13 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
               flexDirection: 'column',
             }}
           >
+            {!isTauri && (
+              <div role="note" style={{ padding: '10px 18px', flexShrink: 0, borderBottom: '0.5px solid var(--ol-line)', background: 'var(--ol-blue-soft)', fontSize: 12, lineHeight: 1.6 }}>
+                <strong>{t('shell.browserPreviewTitle')}</strong>{' '}
+                {t('shell.browserPreviewDescription')}{' '}
+                <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1" target="_blank" rel="noreferrer noopener">{t('shell.browserPreviewDownload')}</a>
+              </div>
+            )}
             {/* key={displayTab} 让每次切换重挂这棵子树 → ol-page-slide keyframe 重新触发。
                 旧 tab 退出时不立刻 unmount，而是先播 ol-page-fadeout（blur+淡出），
                 180ms 后再切到新 tab 并播入场动画。详见 displayTab/tabPhase 的 effect。

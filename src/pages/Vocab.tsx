@@ -37,9 +37,20 @@ export function Vocab() {
   const { t } = useTranslation();
   const [entries, setEntries] = useState<DictionaryEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const revisionRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const addingRef = useRef(false);
+  const pendingIdsRef = useRef(new Set<string>());
+  const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
+  const setPending = (id: string, pending: boolean) => {
+    if (pending) pendingIdsRef.current.add(id);
+    else pendingIdsRef.current.delete(id);
+    setPendingIds(new Set(pendingIdsRef.current));
+  };
   const [presets, setPresets] = useState<VocabPreset[]>(DEFAULT_VOCAB_PRESETS);
   const [selectedPresetIds, setSelectedPresetIds] = useState<string[]>([]);
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
@@ -50,13 +61,14 @@ export function Vocab() {
   const [ruleReplacementDraft, setRuleReplacementDraft] = useState('');
 
   const refresh = async () => {
+    const revision = revisionRef.current;
     try {
       setError(null);
       const data = await listVocab();
-      setEntries(data);
+      if (revision === revisionRef.current) setEntries(data);
     } catch (e) {
       // 之前没 try/catch,后端 decode 失败时 spinner 永久卡死。
-      setError(e instanceof Error ? e.message : String(e));
+      if (revision === revisionRef.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -102,10 +114,22 @@ export function Vocab() {
 
   const onAdd = async () => {
     const phrase = inputRef.current?.value.trim();
-    if (!phrase) return;
-    await addVocab(phrase);
-    if (inputRef.current) inputRef.current.value = '';
-    refresh();
+    if (!phrase || addingRef.current) return;
+    addingRef.current = true;
+    setAdding(true);
+    setActionError(null);
+    try {
+      const saved = await addVocab(phrase);
+      revisionRef.current += 1;
+      setEntries(prev => [saved, ...prev.filter(entry => entry.id !== saved.id)]);
+      // Preserve a new draft typed while the previous save was in flight.
+      if (inputRef.current?.value.trim() === phrase) inputRef.current.value = '';
+    } catch (err) {
+      setActionError(t('vocab.changeFailed', { err: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      addingRef.current = false;
+      setAdding(false);
+    }
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -154,20 +178,38 @@ export function Vocab() {
   };
 
   const onRemove = async (id: string) => {
-    await removeVocab(id);
-    setEntries(prev => prev.filter(e => e.id !== id));
+    if (pendingIdsRef.current.has(id)) return;
+    setPending(id, true);
+    setActionError(null);
+    try {
+      await removeVocab(id);
+      revisionRef.current += 1;
+      setEntries(prev => prev.filter(e => e.id !== id));
+    } catch (err) {
+      setActionError(t('vocab.changeFailed', { err: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      setPending(id, false);
+    }
   };
 
   const onToggle = async (entry: DictionaryEntry) => {
+    if (pendingIdsRef.current.has(entry.id)) return;
+    setPending(entry.id, true);
+    setActionError(null);
     const next = !entry.enabled;
     // 乐观更新 UI；后端失败时回滚 + 让用户看到错误，避免 UI 显示「已禁用」但 ASR/polish
     // 仍在注入此词条造成的诡异状态。issue #60。
     setEntries(prev => prev.map(e => (e.id === entry.id ? { ...e, enabled: next } : e)));
     try {
       await setVocabEnabled(entry.id, next);
+      revisionRef.current += 1;
+      setEntries(prev => prev.map(e => (e.id === entry.id ? { ...e, enabled: next } : e)));
     } catch (err) {
+      revisionRef.current += 1;
       setEntries(prev => prev.map(e => (e.id === entry.id ? { ...e, enabled: entry.enabled } : e)));
-      setError(err instanceof Error ? err.message : String(err));
+      setActionError(t('vocab.changeFailed', { err: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      setPending(entry.id, false);
     }
   };
 
@@ -368,8 +410,9 @@ export function Vocab() {
                 transition: 'border-color 0.16s var(--ol-motion-quick), box-shadow 0.18s var(--ol-motion-soft), background 0.16s var(--ol-motion-quick)',
               }}
             />
-            <Btn variant="primary" icon="plus" onClick={onAdd}>{t('common.add')}</Btn>
+            <Btn variant="primary" icon="plus" disabled={adding} onClick={onAdd}>{t('common.add')}</Btn>
           </div>
+          {actionError && <div role="alert" style={{ marginTop: 10, fontSize: 12, color: 'var(--ol-err)', lineHeight: 1.6 }}>{actionError}</div>}
           <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8, minHeight: 80 }}>
             {loading && <div style={{ fontSize: 12, color: 'var(--ol-ink-4)' }}>{t('common.loading')}</div>}
             {!loading && error && (
@@ -382,8 +425,8 @@ export function Vocab() {
                 {t('vocab.empty')}
               </div>
             )}
-            {!error && entries.map(e => (
-              <VocabChip key={e.id} entry={e} onRemove={() => onRemove(e.id)} onToggle={() => onToggle(e)} />
+            {entries.map(e => (
+              <VocabChip key={e.id} entry={e} disabled={pendingIds.has(e.id)} onRemove={() => onRemove(e.id)} onToggle={() => onToggle(e)} />
             ))}
           </div>
         </Collapsible>
@@ -440,11 +483,12 @@ function CorrectionRuleChip({ rule, onToggle, onRemove }: CorrectionRuleChipProp
 
 interface VocabChipProps {
   entry: DictionaryEntry;
+  disabled?: boolean;
   onRemove: () => void;
   onToggle: () => void;
 }
 
-function VocabChip({ entry, onRemove, onToggle }: VocabChipProps) {
+function VocabChip({ entry, disabled, onRemove, onToggle }: VocabChipProps) {
   const { t } = useTranslation();
   const enabled = entry.enabled;
   return (
@@ -468,6 +512,7 @@ function VocabChip({ entry, onRemove, onToggle }: VocabChipProps) {
     >
       <button
         onClick={onToggle}
+        disabled={disabled}
         title={enabled ? t('vocab.tipDisabled') : t('vocab.tipEnabled')}
         style={{ background: 'transparent', border: 0, padding: 0, color: 'inherit', fontFamily: 'inherit', cursor: 'default' }}
       >
@@ -485,6 +530,7 @@ function VocabChip({ entry, onRemove, onToggle }: VocabChipProps) {
       >{entry.hits}</span>
       <button
         onClick={onRemove}
+        disabled={disabled}
         aria-label={t('vocab.removeAria')}
         style={{
           width: 14, height: 14, padding: 0, border: 0, borderRadius: 999,

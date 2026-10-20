@@ -66,6 +66,9 @@ export const ko: typeof zhCN = {
     selectionAsk: '선택 질문',
   },
   shell: {
+    browserPreviewTitle: '화면 미리보기 · 예시 데이터.',
+    browserPreviewDescription: '서비스, 기기, 기록 상태는 모의 데이터입니다. 변경은 현재 페이지 세션에서만 유지되며, 이 미리보기는 녹음하거나 실제 음성을 입력하지 않습니다.',
+    browserPreviewDownload: '실제 음성 입력을 위한 Windows 앱 다운로드',
     shortcutLabel: '녹음 단축키',
     shortcutHint: '시작 / 정지',
     footer: {
@@ -316,6 +319,7 @@ export const ko: typeof zhCN = {
     confirmClear: '전체 {{count}}건의 기록을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.',
   },
   vocab: {
+    changeFailed: '용어 변경 사항을 저장할 수 없습니다: {{err}}',
     kicker: 'VOCABULARY',
     title: '어휘',
     desc: '인식 전 등장할 수 있는 단어를 모델에 알려 주세요 — 새 단어, 신조어, 전문 용어. ASR 핫워드와 후처리 모델 컨텍스트 양쪽에 모두 전달됩니다.',

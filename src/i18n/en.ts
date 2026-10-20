@@ -109,6 +109,9 @@ export const en: typeof zhCN = {
     },
   },
   shell: {
+    browserPreviewTitle: 'Interface preview · sample data.',
+    browserPreviewDescription: 'Service, device and history statuses are simulated. Changes last for this page session; this preview does not record or insert speech.',
+    browserPreviewDownload: 'Get the Windows app for real dictation',
     shortcutLabel: 'Recording shortcut',
     shortcutHint: 'Start / Stop',
     footer: {
@@ -359,6 +362,7 @@ export const en: typeof zhCN = {
     confirmClear: 'Delete all {{count}} history entries? This cannot be undone.',
   },
   vocab: {
+    changeFailed: 'Could not save vocabulary changes: {{err}}',
     kicker: 'VOCABULARY',
     title: 'Vocabulary',
     desc: 'Tell the model about words to expect — new terms, names, jargon. They are passed both as ASR hot words and as model context.',

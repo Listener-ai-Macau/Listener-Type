@@ -106,6 +106,9 @@ export const zhCN = {
     },
   },
   shell: {
+    browserPreviewTitle: '界面预览 · 示例数据。',
+    browserPreviewDescription: '服务、设备与历史状态均为模拟。修改仅在当前页面会话中保留；此预览不录音，也不会输入真实语音。',
+    browserPreviewDownload: '下载 Windows 应用，使用真实听写',
     shortcutLabel: '录音快捷键',
     shortcutHint: '开始 / 停止',
     footer: {
@@ -356,6 +359,7 @@ export const zhCN = {
     confirmClear: '确定清空全部 {{count}} 条记录？此操作不可恢复。',
   },
   vocab: {
+    changeFailed: '无法保存词汇表修改：{{err}}',
     kicker: 'VOCABULARY',
     title: '词汇表',
     desc: '告诉模型识别前可能出现的词——生词、新词或专业词汇。同时进入 ASR 热词与后期模型上下文。',

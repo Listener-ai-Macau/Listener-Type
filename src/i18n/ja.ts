@@ -66,6 +66,9 @@ export const ja: typeof zhCN = {
     selectionAsk: '選択追問',
   },
   shell: {
+    browserPreviewTitle: '画面プレビュー・サンプルデータ。',
+    browserPreviewDescription: 'サービス、デバイス、履歴の状態は模擬表示です。変更はこのページのセッション中のみ保持され、録音や実際の音声入力は行いません。',
+    browserPreviewDownload: '実際の音声入力には Windows アプリをダウンロード',
     shortcutLabel: '録音ショートカット',
     shortcutHint: '開始 / 停止',
     footer: {
@@ -316,6 +319,7 @@ export const ja: typeof zhCN = {
     confirmClear: '全 {{count}} 件の記録を削除しますか？この操作は取り消せません。',
   },
   vocab: {
+    changeFailed: '用語の変更を保存できませんでした：{{err}}',
     kicker: 'VOCABULARY',
     title: '語彙',
     desc: '認識前に出現する可能性がある単語をモデルに伝えます——新語や専門用語など。ASR ホットワードと後処理モデルのコンテキスト両方に渡されます。',
