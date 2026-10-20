@@ -121,6 +121,20 @@ export function History() {
     () => filtered.find(s => s.id === selectedId) || filtered[0],
     [filtered, selectedId],
   );
+  const selectFilter = (next: 'all' | PolishMode) => {
+    setFilter(next);
+    // Keep selection and the visible detail in the same filtered collection.
+    setSelectedId(current => {
+      const matches = items.filter(s => next === 'all' || s.mode === next);
+      return matches.some(s => s.id === current) ? current : matches[0]?.id ?? null;
+    });
+  };
+  const selectRecent = (session: DictationSession) => {
+    // Recent transcripts spans all styles. Reveal the clicked record before
+    // selecting it, otherwise the detail/copy target falls back to another row.
+    if (filter !== 'all' && session.mode !== filter) setFilter('all');
+    setSelectedId(session.id);
+  };
   const justCopied = !!item && copiedEntry?.id === item.id && copiedEntry.text === item.finalText;
   const showRawComparison = !!item && item.rawTranscript !== item.finalText;
 
@@ -271,7 +285,7 @@ export function History() {
               </div>
             ) : (
               items.slice(0, 5).map(s => (
-                <RecentRow key={s.id} session={s} modeLabel={MODE_LABEL} onSelect={() => setSelectedId(s.id)} />
+                <RecentRow key={s.id} session={s} modeLabel={MODE_LABEL} onSelect={() => selectRecent(s)} />
               ))
             )}
           </div>
@@ -295,7 +309,7 @@ export function History() {
                 <button
                   key={f.id}
                   aria-pressed={filter === f.id}
-                  onClick={() => setFilter(f.id)}
+                  onClick={() => selectFilter(f.id)}
                   style={{
                     padding: '3px 9px', fontSize: 11, borderRadius: 999,
                     border: '0.5px solid ' + (filter === f.id ? 'var(--ol-ink)' : 'var(--ol-line-strong)'),
@@ -326,7 +340,7 @@ export function History() {
                 {items.length > 0 ? (
                   <>
                     <span>{t('history.noMatching')}</span>
-                    <Btn size="sm" variant="ghost" onClick={() => setFilter('all')}>{t('history.showAll')}</Btn>
+                    <Btn size="sm" variant="ghost" onClick={() => selectFilter('all')}>{t('history.showAll')}</Btn>
                   </>
                 ) : t('history.empty', { trigger: prefs ? formatComboLabel(prefs.dictationHotkey) : '' })}
               </div>
@@ -339,8 +353,8 @@ export function History() {
                   width: '100%', padding: '10px 12px', textAlign: 'left',
                   display: 'flex', flexDirection: 'column', gap: 4,
                   border: 0, borderRadius: 8,
-                  background: selectedId === s.id ? 'rgba(101,123,112,0.06)' : 'transparent',
-                  boxShadow: selectedId === s.id ? 'inset 2px 0 0 var(--ol-blue)' : 'none',
+                  background: item?.id === s.id ? 'rgba(101,123,112,0.06)' : 'transparent',
+                  boxShadow: item?.id === s.id ? 'inset 2px 0 0 var(--ol-blue)' : 'none',
                   cursor: 'default', fontFamily: 'inherit', marginBottom: 1,
                   transition: 'background 0.16s var(--ol-motion-quick), box-shadow 0.18s var(--ol-motion-soft)',
                 }}
