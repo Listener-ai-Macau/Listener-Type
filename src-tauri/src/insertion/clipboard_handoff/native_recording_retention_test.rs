@@ -17,11 +17,20 @@ fn explicit_history_copy_does_not_wait_for_focus_or_publish_expired_work() {
     assert!(String::from_utf16_lossy(&name[..end]).starts_with("ListenerClipboardCase_"));
     let mut clipboard = arboard::Clipboard::new().unwrap();
     clipboard.set_text("newer user copy must survive").unwrap();
+    // A more recent real clipboard copy supersedes even an unexpired request.
+    let owner = OWNER.lock();
+    let (reply, result) = mpsc::channel();
+    WORKER.send(Command::CopyBefore("older queued action".into(), clipboard_revision(),
+        Instant::now() + Duration::from_secs(1), reply)).unwrap();
+    clipboard.set_text("new user copy while queued").unwrap();
+    drop(owner);
+    assert!(!result.recv_timeout(Duration::from_secs(2)).unwrap());
+    assert_eq!(clipboard.get_text().unwrap(), "new user copy while queued");
     // The worker reaches the ownership lock but cannot acquire it in time.
     let owner = OWNER.lock();
     assert!(!copy_explicit("expired History action"));
     drop(owner);
-    assert_eq!(clipboard.get_text().unwrap(), "newer user copy must survive");
+    assert_eq!(clipboard.get_text().unwrap(), "new user copy while queued");
     assert!(copy_explicit("完整历史正文。Exact final sentence. 最後の文。"));
     assert_eq!(clipboard.get_text().unwrap(), "完整历史正文。Exact final sentence. 最後の文。");
 }

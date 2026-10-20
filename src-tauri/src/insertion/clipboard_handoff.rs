@@ -136,7 +136,7 @@ pub(crate) enum SessionRangePermission {
 enum Command {
     Paste(String, bool, PasteShortcut, Option<String>, Option<SessionPasteScope>, Sender<PasteResult>),
     Copy(String, Sender<bool>),
-    CopyBefore(String, Instant, Sender<bool>),
+    CopyBefore(String, Option<u64>, Instant, Sender<bool>),
     Retain(ClipboardTicket, String, bool, Sender<RetentionResult>),
     RetainRecording(ClipboardTicket, uuid::Uuid, String, bool, Sender<RetentionResult>),
     Revisable(String, PasteShortcut, SessionPasteScope, Sender<PasteResult>),
@@ -323,7 +323,8 @@ pub(super) fn copy(text: &str) -> bool {
 pub(super) fn copy_explicit(text: &str) -> bool {
     let (sender, receiver) = mpsc::channel();
     let deadline = Instant::now() + Duration::from_secs(1);
-    WORKER.send(Command::CopyBefore(text.into(), deadline, sender)).is_ok()
+    let requested_revision = clipboard_revision();
+    WORKER.send(Command::CopyBefore(text.into(), requested_revision, deadline, sender)).is_ok()
         && receiver.recv_timeout(Duration::from_secs(2)).unwrap_or(false)
 }
 
@@ -824,9 +825,9 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                 let _owner = begin_external_write();
                 let _ = reply.send(super::copy_to_clipboard_now(&text));
             }
-            Some(Command::CopyBefore(text, deadline, reply)) => {
+            Some(Command::CopyBefore(text, requested_revision, deadline, reply)) => {
                 // Check both queue delay and ownership-lock delay before any write.
-                if Instant::now() >= deadline {
+                if Instant::now() >= deadline || requested_revision != clipboard_revision() {
                     let _ = reply.send(false);
                     continue;
                 }
