@@ -102,11 +102,38 @@ pub async fn set_selected_device_settings(
     claim_read_token(&read_token, &device, revision)?;
     run_device_settings_blocking("selected write", move || {
         settings_target::with_device(&device, |io| {
-            write_selected_settings(io, revision, &request)?;
-            selected_readback(io, &device)
+            write_and_read_selected_settings(io, &device, revision, &request)
         })
     })
     .await
+}
+
+fn write_and_read_selected_settings(
+    io: &mut dyn SettingsIo,
+    device: &SettingsDevice,
+    revision: u32,
+    request: &DeviceSettingsUpdateRequest,
+) -> Result<SelectedDeviceSettings, String> {
+    let (committed_revision, committed_snapshot) = write_selected_settings(io, revision, request)?;
+    // Read the complete profile while this exact transport still belongs to
+    // the transaction. APPLY intentionally retires a borrowed BLE capture;
+    // accessing it afterwards is correctly rejected by the identity guard.
+    let mut saved = selected_readback(io, device)?;
+    if saved.revision != committed_revision {
+        return Err("Settings were saved, but this device changed before final readback. Read this selected device again.".into());
+    }
+    if committed_snapshot.ble_name_pending_restart {
+        saved.snapshot.detail = Some(match io.write("DEVICE:APPLY_BLE_NAME") {
+            Ok(()) => "Name was saved and Bluetooth reconnect was requested. Read this same device again after it reconnects.".into(),
+            Err(error) => {
+                log::warn!("[device-settings] name committed on selected transport, restart acknowledgement unavailable: {error}");
+                "Name was saved, but Bluetooth restart acknowledgement was not confirmed. Read this same device again after it reconnects.".into()
+            }
+        });
+        // No reads, profile packets or retries may use the retired handle.
+        // Keep pending=true until a fresh read proves the restart completed.
+    }
+    Ok(saved)
 }
 
 fn selected_readback(
@@ -240,7 +267,7 @@ fn write_selected_settings(
         final_status = observed.ok_or("Selected device did not confirm the settings revision.")?;
         revision = final_status.settings_revision;
     }
-    let mut snapshot = device_settings_snapshot_from_status(final_status);
+    let snapshot = device_settings_snapshot_from_status(final_status);
     let mut saved_snapshot = snapshot.clone();
     // Pending name application is expected here; all other fields must have
     // reached NVS before the advertising handoff is requested.
@@ -257,17 +284,8 @@ fn write_selected_settings(
             mismatches.join("; ")
         ));
     }
-    if rename || snapshot.ble_name_pending_restart {
-        // Apply only through the still-pinned handle. Do not run a global
-        // pairing cleanup, change the voice target, or try another transport.
-        io.write("DEVICE:APPLY_BLE_NAME")?;
-        std::thread::sleep(std::time::Duration::from_millis(350));
-        match io.read() {
-            Ok(status) if status.ble_name == request.ble_name => { revision = status.settings_revision; snapshot = device_settings_snapshot_from_status(status); },
-            Ok(_) => return Err("Name was saved but the selected device returned an unexpected name.".into()),
-            Err(_) => snapshot.detail = Some("Name was saved and reconnect was requested. Read this device again after Bluetooth reconnects.".into()),
-        }
-    }
+    // The caller must finish profile readback before applying a pending name.
+    // A rename is the terminal operation, never the middle of an I/O sequence.
     Ok((revision, snapshot))
 }
 
@@ -298,12 +316,20 @@ mod tests {
         writes: Vec<String>,
         stale_reads: u8,
         race: bool,
+        disconnect_on_apply: bool,
+        disconnected: bool,
+        reads_after_disconnect: usize,
+        fail_apply_ack: bool,
     }
     fn board() -> Board {
         Board {
             writes: vec![],
             stale_reads: 0,
             race: false,
+            disconnect_on_apply: false,
+            disconnected: false,
+            reads_after_disconnect: 0,
+            fail_apply_ack: false,
             status: DeviceSettingsStatus {
                 brightness_percent: 100,
                 plugged_brightness_percent: 100,
@@ -353,6 +379,10 @@ mod tests {
     }
     impl SettingsIo for Board {
         fn read(&mut self) -> Result<DeviceSettingsStatus, String> {
+            if self.disconnected {
+                self.reads_after_disconnect += 1;
+                return Err("Selected Listener connection changed; draft retained. Read this device again.".into());
+            }
             let mut result = self.status.clone();
             if self.stale_reads > 0 {
                 self.stale_reads -= 1;
@@ -364,6 +394,8 @@ mod tests {
             self.writes.push(command.into());
             if command == "DEVICE:APPLY_BLE_NAME" {
                 self.status.ble_name_pending_restart = false;
+                self.disconnected = self.disconnect_on_apply;
+                if self.fail_apply_ack { return Err("ATT acknowledgement lost during reconnect".into()); }
                 return Ok(());
             }
             assert!(command.len() + 1 <= 63);
@@ -424,9 +456,10 @@ mod tests {
         let mut a = board();
         let mut changes = request(&a);
         changes.ble_name = "TheSelectedListener".into();
-        let (_, snapshot) = write_selected_settings(&mut a, 7, &changes).unwrap();
-        assert_eq!(snapshot.ble_name, changes.ble_name);
-        assert!(!snapshot.ble_name_pending_restart);
+        let device = SettingsDevice {id:"ble:exact-board".into(),transport:"ble".into(),label:"B".into()};
+        let saved = write_and_read_selected_settings(&mut a,&device,7,&changes).unwrap();
+        assert_eq!(saved.snapshot.ble_name, changes.ble_name);
+        assert!(saved.snapshot.ble_name_pending_restart);
         assert_eq!(a.writes.last().unwrap(), "DEVICE:APPLY_BLE_NAME");
     }
     #[test]
@@ -435,5 +468,35 @@ mod tests {
         let changes = request(&a);
         write_selected_settings(&mut a, 7, &changes).unwrap();
         assert!(a.writes.is_empty());
+    }
+
+    #[test]
+    fn successful_rename_returns_committed_settings_without_reading_retired_capture() {
+        let mut a = board();
+        a.disconnect_on_apply = true;
+        let mut changes = request(&a);
+        changes.ble_name = "SelectedRenamedBoard".into();
+        let device = SettingsDevice {id:"ble:exact-board".into(),transport:"ble".into(),label:"B".into()};
+        let saved = write_and_read_selected_settings(&mut a,&device,7,&changes)
+            .expect("A committed rename must not fail merely because it retires the original capture");
+        assert_eq!(saved.snapshot.ble_name,changes.ble_name);
+        assert_eq!(saved.revision,a.status.settings_revision);
+        assert_eq!(a.reads_after_disconnect,0,"The old capture is never read after APPLY");
+        assert_eq!(a.writes.last().unwrap(),"DEVICE:APPLY_BLE_NAME");
+    }
+
+    #[test]
+    fn lost_restart_ack_keeps_committed_name_and_never_retries_mutations() {
+        let mut a=board();
+        a.disconnect_on_apply=true;
+        a.fail_apply_ack=true;
+        let mut changes=request(&a);changes.ble_name="CommittedName".into();
+        let device=SettingsDevice{id:"ble:exact-board".into(),transport:"ble".into(),label:"B".into()};
+        let saved=write_and_read_selected_settings(&mut a,&device,7,&changes).unwrap();
+        assert_eq!(saved.snapshot.ble_name,changes.ble_name);
+        assert!(saved.snapshot.ble_name_pending_restart);
+        assert!(saved.snapshot.detail.unwrap().contains("not confirmed"));
+        assert_eq!(a.reads_after_disconnect,0);
+        assert_eq!(a.writes.iter().filter(|s|s.as_str()=="DEVICE:APPLY_BLE_NAME").count(),1);
     }
 }
