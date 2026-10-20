@@ -1464,6 +1464,10 @@ impl Coordinator {
     }
 
     pub fn bind_app(&self, handle: AppHandle) {
+        let history_app = handle.clone();
+        self.inner.history.set_change_notifier(move || {
+            let _ = history_app.emit("history:updated", ());
+        });
         *self.inner.app.lock() = Some(handle);
     }
 

@@ -1164,6 +1164,7 @@ fn write_account(root: &mut CredsRoot, account: CredentialAccount, value: Option
 pub struct HistoryStore {
     path: PathBuf,
     lock: Mutex<()>,
+    change_notifier: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
 }
 
 impl HistoryStore {
@@ -1173,6 +1174,7 @@ impl HistoryStore {
         Ok(Self {
             path: dir.join(HISTORY_FILE),
             lock: Mutex::new(()),
+            change_notifier: Mutex::new(None),
         })
     }
 
@@ -1192,6 +1194,7 @@ impl HistoryStore {
                 Self {
                     path: PathBuf::new(),
                     lock: Mutex::new(()),
+                    change_notifier: Mutex::new(None),
                 }
             }
         }
@@ -1200,6 +1203,10 @@ impl HistoryStore {
     pub fn list(&self) -> Result<Vec<DictationSession>> {
         let _guard = self.lock.lock();
         self.read_locked()
+    }
+
+    pub fn set_change_notifier(&self, notify: impl Fn() + Send + Sync + 'static) {
+        *self.change_notifier.lock() = Some(Box::new(notify));
     }
 
     pub fn append(&self, session: DictationSession) -> Result<()> {
@@ -1341,7 +1348,13 @@ impl HistoryStore {
 
     fn write_locked(&self, sessions: &[DictationSession]) -> Result<()> {
         let json = serde_json::to_vec_pretty(sessions).context("encode history failed")?;
-        atomic_write(&self.path, &json)
+        atomic_write(&self.path, &json)?;
+        // Invalidate views only after a durable write. No transcript travels in
+        // the notification; readers fetch the committed store through list().
+        if let Some(notify) = self.change_notifier.lock().as_ref() {
+            notify();
+        }
+        Ok(())
     }
 }
 
@@ -2785,6 +2798,34 @@ mod tests {
             r#"{{"id":"{id}","createdAt":"2026-07-26T00:00:00Z","rawTranscript":"r","finalText":"f","mode":"raw","insertStatus":"copiedFallback"}}"#
         ))
         .expect("parse DictationSession")
+    }
+
+    #[test]
+    fn history_notifies_only_after_committed_changes() {
+        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+        let _guard = scoped_data_dir();
+        let store = HistoryStore::new().expect("history");
+        let count = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&count);
+        let path = store.path.clone();
+        store.set_change_notifier(move || {
+            // The event must follow replacement of the complete JSON file.
+            let bytes = fs::read(&path).expect("committed history exists");
+            serde_json::from_slice::<Vec<DictationSession>>(&bytes).expect("complete history");
+            observed.fetch_add(1, Ordering::SeqCst);
+        });
+        store.append(make_session("a")).expect("append");
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        store.delete("a").expect("delete");
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        store.delete("missing").expect("absent delete");
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        store.clear().expect("clear");
+        assert_eq!(count.load(Ordering::SeqCst), 3);
+        fs::remove_file(&store.path).expect("remove test file");
+        fs::create_dir(&store.path).expect("block atomic replacement");
+        assert!(store.clear().is_err());
+        assert_eq!(count.load(Ordering::SeqCst), 3);
     }
 
     #[test]

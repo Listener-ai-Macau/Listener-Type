@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { Icon } from '../components/Icon';
 import { detectOS } from '../components/WindowChrome';
 import { formatComboLabel } from '../lib/hotkey';
+import { subscribeHistoryUpdates } from '../lib/historyUpdates';
 import { clearHistory, copyHistoryEntry, deleteHistoryEntry, isTauri, listHistory, readAudioRecording } from '../lib/ipc';
 import type { DictationSession, PolishMode } from '../lib/types';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
@@ -48,11 +49,13 @@ export function History() {
   const copyPendingRef = useRef(false);
   const copyTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  const historyReadRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      historyReadRef.current += 1;
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
     };
   }, []);
@@ -72,24 +75,29 @@ export function History() {
   }, []);
   const { prefs } = useHotkeySettings();
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (manual = false) => {
+    const request = ++historyReadRef.current;
+    if (manual) setLoading(true);
     setLoadError(null);
     try {
       const data = await listHistory();
+      if (!mountedRef.current || request !== historyReadRef.current) return;
       setItems(data);
-      setActionError(null);
+      if (manual) setActionError(null);
       setSelectedId(prev => (prev && data.some(s => s.id === prev) ? prev : data[0]?.id ?? null));
     } catch (error) {
+      if (!mountedRef.current || request !== historyReadRef.current) return;
       console.error('[history] failed to load history', error);
       setLoadError(errorMessage(error));
     } finally {
-      setLoading(false);
+      if (mountedRef.current && request === historyReadRef.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    const unsubscribe = subscribeHistoryUpdates(() => { void refresh(); });
     void refresh();
+    return unsubscribe;
   }, [refresh]);
 
   const filtered = useMemo(
@@ -217,7 +225,7 @@ export function History() {
         desc={t('history.desc')}
         right={
           <div style={{ display: 'flex', gap: 8 }}>
-            <Btn icon="refresh" variant="ghost" size="sm" onClick={() => void refresh()}>{t('common.refresh')}</Btn>
+            <Btn icon="refresh" variant="ghost" size="sm" onClick={() => void refresh(true)}>{t('common.refresh')}</Btn>
             <Btn icon="trash" variant="ghost" size="sm" onClick={onClear}>{t('common.clear')}</Btn>
           </div>
         }
@@ -250,7 +258,7 @@ export function History() {
         <Card padding={0} style={{ display: 'flex', flexDirection: 'column', minHeight: 150, minWidth: 0, overflow: 'hidden' }}>
           <div style={{ padding: '12px 16px', borderBottom: '0.5px solid var(--ol-line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ol-ink-2)' }}>{t('history.recentTitle')}</span>
-            <Btn size="sm" variant="ghost" onClick={() => void refresh()}>{t('common.refresh')}</Btn>
+            <Btn size="sm" variant="ghost" onClick={() => void refresh(true)}>{t('common.refresh')}</Btn>
           </div>
           <div className="ol-thinscroll" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
             {loading ? (
@@ -310,7 +318,7 @@ export function History() {
             {!loading && loadError && (
               <div style={{ padding: 16, fontSize: 12, color: 'var(--ol-ink-4)', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10 }}>
                 <span>{t('history.loadFailed', { err: loadError })}</span>
-                <Btn size="sm" variant="ghost" onClick={() => void refresh()}>{t('history.retry')}</Btn>
+                <Btn size="sm" variant="ghost" onClick={() => void refresh(true)}>{t('history.retry')}</Btn>
               </div>
             )}
             {!loading && !loadError && filtered.length === 0 && (

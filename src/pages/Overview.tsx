@@ -13,6 +13,7 @@ import {
 } from '../lib/embeddedBleProbe';
 import { formatComboLabel } from '../lib/hotkey';
 import { CREDENTIALS_STATUS_CHANGED_EVENT } from '../lib/credentialsStatusEvents';
+import { subscribeHistoryUpdates } from '../lib/historyUpdates';
 import {
   exportDiagnosticPackage,
   getCredentials,
@@ -79,16 +80,32 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onO
     arkConfigured: false,
   });
   const { prefs, updatePrefs } = useHotkeySettings();
+  const historyMounted = useRef(true);
+  const historyRead = useRef(0);
 
   const refreshHistory = useCallback(() => {
+    const request = ++historyRead.current;
     setHistoryError(false);
     listHistory()
-      .then(setHistory)
+      .then(value => {
+        if (historyMounted.current && request === historyRead.current) setHistory(value);
+      })
       .catch(error => {
+        if (!historyMounted.current || request !== historyRead.current) return;
         console.error('[overview] failed to load history', error);
         setHistoryError(true);
       });
   }, []);
+
+  useEffect(() => {
+    historyMounted.current = true;
+    const unsubscribe = subscribeHistoryUpdates(refreshHistory);
+    return () => {
+      historyMounted.current = false;
+      historyRead.current += 1;
+      unsubscribe();
+    };
+  }, [refreshHistory]);
 
   const refreshBleRuntimeStatus = useCallback(() => {
     getEmbeddedBleRuntimeStatus()
