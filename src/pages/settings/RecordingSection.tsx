@@ -856,7 +856,7 @@ function AutostartRow() {
 
 // ─── RecordingSection ────────────────────────────────────────────────
 
-export function RecordingSection() {
+export function RecordingSection({ onSetupListener }: { onSetupListener?: () => void }) {
   const { t } = useTranslation();
   const { prefs, capability, updatePrefs: savePrefs } = useHotkeySettings();
   const [microphoneDevices, setMicrophoneDevices] = useState<MicrophoneDevice[]>([]);
@@ -1049,6 +1049,7 @@ export function RecordingSection() {
               return (
                 <button
                   key={value}
+                  aria-pressed={active}
                   onClick={() => onDictationInputSourceChange(value)}
                   style={{
                     minWidth: 112,
@@ -1076,6 +1077,11 @@ export function RecordingSection() {
               );
             })}
           </div>
+          {onSetupListener && (
+            <button type="button" onClick={onSetupListener} style={{ ...inputStyle, alignSelf: 'flex-start', cursor: 'pointer', fontSize: 12 }}>
+              {t('settings.recording.setupListenerOptional')}
+            </button>
+          )}
         </div>
       </SettingRow>
       <SettingRow label={t('settings.recording.microphoneLabel')} desc={t('settings.recording.microphoneDesc')}>

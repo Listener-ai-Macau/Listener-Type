@@ -12,6 +12,7 @@ import { AdvancedSection } from './settings/AdvancedSection';
 import { ShortcutsSection } from './settings/ShortcutsSection';
 import { PermissionsSection } from './settings/PermissionsSection';
 import { LanguageSection } from './settings/LanguageSection';
+import { LocalAsr } from './LocalAsr';
 
 export { Toggle } from './settings/shared';
 export { AboutUpdateControl } from './settings/AboutUpdateControl';
@@ -19,16 +20,15 @@ export { AboutUpdateControl } from './settings/AboutUpdateControl';
 interface SettingsProps {
   embedded?: boolean;
   initialSection?: SettingsSectionId;
+  onSetupListener?: () => void;
 }
 // "关于" tab 已移除（内容并入外层 SettingsModal 的 About 页，避免设置内外重复入口）。
-export type SettingsSectionId = 'recording' | 'device' | 'providers' | 'shortcuts' | 'permissions' | 'language' | 'advanced';
+export type SettingsSectionId = 'recording' | 'device' | 'providers' | 'localAsr' | 'shortcuts' | 'permissions' | 'language' | 'advanced';
 
-// 「高级」放最末——本地推理 / 实验性开关都集中到这一栏，避免新手用户在主流程
-// 里误开 CPU 推理（之前提案：把 local-qwen3 / foundry-local-whisper 从主 ASR
-// 下拉藏进高级）。位置末尾也是「实验性」语义在 macOS 系统偏好里的惯用位置。
-const SECTION_ORDER: SettingsSectionId[] = ['device', 'recording', 'providers', 'shortcuts', 'permissions', 'language', 'advanced'];
+// Local preparation has its own destination; opening it does not activate a model.
+const SECTION_ORDER: SettingsSectionId[] = ['device', 'recording', 'providers', 'localAsr', 'shortcuts', 'permissions', 'language', 'advanced'];
 
-export function Settings({ embedded = false, initialSection = 'device' }: SettingsProps) {
+export function Settings({ embedded = false, initialSection = 'device', onSetupListener }: SettingsProps) {
   const { t } = useTranslation();
   const [section, setSection] = useState<SettingsSectionId>(initialSection);
 
@@ -137,12 +137,13 @@ export function Settings({ embedded = false, initialSection = 'device' }: Settin
             ...(embedded ? { minHeight: 0, overflow: 'auto', paddingRight: 4, paddingBottom: 16 } : {}),
           }}
         >
-          {section === 'recording' && <RecordingSection />}
+          {section === 'recording' && <RecordingSection onSetupListener={onSetupListener} />}
           {section === 'device' && <DeviceSection />}
           {section === 'providers' && <ProvidersSection onOpenLocalAsr={() => {
-            setSection('advanced');
+            setSection('localAsr');
             contentRef.current?.scrollTo({ top: 0, behavior: 'auto' });
           }} />}
+          {section === 'localAsr' && <LocalAsr />}
           {section === 'shortcuts' && <ShortcutsSection />}
           {section === 'permissions' && <PermissionsSection />}
           {section === 'language' && <LanguageSection />}

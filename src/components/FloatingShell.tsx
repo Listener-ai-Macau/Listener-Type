@@ -60,7 +60,7 @@ const NAV_BASE: Array<Omit<NavItem, 'name'>> = [
 
 const BLE_PAIRING_PROMPT_ACK_KEY = 'ol.blePairingPromptAck';
 const BLE_PAIRING_PROMPT_DEFERRED_KEY = 'ol.blePairingPromptDeferredThisSession';
-const DEV_SETTINGS_SECTIONS: SettingsSectionId[] = ['recording', 'device', 'providers', 'shortcuts', 'permissions', 'language', 'advanced'];
+const DEV_SETTINGS_SECTIONS: SettingsSectionId[] = ['recording', 'device', 'providers', 'localAsr', 'shortcuts', 'permissions', 'language', 'advanced'];
 
 interface FloatingShellProps {
   os?: OS;
@@ -142,32 +142,8 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     };
   }, []);
 
-  useEffect(() => {
-    if (os !== 'win' || !prefs) return;
-    let cancelled = false;
-    (async () => {
-      if (await isMainWindowStartHidden()) {
-        return;
-      }
-      const acknowledgedValue = window.localStorage.getItem(BLE_PAIRING_PROMPT_ACK_KEY);
-      const deferredValue = window.sessionStorage.getItem(BLE_PAIRING_PROMPT_DEFERRED_KEY);
-      if (
-        !cancelled &&
-        acknowledgedValue !== '1' &&
-        deferredValue !== '1' &&
-        (prefs.dictationInputSource ?? 'embeddedBle') !== 'embeddedBle'
-      ) {
-        setBlePairingPromptOpen(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [os, prefs?.dictationInputSource]);
-
-  // 之前监听的模型设置跳转事件已无意义——「模型设置」独立 tab 已下线，
-  // 模型管理 UI 现在通过 Settings → Advanced 的 <LocalAsr /> 渲染，
-  // 用户在 Settings 内即可一站式管理，无需跨页跳转。
+  // Pairing is an explicit choice in Recording settings. Selecting the computer
+  // microphone must never open a hardware guide over the customer's current task.
 
   const rememberProviderPrompt = () => {
     window.sessionStorage.setItem(PROVIDER_SETUP_PROMPT_DEFERRED_KEY, '1');
@@ -180,7 +156,12 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     setBlePairingPromptOpen(false);
   };
 
-  const keepMicrophoneFromBlePrompt = () => {
+  const keepMicrophoneFromBlePrompt = async () => {
+    await updatePrefs(current => ({
+      ...current,
+      dictationInputSource: 'microphone',
+      dictationInputSourceUserOverridden: true,
+    }));
     window.localStorage.setItem(BLE_PAIRING_PROMPT_ACK_KEY, '1');
     setBlePairingPromptOpen(false);
   };
@@ -481,7 +462,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                 <Overview
                   onOpenProvidersSettings={() => openSettings('providers')}
                   onOpenRecordingSettings={() => openSettings('recording')}
-                  onOpenLocalAsrSettings={() => openSettings('advanced')}
+                  onOpenLocalAsrSettings={() => openSettings('localAsr')}
                   onStartDemoMode={startProviderDemoMode}
                 />
               ) : (
@@ -519,6 +500,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
           key={settingsInitialSection ?? 'default'}
           os={os}
           initialSettingsSection={settingsInitialSection}
+          onSetupListener={os === 'win' ? () => setBlePairingPromptOpen(true) : undefined}
           onClose={() => setSettingsOpen(false)}
         />
       }
@@ -529,7 +511,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
           onOpenSettings={openProviderSettings}
           onOpenRecording={openRecordingSettingsFromProviderPrompt}
           onStartDemo={startProviderDemoMode}
-          onOpenLocalSettings={() => { rememberProviderPrompt(); openSettings('advanced'); }}
+          onOpenLocalSettings={() => { rememberProviderPrompt(); openSettings('localAsr'); }}
         />
       ) : blePairingPromptOpen ? (
         <BlePairingPrompt
@@ -684,7 +666,7 @@ function BlePairingPrompt({
   onStartDemo,
 }: {
   onLater: () => void;
-  onUseMicrophone: () => void;
+  onUseMicrophone: () => Promise<void>;
   onEnableEmbeddedBle: () => Promise<void>;
   onComplete: () => void;
   onStartDemo: () => void;
@@ -695,6 +677,7 @@ function BlePairingPrompt({
   const [runtime, setRuntime] = useState<EmbeddedBleRuntimeStatus | null>(null);
   const [lastRepairResult, setLastRepairResult] = useState<EmbeddedBleRepairResult | null>(null);
   const [busyAction, setBusyAction] = useState<FirstRunPairingAction | null>(null);
+  const [microphonePending, setMicrophonePending] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -813,7 +796,19 @@ function BlePairingPrompt({
     onComplete();
   };
 
-  const primaryDisabled = busyAction !== null;
+  const useMicrophone = async () => {
+    setMicrophonePending(true);
+    try {
+      await onUseMicrophone();
+    } catch (error) {
+      setProbeStatus('error');
+      setProbeMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setMicrophonePending(false);
+    }
+  };
+
+  const primaryDisabled = busyAction !== null || microphonePending;
   const secondaryAction = wizard.secondaryAction && wizard.secondaryAction !== wizard.primaryAction
     ? wizard.secondaryAction
     : null;
@@ -939,7 +934,7 @@ function BlePairingPrompt({
           </button>
           {wizard.showUseMicrophone && (
             <button
-              onClick={onUseMicrophone}
+              onClick={() => void useMicrophone()}
               disabled={primaryDisabled}
               style={promptSoftButtonStyle}
             >

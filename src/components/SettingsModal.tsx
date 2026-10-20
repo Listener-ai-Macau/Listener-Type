@@ -27,6 +27,7 @@ interface SettingsModalProps {
   os: OS;
   onClose: () => void;
   initialSettingsSection?: SettingsSectionId;
+  onSetupListener?: () => void;
 }
 
 // 稳定 ID（与 i18n key 一致，方便 modal.sections.* 渲染）。
@@ -46,7 +47,7 @@ interface ModalGroup {
 const HELP_URL = 'https://github.com/Listener-ai-Macau/Listener-Type#readme';
 const RELEASE_NOTES_URL = 'https://github.com/Listener-ai-Macau/Listener-Type/releases';
 
-export function SettingsModal({ os: _os, onClose, initialSettingsSection }: SettingsModalProps) {
+export function SettingsModal({ os: _os, onClose, initialSettingsSection, onSetupListener }: SettingsModalProps) {
   const { t } = useTranslation();
   const { prefs, loading: prefsLoading } = useHotkeySettings();
   // Choose once per opening. Changing input source inside Recording must not
@@ -227,7 +228,7 @@ export function SettingsModal({ os: _os, onClose, initialSettingsSection }: Sett
             // SettingsContent 自己接管 flex:1 + 内部右栏 scroll，外层不能再加 overflow:auto。
             <div style={{ flex: 1, minHeight: 0, padding: '10px 28px 28px', display: 'flex', flexDirection: 'column' }}>
               {entrySection.current ? (
-                <SettingsContent embedded initialSection={entrySection.current} />
+                <SettingsContent embedded initialSection={entrySection.current} onSetupListener={onSetupListener} />
               ) : (
                 <div role="status">{t('common.loading')}</div>
               )}
