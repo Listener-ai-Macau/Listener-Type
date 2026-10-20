@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T14:51:08.317088+08:00",
+  "updated_at": "2026-10-20T15:26:52.123220+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3113,9 +3113,63 @@
       "unverified": [
         "Customer has not used this fix; no additional live speech or real editor clipboard qualification."
       ]
+    },
+    {
+      "id": "customer71_input_aware_settings_and_visible_start_failure",
+      "repo": "type",
+      "commit": "9744baf386aee1cab68ea002dd547c7cd438f05c",
+      "subject": "Follow the selected input in setup and report dictation start failures",
+      "state": "installed71_intermediate_verified_affected_ui_passed_included_in_public72",
+      "protects": [
+        "Settings entry follows selected microphone/Listener input, respects explicit links and stays fixed while editing.",
+        "Quick-start offers dictation after recognition setup and does not mislabel the selected input or swallow its start rejection. Pending starts cannot duplicate and failure can be retried."
+      ],
+      "guards": [
+        "python scripts/check-first-use-entry-ui.py --url <isolated-mock-frontend-url> --report <output-json>"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\entry69-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\entry71-after.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build71\\type71-installed.json"
+      ],
+      "unverified": [
+        "New customer used direct Recording link but did not change source/reopen settings; no new real microphone, editor or hardware acceptance."
+      ]
+    },
+    {
+      "id": "customer72_vocabulary_acknowledgements_and_cancelled_navigation",
+      "repo": "type",
+      "commit": "16e399056a9a855090cb6410482fa0f8801bff5c",
+      "subject": "Keep vocabulary acknowledgements visible and cancel stale page fades",
+      "state": "installed72_affected_mock_ui_and_exact_package_verified_customer_review_separate",
+      "protects": [
+        "Vocabulary save acknowledgement owns the visible entry; failure keeps drafts and known entries; pending mutations are single-flight per target.",
+        "Late list reads cannot erase acknowledged changes, and late saves cannot clear newer drafts.",
+        "Browser mock vocabulary remains internally consistent and simulated statuses are explicitly labeled only in browser previews.",
+        "Cancelling a page transition clears its exiting phase, so returning to the rendered page cannot leave it transparent."
+      ],
+      "guards": [
+        "python scripts/check-vocabulary-ui.py --url <isolated-vite-url> --report <output-json>"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\vocab71-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\navigation71-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\vocab72-after.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build72\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build72\\type72-installed.json"
+      ],
+      "customer_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-20/listener-customer-review-20261020/outputs/Listener_FIRST_USE_20261020_9744baf386ae/customer-experience.txt"
+      ],
+      "machine_accepted_scope": [
+        "Frozen prior counterexamples and thirteen affected browser/mock scenarios, exact package/installed EXE, preserved preferences/credential status and listener restoration."
+      ],
+      "unverified": [
+        "Prior customer SDK issue was the browser mock, not proven native storage failure; new independent review and real speech/editor/hardware scope remain separate."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T14:51:08.317088+08:00",
+  "feature_routes_updated_at": "2026-10-20T15:26:52.123220+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -3721,7 +3775,9 @@
       "accepted_scope": "Customer setup readiness and localized maintenance UI; no speech/hardware/market qualification.",
       "guard_entries": [
         "customer_setup68_asr_ready_does_not_require_optional_llm",
-        "customer69_first_dictation_visible_when_services_ready"
+        "customer69_first_dictation_visible_when_services_ready",
+        "customer71_input_aware_settings_and_visible_start_failure",
+        "customer72_vocabulary_acknowledgements_and_cancelled_navigation"
       ],
       "paths": {
         "type": [
@@ -3732,13 +3788,20 @@
           "src/pages/settings/AboutUpdateControl.tsx",
           "src/pages/settings/AdvancedSection.tsx",
           "src/pages/settings/ProvidersSection.tsx",
-          "src/i18n/enDeviceMaintenance.ts"
+          "src/i18n/enDeviceMaintenance.ts",
+          "src/components/SettingsModal.tsx",
+          "src/pages/Vocab.tsx",
+          "scripts/check-first-use-entry-ui.py",
+          "scripts/check-vocabulary-ui.py"
         ]
       },
       "known_failures": [
         "The legacy startup prompt required both ASR and LLM and incorrectly blocked basic dictation with ASR configured.",
         "The prior homepage local-recognition action selected Foundry before model preparation.",
-        "Prior QuickStart was conditional on missing ASR/LLM; once both were configured the homepage lost all first-dictation guidance."
+        "Prior QuickStart was conditional on missing ASR/LLM; once both were configured the homepage lost all first-dictation guidance.",
+        "Settings since 4ea040d9 always defaulted to Device; QuickStart since 2f9d0e80 mislabeled input and discarded its rejected promise.",
+        "Prior browser add_vocab returned an entry without updating mock list. This is not native persistence evidence.",
+        "At oldest visible ^732a863, returning before the 180ms page transition cleared its timer but left exiting active permanently."
       ]
     },
     {
@@ -3756,6 +3819,25 @@
       },
       "known_failures": [
         "At oldest visible boundary ^732a863, one page-wide boolean mislabeled B after copying A or completing A asynchronously. No recent regression introduction was established."
+      ]
+    },
+    {
+      "id": "vocabulary-ui-and-navigation",
+      "baseline_state": "installed72_affected_mock_ui_and_exact_package_verified_customer_review_separate",
+      "accepted_scope": "Vocabulary acknowledgement/failure ordering and cancellation of page transitions; browser sample state is not native storage or ASR qualification.",
+      "guard_entries": [
+        "customer72_vocabulary_acknowledgements_and_cancelled_navigation"
+      ],
+      "paths": {
+        "type": [
+          "src/pages/Vocab.tsx",
+          "src/components/FloatingShell.tsx",
+          "src/lib/ipc.ts",
+          "scripts/check-vocabulary-ui.py"
+        ]
+      },
+      "known_failures": [
+        "Frozen71 SDK disappears and page cancellation leaves opacity0; both pre-fix samples are preserved."
       ]
     }
   ]

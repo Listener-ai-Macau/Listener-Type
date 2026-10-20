@@ -2,14 +2,14 @@
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build70](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build72](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 Firmware: **ESP32-S3 N16R8**, build `e7bd1f1619b696a1`. Select the same ZIP for USB flashing or Bluetooth OTA in Type.
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device, read its settings, then write changes back to that device. Names, lights, power, keys and knob configuration stay on the board. Use this paired MSI and firmware ZIP.
 RC1 remains a prerelease; intermittent early close and strong-interference limits are documented in the release notes.
-Type build70 fixes History copy feedback so switching records never labels the wrong text as copied. It keeps the first-dictation steps and your actual shortcut visible on the homepage, opens input-source settings directly, and shows the source build in the footer. It retains the basic-dictation setup and English maintenance improvements. RC1 updates use the official MSI download. It retains the device-name, key/knob and firmware-package fixes; Firmware33 is unchanged and excludes throughput experiments.
+Type build72 preserves vocabulary drafts on failed saves and fixes blank content after a cancelled page transition. Settings follow the selected microphone/Listener input, and quick-start failures are visible. History copy feedback stays tied to the actual text copied. It keeps the first-dictation steps and your actual shortcut visible on the homepage, opens input-source settings directly, and shows the source build in the footer. It retains the basic-dictation setup and English maintenance improvements. RC1 updates use the official MSI download. It retains the device-name, key/knob and firmware-package fixes; Firmware33 is unchanged and excludes throughput experiments.
 [App release notes and checksum](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware notes and flashing instructions](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 [English first setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [English user guide](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)
