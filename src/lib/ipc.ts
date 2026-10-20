@@ -999,6 +999,12 @@ export function listHistory(): Promise<DictationSession[]> {
   return invokeOrMock('list_history', undefined, () => mockHistory);
 }
 
+export async function copyHistoryEntry(id: string, expectedText: string): Promise<void> {
+  if (isTauri) return invokeOrMock<void>('copy_history_entry', { id, expectedText }, () => undefined);
+  if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+  await navigator.clipboard.writeText(expectedText);
+}
+
 export function deleteHistoryEntry(id: string): Promise<void> {
   return invokeOrMock('delete_history_entry', { id }, () => undefined);
 }

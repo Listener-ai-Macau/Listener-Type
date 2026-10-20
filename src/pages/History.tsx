@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { Icon } from '../components/Icon';
 import { detectOS } from '../components/WindowChrome';
 import { formatComboLabel } from '../lib/hotkey';
-import { clearHistory, deleteHistoryEntry, isTauri, listHistory, readAudioRecording } from '../lib/ipc';
+import { clearHistory, copyHistoryEntry, deleteHistoryEntry, isTauri, listHistory, readAudioRecording } from '../lib/ipc';
 import type { DictationSession, PolishMode } from '../lib/types';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { Btn, Card, PageHeader, Pill } from './_atoms';
@@ -155,10 +155,7 @@ export function History() {
       copyTimerRef.current = null;
     }
     try {
-      if (!navigator.clipboard?.writeText) {
-        throw new Error('clipboard unavailable');
-      }
-      await navigator.clipboard.writeText(entry.text);
+      await copyHistoryEntry(entry.id, entry.text);
       if (!mountedRef.current) return;
       setActionError(null);
       setCopiedEntry(entry);
@@ -168,7 +165,13 @@ export function History() {
       }, 1500);
     } catch (error) {
       console.error('[history] failed to copy entry', error);
-      if (mountedRef.current) setActionError(t('history.copyFailed', { err: errorMessage(error) }));
+      const message = errorMessage(error);
+      const reason = {
+        history_clipboard_unavailable: 'clipboardUnavailable',
+        history_entry_unavailable: 'entryUnavailable',
+        history_entry_changed: 'entryChanged',
+      }[message];
+      if (mountedRef.current) setActionError(t('history.copyFailed', { err: reason ? t(`history.${reason}`) : message }));
     } finally {
       copyPendingRef.current = false;
       if (mountedRef.current) setCopying(false);

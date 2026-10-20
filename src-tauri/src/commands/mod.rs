@@ -1626,6 +1626,26 @@ pub fn list_history(coord: CoordinatorState<'_>) -> Result<Vec<DictationSession>
 }
 
 #[tauri::command]
+pub async fn copy_history_entry(
+    coord: CoordinatorState<'_>,
+    id: String,
+    expected_text: String,
+) -> Result<(), String> {
+    // Bind the copy to the saved record shown when the user clicked, rather
+    // than accepting an arbitrary/now-stale body as the History result.
+    let entry = coord.history().list().map_err(|e| e.to_string())?
+        .into_iter().find(|entry| entry.id == id)
+        .ok_or_else(|| "history_entry_unavailable".to_owned())?;
+    if entry.final_text != expected_text {
+        return Err("history_entry_changed".into());
+    }
+    let copied = tauri::async_runtime::spawn_blocking(move || {
+        crate::insertion::copy_explicit_history_text(&entry.final_text)
+    }).await.map_err(|_| "history_clipboard_unavailable".to_owned())?;
+    if copied { Ok(()) } else { Err("history_clipboard_unavailable".into()) }
+}
+
+#[tauri::command]
 pub fn delete_history_entry(coord: CoordinatorState<'_>, id: String) -> Result<(), String> {
     coord.history().delete(&id).map_err(|e| e.to_string())
 }

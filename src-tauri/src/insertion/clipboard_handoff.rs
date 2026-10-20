@@ -136,6 +136,7 @@ pub(crate) enum SessionRangePermission {
 enum Command {
     Paste(String, bool, PasteShortcut, Option<String>, Option<SessionPasteScope>, Sender<PasteResult>),
     Copy(String, Sender<bool>),
+    CopyBefore(String, Instant, Sender<bool>),
     Retain(ClipboardTicket, String, bool, Sender<RetentionResult>),
     RetainRecording(ClipboardTicket, uuid::Uuid, String, bool, Sender<RetentionResult>),
     Revisable(String, PasteShortcut, SessionPasteScope, Sender<PasteResult>),
@@ -315,6 +316,15 @@ pub(crate) fn paste_terminal_suffix(expected: &str, suffix: &str, restore: bool,
 pub(super) fn copy(text: &str) -> bool {
     let (sender, receiver) = mpsc::channel();
     WORKER.send(Command::Copy(text.into(), sender)).is_ok() && receiver.recv().unwrap_or(false)
+}
+
+/// An explicit UI copy cannot wait on WebView focus/permission. Expired queued
+/// requests must never publish later and overwrite a more recent user copy.
+pub(super) fn copy_explicit(text: &str) -> bool {
+    let (sender, receiver) = mpsc::channel();
+    let deadline = Instant::now() + Duration::from_secs(1);
+    WORKER.send(Command::CopyBefore(text.into(), deadline, sender)).is_ok()
+        && receiver.recv_timeout(Duration::from_secs(2)).unwrap_or(false)
 }
 
 pub(crate) fn retain(ticket: ClipboardTicket, text: &str, needs_receipt: bool) -> RetentionResult {
@@ -812,6 +822,25 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                 finish(&mut pending, RetentionResult::Superseded);
                 paste_receipt = None;
                 let _owner = begin_external_write();
+                let _ = reply.send(super::copy_to_clipboard_now(&text));
+            }
+            Some(Command::CopyBefore(text, deadline, reply)) => {
+                // Check both queue delay and ownership-lock delay before any write.
+                if Instant::now() >= deadline {
+                    let _ = reply.send(false);
+                    continue;
+                }
+                let Some(mut owner) = OWNER.try_lock_until(deadline) else {
+                    let _ = reply.send(false);
+                    continue;
+                };
+                if Instant::now() >= deadline {
+                    let _ = reply.send(false);
+                    continue;
+                }
+                *owner = owner.wrapping_add(1);
+                finish(&mut pending, RetentionResult::Superseded);
+                paste_receipt = None;
                 let _ = reply.send(super::copy_to_clipboard_now(&text));
             }
             Some(Command::Retain(ticket, text, needs_receipt, reply)) => {

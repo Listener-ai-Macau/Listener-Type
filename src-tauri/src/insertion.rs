@@ -23,6 +23,9 @@ use parking_lot::Mutex;
 use crate::types::{InsertStatus, PasteShortcut};
 
 mod clipboard_handoff;
+pub(crate) fn copy_explicit_history_text(text: &str) -> bool {
+    clipboard_handoff::copy_explicit(text)
+}
 pub(crate) use clipboard_handoff::{
     ClipboardTicket, SessionPasteScope, PasteReceiptCompletion, PasteReceiptHandle, PasteReceiptOutcome,
     PasteReceiptPoll, PasteReceiptProof, PasteSubmission, RetentionResult, SessionRangePermission,
