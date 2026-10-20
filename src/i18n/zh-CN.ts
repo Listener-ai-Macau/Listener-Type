@@ -314,7 +314,9 @@ export const zhCN = {
     quickStartConfigure: '配置 API Key',
     quickStartDemo: 'Demo 模式',
     quickStartLocal: '使用本地识别（无需 Key）',
-    quickStartTest: '用麦克风试录',
+    quickStartTest: '开始听写',
+    quickStartStarting: '正在开始…',
+    quickStartFailed: '无法开始听写：{{err}}',
     quickStartDismiss: '关闭',
   },
   history: {

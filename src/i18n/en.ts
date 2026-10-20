@@ -317,7 +317,9 @@ export const en: typeof zhCN = {
     quickStartConfigure: 'Configure API Key',
     quickStartDemo: 'Demo mode',
     quickStartLocal: 'Use local recognition (no key needed)',
-    quickStartTest: 'Try microphone recording',
+    quickStartTest: 'Start dictation',
+    quickStartStarting: 'Starting…',
+    quickStartFailed: 'Could not start dictation: {{err}}',
     quickStartDismiss: 'Dismiss',
   },
   history: {

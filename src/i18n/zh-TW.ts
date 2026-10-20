@@ -316,7 +316,9 @@ export const zhTW: typeof zhCN = {
     quickStartConfigure: '配置 API Key',
     quickStartDemo: 'Demo 模式',
     quickStartLocal: '使用本地識別（無需 Key）',
-    quickStartTest: '用麥克風試錄',
+    quickStartTest: '開始聽寫',
+    quickStartStarting: '正在開始…',
+    quickStartFailed: '無法開始聽寫：{{err}}',
     quickStartDismiss: '關閉',
   },
   history: {

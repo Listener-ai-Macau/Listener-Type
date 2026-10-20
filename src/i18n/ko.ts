@@ -274,7 +274,9 @@ export const ko: typeof zhCN = {
     quickStartConfigure: 'API Key 설정',
     quickStartDemo: 'Demo 모드',
     quickStartLocal: '로컬 인식 사용 (Key 불필요)',
-    quickStartTest: '마이크 녹음 시도',
+    quickStartTest: '음성 입력 시작',
+    quickStartStarting: '시작 중…',
+    quickStartFailed: '음성 입력을 시작할 수 없습니다: {{err}}',
     quickStartDismiss: '닫기',
   },
   history: {

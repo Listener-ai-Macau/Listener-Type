@@ -12,6 +12,7 @@ import { Row } from './ui/Row';
 import { SavedToast } from './SavedToast';
 import { useSavedToastListener } from '../lib/savedEvent';
 import { readFontScale, setFontScale, type FontScaleId } from '../lib/fontScale';
+import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import {
   cancelDictation,
   exportDiagnosticPackage,
@@ -47,6 +48,13 @@ const RELEASE_NOTES_URL = 'https://github.com/Listener-ai-Macau/Listener-Type/re
 
 export function SettingsModal({ os: _os, onClose, initialSettingsSection }: SettingsModalProps) {
   const { t } = useTranslation();
+  const { prefs, loading: prefsLoading } = useHotkeySettings();
+  // Choose once per opening. Changing input source inside Recording must not
+  // redirect the customer to a different section while they are editing.
+  const entrySection = useRef<SettingsSectionId | null>(initialSettingsSection ?? null);
+  if (entrySection.current === null && (prefs || !prefsLoading)) {
+    entrySection.current = prefs?.dictationInputSource === 'microphone' ? 'recording' : 'device';
+  }
   const [section, setSection] = useState<ModalSectionId>('settings');
   const savedToast = useSavedToastListener();
   const groups: ModalGroup[] = [
@@ -218,7 +226,11 @@ export function SettingsModal({ os: _os, onClose, initialSettingsSection }: Sett
           {section === 'settings' ? (
             // SettingsContent 自己接管 flex:1 + 内部右栏 scroll，外层不能再加 overflow:auto。
             <div style={{ flex: 1, minHeight: 0, padding: '10px 28px 28px', display: 'flex', flexDirection: 'column' }}>
-              <SettingsContent embedded initialSection={initialSettingsSection} />
+              {entrySection.current ? (
+                <SettingsContent embedded initialSection={entrySection.current} />
+              ) : (
+                <div role="status">{t('common.loading')}</div>
+              )}
             </div>
           ) : (
             // personalize / about 短内容：单一 scroll wrapper，超出时本块滚动。

@@ -274,7 +274,9 @@ export const ja: typeof zhCN = {
     quickStartConfigure: 'API Key を設定',
     quickStartDemo: 'Demo モード',
     quickStartLocal: 'ローカル認識を使う（Key 不要）',
-    quickStartTest: 'マイク録音を試す',
+    quickStartTest: '音声入力を開始',
+    quickStartStarting: '開始中…',
+    quickStartFailed: '音声入力を開始できませんでした：{{err}}',
     quickStartDismiss: '閉じる',
   },
   history: {

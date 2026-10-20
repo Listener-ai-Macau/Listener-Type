@@ -323,7 +323,7 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onO
           onConfigure={onOpenProvidersSettings}
           onStartDemo={onStartDemoMode}
           onUseLocal={onOpenLocalAsrSettings}
-          onTestRecord={() => { startDictation().catch(() => {}); }}
+          onTestRecord={startDictation}
         />
       )}
 
@@ -443,12 +443,29 @@ interface QuickStartCardProps {
   onConfigure?: () => void;
   onStartDemo?: () => void;
   onUseLocal?: () => void;
-  onTestRecord?: () => void;
+  onTestRecord?: () => Promise<void>;
 }
 
 function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onStartDemo, onUseLocal, onTestRecord }: QuickStartCardProps) {
   const { t } = useTranslation();
   const [dismissed, setDismissed] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const startPending = useRef(false);
+  const onStart = async () => {
+    if (!asrConfigured || !onTestRecord || startPending.current) return;
+    startPending.current = true;
+    setStarting(true);
+    setStartError(null);
+    try {
+      await onTestRecord();
+    } catch (error) {
+      setStartError(t('overview.quickStartFailed', { err: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      startPending.current = false;
+      setStarting(false);
+    }
+  };
   if (dismissed) return null;
   return (
     <Card padding={0} style={{ marginBottom: 18, overflow: 'hidden', flexShrink: 0 }}>
@@ -477,10 +494,11 @@ function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onStartDemo
           {!asrConfigured && onUseLocal && (
             <Btn size="sm" variant="ghost" icon="bolt" onClick={onUseLocal}>{t('overview.quickStartLocal')}</Btn>
           )}
-          {onTestRecord && (
-            <Btn size="sm" variant="ghost" icon="mic" onClick={onTestRecord}>{t('overview.quickStartTest')}</Btn>
+          {asrConfigured && onTestRecord && (
+            <Btn size="sm" variant="ghost" icon="mic" disabled={starting} onClick={() => void onStart()}>{t(starting ? 'overview.quickStartStarting' : 'overview.quickStartTest')}</Btn>
           )}
         </div>
+        {startError && <div role="alert" style={{ marginTop: 10, fontSize: 12, color: 'var(--ol-err)', lineHeight: 1.5 }}>{startError}</div>}
       </div>
     </Card>
   );
