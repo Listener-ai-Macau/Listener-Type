@@ -185,6 +185,7 @@ export function AdvancedSection() {
               <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
                 <Toggle
                   on={isMac && isOnLocalQwen3}
+                  disabled={!isMac || busy || pendingTarget !== null}
                   onToggle={isMac && !busy && pendingTarget === null ? (next) => {
                     if (next) requestEnable('local-qwen3');
                     else void performSwitch('volcengine');
@@ -201,6 +202,7 @@ export function AdvancedSection() {
                 <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
                   <Toggle
                     on={isOnFoundry}
+                    disabled={busy || pendingTarget !== null}
                     onToggle={!busy && pendingTarget === null ? (next) => {
                       if (next) requestEnable('foundry-local-whisper');
                       else void performSwitch('volcengine');
