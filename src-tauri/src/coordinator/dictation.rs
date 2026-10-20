@@ -2852,6 +2852,21 @@ fn finish_source_integrity_blocked(
     true
 }
 
+/// History describes captured media, not provider processing or network time.
+/// Keep provider timings intact for the recognition/endpoint evidence paths.
+pub(super) fn history_capture_duration_ms(
+    provider_duration_ms: u64,
+    stats: Option<&crate::embedded_audio::SessionStats>,
+) -> u64 {
+    stats
+        .filter(|stats| stats.reconstructed_pcm_bytes > 0)
+        .map(|stats| {
+            (stats.reconstructed_pcm_bytes as u64).saturating_mul(1_000)
+                / crate::embedded_audio::PCM_BYTES_PER_SECOND as u64
+        })
+        .unwrap_or(provider_duration_ms)
+}
+
 // A provider failure must leave a History entry under the same session id as
 // the archived WAV. Otherwise a full recording can exist on disk while the
 // user has no way to find or export it after the capsule closes.
@@ -3831,6 +3846,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             restore_prepared_windows_ime_session(inner, current_session_id);
             return Ok(());
         }
+        let embedded_audio_stats = take_embedded_audio_stats(inner);
+        let history_duration_ms =
+            history_capture_duration_ms(raw.duration_ms, embedded_audio_stats.as_ref());
         let session = DictationSession {
             // The WAV archive was written with `current_session_id` before
             // ASR finalization. Keep History on the same identity even when
@@ -3845,13 +3863,13 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             app_name: None,
             insert_status: InsertStatus::Failed,
             error_code: Some("emptyTranscript".to_string()),
-            duration_ms: Some(raw.duration_ms),
+            duration_ms: Some(history_duration_ms),
             dictionary_entry_count: Some(enabled_phrases(inner).len() as u32),
             // empty-transcript（ASR 没识别到任何文字）也保留 wav 标记——这是用户最想
             // 通过原始录音定位"是不是麦克风太小声 / ASR 模型问题"的场景。修 pr_agent
             // "Missing Audio" 反馈。
             has_audio_recording: Some(inner.audio_archive_active.load(Ordering::Relaxed)),
-            embedded_audio_stats: take_embedded_audio_stats(inner),
+            embedded_audio_stats,
         };
         let prefs_snapshot = inner.prefs.get();
         if let Err(e) = inner.history.append_with_retention(
@@ -4656,6 +4674,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     let history_session_id = current_session_id.to_string();
     let history_created_at = Utc::now().to_rfc3339();
     let prefs_snapshot = inner.prefs.get();
+    let embedded_audio_stats = take_embedded_audio_stats(inner);
+    let history_duration_ms =
+        history_capture_duration_ms(raw.duration_ms, embedded_audio_stats.as_ref());
     let mut session = DictationSession {
         id: history_session_id.clone(),
         created_at: history_created_at.clone(),
@@ -4666,14 +4687,14 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         app_name: None,
         insert_status: status,
         error_code: None, // Filled after clipboard/insertion status settles.
-        duration_ms: Some(raw.duration_ms),
+        duration_ms: Some(history_duration_ms),
         // 历史详情页的"X 个热词"显示：用本次实际命中次数（每个匹配实例算一次），
         // 比"启用词条总数"更能反映本段口述命中了多少。u64 → u32 截断对单段听写足够。
         dictionary_entry_count: Some(total_hits.min(u32::MAX as u64) as u32),
         // 用 begin_session 时 Recorder::start 返回的实际写盘状态，而不是 prefs 开关——
         // 开关打开但路径创建失败时这里是 false，避免前端渲染播放按钮后端 404。
         has_audio_recording: Some(inner.audio_archive_active.load(Ordering::Relaxed)),
-        embedded_audio_stats: take_embedded_audio_stats(inner),
+        embedded_audio_stats,
     };
     // History and recovery share this recording's complete finalized body.
     // Actual editor submissions remain separate facts; a lost cursor/range
