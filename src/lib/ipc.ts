@@ -3,6 +3,8 @@
 // the UI is still operable for visual review. Remote marketplace commands do
 // not mock server state; they require the Rust command layer.
 
+import { notifyCredentialsStatusChanged } from './credentialsStatusEvents';
+
 import type {
   CloudAccountStatus,
   ComboBinding,
@@ -968,16 +970,19 @@ export function getCredentials(): Promise<CredentialsStatus> {
   return invokeOrMock('get_credentials', undefined, () => mockCredentialsStatusForBrowser());
 }
 
-export function setCredential(account: string, value: string): Promise<void> {
-  return invokeOrMock('set_credential', { account, value }, () => undefined);
+export async function setCredential(account: string, value: string): Promise<void> {
+  await invokeOrMock('set_credential', { account, value }, () => undefined);
+  notifyCredentialsStatusChanged();
 }
 
-export function setActiveAsrProvider(provider: string, modelAlias?: string, expectedProvider?: string): Promise<void> {
-  return invokeOrMock('set_active_asr_provider', { provider, ...(modelAlias ? { modelAlias } : {}), ...(expectedProvider ? { expectedProvider } : {}) }, () => undefined);
+export async function setActiveAsrProvider(provider: string, modelAlias?: string, expectedProvider?: string): Promise<void> {
+  await invokeOrMock('set_active_asr_provider', { provider, ...(modelAlias ? { modelAlias } : {}), ...(expectedProvider ? { expectedProvider } : {}) }, () => undefined);
+  notifyCredentialsStatusChanged();
 }
 
-export function setActiveLlmProvider(provider: string): Promise<void> {
-  return invokeOrMock('set_active_llm_provider', { provider }, () => undefined);
+export async function setActiveLlmProvider(provider: string): Promise<void> {
+  await invokeOrMock('set_active_llm_provider', { provider }, () => undefined);
+  notifyCredentialsStatusChanged();
 }
 
 export function readCredential(account: string): Promise<string | null> {

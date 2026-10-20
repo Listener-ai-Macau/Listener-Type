@@ -12,6 +12,7 @@ import {
   type EmbeddedBleProbeStatus,
 } from '../lib/embeddedBleProbe';
 import { formatComboLabel } from '../lib/hotkey';
+import { CREDENTIALS_STATUS_CHANGED_EVENT } from '../lib/credentialsStatusEvents';
 import {
   exportDiagnosticPackage,
   getCredentials,
@@ -99,17 +100,30 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onO
   }, []);
 
   useEffect(() => {
+    let disposed = false;
+    let latestRead = 0;
+    const refreshCredentials = () => {
+      const request = ++latestRead;
+      void getCredentials()
+        .then(status => {
+          if (disposed || request !== latestRead) return;
+          setCreds(status);
+          setCredsError(false);
+        })
+        .catch(error => {
+          if (disposed || request !== latestRead) return;
+          console.error('[overview] failed to load credentials status', error);
+          setCredsError(true);
+        });
+    };
+    window.addEventListener(CREDENTIALS_STATUS_CHANGED_EVENT, refreshCredentials);
     refreshHistory();
     refreshBleRuntimeStatus();
-    getCredentials()
-      .then(status => {
-        setCreds(status);
-        setCredsError(false);
-      })
-      .catch(error => {
-        console.error('[overview] failed to load credentials status', error);
-        setCredsError(true);
-      });
+    refreshCredentials();
+    return () => {
+      disposed = true;
+      window.removeEventListener(CREDENTIALS_STATUS_CHANGED_EVENT, refreshCredentials);
+    };
   }, [refreshBleRuntimeStatus, refreshHistory]);
 
   const metrics = useMemo(() => {
