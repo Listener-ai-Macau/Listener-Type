@@ -835,7 +835,7 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                     let _ = reply.send(false);
                     continue;
                 };
-                if Instant::now() >= deadline {
+                if Instant::now() >= deadline || requested_revision != clipboard_revision() {
                     let _ = reply.send(false);
                     continue;
                 }
