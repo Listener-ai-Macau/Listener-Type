@@ -1,7 +1,7 @@
 // History.tsx — 接 Tauri 后端 list_history / delete_history_entry / clear_history。
 // 真实数据来自 ~/Library/Application Support/Listener Type/history.json。
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../components/Icon';
 import { detectOS } from '../components/WindowChrome';
@@ -43,7 +43,19 @@ export function History() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [justCopied, setJustCopied] = useState(false);
+  const [copiedEntry, setCopiedEntry] = useState<{ id: string; text: string } | null>(null);
+  const [copying, setCopying] = useState(false);
+  const copyPendingRef = useRef(false);
+  const copyTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+    };
+  }, []);
   // 录音文件 lazily-detected missing 状态：retention / 条数 cap 清理后磁盘上 wav
   // 可能已被删，但 history 条目 hasAudioRecording 仍写 true。任一组件
   // （播放 / 导出）首次 IPC 拿到 'recording not found' 时把 id 加进来，
@@ -101,6 +113,7 @@ export function History() {
     () => filtered.find(s => s.id === selectedId) || filtered[0],
     [filtered, selectedId],
   );
+  const justCopied = !!item && copiedEntry?.id === item.id && copiedEntry.text === item.finalText;
 
   const onClear = async () => {
     if (items.length === 0) return;
@@ -131,18 +144,34 @@ export function History() {
   };
 
   const onCopy = async () => {
-    if (!item) return;
+    if (!item || copyPendingRef.current) return;
+    // Capture the actual clipboard payload: selection may change before writeText resolves.
+    const entry = { id: item.id, text: item.finalText };
+    copyPendingRef.current = true;
+    setCopying(true);
+    setCopiedEntry(null);
+    if (copyTimerRef.current !== null) {
+      window.clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = null;
+    }
     try {
       if (!navigator.clipboard?.writeText) {
         throw new Error('clipboard unavailable');
       }
-      await navigator.clipboard.writeText(item.finalText);
+      await navigator.clipboard.writeText(entry.text);
+      if (!mountedRef.current) return;
       setActionError(null);
-      setJustCopied(true);
-      window.setTimeout(() => setJustCopied(false), 1500);
+      setCopiedEntry(entry);
+      copyTimerRef.current = window.setTimeout(() => {
+        setCopiedEntry(null);
+        copyTimerRef.current = null;
+      }, 1500);
     } catch (error) {
       console.error('[history] failed to copy entry', error);
-      setActionError(t('history.copyFailed', { err: errorMessage(error) }));
+      if (mountedRef.current) setActionError(t('history.copyFailed', { err: errorMessage(error) }));
+    } finally {
+      copyPendingRef.current = false;
+      if (mountedRef.current) setCopying(false);
     }
   };
 
@@ -320,7 +349,7 @@ export function History() {
                   <span style={{ fontSize: 11, color: 'var(--ol-ink-4)' }}>{formatDuration(item.durationMs, t)}</span>
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                  <Btn icon={justCopied ? 'check' : 'copy'} variant="ghost" size="sm" onClick={() => void onCopy()}>{justCopied ? t('common.copied') : t('common.copy')}</Btn>
+                  <Btn icon={justCopied ? 'check' : 'copy'} variant="ghost" size="sm" disabled={copying} onClick={() => void onCopy()}>{justCopied ? t('common.copied') : t('common.copy')}</Btn>
                   {item.hasAudioRecording && !audioMissingIds.has(item.id) && (
                     <Btn icon="download" variant="ghost" size="sm" onClick={() => void onExportAudio()}>{t('history.exportRecording')}</Btn>
                   )}
