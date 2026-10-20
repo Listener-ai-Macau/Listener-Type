@@ -1,0 +1,50 @@
+{
+  "schema": "listener.paired-release.v1",
+  "updatedAt": "2026-10-20T11:15:43.385190+08:00",
+  "version": "1.0.6-rc1",
+  "prerelease": true,
+  "type": {
+    "build": 65,
+    "source": "c06880d9b8838ec36b6860c731e2c554296ad844",
+    "sourceTag": "build-source/type65-20261020",
+    "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
+    "sha256": "a743444ff1bc64bee8155febb62fa869c8efe89f9648e2d8cfff9e5c39468da3",
+    "sizeBytes": 298409984,
+    "exeSha256": "21f21a244e3ed89f6e60118523fe55fb99b5481fa18a4599cccc2efea3e6721e",
+    "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
+  },
+  "firmware": {
+    "build": 32,
+    "source": "d2cd2dd0175bf63ce13f4abd5e9bc9cf42132390",
+    "sourceTag": "build-source/firmware32-20261019",
+    "runtimeBuild": "ad73e1113e429ca7",
+    "file": "ListenerFirmware_1.0.6-rc1_ESP32S3.zip",
+    "sha256": "929e5471d97de66939110d09ea2e36a01f4163c60618116943c3b3209691b1ec",
+    "sizeBytes": 1955462,
+    "appSha256": "bfa14cf79f24dea045d34a06d274b2803d6b249fb3339ff79b986f6f6d9a729d",
+    "hardware": "keyboard-v2-n16r8",
+    "url": "https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip"
+  },
+  "verification": {
+    "newMsiEmbeddedExeEqualsBuiltExe": true,
+    "sameVersionMsiUpgradeEnabled": true,
+    "firmwareZipMatchesPreviouslyVerifiedFirmware32": true,
+    "npmAuditVulnerabilities": 0,
+    "nativeRegressionEvidenceSource": "0a8085d51be03cba4fc01d2197c736935fe06f22",
+    "newPackageInstalledForThisPublication": false,
+    "experimentalThroughputFirmwareIncluded": false
+  },
+  "remainingLimits": [
+    "Strong-interference speaker isolation is incomplete.",
+    "Intermittent wake/adoption/early-close cases do not yet have complete current field acceptance.",
+    "Same-session History/clipboard restoration still has limited real editor field coverage.",
+    "Two physical boards simultaneously configured and physical HID presses were not qualified in this release check.",
+    "No stable 160 KB/s or real dual-microphone enhancement qualification is claimed."
+  ],
+  "maintenance": {
+    "remoteBranch": "master",
+    "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
+    "releaseTagPointsToExactBuiltSource": true,
+    "historyTagsPreserved": true
+  }
+}
