@@ -1,10 +1,21 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { execFileSync } from "node:child_process";
 
 const host = process.env.TAURI_DEV_HOST;
+const sourceRevision = (() => {
+  try {
+    const revision = execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { encoding: 'utf8' }).trim();
+    const modified = execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], { encoding: 'utf8' }).trim();
+    return `${revision}${modified ? '+modified' : ''}`;
+  } catch {
+    return 'unavailable';
+  }
+})();
 
 export default defineConfig(async () => ({
   plugins: [react()],
+  define: { 'import.meta.env.VITE_APP_SOURCE_REVISION': JSON.stringify(sourceRevision) },
   base: "./",
   clearScreen: false,
   server: {

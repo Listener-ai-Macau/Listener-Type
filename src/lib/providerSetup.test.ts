@@ -7,6 +7,17 @@ import {
 } from './providerSetup.ts';
 
 const providersSectionSource = readFileSync('src/pages/settings/ProvidersSection.tsx', 'utf8');
+const asrOnlyCustomer = {
+  activeAsrProvider: 'volcengine', activeLlmProvider: 'ark',
+  asrConfigured: true, llmConfigured: false,
+  volcengineConfigured: true, arkConfigured: false,
+};
+if (shouldShowProviderSetupPrompt(asrOnlyCustomer, null)) {
+  throw new Error('Basic dictation must not be blocked by optional polishing setup');
+}
+if (!shouldShowProviderSetupPrompt({ ...asrOnlyCustomer, asrConfigured: false, llmConfigured: true }, null)) {
+  throw new Error('A configured polishing service must not hide missing speech recognition');
+}
 if (!providersSectionSource.includes(
   "const ASR_DEFAULT_RESOURCE_ID = 'volc.bigasr.sauc.duration';",
 )) {

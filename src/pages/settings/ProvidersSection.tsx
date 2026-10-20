@@ -359,51 +359,6 @@ export function ProvidersSection() {
       </div>
       <Card>
         <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>{t('settings.providers.llmTitle')}</div>
-          <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
-            {t('settings.providers.llmDesc')}
-          </div>
-        </div>
-        {/* desc 已去掉——'选择后将自动填入 Base URL 默认值' 在 180px label 列必换行成两行，
-            视觉上 label 区出现"字体单独占一行"。下拉自身已经表达了"切换"含义，desc 冗余。 */}
-        <SettingRow label={t('settings.providers.providerLabel')}>
-          <SelectLite
-            value={llmProvider}
-            onChange={next => onLlmProviderChange(next as LlmPresetId)}
-            options={LLM_PRESETS.map(p => ({
-              value: p.id,
-              label: t(`settings.providers.presets.${p.nameKey}`),
-            }))}
-            ariaLabel={t('settings.providers.providerLabel')}
-            style={{ ...inputStyle, maxWidth: 200 }}
-          />
-        </SettingRow>
-        {codexOAuthSelected ? (
-          <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.6, margin: '2px 0 10px' }}>
-            {t('settings.providers.codexOAuthNotice')}
-          </div>
-        ) : (
-          <>
-            <CredentialField key={`${committedLlmProvider}:api_key`} label={t('settings.providers.apiKeyLabel')} account="ark.api_key" mono mask />
-            <CredentialField key={`${committedLlmProvider}:endpoint`} label={t('settings.providers.baseUrlLabel')} account="ark.endpoint"
-              placeholder={preset.baseUrl || 'https://your-endpoint/v1'} />
-          </>
-        )}
-        <CredentialField key={`${committedLlmProvider}:model:${llmModelRevision}`} label={t('settings.providers.modelLabel')} account="ark.model_id"
-          placeholder={preset.modelPlaceholder || 'model-name'} mono
-          trailing={(
-            <LlmThinkingToggle
-              enabled={prefs?.llmThinkingEnabled ?? false}
-              onToggle={onLlmThinkingToggle}
-            />
-          )}
-        />
-        <ProviderProxySettings kind="llm" providerId={committedLlmProvider} />
-        <ProviderTools key={committedLlmProvider} kind="llm" modelAccount="ark.model_id" onModelSelected={() => setLlmModelRevision(v => v + 1)} />
-      </Card>
-
-      <Card>
-        <div style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 13, fontWeight: 600 }}>{t('settings.providers.asrTitle')}</div>
           <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>{t('settings.providers.asrDesc')}</div>
         </div>
@@ -513,6 +468,51 @@ export function ProvidersSection() {
             <ProviderTools kind="asr" modelAccount="asr.model" onModelSelected={() => setAsrModelRevision(v => v + 1)} />
           </>
         )}
+      </Card>
+
+      <Card>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>{t('settings.providers.llmTitle')}</div>
+          <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
+            {t('settings.providers.llmDesc')}
+          </div>
+        </div>
+        {/* desc 已去掉——'选择后将自动填入 Base URL 默认值' 在 180px label 列必换行成两行，
+            视觉上 label 区出现"字体单独占一行"。下拉自身已经表达了"切换"含义，desc 冗余。 */}
+        <SettingRow label={t('settings.providers.providerLabel')}>
+          <SelectLite
+            value={llmProvider}
+            onChange={next => onLlmProviderChange(next as LlmPresetId)}
+            options={LLM_PRESETS.map(p => ({
+              value: p.id,
+              label: t(`settings.providers.presets.${p.nameKey}`),
+            }))}
+            ariaLabel={t('settings.providers.providerLabel')}
+            style={{ ...inputStyle, maxWidth: 200 }}
+          />
+        </SettingRow>
+        {codexOAuthSelected ? (
+          <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.6, margin: '2px 0 10px' }}>
+            {t('settings.providers.codexOAuthNotice')}
+          </div>
+        ) : (
+          <>
+            <CredentialField key={`${committedLlmProvider}:api_key`} label={t('settings.providers.apiKeyLabel')} account="ark.api_key" mono mask />
+            <CredentialField key={`${committedLlmProvider}:endpoint`} label={t('settings.providers.baseUrlLabel')} account="ark.endpoint"
+              placeholder={preset.baseUrl || 'https://your-endpoint/v1'} />
+          </>
+        )}
+        <CredentialField key={`${committedLlmProvider}:model:${llmModelRevision}`} label={t('settings.providers.modelLabel')} account="ark.model_id"
+          placeholder={preset.modelPlaceholder || 'model-name'} mono
+          trailing={(
+            <LlmThinkingToggle
+              enabled={prefs?.llmThinkingEnabled ?? false}
+              onToggle={onLlmThinkingToggle}
+            />
+          )}
+        />
+        <ProviderProxySettings kind="llm" providerId={committedLlmProvider} />
+        <ProviderTools key={committedLlmProvider} kind="llm" modelAccount="ark.model_id" onModelSelected={() => setLlmModelRevision(v => v + 1)} />
       </Card>
     </>
   );

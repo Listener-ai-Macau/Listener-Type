@@ -1,6 +1,7 @@
 // English resources — translated from zh-CN.ts. Keep keys in sync.
 
 import type { zhCN } from './zh-CN';
+import { enDeviceMaintenance, enFirmwareMaintenance } from './enDeviceMaintenance.ts';
 
 // Type-level guarantee that en mirrors the zh-CN shape.
 export const en: typeof zhCN = {
@@ -123,7 +124,7 @@ export const en: typeof zhCN = {
     },
     providerPrompt: {
       title: 'Set up speech providers',
-      body: 'No ASR or LLM provider is configured yet. Voice input and polishing will not work until you add credentials.',
+      body: "Set up speech recognition to start dictating. AI polishing is optional and can be added later.",
       demoHint: 'You can enter Demo mode or test the microphone first. This will not change real API key settings.',
       later: 'Later',
       testAudio: 'Test audio',
@@ -303,7 +304,9 @@ export const en: typeof zhCN = {
     historyRetry: 'Retry',
     weekDays: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
     quickStartTitle: 'Quick start',
-    quickStartDesc: 'No providers configured yet. Choose a way to get started:',
+    quickStartDesc: "Set up speech recognition to start dictating. AI polishing is optional.",
+    quickStartAsrReady: "Speech recognition is configured. Use your device key or recording shortcut to dictate; AI polishing is optional.",
+    quickStartOptionalPolish: "Set up AI polishing (optional)",
     quickStartConfigure: 'Configure API Key',
     quickStartDemo: 'Demo mode',
     quickStartLocal: 'Use local recognition (no key needed)',
@@ -485,6 +488,7 @@ export const en: typeof zhCN = {
       about: 'About',
     },
     recording: {
+      ...enFirmwareMaintenance,
       title: 'Recording',
       desc: 'Global recording hotkey and trigger mode.',
       hotkeyLabel: 'Recording hotkey',
@@ -669,7 +673,7 @@ export const en: typeof zhCN = {
       voiceprintEnroll: 'Record voiceprint',
       voiceprintDelete: 'Delete',
       wakePhraseLabel: 'Wake phrase',
-      wakePhraseDesc: 'Choose a Chinese wake phrase. Changing it requires recording your voiceprint again.',
+      wakePhraseDesc: 'Voice wake in this release uses a Chinese phrase. For other languages, use a device key or your recording shortcut. Changing the phrase requires recording your voiceprint again.',
       wakePhraseApply: 'Apply',
       wakePhraseApplying: 'Applying',
       removeFillerWordsLabel: 'Remove filler words',
@@ -742,6 +746,7 @@ export const en: typeof zhCN = {
       },
     },
     device: {
+      ...enDeviceMaintenance,
       configTitle: 'Device settings',
       connectionMethod: 'Connection',
       usbMethod: 'USB wired',
@@ -911,7 +916,7 @@ export const en: typeof zhCN = {
       asrInvalidJson: 'ASR response is not valid JSON.',
       asrMissingTextField: 'ASR response is missing the text field.',
       apiKeyMissing: 'API Key is empty.',
-      endpointMissing: 'Endpoint is empty.',
+      endpointMissing: 'Base URL is empty. Enter the service URL shown by your provider.',
       proxyUrlMissing: 'Custom proxy URL is empty.',
       proxyUrlInvalid: 'Custom proxy URL is invalid. Use an http:// or https:// URL.',
       proxyModeInvalid: 'Proxy mode is invalid. Choose the network mode again.',
@@ -1085,6 +1090,10 @@ export const en: typeof zhCN = {
       checkingUpdate: 'Checking…',
       upToDate: 'You are already on the latest version.',
       updateError: 'Update check or install failed. Please try again later.',
+      updateCheckError: "Could not check for updates. This check did not install an update. Try again later or use the official downloads.",
+      openDownloads: "Official downloads",
+      sourceRevision: "Source build: {{revision}}",
+      previewUpdatesManual: "Preview releases are updated with the MSI from the official downloads page. Installing it keeps your settings.",
       openReleases: 'Open Releases',
       source: 'Source',
       docs: 'Docs',
@@ -1093,7 +1102,7 @@ export const en: typeof zhCN = {
       qqDesc: 'Search the group number in QQ to join, or scan the QR code.',
       copyQq: 'Copy group number',
       privacy: 'Privacy',
-      privacyDesc: 'All transcripts stay on this device. Cloud APIs are only called for real-time transcription/polish; no recordings are retained.',
+      privacyDesc: 'History is stored on this computer. Cloud speech recognition sends audio to your selected provider; cloud polishing, translation and Q&A send the relevant text. Local recognition does not make cloud text features offline. Saved audio follows your recording-history settings.',
       localFirst: 'Local-first',
       updateDialog: {
         available: {
@@ -1174,7 +1183,7 @@ export const en: typeof zhCN = {
       exportSuccess: 'Saved',
       exportFailed: 'Export failed',
       privacy: 'Privacy',
-      privacyDesc: 'All transcripts stay on this device. Cloud APIs are used only for real-time calls.',
+      privacyDesc: 'History is stored on this computer. Your selected cloud speech service processes audio; cloud polishing, translation and Q&A process the relevant text. Local recognition does not make cloud text features offline.',
       localFirst: 'Local-first',
     },
   },

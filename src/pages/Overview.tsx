@@ -19,7 +19,6 @@ import {
   listHistory,
   openSystemSettings,
   recoverEmbeddedBleDevice,
-  setActiveAsrProvider,
   startDictation,
 } from '../lib/ipc';
 import type { CredentialsStatus, DictationSession, EmbeddedBleRepairResult, EmbeddedBleRuntimeStatus, PolishMode } from '../lib/types';
@@ -30,6 +29,7 @@ import { EmbeddedBleStatusPanel } from '../components/EmbeddedBleStatusPanel';
 interface OverviewProps {
   onOpenProvidersSettings?: () => void;
   onOpenRecordingSettings?: () => void;
+  onOpenLocalAsrSettings?: () => void;
   onStartDemoMode?: () => void;
 }
 
@@ -58,7 +58,7 @@ const LLM_NAME_KEY_BY_ID: Record<string, string> = {
   custom: 'custom',
 };
 
-export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onStartDemoMode }: OverviewProps) {
+export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onOpenLocalAsrSettings, onStartDemoMode }: OverviewProps) {
   const { t } = useTranslation();
   const [history, setHistory] = useState<DictationSession[]>([]);
   const [historyError, setHistoryError] = useState(false);
@@ -301,13 +301,7 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onS
           llmConfigured={creds.llmConfigured}
           onConfigure={onOpenProvidersSettings}
           onStartDemo={onStartDemoMode}
-          onUseLocal={async () => {
-            try {
-              await setActiveAsrProvider('foundry-local-whisper');
-              const status = await getCredentials();
-              setCreds(status);
-            } catch { /* ignore */ }
-          }}
+          onUseLocal={onOpenLocalAsrSettings}
           onTestRecord={() => { startDictation().catch(() => {}); }}
         />
       )}
@@ -448,12 +442,13 @@ function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onStartDemo
       </div>
       <div style={{ padding: '12px 18px 16px' }}>
         <div style={{ fontSize: 12, color: 'var(--ol-ink-3)', marginBottom: 12, lineHeight: 1.5 }}>
-          {t('overview.quickStartDesc')}
-          {!asrConfigured && !llmConfigured ? '' : !asrConfigured ? ` ASR ${t('overview.statusNotConfigured')}。` : ` LLM ${t('overview.statusNotConfigured')}。`}
+          {t(asrConfigured ? 'overview.quickStartAsrReady' : 'overview.quickStartDesc')}
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {onConfigure && (
-            <Btn size="sm" variant="blue" icon="settings" onClick={onConfigure}>{t('overview.quickStartConfigure')}</Btn>
+            <Btn size="sm" variant={asrConfigured ? 'ghost' : 'blue'} icon="settings" onClick={onConfigure}>
+              {t(asrConfigured && !llmConfigured ? 'overview.quickStartOptionalPolish' : 'overview.quickStartConfigure')}
+            </Btn>
           )}
           {onStartDemo && (
             <Btn size="sm" variant="ghost" icon="sparkle" onClick={onStartDemo}>{t('overview.quickStartDemo')}</Btn>

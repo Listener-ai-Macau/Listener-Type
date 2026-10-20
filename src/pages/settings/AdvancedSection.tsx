@@ -174,12 +174,9 @@ export function AdvancedSection() {
           </div>
         ) : (
           <>
-            {/* Qwen3 行 —— macOS Toggle 可点切换；Windows 后端是 stub，Toggle 始终 off
-                + 不可点 + desc=notSupportedHere，跟"本平台不可用"视觉一致。跨平台
-                异常（Windows profile 同步到 local-qwen3）时 active 状态靠下方独立
-                "禁用本地 ASR" 行兜底，避免 Toggle ON + desc 说不支持的自相矛盾感
-                （pr_agent #403 'Stale Windows state' 修法）。 */}
-            <SettingRow
+            {/* Only show the engine supported on this platform. A stale engine
+                selected on another platform still has the disable action below. */}
+            {isMac && <SettingRow
               label={t('settings.providers.presets.asrLocalQwen3')}
               desc={isMac ? t('settings.advanced.qwen3Desc') : t('settings.advanced.notSupportedHere')}>
               <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
@@ -192,7 +189,7 @@ export function AdvancedSection() {
                   } : undefined}
                 />
               </div>
-            </SettingRow>
+            </SettingRow>}
 
             {/* Foundry 行 —— 仅 Windows 露出（macOS 不展示 Windows 端模型内容）。 */}
             {isWin && (

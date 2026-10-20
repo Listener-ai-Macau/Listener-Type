@@ -25,6 +25,7 @@ export interface UseAutoUpdate {
   progress: number | null;
   downloaded: number;
   contentLength: number | null;
+  errorStage: 'check' | 'install' | null;
   checking: boolean;
   busy: boolean;
   /** 触发"检查更新"。如果发现新版本，状态变为 'available'，需要 caller 渲染对话框让用户确认下载。 */
@@ -42,6 +43,7 @@ export function useAutoUpdate(): UseAutoUpdate {
   const [version, setVersion] = useState('');
   const [downloaded, setDownloaded] = useState(0);
   const [contentLength, setContentLength] = useState<number | null>(null);
+  const [errorStage, setErrorStage] = useState<'check' | 'install' | null>(null);
 
   const checking = status === 'checking';
   const busy = status === 'downloading' || status === 'installing';
@@ -79,6 +81,7 @@ export function useAutoUpdate(): UseAutoUpdate {
   };
 
   const checkForUpdates = async () => {
+    setErrorStage(null);
     setStatus('checking');
     setVersion('');
     resetProgress();
@@ -101,6 +104,7 @@ export function useAutoUpdate(): UseAutoUpdate {
     } catch (error) {
       if (updateOperationRef.current !== operation) return;
       console.error('[updater] failed to check update', error);
+      setErrorStage('check');
       setStatus('error');
     }
   };
@@ -110,6 +114,7 @@ export function useAutoUpdate(): UseAutoUpdate {
     if (!update) return;
     const operation = updateOperationRef.current;
     resetProgress();
+    setErrorStage(null);
     setStatus('downloading');
     try {
       await update.download((event: DownloadEvent) => {
@@ -138,6 +143,7 @@ export function useAutoUpdate(): UseAutoUpdate {
         return;
       }
       console.error('[updater] failed to install update', error);
+      setErrorStage('install');
       await closeUpdate();
       setStatus('error');
     }
@@ -153,6 +159,7 @@ export function useAutoUpdate(): UseAutoUpdate {
 
   return {
     status,
+    errorStage,
     version,
     progress,
     downloaded,

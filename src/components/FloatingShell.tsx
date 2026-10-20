@@ -469,6 +469,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                 <Overview
                   onOpenProvidersSettings={() => openSettings('providers')}
                   onOpenRecordingSettings={() => openSettings('recording')}
+                  onOpenLocalAsrSettings={() => openSettings('advanced')}
                   onStartDemoMode={startProviderDemoMode}
                 />
               ) : (
@@ -514,6 +515,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
           onOpenSettings={openProviderSettings}
           onOpenRecording={openRecordingSettingsFromProviderPrompt}
           onStartDemo={startProviderDemoMode}
+          onOpenLocalSettings={() => { rememberProviderPrompt(); openSettings('advanced'); }}
         />
       ) : blePairingPromptOpen ? (
         <BlePairingPrompt
@@ -1008,11 +1010,13 @@ function ProviderSetupPrompt({
   onOpenSettings,
   onOpenRecording,
   onStartDemo,
+  onOpenLocalSettings,
 }: {
   onLater: () => void;
   onOpenSettings: () => void;
   onOpenRecording: () => void;
   onStartDemo: () => void;
+  onOpenLocalSettings: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -1066,6 +1070,9 @@ function ProviderSetupPrompt({
         <div style={{ fontSize: 12, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginTop: 8 }}>
           {t('shell.providerPrompt.demoHint')}
         </div>
+        <button onClick={onOpenLocalSettings} style={{ ...promptSoftButtonStyle, width: '100%', marginTop: 12 }}>
+          {t('overview.quickStartLocal')}
+        </button>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
           <button
             onClick={onLater}

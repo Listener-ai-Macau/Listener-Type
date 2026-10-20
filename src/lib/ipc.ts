@@ -771,6 +771,9 @@ function mockCredentialsStatusForBrowser(): CredentialsStatus {
       arkConfigured: false,
     };
   }
+  if (devState === 'asr-only') {
+    return { ...mockCredentialsStatus, llmConfigured: false, arkConfigured: false };
+  }
   return mockCredentialsStatus;
 }
 

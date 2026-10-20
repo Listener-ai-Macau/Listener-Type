@@ -35,7 +35,8 @@ export function shouldShowProviderSetupPrompt(
   credentials: CredentialsStatus,
   promptDeferredValue: string | null,
 ): boolean {
-  return !areProvidersConfigured(credentials) && promptDeferredValue !== '1';
+  const speechConfigured = credentials.asrConfigured ?? credentials.volcengineConfigured;
+  return !speechConfigured && promptDeferredValue !== '1';
 }
 
 function errorText(error: unknown): string {
