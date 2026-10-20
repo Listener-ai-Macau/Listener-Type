@@ -134,29 +134,46 @@ export function SettingsModal({ os: _os, onClose, initialSettingsSection }: Sett
               )}
               {g.items.map((it, idx) => {
                 const active = section === it.id && !it.external;
+                const navStyle: CSSProperties = {
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '7px 10px',
+                  borderRadius: 8, border: 0,
+                  background: 'transparent',
+                  fontFamily: 'inherit', fontSize: 13,
+                  cursor: 'default', textAlign: 'left',
+                  position: 'relative', zIndex: 1,
+                  color: 'inherit', textDecoration: 'none',
+                  transition: 'color 0.16s var(--ol-motion-quick), background 0.16s var(--ol-motion-quick)',
+                };
+                if (it.external && it.href) {
+                  return (
+                    <a
+                      key={it.id}
+                      href={it.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ol-nav-btn"
+                      style={navStyle}
+                      onClick={event => {
+                        if ('__TAURI_INTERNALS__' in window) {
+                          event.preventDefault();
+                          void openExternal(it.href!);
+                        }
+                      }}
+                    >
+                      <Icon name={it.icon} size={14} />
+                      <span style={{ flex: 1 }}>{t(`modal.sections.${it.id}`)}</span>
+                      <Icon name="external" size={11} />
+                    </a>
+                  );
+                }
                 return (
                   <button
                     key={it.id}
                     ref={gi === 0 ? (el => { firstGroupRefs.current[idx] = el; }) : undefined}
-                    onClick={() => {
-                      if (it.external && it.href) {
-                        void openExternal(it.href);
-                      } else {
-                        setSection(it.id as ModalSectionId);
-                      }
-                    }}
+                    onClick={() => setSection(it.id as ModalSectionId)}
                     className={active ? 'ol-nav-btn ol-nav-btn-active' : 'ol-nav-btn'}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '7px 10px',
-                      borderRadius: 8, border: 0,
-                      background: 'transparent',
-                      fontFamily: 'inherit', fontSize: 13,
-                      cursor: 'default', textAlign: 'left',
-                      position: 'relative',
-                      zIndex: 1,
-                      transition: 'color 0.16s var(--ol-motion-quick), background 0.16s var(--ol-motion-quick)',
-                    }}>
+                    style={navStyle}>
 
                     <Icon name={it.icon} size={14} />
                     <span style={{ flex: 1 }}>{t(`modal.sections.${it.id}`)}</span>

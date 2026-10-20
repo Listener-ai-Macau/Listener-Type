@@ -264,6 +264,27 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onO
     <>
       <PageHeader title={t('overview.title')} />
 
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+          <Icon name="mic" size={17} />
+          <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('overview.firstDictationTitle')}</h2>
+        </div>
+        <ol style={{ margin: '0 0 12px', paddingLeft: 20, fontSize: 12.5, lineHeight: 1.8, color: 'var(--ol-ink-2)' }}>
+          <li>{t('overview.firstDictationFocus')}</li>
+          <li>{t('overview.firstDictationStart', { trigger: prefs ? formatComboLabel(prefs.dictationHotkey) : t('common.loading') })}</li>
+          <li>{t('overview.firstDictationFinish', { trigger: prefs ? formatComboLabel(prefs.dictationHotkey) : t('common.loading') })}</li>
+        </ol>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {!credsError && !creds.asrConfigured && onOpenProvidersSettings && (
+            <Btn size="sm" variant="blue" icon="settings" onClick={onOpenProvidersSettings}>{t('overview.firstDictationSetup')}</Btn>
+          )}
+          {onOpenRecordingSettings && (
+            <Btn size="sm" variant="ghost" icon="mic" onClick={onOpenRecordingSettings}>{t('overview.firstDictationInput')}</Btn>
+          )}
+          <span style={{ fontSize: 11.5, color: 'var(--ol-ink-4)' }}>{t('overview.firstDictationCancel')}</span>
+        </div>
+      </Card>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 12 }}>
         <ProviderCard
           kind={t('overview.asrKind')}
