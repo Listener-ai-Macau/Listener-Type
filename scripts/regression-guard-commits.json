@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T08:12:42+08:00",
+  "updated_at": "2026-10-20T09:33:39+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -2920,9 +2920,45 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\post-reply63-daily64-restored.json",
         "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-air-efficiency-reply63-field-evidence.json"
       ]
+    },
+    {
+      "id": "firmware64_ota_budget_branch_unexercised_full_rf_and_no_repeated_failed_trials",
+      "repo": "firmware",
+      "commit": "9dabb47d97c00bcc7b49c807311eb4b7789f2f0c",
+      "subject": "Keep OTA packet-budget reconciliation in promotion worker only",
+      "commit_subject": "Keep OTA packet-budget reconciliation in promotion worker only",
+      "state": "full_rf100p796_existing1064_request_not_triggered_no_gain_or_repair_claim",
+      "protects": [
+        "OTA-only request2120 is live-generation/interval scoped and called only by promotion worker; ordinary audio965 policy unchanged. Current field link already1064/1064, receipt flags0: no965 repair field qualification or stable gain.",
+        "Full authenticated original32 RF1734832B/3917 chunks100.796KBps, real2M/7.500016ms and CSA2 zero mismatch. Original measurement result is purpose-scoped, not full all-HCI/IRQ attribution. Same Type and normal32 restored/profile unchanged.",
+        "Hard history constraint: reject re-running215/491/core/queue/Flash/TX1064/window7to8 variants absent documented changed causal evidence. Changed trial conditions must be observed, not only intended. Absent trigger/unsuccessful acquisition is unverified, not performance failure or repair success.",
+        "Keep exact executed sources, actual settings/provenance and failures. Maintain one current TODO pointer with actual timestamp; original older points remain historical."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\ota64-field-summary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\ota64-linked-proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\ota64-budget-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\post-ota64-daily64-restored.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\repair-timeline-audit64.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-ota64-budget-and-timeline-evidence.json"
+      ],
+      "guards": [],
+      "machine_accepted_scope": [
+        "isolated_ota64_full_rf_budget_noop_not965_repair"
+      ],
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\ota64-field-summary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\ota64-linked-proof.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\ota64-budget-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\post-ota64-daily64-restored.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\repair-timeline-audit64.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-ota64-budget-and-timeline-evidence.json"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T08:12:42+08:00",
+  "feature_routes_updated_at": "2026-10-20T09:33:39+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -3210,7 +3246,8 @@
         "firmware60_actual_window8_feedback_restore_not_gain",
         "firmware61_matched_adv38_actual_window8_no_gain",
         "firmware62_ce_request_ownership_not_hardware_ce_proof",
-        "firmware63_remote_ce_prepared_plan8_and_actual965_fragment_budget"
+        "firmware63_remote_ce_prepared_plan8_and_actual965_fragment_budget",
+        "firmware64_ota_budget_branch_unexercised_full_rf_and_no_repeated_failed_trials"
       ],
       "paths": {
         "type": [
@@ -3258,7 +3295,8 @@
         "59 analysis-controller edit lost the independent allocator-only if; no59 physical run reached it due failed RF admission.60 restored its scope and preserved executed sources; do not repeat full-CHECK work from a mislabeled tool gate.",
         "2026-10-20 actual61 CS8 still106.526KB/s with fullRF/tail unchanged; do not repeat only7->8/guard1 as a fresh optimization or call the budget a hard RX deadline.",
         "2026-10-20 readonly62 full image RF misses exactly443B despite sustained tracking/0exportdrops. Plan8/8 remains; no actual CE request receipt retained. Not a valid complete-speed rejection, no device-loss inference, no gate relaxation.",
-        "63 actual local accepted/remote prepared12/24 but plan8 remains; fullRF61.974KBps with965us limits and226+25 splits, local RTC77/63 incomplete. No blanket failure of2M/7.5ms or stable CE63 causation."
+        "63 actual local accepted/remote prepared12/24 but plan8 remains; fullRF61.974KBps with965us limits and226+25 splits, local RTC77/63 incomplete. No blanket failure of2M/7.5ms or stable CE63 causation.",
+        "2026-10-20 09:28 isolated64 already effective1064/1064, zero request flags, fullRF100.796KBps. Do not count this no-trigger case as965 repair or blindly rerun it; pre-observe actual965 or pursue distinct event-tail evidence. Audit also retains repeated RTC coverage, acquisition and mixed-EOL tooling failures."
       ],
       "latest_observed_baseline": {
         "type_build": 42,
