@@ -7,6 +7,7 @@
 // `fetchLocalAsrRemoteInfo()` 实时从 HuggingFace tree API 拉取。
 
 import { invokeOrMock } from './ipc';
+import i18n from '../i18n';
 
 export type LocalAsrMirror = 'huggingface' | 'hf-mirror';
 
@@ -315,7 +316,9 @@ export function setFoundryLocalRuntimeSource(source: string): Promise<void> {
 }
 
 export function prepareFoundryLocalAsr(modelAlias: string): Promise<string> {
-  return invokeOrMock('foundry_local_asr_prepare', { modelAlias }, () => `mock-${modelAlias}`);
+  return invokeOrMock('foundry_local_asr_prepare', { modelAlias }, () => {
+    throw new Error(i18n.t('localAsr.foundryPreviewPreparation'));
+  });
 }
 
 export function cancelFoundryLocalAsrPrepare(): Promise<void> {

@@ -936,6 +936,7 @@ pub async fn set_active_asr_provider(
     coord: CoordinatorState<'_>,
     runtime: State<'_, Arc<FoundryLocalRuntime>>,
     provider: String,
+    model_alias: Option<String>,
 ) -> Result<(), String> {
     let provider = provider.trim().to_string();
     if provider.is_empty() {
@@ -944,14 +945,36 @@ pub async fn set_active_asr_provider(
     if provider == FOUNDRY_LOCAL_PROVIDER_ID && !active_foundry_asr_is_supported(&provider) {
         return Err("Foundry Local Whisper is only available on Windows".to_string());
     }
+    // Commit a local provider/model only after its existing files can actually
+    // load. Bare activation never starts a hidden first-time download, and a
+    // failed load cannot replace the customer's working cloud configuration.
+    let prepared_model = if provider == FOUNDRY_LOCAL_PROVIDER_ID {
+        let alias = model_alias
+            .unwrap_or_else(|| active_foundry_model_from_prefs(&coord.prefs().get()));
+        validate_foundry_model_alias(&alias)?;
+        runtime.ensure_cached_loaded(&alias).await.map_err(|error| {
+            format!("Local recognition is not ready. Open Settings > Local recognition and prepare the model first: {error:#}")
+        })?;
+        Some(alias)
+    } else {
+        None
+    };
     CredentialsVault::set_active_asr_provider(&provider).map_err(|e| e.to_string())?;
     {
         let _settings_guard = settings_update_lock().lock();
         let mut prefs = coord.prefs().get();
-        if prefs.active_asr_provider != provider || !prefs.active_asr_provider_default_migrated {
+        if prefs.active_asr_provider != provider
+            || !prefs.active_asr_provider_default_migrated
+            || prepared_model
+                .as_ref()
+                .is_some_and(|alias| &prefs.foundry_local_asr_model != alias)
+        {
             let previous_provider = prefs.active_asr_provider.clone();
             prefs.active_asr_provider = provider.clone();
             prefs.active_asr_provider_default_migrated = true;
+            if let Some(alias) = prepared_model {
+                prefs.foundry_local_asr_model = alias;
+            }
             if let Err(err) = coord.prefs().set(prefs) {
                 let _ = CredentialsVault::set_active_asr_provider(&previous_provider);
                 return Err(err.to_string());
@@ -962,9 +985,6 @@ pub async fn set_active_asr_provider(
     if provider == crate::asr::local::PROVIDER_ID {
         // 切到本地 ASR → 后台预加载模型，下次按 hotkey 时不必等数秒。
         coord.preload_local_asr_in_background();
-    }
-    if provider == FOUNDRY_LOCAL_PROVIDER_ID {
-        coord.preload_foundry_local_asr_in_background("active_asr_provider_switch");
     }
     if release_plan.qwen {
         // 切回云端 → 用户已不需要本地引擎，立刻释放 1.2GB+ RAM；不释放的话只会等到

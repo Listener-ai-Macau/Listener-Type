@@ -20,6 +20,7 @@ export function AdvancedSection() {
   const platformSupported = isMac || isWin;
   const switchSeqRef = useRef(0);
   const [busy, setBusy] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
   // 待确认的启用目标。!== null 时中央 modal 弹出 + 背景模糊；用户点确认 → 真切；
   // 点取消 → 回到 null。一次只允许一个 modal。
   const [pendingTarget, setPendingTarget] = useState<AsrPresetId | null>(null);
@@ -35,13 +36,16 @@ export function AdvancedSection() {
 
   const performSwitch = async (target: AsrPresetId) => {
     setBusy(true);
+    setSwitchError(null);
     const seq = ++switchSeqRef.current;
     try {
       await setActiveAsrProvider(target);
       if (seq !== switchSeqRef.current) return;
       if (prefs) {
-        await updatePrefs({ ...prefs, activeAsrProvider: target });
+        await updatePrefs(current => ({ ...current, activeAsrProvider: target }));
       }
+    } catch (error) {
+      if (seq === switchSeqRef.current) setSwitchError(error instanceof Error ? error.message : String(error));
     } finally {
       if (seq === switchSeqRef.current) {
         setBusy(false);
@@ -57,6 +61,7 @@ export function AdvancedSection() {
 
   return (
     <>
+      {switchError && <div role="alert" style={{ color: 'var(--ol-err)', fontSize: 12, lineHeight: 1.5 }}>{switchError}</div>}
       {/* ─── 屏幕中央确认 modal（背景模糊） ─────────────────────────────
           点击遮罩或取消按钮关闭；切换中（busy）禁止任何关闭路径以免半切失败。 */}
       {pendingTarget && pendingNameKey && (
