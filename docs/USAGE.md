@@ -24,7 +24,7 @@ Listener Type 有两种输入源：
 ### Windows
 
 1. 从 [GitHub Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases)
-   下载当前 Windows `.msi` 并安装；用同一发布页的 `SHA256SUMS.txt` 核对文件。
+   下载当前 Windows `.msi` 并安装；用同一发布页正文中的 SHA-256 表格核对文件。
    文件名和校验值以该次发布附件为准。
 2. 从开始菜单启动 Listener Type；首次启动允许麦克风访问。
 3. 使用硬件时按「开始配对」，在 Windows 蓝牙设置中选择 `listener`，回到

@@ -1,38 +1,42 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-20T11:15:43.385190+08:00",
+  "updatedAt": "2026-10-20T12:38:43.194745+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 65,
-    "source": "c06880d9b8838ec36b6860c731e2c554296ad844",
-    "sourceTag": "build-source/type65-20261020",
+    "build": 67,
+    "source": "423533ef3f0e1a6dc0b240d8c9f8608c876faf74",
+    "sourceTag": "build-source/type67-20261020",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "a743444ff1bc64bee8155febb62fa869c8efe89f9648e2d8cfff9e5c39468da3",
+    "sha256": "1b8ec87530469ad77cbee400dcc01a80c007f20240e7068810983aea5a95eafb",
     "sizeBytes": 298409984,
-    "exeSha256": "21f21a244e3ed89f6e60118523fe55fb99b5481fa18a4599cccc2efea3e6721e",
+    "exeSha256": "2d2811636829f1935c89ed5412b75241c2dbbc524271a0e0da5acb67e7363526",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
-    "build": 32,
-    "source": "d2cd2dd0175bf63ce13f4abd5e9bc9cf42132390",
-    "sourceTag": "build-source/firmware32-20261019",
-    "runtimeBuild": "ad73e1113e429ca7",
+    "build": 33,
+    "source": "149b6d950ebc5f416924c8670cf2b207bdc2b5b7",
+    "sourceTag": "build-source/firmware33-20261020",
+    "runtimeBuild": "e7bd1f1619b696a1",
     "file": "ListenerFirmware_1.0.6-rc1_ESP32S3.zip",
-    "sha256": "929e5471d97de66939110d09ea2e36a01f4163c60618116943c3b3209691b1ec",
-    "sizeBytes": 1955462,
-    "appSha256": "bfa14cf79f24dea045d34a06d274b2803d6b249fb3339ff79b986f6f6d9a729d",
+    "sha256": "306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272",
+    "sizeBytes": 1956905,
+    "appSha256": "98226f01fb30a86789ce230057ec9eb4a114da9dbbfced1a61d4765eef6c4dbe",
     "hardware": "keyboard-v2-n16r8",
     "url": "https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip"
   },
   "verification": {
     "newMsiEmbeddedExeEqualsBuiltExe": true,
     "sameVersionMsiUpgradeEnabled": true,
-    "firmwareZipMatchesPreviouslyVerifiedFirmware32": true,
     "npmAuditVulnerabilities": 0,
     "nativeRegressionEvidenceSource": "0a8085d51be03cba4fc01d2197c736935fe06f22",
-    "newPackageInstalledForThisPublication": false,
-    "experimentalThroughputFirmwareIncluded": false
+    "newPackageInstalledForThisPublication": true,
+    "experimentalThroughputFirmwareIncluded": false,
+    "firmware33ActualOtaAndExactBuildConfirmed": true,
+    "usbAndBluetoothCoreUiRoundtripVerified": true,
+    "denseOnboardKeysUiWriteReadbackVerified": true,
+    "keysCleanupRestoredThroughExactDeviceApi": true,
+    "actualNativeFilePickerToUiOtaComplete": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -45,6 +49,7 @@
     "remoteBranch": "master",
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
-    "historyTagsPreserved": true
+    "historyTagsPreserved": true,
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build67-20261020"
   }
 }

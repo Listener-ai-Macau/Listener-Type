@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T10:07:47+08:00",
+  "updated_at": "2026-10-20T12:31:51.076280+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -2956,9 +2956,74 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\repair-timeline-audit64.json",
         "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\tools\\ble-ota64-budget-and-timeline-evidence.json"
       ]
+    },
+    {
+      "id": "selected_rename66_verify_before_terminal_apply",
+      "repo": "type",
+      "commit": "f1aa37e91876d81cb48ba77ecf293d84e6a96a20",
+      "subject": "Confirm selected settings before retiring rename connection",
+      "state": "installed66_fw32_usb_ble_ui_write_read_restore_passed",
+      "protects": [
+        "Complete selected settings/key readback must finish on the exact live handle before APPLY_BLE_NAME intentionally retires it.",
+        "Lost apply acknowledgement must not repeat mutations or turn a confirmed persistent save into a false failure; pending restart stays explicit.",
+        "Exact capture, peer, one-use form lease and revision guards remain; unchanged forms do not restart Bluetooth."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib commands::device::settings_selection::tests"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/pre-delivery-acceptance-20261020/selected-rename-before.log",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/pre-delivery-acceptance-20261020/selected-rename-after.log",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/pre-delivery-acceptance-20261020/device-core-round66.json"
+      ],
+      "machine_accepted_scope": [
+        "Before: actual installed65 BLE rename saved but failed final read on retired capture; production helper native counterexample failed.",
+        "After: 7 relevant native tests pass; installed66 USB and BLE core form changes/readback/restoration pass, BLE write/readback2391ms."
+      ],
+      "known_failures": [
+        "e889bb7 introduced complete selected_readback after name APPLY; do not remove identity checks or retry on another device to mask it."
+      ],
+      "pending_human_scope": [
+        "Two physical boards and arbitrary link failure during a new transaction are not qualified."
+      ]
+    },
+    {
+      "id": "firmware33_atomic_power_state_breaks_settings_pm_lock_cycle",
+      "repo": "firmware",
+      "commit": "149b6d950ebc5f416924c8670cf2b207bdc2b5b7",
+      "subject": "Read power state atomically outside settings lock ordering",
+      "state": "actual33_ota_and_dense_keys_write_readback_passed_original_config_restored",
+      "protects": [
+        "Single power-state reads use an atomic enum and never wait for the PM mutex from a device-settings/BLE callback. Compound state snapshots retain their existing mutex.",
+        "Break PM-to-device-settings versus device-settings-to-PM lock dependency without changing connection timing, pairing, audio or power policies."
+      ],
+      "guards": [
+        "python tools/test_power_state_getter.py",
+        "python tools/verify_power_manager_static.py"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/pre-delivery-acceptance-20261020/power-state-before.log",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/pre-delivery-acceptance-20261020/power-state-after.log",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/pre-delivery-acceptance-20261020/e11r-hci-before-after.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/pre-delivery-acceptance-20261020/ota33-post-verified.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/pre-delivery-acceptance-20261020/keys-ui-round.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual C getter with a busy PM mutex: before8 mutex calls/265ms; after0 calls/0ms and all eight values correct; full IDF5.5.4 build/config match and existing power static checks pass.",
+        "Same board actual original-image OTA1735296B/18750ms transfer; fresh exact-peer build e7bd1f1619b696a1, UID/core/profile retained.",
+        "Original32 e11r=0 ATT request unacknowledged followed by HCI0x08 timeout. After33 same13 editable mapping/knob UI write and readback pass; e11r=0 response154.627ms, e11r=1 response231.518ms. Original configuration restored."
+      ],
+      "known_failures": [
+        "Dense-key UI32 saved profile then knob change stalled; partial commits must be explicitly read back and preserved, never silently retried.",
+        "The33 UI cleanup driver hit a covered dropdown; exact-device API restored all values. This is not full UI restoration acceptance."
+      ],
+      "pending_human_scope": [
+        "Full OTA RF capture is not qualified; this round had an authenticated prefix but later tracking gaps.",
+        "No physical HID presses or two-board field qualification; no160KB/s claim."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T09:33:39+08:00",
+  "feature_routes_updated_at": "2026-10-20T12:31:51.076280+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -3494,7 +3559,7 @@
     },
     {
       "id": "device-settings-target-selection",
-      "baseline_state": "installed60_fw32_single_peer_write_read_restore_and_reboot_persistence_passed",
+      "baseline_state": "installed66_fw33_ui_core_roundtrip_dense_keys_write_readback_original_config_restored",
       "accepted_scope": "Selected-board name, LED zones, power, voice automation and onboard key/knob settings; exact target/read lease/revision guards. Real E1 single-board write/read/restore and normal-reboot persistence; native C two-NVS-bank isolation. Two physical boards together and physical HID presses remain unclaimed.",
       "guard_entries": [
         "explicit_device_settings_usb_ble_target_and_read_lease",
@@ -3502,7 +3567,9 @@
         "device_settings_editable_draft_shared_selected_peer",
         "device_settings_live_service_exact_peer_and_draft58",
         "device_onboard_keys60_exact_uid_and_bounded_transaction",
-        "firmware32_device_owned_profiles_atomic_nvs"
+        "firmware32_device_owned_profiles_atomic_nvs",
+        "selected_rename66_verify_before_terminal_apply",
+        "firmware33_atomic_power_state_breaks_settings_pm_lock_cycle"
       ],
       "paths": {
         "type": [
@@ -3520,7 +3587,9 @@
         "Historical 2026-10-19 peer was F83469CA5C53, not historical CDB2F668B535. 17:32 tracking-only capture has only3 target RF records and no connection follow; no old key reuse, full RF, speed or device-loss claim.",
         "Type54 fff0bf2 clears snapshot/name then disables all edits if read fails.",
         "2026-10-19 old F8 target fails while connected same-name Listener is F3371BC799AF.",
-        "Historical57 F3 audio-service open returned SharingViolation4/AccessDenied3; DIS read succeeds. 58 later reused the exact active notify service; the old failure remains preserved."
+        "Historical57 F3 audio-service open returned SharingViolation4/AccessDenied3; DIS read succeeds. 58 later reused the exact active notify service; the old failure remains preserved.",
+        "2026-10-20 Type65/FW32 BLE rename saved then read retired capture (e889bb7); fixedf1aa37e, actual66 both routes pass.",
+        "2026-10-20 dense keys/knob e11r0 had HCI0x08 after partial commit; FW33 atomic state getter fixes known lock dependency, post-write ATT response and profile/core restoration verified."
       ]
     },
     {

@@ -6,7 +6,7 @@ This guide covers the Windows setup and user controls shown on the current produ
 
 ## Install and make your first dictation
 
-1. Download the current Windows MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases). Match its checksum against that release's `SHA256SUMS.txt`; filenames and hashes belong to the specific release.
+1. Download the current Windows MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases). Match its checksum against the SHA-256 table in the release description; filenames and hashes belong to the specific release.
 2. Install and open Listener Type. Allow microphone access. Windows installation uses WebView2; prepare its runtime first on an offline computer.
 3. In Settings → Recording, choose Computer microphone. To use a keyboard, charge it over USB-C, click the knob to power on, and start pairing in Settings → Device. Select `listener` in Windows Bluetooth, return to Type and check the connection. Choose Listener BLE as the recording source.
 4. Configure a recognition provider's credentials and model, or prepare the Windows local recognition runtime and model. Try Raw in a plain text editor before adding other services.

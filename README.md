@@ -2,15 +2,17 @@
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build65](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build67](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
-Firmware: **ESP32-S3 N16R8**, build `ad73e1113e429ca7`. Select the same ZIP for USB flashing or Bluetooth OTA in Type.
+Firmware: **ESP32-S3 N16R8**, build `e7bd1f1619b696a1`. Select the same ZIP for USB flashing or Bluetooth OTA in Type.
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device, read its settings, then write changes back to that device. Names, lights, power, keys and knob configuration stay on the board. Use this paired MSI and firmware ZIP.
 RC1 remains a prerelease; intermittent early close and strong-interference limits are documented in the release notes.
-This refresh includes exact-device OTA handoff, removes connection-policy changes to unrelated Bluetooth devices, and updates the build dependency source-map-js to 1.2.2. Firmware remains the verified Firmware32 image; experimental throughput firmware is excluded.
+This refresh fixes device-name confirmation after Bluetooth reconnect, key/knob saves that could stall, and firmware-package errors hidden in USB mode. The paired release uses normal firmware with per-device settings preserved; throughput experiments are excluded.
 [App release notes and checksum](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware notes and flashing instructions](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
+
+[English first setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [English user guide](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)
 
 ---
 
@@ -27,7 +29,7 @@ This refresh includes exact-device OTA handoff, removes connection-policy change
 
 **Speak a longer message, an email or a note. Keep the text in the field you are already using.**
 
-**[Download for Windows](https://github.com/Listener-ai-Macau/Listener-Type/releases)** · [First setup](#make-your-first-dictation) · [Foldout manual](docs/manuals/Listener-fold-EN.pdf)
+**[Download for Windows](https://github.com/Listener-ai-Macau/Listener-Type/releases)** · [First setup](#make-your-first-dictation) · [User guide](docs/USAGE.en.md)
 
 Free and open source · Keyboard optional · Set up a recognition service or local model first.
 
@@ -107,7 +109,7 @@ Connect in Settings → Device. Click the knob to start/stop, rotate for volume,
 
 Configure wake phrase and voiceprint in **Device settings**. Enroll with three samples of the current phrase, and enroll again after changing it. Voiceprint reduces input interference; review the final result in noise or overlapping speech. Deleting the voiceprint does not disable voice wake. Enrollment creates a protected local template; original sample recordings are not retained after enrollment.
 
-[Hardware controls and light language](https://github.com/Listener-ai-Macau/Listener-Firmware) · [Foldout manual](docs/manuals/Listener-fold-EN.pdf)
+[Hardware controls and light language](https://github.com/Listener-ai-Macau/Listener-Firmware) · [User guide](docs/USAGE.en.md)
 
 ## Configure the services and understand the data flow
 

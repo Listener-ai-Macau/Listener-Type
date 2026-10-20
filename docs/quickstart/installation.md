@@ -1,20 +1,12 @@
 # Installation
 
-## macOS
+## macOS and Linux
 
-1. Download the Listener Type `.dmg` from the Listener Type releases page.
-2. Drag `Listener Type.app` into Applications.
-3. If macOS reports the app as damaged for an ad-hoc build, run:
-
-```bash
-xattr -cr "/Applications/Listener Type.app"
-```
-
-4. Launch the app and grant permissions.
+RC1 provides a Windows MSI. macOS and Linux currently require source builds; see the [platform scope](../../README.md) before downloading.
 
 ## Windows
 
-1. Download the Windows `.msi` from [Listener Type Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases). Verify it against that release's `SHA256SUMS.txt`.
+1. Download the Windows `.msi` from [Listener Type Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases). Verify it against the SHA-256 table in the release description.
 2. Run the installer. The production installer is per-machine so Windows may ask for administrator approval.
 3. Launch Listener Type from the Start menu.
 4. On first launch, grant microphone/hotkey permissions, then follow the Listener BLE pairing prompt. Use **Start pairing** to switch into the OOBE pairing flow; you should not need Node.js, Rust, ESP-IDF, a serial port, or UUID entry.
