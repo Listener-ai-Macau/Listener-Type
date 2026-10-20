@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-20T12:38:43.194745+08:00",
+  "updatedAt": "2026-10-20T13:59:19.217573+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 67,
-    "source": "423533ef3f0e1a6dc0b240d8c9f8608c876faf74",
-    "sourceTag": "build-source/type67-20261020",
+    "build": 68,
+    "source": "cfa6c939a66356d8a40ddd2c5b4bc6806a45adc3",
+    "sourceTag": "build-source/type68-20261020",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "1b8ec87530469ad77cbee400dcc01a80c007f20240e7068810983aea5a95eafb",
-    "sizeBytes": 298409984,
-    "exeSha256": "2d2811636829f1935c89ed5412b75241c2dbbc524271a0e0da5acb67e7363526",
+    "sha256": "844c6b64f91bcefde0e4869c534aeb3d4ac9681febe1f38cd325063d6bf0a65b",
+    "sizeBytes": 298528768,
+    "exeSha256": "0ca7b2cd5f6dcc1f02802f6a85eae0a6080ed61e3d5d8ea6b05a6143fd5f6874",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -36,20 +36,27 @@
     "usbAndBluetoothCoreUiRoundtripVerified": true,
     "denseOnboardKeysUiWriteReadbackVerified": true,
     "keysCleanupRestoredThroughExactDeviceApi": true,
-    "actualNativeFilePickerToUiOtaComplete": false
+    "actualNativeFilePickerToUiOtaComplete": false,
+    "customerSetup68IsolatedUiVerified": true,
+    "type68InstalledExeAndPreferencesVerified": true,
+    "customerSpeechOrHardwarePurchaseValueVerified": false,
+    "priorHardwareEvidenceScope": "USB/Bluetooth settings and Firmware33 OTA evidence retained from installed Type66/67; not rerun or requalified as Type68 full hardware/customer acceptance."
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
     "Intermittent wake/adoption/early-close cases do not yet have complete current field acceptance.",
     "Same-session History/clipboard restoration still has limited real editor field coverage.",
     "Two physical boards simultaneously configured and physical HID presses were not qualified in this release check.",
-    "No stable 160 KB/s or real dual-microphone enhancement qualification is claimed."
+    "No stable 160 KB/s or real dual-microphone enhancement qualification is claimed.",
+    "First-use UI was verified with isolated browser mocks; live speech, physical-device value and purchase conversion were not established by these checks.",
+    "Local runtime/model first download and no-key real inference remain to be qualified. Backend-generated diagnostics may still need localization.",
+    "RC1 uses official MSI downloads for updates; it has no stable signed automatic-updater feed."
   ],
   "maintenance": {
     "remoteBranch": "master",
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build67-20261020"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build68-20261020"
   }
 }
