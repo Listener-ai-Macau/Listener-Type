@@ -37,6 +37,7 @@ import type {
   StylePackExample,
   StylePackKind,
   StylePackRuntimeDiagnostics,
+  StyleTextTrialResult,
   StyleSystemPrompts,
   UserPreferences,
   VoiceprintStatus,
@@ -1686,6 +1687,13 @@ export function createStylePackFromTemplate(template: StylePack): Promise<StyleP
 
 export function previewStylePackRuntime(stylePack: StylePack): Promise<StylePackRuntimeDiagnostics> {
   return invokeOrMock('preview_style_pack_runtime', { stylePack }, () => composeMockStylePackRuntimeDiagnostics(stylePack));
+}
+
+export function tryStylePackText(stylePackId: string, rawText: string): Promise<StyleTextTrialResult> {
+  return invokeOrMock('try_style_pack_text', { stylePackId, rawText }, () => {
+    // The ordinary browser preview cannot call the user's configured native text service.
+    throw new Error('style_trial_native_required');
+  });
 }
 
 export function setActiveStylePack(id: string): Promise<StylePack> {

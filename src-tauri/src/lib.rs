@@ -1025,6 +1025,7 @@ pub fn run() {
             commands::create_style_pack_from_template,
             commands::save_style_pack,
             commands::preview_style_pack_runtime,
+            commands::try_style_pack_text,
             commands::set_active_style_pack,
             commands::set_style_pack_enabled,
             commands::reset_builtin_style_pack,

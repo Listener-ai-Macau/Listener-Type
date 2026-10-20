@@ -338,6 +338,16 @@ pub struct StylePackRuntimeDiagnostics {
     pub preview_omits_front_app: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StyleTextTrialResult {
+    pub pack_id: String,
+    pub pack_name: String,
+    pub output_text: String,
+    pub used_text_service: bool,
+    pub elapsed_ms: u64,
+}
+
 impl Default for StylePack {
     fn default() -> Self {
         Self {

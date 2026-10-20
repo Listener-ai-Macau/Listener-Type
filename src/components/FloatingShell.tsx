@@ -465,6 +465,8 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                   onOpenLocalAsrSettings={() => openSettings('localAsr')}
                   onStartDemoMode={startProviderDemoMode}
                 />
+              ) : displayTab === 'style' ? (
+                <Style onOpenProviders={() => openSettings('providers')} />
               ) : (
                 <Page />
               )}

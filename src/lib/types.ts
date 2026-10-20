@@ -381,6 +381,14 @@ export interface StylePackRuntimeDiagnostics {
   previewOmitsFrontApp: boolean;
 }
 
+export interface StyleTextTrialResult {
+  packId: string;
+  packName: string;
+  outputText: string;
+  usedTextService: boolean;
+  elapsedMs: number;
+}
+
 export interface CloudAccountStatus {
   configured: boolean;
   signedIn: boolean;

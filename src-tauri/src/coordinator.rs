@@ -2527,6 +2527,65 @@ impl Coordinator {
         .map_err(|e| e.to_string())
     }
 
+    /// An explicit text-only trial; never changes active style, history or output targets.
+    pub async fn try_style_pack_text(
+        &self,
+        style_pack_id: String,
+        raw_text: String,
+    ) -> Result<crate::types::StyleTextTrialResult, String> {
+        let chars = raw_text.chars().count();
+        if raw_text.trim().is_empty() || chars > 4_000 {
+            return Err("style_trial_invalid_text".into());
+        }
+        let pack = self
+            .inner
+            .style_packs
+            .get(&style_pack_id)
+            .map_err(|e| e.to_string())?;
+        let started = std::time::Instant::now();
+        let used_text_service = pack.base_mode != PolishMode::Raw || raw_style_pack_uses_llm(&pack);
+        let output_text = if used_text_service {
+            let prefs = self.inner.prefs.get();
+            let hotwords = enabled_phrases(&self.inner);
+            // No frontmost-app capture or previous dictation context in a typed trial.
+            tokio::time::timeout(
+                std::time::Duration::from_secs(45),
+                polish_text(
+                    &raw_text,
+                    pack.base_mode,
+                    &hotwords,
+                    &pack.prompt,
+                    &prefs.working_languages,
+                    prefs.chinese_script_preference,
+                    prefs.output_language_preference,
+                    prefs.llm_thinking_enabled,
+                    None,
+                    &[],
+                ),
+            )
+            .await
+            .map_err(|_| "style_trial_timeout".to_owned())?
+            .map_err(|e| e.to_string())?
+        } else {
+            raw_text
+        };
+        log::info!(
+            "[style-pack] text_trial pack={} input_chars={} output_chars={} text_service={} elapsed_ms={}",
+            pack.id,
+            chars,
+            output_text.chars().count(),
+            used_text_service,
+            started.elapsed().as_millis()
+        );
+        Ok(crate::types::StyleTextTrialResult {
+            pack_id: pack.id,
+            pack_name: pack.name,
+            output_text,
+            used_text_service,
+            elapsed_ms: started.elapsed().as_millis() as u64,
+        })
+    }
+
     pub fn preview_style_pack_runtime(
         &self,
         style_pack: &crate::types::StylePack,

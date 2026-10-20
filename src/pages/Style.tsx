@@ -19,6 +19,7 @@ import { Btn, Card, PageHeader, Pill } from './_atoms';
 import { Icon } from '../components/Icon';
 import { SavedToast, type SaveToastState } from '../components/SavedToast';
 import { MarketplaceModal } from '../components/MarketplaceModal';
+import { StyleTextTrial } from '../components/StyleTextTrial';
 
 type BusyAction =
   | 'loading'
@@ -118,8 +119,10 @@ function sanitizeZipFileName(name: string) {
   return trimmed.replace(/[<>:"/\\|?*]+/g, '-').replace(/\s+/g, '-').toLowerCase();
 }
 
-export function Style() {
+export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}) {
   const { t, i18n } = useTranslation();
+  const [trialPack, setTrialPack] = useState<StylePack | null>(null);
+  const [trialDraft, setTrialDraft] = useState('');
   const isEnglish = i18n.language.toLowerCase().startsWith('en');
   const { prefs: marketplacePrefs } = useHotkeySettings();
   const canPublish = (marketplacePrefs?.marketplaceDevLogin ?? '').trim().length > 0;
@@ -667,6 +670,15 @@ export function Style() {
         offsetStyle={{ position: 'fixed', bottom: 32, right: 32, top: 'auto' }}
       />
 
+      {trialPack && <StyleTextTrial
+        key={trialPack.id}
+        pack={trialPack}
+        draft={trialDraft}
+        onDraftChange={setTrialDraft}
+        onClose={() => setTrialPack(null)}
+        onOpenProviders={onOpenProviders ? () => { setTrialPack(null); onOpenProviders(); } : undefined}
+      />}
+
       {marketplaceOpen && (
         <MarketplaceModal
           onClose={() => {
@@ -713,7 +725,12 @@ export function Style() {
                   </button>
                 )}
               </div>
-              <Pill tone="outline">{copy.listCount(packs.length)}</Pill>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                {rawPack && <Btn size="sm" variant="ghost" onClick={() => setTrialPack(clonePack(rawPack))}>
+                  {t('style.trial.open', { name: rawPack.name })}
+                </Btn>}
+                <Pill tone="outline">{copy.listCount(packs.length)}</Pill>
+              </div>
             </div>
           </div>
           <div className="ol-thinscroll" style={{ padding: 18, overflow: 'auto', flex: '1 1 0', minHeight: 0 }}>
@@ -820,6 +837,9 @@ export function Style() {
                   </div>
 
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 'auto' }}>
+                    <Btn size="sm" variant="blue" onClick={() => setTrialPack(clonePack(pack))}>
+                      {t('style.trial.open', { name: pack.name })}
+                    </Btn>
                     <Btn
                       size="sm"
                       variant={pack.active ? 'soft' : 'ghost'}

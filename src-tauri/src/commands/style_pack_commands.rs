@@ -56,6 +56,15 @@ pub fn save_style_pack(
 }
 
 #[tauri::command]
+pub async fn try_style_pack_text(
+    coord: CoordinatorState<'_>,
+    style_pack_id: String,
+    raw_text: String,
+) -> Result<crate::types::StyleTextTrialResult, String> {
+    coord.try_style_pack_text(style_pack_id, raw_text).await
+}
+
+#[tauri::command]
 pub fn preview_style_pack_runtime(
     coord: CoordinatorState<'_>,
     style_pack: StylePack,
