@@ -937,6 +937,7 @@ pub async fn set_active_asr_provider(
     runtime: State<'_, Arc<FoundryLocalRuntime>>,
     provider: String,
     model_alias: Option<String>,
+    expected_provider: Option<String>,
 ) -> Result<(), String> {
     let provider = provider.trim().to_string();
     if provider.is_empty() {
@@ -959,10 +960,13 @@ pub async fn set_active_asr_provider(
     } else {
         None
     };
-    CredentialsVault::set_active_asr_provider(&provider).map_err(|e| e.to_string())?;
     {
         let _settings_guard = settings_update_lock().lock();
         let mut prefs = coord.prefs().get();
+        if expected_provider.as_ref().is_some_and(|expected| &prefs.active_asr_provider != expected) {
+            return Err("Recognition settings changed during preparation. The prepared model was not selected; your latest choice is preserved.".into());
+        }
+        CredentialsVault::set_active_asr_provider(&provider).map_err(|e| e.to_string())?;
         if prefs.active_asr_provider != provider
             || !prefs.active_asr_provider_default_migrated
             || prepared_model

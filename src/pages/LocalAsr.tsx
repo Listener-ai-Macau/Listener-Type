@@ -92,6 +92,7 @@ export function LocalAsr() {
   const engineStatusTimer = useRef<number | null>(null);
   const foundrySelectionDirty = useRef(false);
   const foundryCancelRequestedRef = useRef(false);
+  const foundryMounted = useRef(true);
 
   const refreshEngineStatus = async () => {
     try {
@@ -185,12 +186,14 @@ export function LocalAsr() {
   };
 
   useEffect(() => {
+    foundryMounted.current = true;
     void refresh();
     // 引擎状态每 5s 轮询一次，让 UI 能看到 release 计时器到点后的状态变化
     engineStatusTimer.current = window.setInterval(() => {
       void refreshEngineStatus();
     }, 5000);
     return () => {
+      foundryMounted.current = false;
       if (engineStatusTimer.current !== null) {
         window.clearInterval(engineStatusTimer.current);
       }
@@ -336,6 +339,7 @@ export function LocalAsr() {
   const handlePrepareFoundry = async (activateAfterPrepare = false) => {
     if (!foundryAvailable) return;
     const modelAlias = selectedFoundryAlias;
+    const expectedProvider = prefs?.activeAsrProvider;
     setFoundryActivateAfterPrepare(activateAfterPrepare);
     foundryCancelRequestedRef.current = false;
     setFoundryBusy('prepare');
@@ -350,11 +354,12 @@ export function LocalAsr() {
     try {
       setError(null);
       await prepareFoundryLocalAsr(modelAlias);
+      if (!foundryMounted.current) return;
       if (foundryCancelRequestedRef.current) throw new Error(t('localAsr.foundryPrepareCancelled'));
       setFoundryProgress({ phase: 'finished', modelAlias, label: t('localAsr.foundryPrepareDone'), percent: 100, error: null });
       if (activateAfterPrepare) {
         setFoundryBusy('enable');
-        await setActiveAsrProvider('foundry-local-whisper', modelAlias);
+        await setActiveAsrProvider('foundry-local-whisper', modelAlias, expectedProvider);
       } else {
         await setFoundryLocalAsrModel(modelAlias);
       }
@@ -719,7 +724,7 @@ export function LocalAsr() {
             <Btn
               variant="blue"
               size="sm"
-              disabled={foundryBusy !== null || !foundryAvailable}
+              disabled={foundryBusy !== null || !foundryAvailable || !prefs}
               onClick={() => void handlePrepareFoundry(true)}>
               {foundryActivateAfterPrepare ? (foundryBusy === 'enable' ? t('localAsr.foundryEnabling') : foundryPrepareLabel) : t('localAsr.foundryPrepareAndUse')}
             </Btn>

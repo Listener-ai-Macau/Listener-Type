@@ -48,6 +48,10 @@ with sync_playwright() as pw:
    page.get_by_role('button',name=re.compile('Whisper Tiny.*151')).click()
    check('Smaller download is an explicit choice without changing the active provider',not any(x['cmd'] in ['set_active_asr_provider','foundry_local_asr_set_model','foundry_local_asr_prepare'] for x in page.evaluate('window.__localLog')))
    button.click();page.wait_for_function("window.__localLog.some(x=>x.cmd==='foundry_local_asr_prepare')")
+   page.get_by_role('button',name='Providers',exact=True).click();page.evaluate('window.__releasePrepare()');page.wait_for_timeout(250)
+   check('Leaving preparation cannot later replace the selected service',not any(x['cmd'] in ['set_active_asr_provider','foundry_local_asr_set_model'] for x in page.evaluate('window.__localLog')))
+   page.get_by_role('button',name='Local recognition',exact=True).click();page.get_by_role('button',name=re.compile('Whisper Tiny.*151')).click();page.evaluate("window.__localLog=[]")
+   button.click();page.wait_for_function("window.__localLog.some(x=>x.cmd==='foundry_local_asr_prepare')")
    expect(button).to_be_disabled()
    check('Pending preparation does not change provider or saved model',not any(x['cmd'] in ['set_active_asr_provider','foundry_local_asr_set_model'] for x in page.evaluate('window.__localLog')))
    page.get_by_role('button',name='Cancel prepare',exact=True).click();expect(page.get_by_text('Preparation cancelled',exact=True)).to_be_visible()
@@ -61,7 +65,7 @@ with sync_playwright() as pw:
    page.evaluate('window.__activationFails=false;window.__localLog=[]');button.click();expect(page.get_by_text('In use',exact=True)).to_be_visible()
    log=page.evaluate('window.__localLog');commands=[x['cmd'] for x in log]
    activation=next(x for x in log if x['cmd']=='set_active_asr_provider')
-   check('Successful activation commits the explicitly selected model after preparation',commands.index('foundry_local_asr_prepare')<commands.index('set_active_asr_provider') and activation['args']['modelAlias']=='whisper-tiny')
+   check('Successful activation commits the explicitly selected model after preparation',commands.index('foundry_local_asr_prepare')<commands.index('set_active_asr_provider') and activation['args']['modelAlias']=='whisper-tiny' and activation['args']['expectedProvider']=='volcengine')
    page.evaluate("window.__prepareOutcome='preview';window.__localLog=[]");button.click();expect(page.get_by_role('alert')).to_contain_text('This browser preview cannot download or run recognition')
    check('Ordinary browser preview never claims to download or prepare a real model',not any(x['cmd']=='set_active_asr_provider' for x in page.evaluate('window.__localLog')))
    if a.screenshot:
