@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T20:35:26.909804+08:00",
+  "updated_at": "2026-10-20T21:18:58.836797+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3403,9 +3403,39 @@
         "First uncontrolled focused-control failure remains; no claim that the original native SetFocus call necessarily caused it.",
         "No independent customer use, live microphone/wake/automatic endpoint, real target app beyond this WinForms field, verified clipboard read, physical benefit or market purchase."
       ]
+    },
+    {
+      "id": "customer80_reachable_guide_exact_setup_routes",
+      "repo": "type",
+      "commit": "a8a298b6bb75e2c6d4cf056071f3cb69bcbeb09e",
+      "subject": "Reachable usage guide and exact device/recording setup routes",
+      "state": "installed80_affected_native_ui_verified_customer_reuse_pending",
+      "protects": [
+        "Opening the device guide closes the covering Settings sheet.",
+        "Device guide routes Device settings to device, Recording settings to recording, and preserves explicit existing style trials.",
+        "Five-language labels describe guidance/settings rather than claiming offline recognition or an audio test.",
+        "Prompt primary foreground uses its paired theme token in light and dark modes."
+      ],
+      "guards": [
+        "Affected guide navigation and state preservation only; no protocol or audio-chain change."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\guide80-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\guide80-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\guide80-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build80\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build80\\type80-installed.json"
+      ],
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-79-native-20261020\\REPORT.txt"
+      ],
+      "unverified": [
+        "Report79 precedes this source. Actual independent80 reuse and purchase judgment remain separate.",
+        "No new live speech, physical/hardware, clipboard or interference qualification."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T20:35:26.909804+08:00",
+  "feature_routes_updated_at": "2026-10-20T21:18:58.836797+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -4008,7 +4038,7 @@
     },
     {
       "id": "customer-first-use",
-      "baseline_state": "installed79_hash_verified_native_first_use_observed_guidance_and_style_trials_real_speech_unqualified",
+      "baseline_state": "installed80_affected_native_guide_routes_verified_independent_reuse_pending",
       "accepted_scope": "First-use guidance and explicit personal-text trial navigation; precise native History copy proof is separate. No live speech, hardware or market qualification.",
       "guard_entries": [
         "customer_setup68_asr_ready_does_not_require_optional_llm",
@@ -4021,7 +4051,8 @@
         "customer76_explicit_style_text_trial",
         "customer77_trial_readiness_and_targeted_text_settings",
         "customer78_native_history_copy_and_honest_demo",
-        "customer79_discoverable_trials_and_unique_history_body"
+        "customer79_discoverable_trials_and_unique_history_body",
+        "customer80_reachable_guide_exact_setup_routes"
       ],
       "paths": {
         "type": [
@@ -4071,7 +4102,8 @@
         "Frozen73 illustrative history has no Formal examples and labels an empty style filter as no history.",
         "Frozen74 activates Foundry before any preparation; frontend86fd8f6 and native8a4f637b preserve the old source of this failure.",
         "Native78 Demo guidance has no entry to the existing text trials; customer78 found them later in Style.",
-        "History since oldest visible ^732a863 renders two bodies unconditionally even when identical."
+        "History since oldest visible ^732a863 renders two bodies unconditionally even when identical.",
+        "Source c53caee1 device guidance leaves the parent Settings sheet covering it and routes Pair device to Recording; actual79 browser counterexample retained."
       ]
     },
     {

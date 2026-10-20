@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-20T19:49:52.694994+08:00",
+  "updatedAt": "2026-10-20T21:18:58.836797+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 79,
-    "source": "ec136a7055975c853ae5a2852d53ed8d88f094b0",
-    "sourceTag": "build-source/type79-20261020",
+    "build": 80,
+    "source": "a8a298b6bb75e2c6d4cf056071f3cb69bcbeb09e",
+    "sourceTag": "build-source/type80-20261020",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "2a3944baed7a68265daf9ee201bf910d6d08d51200fec9d9533dcead772b1baf",
-    "sizeBytes": 298577920,
-    "exeSha256": "70d2bb37d3df655516df1ae1cd0161c059454f0dca22f1e80561cf52593aee2f",
+    "sha256": "4d3d20947ea72eeb9ae42624ab25bddceb5bd7560c8eb0b7c572b76949a48750",
+    "sizeBytes": 298590208,
+    "exeSha256": "b782bf7706e011e29d65f18f547366c1fda852ddc47013d056567f2d608b3551",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -71,9 +71,12 @@
     "type78InstalledExeAndPreferencesVerified": true,
     "history78PrivateNativeClipboardVerified": true,
     "history78ExpiredCopyCannotWriteVerified": true,
-    "customer78Reviewed": false,
+    "customer78Reviewed": true,
     "type79InstalledExeAndPreferencesVerified": true,
-    "customer79AffectedUiVerified": true
+    "customer79AffectedUiVerified": true,
+    "type80InstalledExeAndPreferencesVerified": true,
+    "guide80AffectedNativeUiVerified": true,
+    "customer79Reviewed": true
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -81,7 +84,7 @@
     "Same-session History/clipboard restoration still has limited real editor field coverage.",
     "Two physical boards simultaneously configured and physical HID presses were not qualified in this release check.",
     "No stable 160 KB/s or real dual-microphone enhancement qualification is claimed.",
-    "First-use UI was verified with isolated browser mocks; live speech, physical-device value and purchase conversion were not established by these checks.",
+    "First-use UI has isolated native/browser evidence, and one recorded WAV reached the original editor under source79. These checks do not qualify live speech, independent ordinary use, physical value or purchase conversion.",
     "Local runtime/model first download and no-key real inference remain to be qualified. Backend-generated diagnostics may still need localization.",
     "RC1 uses official MSI downloads for updates; it has no stable signed automatic-updater feed."
   ],
@@ -90,6 +93,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build79-20261020"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build80-20261020"
   }
 }
