@@ -32,6 +32,7 @@ mod firmware_ota;
 mod github_oauth;
 mod global_hotkey_runtime;
 mod hotkey;
+mod history_metadata;
 mod insertion;
 mod llm_gemini;
 mod marketplace_backend;

@@ -39,22 +39,6 @@ use crate::coordinator::Coordinator;
 use crate::coordinator::{PolishPrefetch, PolishPrefetchBuf};
 
 #[test]
-fn history_capture_duration_uses_media_not_processing_time() {
-    use super::dictation::history_capture_duration_ms;
-    let mut stats = crate::embedded_audio::collect_notifications(std::iter::empty::<&[u8]>())
-        .expect("empty collector").stats();
-    assert_eq!(history_capture_duration_ms(2_527, None), 2_527);
-    assert_eq!(history_capture_duration_ms(2_527, Some(&stats)), 2_527);
-    stats.reconstructed_pcm_bytes = 926_498;
-    // Do not infer media length from wall time or a floating display field.
-    stats.duration_seconds = 999.0;
-    assert_eq!(history_capture_duration_ms(2_527, Some(&stats)), 28_953);
-    assert_eq!(history_capture_duration_ms(120_000, Some(&stats)), 28_953);
-    stats.reconstructed_pcm_bytes = 32_000;
-    assert_eq!(history_capture_duration_ms(8_000, Some(&stats)), 1_000);
-}
-
-#[test]
 fn device_processing_hint_rejects_retired_producers_and_reordered_workers() {
     let coordinator = Coordinator::new();
     let inner = &coordinator.inner;

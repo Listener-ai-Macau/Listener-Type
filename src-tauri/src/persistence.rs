@@ -1343,7 +1343,14 @@ impl HistoryStore {
     }
 
     fn read_locked(&self) -> Result<Vec<DictationSession>> {
-        read_or_default::<Vec<DictationSession>>(&self.path)
+        let mut sessions = read_or_default::<Vec<DictationSession>>(&self.path)?;
+        // Existing records can contain provider wall time. Derive media time
+        // from their own saved PCM evidence without rewriting on a read.
+        for session in &mut sessions {
+            session.duration_ms = crate::history_metadata::capture_duration_ms(
+                session.duration_ms, session.embedded_audio_stats.as_ref());
+        }
+        Ok(sessions)
     }
 
     fn write_locked(&self, sessions: &[DictationSession]) -> Result<()> {
@@ -2798,6 +2805,29 @@ mod tests {
             r#"{{"id":"{id}","createdAt":"2026-07-26T00:00:00Z","rawTranscript":"r","finalText":"f","mode":"raw","insertStatus":"copiedFallback"}}"#
         ))
         .expect("parse DictationSession")
+    }
+
+    #[test]
+    fn history_media_duration_normalizes_legacy_rows_without_rewriting() {
+        let _guard = scoped_data_dir();
+        let store = HistoryStore::new().expect("history");
+        let mut legacy = make_session("legacy");
+        legacy.duration_ms = Some(2_527);
+        let mut stats = crate::embedded_audio::collect_notifications(std::iter::empty::<&[u8]>())
+            .expect("collector").stats();
+        stats.reconstructed_pcm_bytes = 926_498;
+        legacy.embedded_audio_stats = Some(stats);
+        let mut no_media_evidence = make_session("unknown");
+        no_media_evidence.duration_ms = Some(7_000);
+        let original = serde_json::to_vec(&vec![legacy, no_media_evidence]).unwrap();
+        fs::write(&store.path, &original).expect("write legacy fixture");
+        let rows = store.list().expect("read history");
+        assert_eq!(rows[0].duration_ms, Some(28_953));
+        assert_eq!(rows[0].id, "legacy");
+        assert_eq!(rows[0].raw_transcript, "r");
+        assert_eq!(rows[0].final_text, "f");
+        assert_eq!(rows[1].duration_ms, Some(7_000));
+        assert_eq!(fs::read(&store.path).unwrap(), original);
     }
 
     #[test]
