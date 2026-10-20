@@ -3,6 +3,68 @@
 
 use super::*;
 
+// These fixtures have a control queue but no real WinRT device. Production
+// registration/readiness/cleanup still runs through the shared implementation.
+fn install_test_audio_control(
+    capture_id: u64,
+    tx: mpsc::Sender<AudioControlRequest>,
+) -> ActiveAudioControlRegistration {
+    ActiveAudioControlRegistration::install_sender(ActiveAudioControlSender {
+        capture_id,
+        tx,
+        readiness: Arc::new(CaptureControlReadiness::new()),
+        bluetooth_address: Some(0xA1B2C3D4E5F6),
+        settings_service: None,
+        settings_control: None,
+        settings_device: None,
+    })
+}
+
+#[test]
+fn ota_handoff_rejects_missing_or_zero_peer_without_writing_to_the_queue() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    for address in [None, Some(0)] {
+        let (tx, rx) = mpsc::channel();
+        let registration = ActiveAudioControlRegistration::install_sender(ActiveAudioControlSender {
+            capture_id: 400, tx,
+            readiness: Arc::new(CaptureControlReadiness::new()),
+            bluetooth_address: address,
+            settings_service: None, settings_control: None, settings_device: None,
+        });
+        registration.readiness.transition(CaptureControlState::Ready);
+        assert!(request_listener_ota_v1_active_link(None).unwrap_err().contains("no exact active device address"));
+        assert!(rx.try_recv().is_err());
+        drop(registration);
+    }
+}
+
+#[test]
+fn audio_control_registration_keeps_exact_destination_when_a_capture_is_replaced() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    *active_audio_control_slot().lock().unwrap() = None;
+    let (tx1, _rx1) = mpsc::channel();
+    let first = ActiveAudioControlRegistration::install_sender(ActiveAudioControlSender {
+        capture_id: 401, tx: tx1,
+        readiness: Arc::new(CaptureControlReadiness::new()),
+        bluetooth_address: Some(0xAABBCCDDEE01),
+        settings_service: None, settings_control: None, settings_device: None,
+    });
+    assert_eq!(active_audio_control_sender().unwrap().bluetooth_address, Some(0xAABBCCDDEE01));
+    let (tx2, _rx2) = mpsc::channel();
+    let second = ActiveAudioControlRegistration::install_sender(ActiveAudioControlSender {
+        capture_id: 402, tx: tx2,
+        readiness: Arc::new(CaptureControlReadiness::new()),
+        bluetooth_address: Some(0xAABBCCDDEE02),
+        settings_service: None, settings_control: None, settings_device: None,
+    });
+    drop(first);
+    let current = active_audio_control_sender().unwrap();
+    assert_eq!(current.capture_id, 402);
+    assert_eq!(current.bluetooth_address, Some(0xAABBCCDDEE02));
+    drop(second);
+    assert!(active_audio_control_sender().is_none());
+}
+
 #[test]
 fn ota_wire_capability_is_unique_and_explicit_on_current_readiness() {
     assert!(listener_ota_v1_supports_block_deflate(b"ready=1;ota_deflate_blocks_v1=1"));
@@ -2304,16 +2366,10 @@ fn rename_recovery_preserves_advertised_address_type_through_first_pairasync() {
         "typed identity must survive the transient WinRT device fallback and remain observable"
     );
 
-    let custom = source
-        .find("custom_pair_listener_candidate(pairing, &candidate.label, expected_name)")
-        .expect("custom PairAsync should be the exact recovery ceremony");
-    let standard = source
-        .find("run_default_pairing_once(pairing, &candidate.label, \"standard pairing\")")
-        .expect("generic standard PairAsync fallback should remain available");
-    assert!(
-        custom < standard,
-        "typed Type recovery must register its ConfirmOnly handler before generic PairAsync"
-    );
+    // Typed device identity is independent of the pairing ceremony order.
+    // 54222ab restored default-first after the custom-first path delayed
+    // measured rename recovery. The dedicated owned_rename_uses_default_
+    // ceremony_before_custom_fallback test protects that newer contract.
 }
 
 #[test]
@@ -2564,15 +2620,15 @@ fn ota_handoff_preserves_transport_failure_and_optional_context_semantics() {
         (Some(8), Err("older firmware does not support context"), Ok(())),
     ] {
         let (tx, rx) = mpsc::channel::<AudioControlRequest>();
-        let registration = ActiveAudioControlRegistration::install(91, tx);
+        let registration = install_test_audio_control(91, tx);
         registration.readiness.transition(CaptureControlState::Ready);
         let worker = std::thread::spawn(move || {
             if context.is_some() {
-                let request = rx.recv().unwrap();
+                let request = rx.recv_timeout(Duration::from_secs(2)).expect("bounded fixture handoff request");
                 assert!(request.bytes.starts_with(b"TYPE:OBS:OTA:"));
                 request.result_tx.send(context_result.map_err(str::to_owned)).unwrap();
             }
-            let request = rx.recv().unwrap();
+            let request = rx.recv_timeout(Duration::from_secs(2)).expect("bounded fixture handoff request");
             assert_eq!(request.bytes, b"TYPE:OTA\n");
             request.result_tx.send(handoff_result.map_err(str::to_owned)).unwrap();
         });
@@ -2589,7 +2645,7 @@ async fn ota_control_readiness_tracks_transport_ownership_and_revokes_stale_read
     let _guard = active_audio_control_test_lock().lock().unwrap();
     *active_audio_control_slot().lock().unwrap() = None;
     let (tx, rx) = mpsc::channel();
-    let old = ActiveAudioControlRegistration::install(101, tx);
+    let old = install_test_audio_control(101, tx);
     assert!(request_listener_ota_v1_active_link(None).unwrap_err().contains("not control-ready"));
     assert!(rx.try_recv().is_err(), "opening capture must not receive TYPE:OTA");
     old.readiness.transition(CaptureControlState::Ready);
@@ -2606,7 +2662,7 @@ async fn ota_control_readiness_tracks_transport_ownership_and_revokes_stale_read
     assert!(!ota_control_dispatch_allowed(101), "recovered PCM/late HB cannot unquarantine old GATT");
 
     let (tx, _rx) = mpsc::channel();
-    let new = ActiveAudioControlRegistration::install(102, tx);
+    let new = install_test_audio_control(102, tx);
     assert!(!ota_control_dispatch_allowed(101));
     assert!(!ota_control_dispatch_allowed(102));
     new.readiness.transition(CaptureControlState::Ready);
@@ -2625,11 +2681,11 @@ fn active_audio_control_registration_only_clears_matching_capture() {
     *active_audio_control_slot().lock().unwrap() = None;
 
     let (tx1, _rx1) = mpsc::channel();
-    let registration1 = ActiveAudioControlRegistration::install(10, tx1);
+    let registration1 = install_test_audio_control(10, tx1);
     assert_eq!(active_audio_control_sender().unwrap().capture_id, 10);
 
     let (tx2, _rx2) = mpsc::channel();
-    let registration2 = ActiveAudioControlRegistration::install(20, tx2);
+    let registration2 = install_test_audio_control(20, tx2);
     assert_eq!(active_audio_control_sender().unwrap().capture_id, 20);
 
     drop(registration1);
@@ -2644,7 +2700,7 @@ fn queued_audio_control_timeout_keeps_live_capture_and_expires_command() {
     let _guard = active_audio_control_test_lock().lock().unwrap();
     *active_audio_control_slot().lock().unwrap() = None;
     let (tx, rx) = mpsc::channel();
-    let registration = ActiveAudioControlRegistration::install(73, tx);
+    let registration = install_test_audio_control(73, tx);
 
     let result = send_audio_control_via_active_capture(
         b"VREC:ENSURE:00000001:00000002\n",
@@ -2811,7 +2867,7 @@ fn active_audio_control_queue_preserves_fifo_while_skipping_cancelled_request() 
 fn expired_audio_control_request_replies_without_disconnect_or_reordering() {
     let _guard = active_audio_control_test_lock().lock().unwrap();
     let (tx, rx) = mpsc::channel();
-    let registration = ActiveAudioControlRegistration::install(75, tx.clone());
+    let registration = install_test_audio_control(75, tx.clone());
     let (expired_tx, expired_rx) = mpsc::channel();
     tx.send(AudioControlRequest {
         bytes: vec![],
@@ -2845,11 +2901,11 @@ fn accepted_wake_abort_is_scoped_to_ensure_capture_generation() {
     *accepted_wake_capture_owner_slot().lock().unwrap() = None;
 
     let (old_tx, _old_rx) = mpsc::channel();
-    let old_registration = ActiveAudioControlRegistration::install(73, old_tx);
+    let old_registration = install_test_audio_control(73, old_tx);
     remember_accepted_wake_capture_owner(0x1234, 73);
 
     let (new_tx, new_rx) = mpsc::channel();
-    let new_registration = ActiveAudioControlRegistration::install(74, new_tx);
+    let new_registration = install_test_audio_control(74, new_tx);
     let error = send_recording_control_abort_wake_capture(
         0x1234,
         Duration::from_millis(20),
@@ -2870,7 +2926,7 @@ fn device_settings_command_prefers_active_capture() {
     *active_audio_control_slot().lock().unwrap() = None;
 
     let (tx, rx) = mpsc::channel();
-    let registration = ActiveAudioControlRegistration::install(42, tx);
+    let registration = install_test_audio_control(42, tx);
     let receiver = std::thread::spawn(move || {
         let request = rx
             .recv_timeout(Duration::from_secs(1))

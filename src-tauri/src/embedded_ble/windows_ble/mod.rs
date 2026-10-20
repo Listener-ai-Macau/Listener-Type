@@ -663,8 +663,17 @@ struct ActiveAudioControlRegistration {
 impl ActiveAudioControlRegistration {
     fn install(capture_id: u64, tx: mpsc::Sender<AudioControlRequest>, target: &OpenNotifyTarget) -> Self {
         let readiness = Arc::new(CaptureControlReadiness::new());
+        Self::install_sender(ActiveAudioControlSender { capture_id, tx, readiness, bluetooth_address: target.bluetooth_address, settings_service: target.service.clone(), settings_control: target.control.clone(), settings_device: target.device.clone() })
+    }
+
+    // Register the control lease independently from the WinRT notification
+    // characteristic. Queue/lifecycle regressions can exercise this same path
+    // without opening a device or manufacturing an invalid WinRT interface.
+    fn install_sender(sender: ActiveAudioControlSender) -> Self {
+        let capture_id = sender.capture_id;
+        let readiness = Arc::clone(&sender.readiness);
         if let Ok(mut slot) = active_audio_control_slot().lock() {
-            *slot = Some(ActiveAudioControlSender { capture_id, tx, readiness: Arc::clone(&readiness), bluetooth_address: target.bluetooth_address, settings_service: target.service.clone(), settings_control: target.control.clone(), settings_device: target.device.clone() });
+            *slot = Some(sender);
             audio_control_readiness_notification().send_replace(());
             log::info!("[embedded-ble] capture #{capture_id}: audio control sender registered");
         }
