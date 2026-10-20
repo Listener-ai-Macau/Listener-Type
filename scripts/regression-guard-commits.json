@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T17:35:44.276898+08:00",
+  "updated_at": "2026-10-20T18:08:41.606037+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3289,9 +3289,38 @@
         "No successful real Light-service response: this machine has no configured text service. No new customer76 review is claimed.",
         "Typed trials do not qualify real speech, editor insertion, hardware convenience, long-term use or purchasing."
       ]
+    },
+    {
+      "id": "customer77_trial_readiness_and_targeted_text_settings",
+      "repo": "type",
+      "commit": "8e92b18219d559838e02540654bff60f9ba089ca",
+      "subject": "Disclose real trial availability before entry and preserve the text-service navigation purpose",
+      "state": "installed77_actual_readiness_state_preserved_and_affected_ui_verified",
+      "protects": [
+        "Browser text-trial limitation is visible before typing or submitting; it never simulates a result.",
+        "Native readiness uses the explicitly selected saved style and actual credential status. No provider switch or processing request occurs during preflight.",
+        "Text-trial settings open LLM first in both DOM and visual order; ordinary Providers retains ASR-first order. Stable keys preserve credential-card identity.",
+        "Draft retention, explicit-style processing, error/retry and late-result isolation remain."
+      ],
+      "guards": [
+        "python scripts/check-style-text-trial-ui.py --url <isolated-vite-url> --report <output-json>"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style77-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style77-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build77\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261020-build77\\type77-installed.json"
+      ],
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-76-recorded-20261020\\REPORT.txt"
+      ],
+      "unverified": [
+        "This first-use report observed source8eed884/build76, not customer77. The customer confirmed retained input, but did not purchase.",
+        "Actual polished text-service success, fresh speech-to-editor use and physical/long-term purchasing qualification remain unverified."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-20T17:35:44.276898+08:00",
+  "feature_routes_updated_at": "2026-10-20T18:08:41.606037+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -3903,7 +3932,8 @@
         "customer73_local_setup_translation_and_switch_state",
         "customer74_uninterrupted_onboarding_and_honest_history",
         "customer75_prepare_before_local_activation",
-        "customer76_explicit_style_text_trial"
+        "customer76_explicit_style_text_trial",
+        "customer77_trial_readiness_and_targeted_text_settings"
       ],
       "paths": {
         "type": [
@@ -3933,7 +3963,8 @@
           "src/components/StyleTextTrial.tsx",
           "src-tauri/src/coordinator.rs",
           "src-tauri/src/commands/style_pack_commands.rs",
-          "scripts/check-style-text-trial-ui.py"
+          "scripts/check-style-text-trial-ui.py",
+          "src/pages/Settings.tsx"
         ]
       },
       "known_failures": [
