@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-20T09:33:39+08:00",
+  "updated_at": "2026-10-20T10:07:47+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3052,7 +3052,8 @@
       },
       "known_failures": [
         "54222ab32b4c5861015d957d9d3eb695f340e815 restores owned same-address rename handoff; 2c27f7bbf21c6e5386fb425f4c3e40b3f3f95718 removes unowned cross-board cleanup. Neither is a new grant for broad pairing removal.",
-        "2026-10-17 14:58 Type34/FW19 actual rename ~36s: Type65f76abd added exact ACK to shared USB recovery but firmware2ec30e81 emits it only for FRESH. Restored stable path54222ab therefore executes then falsely times out. FW20 candidate repairs completion contract; physical timing pending."
+        "2026-10-17 14:58 Type34/FW19 actual rename ~36s: Type65f76abd added exact ACK to shared USB recovery but firmware2ec30e81 emits it only for FRESH. Restored stable path54222ab therefore executes then falsely times out. FW20 candidate repairs completion contract; physical timing pending.",
+        "2026-10-20 native suite repair 0a8085d51be03cba4fc01d2197c736935fe06f22: stale65f76ab custom-first test contradicted the measured default-first restoration54222ab. Preserve typed identity and dedicated default-first guard; never restore the slower ceremony merely to satisfy the stale assertion. Native128 passed, physical probe excluded; no product pairing or installed Type change."
       ],
       "latest_observed_baseline": {
         "observed_at": "2026-10-17T15:15:31.006196+08:00",
