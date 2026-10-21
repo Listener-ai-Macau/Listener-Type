@@ -1,6 +1,6 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-21T14:54:53.060035+08:00",
+  "updatedAt": "2026-10-21T15:15:46.743805+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
@@ -111,9 +111,18 @@
     "type91InstalledExeAndPreferencesVerified": true,
     "textTrial91OptionalListNativeVerified": true,
     "textTrial91VerificationScope": "Exact private native91: saved technical-purpose description, explicit optional list creation, Raw Copy/paste and one existing DeepSeek request for synthetic draft. Default/old prompts unchanged. Not customer, live speech, external editor or physical qualification.",
-    "type92InstalledExeAndPreferencesVerified": false,
+    "type92InstalledExeAndPreferencesVerified": true,
     "draft92ReadinessIndependentEditingVerified": true,
-    "draft92VerificationScope": "Controlled pending/failure/retry readiness with ordinary input; exact private native92 Raw Copy/paste. Does not establish the unique cause of customer91 transient or new speech/hardware acceptance."
+    "draft92VerificationScope": "Controlled pending/failure/retry readiness with ordinary input; exact private native92 Raw Copy/paste. Does not establish the unique cause of customer91 transient or new speech/hardware acceptance.",
+    "localInstallationFollowUp": {
+      "completedAt": "2026-10-21T15:10:27.146222+08:00",
+      "build": 92,
+      "installedExeSha256": "e6902307762050618311417a7b21d15294ea133b4c07b5f8acbecc1fab347662",
+      "preferencesPreserved": true,
+      "credentialStatusPreserved": true,
+      "backgroundListenerReady": true,
+      "scope": "Idle local update after publication; no new voice, physical or independent customer qualification."
+    }
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
