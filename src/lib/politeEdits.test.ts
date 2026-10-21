@@ -11,6 +11,12 @@ assert.equal(applyLocalPoliteOption('  Share the notes with Zoë on Friday!  ', 
 for (const unsupported of ['You must send the log by 18:00.', 'Please do not send the log.', 'Could you please send the log?', 'Send me `API_KEY`.', 'Send me https://example.com/log.', 'Send Dr.', 'Send me the log. Send me the log.', '请发日志。', 'Send\nme the log.']) assert.deepEqual(localPoliteOptions(unsupported), [], unsupported);
 assert.throws(() => applyLocalPoliteOption(customer120.replace('Thursday', 'Monday'), local[0]));
 assert.throws(() => applyLocalPoliteOption(customer120, { ...local[0], new: 'Could you please send me the draft by Monday?' }));
+const literalTokens = 'Send $& and $\' and $` as literal text.';
+// Backticks deliberately exclude code-like text. Dollar replacement tokens alone
+// must remain literal rather than duplicating the old request or its surroundings.
+assert.deepEqual(localPoliteOptions(literalTokens), []);
+const dollars = 'Send $& and $$ as literal text. Thanks.';
+assert.equal(applyLocalPoliteOption(dollars, localPoliteOptions(dollars)[0]), 'Could you please send $& and $$ as literal text? Thanks.');
 
 const source = "Tomorrow's design review at 3 won't work for me. Could we move it to 4? If not, send me your notes and I'll reply by Friday. Thanks!";
 const edits = [{ old: 'Could we move it to 4?', new: 'Could we please move it to 4?' }, { old: 'send me your notes', new: 'please send me your notes' }];

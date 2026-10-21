@@ -19,7 +19,7 @@ export function localPoliteOptions(source: string): PoliteEdit[] {
     if (!match || /\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|etc|[A-Z])\.$/u.test(old)) continue;
     const replacement = `Could you please ${match[1].toLowerCase()} ${match[2]}?`;
     if (source.indexOf(old) !== source.lastIndexOf(old)) continue;
-    const proposed = source.replace(old, replacement);
+    const proposed = source.replace(old, () => replacement);
     if (same(anchors(source), anchors(proposed)) && same(markers(source), markers(proposed))) edits.push({ old, new: replacement });
   }
   return edits;
@@ -30,7 +30,7 @@ export function localPoliteOptions(source: string): PoliteEdit[] {
 export function applyLocalPoliteOption(source: string, selected: PoliteEdit): string {
   const valid = localPoliteOptions(source).some(edit => edit.old === selected.old && edit.new === selected.new);
   if (!valid) throw new Error('polite_edits_invalid_response');
-  return source.replace(selected.old, selected.new);
+  return source.replace(selected.old, () => selected.new);
 }
 
 function markers(text: string): string[] {
