@@ -3,8 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { isTauri, saveTextDraft } from '../lib/ipc';
 import { Btn } from '../pages/_atoms';
 
-export function SaveTextDraft({ name, original, text, disabled, onBusy }: {
+export function SaveTextDraft({ name, original, text, disabled, onBusy, onSaved }: {
   name: string; original: string; text: string; disabled: boolean; onBusy: (busy: boolean) => void;
+  onSaved?: (text: string) => void;
 }) {
   const { t } = useTranslation();
   const signature = JSON.stringify([name,original,text]);
@@ -19,7 +20,7 @@ export function SaveTextDraft({ name, original, text, disabled, onBusy }: {
     running.current=true;setSaving(true);setError('');onBusy(true);
     try {
       await saveTextDraft(request.current.id,Array.from(name).slice(0,80).join(''),original,text);
-      if(alive.current)setSaved(signature);
+      if(alive.current){setSaved(signature);onSaved?.(text);}
     } catch(cause) {
       if(alive.current)setError(t(String(cause).includes('saved_draft_limit')?'textDraft.full':'textDraft.failed'));
     } finally {

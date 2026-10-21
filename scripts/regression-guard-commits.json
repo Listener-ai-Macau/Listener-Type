@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T02:54:01.551863+08:00",
+  "updated_at": "2026-10-22T03:04:37.396143+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4778,7 +4778,7 @@
       "repo": "type",
       "commit": "f7ecc471a630163199d7e9dc4b4b1433d9de682e",
       "subject": "Read result before explicit Copy/Save; reveal secondary actions on demand; label unchanged technical factory style accurately",
-      "state": "exact112_affected_native_workflow_verified_customer_pending",
+      "state": "exact112_native_verified_independent_customer_result_edit_save_paste_reopen_success",
       "protects": [
         "Current result/editor and service source appear before primary Copy/Save and visible retention notice; secondary key phrase/explicit external insertion stay available by ordinary disclosure. Insertion Cancel stays outside it.",
         "Existing edited result signature, prior comparison, native-copy acknowledgement, save idempotency/failure locks, local-only storage, nested phrase dirty protection and explicit external insertion cancellation remain. No automatic mutation.",
@@ -4802,10 +4802,15 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE111-software-20261022-023700\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE104-software-20261021-235730\\experience.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE104-software-20261021-235730\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE112-software-20261022-025600\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE112-software-20261022-025600\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE112-software-20261022-025600\\04-light-result.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE112-software-20261022-025600\\07-paste-observed.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE112-software-20261022-025600\\08-saved-draft-retrieved.png"
       ],
       "unverified": [
-        "Independent112 pending.111 own saved draft useful; still deferred49;112 presentation usefulness not yet customer observed.",
+        "Independent112 chose Light1.2s, facts retained, edited2/3→2pm/3pm, Save→Copied→ordinary Paste into own Type input→close/reopen saved exact edit. Result comparison/readability useful, no blocking issue. First paste while Copying did not complete, second afterCopied did; do not call the first success or remove pending guard. Technical label/secondary actions untried. Still defers49 hardware.",
         "Formal lightness F111-01 stays one subjective sample, no prompt/quality fix claimed. No voice/BLE/external target/physical or purchase qualification."
       ]
     }

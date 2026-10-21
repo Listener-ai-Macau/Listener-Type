@@ -5,6 +5,7 @@ import type { CredentialsStatus } from '../lib/types';
 import sampleUrl from '../../docs/assets/voice-example/voice-sample.wav?url';
 import { detectOS } from './WindowChrome';
 import { Btn } from '../pages/_atoms';
+import { SaveTextDraft } from './SaveTextDraft';
 import './StyleTextTrial.css';
 
 const MAX_WAV = 60 * 32_000 + 65_536;
@@ -14,6 +15,7 @@ export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => vo
   const generation = useRef(0);
   const requestId = useRef<string | null>(null);
   const copyBusy = useRef(false);
+  const saveBusy = useRef(false);
   const selecting = useRef(false);
   const [selection, setSelection] = useState<{ name: string; bytes: number[]; sample: boolean } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -25,6 +27,8 @@ export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => vo
   const [text, setText] = useState('');
   const [copying, setCopying] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedText, setSavedText] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [closeConfirm, setCloseConfirm] = useState(false);
   const supported = status?.activeAsrProvider === 'volcengine';
@@ -44,13 +48,13 @@ export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => vo
     };
   }, []);
   const close = () => {
-    if (copyBusy.current || selecting.current) return;
+    if (copyBusy.current || saveBusy.current || selecting.current) return;
     if (requestId.current) { void cancelAudioFileTrial(requestId.current).catch(() => {}); }
-    if (result && text.trim() && !copied) setCloseConfirm(true);
+    if (result && text.trim() && !copied && savedText !== text) setCloseConfirm(true);
     else onClose();
   };
   const select = async (name: string, read: () => Promise<ArrayBuffer>, size?: number, sample = false) => {
-    if (selecting.current || requestId.current || copyBusy.current || result) return;
+    if (selecting.current || requestId.current || copyBusy.current || saveBusy.current || result) return;
     selecting.current = true; setLoading(true); setError('');
     const version = ++generation.current;
     try {
@@ -66,14 +70,14 @@ export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => vo
     }
   };
   const transcribe = async () => {
-    if (!selection || !ready || requestId.current || copyBusy.current || selecting.current || result) return;
+    if (!selection || !ready || requestId.current || copyBusy.current || saveBusy.current || selecting.current || result) return;
     const id = crypto.randomUUID(); requestId.current = id;
     const version = ++generation.current;
     const source = selection.name;
     setPending(true); setError('');
     try {
       const value = await transcribeAudioFileTrial(id, selection.bytes);
-      if (version === generation.current) { setResult({ ...value, source }); setText(value.text); setCopied(false); }
+      if (version === generation.current) { setResult({ ...value, source }); setText(value.text); setCopied(false); setSavedText(null); }
     } catch (cause) {
       if (version === generation.current) {
         const code = String(cause);
@@ -86,7 +90,7 @@ export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => vo
     }
   };
   const copy = async () => {
-    if (!text.trim() || copyBusy.current || requestId.current) return;
+    if (!text.trim() || copyBusy.current || saveBusy.current || requestId.current) return;
     copyBusy.current = true; setCopying(true); setCopied(false); setError('');
     const version = generation.current;
     try { await copyExplicitText(text, detectOS() === 'win'); if (version === generation.current) { setCopied(true); setCloseConfirm(false); } }
@@ -96,7 +100,7 @@ export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => vo
   return <dialog ref={dialog} className="ol-style-trial" aria-labelledby="audio-file-title" onCancel={event => { event.preventDefault(); close(); }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
       <h2 id="audio-file-title" style={{ margin: 0, fontSize: 20 }}>{t('audioFile.title')}</h2>
-      <Btn variant="ghost" disabled={copying || loading} onClick={close}>{t('audioFile.close')}</Btn>
+      <Btn variant="ghost" disabled={copying || saving || loading} onClick={close}>{t('audioFile.close')}</Btn>
     </div>
     <p className="ol-style-trial-hint">{t('audioFile.intro')}</p>
     <p role="note" className="ol-style-trial-hint">{t('audioFile.cost')}</p>
@@ -122,14 +126,25 @@ export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => vo
     {result && <section aria-label={t('audioFile.result')} style={{ marginTop: 16 }}>
       <h3 style={{ fontSize: 15 }}>{t('audioFile.result')}</h3>
       <p className="ol-style-trial-hint">{t('audioFile.receipt', { source: result.source, duration: (result.audioDurationMs / 1000).toFixed(1), time: (result.elapsedMs / 1000).toFixed(1) })}</p>
-      <textarea aria-label={t('audioFile.result')} className="ol-style-trial-result-body ol-style-trial-result-editor" value={text} disabled={copying} onChange={event => { setText(event.target.value); setCopied(false); }} />
+      <textarea aria-label={t('audioFile.result')} className="ol-style-trial-result-body ol-style-trial-result-editor" value={text} disabled={copying || saving} onChange={event => { setText(event.target.value); setCopied(false); setCloseConfirm(false); }} />
       <p className="ol-style-trial-hint">{t('audioFile.retention')}</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-        <Btn variant="blue" disabled={copying || !text.trim()} onClick={() => void copy()}>{t(copying ? 'audioFile.copying' : copied ? 'audioFile.copied' : 'audioFile.copy')}</Btn>
-        <Btn variant="ghost" disabled={copying} onClick={() => { setCloseConfirm(false); setResult(null); setText(''); setCopied(false); setError(''); }}>{t('audioFile.discard')}</Btn>
+        <Btn variant="blue" disabled={copying || saving || !text.trim()} onClick={() => void copy()}>{t(copying ? 'audioFile.copying' : copied ? 'audioFile.copied' : 'audioFile.copy')}</Btn>
+        <SaveTextDraft name={result.source} original={result.text} text={text} disabled={copying}
+          onBusy={value => {
+            saveBusy.current = value; setSaving(value);
+            if (value) { setError(''); setCloseConfirm(false); }
+          }}
+          onSaved={value => { setSavedText(value); setCloseConfirm(false); }} />
+        <Btn variant="ghost" disabled={copying || saving} onClick={() => {
+          if (saveBusy.current || copyBusy.current) return;
+          setCloseConfirm(false); setResult(null); setText(''); setCopied(false); setSavedText(null); setError('');
+        }}>{t('audioFile.discard')}</Btn>
       </div>
     </section>}
     {error && <p role="alert" className="ol-style-trial-hint" style={{ color: 'var(--ol-red)' }}>{error}</p>}
-    {closeConfirm && <div role="alert" style={{ marginTop: 14 }}><p>{t('audioFile.confirmClose')}</p><Btn onClick={() => setCloseConfirm(false)}>{t('audioFile.keep')}</Btn> <Btn variant="ghost" onClick={onClose}>{t('audioFile.closeWithoutCopy')}</Btn></div>}
+    {closeConfirm && <div role="alert" style={{ marginTop: 14 }}><p>{t('audioFile.confirmClose')}</p><Btn disabled={copying || saving} onClick={() => setCloseConfirm(false)}>{t('audioFile.keep')}</Btn> <Btn variant="ghost" disabled={copying || saving} onClick={() => {
+      if (!saveBusy.current && !copyBusy.current) onClose();
+    }}>{t('audioFile.closeWithoutCopy')}</Btn></div>}
   </dialog>;
 }
