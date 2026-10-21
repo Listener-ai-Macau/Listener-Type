@@ -469,6 +469,7 @@ export const zhTW: typeof zhCN = {
       stylesFailed: "無法讀取已儲存的風格。草稿仍保留。",
 
       copyResult: "複製結果",
+      keepResult: "本次試用不會加入歷史記錄。需要保留時，請在關閉前複製結果。",
       copying: "正在複製…",
       copied: "已複製",
       copyFailed: "未能複製結果。請重試，或選取文字後複製。",

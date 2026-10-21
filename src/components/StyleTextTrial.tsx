@@ -181,6 +181,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
             </Btn>
           </div>
+          <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t('style.trial.keepResult')}</p>
           <p className="ol-style-trial-hint">{t(result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}</p>
           <div className="ol-style-trial-result-body ol-thinscroll" tabIndex={0}>{result.outputText}</div>
           {copiedResult === result && <p role="status" className="ol-style-trial-hint">{t('style.trial.copied')}</p>}

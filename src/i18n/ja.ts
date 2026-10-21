@@ -427,6 +427,7 @@ export const ja: typeof zhCN = {
       stylesFailed: "保存済みのスタイルを読み込めませんでした。下書きは残っています。",
 
       copyResult: "結果をコピー",
+      keepResult: "この試用結果は履歴に保存されません。残したい結果は閉じる前にコピーしてください。",
       copying: "コピー中…",
       copied: "コピーしました",
       copyFailed: "結果をコピーできませんでした。再試行するか、文章を選択してコピーしてください。",

@@ -467,6 +467,7 @@ export const zhCN = {
       stylesFailed: "未能读取保存的风格。你的草稿仍保留。",
 
       copyResult: "复制结果",
+      keepResult: "本次试用不会加入历史记录。需要保留时，请在关闭前复制结果。",
       copying: "正在复制…",
       copied: "已复制",
       copyFailed: "未能复制结果。请重试，或选中文字后复制。",

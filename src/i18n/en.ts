@@ -470,6 +470,7 @@ export const en: typeof zhCN = {
       stylesFailed: "Could not load your saved styles. Your draft is still here.",
 
       copyResult: "Copy result",
+      keepResult: "This trial is not saved in History. Copy any result you want to keep before closing.",
       copying: "Copying…",
       copied: "Copied",
       copyFailed: "Could not copy the result. Try again, or select the text and copy it.",

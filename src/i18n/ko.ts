@@ -427,6 +427,7 @@ export const ko: typeof zhCN = {
       stylesFailed: "저장된 스타일을 불러오지 못했습니다. 초안은 그대로 있습니다.",
 
       copyResult: "결과 복사",
+      keepResult: "이 체험 결과는 기록에 저장되지 않습니다. 보관할 결과는 닫기 전에 복사하세요.",
       copying: "복사 중…",
       copied: "복사됨",
       copyFailed: "결과를 복사하지 못했습니다. 다시 시도하거나 텍스트를 선택해 복사하세요.",
