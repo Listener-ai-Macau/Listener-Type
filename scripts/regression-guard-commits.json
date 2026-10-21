@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T11:46:59.226143+08:00",
+  "updated_at": "2026-10-21T11:59:33.347116+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3782,7 +3782,7 @@
       "commit": "fbd701fcee34b3076a15b6c2589cda018f8776cf",
       "subject": "Expose text trials from Overview and copy their actual results with acknowledgement",
       "commit_subject": "Expose text trials from Overview and copy their actual results with acknowledgement",
-      "state": "installed89_overview_entry_and_native_copy_paste_verified_independent_reuse_pending",
+      "state": "installed89_independent_overview_trial_and_copy_reused_hardware_purchase_declined",
       "protects": [
         "Overview exposes normal Style navigation without recording, activation or processing.",
         "Only explicit Copy writes the actual displayed result; processing leaves clipboard unchanged.",
@@ -3799,16 +3799,21 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style89-native-copied.png",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style89-native-private-paste.png",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build89\\type-artifact-verification.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build89\\type89-installed.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build89\\type89-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\native89-isolation-audit.json"
       ],
       "customer_evidence": [
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-88-ready-text-20261021\\report.txt"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-88-ready-text-20261021\\report.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-89-native-20261021\\report.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-89-native-20261021\\01-overview.png",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-89-native-20261021\\04-copy-feedback.png"
       ],
       "unverified": [
-        "Original FU88-02/03 wishes implemented; independent89 reuse pending.",
+        "Independent89 actually found Overview text trial, processed its own Light draft and received Copy acknowledgement; no external paste/live voice/physical qualification. Still declines49USD hardware.",
         "Native engineer Copy uses synthetic Raw, not a new cloud/personal speech result, external app field or hardware/purchase acceptance.",
         "Non-Windows retains browser clipboard behavior; its native expiry/lifetime is not qualified here."
-      ]
+      ],
+      "customer_result": "No text-path operational blocker; explicitly finds Overview entry useful and result Copy understandable. Own real result preserves content; service display1.1s, customer observed completion at~8s rather than measuring E2E. Would not order hardware absent real ordinary voice/target-field/physical convenience experience."
     }
   ],
   "feature_routes_updated_at": "2026-10-21T11:46:59.226143+08:00",
