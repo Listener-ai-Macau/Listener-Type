@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T23:59:51.079567+08:00",
+  "updated_at": "2026-10-22T00:09:59.040704+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4513,7 +4513,7 @@
       "repo": "type",
       "commit": "9ad971ba0c70593ad945b3331d4a5e347af56078",
       "subject": "Show actual key targets and open local pages from practice",
-      "state": "candidate104_exact_native_actual_history_reached_customer_pending",
+      "state": "candidate104_independent_template_workflow_used_page_action_unexplored_purchase_deferred",
       "protects": [
         "Both key pads show actual mapping parameters: phrase/page/shortcut/app filename. No new stored labels or firmware fields.",
         "Practice Type-page action offers explicit local Open through existing app/settings router. It does not inject OS keys, write devices or start external apps.",
@@ -4533,10 +4533,12 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE103-software-20261021-232600\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE104-software-20261021-235730\\dispatch-input.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE104-software-20261021-235730\\dispatch-input.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE104-software-20261021-235730\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE104-software-20261021-235730\\operations.txt"
       ],
       "unverified": [
-        "Full104 customer report pending; software route is not physical HID or purchase qualification.",
+        "Independent104 naturally used custom template/native save/private copy-paste-undo, actual Everyday list1.0s and edited-template→key1 save/reuse; not local page action. Mild interest/deferred49. Page route remains engineer-confirmed only; long-config navigation continues105.",
         "F103R-01 saved phrase back to writing position remains main follow-up; current104 only improves actual local page use."
       ]
     }
