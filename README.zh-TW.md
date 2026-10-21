@@ -6,7 +6,7 @@
 
 | 用途 | 直接下載 |
 | --- | --- |
-| **Windows 軟體** | **[下載 MSI · Type build86](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 軟體** | **[下載 MSI · Type build87](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **韌體：USB 燒寫 / 藍牙 OTA** | **[下載韌體 ZIP · 兩種方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <details>
@@ -19,7 +19,7 @@ Type 預設使用 **USB 有線燒寫**，能力已內建；無需另裝 Python�
 </details>
 
 RC1 仍為候選版本，偶發提前結束與強干擾限制見發布說明。
-Type build86 在目前的文字服務設定旁補充帳號／API權限、可用模型、官方設定與費用入口；查看說明不會改寫憑證或發起服務請求。保留歷史取回與風格前置狀態等修復，Firmware33不變。
+Type build87 讓未改動的內建風格名稱、說明和標籤在卡片與文字試用中隨介面語言顯示，保留自訂名稱、匯入風格和已存提示詞。保留歷史與服務設定引導修復，不改聽寫行為，Firmware33不變。
 [軟體發布說明與校驗](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [韌體發布說明與燒寫方法](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 [English first setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [English user guide](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)
