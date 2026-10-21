@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T23:20:16.564326+08:00",
+  "updated_at": "2026-10-21T23:28:13.813311+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4473,9 +4473,40 @@
       "capture_limitations": [
         "First native script used viewport-only coordinates and hit sticky footer instead of obscured Apply; then cleanup Close was above the dialog clip. Both original failures/screenshots retained. Fixed tool hit-test/scroll, not product source; final complete native path passed."
       ]
+    },
+    {
+      "id": "customer103_distinguishable_reply_keys_and_style_purpose",
+      "repo": "type",
+      "commit": "d735c6b4f88ceaf8ee06e60f2c19267028b402ca",
+      "subject": "Record independent102 reply reuse and remaining key friction",
+      "state": "candidate103_exact_native_reply_previews_and_action_semantics_verified_customer_pending",
+      "protects": [
+        "Each template key previews its own actual mapping in configuration and scoped practice; no new stored field, cloud summary or truncated stored text.",
+        "Previous enabled style action is accurately named and described; practice explains without changing active style or selected text. Existing device action remains unchanged.",
+        "Incoming reviewed-phrase draft keeps gesture and explicit Apply together; optional advanced actions collapsed only for this path. Explicit Save, original text, nested close, size, CAS and per-board isolation remain."
+      ],
+      "guards": [
+        "scripts/check-device-key-practice-ui.py:12 affected checks including Unicode, actual reply previews and previous-style no-dispatch.",
+        "scripts/check-result-key-phrase-ui.py:9 reviewed-result→draft/save/close/size/read-race/device-isolation checks.",
+        "Exact103 private ordinary native result→explicit key draft/save/reopen, two distinct template previews/reuse and prior-style explanation;0cloud."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\phrase103-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\practice103-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native103-snapshot-20261021-232516\\phrase-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261021-build103\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE102-software-20261021-230100\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE103-software-20261021-232600\\dispatch-input.txt"
+      ],
+      "unverified": [
+        "Independent103 full feedback pending; UI/native engineering pass does not establish purchase desire.",
+        "Automatic Formal quality, physical/voice/external input/long-term/real sale remain open."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-21T23:03:17.190691+08:00",
+  "feature_routes_updated_at": "2026-10-21T23:28:13.813311+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -5031,7 +5062,8 @@
         "selected_rename66_verify_before_terminal_apply",
         "firmware33_atomic_power_state_breaks_settings_pm_lock_cycle",
         "customer100_scoped_four_key_practice",
-        "customer102_reviewed_result_key_phrase"
+        "customer102_reviewed_result_key_phrase",
+        "customer103_distinguishable_reply_keys_and_style_purpose"
       ],
       "paths": {
         "type": [
@@ -5067,7 +5099,8 @@
         "firmware32_device_owned_profiles_atomic_nvs",
         "customer98_reusable_local_key_layouts",
         "customer100_scoped_four_key_practice",
-        "customer102_reviewed_result_key_phrase"
+        "customer102_reviewed_result_key_phrase",
+        "customer103_distinguishable_reply_keys_and_style_purpose"
       ],
       "paths": {
         "type": [
@@ -5141,7 +5174,8 @@
         "customer99_session_style_comparisons",
         "customer100_scoped_four_key_practice",
         "customer101_visible_style_comparisons",
-        "customer102_reviewed_result_key_phrase"
+        "customer102_reviewed_result_key_phrase",
+        "customer103_distinguishable_reply_keys_and_style_purpose"
       ],
       "paths": {
         "type": [
@@ -5279,7 +5313,8 @@
         "customer97_local_result_revision_delivery",
         "customer99_session_style_comparisons",
         "customer101_visible_style_comparisons",
-        "customer102_reviewed_result_key_phrase"
+        "customer102_reviewed_result_key_phrase",
+        "customer103_distinguishable_reply_keys_and_style_purpose"
       ],
       "paths": {
         "type": [
