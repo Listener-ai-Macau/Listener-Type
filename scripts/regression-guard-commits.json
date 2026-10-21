@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T07:31:50.369328+08:00",
+  "updated_at": "2026-10-22T07:40:52.159145+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5282,7 +5282,7 @@
       "repo": "type",
       "commit": "f044eed30ae3db1dbfea6910ed0c7675318b0dfa",
       "subject": "Explicit concise saved preset, trial-only creation independent of daily recording preferences",
-      "state": "exact125_native_value_and_preference_isolation_verified_customer_pending",
+      "state": "customer125_found_concise_but_savings_weak_manual_edit_save_recovery_purchase_deferred",
       "previous_source_evidence": "F123-02 wants whole paragraph more concise; F124-01 Light only removed um and49 deferred. Five bounded existing-provider probes preserve weak short-English results; wordy English363→282, Japanese169→126, Chinese74→60. Old124 API creates enabled imported styles and syncs Raw→Raw+Light even when active stays Raw.",
       "protects": [
         "Optional concise style reuses exact researched prompt; explicit Add creates/selects only, explicit Try sends request. No default Raw/Light/model/provider/account change or automatic processing. Existing original/comparison/edit/copy/save guards retained.",
@@ -5307,11 +5307,17 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE123-software-20261022-064300\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE124-software-20261022-070400\\experience.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE124-software-20261022-070400\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE125-software-20261022-073400\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE125-software-20261022-073400\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE125-software-20261022-073400\\09-concise-result.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE125-software-20261022-073400\\14-copy-confirmed.png"
       ],
       "unverified": [
-        "New125 independent customer pending. Short drafts can remain nearly unchanged; limited multilingual probes are not global semantic guarantees.",
-        "Real speech/external application/physical qualification/long-term value and49 purchase intent/order remain open."
+        "125全文/操作/09与14截图已读：自选改期通知，Light1.1s原样；本地礼貌变长不采用；找到Concise0.9s仅删sorry/缩写，自己主要编辑后保存重开/界面Copied。未外部粘贴。仍49暂缓。F125-01省力不足、F125-02想直接短一点不用研究风格，沿L09/F96-02/F123-02/F124-01。",
+        "客户成功找到入口且保存自己改稿，不等于自动简洁收益充分；原模拟拒绝保留。试用/日用偏好隔离仅工程确认，客户未观察日常循环。",
+        "下一沿F125-01/02评估直接目的动作及真正有用短稿，先用本次原失败稿有界研究，不换顾客抽好评或把已有好样本冒充普遍。",
+        "工程另复现风格持久化失败仍修改内存，67055测试失败为反例，原L09存储信任路径待126修。"
       ]
     }
   ],

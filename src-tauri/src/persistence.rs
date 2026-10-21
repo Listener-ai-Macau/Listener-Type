@@ -1593,8 +1593,17 @@ impl StylePackStore {
         self.create_from_template_with_enabled(template, false)
     }
 
+    /// Keep visible state aligned with durable metadata. A failed write must
+    /// leave creation, edits, enable/reset/delete and import logically untouched.
+    fn commit_style_pack_state(&self, state: &mut Vec<StylePack>, next: Vec<StylePack>) -> Result<()> {
+        write_style_packs_file(&self.path, &next)?;
+        *state = next;
+        Ok(())
+    }
+
     fn create_from_template_with_enabled(&self, template: StylePack, enabled: bool) -> Result<StylePack> {
-        let mut packs = self.state.lock();
+        let mut state = self.state.lock();
+        let mut packs = state.clone();
         let base_id = if template.id.trim().is_empty() {
             format!("imported-{}", Uuid::new_v4().simple())
         } else {
@@ -1610,7 +1619,7 @@ impl StylePackStore {
         pack.active = false;
         pack.enabled = enabled;
         packs.push(pack.clone());
-        write_style_packs_file(&self.path, &packs)?;
+        self.commit_style_pack_state(&mut state, packs)?;
         log::info!(
             "[style-pack] created from template id={} base_mode={:?} prompt_chars={} examples={}",
             pack.id,
@@ -1622,7 +1631,8 @@ impl StylePackStore {
     }
 
     pub fn upsert(&self, incoming: StylePack) -> Result<StylePack> {
-        let mut packs = self.state.lock();
+        let mut state = self.state.lock();
+        let mut packs = state.clone();
         let index = packs
             .iter()
             .position(|pack| pack.id == incoming.id)
@@ -1630,7 +1640,7 @@ impl StylePackStore {
         let existing = packs[index].clone();
         let updated = merge_style_pack_update(existing, incoming)?;
         packs[index] = updated.clone();
-        write_style_packs_file(&self.path, &packs)?;
+        self.commit_style_pack_state(&mut state, packs)?;
         log::info!(
             "[style-pack] saved id={} kind={:?} base_mode={:?} prompt_chars={} examples={} tags={} version={}",
             updated.id,
@@ -1652,7 +1662,8 @@ impl StylePackStore {
         origin_pack_id: Option<String>,
         origin_author_login: Option<String>,
     ) -> Result<StylePack> {
-        let mut packs = self.state.lock();
+        let mut state = self.state.lock();
+        let mut packs = state.clone();
         let index = packs
             .iter()
             .position(|pack| pack.id == id)
@@ -1661,12 +1672,13 @@ impl StylePackStore {
         packs[index].origin_author_login = normalize_optional_text(origin_author_login);
         packs[index].updated_at = Some(Utc::now().to_rfc3339());
         let updated = packs[index].clone();
-        write_style_packs_file(&self.path, &packs)?;
+        self.commit_style_pack_state(&mut state, packs)?;
         Ok(updated)
     }
 
     pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<StylePack> {
-        let mut packs = self.state.lock();
+        let mut state = self.state.lock();
+        let mut packs = state.clone();
         let index = packs
             .iter()
             .position(|pack| pack.id == id)
@@ -1677,7 +1689,7 @@ impl StylePackStore {
             packs[index].updated_at = Some(Utc::now().to_rfc3339());
         }
         let updated = packs[index].clone();
-        write_style_packs_file(&self.path, &packs)?;
+        self.commit_style_pack_state(&mut state, packs)?;
         log::info!(
             "[style-pack] set_enabled id={} enabled={} base_mode={:?}",
             updated.id,
@@ -1690,7 +1702,8 @@ impl StylePackStore {
     pub fn reset_builtin(&self, id: &str) -> Result<StylePack> {
         let mode = builtin_mode_from_style_pack_id(id)
             .ok_or_else(|| anyhow!("style pack {} is not a builtin pack", id))?;
-        let mut packs = self.state.lock();
+        let mut state = self.state.lock();
+        let mut packs = state.clone();
         let index = packs
             .iter()
             .position(|pack| pack.id == id)
@@ -1703,7 +1716,7 @@ impl StylePackStore {
             .or_else(|| Some(Utc::now().to_rfc3339()));
         reset.updated_at = Some(Utc::now().to_rfc3339());
         packs[index] = reset.clone();
-        write_style_packs_file(&self.path, &packs)?;
+        self.commit_style_pack_state(&mut state, packs)?;
         log::info!(
             "[style-pack] reset_builtin id={} base_mode={:?} prompt_chars={} examples={}",
             reset.id,
@@ -1715,7 +1728,8 @@ impl StylePackStore {
     }
 
     pub fn remove_imported(&self, id: &str) -> Result<()> {
-        let mut packs = self.state.lock();
+        let mut state = self.state.lock();
+        let mut packs = state.clone();
         let index = packs
             .iter()
             .position(|pack| pack.id == id)
@@ -1724,12 +1738,12 @@ impl StylePackStore {
             return Err(anyhow!("builtin style pack cannot be deleted"));
         }
         let removed = packs[index].clone();
-        remove_style_pack_assets(&self.asset_root, &packs[index]);
         packs.remove(index);
         if ensure_at_least_one_style_pack_enabled(&mut packs) {
             // write updated fallback state as well
         }
-        write_style_packs_file(&self.path, &packs)?;
+        self.commit_style_pack_state(&mut state, packs)?;
+        remove_style_pack_assets(&self.asset_root, &removed);
         log::info!(
             "[style-pack] removed imported id={} base_mode={:?}",
             removed.id,
@@ -1748,7 +1762,8 @@ impl StylePackStore {
         let examples =
             read_zip_json_entry::<Vec<StylePackExample>>(&mut archive, &manifest.examples_file)?;
 
-        let mut packs = self.state.lock();
+        let mut state = self.state.lock();
+        let mut packs = state.clone();
         let now = Utc::now().to_rfc3339();
         let pack_id = unique_imported_style_pack_id(&packs, &manifest.id);
         let icon_path = if let Some(icon_file) = manifest.icon_file.as_deref() {
@@ -1784,7 +1799,7 @@ impl StylePackStore {
             origin_author_login: normalize_optional_text(manifest.origin_author_login),
         };
         packs.insert(0, pack.clone());
-        write_style_packs_file(&self.path, &packs)?;
+        self.commit_style_pack_state(&mut state, packs)?;
         log::info!(
             "[style-pack] imported source={} installed_id={} manifest_id={} base_mode={:?} prompt_chars={} examples={} tags={} icon={}",
             zip_path.display(),
@@ -3331,6 +3346,55 @@ mod tests {
         assert!(validate_correction_rule_syntax("{num}", "{num}例").is_err());
         assert!(validate_correction_rule_syntax("{num}到{num}粒", "{num}例").is_err());
         assert!(validate_correction_rule_syntax("几粒", "{num}例").is_err());
+    }
+
+    #[test]
+    fn failed_trial_style_write_must_not_leave_a_ghost_preset_in_memory() {
+        use super::StylePackStore;
+        use crate::types::{PolishMode, StylePackKind};
+        use parking_lot::Mutex;
+        use uuid::Uuid;
+        let root = std::env::temp_dir().join(format!("listener-style-write-failure-{}", Uuid::new_v4().simple()));
+        let blocked_path = root.join("style-packs.json");
+        fs::create_dir_all(&blocked_path).expect("owned directory rejects metadata replacement");
+        let icon = root.join("assets/imported-existing/icon.png");
+        fs::create_dir_all(icon.parent().expect("owned icon parent")).expect("icon directory");
+        fs::write(&icon, b"owned test marker").expect("owned icon");
+        let mut initial = builtin_style_packs();
+        initial[0].prompt = "previously saved custom wording".into();
+        let mut existing = initial[1].clone();
+        existing.id = "imported-existing".into();
+        existing.kind = StylePackKind::Imported;
+        existing.icon_path = Some(icon.to_string_lossy().to_string());
+        initial.push(existing.clone());
+        let before = serde_json::to_value(&initial).expect("original state");
+        let store = StylePackStore { path: blocked_path, asset_root: root.join("assets"), state: Mutex::new(initial.clone()) };
+        let template = initial.iter().find(|pack| pack.base_mode == PolishMode::Light).expect("template").clone();
+        let zip_path = root.join("owned-import.zip");
+        store.export_to_zip("builtin.raw", &zip_path).expect("owned valid import fixture");
+        let mut observations = Vec::new();
+        macro_rules! must_rollback {
+            ($name:expr, $mutation:expr) => {{
+                let result = $mutation;
+                let after = serde_json::to_value(store.list().expect("state after failed mutation")).expect("state JSON");
+                observations.push(($name, result.is_err() && after == before));
+            }};
+        }
+        must_rollback!("trial create", store.create_for_text_trial(template.clone()));
+        must_rollback!("normal create", store.create_from_template(template));
+        let mut edited = existing.clone();
+        edited.prompt = "new unsaved wording".into();
+        must_rollback!("edit", store.upsert(edited));
+        must_rollback!("origin", store.set_origin(&existing.id, Some("remote-id".into()), Some("author".into())));
+        must_rollback!("enable", store.set_enabled("builtin.light", false));
+        must_rollback!("reset", store.reset_builtin("builtin.raw"));
+        must_rollback!("delete", store.remove_imported(&existing.id));
+        let icon_kept_after_failed_delete = icon.exists();
+        must_rollback!("import", store.import_from_zip(&zip_path));
+        assert!(root.starts_with(std::env::temp_dir()));
+        fs::remove_dir_all(root).expect("remove owned failure directory");
+        assert!(observations.iter().all(|(_, kept)| *kept), "failed persistence changed visible state: {observations:?}");
+        assert!(icon_kept_after_failed_delete, "failed delete must retain the old asset");
     }
 
     #[test]
