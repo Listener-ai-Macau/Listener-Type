@@ -7,8 +7,10 @@ import type { StylePack, StyleTextTrialReadiness, StyleTextTrialResult } from '.
 import { Btn } from '../pages/_atoms';
 import './StyleTextTrial.css';
 
-export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProviders }: {
+export function StyleTextTrial({ pack, packs, onSelectPack, draft, onDraftChange, onClose, onOpenProviders }: {
   pack: StylePack;
+  packs?: StylePack[];
+  onSelectPack?: (id: string) => void;
   draft: string;
   onDraftChange: (text: string) => void;
   onClose: () => void;
@@ -20,6 +22,7 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
     .filter(example => example.input.trim() && example.output.trim())
     .map(example => stylePackExamplePresentation(pack, example, t));
   const dialog = useRef<HTMLDialogElement>(null);
+  const resultSection = useRef<HTMLElement>(null);
   const generation = useRef(0);
   const running = useRef(false);
   const copyRunning = useRef(false);
@@ -33,6 +36,13 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
   const [readinessError, setReadinessError] = useState(false);
   const [readinessAttempt, setReadinessAttempt] = useState(0);
   const canProcess = !!readiness?.available && (!readiness.requiresTextService || readiness.textServiceConfigured);
+
+  useEffect(() => {
+    // Keep a new result reachable in a short/narrow dialog without moving focus.
+    if (result && window.matchMedia('(max-width: 800px)').matches) {
+      resultSection.current?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [result]);
 
   useEffect(() => {
     let current = true;
@@ -107,7 +117,7 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
   return (
     <dialog
       ref={dialog}
-      className="ol-style-trial ol-thinscroll"
+      className={`ol-style-trial ol-thinscroll${result ? ' ol-style-trial-has-result' : ''}`}
       aria-labelledby="style-trial-title"
       aria-describedby="style-trial-description"
       onCancel={event => { event.preventDefault(); onClose(); }}
@@ -116,35 +126,28 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
         <h2 id="style-trial-title" style={{ margin: 0, fontSize: 21 }}>{t('style.trial.title', { name: presentation.name })}</h2>
         <Btn size="sm" variant="ghost" onClick={onClose}>{t('common.close')}</Btn>
       </div>
-      <p id="style-trial-description" className="ol-style-trial-hint">{t('style.trial.description')}</p>
-      {readiness?.available !== false && <p className="ol-style-trial-hint">{t('style.trial.serviceNotice')}</p>}
+      <p id="style-trial-description" className="ol-style-trial-hint">{t('style.trial.shortNotice')}</p>
+      {packs && onSelectPack && <label className="ol-style-trial-picker">
+        <span>{t('style.trial.styleLabel')}</span>
+        <select aria-label={t('style.trial.styleLabel')} value={pack.id} disabled={pending || copying}
+          onChange={event => onSelectPack(event.target.value)}>
+          {packs.map(option => <option key={option.id} value={option.id}>{stylePackPresentation(option, t).name}</option>)}
+        </select>
+      </label>}
       {readiness?.available === false && <p role="status" className="ol-style-trial-hint">{t('style.trial.nativeRequired')}</p>}
       {readiness?.available && readiness.requiresTextService && !readiness.textServiceConfigured && <p role="status" className="ol-style-trial-hint">{t('style.trial.needsService')}</p>}
       {!readiness && !readinessError && <p role="status" className="ol-style-trial-hint">{t('style.trial.checking')}</p>}
       {readinessError && <p role="alert" className="ol-style-trial-hint">{t('style.trial.readinessFailed')} <Btn size="sm" onClick={() => setReadinessAttempt(value => value + 1)}>{t('common.retry')}</Btn></p>}
-      {readiness?.requiresTextService && savedExamples.length > 0 && (
-        <details className="ol-style-saved-examples" data-style-saved-examples>
-          <summary>{t('style.trial.exampleSummary')}</summary>
-          <p className="ol-style-trial-hint" role="note">{t('style.trial.exampleNotice')}</p>
-          {savedExamples.map((example, index) => (
-            <article key={index} className="ol-style-saved-example">
-              <div style={{ fontWeight: 600 }}>{example.title || t('style.trial.exampleUntitled', { number: index + 1 })}</div>
-              <div className="ol-style-trial-hint">{t('style.trial.exampleInput')}</div>
-              <pre>{example.input}</pre>
-              <div className="ol-style-trial-hint">{t('style.trial.exampleOutput')}</div>
-              <pre>{example.output}</pre>
-            </article>
-          ))}
-        </details>
-      )}
-      <label htmlFor="style-trial-input" style={{ display: 'block', fontWeight: 600, marginTop: 20, marginBottom: 8 }}>
+      <div className="ol-style-trial-workspace">
+      <div className="ol-style-trial-draft">
+      <label htmlFor="style-trial-input" style={{ display: 'block', fontWeight: 600, marginBottom: 8 }}>
         {t('style.trial.input')}
       </label>
       <textarea
         id="style-trial-input"
         value={draft}
         maxLength={4000}
-        rows={5}
+        rows={6}
         disabled={pending || copying || !readiness?.available}
         placeholder={t('style.trial.placeholder')}
         onChange={event => { onDraftChange(event.target.value); setResult(null); setError(''); setCopiedResult(null); setCopyError(false); }}
@@ -159,8 +162,9 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
       </div>
       {pending && <p role="status" className="ol-style-trial-hint">{t('style.trial.pending')}</p>}
       {error && <p role="alert" style={{ color: 'var(--ol-err)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.6 }}>{error}</p>}
+      </div>
       {result && (
-        <section aria-label={t('style.trial.output')} aria-live="polite" style={{ marginTop: 20 }}>
+        <section ref={resultSection} className="ol-style-trial-result" aria-label={t('style.trial.output')} aria-live="polite">
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
             <div style={{ fontWeight: 600 }}>{t('style.trial.output')}</div>
             <Btn size="sm" variant="ghost" disabled={copying} onClick={() => void copyResult()}>
@@ -168,10 +172,31 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
             </Btn>
           </div>
           <p className="ol-style-trial-hint">{t(result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}</p>
-          <div style={{ padding: 14, borderRadius: 12, background: 'var(--ol-blue-soft)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.75, userSelect: 'text' }}>{result.outputText}</div>
+          <div className="ol-style-trial-result-body ol-thinscroll" tabIndex={0}>{result.outputText}</div>
           {copiedResult === result && <p role="status" className="ol-style-trial-hint">{t('style.trial.copied')}</p>}
           {copyError && <p role="alert" className="ol-style-trial-hint">{t('style.trial.copyFailed')}</p>}
         </section>
+      )}
+      </div>
+      <details className="ol-style-trial-details">
+        <summary>{t('style.trial.detailsSummary')}</summary>
+        <p className="ol-style-trial-hint">{t('style.trial.description')}</p>
+        <p className="ol-style-trial-hint">{t('style.trial.serviceNotice')}</p>
+      </details>
+      {readiness?.requiresTextService && savedExamples.length > 0 && (
+        <details className="ol-style-saved-examples" data-style-saved-examples>
+          <summary>{t('style.trial.exampleSummary')}</summary>
+          <p className="ol-style-trial-hint" role="note">{t('style.trial.exampleNotice')}</p>
+          {savedExamples.map((example, index) => (
+            <article key={index} className="ol-style-saved-example">
+              <div style={{ fontWeight: 600 }}>{example.title || t('style.trial.exampleUntitled', { number: index + 1 })}</div>
+              <div className="ol-style-trial-hint">{t('style.trial.exampleInput')}</div>
+              <pre>{example.input}</pre>
+              <div className="ol-style-trial-hint">{t('style.trial.exampleOutput')}</div>
+              <pre>{example.output}</pre>
+            </article>
+          ))}
+        </details>
       )}
     </dialog>
   );

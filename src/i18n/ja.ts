@@ -412,6 +412,11 @@ export const ja: typeof zhCN = {
       }
     },
     trial: {
+      shortNotice: "テキストのみの試用です。音声認識は試しません。既定の原文は通信せず、他やカスタムスタイルにはテキストサービス料金がかかる場合があります。送信ボタンを押すまで送信しません。",
+      detailsSummary: "テキストの使用と試用の説明",
+      styleLabel: "試すスタイル",
+      stylesFailed: "保存済みのスタイルを読み込めませんでした。下書きは残っています。",
+
       copyResult: "結果をコピー",
       copying: "コピー中…",
       copied: "コピーしました",

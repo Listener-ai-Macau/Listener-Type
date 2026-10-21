@@ -455,6 +455,11 @@ export const en: typeof zhCN = {
       }
     },
     trial: {
+      shortNotice: "Text-only trial, not speech recognition. Default Raw sends no request; other or customized styles may incur text-service charges. Nothing is sent until you submit.",
+      detailsSummary: "How this trial uses your text",
+      styleLabel: "Trial style",
+      stylesFailed: "Could not load your saved styles. Your draft is still here.",
+
       copyResult: "Copy result",
       copying: "Copying…",
       copied: "Copied",

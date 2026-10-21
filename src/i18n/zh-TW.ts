@@ -454,6 +454,11 @@ export const zhTW: typeof zhCN = {
       }
     },
     trial: {
+      shortNotice: "只試文字，不測試語音辨識。預設原文不發請求，其他或自訂風格可能產生文字服務費用；提交前不會傳送。",
+      detailsSummary: "文字用途與試用說明",
+      styleLabel: "試用風格",
+      stylesFailed: "無法讀取已儲存的風格。草稿仍保留。",
+
       copyResult: "複製結果",
       copying: "正在複製…",
       copied: "已複製",

@@ -18,9 +18,10 @@ localStorage.setItem('ol.locale','en');
 sessionStorage.setItem('ol.providerSetupPromptDeferredThisSession','1');
 window.__copyLog=[];window.__copyResolve=null;window.__copyReject=null;
 Object.defineProperty(navigator,'clipboard',{value:{writeText:text=>{window.__copyLog.push(text);return new Promise((resolve,reject)=>{window.__copyResolve=resolve;window.__copyReject=reject;});}}});
-window.__trialLog=[]; window.__trialOutcome='pending'; window.__trialResolvers=[]; window.__trialConfigured=true;
+window.__styleListFail=false; window.__trialLog=[]; window.__trialOutcome='pending'; window.__trialResolvers=[]; window.__trialConfigured=true;
 window.__trialFixture=(cmd,args,mock)=>{
  window.__trialLog.push({cmd,args});
+ if(cmd==='list_style_packs' && window.__styleListFail) return Promise.reject(new Error('saved styles unavailable'));
  if(cmd==='get_style_text_trial_readiness') return {available:window.__trialOutcome!=='preview',requiresTextService:args.stylePackId!=='builtin.raw',textServiceConfigured:window.__trialConfigured};
  if(cmd!=='try_style_pack_text') return mock();
  if(window.__trialOutcome==='preview') return mock();
@@ -45,8 +46,25 @@ with sync_playwright() as pw:
             route.fulfill(response=r,body=source.replace(old,'if (!isTauri) {\n    return window.__trialFixture(cmd,args,mock);\n  }',1))
         page.route(re.compile(r'/src/lib/ipc\.ts(?:\?.*)?$'),fixture)
         page.goto(a.url,wait_until='networkidle')
+        page.evaluate('window.__styleListFail=true')
         page.get_by_role('button',name='Try typed text',exact=True).click()
-        check('Overview text action reaches styles without processing or activation',not any(x['cmd'] in ['try_style_pack_text','set_active_style_pack','start_dictation'] for x in page.evaluate('window.__trialLog')))
+        expect(page.get_by_role('dialog').get_by_role('alert')).to_contain_text('Could not load your saved styles')
+        page.evaluate('window.__styleListFail=false')
+        page.get_by_role('dialog').get_by_role('button',name='Retry',exact=True).click()
+        quick=page.get_by_role('dialog')
+        expect(quick).to_be_visible()
+        expect(quick.get_by_label('Your text',exact=True)).to_be_visible()
+        check('Overview opens the draft directly without visiting style management or processing',not page.get_by_role('button',name='Import ZIP',exact=True).is_visible() and not any(x['cmd'] in ['try_style_pack_text','set_active_style_pack','start_dictation'] for x in page.evaluate('window.__trialLog')))
+        quick.get_by_label('Your text',exact=True).fill('Keep my draft while choosing a style')
+        quick.get_by_role('combobox',name='Trial style').select_option('builtin.formal')
+        expect(quick.get_by_label('Your text',exact=True)).to_have_value('Keep my draft while choosing a style')
+        check('Choosing a trial style preserves draft without changing the active style or sending text',not any(x['cmd'] in ['try_style_pack_text','set_active_style_pack'] for x in page.evaluate('window.__trialLog')))
+        quick.get_by_role('button',name='Close',exact=True).click()
+        page.get_by_role('button',name='Try typed text',exact=True).click()
+        expect(quick.get_by_label('Your text',exact=True)).to_have_value('Keep my draft while choosing a style')
+        check('Closing and reopening Overview trial preserves its in-memory draft',True)
+        quick.get_by_role('button',name='Close',exact=True).click()
+        page.get_by_role('button',name='Style',exact=True).click()
         expect(page.get_by_role('button',name='Try Light polish',exact=True)).to_be_visible()
         # Exclude the existing app startup locale synchronization from trial actions.
         page.evaluate('window.__trialLog=[]')
@@ -75,6 +93,11 @@ with sync_playwright() as pw:
         output=dialog.get_by_role('region',name='Result')
         expect(output).to_contain_text('Trial: My own message, <b>without markup</b>.')
         check('Returned text is rendered as text, without executing markup',output.locator('b').count()==0)
+        page.set_viewport_size({'width':1280,'height':800})
+        check('Returned body sits beside the draft with its copy action in view',output.bounding_box()['x']>entry.bounding_box()['x']+entry.bounding_box()['width'] and output.get_by_role('button',name='Copy result',exact=True).is_visible())
+        expect(dialog.locator('.ol-style-trial-details')).not_to_have_attribute('open','')
+        check('Compact cost and text-only notice stays visible before the draft while full details remain available',dialog.get_by_text('Text-only trial, not speech recognition.',exact=False).is_visible() and dialog.locator('.ol-style-trial-details summary').is_visible())
+        if a.screenshot:page.screenshot(path=str(a.screenshot),full_page=True)
         copy=dialog.get_by_role('button',name='Copy result',exact=True)
         copy.click()
         expect(dialog.get_by_role('button',name='Copying…',exact=True)).to_be_disabled()
@@ -127,7 +150,7 @@ with sync_playwright() as pw:
         log=page.evaluate('window.__trialLog')
         forbidden=['set_active_style_pack','set_settings','delete_history','clear_history','repolish','hotkey_recording_toggle','start_recording']
         check('Trial does not activate a style, save preferences or touch dictation/history',not any(x['cmd'] in forbidden for x in log))
-        if a.screenshot:page.screenshot(path=str(a.screenshot),full_page=True)
+        if a.screenshot:page.screenshot(path=str(a.screenshot.with_name(a.screenshot.stem+'-unavailable'+a.screenshot.suffix)),full_page=True)
         page.keyboard.press('Escape');expect(dialog).to_have_count(0)
         check('Native dialog supports keyboard dismissal',True)
         check('Only the isolated browser was instrumented',bool(patched))

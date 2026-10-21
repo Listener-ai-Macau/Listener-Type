@@ -676,6 +676,8 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
       {trialPack && <StyleTextTrial
         key={trialPack.id}
         pack={trialPack}
+        packs={packs}
+        onSelectPack={id => setTrialPack(packs.find(pack => pack.id === id) ?? trialPack)}
         draft={trialDraft}
         onDraftChange={setTrialDraft}
         onClose={() => setTrialPack(null)}

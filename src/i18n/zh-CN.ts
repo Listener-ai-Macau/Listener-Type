@@ -452,6 +452,11 @@ export const zhCN = {
       }
     },
     trial: {
+      shortNotice: "只试文字，不测试语音识别。默认原文不发请求，其他或自定义风格可能产生文字服务费用；提交前不会发送。",
+      detailsSummary: "文字用途与试用说明",
+      styleLabel: "试用风格",
+      stylesFailed: "未能读取保存的风格。你的草稿仍保留。",
+
       copyResult: "复制结果",
       copying: "正在复制…",
       copied: "已复制",

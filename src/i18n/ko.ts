@@ -412,6 +412,11 @@ export const ko: typeof zhCN = {
       }
     },
     trial: {
+      shortNotice: "텍스트만 체험하며 음성 인식은 테스트하지 않습니다. 기본 원문은 요청을 보내지 않으며 다른 스타일이나 사용자 지정 스타일은 텍스트 서비스 요금이 발생할 수 있습니다. 제출 전에는 전송하지 않습니다.",
+      detailsSummary: "텍스트 사용 및 체험 안내",
+      styleLabel: "체험할 스타일",
+      stylesFailed: "저장된 스타일을 불러오지 못했습니다. 초안은 그대로 있습니다.",
+
       copyResult: "결과 복사",
       copying: "복사 중…",
       copied: "복사됨",

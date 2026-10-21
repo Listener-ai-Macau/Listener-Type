@@ -12,6 +12,7 @@ import { Icon } from './Icon';
 import { WindowChrome, detectOS, type OS } from './WindowChrome';
 import { SettingsModal } from './SettingsModal';
 import { Overview } from '../pages/Overview';
+import { QuickStyleTextTrial } from './QuickStyleTextTrial';
 import { History } from '../pages/History';
 import { Vocab } from '../pages/Vocab';
 import { Style } from '../pages/Style';
@@ -86,6 +87,8 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const [providerPromptOpen, setProviderPromptOpen] = useState(false);
   const [blePairingPromptOpen, setBlePairingPromptOpen] = useState(false);
   const [demoModeSession, setDemoModeSession] = useState<DemoModeSession | null>(null);
+  const [quickTrialOpen, setQuickTrialOpen] = useState(false);
+  const [quickTrialDraft, setQuickTrialDraft] = useState('');
 
   // displayTab 是实际渲染的 tab，currentTab 是用户点中的目标 tab。
   const [displayTab, setDisplayTab] = useState<AppTab>(initialTab);
@@ -474,7 +477,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                   onOpenRecordingSettings={() => openSettings('recording')}
                   onOpenLocalAsrSettings={() => openSettings('localAsr')}
                   onStartDemoMode={startProviderDemoMode}
-                  onOpenStyles={() => setCurrentTab('style')}
+                  onOpenStyles={() => setQuickTrialOpen(true)}
                 />
               ) : displayTab === 'style' ? (
                 <Style onOpenProviders={() => openSettings('providers', 'llm')} />
@@ -485,6 +488,10 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
           </main>
         </div>
       </div>
+
+      {quickTrialOpen && <QuickStyleTextTrial draft={quickTrialDraft} onDraftChange={setQuickTrialDraft}
+        onClose={() => setQuickTrialOpen(false)}
+        onOpenProviders={() => { setQuickTrialOpen(false); openSettings('providers', 'llm'); }} />}
 
       {/* Footer — 透明地坐在外层磨砂底板上，跟 sidebar 同一片磨砂玻璃 */}
       <div
