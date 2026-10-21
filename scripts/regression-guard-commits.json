@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T05:32:26.415692+08:00",
+  "updated_at": "2026-10-22T05:49:08.899397+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5093,7 +5093,7 @@
       "repo": "type",
       "commit": "6311902575d6121826fd9980fd779a02992c0687",
       "subject": "Ship optional reviewed local courtesy edits while preserving result-first Copy/Save placement",
-      "state": "exact120_artifact_targeted_layout_verified_inherit_unchanged119_native_provider_flow_customer_pending",
+      "state": "customer120_rejected_poor_extra_paid_suggestion_local_request_options121_in_progress",
       "previous_source_evidence": "119/8e2c420a held before publication: real service/edit/save worked, visual optional block pushed original Copy/Save down.120 only moves optional section after primary actions/retention.",
       "protects": [
         "Original source/result and Copy/Save remain first at native-sized viewport. Optional service action does not start automatically or change default Formal, selected dictation style or live recording.",
@@ -5113,10 +5113,15 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE117-software-20261022-044800\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE118-software-20261022-050500\\experience.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE118-software-20261022-050500\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE120-software-20261022-053500\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE120-software-20261022-053500\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE120-software-20261022-053500\\07-courtesy-suggestions.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE120-software-20261022-053500\\10-reopened-saved-draft.png"
       ],
       "unverified": [
-        "No independent120 customer yet, no hardware purchase intent/order, no new external input/live/physical/BLE qualification. Default Formal/general grammar quality remains open."
+        "120全文/操作与07/10截图已读：Formal1.4s仅Please/大小写；客户自然打开额外付费礼貌建议0.9s，Please kindly被拒绝，Keep my wording后自己改Could you please问句；保存重开成功/界面Copied，未外部上屏。49美元暂缓，免费软件足够/语气收益不足。",
+        "F120-01并原L09/F96-02/F117-01：第二次请求仍未改善语气；F120-02建议入口需滚动。默认Formal/实物/真实订单仍未完成。"
       ]
     }
   ],

@@ -292,11 +292,11 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
             </Btn>
             <SaveTextDraft name={presentation.name} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving}
               onSaved={text => setSavedDraftSignature(JSON.stringify([presentation.name, draft, text]))} />
+            {pack.baseMode === 'formal' && <PoliteEditSuggestions text={resultOutput}
+              disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />}
           </div>
           <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t(savedCurrentDraft ? 'textDraft.savedRetention' : 'textDraft.retention')}</p>
           {restored && <p role="note" className="ol-style-trial-hint" data-style-trial-restored>{t('style.trial.restoredResult')}</p>}
-          {pack.baseMode === 'formal' && <PoliteEditSuggestions text={resultOutput}
-            disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />}
           <details className="ol-style-trial-details ol-style-trial-more-actions">
             <summary>{t('style.trial.moreActions')}</summary>
             <div className="ol-style-trial-secondary-actions">

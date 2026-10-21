@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { suggestPoliteTextEdits } from '../lib/ipc';
-import { applyPoliteEdits, reviewPoliteEdits, type PoliteEditReview } from '../lib/politeEdits';
+import { applyLocalPoliteOption, applyPoliteEdits, localPoliteOptions, reviewPoliteEdits, type PoliteEditReview } from '../lib/politeEdits';
 import { Btn } from '../pages/_atoms';
 
 export function PoliteEditSuggestions({ text, disabled, onApply }: {
@@ -15,8 +15,10 @@ export function PoliteEditSuggestions({ text, disabled, onApply }: {
   const [selected, setSelected] = useState<number[]>([]);
   const [error, setError] = useState('');
   const [applied, setApplied] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const current = reply?.source === text ? reply : null;
+  const localOptions = localPoliteOptions(text);
   const request = async () => {
     if (running.current || disabled || !text.trim() || text.length > 4000) return;
     const source = text;
@@ -39,7 +41,20 @@ export function PoliteEditSuggestions({ text, disabled, onApply }: {
       onApply(updated); setApplied(updated); setReply(null); setSelected([]);
     } catch { setError('failed'); }
   };
-  return <section aria-label={t('politeEdits.title')} className="ol-style-trial-comparisons" style={{ margin: '12px 0' }}>
+  return <>
+    <Btn size="sm" variant="ghost" disabled={disabled || !text.trim()} onClick={() => setOpen(value => !value)}>{t('politeEdits.open')}</Btn>
+    {open && <section aria-label={t('politeEdits.title')} className="ol-style-trial-comparisons" style={{ flexBasis: '100%', minWidth: 0, margin: '4px 0' }}>
+    <p className="ol-style-trial-hint">{t('politeEdits.localHint')}</p>
+    {localOptions.length === 0 && <p className="ol-style-trial-hint">{t('politeEdits.localNone')}</p>}
+    {localOptions.map(edit => <div key={edit.old} style={{ margin: '10px 0', lineHeight: 1.6, overflowWrap: 'anywhere' }}>
+      <p style={{ margin: '4px 0' }}><del>{edit.old}</del>{' → '}<ins>{edit.new}</ins></p>
+      <Btn size="sm" disabled={disabled || pending} onClick={() => {
+        try {
+          const updated = applyLocalPoliteOption(text, edit);
+          onApply(updated); setApplied(updated); setReply(null); setSelected([]); setError('');
+        } catch { setError('failed'); }
+      }}>{t('politeEdits.useLocal')}</Btn>
+    </div>)}
     <Btn size="sm" variant="ghost" disabled={disabled || pending || !text.trim() || text.length > 4000} onClick={() => void request()}>
       {t(pending ? 'politeEdits.pending' : 'politeEdits.request')}
     </Btn>
@@ -58,5 +73,6 @@ export function PoliteEditSuggestions({ text, disabled, onApply }: {
     {reply && !current && <p role="status" className="ol-style-trial-hint">{t('politeEdits.stale')}</p>}
     {applied === text && <p role="status" className="ol-style-trial-hint">{t('politeEdits.applied')}</p>}
     {error && <p role="alert" className="ol-style-trial-hint">{t(`politeEdits.${error}`)}</p>}
-  </section>;
+  </section>}
+  </>;
 }

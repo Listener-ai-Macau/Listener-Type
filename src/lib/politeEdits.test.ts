@@ -1,5 +1,16 @@
 import assert from 'node:assert/strict';
-import { applyPoliteEdits, reviewPoliteEdits } from './politeEdits.ts';
+import { applyLocalPoliteOption, applyPoliteEdits, localPoliteOptions, reviewPoliteEdits } from './politeEdits.ts';
+
+// FIRST_USE120 rejected Please kindly and manually chose a courteous question.
+const customer120 = "Please send me the revised draft by Thursday. I need time to review it before Friday's meeting. Thanks.";
+const local = localPoliteOptions(customer120);
+assert.deepEqual(local, [{ old: 'Please send me the revised draft by Thursday.', new: 'Could you please send me the revised draft by Thursday?' }]);
+assert.equal(applyLocalPoliteOption(customer120, local[0]), "Could you please send me the revised draft by Thursday? I need time to review it before Friday's meeting. Thanks.");
+assert.equal(applyLocalPoliteOption('Send me the log by 18:00.', localPoliteOptions('Send me the log by 18:00.')[0]), 'Could you please send me the log by 18:00?');
+assert.equal(applyLocalPoliteOption('  Share the notes with Zoë on Friday!  ', localPoliteOptions('  Share the notes with Zoë on Friday!  ')[0]), '  Could you please share the notes with Zoë on Friday?  ');
+for (const unsupported of ['You must send the log by 18:00.', 'Please do not send the log.', 'Could you please send the log?', 'Send me `API_KEY`.', 'Send me https://example.com/log.', 'Send Dr.', 'Send me the log. Send me the log.', '请发日志。', 'Send\nme the log.']) assert.deepEqual(localPoliteOptions(unsupported), [], unsupported);
+assert.throws(() => applyLocalPoliteOption(customer120.replace('Thursday', 'Monday'), local[0]));
+assert.throws(() => applyLocalPoliteOption(customer120, { ...local[0], new: 'Could you please send me the draft by Monday?' }));
 
 const source = "Tomorrow's design review at 3 won't work for me. Could we move it to 4? If not, send me your notes and I'll reply by Friday. Thanks!";
 const edits = [{ old: 'Could we move it to 4?', new: 'Could we please move it to 4?' }, { old: 'send me your notes', new: 'please send me your notes' }];

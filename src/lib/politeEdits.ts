@@ -1,6 +1,38 @@
 export interface PoliteEdit { old: string; new: string }
 export interface PoliteEditReview { edits: PoliteEdit[]; skipped: number }
 
+/** A deliberately narrow, local English option. Only the request prefix and final
+ * punctuation change; the request body is copied exactly. This is not a general
+ * grammar or multilingual rewriter. Applying recomputes the option for current text.
+ */
+export function localPoliteOptions(source: string): PoliteEdit[] {
+  if (!source.trim() || source.length > 4000) return [];
+  const Segmenter = (Intl as unknown as { Segmenter?: new (locale: string, options: { granularity: string }) => {
+    segment(text: string): Iterable<{ segment: string }>;
+  } }).Segmenter;
+  if (!Segmenter) return [];
+  const edits: PoliteEdit[] = [];
+  for (const { segment } of new Segmenter('en', { granularity: 'sentence' }).segment(source)) {
+    const old = segment.trim();
+    if (old.length > 200 || /[\r\n`]|https?:|www\.|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/iu.test(old)) continue;
+    const match = /^(?:(?:please|kindly)\s+)?(send|share|check|review|confirm|provide|bring|update|let|tell|give|take|return|submit|forward|attach)\s+([^?!]+?)[.!]?$/iu.exec(old);
+    if (!match || /\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|etc|[A-Z])\.$/u.test(old)) continue;
+    const replacement = `Could you please ${match[1].toLowerCase()} ${match[2]}?`;
+    if (source.indexOf(old) !== source.lastIndexOf(old)) continue;
+    const proposed = source.replace(old, replacement);
+    if (same(anchors(source), anchors(proposed)) && same(markers(source), markers(proposed))) edits.push({ old, new: replacement });
+  }
+  return edits;
+}
+
+/** The whole single-sentence draft is permitted only for a recomputed local option,
+ * never by relaxing the checks on untrusted service proposals. */
+export function applyLocalPoliteOption(source: string, selected: PoliteEdit): string {
+  const valid = localPoliteOptions(source).some(edit => edit.old === selected.old && edit.new === selected.new);
+  if (!valid) throw new Error('polite_edits_invalid_response');
+  return source.replace(selected.old, selected.new);
+}
+
 function markers(text: string): string[] {
   return (text.toLowerCase().match(/\b(?:must|required|mandatory|shall|not|never|cannot|can't|won't|may|might|possibly|perhaps|if|unless|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|必须|务必|不得|禁止|不能|不要|别|可能|也许|或许|如果|除非|不|(?:星期|周)[一二三四五六日天]|必ず|必要|してはいけ|かもしれ|できない|ない|なら|[月火水木金土日]曜日?|반드시|필수|금지|않|못|가능|[월화수목금토일]요일/gu) ?? []).sort();
 }
