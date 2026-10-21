@@ -9,6 +9,7 @@ import { Btn } from '../pages/_atoms';
 import './StyleTextTrial.css';
 import { DeviceLayoutsDialog } from './DeviceLayoutsDialog';
 import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
+import { PoliteEditSuggestions } from './PoliteEditSuggestions';
 
 export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draft, onDraftChange, onClose, onOpenProviders, readinessRevision = 0 }: {
   pack: StylePack;
@@ -150,6 +151,14 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     }
   };
 
+  const updateEditedOutput = (value: string) => {
+    if (!result || copying || delivering || draftSaving) return;
+    const edited = value === result.outputText ? null : value;
+    setEditedOutput(edited);
+    completed.current.set(pack.id, { signature, input: draft, result, edited });
+    setCopiedResult(null); setCopyError(false); setDeliveryMessage('');
+  };
+
   const copyResult = async () => {
     if (draftSaving || !result || !resultOutput.trim() || copyRunning.current || running.current || deliveryRequest.current) return;
     const selectedResult = result;
@@ -274,12 +283,11 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
             onChange={event => {
               if (draftSaving || copyRunning.current || deliveryRequest.current) return;
               const value = event.target.value;
-              const edited = value === result.outputText ? null : value;
-              setEditedOutput(edited);
-              completed.current.set(pack.id, { signature, input: draft, result, edited });
-              setCopiedResult(null); setCopyError(false); setDeliveryMessage('');
+              updateEditedOutput(value);
             }} />
           <p className="ol-style-trial-hint">{t('style.trial.editHint')}</p>
+          {pack.baseMode === 'formal' && <PoliteEditSuggestions text={resultOutput}
+            disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />}
           <div className="ol-style-trial-primary-actions">
             <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}

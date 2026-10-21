@@ -968,6 +968,12 @@ export function stopMicrophoneLevelMonitor(): Promise<void> {
 }
 
 // ── Credentials ────────────────────────────────────────────────────────
+export function suggestPoliteTextEdits(text: string): Promise<{ proposalJson: string; elapsedMs: number }> {
+  return invokeOrMock('suggest_polite_text_edits', { text }, () => {
+    throw new Error('polite_edits_native_required');
+  });
+}
+
 export function getCredentials(): Promise<CredentialsStatus> {
   return invokeOrMock('get_credentials', undefined, () => mockCredentialsStatusForBrowser());
 }

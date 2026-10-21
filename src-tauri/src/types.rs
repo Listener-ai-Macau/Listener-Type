@@ -350,6 +350,13 @@ pub struct StyleTextTrialResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PoliteTextEditsResult {
+    pub proposal_json: String,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StyleTextTrialReadiness {
     pub available: bool,
     pub requires_text_service: bool,

@@ -1,6 +1,7 @@
 import { textDraftTranslations } from './textDraft.ts';
 import { hardwareLayoutTranslations } from './hardwareLayout.ts';
 import { audioFileTranslations } from './audioFile.ts';
+import { politeEditsTranslations } from './politeEdits.ts';
 // English resources — translated from zh-CN.ts. Keep keys in sync.
 
 import type { zhCN } from './zh-CN';
@@ -8,6 +9,7 @@ import { enDeviceMaintenance, enFirmwareMaintenance } from './enDeviceMaintenanc
 
 // Type-level guarantee that en mirrors the zh-CN shape.
 export const en: typeof zhCN = {
+  politeEdits: politeEditsTranslations.en,
   textDraft: textDraftTranslations['en'],
   hardwareLayout: hardwareLayoutTranslations['en'],
   earlierTrial: {"title": "Earlier result for comparison", "hint": "Your input or saved style has changed. This is the earlier result, including your edits, not an output for the current draft. No new request was made. It stays only in this open window, until replaced by a new result for this style.", "input": "Input used for this earlier result"},

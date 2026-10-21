@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T05:01:11.990025+08:00",
+  "updated_at": "2026-10-22T05:13:39.739388+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5011,7 +5011,7 @@
       "repo": "type",
       "commit": "6d9a18bafacdec1bf83eb3b25b2662ad66f0858a",
       "subject": "A failed settings write that settled before Close must remain explicit until same-field retry success or explicit return",
-      "state": "exact118_artifact_and_actual_react_controlled_failure_verified_customer_pending",
+      "state": "exact118_engineering_verified_customer_typed_path_complete_settings_untried",
       "previous_source_evidence": "0d47630a new117 nested settings window only waited pending failures; settled failure before Close reproduced. Source transcript remains intact, configuration edit could silently close.",
       "protects": [
         "Per-field/switch operation revisions retain latest outcome, scoped to this settings visit. Same-field success clears failure; unrelated success cannot; obsolete failure cannot overwrite newer success.",
@@ -5029,10 +5029,15 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build118\\type-artifact-verification.json"
       ],
       "customer_evidence": [
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE117-software-20261022-044800\\experience.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE117-software-20261022-044800\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE118-software-20261022-050500\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE118-software-20261022-050500\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE118-software-20261022-050500\\04-formal-result.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE118-software-20261022-050500\\08-saved-draft-loaded.png"
       ],
       "unverified": [
-        "Customer117 chose typed Formal/save/reopen, new settings untried,49 deferred.118 not independently tried yet; no live/BLE/external input/physical/purchase qualification."
+        "118 full experience/operations read,04/08 viewed. Typed Formal0.7s, user edits Hi→Hello, saves/reopens same draft. No blocker/no Copy; Formal tone/organisation gain small,49 deferred/free Type enough. New settings flow untried.",
+        "F118-01 merges F96-02/F117-01 actual formal-style gain issue. No external input/live/physical/order."
       ]
     },
     {

@@ -1,12 +1,14 @@
 import { textDraftTranslations } from './textDraft.ts';
 import { hardwareLayoutTranslations } from './hardwareLayout.ts';
 import { audioFileTranslations } from './audioFile.ts';
+import { politeEditsTranslations } from './politeEdits.ts';
 import type { zhCN } from './zh-CN';
 
 // 繁體中文資源 — 與產品當前文案保持一致。
 // 新增 key 時，必須同步更新 en.ts，避免切換到 English 後出現中文殘留。
 
 export const zhTW: typeof zhCN = {
+  politeEdits: politeEditsTranslations['zh-TW'],
   textDraft: textDraftTranslations['zh-TW'],
   hardwareLayout: hardwareLayoutTranslations['zh-TW'],
   earlierTrial: {"title": "上一份結果 · 供對照", "hint": "原稿或儲存的風格已改變。此處保留上一份結果及你的修訂，不是目前原稿的新輸出，也沒有重新請求服務。僅保留在目前視窗，直到本風格產生新結果。", "input": "這份舊結果使用的原稿"},

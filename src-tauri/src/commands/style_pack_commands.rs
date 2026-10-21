@@ -92,6 +92,14 @@ pub async fn copy_style_trial_result(text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn suggest_polite_text_edits(
+    coord: CoordinatorState<'_>,
+    text: String,
+) -> Result<crate::types::PoliteTextEditsResult, String> {
+    coord.suggest_polite_text_edits(text).await
+}
+
+#[tauri::command]
 pub fn preview_style_pack_runtime(
     coord: CoordinatorState<'_>,
     style_pack: StylePack,
