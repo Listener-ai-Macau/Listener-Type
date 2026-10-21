@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-21T17:30:28.600234+08:00",
+  "updatedAt": "2026-10-21T17:52:40.872268+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 93,
-    "source": "8851f5e9b96314638881c4e4df23b4a3e88c093d",
-    "sourceTag": "build-source/type93-20261021",
+    "build": 94,
+    "source": "d19ceefcf1c5ad2559f0eb079c0cb3b1341424d3",
+    "sourceTag": "build-source/type94-20261021",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "5bf34a3aec1f2b26da08b340cc38565ea2c3541a59105581928ba1acc1f8bb8e",
-    "sizeBytes": 298508288,
-    "exeSha256": "06b836f24544711add0d0bb123c0b3b1b19da77149cfb646b2e752e439fe21ba",
+    "sha256": "e3ac2d6ab245c205ac5d7ec14d49ba4349042826f6546d3171d552ac78713e6a",
+    "sizeBytes": 298500096,
+    "exeSha256": "e2250d211c96aa6cc50e0f7f6e3bbeeae16bb425150dc4fd015aa9d69fc9c61b",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -125,7 +125,11 @@
     },
     "type93InstalledExeAndPreferencesVerified": false,
     "type93NativeRetentionNoticeVisible": true,
-    "type93VerificationScope": "One exact private native Raw result shows the retention notice beside Copy without opening details; no cloud, audio, BLE, external-field or independent93 purchase proof. Daily app remains92 to avoid an unnecessary interruption."
+    "type93VerificationScope": "One exact private native Raw result shows the retention notice beside Copy without opening details; no cloud, audio, BLE, external-field or independent93 purchase proof. Daily app remains92 to avoid an unnecessary interruption.",
+    "type94InstalledExeAndPreferencesVerified": false,
+    "type94TrialControlsStableInExactNative": true,
+    "type94LayoutDesktopAndNarrowVerified": true,
+    "type94VerificationScope": "Controlled readiness/style/layout movement56.859px before to0px after, draft and viewport retained. Exact94 ordinary private native Raw/Light/Raw/result controls stable. No cloud in engineer checks, new speech, BLE, external field or customer purchase proof; daily92 retained."
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -142,6 +146,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build93-20261021"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build94-20261021"
   }
 }
