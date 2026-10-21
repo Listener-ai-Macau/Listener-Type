@@ -405,6 +405,32 @@ export const zhTW: typeof zhCN = {
     },
   },
   style: {
+    builtinPacks: {
+      "raw": {
+        "name": "原文",
+        "description": "盡量保留原話的順序、語氣和資訊密度，只做必要斷句與標點整理。",
+        "tag0": "原文",
+        "tag1": "最小改寫"
+      },
+      "light": {
+        "name": "輕度潤色",
+        "description": "把口語整理成順暢、自然、可直接傳送的文字，但不擴寫事實。",
+        "tag0": "日常溝通",
+        "tag1": "順暢"
+      },
+      "structured": {
+        "name": "清晰結構",
+        "description": "面向 AI 程式協作、技術排障和模型資訊，優先確保術語與結構準確。",
+        "tag0": "AI 程式",
+        "tag1": "技術結構化"
+      },
+      "formal": {
+        "name": "正式表達",
+        "description": "適合郵件、週報、跨團隊同步等情境，語氣更完整、專業、克制。",
+        "tag0": "正式",
+        "tag1": "工作溝通"
+      }
+    },
     trial: {
       serviceFree: "原文 · 無需文字服務",
       serviceMissing: "需文字服務 · 尚未設定",

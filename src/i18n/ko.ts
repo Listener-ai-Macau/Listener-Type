@@ -1,5 +1,5 @@
 import type { zhCN } from './zh-CN';
-import { en } from './en';
+import { en } from './en.ts';
 
 // Korean locale.
 // 구조는 zh-CN.ts 를 따릅니다. 새 key 를 추가할 때 ja.ts / ko.ts 도 동시에
@@ -363,6 +363,32 @@ export const ko: typeof zhCN = {
     },
   },
   style: {
+    builtinPacks: {
+      "raw": {
+        "name": "원문",
+        "description": "원래 말의 순서, 어조와 정보를 최대한 유지하고 필요한 문장 구분과 문장부호만 정리합니다.",
+        "tag0": "원문",
+        "tag1": "최소한의 수정"
+      },
+      "light": {
+        "name": "가벼운 다듬기",
+        "description": "사실을 덧붙이지 않고 말한 내용을 자연스럽고 바로 보낼 수 있는 문장으로 다듬습니다.",
+        "tag0": "일상 소통",
+        "tag1": "자연스러운 문장"
+      },
+      "structured": {
+        "name": "명확한 구조",
+        "description": "AI 코딩 협업, 기술 문제 해결과 모델 정보를 위한 용어 및 구조의 정확성을 우선합니다.",
+        "tag0": "AI 코딩",
+        "tag1": "기술적 구조"
+      },
+      "formal": {
+        "name": "격식 있는 표현",
+        "description": "이메일, 주간 보고와 팀 간 공유에 맞게 전문적이고 절제된 어조로 정리합니다.",
+        "tag0": "격식",
+        "tag1": "업무 소통"
+      }
+    },
     trial: {
       serviceFree: "원문 · 텍스트 서비스 불필요",
       serviceMissing: "텍스트 서비스 필요 · 미설정",

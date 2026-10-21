@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getStyleTextTrialReadiness, tryStylePackText } from '../lib/ipc';
+import { stylePackPresentation } from '../lib/stylePackPresentation';
 import type { StylePack, StyleTextTrialReadiness, StyleTextTrialResult } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import './StyleTextTrial.css';
@@ -13,6 +14,7 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
   onOpenProviders?: () => void;
 }) {
   const { t } = useTranslation();
+  const presentation = stylePackPresentation(pack, t);
   const dialog = useRef<HTMLDialogElement>(null);
   const generation = useRef(0);
   const running = useRef(false);
@@ -82,7 +84,7 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
       onCancel={event => { event.preventDefault(); onClose(); }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-        <h2 id="style-trial-title" style={{ margin: 0, fontSize: 21 }}>{t('style.trial.title', { name: pack.name })}</h2>
+        <h2 id="style-trial-title" style={{ margin: 0, fontSize: 21 }}>{t('style.trial.title', { name: presentation.name })}</h2>
         <Btn size="sm" variant="ghost" onClick={onClose}>{t('common.close')}</Btn>
       </div>
       <p id="style-trial-description" className="ol-style-trial-hint">{t('style.trial.description')}</p>

@@ -406,6 +406,32 @@ export const en: typeof zhCN = {
     },
   },
   style: {
+    builtinPacks: {
+      "raw": {
+        "name": "Original text",
+        "description": "Keep the original order, tone and information, with only necessary punctuation and sentence breaks.",
+        "tag0": "Original text",
+        "tag1": "Minimal rewriting"
+      },
+      "light": {
+        "name": "Light polish",
+        "description": "Turn spoken wording into smooth, natural, sendable text without adding facts.",
+        "tag0": "Everyday communication",
+        "tag1": "Natural flow"
+      },
+      "structured": {
+        "name": "Clear structure",
+        "description": "For AI coding collaboration, technical troubleshooting and model information, with accurate terminology and structure.",
+        "tag0": "AI coding",
+        "tag1": "Technical structure"
+      },
+      "formal": {
+        "name": "Formal wording",
+        "description": "For email, weekly reports and cross-team updates, with a complete, professional and restrained tone.",
+        "tag0": "Formal",
+        "tag1": "Work communication"
+      }
+    },
     trial: {
       serviceFree: "Original text · no text service needed",
       serviceMissing: "Text service required · not configured",

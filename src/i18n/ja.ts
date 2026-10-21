@@ -1,5 +1,5 @@
 import type { zhCN } from './zh-CN';
-import { en } from './en';
+import { en } from './en.ts';
 
 // Japanese locale.
 // 構造は zh-CN.ts に追従。新しい key を追加する場合は ja.ts / ko.ts も同時に
@@ -363,6 +363,32 @@ export const ja: typeof zhCN = {
     },
   },
   style: {
+    builtinPacks: {
+      "raw": {
+        "name": "原文",
+        "description": "元の語順、口調、情報をできるだけ保ち、必要な句読点と文の区切りだけを整えます。",
+        "tag0": "原文",
+        "tag1": "最小限の書き換え"
+      },
+      "light": {
+        "name": "軽い推敲",
+        "description": "話し言葉を自然でそのまま送れる文章に整えます。事実は付け加えません。",
+        "tag0": "日常のやり取り",
+        "tag1": "自然な文章"
+      },
+      "structured": {
+        "name": "明確な構成",
+        "description": "AIコーディング、技術的な問題解決、モデル情報向けに、用語と構成の正確さを重視します。",
+        "tag0": "AIコーディング",
+        "tag1": "技術的な構成"
+      },
+      "formal": {
+        "name": "フォーマルな表現",
+        "description": "メール、週報、チーム間の共有向けに、丁寧で専門的かつ控えめな文章に整えます。",
+        "tag0": "フォーマル",
+        "tag1": "仕事のやり取り"
+      }
+    },
     trial: {
       serviceFree: "原文 · テキストサービス不要",
       serviceMissing: "テキストサービスが必要 · 未設定",

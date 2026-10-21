@@ -403,6 +403,32 @@ export const zhCN = {
     },
   },
   style: {
+    builtinPacks: {
+      "raw": {
+        "name": "原文",
+        "description": "尽量保留原话的顺序、语气和信息密度，只做必要断句与标点整理。",
+        "tag0": "原文",
+        "tag1": "最小改写"
+      },
+      "light": {
+        "name": "轻度润色",
+        "description": "把口语整理成顺畅、自然、可直接发送的文字，但不扩写事实。",
+        "tag0": "日常沟通",
+        "tag1": "顺滑"
+      },
+      "structured": {
+        "name": "清晰结构",
+        "description": "面向 AI 编程协作、技术排障和模型资讯，优先保证术语与结构准确。",
+        "tag0": "AI 编程",
+        "tag1": "技术结构化"
+      },
+      "formal": {
+        "name": "正式表达",
+        "description": "适合邮件、周报、跨团队同步等场景，语气更完整、专业、克制。",
+        "tag0": "正式",
+        "tag1": "工作沟通"
+      }
+    },
     trial: {
       serviceFree: "原文 · 无需文本服务",
       serviceMissing: "需文本服务 · 尚未配置",

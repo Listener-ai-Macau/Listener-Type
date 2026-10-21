@@ -21,6 +21,7 @@ import { SavedToast, type SaveToastState } from '../components/SavedToast';
 import { MarketplaceModal } from '../components/MarketplaceModal';
 import { StyleTextTrial } from '../components/StyleTextTrial';
 import { StyleTrialAvailability } from '../components/StyleTrialAvailability';
+import { stylePackPresentation } from '../lib/stylePackPresentation';
 
 type BusyAction =
   | 'loading'
@@ -332,6 +333,7 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
   const selectedPack = packs.find(pack => pack.id === selectedId) ?? null;
   const activePack = packs.find(pack => pack.active) ?? null;
   const rawPack = packs.find(pack => pack.id === BUILTIN_RAW_ID) ?? null;
+  const rawPresentation = rawPack ? stylePackPresentation(rawPack, t) : null;
   const otherBuiltinPacks = packs
     .filter(pack => pack.kind === 'builtin' && pack.id !== BUILTIN_RAW_ID)
     .sort((a, b) => BUILTIN_BODY_ORDER.indexOf(a.id) - BUILTIN_BODY_ORDER.indexOf(b.id));
@@ -405,7 +407,7 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
 
   const openEditorForPack = (pack: StylePack) => {
     if (editorOpen && dirty && selectedPack && selectedPack.id !== pack.id) {
-      if (!window.confirm(copy.discardSwitchConfirm(pack.name))) {
+      if (!window.confirm(copy.discardSwitchConfirm(stylePackPresentation(pack, t).name))) {
         return;
       }
     }
@@ -482,7 +484,7 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
     setBusy('activating');
     try {
       await setActiveStylePack(pack.id);
-      showSaveStatus('saved', copy.activateSuccess(pack.name), true);
+      showSaveStatus('saved', copy.activateSuccess(stylePackPresentation(pack, t).name), true);
       await loadPacks(pack.id);
     } catch (activateError) {
       showSaveStatus('failed', copy.activateFailed(String(activateError)));
@@ -496,7 +498,7 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
     setBusy('resetting');
     try {
       await resetBuiltinStylePack(selectedPack.id);
-      showSaveStatus('saved', copy.resetSuccess(selectedPack.name), true);
+      showSaveStatus('saved', copy.resetSuccess(stylePackPresentation(selectedPack, t).name), true);
       await loadPacks(selectedPack.id);
     } catch (resetError) {
       showSaveStatus('failed', copy.resetFailed(String(resetError)));
@@ -703,7 +705,7 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
                     type="button"
                     onClick={() => void handleActivate(rawPack)}
                     disabled={rawPack.active || busy === 'activating'}
-                    title={rawPack.name}
+                    title={rawPresentation?.name}
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -721,7 +723,7 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
                       transition: 'border-color 0.16s var(--ol-motion-quick), background 0.16s var(--ol-motion-quick), color 0.16s var(--ol-motion-quick)',
                     }}
                   >
-                    <span>{rawPack.name}</span>
+                    <span>{rawPresentation?.name}</span>
                     {rawPack.active && <span style={{ fontSize: 11, opacity: 0.85 }}>·{copy.active}</span>}
                   </button>
                 )}
@@ -729,7 +731,7 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 {rawPack && <StyleTrialAvailability packId={rawPack.id} revision={rawPack.updatedAt} />}
                 {rawPack && <Btn size="sm" variant="ghost" onClick={() => setTrialPack(clonePack(rawPack))}>
-                  {t('style.trial.open', { name: rawPack.name })}
+                  {t('style.trial.open', { name: rawPresentation?.name })}
                 </Btn>}
                 <Pill tone="outline">{copy.listCount(packs.length)}</Pill>
               </div>
@@ -739,6 +741,7 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
             {bodyPacks.map(pack => {
               const isBuiltin = pack.kind === 'builtin';
+              const presentation = stylePackPresentation(pack, t);
               return (
                 <div
                   key={pack.id}
@@ -765,7 +768,7 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
                     <div style={{ minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         <div style={{ fontSize: 14, fontWeight: 600, color: isBuiltin && !pack.active ? 'var(--ol-ink-2)' : 'var(--ol-ink)' }}>
-                          {pack.name}
+                          {presentation.name}
                         </div>
                         <Pill tone={isBuiltin ? 'outline' : 'blue'} size="sm">
                           {isBuiltin ? copy.builtin : copy.imported}
@@ -791,7 +794,7 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
                           minHeight: 60,
                         }}
                       >
-                        {pack.description}
+                        {presentation.description}
                       </div>
                     </div>
                     {isBuiltin ? (
@@ -833,7 +836,7 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minHeight: 24, marginBottom: 12 }}>
                     <Pill tone={modeTone(pack.baseMode)} size="sm">{t(`style.modes.${pack.baseMode}.name`)}</Pill>
-                    {pack.tags.slice(0, 1).map(tag => (
+                    {presentation.tags.slice(0, 1).map(tag => (
                       <Pill key={`${pack.id}-${tag}`} tone="default" size="sm">{tag}</Pill>
                     ))}
                   </div>
@@ -843,7 +846,7 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 'auto' }}>
                     <Btn size="sm" variant="blue" onClick={() => setTrialPack(clonePack(pack))}>
-                      {t('style.trial.open', { name: pack.name })}
+                      {t('style.trial.open', { name: presentation.name })}
                     </Btn>
                     <Btn
                       size="sm"
