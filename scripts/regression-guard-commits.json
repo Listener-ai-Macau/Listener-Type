@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T10:50:20.511485+08:00",
+  "updated_at": "2026-10-21T11:24:18.034890+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3715,9 +3715,63 @@
         "No voice, text-service success, hardware or purchase qualification. Other legacy interface strings may remain untranslated."
       ],
       "customer_result": "Independent87 English FIRST_USE chose Formal wording for its own email draft, understood English names/descriptions and missing-service requirement, and retained the draft across settings. No actual email output; declines49USD hardware without actual voice-to-target-field benefit and physical convenience."
+    },
+    {
+      "id": "customer88_saved_illustrations_distinct_from_personal_result",
+      "repo": "type",
+      "commit": "57636034bf9a9746c1dd9e9e91d622897280fd47",
+      "subject": "Expose clearly labeled saved style illustrations without processing drafts",
+      "commit_subject": "Expose clearly labeled saved style illustrations without processing drafts",
+      "state": "installed88_native_illustration_and_one_real_text_trial_verified_not_customer_reused",
+      "protects": [
+        "Saved illustrations are read-only, explicitly not personal or model-verified output; viewing sends no request or populates a draft.",
+        "Only complete unchanged factory example pairs are localized; custom/imported pairs remain literal and saved prompts/examples do not change.",
+        "Actual trial processing, request, draft and result remain separate; Raw does not imply offline polish."
+      ],
+      "guards": [
+        "node --experimental-strip-types src/lib/stylePackPresentation.test.ts"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style88-native-trial.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style88-saved-example.png",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build88\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build88\\type88-installed.json"
+      ],
+      "unverified": [
+        "Independent88 reuse pending; no speech, external field, physical value or purchasing proof.",
+        "Result text was observed in native DOM; initial result screenshot shows an earlier scroll area, not a visual result proof."
+      ]
+    },
+    {
+      "id": "customer88_private_credential_profile_does_not_write_daily_vault",
+      "repo": "type",
+      "commit": "65fe648759ec5c7951f0766a4b05a0ac67bfa989",
+      "subject": "Separate opt-in private credential profiles without daily-vault fallback",
+      "commit_subject": "Separate opt-in private credential profiles without daily-vault fallback",
+      "state": "installed88_private_os_vault_and_daily_preservation_observed",
+      "protects": [
+        "No namespace retains original production credential service, including existing portable data dirs.",
+        "Explicit namespace requires safe token and absolute data directory; malformed configuration cannot select daily credentials.",
+        "Private profile never reads/migrates/deletes daily legacy credential files.",
+        "Windows latest-document merging and Enterprise/Roaming persistence remain unchanged."
+      ],
+      "guards": [
+        "Actual production resolver module compiled directly with rustc --test; two focused scope boundary tests.",
+        "Exact88 private normal-language-setting writes and text trial; compare production vault/settings/status/history/packs before and after."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native88-customer-20261021-111918\\setup-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native88-customer-20261021-112034\\setup-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style88-native-trial.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build88\\type88-installed.json"
+      ],
+      "unverified": [
+        "Native private seeding uses only existing DeepSeek, no ASR or new account; not a newly delivered free service.",
+        "Default production scope preservation observed; no negative Local2/Roaming3 fixture run while daily Type is open."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-21T10:36:00.004591+08:00",
+  "feature_routes_updated_at": "2026-10-21T11:24:18.034890+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -4342,7 +4396,9 @@
         "customer85_style_trial_upfront_service_status",
         "customer_public_rc1_usage_and_service_scope",
         "customer86_provider_account_model_cost_guide",
-        "customer87_builtin_style_presentation_locale"
+        "customer87_builtin_style_presentation_locale",
+        "customer88_saved_illustrations_distinct_from_personal_result",
+        "customer88_private_credential_profile_does_not_write_daily_vault"
       ],
       "paths": {
         "type": [
@@ -4375,7 +4431,10 @@
           "scripts/check-style-text-trial-ui.py",
           "src/pages/Settings.tsx",
           "src/lib/ipc.ts",
-          "src-tauri/src/insertion/clipboard_handoff.rs"
+          "src-tauri/src/insertion/clipboard_handoff.rs",
+          "src/lib/stylePackPresentation.ts",
+          "src/lib/stylePackPresentation.test.ts",
+          "src-tauri/src/persistence/credential_scope.rs"
         ]
       },
       "known_failures": [
@@ -4399,7 +4458,8 @@
         "Customer82 saw2.5seconds for29-second recorded media: successful History bound RawTranscript provider elapsed time, while its saved PCM evidence gives28953ms.",
         "Old History recent list spans all modes but detail falls back inside the active style filter: clicking Raw A while filtering Light copied Light B. Earliest fallback ^732a863; recent list3ca9f850, not an83 regression.",
         "Independent84 only learned style service requirements after opening trial; missing service is a dependency, not a false successful output.85 exposes status on cards.",
-        "Public reader found ChineseUSAGE1.0.5 and offlineLight promise conflicting with current entry. Source4d4b8890/735cc9aa retained; bbaa17a corrects guide, not runtime. Mixed web-reader build labels remain observed/cache-unknown; actualGitHub blobs match current contents."
+        "Public reader found ChineseUSAGE1.0.5 and offlineLight promise conflicting with current entry. Source4d4b8890/735cc9aa retained; bbaa17a corrects guide, not runtime. Mixed web-reader build labels remain observed/cache-unknown; actualGitHub blobs match current contents.",
+        "Before88 isolated data/WebView profiles still used the shared OS vault; switching their active provider could alter the daily provider selection. Fixed with explicit protected private namespace; prior blocked LLM reports describe active incomplete Ark, not absence of a separately configured DeepSeek."
       ]
     },
     {
