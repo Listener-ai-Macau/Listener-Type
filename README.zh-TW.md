@@ -1,72 +1,46 @@
-## 下載 Listener · RC1
+# Listener
 
-**第一次使用 Type？** 先下載 Windows MSI，設定語音辨識，並選擇電腦麥克風或 Listener。把游標放進可編輯輸入框，按 **Right Ctrl** 說話，再按一次結束。
+## 放在桌邊的 AI 入門小工具 · 49 美元
 
-**聽寫必需：** 可用的收音裝置與已設定的辨識服務。**可選：** 文字服務用於潤色或翻譯；韌體 ZIP 用於更新 Listener 硬體。
+一個麥克風、一個錄音旋鈕、四顆可自訂按鍵。配合 Windows Type，用說話起草訊息、郵件或筆記，文字進入正在使用的輸入框。
+
+**49 美元為硬體價格，Type 軟體免費開源。**
 
 | 用途 | 直接下載 |
 | --- | --- |
 | **Windows 軟體** | **[下載 MSI · Type build92](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **韌體：USB 燒寫 / 藍牙 OTA** | **[下載韌體 ZIP · 兩種方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
+[English](README.md) · **繁體中文** · [简体中文](README.zh-CN.md)
+
+<img src="docs/assets/readme/keyboard-front.jpg" alt="Listener 實物：四顆透明按鍵、黑色旋鈕與六顆狀態燈" width="720">
+
+*Listener 實物照片。計劃交付外觀基本如圖：透明外殼、透明鍵帽、黑色旋鈕；此圖不是操作錄影。*
+
+- **說出來：** 旋鈕開停錄音，電腦上的 Type 完成辨識與寫入。
+- **按需要整理：** 預設保留原文，也可在設定文字服務後選擇風格或翻譯。
+- **設成自己的：** 自訂四顆按鍵、燈光與電源設定，每台裝置獨立儲存。
+
+**開始前需要：** Windows Type，以及已設定的辨識服務或本機模型。雲端用量單獨計費；目前版本不附帶開箱可用的官方雲端帳號或辨識額度。
+
+**RC1 仍為候選版本。** 強干擾分離尚未完善，偶發提前結束仍在跟進，詳見[目前限制與發布說明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1)。硬體購買入口尚未公布。
+
+[首次設定](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/README.zh-TW.md#先完成一次輸入) · [需要時再查使用指南](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.md)
+
 <details>
-<summary>已有裝置：韌體與設定說明</summary>
+<summary>已有裝置：韌體、設定與本次版本</summary>
 
 韌體適用 **ESP32-S3 N16R8**，建置 `e7bd1f1619b696a1`。USB 與藍牙更新選擇同一個 ZIP。
 Type 預設使用 **USB 有線燒寫**，能力已內建；無需另裝 Python、ESP-IDF 或其他燒寫軟體。
 裝置設定各自獨立：選擇一台有線／藍牙裝置，讀取後修改並寫入；名稱、燈光、電源、按鍵與旋鈕設定保存在該裝置。請配套使用本頁 MSI 與韌體 ZIP。
 
+Type build92在檢查風格可用性、檢查失敗或重試時仍可編輯草稿，提交按鈕繼續依真實可用狀態保護。保留用途說明、可選日常清單、既有風格、並排結果和明確複製，Firmware33不變。
+
+[Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
+
 </details>
 
-RC1 仍為候選版本，偶發提前結束與強干擾限制見發布說明。
-Type build92在檢查風格可用性、檢查失敗或重試時仍可編輯草稿，提交按鈕繼續依真實可用狀態保護。保留用途說明、可選日常清單、既有風格、並排結果和明確複製，Firmware33不變。
-[軟體發布說明與校驗](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [韌體發布說明與燒寫方法](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
-
-[English first setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [English user guide](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)
-
 ---
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/listener/type-hero-dark.png">
-  <img src="docs/assets/listener/type-hero.png" alt="Listener Type：把說的話寫入目前輸入框" width="1600">
-</picture>
-
-**繁體中文** · [English](README.md) · [简体中文](README.zh-CN.md)
-
-# Listener Type
-
-**用說話起草較長的訊息、郵件或筆記，文字回到正在使用的輸入框。**
-
-[首次設定](#先完成一次輸入) · [使用指南（簡體中文）](docs/USAGE.md) · [English guide](docs/USAGE.en.md)
-
-免費開源 · 硬體可選 · 首次需設定辨識服務或本機模型。
-
-## 放在桌邊的 AI 入門小工具 · 49 美元
-
-它是一件帶開發板氣質、可以自訂的 AI 入門硬體：買來玩玩聲音輸入，看看文字風格如何整理訊息，把四個鍵設成自己的桌面動作。喜歡旋鈕與電路板外觀、想透過一件小事學會怎麼用 AI，或偶爾順手說句話，都可以是購買理由。正常使用 Type 不需要程式設計。
-
-裝置負責麥克風、實體控制與藍牙音訊，Windows 上的 Type 再連接你選用的辨識與文字服務；完整 AI 流程需要電腦與相應服務配合。
-
-<img src="docs/assets/readme/keyboard-front.jpg" alt="倉庫中的Listener實物照片：透明按鍵、黑色旋鈕與狀態燈" width="820">
-
-*49美元版本計劃基本按圖中外觀交付：透明外殼、透明鍵帽、黑色旋鈕。照片不代表手旁比例、按轉手感或聲音示範。*
-
-Listener 把麥克風與實體錄音開關放在工作時順手的位置，適合在桌前交替說話和打字，起草較長的訊息、郵件或筆記。
-
-| 桌前使用 | 免費 Type 軟體 | 配合 Listener 硬體 |
-| --- | --- | --- |
-| 收音 | 電腦麥克風 | 裝置自己的麥克風，透過藍牙傳給 Type |
-| 開始、結束錄音 | Right Ctrl | 單擊旋鈕，無需在螢幕上找結束按鈕 |
-| 其他控制 | 常用鍵盤與螢幕 | 音量旋鈕、四個可自訂按鍵與六顆狀態燈 |
-| 辨識並寫入文字 | 電腦上設定的辨識服務 | 使用同一套 Type 辨識與文字輸出流程 |
-
-**49 美元為硬體價格。** 辨識服務需另行設定，費用分別計算；目前版本沒有附帶開箱可用的 Listener 雲端帳號或辨識額度。如果現有麥克風與快速鍵已夠順手，可以繼續使用免費軟體。硬體增加的是桌面收音與實體控制，辨識效果和速度仍取決於所選服務、收音環境及電腦。
-
-日常差別是：Type保持執行、游標在目標輸入框時，電腦麥克風用Right Ctrl開停；Listener把自己的麥克風和錄音旋鈕放在手邊，用旋鈕開停、燈顯示狀態。兩種方式仍用相同的已設定服務，並需複核結果。可先用免費軟體，再判斷專用桌面收音和實體控制對自己是否值得。
-
-[風格選擇與雲端用量估算（簡體中文使用說明）](docs/USAGE.md)
-
-完整硬體音訊路徑目前使用 **Windows Type**。RC1 仍為候選版本，購買前請查看[目前限制與發布說明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1)；購買入口尚未公布。
 
 ## 先完成一次輸入
 
@@ -84,7 +58,8 @@ Listener 把麥克風與實體錄音開關放在工作時順手的位置，適�
 | 你的目的 | 對應能力 |
 | --- | --- |
 | 保留措辭 | 預設原文模式（Raw）、錄音膠囊預覽、游標插入與剪貼簿備援 |
-| 整理訊息、郵件或任務 | Light / Structured / Formal；需設定相應文字服務，風格可編輯與匯入／匯出 |
+| 整理訊息或郵件 | Light / Formal；多事項可選「日常清單」，需設定文字服務 |
+| 為 AI 程式設計工具準備技術指令 | Structured；風格可編輯與匯入／匯出 |
 | 翻譯 | 先選目標語言，錄音時按 Shift 啟用本次翻譯；需設定相應服務 |
 | 協助辨識人名與術語 | 本機詞庫、預設與字面糾錯規則 |
 | 取回剛才的結果 | 歷史查看、複製、刪除與保留期限設定 |

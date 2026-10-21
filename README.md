@@ -1,73 +1,46 @@
-## Download Listener · RC1
+# Listener
 
-**First time using Type?** Download the Windows MSI, configure speech recognition, and select your computer microphone or Listener. Put the cursor in a writable field, press **Right Ctrl** to speak, then press it again to finish.
+## An AI starter gadget for your desk · US$49
 
-**Required for dictation:** an audio input and a configured recognizer. **Optional:** a text service for polishing or translation. Use the firmware ZIP when updating Listener hardware.
+A microphone, a recording knob and four customizable keys. Speak a message, email or note into the field you are using with Windows Type.
+
+**US$49 is the hardware price. Type is free and open source.**
 
 | Purpose | Direct download |
 | --- | --- |
 | **Windows app** | **[Download MSI · Type build92](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
+**English** · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md)
+
+<img src="docs/assets/readme/keyboard-front.jpg" alt="Listener hardware: four transparent keys, black knob and six status lights" width="720">
+
+*Actual Listener hardware. Planned appearance: transparent case and keycaps, black knob, broadly as shown. This is a photograph, not an operation video.*
+
+- **Say it:** the knob starts and stops dictation; Type handles recognition and writing on the computer.
+- **Shape the words:** keep the original by default, or choose a text style or translation with a configured text service.
+- **Make it yours:** assign the four keys and adjust lights or power settings. Each device keeps its own settings.
+
+**Before you start:** the full hardware-audio path needs Windows Type and a configured recognition service or local model. Cloud usage is billed separately; no ready-to-use official cloud account or allowance is included in this release.
+
+**RC1 is a prerelease.** Strong-interference separation is incomplete and intermittent early-close cases remain under review. [Current limits and release notes](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1). Hardware purchase link not yet announced.
+
+[First setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [Look through the user guide when needed](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)
+
 <details>
-<summary>Firmware and device settings</summary>
+<summary>Already have a device? Firmware, settings and current build</summary>
 
 Firmware: **ESP32-S3 N16R8**, build `e7bd1f1619b696a1`. Select the same ZIP for USB flashing or Bluetooth OTA in Type.
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device, read its settings, then write changes back to that device. Names, lights, power, keys and knob configuration stay on the board. Use this paired MSI and firmware ZIP.
 
+Type build92 keeps the trial draft editable while service availability is checked, fails or is retried; submission stays protected until ready. The selected purpose, optional Everyday list, existing styles, side-by-side results and explicit copying remain. Firmware33 is unchanged.
+
+[Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
+
 </details>
 
-RC1 remains a prerelease; intermittent early close and strong-interference limits are documented in the release notes.
-Type build92 keeps the trial draft editable while service availability is checked, fails or is retried; submission stays protected until ready. The selected purpose, optional Everyday list, existing styles, side-by-side results and explicit copying remain. Firmware33 is unchanged.
-[App release notes and checksum](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware notes and flashing instructions](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
-
-[English first setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [English user guide](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)
-
 ---
-
-<picture>
-  <source media="(prefers-color-scheme: dark) and (max-width: 600px)" srcset="docs/assets/listener/type-hero-en-mobile-dark.png">
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/listener/type-hero-en-dark.png">
-  <source media="(max-width: 600px)" srcset="docs/assets/listener/type-hero-en-mobile.png">
-  <img src="docs/assets/listener/type-hero-en.png" alt="Listener Type: your voice at the cursor" width="1600">
-</picture>
-
-**English** · [Chinese](README.zh-CN.md)
-
-# Listener Type
-
-**Speak a longer message, an email or a note. Keep the text in the field you are already using.**
-
-**[Download for Windows](https://github.com/Listener-ai-Macau/Listener-Type/releases)** · [First setup](#make-your-first-dictation) · [User guide](docs/USAGE.en.md)
-
-Free and open source · Keyboard optional · Set up a recognition service or local model first.
-
-## An AI starter gadget for your desk · US$49
-
-A small, customizable piece of hardware for trying AI interactions: explore voice input, see how text styles change a message, and make four desk keys your own. Enjoy the knob and the visible electronics, learn by trying a small task, or use it occasionally when it feels handy. Normal Type use does not require programming.
-
-The board provides the microphone, physical controls and Bluetooth audio. Windows Type connects that audio and text to your selected recognition and text services; the AI workflow is not provided by the board alone.
-
-<img src="docs/assets/readme/keyboard-front.jpg" alt="Repository photograph of Listener hardware with four transparent keys, a black knob and status lights" width="820">
-
-*Planned US$49 hardware appearance: transparent case, transparent keycaps and a black knob, broadly as shown. The photograph does not demonstrate hand size, control feel or sound.*
-
-Listener puts a microphone and a physical start/stop control beside your working hand. It is designed for desk work where you alternate between speaking and typing longer messages, emails or notes.
-
-| At your desk | Free Type app | With Listener hardware |
-| --- | --- | --- |
-| Pick up your voice | Computer microphone | Listener's own microphone, sent to Type over Bluetooth |
-| Start and finish a recording | Right Ctrl | Click the knob; finish without finding a control on screen |
-| Other controls | Your usual keyboard and screen | Volume knob, four customizable keys and six status lights |
-| Recognize and write the words | Your configured recognizer on the computer | The same Type recognition and text-output workflow |
-
-**US$49 is the hardware price.** Recognition setup and service costs are separate. The current build does not include a ready-to-use Listener cloud account or bundled recognition allowance. If your existing microphone and shortcut already suit your work, you can keep using the free app. The hardware adds the desk microphone and physical controls; recognition quality and speed still depend on the selected service, input conditions and computer.
-
-The full hardware-audio path currently uses **Windows Type**. RC1 is a prerelease; check the [current limits and release notes](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) before deciding. The purchase link has not yet been announced.
-
-**What changes in an ordinary writing session?** Keep the destination field focused and Type running. With your computer microphone, Right Ctrl starts and stops; with Listener, its microphone and knob can stay at a fixed spot beside your hand, the knob starts and stops, and the device lights show status. You still review the words and use the same configured services. Consider the hardware if a dedicated desk microphone and physical controls fit repeated voice-input sessions; try the free app first to decide whether those controls add value to your own setup.
-
 
 ## Stay where you are writing
 
@@ -115,7 +88,8 @@ The app is free; cloud costs are set by each provider. Without an API key, prepa
 | Your task | What to use |
 | --- | --- |
 | Keep the original wording | Raw dictation, recording-capsule preview, cursor insertion and clipboard fallback |
-| Tidy a message, email or task list | Light / Structured / Formal; editable styles with ZIP import/export |
+| Tidy a message or email | Light / Formal; optional Everyday list for several action points |
+| Prepare instructions for an AI coding tool | Structured; styles support editing and ZIP import/export |
 | Write in another language | Select a target, then tap Shift during recording |
 | Help with names and terminology | Local vocabulary, presets and literal correction rules |
 | Ask about a passage | Select text, open QA with Ctrl+Shift+;, then use the recording key to ask |
