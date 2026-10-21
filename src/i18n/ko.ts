@@ -271,6 +271,8 @@ export const ko: typeof zhCN = {
     firstDictationSetup: "먼저 음성 인식 설정",
     firstDictationInput: "마이크 및 입력 소스",
     firstDictationCancel: "Esc 키로 녹음을 취소합니다.",
+    tryTypedText: "입력한 글로 사용해 보기",
+    tryTypedTextHint: "마이크 없이 스타일을 선택해 볼 수 있습니다. 문장 다듬기에는 텍스트 서비스가 필요합니다.",
     quickStartTitle: '빠른 시작',
     quickStartDesc: "음성 인식을 설정하면 받아쓰기를 시작할 수 있습니다. AI 문장 다듬기는 선택 사항입니다.",
     quickStartAsrReady: "음성 인식이 설정되었습니다. 기기 버튼이나 녹음 단축키로 받아쓰기를 시작하세요. AI 문장 다듬기는 선택 사항입니다.",
@@ -410,6 +412,10 @@ export const ko: typeof zhCN = {
       }
     },
     trial: {
+      copyResult: "결과 복사",
+      copying: "복사 중…",
+      copied: "복사됨",
+      copyFailed: "결과를 복사하지 못했습니다. 다시 시도하거나 텍스트를 선택해 복사하세요.",
       exampleSummary: "저장된 예시 보기 · 실시간 결과가 아닙니다",
       exampleNotice: "스타일에 저장된 예시입니다. 사용자의 글로 생성한 결과가 아니며 현재 모델에서 검증하지 않았습니다. 보더라도 서비스 요청을 보내거나 초안을 바꾸지 않습니다.",
       exampleInput: "예시 초안",
@@ -426,7 +432,7 @@ export const ko: typeof zhCN = {
       download: "Windows 앱 다운로드",
       open: "{{name}} 체험",
       title: "내 글로 {{name}} 체험",
-      description: "저장된 스타일이 직접 입력한 글을 어떻게 처리하는지 확인합니다. 음성 인식 테스트가 아닙니다. 현재 스타일, 기록, 클립보드는 바뀌지 않습니다.",
+      description: "저장한 스타일로 직접 입력한 글을 처리합니다. 음성 인식 테스트는 아닙니다. 처리 시 현재 스타일, 기록, 클립보드는 바뀌지 않습니다. 결과를 사용하려면 결과 복사를 누르세요.",
       serviceNotice: "기본 원문 스타일은 텍스트 서비스를 사용하지 않습니다. 다른 스타일이나 사용자 지정 스타일은 설정된 서비스를 사용하며 해당 서비스의 일반 요금이 발생할 수 있습니다. 여기서 직접 제출한 글만 처리합니다.",
       input: "내 글",
       placeholder: "작성하려는 내용을 입력하거나 붙여넣으세요…",

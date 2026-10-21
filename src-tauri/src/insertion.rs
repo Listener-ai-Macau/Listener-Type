@@ -24,6 +24,9 @@ use crate::types::{InsertStatus, PasteShortcut};
 
 mod clipboard_handoff;
 pub(crate) fn copy_explicit_history_text(text: &str) -> bool {
+    copy_explicit_text(text)
+}
+pub(crate) fn copy_explicit_text(text: &str) -> bool {
     clipboard_handoff::copy_explicit(text)
 }
 pub(crate) use clipboard_handoff::{

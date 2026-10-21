@@ -311,6 +311,8 @@ export const zhCN = {
     firstDictationSetup: "先配置语音识别",
     firstDictationInput: "麦克风与输入来源",
     firstDictationCancel: "按 Esc 可取消录音。",
+    tryTypedText: "先试一段文字",
+    tryTypedTextHint: "无需麦克风，选择风格即可试用；润色需要文本服务。",
     quickStartTitle: '快速开始',
     quickStartDesc: "先设置语音识别，即可开始听写；AI 润色为可选功能。",
     quickStartAsrReady: "语音识别已配置，可通过设备按键或录音快捷键听写；AI 润色为可选功能。",
@@ -450,6 +452,10 @@ export const zhCN = {
       }
     },
     trial: {
+      copyResult: "复制结果",
+      copying: "正在复制…",
+      copied: "已复制",
+      copyFailed: "未能复制结果。请重试，或选中文字后复制。",
       exampleSummary: "查看保存示例 · 非实时结果",
       exampleNotice: "这是随风格包保存的示例，不是为你的文字实时生成，也未验证当前模型效果。查看不会发送服务请求或改动你的草稿。",
       exampleInput: "示例原稿",
@@ -466,7 +472,7 @@ export const zhCN = {
       download: "下载 Windows 软件",
       open: "试用{{name}}",
       title: "用自己的文字试用{{name}}",
-      description: "看看已保存的风格如何处理你的文字。这不是语音识别测试。当前风格、历史和剪贴板保持不变。",
+      description: "使用已保存的风格处理你键入的文字，不测试语音识别。处理不会改变当前风格、历史或剪贴板；需要取用成稿时，请点击“复制结果”。",
       serviceNotice: "默认原文风格不调用文本服务；其它或自定义风格使用你配置的文本服务，可能产生该服务的正常费用。只处理你在这里主动提交的文字。",
       input: "你的文字",
       placeholder: "输入或粘贴你想写的内容…",

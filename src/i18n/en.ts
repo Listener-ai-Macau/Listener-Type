@@ -314,6 +314,8 @@ export const en: typeof zhCN = {
     firstDictationSetup: "Set up speech recognition first",
     firstDictationInput: "Microphone and input source",
     firstDictationCancel: "Esc cancels the recording.",
+    tryTypedText: "Try typed text",
+    tryTypedTextHint: "No microphone needed. Choose a style; polishing needs a text service.",
     quickStartTitle: 'Quick start',
     quickStartDesc: "Set up speech recognition to start dictating. AI polishing is optional.",
     quickStartAsrReady: "Speech recognition is configured. Use your device key or recording shortcut to dictate; AI polishing is optional.",
@@ -453,6 +455,10 @@ export const en: typeof zhCN = {
       }
     },
     trial: {
+      copyResult: "Copy result",
+      copying: "Copying…",
+      copied: "Copied",
+      copyFailed: "Could not copy the result. Try again, or select the text and copy it.",
       exampleSummary: "View a saved example · illustration",
       exampleNotice: "Illustrations saved with this style pack. They were not generated for your text or verified against your model. Viewing them sends no service request and leaves your draft unchanged.",
       exampleInput: "Example draft",
@@ -469,7 +475,7 @@ export const en: typeof zhCN = {
       download: "Download the Windows app",
       open: "Try {{name}}",
       title: "Try {{name}} with your text",
-      description: "See how a saved style handles your own typed text. This does not test speech recognition. Your active style, history and clipboard stay unchanged.",
+      description: "See how a saved style handles your own typed text. This does not test speech recognition. Processing keeps your active style, history and clipboard unchanged. Use Copy result when you want the output on your clipboard.",
       serviceNotice: "Default Raw keeps your text without a text service. Other or customized styles use your configured text service and may incur its normal charges. Only text you submit here is processed.",
       input: "Your text",
       placeholder: "Type or paste something you want to write…",

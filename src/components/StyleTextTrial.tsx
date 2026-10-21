@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getStyleTextTrialReadiness, tryStylePackText } from '../lib/ipc';
+import { copyStyleTrialResult, getStyleTextTrialReadiness, tryStylePackText } from '../lib/ipc';
+import { detectOS } from './WindowChrome';
 import { stylePackExamplePresentation, stylePackPresentation } from '../lib/stylePackPresentation';
 import type { StylePack, StyleTextTrialReadiness, StyleTextTrialResult } from '../lib/types';
 import { Btn } from '../pages/_atoms';
@@ -21,8 +22,12 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
   const dialog = useRef<HTMLDialogElement>(null);
   const generation = useRef(0);
   const running = useRef(false);
+  const copyRunning = useRef(false);
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<StyleTextTrialResult | null>(null);
+  const [copying, setCopying] = useState(false);
+  const [copiedResult, setCopiedResult] = useState<StyleTextTrialResult | null>(null);
+  const [copyError, setCopyError] = useState(false);
   const [error, setError] = useState('');
   const [readiness, setReadiness] = useState<StyleTextTrialReadiness | null>(null);
   const [readinessError, setReadinessError] = useState(false);
@@ -51,11 +56,13 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
   }, []);
 
   const runTrial = async () => {
-    if (running.current || !canProcess || !draft.trim()) return;
+    if (running.current || copyRunning.current || !canProcess || !draft.trim()) return;
     running.current = true;
     const request = ++generation.current;
     setPending(true);
     setResult(null);
+    setCopiedResult(null);
+    setCopyError(false);
     setError('');
     try {
       const value = await tryStylePackText(pack.id, draft);
@@ -75,6 +82,25 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
         running.current = false;
         setPending(false);
       }
+    }
+  };
+
+  const copyResult = async () => {
+    if (!result || copyRunning.current || running.current) return;
+    const selectedResult = result;
+    const request = generation.current;
+    copyRunning.current = true;
+    setCopying(true);
+    setCopiedResult(null);
+    setCopyError(false);
+    try {
+      await copyStyleTrialResult(selectedResult.outputText, detectOS() === 'win');
+      if (generation.current === request) setCopiedResult(selectedResult);
+    } catch {
+      if (generation.current === request) setCopyError(true);
+    } finally {
+      copyRunning.current = false;
+      if (generation.current === request) setCopying(false);
     }
   };
 
@@ -119,13 +145,13 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
         value={draft}
         maxLength={4000}
         rows={5}
-        disabled={pending || !readiness?.available}
+        disabled={pending || copying || !readiness?.available}
         placeholder={t('style.trial.placeholder')}
-        onChange={event => { onDraftChange(event.target.value); setResult(null); setError(''); }}
+        onChange={event => { onDraftChange(event.target.value); setResult(null); setError(''); setCopiedResult(null); setCopyError(false); }}
         style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', minHeight: 110, padding: 12, borderRadius: 12, border: '1px solid var(--ol-line-strong)', color: 'var(--ol-ink)', background: 'var(--ol-surface-2)', font: 'inherit', lineHeight: 1.65 }}
       />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginTop: 12 }}>
-        <Btn variant="blue" disabled={pending || !canProcess || !draft.trim()} onClick={() => void runTrial()}>
+        <Btn variant="blue" disabled={pending || copying || !canProcess || !draft.trim()} onClick={() => void runTrial()}>
           {t(pending ? 'style.trial.running' : 'style.trial.run')}
         </Btn>
         {readiness?.available && onOpenProviders && <Btn variant="ghost" onClick={onOpenProviders}>{t('style.trial.providers')}</Btn>}
@@ -135,9 +161,16 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
       {error && <p role="alert" style={{ color: 'var(--ol-err)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.6 }}>{error}</p>}
       {result && (
         <section aria-label={t('style.trial.output')} aria-live="polite" style={{ marginTop: 20 }}>
-          <div style={{ fontWeight: 600 }}>{t('style.trial.output')}</div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+            <div style={{ fontWeight: 600 }}>{t('style.trial.output')}</div>
+            <Btn size="sm" variant="ghost" disabled={copying} onClick={() => void copyResult()}>
+              {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
+            </Btn>
+          </div>
           <p className="ol-style-trial-hint">{t(result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}</p>
           <div style={{ padding: 14, borderRadius: 12, background: 'var(--ol-blue-soft)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.75, userSelect: 'text' }}>{result.outputText}</div>
+          {copiedResult === result && <p role="status" className="ol-style-trial-hint">{t('style.trial.copied')}</p>}
+          {copyError && <p role="alert" className="ol-style-trial-hint">{t('style.trial.copyFailed')}</p>}
         </section>
       )}
     </dialog>

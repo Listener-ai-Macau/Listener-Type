@@ -1012,6 +1012,12 @@ export async function copyHistoryEntry(id: string, expectedText: string, nativeW
   await navigator.clipboard.writeText(expectedText);
 }
 
+export async function copyStyleTrialResult(text: string, nativeWindows: boolean): Promise<void> {
+  if (isTauri && nativeWindows) return invokeOrMock<void>('copy_style_trial_result', { text }, () => undefined);
+  if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+  await navigator.clipboard.writeText(text);
+}
+
 export function deleteHistoryEntry(id: string): Promise<void> {
   return invokeOrMock('delete_history_entry', { id }, () => undefined);
 }

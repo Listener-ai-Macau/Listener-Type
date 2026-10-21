@@ -33,6 +33,7 @@ interface OverviewProps {
   onOpenRecordingSettings?: () => void;
   onOpenLocalAsrSettings?: () => void;
   onStartDemoMode?: () => void;
+  onOpenStyles?: () => void;
 }
 
 const ASR_NAME_KEY_BY_ID: Record<string, string> = {
@@ -60,7 +61,7 @@ const LLM_NAME_KEY_BY_ID: Record<string, string> = {
   custom: 'custom',
 };
 
-export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onOpenLocalAsrSettings, onStartDemoMode }: OverviewProps) {
+export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onOpenLocalAsrSettings, onStartDemoMode, onOpenStyles }: OverviewProps) {
   const { t } = useTranslation();
   const [history, setHistory] = useState<DictationSession[]>([]);
   const [historyError, setHistoryError] = useState(false);
@@ -314,6 +315,12 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onO
           )}
           <span style={{ fontSize: 11.5, color: 'var(--ol-ink-4)' }}>{t('overview.firstDictationCancel')}</span>
         </div>
+        {onOpenStyles && (
+          <div style={{ borderTop: '1px solid var(--ol-line)', paddingTop: 10, marginTop: 12, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <Btn size="sm" variant="ghost" onClick={onOpenStyles}>{t('overview.tryTypedText')}</Btn>
+            <span style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--ol-ink-3)' }}>{t('overview.tryTypedTextHint')}</span>
+          </div>
+        )}
       </Card>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 12 }}>

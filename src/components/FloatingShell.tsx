@@ -474,6 +474,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                   onOpenRecordingSettings={() => openSettings('recording')}
                   onOpenLocalAsrSettings={() => openSettings('localAsr')}
                   onStartDemoMode={startProviderDemoMode}
+                  onOpenStyles={() => setCurrentTab('style')}
                 />
               ) : displayTab === 'style' ? (
                 <Style onOpenProviders={() => openSettings('providers', 'llm')} />

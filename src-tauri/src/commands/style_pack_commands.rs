@@ -79,6 +79,19 @@ pub async fn try_style_pack_text(
 }
 
 #[tauri::command]
+pub async fn copy_style_trial_result(text: String) -> Result<(), String> {
+    if text.is_empty() || text.chars().count() > 100_000 {
+        return Err("style_trial_clipboard_unavailable".into());
+    }
+    // Explicit copy only; no insertion, history entry or automatic processing.
+    // Reuse the expiry/revision-aware clipboard worker already used by History.
+    let copied = tauri::async_runtime::spawn_blocking(move || {
+        crate::insertion::copy_explicit_text(&text)
+    }).await.map_err(|_| "style_trial_clipboard_unavailable".to_owned())?;
+    if copied { Ok(()) } else { Err("style_trial_clipboard_unavailable".into()) }
+}
+
+#[tauri::command]
 pub fn preview_style_pack_runtime(
     coord: CoordinatorState<'_>,
     style_pack: StylePack,

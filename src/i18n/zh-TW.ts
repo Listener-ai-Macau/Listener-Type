@@ -313,6 +313,8 @@ export const zhTW: typeof zhCN = {
     firstDictationSetup: "先設定語音辨識",
     firstDictationInput: "麥克風與輸入來源",
     firstDictationCancel: "按 Esc 可取消錄音。",
+    tryTypedText: "先試一段文字",
+    tryTypedTextHint: "無需麥克風，選擇風格即可試用；潤色需要文字服務。",
     quickStartTitle: '快速開始',
     quickStartDesc: "先設定語音辨識，即可開始聽寫；AI 潤飾為選用功能。",
     quickStartAsrReady: "語音辨識已設定，可透過裝置按鍵或錄音快捷鍵聽寫；AI 潤飾為選用功能。",
@@ -452,6 +454,10 @@ export const zhTW: typeof zhCN = {
       }
     },
     trial: {
+      copyResult: "複製結果",
+      copying: "正在複製…",
+      copied: "已複製",
+      copyFailed: "未能複製結果。請重試，或選取文字後複製。",
       exampleSummary: "查看已存範例 · 非即時結果",
       exampleNotice: "這是隨風格包儲存的範例，不是為你的文字即時產生，也未驗證目前模型的效果。查看不會傳送服務請求或改動你的草稿。",
       exampleInput: "範例原稿",
@@ -468,7 +474,7 @@ export const zhTW: typeof zhCN = {
       download: "下載 Windows 軟體",
       open: "試用{{name}}",
       title: "用自己的文字試用{{name}}",
-      description: "看看已儲存的風格如何處理你的文字。這不是語音辨識測試。目前風格、歷史與剪貼簿保持不變。",
+      description: "使用已儲存的風格處理你鍵入的文字，不測試語音辨識。處理不會改變目前風格、歷史或剪貼簿；需要取用成稿時，請點擊「複製結果」。",
       serviceNotice: "預設原文風格不呼叫文字服務；其它或自訂風格使用你設定的文字服務，可能產生該服務的正常費用。只處理你在此主動提交的文字。",
       input: "你的文字",
       placeholder: "輸入或貼上你想寫的內容…",

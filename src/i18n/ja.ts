@@ -271,6 +271,8 @@ export const ja: typeof zhCN = {
     firstDictationSetup: "先に音声認識を設定",
     firstDictationInput: "マイクと入力元",
     firstDictationCancel: "Esc で録音をキャンセルできます。",
+    tryTypedText: "入力した文章で試す",
+    tryTypedTextHint: "マイクは不要です。スタイルを選んで試せます。整文にはテキストサービスが必要です。",
     quickStartTitle: 'クイックスタート',
     quickStartDesc: "音声認識を設定すると入力を始められます。AIによる文章調整は任意です。",
     quickStartAsrReady: "音声認識は設定済みです。デバイスのキーか録音ショートカットで入力できます。AIによる文章調整は任意です。",
@@ -410,6 +412,10 @@ export const ja: typeof zhCN = {
       }
     },
     trial: {
+      copyResult: "結果をコピー",
+      copying: "コピー中…",
+      copied: "コピーしました",
+      copyFailed: "結果をコピーできませんでした。再試行するか、文章を選択してコピーしてください。",
       exampleSummary: "保存された例を見る · リアルタイムの結果ではありません",
       exampleNotice: "このスタイルに保存された例です。あなたの文章から生成した結果ではなく、現在のモデルでの動作も未確認です。表示してもサービスへの送信や下書きの変更は行いません。",
       exampleInput: "例の下書き",
@@ -426,7 +432,7 @@ export const ja: typeof zhCN = {
       download: "Windowsアプリをダウンロード",
       open: "{{name}}を試す",
       title: "自分の文章で{{name}}を試す",
-      description: "保存したスタイルで入力した文章を処理します。音声認識のテストではありません。現在のスタイル、履歴、クリップボードは変更しません。",
+      description: "保存したスタイルで入力した文章を処理します。音声認識のテストではありません。処理しても現在のスタイル、履歴、クリップボードは変わりません。結果を使う場合は「結果をコピー」を押してください。",
       serviceNotice: "既定の原文スタイルはテキストサービスを使いません。他のスタイルやカスタマイズしたスタイルは設定済みのサービスを使い、通常の利用料金が発生する場合があります。ここで送信する文章だけを処理します。",
       input: "自分の文章",
       placeholder: "書きたい内容を入力または貼り付け…",
