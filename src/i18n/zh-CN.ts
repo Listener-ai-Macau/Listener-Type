@@ -2,6 +2,11 @@
 // 添加新 key 时，必须同步更新 en.ts，否则首次切换到 English 会回落到中文残留。
 
 export const zhCN = {
+  styleComparisons: {
+    "title": "这段原文已完成的结果",
+    "hint": "这些结果保留在当前窗口，不会重新请求服务。打开相应结果后可编辑或复制。",
+    "open": "打开{{name}}"
+  },
   devicePractice: {
     "title": "试试我的四个键",
     "description": "在这里输入文字，再点击下面的按键。按键使用当前布局的单击动作。",

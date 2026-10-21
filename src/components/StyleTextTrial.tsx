@@ -35,6 +35,14 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const completed = useRef(new Map<string, { signature: string; result: StyleTextTrialResult; edited: string | null }>());
   const signature = JSON.stringify([draft, pack.prompt]);
   const result = storedResult?.packId === pack.id && resultSignature === signature ? storedResult : null;
+  // Previous styles stay visibly labelled while a new style has no result yet.
+  // They belong only to this exact input and unchanged saved prompt, never a new draft.
+  const comparisons = (packs ?? [pack]).flatMap(option => {
+    if (option.id === pack.id) return [];
+    const saved = completed.current.get(option.id);
+    return saved?.signature === JSON.stringify([draft, option.prompt])
+      ? [{ pack: option, text: saved.edited ?? saved.result.outputText }] : [];
+  });
   const [restored, setRestored] = useState(false);
   const [copying, setCopying] = useState(false);
   const [copiedResult, setCopiedResult] = useState<StyleTextTrialResult | null>(null);
@@ -243,6 +251,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       {pending && <p role="status" className="ol-style-trial-hint">{t('style.trial.pending')}</p>}
       {error && <p role="alert" style={{ color: 'var(--ol-err)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.6 }}>{error}</p>}
       </div>
+      <div className="ol-style-trial-outputs">
       {result && (
         <section ref={resultSection} className="ol-style-trial-result" aria-label={t('style.trial.output')} aria-live="polite">
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
@@ -283,6 +292,19 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         <h3>{t('style.trial.output')}</h3>
         <p className="ol-style-trial-hint">{t(pending ? 'style.trial.running' : 'style.trial.resultPlaceholder')}</p>
       </div>}
+      {comparisons.length > 0 && <section className="ol-style-trial-comparisons" aria-label={t('styleComparisons.title')} data-style-trial-comparisons>
+        <h3>{t('styleComparisons.title')}</h3>
+        <p className="ol-style-trial-hint">{t('styleComparisons.hint')}</p>
+        {comparisons.map(previous => <article key={previous.pack.id}>
+          <div className="ol-style-trial-comparison-heading">
+            <h4>{stylePackPresentation(previous.pack, t).name}</h4>
+            {onSelectPack && <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || extraStyleChoice?.pending}
+              onClick={() => onSelectPack(previous.pack.id)}>{t('styleComparisons.open', {name:stylePackPresentation(previous.pack, t).name})}</Btn>}
+          </div>
+          <pre>{previous.text}</pre>
+        </article>)}
+      </section>}
+      </div>
       </div>
       {extraStyleChoice && <div className="ol-style-trial-alternative">
         <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || extraStyleChoice.pending} onClick={extraStyleChoice.onChoose}>

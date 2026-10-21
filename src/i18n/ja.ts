@@ -6,6 +6,11 @@ import { en } from './en.ts';
 // 更新してください（更新されない key は ...en で英語にフォールバックします）。
 export const ja: typeof zhCN = {
   ...en,
+  styleComparisons: {
+    "title": "このテキストの作成済み結果",
+    "hint": "このウィンドウ内に保持され、新たなサービスへのリクエストはありません。結果を開くと編集やコピーができます。",
+    "open": "{{name}}を開く"
+  },
   devicePractice: {
     "title": "4つのキーを試す",
     "description": "ここにテキストを入力し、下のキーをクリックしてください。現在のレイアウトの1回押しの動作を試せます。",

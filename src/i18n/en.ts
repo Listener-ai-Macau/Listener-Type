@@ -5,6 +5,11 @@ import { enDeviceMaintenance, enFirmwareMaintenance } from './enDeviceMaintenanc
 
 // Type-level guarantee that en mirrors the zh-CN shape.
 export const en: typeof zhCN = {
+  styleComparisons: {
+    "title": "Completed for this text",
+    "hint": "These results stay in this open window without a new service request. Open a result to edit or copy it.",
+    "open": "Open {{name}}"
+  },
   devicePractice: {
     "title": "Try your four keys",
     "description": "Type something here, then click a key below. The buttons use the single-press actions in your current layout.",

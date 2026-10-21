@@ -6,6 +6,11 @@ import { en } from './en.ts';
 // 갱신해 주세요(갱신되지 않은 key 는 ...en 으로 영어로 fallback 됩니다).
 export const ko: typeof zhCN = {
   ...en,
+  styleComparisons: {
+    "title": "이 텍스트의 완료된 결과",
+    "hint": "새 서비스 요청 없이 이 창에 보관됩니다. 결과를 열어 편집하거나 복사할 수 있습니다.",
+    "open": "{{name}} 열기"
+  },
   devicePractice: {
     "title": "네 개의 키 사용해 보기",
     "description": "여기에 텍스트를 입력한 다음 아래 키를 눌러 보세요. 현재 레이아웃의 한 번 누르기 동작을 사용합니다.",

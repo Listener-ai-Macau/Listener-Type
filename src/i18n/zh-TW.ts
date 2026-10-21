@@ -4,6 +4,11 @@ import type { zhCN } from './zh-CN';
 // 新增 key 時，必須同步更新 en.ts，避免切換到 English 後出現中文殘留。
 
 export const zhTW: typeof zhCN = {
+  styleComparisons: {
+    "title": "這段原文已完成的結果",
+    "hint": "這些結果保留在目前視窗，不會重新請求服務。開啟相應結果後可編輯或複製。",
+    "open": "開啟{{name}}"
+  },
   devicePractice: {
     "title": "試試我的四個鍵",
     "description": "在這裡輸入文字，再點選下方按鍵。按鍵使用目前配置的單按動作。",
