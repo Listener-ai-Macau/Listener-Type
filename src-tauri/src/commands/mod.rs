@@ -1851,6 +1851,7 @@ pub async fn repolish(
 }
 
 include!("style_pack_commands.rs");
+include!("audio_file_trial.rs");
 include!("style_trial_delivery.rs");
 include!("local_device_layouts.rs");
 

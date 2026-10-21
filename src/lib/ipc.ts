@@ -1741,6 +1741,14 @@ export function previewStylePackRuntime(stylePack: StylePack): Promise<StylePack
   return invokeOrMock('preview_style_pack_runtime', { stylePack }, () => composeMockStylePackRuntimeDiagnostics(stylePack));
 }
 
+export interface AudioFileTranscript { text: string; audioDurationMs: number; elapsedMs: number }
+export function transcribeAudioFileTrial(requestId: string, wavBytes: number[]): Promise<AudioFileTranscript> {
+  return invokeOrMock('transcribe_audio_file_trial', { requestId, wavBytes }, () => { throw new Error('audio_file_native'); });
+}
+export function cancelAudioFileTrial(requestId: string): Promise<void> {
+  return invokeOrMock('cancel_audio_file_trial', { requestId }, () => undefined);
+}
+
 export function tryStylePackText(stylePackId: string, rawText: string): Promise<StyleTextTrialResult> {
   return invokeOrMock('try_style_pack_text', { stylePackId, rawText }, () => {
     // The ordinary browser preview cannot call the user's configured native text service.

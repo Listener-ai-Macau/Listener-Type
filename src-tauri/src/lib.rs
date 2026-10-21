@@ -1029,6 +1029,8 @@ pub fn run() {
             commands::save_style_pack,
             commands::preview_style_pack_runtime,
             commands::try_style_pack_text,
+            commands::transcribe_audio_file_trial,
+            commands::cancel_audio_file_trial,
             commands::copy_style_trial_result,
             commands::list_local_device_layouts,
             commands::save_local_device_layout,

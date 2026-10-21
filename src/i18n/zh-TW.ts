@@ -1,9 +1,11 @@
+import { audioFileTranslations } from './audioFile';
 import type { zhCN } from './zh-CN';
 
 // 繁體中文資源 — 與產品當前文案保持一致。
 // 新增 key 時，必須同步更新 en.ts，避免切換到 English 後出現中文殘留。
 
 export const zhTW: typeof zhCN = {
+  audioFile: audioFileTranslations.zhTW,
   savedPhrases: {
     title: '使用已儲存定型文',
     intro: '使用已儲存配置中的定型文。複製到剪貼簿後，貼到正在寫作的位置。配置變更需先儲存才會出現在這裡。',

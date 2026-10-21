@@ -1,3 +1,4 @@
+import { audioFileTranslations } from './audioFile';
 import type { zhCN } from './zh-CN';
 import { en } from './en.ts';
 
@@ -6,6 +7,7 @@ import { en } from './en.ts';
 // 更新してください（更新されない key は ...en で英語にフォールバックします）。
 export const ja: typeof zhCN = {
   ...en,
+  audioFile: audioFileTranslations.ja,
   savedPhrases: {
     title: '保存した定型文を使う',
     intro: '保存済みの配置から定型文をコピーし、書いている場所に貼り付けます。配置の編集内容は先に保存してください。',

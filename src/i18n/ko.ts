@@ -1,3 +1,4 @@
+import { audioFileTranslations } from './audioFile';
 import type { zhCN } from './zh-CN';
 import { en } from './en.ts';
 
@@ -6,6 +7,7 @@ import { en } from './en.ts';
 // 갱신해 주세요(갱신되지 않은 key 는 ...en 으로 영어로 fallback 됩니다).
 export const ko: typeof zhCN = {
   ...en,
+  audioFile: audioFileTranslations.ko,
   savedPhrases: {
     title: '저장한 문구 사용',
     intro: '저장된 레이아웃에서 문구를 복사해 작성 중인 곳에 붙여 넣으세요. 레이아웃 수정 사항은 먼저 저장해야 여기에 반영됩니다.',

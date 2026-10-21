@@ -1,3 +1,4 @@
+import { audioFileTranslations } from './audioFile';
 // English resources — translated from zh-CN.ts. Keep keys in sync.
 
 import type { zhCN } from './zh-CN';
@@ -5,6 +6,7 @@ import { enDeviceMaintenance, enFirmwareMaintenance } from './enDeviceMaintenanc
 
 // Type-level guarantee that en mirrors the zh-CN shape.
 export const en: typeof zhCN = {
+  audioFile: audioFileTranslations.en,
   savedPhrases: {
     title: 'Use my saved phrases',
     intro: 'Use phrases from a saved layout. Copy to your clipboard, then paste where you are writing. Save layout edits first to use them here.',
@@ -576,7 +578,7 @@ export const en: typeof zhCN = {
       insertFailed: "Insertion was not confirmed. Check the destination; your result is still here to copy. An editable destination and an unchanged clipboard are required.",
       insertRecording: "Finish the current recording before inserting this result.",
       insertCancelled: "Insertion cancelled. Your result stays here.",
-      shortNotice: "Text-only trial, not speech recognition. Default Raw sends no request; other or customized styles may incur text-service charges. Nothing is sent until you submit.",
+      shortNotice: "Text-only trial, not speech recognition. Default Original text sends no request; other or customized styles may incur text-service charges. Nothing is sent until you submit.",
       detailsSummary: "How this trial uses your text",
       styleLabel: "Trial style",
       stylesFailed: "Could not load your saved styles. Your draft is still here.",
@@ -604,7 +606,7 @@ export const en: typeof zhCN = {
       open: "Try {{name}}",
       title: "Try {{name}} with your text",
       description: "See how a saved style handles your own typed text. This does not test speech recognition. Processing keeps your active style, history and clipboard unchanged. Use Copy result when you want the output on your clipboard.",
-      serviceNotice: "Default Raw keeps your text without a text service. Other or customized styles use your configured text service and may incur its normal charges. Only text you submit here is processed.",
+      serviceNotice: "Default Original text keeps your text without a text service. Other or customized styles use your configured text service and may incur its normal charges. Only text you submit here is processed.",
       input: "Your text",
       placeholder: "Type or paste something you want to write…",
       run: "Try this text",

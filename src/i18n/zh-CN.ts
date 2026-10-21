@@ -1,7 +1,9 @@
+import { audioFileTranslations } from './audioFile';
 // 简体中文资源 — 与产品当前文案保持一致。
 // 添加新 key 时，必须同步更新 en.ts，否则首次切换到 English 会回落到中文残留。
 
 export const zhCN = {
+  audioFile: audioFileTranslations.zhCN,
   savedPhrases: {
     title: '使用已保存短语',
     intro: '使用已保存布局中的短语。复制到剪贴板后，粘贴到正在写作的位置。布局修改需先保存才会出现在这里。',
