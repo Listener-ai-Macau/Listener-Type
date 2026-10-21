@@ -45,6 +45,12 @@ Free and open source · Keyboard optional · Set up a recognition service or loc
 
 ## A desk control for voice input · US$49
 
+An optional little desk gadget: enjoy a physical knob, four keys you can make your own, and a voice-to-text interaction to try whenever it suits you. It can earn a place on your desk because you like using it, even for occasional messages.
+
+<img src="docs/assets/readme/keyboard-front.jpg" alt="Repository photograph of Listener hardware with four transparent keys, a black knob and status lights" width="820">
+
+*Repository hardware photograph. It shows the appearance; hand size, control feel and the final shipping batch are not established by this image.*
+
 Listener puts a microphone and a physical start/stop control beside your working hand. It is designed for desk work where you alternate between speaking and typing longer messages, emails or notes.
 
 | At your desk | Free Type app | With Listener hardware |
