@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-21T17:52:40.872268+08:00",
+  "updatedAt": "2026-10-22T00:29:09.831024+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 94,
-    "source": "d19ceefcf1c5ad2559f0eb079c0cb3b1341424d3",
-    "sourceTag": "build-source/type94-20261021",
+    "build": 105,
+    "source": "e80c3d943ff6076a3140ed423956132fc3e3074b",
+    "sourceTag": "build-source/type105-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "e3ac2d6ab245c205ac5d7ec14d49ba4349042826f6546d3171d552ac78713e6a",
-    "sizeBytes": 298500096,
-    "exeSha256": "e2250d211c96aa6cc50e0f7f6e3bbeeae16bb425150dc4fd015aa9d69fc9c61b",
+    "sha256": "7ebcb2c17e24725b80f70b8e60467e48137cd1a2d34a6312b253687d9561c26a",
+    "sizeBytes": 298561536,
+    "exeSha256": "0e2cff4169f8f4328835d56fe4caf8c0949707254ba484a14c2ed3079ac10f89",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -129,7 +129,14 @@
     "type94InstalledExeAndPreferencesVerified": false,
     "type94TrialControlsStableInExactNative": true,
     "type94LayoutDesktopAndNarrowVerified": true,
-    "type94VerificationScope": "Controlled readiness/style/layout movement56.859px before to0px after, draft and viewport retained. Exact94 ordinary private native Raw/Light/Raw/result controls stable. No cloud in engineer checks, new speech, BLE, external field or customer purchase proof; daily92 retained."
+    "type94VerificationScope": "Controlled readiness/style/layout movement56.859px before to0px after, draft and viewport retained. Exact94 ordinary private native Raw/Light/Raw/result controls stable. No cloud in engineer checks, new speech, BLE, external field or customer purchase proof; daily92 retained.",
+    "type105InstalledExeAndPreferencesVerified": false,
+    "type105ExactPrivateNativeWorkflowVerified": true,
+    "type105VerificationScope": "Exact isolated native MSI: editable result→explicit selected-key draft→Save→reopen→two distinct phrase previews/practice reuse; explicit internal Type page navigation; saved-phrase native clipboard Copy→ordinary Paste into own Type input→continued typing. Engineer check used no cloud. Independent105 used the existing text service, edited and copied its own result, but did not explore saved phrases. Daily92 stays running. No new voice/BLE/external automatic input/physical qualification.",
+    "customer102ActualResultToKeySaveReuseObserved": true,
+    "customer105Reviewed": true,
+    "customer105SavedPhraseUseObserved": false,
+    "customer105PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -146,6 +153,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build94-20261021"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build105-20261022"
   }
 }

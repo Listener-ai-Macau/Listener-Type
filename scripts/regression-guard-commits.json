@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T00:19:35.232050+08:00",
+  "updated_at": "2026-10-22T00:28:56.957974+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4547,7 +4547,7 @@
       "repo": "type",
       "commit": "e80c3d943ff6076a3140ed423956132fc3e3074b",
       "subject": "Reuse saved key phrases through explicit clipboard copy",
-      "state": "candidate105_exact_native_saved_copy_ordinary_paste_verified_customer_pending",
+      "state": "candidate105_exact_native_saved_copy_paste_verified_independent_customer_did_not_explore_feature",
       "protects": [
         "Use saved phrases reads saved layout text keyed by actual key/gesture, independently of unsaved mapping drafts and the practice buffer. No placeholder copies.",
         "Explicit copy reuses the existing generic clipboard worker. Copied appears only after success; failure retains saved phrase and retry. Busy closes/layout changes are held until completion.",
@@ -4570,10 +4570,12 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE103-software-20261021-232600\\clarification-return-use.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE105-software-20261022-001700\\dispatch-input.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE105-software-20261022-001700\\dispatch-input.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE105-software-20261022-001700\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE105-software-20261022-001700\\operations.txt"
       ],
       "unverified": [
-        "Independent105 full feedback pending. Native saved Copy/Paste into own input is not automatic external insertion or physical-key proof.",
+        "Independent105 completed a self-chosen email task with actual existing text service, local result editing and native UI Copy confirmation; did not explore saved phrases. Saved-phrase customer value remains unknown; temporarily declines49 hardware, prefers free app for this text task.",
         "F103R-01 original current-writing-position outcome only partly addressed: manual clipboard reuse is available; automatic target insertion remains separate. Automatic Formal quality and105 physical/live speech/real purchase remain unknown."
       ]
     }
