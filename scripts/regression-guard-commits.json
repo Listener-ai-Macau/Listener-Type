@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T22:31:42.735266+08:00",
+  "updated_at": "2026-10-21T23:03:17.190691+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4308,12 +4308,15 @@
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE97-software-20261021-200233\\experience.txt",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE98-software-20261021-211050\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE98-software-20261021-211050\\operations.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE98-software-20261021-211050\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE101-software-20261021-223000\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE101-software-20261021-223000\\operations.txt"
       ],
       "unverified": [
         "Independent98 chose typed drafting, used local result editing and still declined49 hardware. Did not open key-layout library; its independent value remains unknown, not a negative usability result.",
         "Physical key presses, new98 physical layout writing, real voice/from-zero setup/external Insert/long-term/real payment remain unknown. Headless target fixture is not a BLE or two-physical-board acceptance."
-      ]
+      ],
+      "customer_followup101": "Capability retained in exact101 and independently used: saved own template, private practice Copy/Paste/Undo, actual edited service result copied into key1 and reused. Earlier98/100 non-use/refusals remain; not physical proof or purchase."
     },
     {
       "id": "customer99_session_style_comparisons",
@@ -4382,19 +4385,22 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE99-software-20261021-214530\\experience.txt",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE100-software-20261021-221230\\dispatch-input.txt",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE100-software-20261021-221230\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE100-software-20261021-221230\\operations.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE100-software-20261021-221230\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE101-software-20261021-223000\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE101-software-20261021-223000\\operations.txt"
       ],
       "unverified": [
         "Independent100 saw practice entry but chose typed drafting only, edited final text and deferred49 hardware. Practice value remains unexplored. Its switch-style perceived loss is addressed101 as visible comparison, not claimed fixed by the invisible99 cache.",
         "AutomaticFormal quality, true speech/external-field input, physical controls/from-zero service setup/long-term and real payment remain separate unknowns."
-      ]
+      ],
+      "customer_followup101": "Capability retained in exact101 and independently used: saved own template, private practice Copy/Paste/Undo, actual edited service result copied into key1 and reused. Earlier98/100 non-use/refusals remain; not physical proof or purchase."
     },
     {
       "id": "customer101_visible_style_comparisons",
       "repo": "type",
       "commit": "640ee87568a6a593fdffad070447cc9717eaadcd",
       "subject": "Keep labelled completed results visible while comparing another style",
-      "state": "candidate101_exact_native_visible_comparison_and_own_input_copy_verified_customer_pending",
+      "state": "candidate101_independent_custom_layout_workflow_observed_comparison_unexplored_purchase_deferred",
       "protects": [
         "Other completed styles remain visibly labelled while the selected new style has no result. Open recovers that exact local edit without a service call.",
         "Visible prior text is filtered by exact draft and unchanged saved style prompt; deleted/different styles and other inputs cannot leak into comparison.",
@@ -4418,15 +4424,55 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE100-software-20261021-221230\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE101-software-20261021-223000\\dispatch-input.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE101-software-20261021-223000\\dispatch-input.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE101-software-20261021-223000\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE101-software-20261021-223000\\operations.txt"
       ],
       "unverified": [
-        "Independent101 natural feedback pending; no claim comparison or prior practice creates purchase desire.",
+        "Independent101 used one Formal result only, so visible multi-style comparison remains unexplored. Actual layout save/practice and normal edited-result Copy→template paste succeeded; still deferred49.",
         "AutomaticFormal quality, external insertion/real voice/physical controls/from-zero setup/long-term and real payment remain distinct unknowns."
+      ]
+    },
+    {
+      "id": "customer102_reviewed_result_key_phrase",
+      "repo": "type",
+      "commit": "fb4e4a2d4583b88c00d859c5a591fcbb24c77ec1",
+      "subject": "Turn reviewed text into an explicit reusable key-layout draft",
+      "state": "candidate102_exact_native_result_to_key_draft_save_reuse_verified_customer_pending",
+      "protects": [
+        "Explicit Use as a key phrase captures current edited result into an independent draft, with no clipboard/API rerun or device write. Original trial remains.",
+        "Choose key/gesture and explicit Apply changes only that mapping; explicit local Save retains other mappings and existing capacity/CAS protections. Large phrases are never truncated silently.",
+        "Unapplied phrase edits and unsaved mappings ask before close; nested Escape cannot close parent trial.",
+        "Overview and result bridge remember only last selected layout ID in this window session; read current library and never overwrite already touched input/practice. Device-settings library ignores this hint.",
+        "Save footer remains reachable; all selected-board revision/read-token protections and ordinary dictation/config unchanged."
+      ],
+      "guards": [
+        "scripts/check-result-key-phrase-ui.py:9 affected draft→review→mapping/save/close/size/read-race/device-isolation checks.",
+        "Existing12 local-layout/selected-board contracts and31 trial lifecycle checks; stable all4style input/button positions.",
+        "Exact102 ordinary native Raw→edit→key draft→explicit save, reopen without reselect, own practice exact, cleanup;0cloud."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\phrase102-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\layout102-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style102-lifecycle.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style102-layout.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native102-snapshot-20261021-225718\\phrase-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261021-build102\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE101-software-20261021-223000\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE102-software-20261021-230100\\dispatch-input.txt"
+      ],
+      "unverified": [
+        "Independent102 complete feedback pending; engineering shortening does not establish purchase desire.",
+        "AutomaticFormal quality and true speech/external app/physical/long-term/payment remain open."
+      ],
+      "capture_limitations": [
+        "First native script used viewport-only coordinates and hit sticky footer instead of obscured Apply; then cleanup Close was above the dialog clip. Both original failures/screenshots retained. Fixed tool hit-test/scroll, not product source; final complete native path passed."
       ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-21T22:31:42.735266+08:00",
+  "feature_routes_updated_at": "2026-10-21T23:03:17.190691+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -4981,7 +5027,8 @@
         "firmware32_device_owned_profiles_atomic_nvs",
         "selected_rename66_verify_before_terminal_apply",
         "firmware33_atomic_power_state_breaks_settings_pm_lock_cycle",
-        "customer100_scoped_four_key_practice"
+        "customer100_scoped_four_key_practice",
+        "customer102_reviewed_result_key_phrase"
       ],
       "paths": {
         "type": [
@@ -4989,7 +5036,8 @@
           "src-tauri/src/commands/device/settings_selection.rs",
           "src-tauri/src/embedded_ble/windows_ble/settings_target.rs",
           "src/components/DeviceLayoutPractice.tsx",
-          "scripts/check-device-key-practice-ui.py"
+          "scripts/check-device-key-practice-ui.py",
+          "scripts/check-result-key-phrase-ui.py"
         ],
         "firmware": [
           "components/device_settings/device_settings.c",
@@ -5015,7 +5063,8 @@
         "device_onboard_keys60_exact_uid_and_bounded_transaction",
         "firmware32_device_owned_profiles_atomic_nvs",
         "customer98_reusable_local_key_layouts",
-        "customer100_scoped_four_key_practice"
+        "customer100_scoped_four_key_practice",
+        "customer102_reviewed_result_key_phrase"
       ],
       "paths": {
         "type": [
@@ -5032,7 +5081,8 @@
           "src/lib/deviceKeyLayouts.ts",
           "scripts/check-device-layouts-ui.py",
           "src/components/DeviceLayoutPractice.tsx",
-          "scripts/check-device-key-practice-ui.py"
+          "scripts/check-device-key-practice-ui.py",
+          "scripts/check-result-key-phrase-ui.py"
         ],
         "firmware": [
           "components/device_settings/device_key_profile.c",
@@ -5087,7 +5137,8 @@
         "customer97_local_result_revision_delivery",
         "customer99_session_style_comparisons",
         "customer100_scoped_four_key_practice",
-        "customer101_visible_style_comparisons"
+        "customer101_visible_style_comparisons",
+        "customer102_reviewed_result_key_phrase"
       ],
       "paths": {
         "type": [
@@ -5133,7 +5184,8 @@
           "src/lib/everydayListStyle.ts",
           "scripts/check-style-trial-comparison-ui.py",
           "src/components/DeviceLayoutPractice.tsx",
-          "scripts/check-device-key-practice-ui.py"
+          "scripts/check-device-key-practice-ui.py",
+          "scripts/check-result-key-phrase-ui.py"
         ]
       },
       "known_failures": [
@@ -5223,7 +5275,8 @@
         "customer95_reviewed_result_explicit_handoff",
         "customer97_local_result_revision_delivery",
         "customer99_session_style_comparisons",
-        "customer101_visible_style_comparisons"
+        "customer101_visible_style_comparisons",
+        "customer102_reviewed_result_key_phrase"
       ],
       "paths": {
         "type": [
@@ -5234,7 +5287,8 @@
           "src-tauri/src/insertion/clipboard_handoff.rs",
           "scripts/check-style-trial-handoff-ui.py",
           "src/components/QuickStyleTextTrial.tsx",
-          "scripts/check-style-trial-comparison-ui.py"
+          "scripts/check-style-trial-comparison-ui.py",
+          "scripts/check-result-key-phrase-ui.py"
         ]
       },
       "known_failures": [
