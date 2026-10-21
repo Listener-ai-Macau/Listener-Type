@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T13:35:41.392782+08:00",
+  "updated_at": "2026-10-21T14:24:21.787829+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3919,9 +3919,43 @@
         "Still missing live same-frame knob/speech/lights/final-text demonstration and hand scale/control sound/feel.",
         "Original F90-02 Structured output value remains open; not fixed by positioning or photographs."
       ]
+    },
+    {
+      "id": "customer91_optional_everyday_list_and_trial_purpose",
+      "repo": "type",
+      "commit": "8162b6ee13c2545afa72af47ab5ca5495aed4a75",
+      "subject": "Display selected saved-style purpose and add a separate optional everyday-list style without changing old prompts or defaults",
+      "state": "exact91_native_UI_and_existing_text_service_verified_independent_reuse_pending",
+      "protects": [
+        "Saved purpose is visible before submission; customized descriptions stay intact.",
+        "Everyday list uses the existing create_from_template path only after an explicit action; it does not replace builtin prompts or activate recording.",
+        "Creation failure preserves draft/selection and permits retry; a matching saved prompt is reused without duplicates.",
+        "Pending style creation prevents a competing trial/selection; late creation completion does not reopen closed UI.",
+        "Existing Raw, provider selection, clipboard acknowledgement and draft/result lifecycle remain."
+      ],
+      "guards": [
+        "npm run build",
+        "python scripts/check-style-text-trial-ui.py --url <owned URL> --report <owned path>",
+        "Exact91 private ordinary UI, native Raw Copy/paste, optional style create and one explicit existing DeepSeek request."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style91-general-list-probe.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style91-affected-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style91-native-copy.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style91-native-everyday-result.png",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build91\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-90-software-20261021\\report.txt"
+      ],
+      "unverified": [
+        "Independent91 reuse and purchase interest remain unproven here; prior90 reported F90-02.",
+        "Synthetic engineering text under English output preference does not validate all languages/providers or live ASR, external input and physical use.",
+        "The builtin technical style is preserved; this adds an explicit everyday alternative, not a guarantee that every draft always becomes a list."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-21T13:35:41.392782+08:00",
+  "feature_routes_updated_at": "2026-10-21T14:24:21.787829+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -4524,7 +4558,7 @@
     },
     {
       "id": "customer-first-use",
-      "baseline_state": "installed87_native_default_style_locale_verified_customer_pending",
+      "baseline_state": "91_native_optional_list_verified_latest90_independent_conditionally_interested_not_ordered",
       "accepted_scope": "First-use guidance and explicit personal-text trial navigation; precise native History copy proof is separate. No live speech, hardware or market qualification.",
       "guard_entries": [
         "customer_setup68_asr_ready_does_not_require_optional_llm",
@@ -4552,7 +4586,8 @@
         "customer89_text_trial_copy_and_overview_entry",
         "customer89_software_value_public_information",
         "customer90_direct_trial_workspace_and_result_readability",
-        "customer90_optional_ai_starter_value_and_real_photo"
+        "customer90_optional_ai_starter_value_and_real_photo",
+        "customer91_optional_everyday_list_and_trial_purpose"
       ],
       "paths": {
         "type": [
@@ -4594,7 +4629,8 @@
           "docs/USAGE.md",
           "docs/release/rc1-notes.md",
           "src/components/QuickStyleTextTrial.tsx",
-          "src/components/StyleTextTrial.css"
+          "src/components/StyleTextTrial.css",
+          "src/lib/everydayListStyle.ts"
         ]
       },
       "known_failures": [
@@ -4623,7 +4659,8 @@
         "Independent88 completed its own useful Light-polish result but Overview had no typed-trial entry and results no explicit Copy action. FU88-02/03 are navigation/use frictions, not evidence that manual text selection failed.",
         "Independent software-value89 saw public release engineering/customer narratives alongside product facts. Fresh-none history did not prevent exposure through public notes. Old version labels through web-reader remain channel-specific unknown, not proved wrong MSI.",
         "Independent public-value89 wanted a draft but Overview navigated to pack management; old text-trial stacked full notices/examples/draft before result, pushing the short email tail below the viewport. F89PV-02/03 retained; not ASR/BLE faults.",
-        "Independent90 used correct builtin.structured saved6415-char prompt with explicit3-item formatting and Structured native dispatch, yet the retained reading-group draft returned one paragraph. UI selection/source dispatch confirmed, format-compliance root cause remains open; not a new speech/BLE fault."
+        "Independent90 used correct builtin.structured saved6415-char prompt with explicit3-item formatting and Structured native dispatch, yet the retained reading-group draft returned one paragraph. UI selection/source dispatch confirmed, format-compliance root cause remains open; not a new speech/BLE fault.",
+        "F90-02: a reading-group message stayed one paragraph under builtin.structured despite correct dispatch. This factory prompt has technical focus since732a863;90 trial selector hid its saved purpose.91 exposes purpose and adds a separate optional everyday list; original/custom prompts remain intact."
       ]
     },
     {

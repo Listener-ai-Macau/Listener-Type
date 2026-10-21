@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-21T12:41:59.239927+08:00",
+  "updatedAt": "2026-10-21T14:24:21.787829+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 90,
-    "source": "eaf0de83582cefc04e4d208c08a069240ac0807b",
-    "sourceTag": "build-source/type90-20261021",
+    "build": 91,
+    "source": "8162b6ee13c2545afa72af47ab5ca5495aed4a75",
+    "sourceTag": "build-source/type91-20261021",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "99b7e46e2be3b6d75d1f477dc7e3b6a6f5bf1d943c35e8a9e01f1dbf969162cc",
+    "sha256": "ef9e4764d0c02329061243b58077e80fcc9adfdd1641dde40241672d25cbde7b",
     "sizeBytes": 298631168,
-    "exeSha256": "8118a52dd55d139493adcf71f7abf741c86580e3885fa285f9aa7551574bf903",
+    "exeSha256": "bcc8cfbc800716708c9e6943ed716c34eaf92868b383c82e91daf45eb29eaeef",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -107,7 +107,10 @@
     "textTrial89VerificationScope": "Exact native package, synthetic Raw result explicitly copied and pasted unchanged into own private input. No cloud, live speech, external target or physical acceptance.",
     "type90InstalledExeAndPreferencesVerified": true,
     "textTrial90DirectWorkspaceAndNativeCopyVerified": true,
-    "textTrial90VerificationScope": "Exact private native Raw UI: Overview directly opens draft, result/native Copy and ordinary paste into own field. No service, live speech, external editor or hardware qualification."
+    "textTrial90VerificationScope": "Exact private native Raw UI: Overview directly opens draft, result/native Copy and ordinary paste into own field. No service, live speech, external editor or hardware qualification.",
+    "type91InstalledExeAndPreferencesVerified": true,
+    "textTrial91OptionalListNativeVerified": true,
+    "textTrial91VerificationScope": "Exact private native91: saved technical-purpose description, explicit optional list creation, Raw Copy/paste and one existing DeepSeek request for synthetic draft. Default/old prompts unchanged. Not customer, live speech, external editor or physical qualification."
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -124,6 +127,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build90-20261021"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build91-20261021"
   }
 }
