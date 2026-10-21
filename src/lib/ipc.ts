@@ -1369,6 +1369,26 @@ export function getDeviceSettings(): Promise<DeviceSettingsSnapshot> {
 }
 
 const mockSettingsDevice: SettingsDevice = { id: 'usb:demo', transport: 'usb', label: 'Listener · USB' };
+export interface SavedTextDraft { id: string; createdAt: string; name: string; original: string; text: string }
+let mockTextDrafts: SavedTextDraft[] = [];
+export function listSavedTextDrafts(): Promise<SavedTextDraft[]> {
+  return invokeOrMock('list_saved_text_drafts', undefined, () => structuredClone(mockTextDrafts));
+}
+export function saveTextDraft(id: string, name: string, original: string, text: string): Promise<SavedTextDraft> {
+  return invokeOrMock('save_text_draft', {id,name,original,text}, () => {
+    const old = mockTextDrafts.find(d => d.id === id);
+    if (old) {
+      if (old.name !== name || old.original !== original || old.text !== text) throw Error('saved_draft_changed');
+      return structuredClone(old);
+    }
+    if (mockTextDrafts.length >= 50) throw Error('saved_draft_limit');
+    const value = {id,createdAt:new Date().toISOString(),name,original,text};
+    mockTextDrafts.unshift(value);return structuredClone(value);
+  });
+}
+export function deleteSavedTextDraft(id: string): Promise<void> {
+  return invokeOrMock('delete_saved_text_draft', {id}, () => {mockTextDrafts = mockTextDrafts.filter(d=>d.id!==id);});
+}
 let mockDeviceLayouts: DeviceLayout[] = [];
 export const nativeDeviceLayoutsAvailable = isTauri;
 export function listLocalDeviceLayouts(): Promise<DeviceLayout[]> {

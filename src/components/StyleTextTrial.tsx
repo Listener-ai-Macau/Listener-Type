@@ -1,3 +1,4 @@
+import { SaveTextDraft } from './SaveTextDraft';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { canInsertStyleTrialResult, cancelStyleTrialInsert, copyStyleTrialResult, getStyleTextTrialReadiness, insertStyleTrialResult, tryStylePackText } from '../lib/ipc';
@@ -30,6 +31,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const running = useRef(false);
   const copyRunning = useRef(false);
   const [pending, setPending] = useState(false);
+  const [draftSaving, setDraftSaving] = useState(false);
   const [keyPhrase, setKeyPhrase] = useState<string | null>(null);
   const [storedResult, setResult] = useState<StyleTextTrialResult | null>(null);
   const [resultSignature, setResultSignature] = useState('');
@@ -108,7 +110,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   }, []);
 
   const runTrial = async () => {
-    if (running.current || copyRunning.current || deliveryRequest.current || extraStyleChoice?.pending || !canProcess || !draft.trim()) return;
+    if (draftSaving || running.current || copyRunning.current || deliveryRequest.current || extraStyleChoice?.pending || !canProcess || !draft.trim()) return;
     running.current = true;
     const request = ++generation.current;
     setPending(true);
@@ -146,7 +148,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   };
 
   const copyResult = async () => {
-    if (!result || !resultOutput.trim() || copyRunning.current || running.current || deliveryRequest.current) return;
+    if (draftSaving || !result || !resultOutput.trim() || copyRunning.current || running.current || deliveryRequest.current) return;
     const selectedResult = result;
     const request = generation.current;
     copyRunning.current = true;
@@ -171,7 +173,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   }, [deliveryStarted]);
 
   const insertElsewhere = async () => {
-    if (!result || !resultOutput.trim() || running.current || copyRunning.current || deliveryRequest.current) return;
+    if (draftSaving || !result || !resultOutput.trim() || running.current || copyRunning.current || deliveryRequest.current) return;
     const id = crypto.randomUUID();
     deliveryRequest.current = id;
     setDeliveryMessage('');
@@ -209,16 +211,16 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       className={`ol-style-trial ol-thinscroll${result ? ' ol-style-trial-has-result' : ''}`}
       aria-labelledby="style-trial-title"
       aria-describedby="style-trial-description"
-      onCancel={event => { event.preventDefault(); onClose(); }}
+      onCancel={event => { event.preventDefault(); if (!draftSaving) onClose(); }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
         <h2 id="style-trial-title" style={{ margin: 0, fontSize: 21 }}>{t('style.trial.title', { name: presentation.name })}</h2>
-        <Btn size="sm" variant="ghost" onClick={onClose}>{t('common.close')}</Btn>
+        <Btn size="sm" variant="ghost" disabled={draftSaving} onClick={() => { if (!draftSaving) onClose(); }}>{t('common.close')}</Btn>
       </div>
       <p id="style-trial-description" className="ol-style-trial-hint">{t('style.trial.shortNotice')}</p>
       {packs && onSelectPack && <label className="ol-style-trial-picker">
         <span>{t('style.trial.styleLabel')}</span>
-        <select aria-label={t('style.trial.styleLabel')} value={pack.id} disabled={pending || copying || delivering || extraStyleChoice?.pending}
+        <select aria-label={t('style.trial.styleLabel')} value={pack.id} disabled={pending || copying || delivering || draftSaving || extraStyleChoice?.pending}
           onChange={event => onSelectPack(event.target.value)}>
           {packs.map(option => <option key={option.id} value={option.id}>{stylePackPresentation(option, t).name}</option>)}
         </select>
@@ -241,16 +243,16 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         maxLength={4000}
         rows={6}
         // Readiness gates submission, not drafting: checking/failure must not discard typing.
-        disabled={pending || copying || delivering || extraStyleChoice?.pending}
+        disabled={pending || copying || delivering || draftSaving || extraStyleChoice?.pending}
         placeholder={t('style.trial.placeholder')}
         onChange={event => { onDraftChange(event.target.value); setResult(null); setError(''); setCopiedResult(null); setCopyError(false); }}
         style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', minHeight: 110, padding: 12, borderRadius: 12, border: '1px solid var(--ol-line-strong)', color: 'var(--ol-ink)', background: 'var(--ol-surface-2)', font: 'inherit', lineHeight: 1.65 }}
       />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginTop: 12 }}>
-        <Btn variant="blue" disabled={pending || copying || delivering || extraStyleChoice?.pending || !canProcess || !draft.trim()} onClick={() => void runTrial()}>
+        <Btn variant="blue" disabled={pending || copying || delivering || draftSaving || extraStyleChoice?.pending || !canProcess || !draft.trim()} onClick={() => void runTrial()}>
           {t(pending ? 'style.trial.running' : 'style.trial.run')}
         </Btn>
-        {readiness?.available && onOpenProviders && <Btn variant="ghost" onClick={onOpenProviders}>{t('style.trial.providers')}</Btn>}
+        {readiness?.available && onOpenProviders && <Btn variant="ghost" disabled={draftSaving} onClick={onOpenProviders}>{t('style.trial.providers')}</Btn>}
         {readiness?.available === false && <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1" target="_blank" rel="noreferrer noopener" style={{ color: 'var(--ol-blue)', fontSize: 13 }}>{t('style.trial.download')}</a>}
       </div>
       {pending && <p role="status" className="ol-style-trial-hint">{t('style.trial.pending')}</p>}
@@ -262,21 +264,22 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
             <div style={{ fontWeight: 600 }}>{t('style.trial.output')}</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <Btn size="sm" variant="ghost" disabled={copying || delivering || !resultOutput.trim()} onClick={() => void copyResult()}>
+            <Btn size="sm" variant="ghost" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
             </Btn>
-            <Btn size="sm" variant="ghost" disabled={copying || delivering || !resultOutput.trim()} onClick={() => setKeyPhrase(resultOutput)}>{t('keyPhrase.open')}</Btn>
-            {canInsertStyleTrialResult && <Btn size="sm" variant="blue" disabled={copying || delivering || !resultOutput.trim()} onClick={() => void insertElsewhere()}>{t('style.trial.insertElsewhere')}</Btn>}
+            <Btn size="sm" variant="ghost" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => setKeyPhrase(resultOutput)}>{t('keyPhrase.open')}</Btn>
+            {canInsertStyleTrialResult && <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void insertElsewhere()}>{t('style.trial.insertElsewhere')}</Btn>}
             </div>
           </div>
-          <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t('style.trial.keepResult')}</p>
+          <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t('textDraft.retention')}</p>
+          <SaveTextDraft name={presentation.name} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving} />
           {restored && <p role="note" className="ol-style-trial-hint" data-style-trial-restored>{t('style.trial.restoredResult')}</p>}
           <p className="ol-style-trial-hint">{editedOutput !== null ? t('style.trial.editedResult') : t(result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}</p>
           <textarea className="ol-style-trial-result-body ol-style-trial-result-editor ol-thinscroll"
             aria-label={t('style.trial.resultInput')} value={resultOutput} rows={8} maxLength={100000}
-            disabled={copying || delivering}
+            disabled={copying || delivering || draftSaving}
             onChange={event => {
-              if (copyRunning.current || deliveryRequest.current) return;
+              if (draftSaving || copyRunning.current || deliveryRequest.current) return;
               const value = event.target.value;
               const edited = value === result.outputText ? null : value;
               setEditedOutput(edited);
@@ -310,7 +313,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         {comparisons.map(previous => <article key={previous.pack.id}>
           <div className="ol-style-trial-comparison-heading">
             <h4>{stylePackPresentation(previous.pack, t).name}</h4>
-            {onSelectPack && <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || extraStyleChoice?.pending}
+            {onSelectPack && <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || extraStyleChoice?.pending}
               onClick={() => onSelectPack(previous.pack.id)}>{t('styleComparisons.open', {name:stylePackPresentation(previous.pack, t).name})}</Btn>}
           </div>
           <pre>{previous.text}</pre>
@@ -319,7 +322,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       </div>
       </div>
       {extraStyleChoice && <div className="ol-style-trial-alternative">
-        <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || extraStyleChoice.pending} onClick={extraStyleChoice.onChoose}>
+        <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || extraStyleChoice.pending} onClick={extraStyleChoice.onChoose}>
           {extraStyleChoice.pending ? t('style.everydayList.adding') : extraStyleChoice.label}
         </Btn>
         <p className="ol-style-trial-hint">{extraStyleChoice.hint}</p>

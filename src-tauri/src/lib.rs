@@ -69,6 +69,7 @@ mod transcript_boundary;
 mod types;
 mod device_key_profile;
 mod device_layouts;
+mod saved_text_drafts;
 mod unicode_keystroke;
 mod wake_phrase;
 mod windows_ime_ipc;
@@ -1035,6 +1036,9 @@ pub fn run() {
             commands::list_local_device_layouts,
             commands::save_local_device_layout,
             commands::delete_local_device_layout,
+            commands::list_saved_text_drafts,
+            commands::save_text_draft,
+            commands::delete_saved_text_draft,
             commands::insert_style_trial_result,
             commands::cancel_style_trial_insert,
             commands::get_style_text_trial_readiness,

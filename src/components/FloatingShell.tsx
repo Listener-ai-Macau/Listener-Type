@@ -1,3 +1,4 @@
+import { SavedTextDraftsDialog } from './SavedTextDraftsDialog';
 // FloatingShell.tsx — frosted outer frame + raised inner console.
 // Sidebar lives INSIDE the console card. Footer icons sit on the frosted outer.
 // Settings is no longer a sidebar tab — it opens as a centered modal sheet.
@@ -92,6 +93,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const [quickTrialOpen, setQuickTrialOpen] = useState(false);
   const [quickTrialDraft, setQuickTrialDraft] = useState('');
   const [audioFileOpen, setAudioFileOpen] = useState(false);
+  const [savedDraftsOpen, setSavedDraftsOpen] = useState(false);
 
   // displayTab 是实际渲染的 tab，currentTab 是用户点中的目标 tab。
   const [displayTab, setDisplayTab] = useState<AppTab>(initialTab);
@@ -483,6 +485,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                   onStartDemoMode={startProviderDemoMode}
                   onOpenStyles={() => setQuickTrialOpen(true)}
                   onOpenAudioFile={() => setAudioFileOpen(true)}
+                  onOpenSavedDrafts={() => setSavedDraftsOpen(true)}
                 />
               ) : displayTab === 'style' ? (
                 <Style onOpenProviders={() => openSettings('providers', 'llm')} />
@@ -497,6 +500,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
       {quickTrialOpen && <QuickStyleTextTrial draft={quickTrialDraft} onDraftChange={setQuickTrialDraft}
         onClose={() => setQuickTrialOpen(false)}
         onOpenProviders={() => { setQuickTrialOpen(false); openSettings('providers', 'llm'); }} />}
+      {savedDraftsOpen && <SavedTextDraftsDialog onClose={() => setSavedDraftsOpen(false)} />}
       {audioFileOpen && <AudioFileTrial onClose={() => setAudioFileOpen(false)}
         onOpenProviders={() => { setAudioFileOpen(false); openSettings('providers'); }} />}
 
