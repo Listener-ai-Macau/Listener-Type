@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T09:15:13.324646+08:00",
+  "updated_at": "2026-10-21T09:18:29.956207+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3229,7 +3229,8 @@
       ],
       "supersedes": {
         "customer73_local_setup_translation_and_switch_state": "Only the preparation destination changes intentionally from Advanced to dedicated Local recognition. Prior translation/switch/loading protections remain."
-      }
+      },
+      "commit_subject": "Keep microphone setup unobstructed and open local preparation directly"
     },
     {
       "id": "customer75_prepare_before_local_activation",
@@ -3259,7 +3260,8 @@
       "unverified": [
         "Actual first runtime/model download and real inference are not established by the controlled browser fixture.",
         "Independent customer observations and willingness are recorded separately; no new real speech, insertion or physical qualification."
-      ]
+      ],
+      "commit_subject": "Keep later recognition choices when local preparation completes"
     },
     {
       "id": "customer76_explicit_style_text_trial",
@@ -3288,7 +3290,8 @@
       "unverified": [
         "No successful real Light-service response: this machine has no configured text service. No new customer76 review is claimed.",
         "Typed trials do not qualify real speech, editor insertion, hardware convenience, long-term use or purchasing."
-      ]
+      ],
+      "commit_subject": "Try saved styles on personal text without changing dictation settings"
     },
     {
       "id": "customer77_trial_readiness_and_targeted_text_settings",
@@ -3317,7 +3320,8 @@
       "unverified": [
         "This first-use report observed source8eed884/build76, not customer77. The customer confirmed retained input, but did not purchase.",
         "Actual polished text-service success, fresh speech-to-editor use and physical/long-term purchasing qualification remain unverified."
-      ]
+      ],
+      "commit_subject": "Disclose style trial readiness early and open the correct text service settings"
     },
     {
       "id": "customer78_native_history_copy_and_honest_demo",
@@ -3351,7 +3355,8 @@
         "Customer78 observed Copy acknowledgement and honest Demo guidance in actual native78; did not independently read/paste the clipboard. Root engineering clipboard proof is separate.",
         "Live speech, endpoint/editor insertion, real hardware and market purchase remain separate.",
         "Customer80 later pasted copied History into the app own input using ordinary Ctrl+V; this strengthens only the private-station History-copy scope, not live dictation/clipboard restoration or external editors."
-      ]
+      ],
+      "commit_subject": "Recheck clipboard revision after acquiring copy ownership"
     },
     {
       "id": "customer79_discoverable_trials_and_unique_history_body",
@@ -3379,7 +3384,8 @@
       "unverified": [
         "Customer79 actually used Demo to Style to personal trial, saw explicit missing-text-service dependency and exact raw output; no history/copy action by this customer. Native History presentation/copy confirmation is root engineering evidence.",
         "No new live speech, editor insertion, physical hardware or market purchase qualification; customer79 declined purchase in the recorded conditions."
-      ]
+      ],
+      "commit_subject": "Expose existing style trials from Demo and avoid identical History comparisons"
     },
     {
       "id": "type79_recorded_audio_to_original_popup",
@@ -3404,7 +3410,8 @@
         "131-character actual input equals History, not a word-accuracy certificate for source audio. Product pasteSent is retained; independent owned-edit read proves this one delivery.",
         "First uncontrolled focused-control failure remains; no claim that the original native SetFocus call necessarily caused it.",
         "No independent customer use, live microphone/wake/automatic endpoint, real target app beyond this WinForms field, verified clipboard read, physical benefit or market purchase."
-      ]
+      ],
+      "commit_subject": "Expose existing style trials from Demo and avoid identical History comparisons"
     },
     {
       "id": "customer80_reachable_guide_exact_setup_routes",
@@ -3435,7 +3442,8 @@
       "unverified": [
         "Customer80 actually copied existing History and pasted via ordinary Ctrl+V into its own Style input; it did not open the repaired guide/device route.",
         "No new/live speech, external-editor insertion, physical hardware or market purchase; customer80 declines49USD under actual service/experience conditions."
-      ]
+      ],
+      "commit_subject": "Keep setup prompt primary labels readable in both themes"
     },
     {
       "id": "customer81_overview_configuration_status_refresh",
@@ -3465,7 +3473,8 @@
         "Report80 is prior-source feedback, not an81 configuration-save customer trial. Actual81 customer saving valid native keys is unqualified.",
         "Native IPC properties are immutable: interception was unavailable, and the failed test stopped before writing dummy values. Native readonly display/subscription checks passed; real storage/validity/quota scope remains on earlier guards.",
         "Live speech, external target insertion, physical hardware and purchase remain separate."
-      ]
+      ],
+      "commit_subject": "Refresh first-use credential status after successful configuration changes"
     },
     {
       "id": "customer82_committed_history_live_views",
@@ -3505,7 +3514,8 @@
         "F82N-03": "Observed older public build79 label; actual current contents API equals HEAD Git blob and says82. Indexed/cache cause unproven; no fabricated source fix.",
         "F82N-04": "Duration2527ms versus source28953ms confirmed; fixed in83, customer83 reuse unqualified.",
         "F82N-05": "Structured name versus technical-purpose description uncertain for ordinary notes; subjective wish retained, existing technical prompt not overwritten."
-      }
+      },
+      "commit_subject": "Refresh mounted history views only after committed store changes"
     },
     {
       "id": "customer83_history_source_media_duration",
@@ -3536,7 +3546,8 @@
       "unverified": [
         "Customer82 feedback belongs to82; independent83 reuse remains unqualified.",
         "Native replay is not fresh microphone, endpoint, external insertion or hardware/purchase qualification."
-      ]
+      ],
+      "commit_subject": "Normalize existing and new history duration from captured media evidence"
     },
     {
       "id": "customer84_history_recent_selection_copy",
@@ -3568,7 +3579,8 @@
       ],
       "customer_evidence": [
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-84-native-20261021\\REPORT.txt"
-      ]
+      ],
+      "commit_subject": "Keep History recent selection and copy bound to the requested record"
     },
     {
       "id": "customer85_style_trial_upfront_service_status",
@@ -3598,7 +3610,8 @@
       "unverified": [
         "Customer84 requested upfront status on84; customer85 reuse not performed.",
         "Configured status is not successful cloud processing/remaining quota. No live speech, external editor, hardware or purchase qualification."
-      ]
+      ],
+      "commit_subject": "Accept legacy style packs without an update timestamp"
     },
     {
       "id": "customer_public_rc1_usage_and_service_scope",
@@ -3624,6 +3637,12 @@
       "unverified": [
         "Public-entry AI understood the hardware scope but did not buy; no app/hardware interaction.",
         "No new app binary, live speech, accuracy, physical convenience or real-market qualification."
+      ],
+      "commit_subject": "Align current usage guides with RC1 and actual style service requirements",
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\public-hardware-entry-delivered-20261021.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\current-usage-delivered-20261021.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-public-hardware-20261021\\REPORT.txt"
       ]
     }
   ],

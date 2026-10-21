@@ -14,6 +14,16 @@ This guide covers the current [v1.0.6-rc1 Windows candidate](https://github.com/
 
 You can view, edit and import/export built-in style packs locally. **That does not make Light text processing offline.** Default Raw needs no text service; a customized Raw pack can have different requirements. Check its card and trial status. “Configured” does not guarantee remaining quota or a successful request.
 
+### Windows clicks for the no-key path
+
+1. Open **Settings → Providers**. In the speech-recognition section, click **Prepare local recognition**. You do not need to select a cloud provider or enter a key first.
+2. On **Windows Foundry Local Whisper**, keep the default **Whisper Small (whisper-small)**. Base and Tiny are smaller alternatives with a possible accuracy tradeoff.
+3. Check the displayed model size and runtime status. Size comes from the current catalog; “unknown” means it has not been obtained, not a zero-byte download. Total disk use also includes the runtime and extracted files.
+4. Click **Prepare and use local recognition** and wait for download, loading and activation. Cancel or failure preserves the old provider. **Download / load only** does not activate it. Check the loaded-model and active status before recording.
+5. Select **Computer microphone** in Recording settings and keep default **Raw** in Styles. Focus a writable field, press Right Ctrl, speak, and press again to stop and review.
+
+This path does not provide automatic polishing or instant use before downloading. Use the size currently shown to decide whether to proceed; unknown download and running-memory sizes are not fixed promises.
+
 ## Install and make your first dictation
 
 1. Download the current Windows MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases). Match its checksum against the SHA-256 table in the release description; filenames and hashes belong to the specific release.
