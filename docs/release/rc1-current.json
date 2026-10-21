@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-21T15:15:46.743805+08:00",
+  "updatedAt": "2026-10-21T17:30:28.600234+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 92,
-    "source": "7ecdadcdeb98405a94fcbc0c7d96bc1423ee5ed8",
-    "sourceTag": "build-source/type92-20261021",
+    "build": 93,
+    "source": "8851f5e9b96314638881c4e4df23b4a3e88c093d",
+    "sourceTag": "build-source/type93-20261021",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "fff5155f2947a214b7cd3fc58b816fcc0decafa06a6a5c4f5febc90c02c96bff",
-    "sizeBytes": 298631168,
-    "exeSha256": "e6902307762050618311417a7b21d15294ea133b4c07b5f8acbecc1fab347662",
+    "sha256": "5bf34a3aec1f2b26da08b340cc38565ea2c3541a59105581928ba1acc1f8bb8e",
+    "sizeBytes": 298508288,
+    "exeSha256": "06b836f24544711add0d0bb123c0b3b1b19da77149cfb646b2e752e439fe21ba",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -122,7 +122,10 @@
       "credentialStatusPreserved": true,
       "backgroundListenerReady": true,
       "scope": "Idle local update after publication; no new voice, physical or independent customer qualification."
-    }
+    },
+    "type93InstalledExeAndPreferencesVerified": false,
+    "type93NativeRetentionNoticeVisible": true,
+    "type93VerificationScope": "One exact private native Raw result shows the retention notice beside Copy without opening details; no cloud, audio, BLE, external-field or independent93 purchase proof. Daily app remains92 to avoid an unnecessary interruption."
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -139,6 +142,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build92-20261021"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build93-20261021"
   }
 }
