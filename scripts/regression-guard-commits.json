@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T01:53:00.931735+08:00",
+  "updated_at": "2026-10-22T02:15:22.752526+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4690,6 +4690,40 @@
         "Value clarity is an engineering hypothesis responding to repeated free-software-sufficient refusals. No requested photo feature or autonomous purchase intent is invented.",
         "Live speech, real physical controls, long-term use, external automatic input and actual purchase remain unknown."
       ]
+    },
+    {
+      "id": "customer110_explicit_local_edited_draft_retention",
+      "repo": "type",
+      "commit": "278a7fed5fb966ab56977f0ae65630f9f2d8683f",
+      "subject": "Explicitly save current edited text with original in a separate immutable local draft library",
+      "state": "exact110_native_save_reload_copy_paste_delete_verified_customer_pending",
+      "protects": [
+        "Save is explicit, stores exact original and current edited result as local text, makes no service call and does not create speech History/audio/metrics or automatic insertion. No automatic retention.",
+        "Immutable UUID bound to one exact save payload makes an uncertain same-request retry idempotent; changed id content is rejected.0empty/oversize text,50-entry/4MiB bounds, bad files retained and no automatic old-draft eviction.",
+        "Saving holds source/style/result/close until actual acknowledgement; failure keeps editable current result. Reopen from Overview, read exact saved version and original, copy explicitly or confirm deletion. Browser page-only memory is labelled.",
+        "Existing signature/earlier-result authority, native clipboard worker and daily app behavior retained."
+      ],
+      "guards": [
+        "2 actual Rust storage/uncertain-retry/corruption/capacity tests;6 new UI checks,31 original trial lifecycle,all-style layout measured0px movement,tsc.",
+        "Exact native MSI ordinary Raw→local edit→Save→actual local file→ordinary reload/reopen→native Copy→ordinary Paste/continued input exact→confirmed delete. Other private JSON files unchanged.0cloud."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\drafts110-storage-tests.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\drafts110-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style110-existing.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\layout110-trial.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native110-snapshot-20261022-021238\\drafts-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native110-snapshot-20261022-021238\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build110\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE109-software-20261022-014330\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\dispatch-input.txt"
+      ],
+      "unverified": [
+        "Independent110 report pending. F109-01 is a future retrieval wish, not an observed lost-text incident.",
+        "Source/native correctness not customer usefulness or hardware purchase willingness. Live speech/physical/external automatic input/long term/real purchase remain unknown."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5380,7 +5414,8 @@
         "customer105_saved_phrase_explicit_clipboard_reuse",
         "customer107_explicit_audio_file_transcription",
         "customer108_earlier_result_snapshot_and_audio_window_lifetime",
-        "customer109_physical_layout_map_and_independent_press_practice"
+        "customer109_physical_layout_map_and_independent_press_practice",
+        "customer110_explicit_local_edited_draft_retention"
       ],
       "paths": {
         "type": [
@@ -5438,7 +5473,12 @@
           "scripts/check-audio-file-trial-ui.py",
           "scripts/check-earlier-trial-result-ui.py",
           "src/components/DeviceLayoutMap.tsx",
-          "scripts/check-hardware-layout-ui.py"
+          "scripts/check-hardware-layout-ui.py",
+          "src-tauri/src/saved_text_drafts.rs",
+          "src-tauri/src/commands/saved_text_drafts.rs",
+          "src/components/SaveTextDraft.tsx",
+          "src/components/SavedTextDraftsDialog.tsx",
+          "scripts/check-saved-text-drafts-ui.py"
         ]
       },
       "known_failures": [
@@ -5535,7 +5575,8 @@
         "customer105_saved_phrase_explicit_clipboard_reuse",
         "customer107_explicit_audio_file_transcription",
         "customer108_earlier_result_snapshot_and_audio_window_lifetime",
-        "customer109_physical_layout_map_and_independent_press_practice"
+        "customer109_physical_layout_map_and_independent_press_practice",
+        "customer110_explicit_local_edited_draft_retention"
       ],
       "paths": {
         "type": [
@@ -5559,7 +5600,12 @@
           "scripts/check-earlier-trial-result-ui.py",
           "src/components/DeviceLayoutMap.tsx",
           "src/components/DeviceLayoutPractice.tsx",
-          "scripts/check-hardware-layout-ui.py"
+          "scripts/check-hardware-layout-ui.py",
+          "src-tauri/src/saved_text_drafts.rs",
+          "src-tauri/src/commands/saved_text_drafts.rs",
+          "src/components/SaveTextDraft.tsx",
+          "src/components/SavedTextDraftsDialog.tsx",
+          "scripts/check-saved-text-drafts-ui.py"
         ]
       },
       "known_failures": [

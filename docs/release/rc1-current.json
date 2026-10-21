@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T01:44:51.944260+08:00",
+  "updatedAt": "2026-10-22T02:15:22.862916+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 109,
-    "source": "439f444f6afe22aaf8218a1454ed09dd538e343c",
-    "sourceTag": "build-source/type109-20261022",
+    "build": 110,
+    "source": "278a7fed5fb966ab56977f0ae65630f9f2d8683f",
+    "sourceTag": "build-source/type110-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "581852420d22511c1daa7c4a283e9853a153fa24857ff15a042abd042a9e9c6e",
-    "sizeBytes": 299081728,
-    "exeSha256": "4f45c4160239ac5cdc95a1017df87ff16d8c96a363b6dc81755246558c13a4ce",
+    "sha256": "3826090cabcc4c42bb3689eebdbba5afc7b2a2e97e38d2ff1ea0036d009635fe",
+    "sizeBytes": 299102208,
+    "exeSha256": "ad04a84e1f727ffe8d55507edc56a566555c9c84ba2f2f00df164fe44dbe6c3e",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -150,8 +150,13 @@
     "type109InstalledExeAndPreferencesVerified": false,
     "type109ExactPrivateNativeWorkflowVerified": true,
     "type109VerificationScope": "Exact isolated native MSI: actual photo loaded and selected key highlighted, distinct single/double/hold mappings saved to local library, each exact Unicode/newline template practised, ordinary reload retains saved layout and clears temporary text. No device write/cloud/recording; daily92 stays open. Not physical controls, live speech, external input or purchase qualification.",
-    "customer109Reviewed": false,
-    "customer109PurchaseQualification": false
+    "customer109Reviewed": true,
+    "customer109PurchaseQualification": false,
+    "type110InstalledExeAndPreferencesVerified": false,
+    "type110ExactPrivateNativeWorkflowVerified": true,
+    "type110VerificationScope": "Exact isolated native MSI: explicitly save edited Unicode/newline text and original; actual local file matches, ordinary reload/reopen retains it, native Copy and ordinary Paste/continued input exact, explicit confirmed deletion. Other private JSON files and daily92 unchanged.0cloud, no speech History/audio/device/external automatic input/physical qualification.",
+    "customer110Reviewed": false,
+    "customer110PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -168,6 +173,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build109-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build110-20261022"
   }
 }
