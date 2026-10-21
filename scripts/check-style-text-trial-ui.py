@@ -174,8 +174,8 @@ with sync_playwright() as pw:
         page.evaluate("window.__trialOutcome='preview'")
         page.get_by_role('button',name='Try Original text',exact=True).click()
         expect(dialog.get_by_role('status')).to_contain_text('This browser preview does not simulate a result')
-        expect(entry).to_be_disabled();expect(run).to_be_disabled()
-        check('Ordinary preview states its limit before typing or submitting',output.count()==0)
+        expect(entry).to_be_enabled();expect(run).to_be_disabled()
+        check('Ordinary preview allows drafts but discloses its limit and cannot submit',output.count()==0)
         log=page.evaluate('window.__trialLog')
         forbidden=['set_active_style_pack','set_settings','delete_history','clear_history','repolish','hotkey_recording_toggle','start_recording']
         check('Trial does not activate a style, save preferences or touch dictation/history',not any(x['cmd'] in forbidden for x in log))

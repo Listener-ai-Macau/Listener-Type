@@ -157,7 +157,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         value={draft}
         maxLength={4000}
         rows={6}
-        disabled={pending || copying || extraStyleChoice?.pending || !readiness?.available}
+        // Readiness gates submission, not drafting: checking/failure must not discard typing.
+        disabled={pending || copying || extraStyleChoice?.pending}
         placeholder={t('style.trial.placeholder')}
         onChange={event => { onDraftChange(event.target.value); setResult(null); setError(''); setCopiedResult(null); setCopyError(false); }}
         style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', minHeight: 110, padding: 12, borderRadius: 12, border: '1px solid var(--ol-line-strong)', color: 'var(--ol-ink)', background: 'var(--ol-surface-2)', font: 'inherit', lineHeight: 1.65 }}

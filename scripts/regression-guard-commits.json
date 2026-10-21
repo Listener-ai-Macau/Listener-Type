@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T14:24:21.787829+08:00",
+  "updated_at": "2026-10-21T14:39:05.881680+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3925,7 +3925,7 @@
       "repo": "type",
       "commit": "8162b6ee13c2545afa72af47ab5ca5495aed4a75",
       "subject": "Display selected saved-style purpose and add a separate optional everyday-list style without changing old prompts or defaults",
-      "state": "exact91_native_UI_and_existing_text_service_verified_independent_reuse_pending",
+      "state": "91_installed_published_independent91_used_visible_light_purpose_optional_list_not_reused",
       "protects": [
         "Saved purpose is visible before submission; customized descriptions stay intact.",
         "Everyday list uses the existing create_from_template path only after an explicit action; it does not replace builtin prompts or activate recording.",
@@ -3946,16 +3946,22 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build91\\type-artifact-verification.json"
       ],
       "customer_evidence": [
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-90-software-20261021\\report.txt"
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/outputs/Listener-FIRST_USE-90-software-20261021/report.txt",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/outputs/Listener-FIRST_USE-91-natural-20261021/experience.txt"
       ],
       "unverified": [
-        "Independent91 reuse and purchase interest remain unproven here; prior90 reported F90-02.",
-        "Synthetic engineering text under English output preference does not validate all languages/providers or live ASR, external input and physical use.",
-        "The builtin technical style is preserved; this adds an explicit everyday alternative, not a guarantee that every draft always becomes a list."
-      ]
+        "Optional Everyday list has engineering exact91 proof only; this independent customer did not select it.",
+        "Controlled readiness-disabled input reproduces a same-class defect, but cannot alone uniquely reconstruct customer91 transient event.",
+        "Fresh voice, external editor, physical hardware, actual billing and purchase remain unknown."
+      ],
+      "customer_feedback": {
+        "F91-01": "Independent91 chose own Sam rescheduling message; Light purpose description clarified choice, actual0.8s service result and Copied-then-private-CtrlV useful. Did not use Everyday list.",
+        "F91-02": "Immediate typing after choosing Light left entry empty while Checking trial availability. Exact event cause unknown; controlled91 reproduces same-class discarded typing because readiness disables draft; source8e92b182.",
+        "F91-03": "Would reuse free text function, does not yet buy49USD hardware. No firsthand voice/control convenience or from-zero account/billing experience; retain hypothesis and refusal."
+      }
     }
   ],
-  "feature_routes_updated_at": "2026-10-21T14:24:21.787829+08:00",
+  "feature_routes_updated_at": "2026-10-21T14:39:05.881680+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -4660,7 +4666,8 @@
         "Independent software-value89 saw public release engineering/customer narratives alongside product facts. Fresh-none history did not prevent exposure through public notes. Old version labels through web-reader remain channel-specific unknown, not proved wrong MSI.",
         "Independent public-value89 wanted a draft but Overview navigated to pack management; old text-trial stacked full notices/examples/draft before result, pushing the short email tail below the viewport. F89PV-02/03 retained; not ASR/BLE faults.",
         "Independent90 used correct builtin.structured saved6415-char prompt with explicit3-item formatting and Structured native dispatch, yet the retained reading-group draft returned one paragraph. UI selection/source dispatch confirmed, format-compliance root cause remains open; not a new speech/BLE fault.",
-        "F90-02: a reading-group message stayed one paragraph under builtin.structured despite correct dispatch. This factory prompt has technical focus since732a863;90 trial selector hid its saved purpose.91 exposes purpose and adds a separate optional everyday list; original/custom prompts remain intact."
+        "F90-02: a reading-group message stayed one paragraph under builtin.structured despite correct dispatch. This factory prompt has technical focus since732a863;90 trial selector hid its saved purpose.91 exposes purpose and adds a separate optional everyday list; original/custom prompts remain intact.",
+        "F91-02: readiness checking disables draft input since8e92b182, so a click/type before availability can discard text. Controlled91 ordinary input reproduced; customer-specific focus/layout timing remains unknown."
       ]
     },
     {
