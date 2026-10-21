@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T02:54:01.638668+08:00",
+  "updatedAt": "2026-10-22T03:15:58.684085+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 112,
-    "source": "f7ecc471a630163199d7e9dc4b4b1433d9de682e",
-    "sourceTag": "build-source/type112-20261022",
+    "build": 113,
+    "source": "8c8191520411305ec935c7ad8bff716fa79e466f",
+    "sourceTag": "build-source/type113-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "27f1201a53085aaa8d9e6850c221d3e8b0e370065823e6037adaf20121562b6f",
+    "sha256": "9997e09515fcdf7ea7a1c0e15122122b5b083a3f7a0838656a42d6cf0fb8613f",
     "sizeBytes": 299102208,
-    "exeSha256": "1804e28eff8572c1697547ca21a2693539ffee101da0db372ea03d421c9e2420",
+    "exeSha256": "6a10a1391557051becc7452852534caa84f76698e08716804496a5e8eda78ace",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -168,8 +168,14 @@
     "type112ExactPrivateNativeWorkflowVerified": true,
     "type112VerificationScope": "Exact isolated native MSI: result before primary Copy/Save, secondary actions initially folded and available by ordinary disclosure, technical factory display label visible; edited Unicode/newline result→explicit Save→reload/reopen→native Copy→ordinary Paste/continued input exact, confirmed delete.0cloud, daily92 unchanged. Controlled UI retains save/insert/cancel/phrase/dirty/signature guards. No voice/device/external input/physical qualification.",
     "customer111OwnSavedDraftUseObserved": true,
-    "customer112Reviewed": false,
-    "customer112PurchaseQualification": false
+    "customer112Reviewed": true,
+    "customer112PurchaseQualification": false,
+    "type113InstalledExeAndPreferencesVerified": false,
+    "type113ExactPrivateNativeWorkflowVerified": true,
+    "type113VerificationScope": "Exact isolated native MSI: included synthetic11.48s WAV→existing direct Volcengine actual transcript→local Unicode/newline edit→explicit Save→ordinary reload/reopen exact original recognized text and edit→native Copy/ordinary Paste and continued writing→confirmed delete. Other private state/daily92 unchanged. File ASR/cancel/Ready path unchanged. Not live speech, external input, hardware or purchase qualification.",
+    "customer112OwnEditedSavePasteReopenObserved": true,
+    "customer113Reviewed": false,
+    "customer113PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -186,6 +192,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build112-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build113-20261022"
   }
 }

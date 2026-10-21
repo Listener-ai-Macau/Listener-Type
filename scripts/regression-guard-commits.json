@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T03:04:37.396143+08:00",
+  "updated_at": "2026-10-22T03:15:58.605698+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4813,6 +4813,37 @@
         "Independent112 chose Light1.2s, facts retained, edited2/3→2pm/3pm, Save→Copied→ordinary Paste into own Type input→close/reopen saved exact edit. Result comparison/readability useful, no blocking issue. First paste while Copying did not complete, second afterCopied did; do not call the first success or remove pending guard. Technical label/secondary actions untried. Still defers49 hardware.",
         "Formal lightness F111-01 stays one subjective sample, no prompt/quality fix claimed. No voice/BLE/external target/physical or purchase qualification."
       ]
+    },
+    {
+      "id": "customer113_recorded_transcript_explicit_local_drafts",
+      "repo": "type",
+      "commit": "8c8191520411305ec935c7ad8bff716fa79e466f",
+      "subject": "Keep actual recognized original plus edited recorded transcript through explicit local Save draft and ordinary reopen",
+      "state": "exact113_recorded_transcript_save_reopen_native_copy_paste_verified_customer_pending",
+      "protects": [
+        "Audio-file result saves only by explicit Save draft, using actual ASR result.text as original and current edited text, source as name; no sample reference substitution/audio retention/recording History or added recognition call. Existing local draft library bounds preserved.",
+        "Saving uses synchronous busy ref and UI locks for close/Escape/confirmation, result edits, copy and discard; failure leaves transcript. Exact saved current text may close; edits or a different result cannot borrow its saved acknowledgement.",
+        "SaveTextDraft success callback is optional; existing typed result idempotency, error retention and busy protections unchanged. File ASR Ready/transmit/finish/cancel implementation untouched."
+      ],
+      "guards": [
+        "Audio lifecycle9checks include save failure, pending locks, recognized original and exact edit, changed/new version acknowledgement and ordinary library reopen. Existing typed saved-draft6checks and tsc pass.",
+        "Exact native113 included synthetic11.48s WAV submitted once explicitly to existing direct Volcengine: actual1.6s result preserves key facts. Local Unicode/newline edit→Save→close/reload→same original/edit→native library Copy→ordinary Paste/continue→confirmed delete. No new request from Save; no live mic/device/external editor claim."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\audio113-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\drafts113-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native113-snapshot-20261022-031425\\audio-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native113-snapshot-20261022-031425\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build113\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE109-software-20261022-014330\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE112-software-20261022-025600\\experience.txt"
+      ],
+      "unverified": [
+        "Independent113 pending. Extends F109-01 explicit retention to recorded transcripts by engineering consistency decision;112 did not report lost recording or use audio.",
+        "112 typed task useful but49 hardware deferred. No independent113 use, live speech/BLE/hardware/external automatic input or purchase qualification."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5506,7 +5537,8 @@
         "customer109_physical_layout_map_and_independent_press_practice",
         "customer110_explicit_local_edited_draft_retention",
         "customer111_stable_compact_key_layout_editor",
-        "customer112_result_first_actions_and_safe_technical_label"
+        "customer112_result_first_actions_and_safe_technical_label",
+        "customer113_recorded_transcript_explicit_local_drafts"
       ],
       "paths": {
         "type": [
@@ -5673,7 +5705,8 @@
         "customer109_physical_layout_map_and_independent_press_practice",
         "customer110_explicit_local_edited_draft_retention",
         "customer111_stable_compact_key_layout_editor",
-        "customer112_result_first_actions_and_safe_technical_label"
+        "customer112_result_first_actions_and_safe_technical_label",
+        "customer113_recorded_transcript_explicit_local_drafts"
       ],
       "paths": {
         "type": [

@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build112 / Firmware33
+# Listener v1.0.6-rc1 · Type build113 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,12 @@
 | **ESP32-S3 firmware · USB flashing / Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+- After a recorded-audio transcript returns, choose **Save draft** to keep the actual recognized original and your current edited transcript in the existing local text library. Open **Overview → Saved drafts** to read, copy or delete it later. This stores no audio, makes no additional service request and does not create a recording History entry.
+- Saving holds editing, copying, discarding and closing until acknowledgement; a failure keeps the transcript available. A saved current version can close without a false warning. Later edits and new results do not inherit that saved acknowledgement.
+- File recognition still requires your configured direct Volcengine service. Selecting a file stays local until explicit **Transcribe**; live recording and file cancellation remain separate.
+
+## Retained from build112
 
 - Read and edit the result first. **Copy result** and **Save draft** are the main actions below it; the original stays beside it on a wide window. The retention notice remains visible.
 - **More ways to use this text** opens the existing key-phrase and explicit external-insertion actions. Insertion cancellation remains available even if this section is folded. No copying, saving, insertion or device write happens automatically.
@@ -39,7 +45,7 @@
 ## Recorded audio · retained from build107
 
 - **Overview → Transcribe recorded audio** accepts an uncompressed 16 kHz/16-bit mono WAV up to 60 seconds. Choose a file or the included synthetic English sample; selection stays local until you explicitly choose **Transcribe**. It uses your existing direct Volcengine recognition service and its normal charges. Other providers and managed accounts are not supported in this new file entry.
-- Review and edit the actual returned transcript, then explicitly copy it for normal pasting. File results are not saved in History; copy before closing. Cancellation stops only that file request; it does not stop a live recording. No microphone, device command, automatic insertion or local-model download is involved. Sample reference words are labelled separately from recognition results; file-processing time is not live recording latency.
+- Review and edit the actual returned transcript, then explicitly copy it for normal pasting. File results are separate from recording History; explicitly Copy or Save draft before closing. Cancellation stops only that file request; it does not stop a live recording. No microphone, device command, automatic insertion or local-model download is involved. Sample reference words are labelled separately from recognition results; file-processing time is not live recording latency.
 - The English typed-trial notice now uses **Original text**, matching its picker.
 
 ## Retained workspace features
@@ -62,18 +68,20 @@ Typed processing uses your configured text service and may incur its usual charg
 
 **Type is free. US$49 is the Listener hardware price.** The device adds its own desk microphone, physical recording/volume control, four customizable keys and status lights. The free app can use a computer microphone and Right Ctrl; both routes use the recognizer configured on the computer. Cloud setup and usage cost extra. The current release does not include a ready-to-use Listener cloud account or bundled usage; a purchase link has not yet been announced.
 
-This is an **RC1 prerelease for Windows**. Review final words in noise or overlapping speech. Strong-interference filtering is limited, and intermittent early-close field reports remain unresolved; use the manual finish control when needed. This build improves reading and reusing text results; it does not claim new wake, recording-stop or Bluetooth fixes. Firmware33 is unchanged, so a device already on that firmware needs no reflash. One synthetic English file was checked through the existing service; this does not establish general recognition quality, new live-speech, external-editor or physical qualification.
+This is an **RC1 prerelease for Windows**. Review final words in noise or overlapping speech. Strong-interference filtering is limited, and intermittent early-close field reports remain unresolved; use the manual finish control when needed. This build extends explicit local draft retention to recorded transcripts; it does not claim new wake, recording-stop or Bluetooth fixes. Firmware33 is unchanged, so a device already on that firmware needs no reflash. One synthetic English file was checked through the existing service; this does not establish general recognition quality, new live-speech, external-editor or physical qualification.
 
 ## Check which file you have
 
-The MSI is **Type build112**, source **f7ecc471a630** (also shown in the app footer/About). Firmware is **build33**, runtime **e7bd1f1619b696a1**. Filenames stay fixed within RC1; the source and SHA-256 identify the files.
+The MSI is **Type build113**, source **8c8191520411** (also shown in the app footer/About). Firmware is **build33**, runtime **e7bd1f1619b696a1**. Filenames stay fixed within RC1; the source and SHA-256 identify the files.
 
 | Component | Exact source | SHA-256 |
 | --- | --- | --- |
-| Type112 MSI · 299102208 bytes | [f7ecc471a630](https://github.com/Listener-ai-Macau/Listener-Type/commit/f7ecc471a630163199d7e9dc4b4b1433d9de682e) | `27f1201a53085aaa8d9e6850c221d3e8b0e370065823e6037adaf20121562b6f` |
+| Type113 MSI · 299102208 bytes | [8c8191520411](https://github.com/Listener-ai-Macau/Listener-Type/commit/8c8191520411305ec935c7ad8bff716fa79e466f) | `9997e09515fcdf7ea7a1c0e15122122b5b083a3f7a0838656a42d6cf0fb8613f` |
 | Firmware33 ZIP · 1956905 bytes | [149b6d950ebc](https://github.com/Listener-ai-Macau/Listener-Firmware/commit/149b6d950ebc5f416924c8670cf2b207bdc2b5b7) | `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272` |
 
 ## 中文说明
+
+113将已有录音的真实原转写和当前修订稿接入同一个明确「保存成稿」入口；可关窗后从总览重开、复制、确认删除。只保留本机文字，不存音频、不写录音历史、不自动保存、不新增云请求。保存失败留稿，保存中锁定冲突操作，后续修改或新结果不冒用旧保存回执。
 
 112先展示结果正文及实际来源，正文下明确复制/保存；按键短语与外部插入可从「更多文字用途」展开，插入中的取消始终可用。默认技术风格显示为「技术指令」，保留旧工厂持久化名字、用户改名/导入内容、提示词及示例。没有改识别、默认输出或自动保存行为。
 
@@ -85,7 +93,7 @@ The MSI is **Type build112**, source **f7ecc471a630** (also shown in the app foo
 
 改稿后可只读对照「上一份结果」和对应原输入，不将旧结果当作新稿的输出，也不会重新请求服务。恢复完全相同的原稿时可恢复匹配修订；本风格生成新结果才替换旧快照，关闭清除。已有录音窗口由主界面持有，底层换页不会丢掉它的请求或文字。
 
-「总览 → 转写已有录音」可选择未压缩16 kHz、16位单声道WAV（最长60秒）或内置英文合成样例，明确点击「转写」才上传到当前自行配置的火山识别服务并正常计费；暂不支持其它提供商或托管账号。返回文字可核对、修订和明确复制，不写历史，关闭前复制需要保留的内容。取消只停止这条文件请求，不中断实时录音。此入口不采音、不控制设备、不自动上屏、不下载本地模型；样例参考词和实际识别结果分开，文件耗时不代表实时延迟。
+「总览 → 转写已有录音」可选择未压缩16 kHz、16位单声道WAV（最长60秒）或内置英文合成样例，明确点击「转写」才上传到当前自行配置的火山识别服务并正常计费；暂不支持其它提供商或托管账号。返回文字可核对、修订、明确复制或保存成稿，与录音历史独立；关闭前复制或保存需要保留的内容。取消只停止这条文件请求，不中断实时录音。此入口不采音、不控制设备、不自动上屏、不下载本地模型；样例参考词和实际识别结果分开，文件耗时不代表实时延迟。
 
 本版可原地修订文字结果，在当前窗口查看同一原文已完成的不同风格结果，打开旧结果不会再次请求服务。主页可保存自己的四键/旋钮布局，并用独立练习框试支持的短语、复制、粘贴、撤销等单击／双击／长按映射。练习复制使用私有缓冲，不操作系统剪贴板，不模拟录音、AI、外部应用、其它快捷键或旋钮。
 
@@ -93,4 +101,4 @@ The MSI is **Type build112**, source **f7ecc471a630** (also shown in the app foo
 
 「使用已保存短语」可明确复制真实保存的内容，再正常粘贴到写作位置；这项复制才使用系统剪贴板，失败保留内容可重试，不自动上屏。卡片显示实际目标，支持的Type本机页面可从练习中明确打开；未保存保护保持。长配置窗口的顶部模式入口保持可见。
 
-Type免费，49美元是硬件价，云服务配置和用量另计。试用不启动录音、不改变当前风格、不写历史；非原文风格可能产生现有文字服务费用。Firmware33不变；本次不声称修复强干扰、偶发提前结束、唤醒或蓝牙，也不代表新的实物/真实语音/外部输入整体验收。当前Type112/f7ecc471a630与Firmware33的校验值见上表。
+Type免费，49美元是硬件价，云服务配置和用量另计。试用不启动录音、不改变当前风格、不写历史；非原文风格可能产生现有文字服务费用。Firmware33不变；本次不声称修复强干扰、偶发提前结束、唤醒或蓝牙，也不代表新的实物/真实语音/外部输入整体验收。当前Type113/8c8191520411与Firmware33的校验值见上表。
