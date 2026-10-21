@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { listStylePacks } from '../lib/ipc';
+import { createStylePackFromTemplate, listStylePacks } from '../lib/ipc';
+import { everydayListStyle, isEverydayListStyle } from '../lib/everydayListStyle';
 import type { StylePack } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import { StyleTextTrial } from './StyleTextTrial';
@@ -17,6 +18,14 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, onOpenProvi
   const [selectedId, setSelectedId] = useState('');
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [adding, setAdding] = useState(false);
+  const [addFailed, setAddFailed] = useState(false);
+  const addingRef = useRef(false);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   useEffect(() => {
     let current = true;
     setFailed(false);
@@ -30,8 +39,33 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, onOpenProvi
     return () => { current = false; };
   }, [attempt]);
   const selected = packs.find(pack => pack.id === selectedId);
+  const savedEverydayList = packs.find(isEverydayListStyle);
+  const chooseEverydayList = async () => {
+    if (addingRef.current) return;
+    if (savedEverydayList) { setSelectedId(savedEverydayList.id); return; }
+    addingRef.current = true;
+    setAdding(true);
+    setAddFailed(false);
+    try {
+      const created = await createStylePackFromTemplate(everydayListStyle(t));
+      if (mounted.current) {
+        setPacks(current => [...current.filter(pack => pack.id !== created.id), created]);
+        setSelectedId(created.id);
+      }
+    } catch {
+      if (mounted.current) setAddFailed(true);
+    } finally {
+      addingRef.current = false;
+      if (mounted.current) setAdding(false);
+    }
+  };
   return selected ? <StyleTextTrial key={selected.id} pack={selected} packs={packs}
     onSelectPack={setSelectedId} draft={draft} onDraftChange={onDraftChange}
+    extraStyleChoice={selected.id === 'builtin.structured' ? {
+      label: t(savedEverydayList ? 'style.everydayList.choose' : 'style.everydayList.add'),
+      hint: t('style.everydayList.hint'), pending: adding,
+      error: addFailed ? t('style.everydayList.failed') : '', onChoose: () => void chooseEverydayList(),
+    } : undefined}
     onClose={onClose} onOpenProviders={onOpenProviders} /> :
     <TrialLoading failed={failed} onRetry={() => setAttempt(value => value + 1)} onClose={onClose} title={t('overview.tryTypedText')} />;
 }

@@ -408,6 +408,15 @@ export const en: typeof zhCN = {
     },
   },
   style: {
+    everydayList: {
+      name: 'Everyday list',
+      description: 'Make messages and notes easier to scan with short bullet points, keeping details, questions and conditions.',
+      add: 'Add Everyday list for messages',
+      choose: 'Choose saved Everyday list',
+      adding: 'Adding style…',
+      hint: 'Optional, separate style for everyday messages. Adding or choosing it here does not change your recording default or send your text.',
+      failed: 'Could not add the style. Your draft is unchanged; you can try again.',
+    },
     builtinPacks: {
       "raw": {
         "name": "Original text",

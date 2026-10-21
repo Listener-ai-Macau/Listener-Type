@@ -22,6 +22,7 @@ import { MarketplaceModal } from '../components/MarketplaceModal';
 import { StyleTextTrial } from '../components/StyleTextTrial';
 import { StyleTrialAvailability } from '../components/StyleTrialAvailability';
 import { stylePackPresentation } from '../lib/stylePackPresentation';
+import { everydayListStyle, isEverydayListStyle } from '../lib/everydayListStyle';
 
 type BusyAction =
   | 'loading'
@@ -532,14 +533,15 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
     await handleDeleteImportedPack(selectedPack);
   };
 
-  const handleCreateFromTemplate = async () => {
+  const handleCreateFromTemplate = async (everyday = false) => {
     setBusy('creating');
     try {
-      const template: StylePack = {
+      const template: StylePack = everyday ? everydayListStyle(t) : {
         ...NEW_PACK_TEMPLATE_BASE,
         id: '',
       };
-      const created = await createStylePackFromTemplate(template);
+      const existing = everyday ? packs.find(isEverydayListStyle) : undefined;
+      const created = existing ?? await createStylePackFromTemplate(template);
       showSaveStatus('saved', copy.createSuccess, true);
       await loadPacks(created.id);
       // Re-fetch list, then open the editor on the new pack
@@ -740,6 +742,12 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
             </div>
           </div>
           <div className="ol-thinscroll" style={{ padding: 18, overflow: 'auto', flex: '1 1 0', minHeight: 0 }}>
+            {!packs.some(isEverydayListStyle) && <div style={{ marginBottom: 16 }}>
+              <Btn size="sm" variant="ghost" disabled={busy !== null} onClick={() => void handleCreateFromTemplate(true)}>
+                {t('style.everydayList.add')}
+              </Btn>
+              <p style={{ color: 'var(--ol-ink-3)', fontSize: 12, lineHeight: 1.6, margin: '8px 0 0' }}>{t('style.everydayList.hint')}</p>
+            </div>}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
             {bodyPacks.map(pack => {
               const isBuiltin = pack.kind === 'builtin';

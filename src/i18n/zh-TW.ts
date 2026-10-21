@@ -407,6 +407,15 @@ export const zhTW: typeof zhCN = {
     },
   },
   style: {
+    everydayList: {
+      name: '日常清單',
+      description: '將訊息和筆記整理成便於瀏覽的簡短要點，保留細節、提問與條件。',
+      add: '新增適合訊息的「日常清單」',
+      choose: '選擇已儲存的「日常清單」',
+      adding: '正在新增風格…',
+      hint: '獨立可選風格，適合日常訊息。在這裡新增或選擇，不會變更錄音預設風格，也不會傳送文字。',
+      failed: '無法新增風格，草稿已保留，可以重試。',
+    },
     builtinPacks: {
       "raw": {
         "name": "原文",

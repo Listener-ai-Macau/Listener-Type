@@ -19,10 +19,16 @@ sessionStorage.setItem('ol.providerSetupPromptDeferredThisSession','1');
 window.__copyLog=[];window.__copyResolve=null;window.__copyReject=null;
 Object.defineProperty(navigator,'clipboard',{value:{writeText:text=>{window.__copyLog.push(text);return new Promise((resolve,reject)=>{window.__copyResolve=resolve;window.__copyReject=reject;});}}});
 window.__styleListFail=false; window.__trialLog=[]; window.__trialOutcome='pending'; window.__trialResolvers=[]; window.__trialConfigured=true;
+window.__addOutcome='reject'; window.__addResolve=null;
 window.__trialFixture=(cmd,args,mock)=>{
  window.__trialLog.push({cmd,args});
  if(cmd==='list_style_packs' && window.__styleListFail) return Promise.reject(new Error('saved styles unavailable'));
  if(cmd==='get_style_text_trial_readiness') return {available:window.__trialOutcome!=='preview',requiresTextService:args.stylePackId!=='builtin.raw',textServiceConfigured:window.__trialConfigured};
+ if(cmd==='create_style_pack_from_template') {
+  if(window.__addOutcome==='reject') return Promise.reject(new Error('save unavailable'));
+  if(window.__addOutcome==='pending') return new Promise(resolve=>window.__addResolve=()=>resolve(mock()));
+  return mock();
+ }
  if(cmd!=='try_style_pack_text') return mock();
  if(window.__trialOutcome==='preview') return mock();
  if(window.__trialOutcome==='reject') return Promise.reject(new Error('Sample service unavailable'));
@@ -59,6 +65,29 @@ with sync_playwright() as pw:
         quick.get_by_role('combobox',name='Trial style').select_option('builtin.formal')
         expect(quick.get_by_label('Your text',exact=True)).to_have_value('Keep my draft while choosing a style')
         check('Choosing a trial style preserves draft without changing the active style or sending text',not any(x['cmd'] in ['try_style_pack_text','set_active_style_pack'] for x in page.evaluate('window.__trialLog')))
+        quick.get_by_role('combobox',name='Trial style').select_option('builtin.structured')
+        # This browser fixture carries a saved non-factory description; display it verbatim.
+        expect(quick.locator('[data-style-trial-purpose]')).to_have_text('适合多事项和多主题口述，自动整理为层次清楚的结构化输出。')
+        quick.get_by_role('button',name='Add Everyday list for messages',exact=True).click()
+        expect(quick.get_by_role('alert')).to_contain_text('Could not add the style')
+        expect(quick.get_by_label('Your text',exact=True)).to_have_value('Keep my draft while choosing a style')
+        check('A failed optional style save keeps the existing selection and draft, and offers retry',quick.get_by_role('combobox').input_value()=='builtin.structured')
+        page.evaluate("window.__addOutcome='pending'")
+        quick.get_by_role('button',name='Add Everyday list for messages',exact=True).click()
+        expect(quick.get_by_role('button',name='Adding style…',exact=True)).to_be_disabled()
+        expect(quick.get_by_role('combobox')).to_be_disabled()
+        expect(quick.get_by_role('button',name='Try this text',exact=True)).to_be_disabled()
+        page.evaluate('window.__addResolve()')
+        expect(quick.get_by_role('heading')).to_have_text('Try Everyday list with your text')
+        expect(quick.get_by_label('Your text',exact=True)).to_have_value('Keep my draft while choosing a style')
+        created=[x for x in page.evaluate('window.__trialLog') if x['cmd']=='create_style_pack_from_template'][-1]['args']['template']
+        import hashlib
+        check('Optional everyday style saves the tested independent prompt without making it active',created['kind']=='imported' and created['baseMode']=='structured' and not created['active'] and hashlib.sha256(created['prompt'].encode()).hexdigest()=='999c281df2b68ad8c2594a1290da3c3cd49d70f1d8313550f7816664c8363103')
+        check('Adding a style does not process text or change recording defaults',not any(x['cmd'] in ['try_style_pack_text','set_active_style_pack','save_style_pack'] for x in page.evaluate('window.__trialLog')))
+        quick.get_by_role('combobox').select_option('builtin.structured')
+        quick.get_by_role('button',name='Choose saved Everyday list',exact=True).click()
+        expect(quick.get_by_role('heading')).to_have_text('Try Everyday list with your text')
+        check('Choosing the saved optional style reuses it rather than adding a duplicate',len([x for x in page.evaluate('window.__trialLog') if x['cmd']=='create_style_pack_from_template'])==2)
         quick.get_by_role('button',name='Close',exact=True).click()
         page.get_by_role('button',name='Try typed text',exact=True).click()
         expect(quick.get_by_label('Your text',exact=True)).to_have_value('Keep my draft while choosing a style')

@@ -405,6 +405,15 @@ export const zhCN = {
     },
   },
   style: {
+    everydayList: {
+      name: '日常清单',
+      description: '将消息和笔记整理成便于扫读的简短要点，保留细节、提问与条件。',
+      add: '添加适合消息的「日常清单」',
+      choose: '选择已保存的「日常清单」',
+      adding: '正在添加风格…',
+      hint: '独立可选风格，适合日常消息。在这里添加或选择，不会改变录音默认风格，也不会发送文字。',
+      failed: '未能添加风格，草稿已保留，可以重试。',
+    },
     builtinPacks: {
       "raw": {
         "name": "原文",
