@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T07:09:08.676130+08:00",
+  "updated_at": "2026-10-22T07:31:50.369328+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5276,6 +5276,43 @@
         "F124-01并原L09/F96-02与F123-02：文字改进幅度小，不买原因具体，下一只评估显式简洁稿价值，不反复替换Formal prompt/模型，不改默认。",
         "真实语音/外部应用/实物/真人付费未知，软件可执行价值迭代不等待这些。"
       ]
+    },
+    {
+      "id": "customer125_optional_concise_preset_keeps_trial_creation_out_of_daily_cycle",
+      "repo": "type",
+      "commit": "f044eed30ae3db1dbfea6910ed0c7675318b0dfa",
+      "subject": "Explicit concise saved preset, trial-only creation independent of daily recording preferences",
+      "state": "exact125_native_value_and_preference_isolation_verified_customer_pending",
+      "previous_source_evidence": "F123-02 wants whole paragraph more concise; F124-01 Light only removed um and49 deferred. Five bounded existing-provider probes preserve weak short-English results; wordy English363→282, Japanese169→126, Chinese74→60. Old124 API creates enabled imported styles and syncs Raw→Raw+Light even when active stays Raw.",
+      "protects": [
+        "Optional concise style reuses exact researched prompt; explicit Add creates/selects only, explicit Try sends request. No default Raw/Light/model/provider/account change or automatic processing. Existing original/comparison/edit/copy/save guards retained.",
+        "Text workspace passes trialOnly=true. Persist an inactive disabled style without syncing/writing preferences or entering live recording cycle; get by id still permits explicit text trial. Normal style-manager creation remains enabled/compatible, existing saved styles unchanged.",
+        "Creation error keeps draft and current selection; pending blocks competing style/submission actions; saved preset reused without duplicate; completed results reused for exact source/prompt."
+      ],
+      "guards": [
+        "Real Rust store test: persist/reload disabled trial, addressability, full preferences unchanged after sync; normal creation still enables Light. First test-only missing imports repaired before source commit.",
+        "Actual React concise creation/pending/explicit request/reopen/cache/save/failure plus shared Everyday/Copy lifecycle and retained8 wording protections, tsc. Old shared details selector qualified to info disclosure, not product workaround.",
+        "Exact125 ordinary private native: Add no request, disabled/inactive preset, all builtin packs and preference/history files unchanged; explicit one real existing-service request→shorter nonprivate result→save/reopen exact."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\concise125-store-test.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\concise125-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\concise125-style-lifecycle-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\concise125-retained-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native124-snapshot-20261022-070909\\concise125-probe.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native124-snapshot-20261022-070909\\concise125-wordy-probe.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native125-snapshot-20261022-073109\\concise125-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native125-snapshot-20261022-073109\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build125\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE123-software-20261022-064300\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE124-software-20261022-070400\\experience.txt"
+      ],
+      "unverified": [
+        "New125 independent customer pending. Short drafts can remain nearly unchanged; limited multilingual probes are not global semantic guarantees.",
+        "Real speech/external application/physical qualification/long-term value and49 purchase intent/order remain open."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5985,7 +6022,8 @@
         "customer121_immediate_local_english_request_option_before_paid_alternatives",
         "customer122_common_request_questions_two_local_tones",
         "customer123_request_spans_keyless_raw_local_options_identity_feedback",
-        "customer124_wording_service_reply_origin_and_local_recovery"
+        "customer124_wording_service_reply_origin_and_local_recovery",
+        "customer125_optional_concise_preset_keeps_trial_creation_out_of_daily_cycle"
       ],
       "paths": {
         "type": [

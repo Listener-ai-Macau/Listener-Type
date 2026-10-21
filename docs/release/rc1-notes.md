@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build124 / Firmware33
+# Listener v1.0.6-rc1 · Type build125 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,14 @@
 | **ESP32-S3 firmware · USB flashing / Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+**Try typed text → Add concise style** saves an optional **Concise message** preset on this computer and selects it for the text workspace. It is designed to shorten wordy phrasing while preserving details, conditions and the original language. Already concise text may remain unchanged. Review the result before using it; this is text-service processing, not guaranteed semantic preservation or speech recognition.
+
+Adding or selecting the preset does not send text. Choose **Try this text** when ready to use your configured text service; normal service charges may apply. Original text and other completed style results remain available to compare, and you can edit, copy or explicitly save the result. The saved preset can be selected again without creating a duplicate.
+
+Text-workspace presets are saved outside the daily recording style cycle. Adding Concise message or the optional Everyday list no longer expands that cycle or rewrites recording preferences. They are available for explicit text trials; enabling/activating a style for live dictation remains a separate choice in Style. Existing saved styles, normal style-manager creation, default Original/Light prompts, provider/model/account settings and firmware are retained.
+
+## Wording recovery retained from build124
 
 Optional text-service suggestions now distinguish **a request that did not complete** from **a reply that could not be used safely**. A rejected suggestion does not tell you to change a working account. Your existing text remains available: continue with local wording choices, edit directly, copy or save. No automatic retry sends another paid request.
 
@@ -44,10 +52,14 @@ Type is free; US$49 is the hardware price. Cloud service setup and usage are sep
 
 | Component | Exact source | SHA-256 |
 | --- | --- | --- |
-| Type124 MSI · 299118592 bytes | [b40f163fcd53](https://github.com/Listener-ai-Macau/Listener-Type/commit/b40f163fcd5313a3ddc248b5bdebf56597070a98) | `e0d1076e98e0b2803c536d862041fd39c9cfa80f570df25446506df6569a1ab8` |
+| Type125 MSI · 299114496 bytes | [f044eed30ae3](https://github.com/Listener-ai-Macau/Listener-Type/commit/f044eed30ae3db1dbfea6910ed0c7675318b0dfa) | `efefcd0233be7e8a0fe2a174f05785692199fcf36c9e9c33d62f06843d8191ed` |
 | Firmware33 ZIP · 1956905 bytes | [149b6d950ebc](https://github.com/Listener-ai-Macau/Listener-Firmware/commit/149b6d950ebc5f416924c8670cf2b207bdc2b5b7) | `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272` |
 
 ## 中文说明
+
+125提供可选“简洁成稿”：文字试用中主动添加并选中，不发送文字；明确处理时才使用既有文本服务并正常计费。用于压缩啰嗦表达，需自行核对信息与条件；已简洁的稿可能不变。原稿、不同风格结果比较与修订复制/保存保留。
+
+文字试用中新建的简洁/日常列表风格保存在日常循环之外，不改录音偏好；用于实时录音的启用/激活仍需在风格页另选。普通风格管理创建和已保存风格保持，默认原文/Light提示、账号/模型/提供商及Firmware33不变。
 
 124区分“请求未完成”与“服务已返回但建议无法安全采用”，不把后者误导成需要改账号；原文、本地选项、主动复制/保存保留，不自动付费重试。编辑了新稿后，旧请求的错误不会挂在新稿上。原建议校验保持，不改云模型/提示、默认识别或固件。
 
