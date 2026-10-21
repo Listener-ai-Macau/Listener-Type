@@ -6,7 +6,7 @@
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build83](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build84](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <details>
@@ -19,7 +19,7 @@ Device settings are independent: select one USB/Bluetooth device, read its setti
 </details>
 
 RC1 remains a prerelease; intermittent early close and strong-interference limits are documented in the release notes.
-Type build83 uses saved PCM evidence for embedded recording duration instead of recognition processing time. Existing records with this evidence also display the corrected duration without re-recognition; records without it retain their prior value. Earlier live History/setup fixes remain, and Firmware33 is unchanged.
+Type build84 fixes History selection: choosing a recent entry outside the current style filter now reveals that entry, so the detail, highlight and Copy refer to the same record. Earlier media-duration, live History and setup fixes remain. Firmware33 is unchanged.
 [App release notes and checksum](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware notes and flashing instructions](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 [English first setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [English user guide](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)

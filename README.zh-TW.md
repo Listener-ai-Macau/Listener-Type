@@ -6,7 +6,7 @@
 
 | 用途 | 直接下载 |
 | --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build83](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 软件** | **[下载 MSI · Type build84](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <details>
@@ -19,7 +19,7 @@ Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另
 </details>
 
 RC1 仍为候选版本，偶发提前结束及强干扰限制见发布说明。
-Type build83 修复历史录音时长：按已有PCM长度计算，避免把识别处理耗时当录音长度；有证据的旧记录也无需重识别即可正确显示，没有证据的保留原值。保留历史自动更新和配置/指南修复，Firmware33不变。
+Type build84 修复历史取回错选：筛选某种风格后，点击其它风格的最近记录，会正确显示并选中所点记录，正文、高亮与复制保持一致。保留83录音时长、历史自动更新和配置/指南修复，Firmware33不变。
 [软件发布说明与校验](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [固件发布说明与烧写方法](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 [English first setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [English user guide](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)
