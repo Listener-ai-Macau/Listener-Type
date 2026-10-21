@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-21T11:24:18.034890+08:00",
+  "updatedAt": "2026-10-21T11:46:59.226143+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 88,
-    "source": "65fe648759ec5c7951f0766a4b05a0ac67bfa989",
-    "sourceTag": "build-source/type88-20261021",
+    "build": 89,
+    "source": "fbd701fcee34b3076a15b6c2589cda018f8776cf",
+    "sourceTag": "build-source/type89-20261021",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "212c9fef5e60685729eeb0252d54ac98c00aa0d72015bea501620c4d064acad8",
-    "sizeBytes": 298614784,
-    "exeSha256": "11573c1adfb2aba711690b44e04c4868f3a7e61096d0cb219624aeca82324308",
+    "sha256": "e4d80c32ba552775dfd75b4340401e629b23462d306aabb00f6f683a23382e67",
+    "sizeBytes": 298631168,
+    "exeSha256": "3fe561c443d8258403831ec932191af155a0774fa5abe90d3b478e97b0539c5a",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -101,7 +101,10 @@
     "savedStyleIllustration88NativeUiVerified": true,
     "privateCredentialScope88NativeVerified": true,
     "oneExistingDeepSeek88TextTrialSucceeded": true,
-    "existingServiceTrial88Scope": "One synthetic engineer text trial, ordinary private native UI, existing DeepSeek. Not personal speech, hardware or purchase proof."
+    "existingServiceTrial88Scope": "One synthetic engineer text trial, ordinary private native UI, existing DeepSeek. Not personal speech, hardware or purchase proof.",
+    "type89InstalledExeAndPreferencesVerified": true,
+    "textTrial89OverviewEntryAndNativeCopyVerified": true,
+    "textTrial89VerificationScope": "Exact native package, synthetic Raw result explicitly copied and pasted unchanged into own private input. No cloud, live speech, external target or physical acceptance."
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -118,6 +121,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build88-20261021"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build89-20261021"
   }
 }

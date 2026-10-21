@@ -6,7 +6,7 @@
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build88](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build89](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <details>
@@ -19,7 +19,7 @@ Device settings are independent: select one USB/Bluetooth device, read its setti
 </details>
 
 RC1 remains a prerelease; intermittent early close and strong-interference limits are documented in the release notes.
-Type build88 adds clearly labeled, read-only saved illustrations inside text trials. Your own draft and real service results remain separate. Explicit private data profiles can use a separate protected credential namespace; daily provider selection and dictation behavior are unchanged. Prior fixes remain; Firmware33 is unchanged.
+Type build89 adds a typed-text trial entry on Overview and an explicit Copy result action. Copy confirms success, preserves the result on failure and uses the native Windows clipboard path. Processing itself still leaves the clipboard unchanged. Prior style/History/provider fixes remain; dictation and Firmware33 are unchanged.
 [App release notes and checksum](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware notes and flashing instructions](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 [English first setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [English user guide](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)
