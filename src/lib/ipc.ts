@@ -1018,6 +1018,14 @@ export async function copyStyleTrialResult(text: string, nativeWindows: boolean)
   await navigator.clipboard.writeText(text);
 }
 
+export const canInsertStyleTrialResult = isTauri && /Windows/i.test(navigator.userAgent);
+export function insertStyleTrialResult(requestId: string, text: string): Promise<'confirmed' | 'sent'> {
+  return invokeOrMock('insert_style_trial_result', { requestId, text }, () => { throw new Error('style_insert_unsupported'); });
+}
+export function cancelStyleTrialInsert(requestId: string): Promise<boolean> {
+  return invokeOrMock('cancel_style_trial_insert', { requestId }, () => true);
+}
+
 export function deleteHistoryEntry(id: string): Promise<void> {
   return invokeOrMock('delete_history_entry', { id }, () => undefined);
 }

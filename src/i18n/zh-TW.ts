@@ -463,6 +463,15 @@ export const zhTW: typeof zhCN = {
       }
     },
     trial: {
+      insertElsewhere: "插入到另一應用程式…",
+      insertHint: "點擊插入後，請在5秒內把游標放到目標輸入框。只插入文字，不傳送訊息。僅限 Windows 應用程式。",
+      insertCountdown: "請現在點擊目標輸入框，{{seconds}} 秒後插入。",
+      insertWorking: "正在檢查目標並插入…",
+      insertConfirmed: "已在目標輸入框確認文字，請檢查後自行傳送。",
+      insertSent: "已送出貼上，請檢查目標；尚未確認文字已顯示。",
+      insertFailed: "尚未確認插入成功，請檢查目標；結果仍可在此複製。目標需要可編輯，等待期間請勿更改剪貼簿。",
+      insertRecording: "請先結束目前錄音，再插入此結果。",
+      insertCancelled: "已取消插入，結果仍保留在這裡。",
       shortNotice: "只試文字，不測試語音辨識。預設原文不發請求，其他或自訂風格可能產生文字服務費用；提交前不會傳送。",
       detailsSummary: "文字用途與試用說明",
       styleLabel: "試用風格",

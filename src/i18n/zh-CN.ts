@@ -461,6 +461,15 @@ export const zhCN = {
       }
     },
     trial: {
+      insertElsewhere: "插入到另一应用…",
+      insertHint: "点击插入后，请在5秒内把光标放到目标输入框。只插入文字，不发送消息。仅限 Windows 应用。",
+      insertCountdown: "请现在点击目标输入框，{{seconds}} 秒后插入。",
+      insertWorking: "正在检查目标并插入…",
+      insertConfirmed: "已在目标输入框确认文字，请检查后自行发送。",
+      insertSent: "已发出粘贴，请检查目标；尚未确认文字已显示。",
+      insertFailed: "尚未确认插入成功，请检查目标；结果仍可在此复制。目标需要可编辑，等待期间请勿更改剪贴板。",
+      insertRecording: "请先结束当前录音，再插入此结果。",
+      insertCancelled: "已取消插入，结果仍保留在这里。",
       shortNotice: "只试文字，不测试语音识别。默认原文不发请求，其他或自定义风格可能产生文字服务费用；提交前不会发送。",
       detailsSummary: "文字用途与试用说明",
       styleLabel: "试用风格",

@@ -1851,6 +1851,7 @@ pub async fn repolish(
 }
 
 include!("style_pack_commands.rs");
+include!("style_trial_delivery.rs");
 
 #[tauri::command]
 pub fn check_accessibility_permission() -> PermissionStatus {

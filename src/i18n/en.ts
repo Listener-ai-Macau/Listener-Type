@@ -464,6 +464,15 @@ export const en: typeof zhCN = {
       }
     },
     trial: {
+      insertElsewhere: "Insert in another app…",
+      insertHint: "Click Insert, then place the cursor in your destination within 5 seconds. Inserts only; never sends the message. Windows app only.",
+      insertCountdown: "Click your destination text field now — inserting in {{seconds}} s.",
+      insertWorking: "Checking the destination and inserting…",
+      insertConfirmed: "The destination confirmed the text. Review it before sending.",
+      insertSent: "Paste was sent. Check the destination; on-screen text was not confirmed.",
+      insertFailed: "Insertion was not confirmed. Check the destination; your result is still here to copy. An editable destination and an unchanged clipboard are required.",
+      insertRecording: "Finish the current recording before inserting this result.",
+      insertCancelled: "Insertion cancelled. Your result stays here.",
       shortNotice: "Text-only trial, not speech recognition. Default Raw sends no request; other or customized styles may incur text-service charges. Nothing is sent until you submit.",
       detailsSummary: "How this trial uses your text",
       styleLabel: "Trial style",

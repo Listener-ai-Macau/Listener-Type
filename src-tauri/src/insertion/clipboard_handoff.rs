@@ -135,11 +135,87 @@ pub(crate) enum SessionRangePermission {
 
 enum Command {
     Paste(String, bool, PasteShortcut, Option<String>, Option<SessionPasteScope>, Sender<PasteResult>),
+    ExplicitTarget(String, PasteShortcut, ExplicitTargetGuard, Sender<PasteResult>),
     Copy(String, Sender<bool>),
     CopyBefore(String, Option<u64>, Instant, Sender<bool>),
     Retain(ClipboardTicket, String, bool, Sender<RetentionResult>),
     RetainRecording(ClipboardTicket, uuid::Uuid, String, bool, Sender<RetentionResult>),
     Revisable(String, PasteShortcut, SessionPasteScope, Sender<PasteResult>),
+}
+
+/// One explicit, expiring handoff. Cancellation wins until the worker commits
+/// to dispatch, not merely until the frontend timer finishes.
+pub(crate) struct ExplicitPastePermit {
+    state: std::sync::atomic::AtomicU8,
+    deadline: Instant,
+}
+
+impl ExplicitPastePermit {
+    pub(crate) fn new(lifetime: Duration) -> Self {
+        Self { state: std::sync::atomic::AtomicU8::new(0), deadline: Instant::now() + lifetime }
+    }
+    pub(crate) fn cancel(&self) -> bool {
+        self.state.compare_exchange(0, 1, std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst).is_ok()
+    }
+    fn waiting(&self) -> bool {
+        Instant::now() < self.deadline && self.state.load(std::sync::atomic::Ordering::SeqCst) == 0
+    }
+    fn claim(&self) -> bool {
+        self.waiting() && self.state.compare_exchange(0, 2, std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst).is_ok()
+    }
+    fn dispatching(&self) -> bool {
+        Instant::now() < self.deadline && self.state.load(std::sync::atomic::Ordering::SeqCst) == 2
+    }
+}
+
+struct ExplicitTargetGuard {
+    permit: std::sync::Arc<ExplicitPastePermit>,
+    origin: ClipboardTicket,
+    target: usize,
+}
+
+impl ExplicitTargetGuard {
+    fn current(&self, owner: u64) -> bool {
+        self.permit.waiting() && self.origin.id == owner
+            && self.origin.revision == clipboard_revision()
+            && explicit_external_target() == Some(self.target)
+    }
+    fn dispatch_current(&self) -> bool {
+        self.permit.dispatching() && explicit_external_target() == Some(self.target)
+    }
+}
+
+pub(crate) fn explicit_external_target() -> Option<usize> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+        let hwnd = unsafe { GetForegroundWindow() };
+        let mut pid = 0;
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)); }
+        (!hwnd.0.is_null() && pid != 0 && pid != std::process::id()).then_some(hwnd.0 as usize)
+    }
+    #[cfg(not(target_os = "windows"))]
+    { None }
+}
+
+pub(crate) fn paste_explicit_target(text: &str, shortcut: PasteShortcut, origin: ClipboardTicket,
+    target: usize, permit: std::sync::Arc<ExplicitPastePermit>) -> PasteSubmission {
+    let (reply, result) = mpsc::channel();
+    let guard = ExplicitTargetGuard { permit: std::sync::Arc::clone(&permit), origin, target };
+    let value = if WORKER.send(Command::ExplicitTarget(text.into(), shortcut, guard, reply)).is_ok() {
+        result.recv_timeout(Duration::from_secs(3)).ok()
+    } else { None };
+    match value {
+        Some(value) => PasteSubmission { status: value.status, receipt: value.receipt,
+            range_permission: value.range_permission },
+        None => {
+            permit.cancel();
+            PasteSubmission { status: InsertStatus::DeferredNoTarget, receipt: None,
+                range_permission: SessionRangePermission::NotRequested }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -549,7 +625,12 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                     Err(_) => break,
                 }
             };
+        let mut explicit_target = None;
         let (command, revisable) = match command {
+            Some(Command::ExplicitTarget(text, shortcut, guard, reply)) => {
+                explicit_target = Some(guard);
+                (Some(Command::Paste(text, false, shortcut, None, None, reply)), false)
+            }
             Some(Command::Revisable(text, shortcut, scope, reply)) =>
                 (Some(Command::Paste(text, false, shortcut, None, Some(scope), reply)), true),
             Some(Command::RetainRecording(origin, session, text, needs_receipt, reply)) => {
@@ -566,6 +647,12 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
         };
         match command {
             Some(Command::Paste(text, restore, shortcut, expected, scope, reply)) => {
+                let rejected = || PasteResult { status: InsertStatus::DeferredNoTarget,
+                    terminal_decision: None, receipt: None, range_permission: SessionRangePermission::NotRequested };
+                if explicit_target.as_ref().is_some_and(|guard| !guard.current(*OWNER.lock())) {
+                    let _ = reply.send(rejected());
+                    continue;
+                }
                 let capture_started = Instant::now();
                 let (captured_reader, focus) = capture();
                 if !paste_dispatch_allowed(focus) {
@@ -736,7 +823,20 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                 log::info!("[insertion] paste readback captured available={} capture_ms={} payload_chars={}",
                     before.is_some(), capture_started.elapsed().as_millis(), text.chars().count());
                 // The clipboard writer and receipt share one owner generation.
-                let mut owner = OWNER.lock();
+                let mut owner = if let Some(guard) = explicit_target.as_ref() {
+                    match OWNER.try_lock_until(guard.permit.deadline) {
+                        Some(owner) => owner,
+                        None => { let _ = reply.send(rejected()); continue; }
+                    }
+                } else { OWNER.lock() };
+                if let Some(guard) = explicit_target.as_ref() {
+                    let current_reader = reader.as_ref().and_then(|reader| reader.current_observation().ok());
+                    if focus != crate::selection::FocusedInputState::Editable || current_reader != Some(true)
+                        || !guard.current(*owner) || !guard.permit.claim() {
+                        let _ = reply.send(rejected());
+                        continue;
+                    }
+                }
                 if revisable {
                     let current = reader.as_ref().and_then(|r| r.current_observation().ok());
                     let fresh = reader.as_ref().map(|r| r.before());
@@ -764,7 +864,10 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                 *owner = owner.wrapping_add(1);
                 let current_ticket = *owner;
                 #[cfg(not(target_os = "macos"))]
-                let result = super::insert_with_clipboard_restore_now(&text, restore, shortcut);
+                let result = if let Some(guard) = explicit_target.as_ref() {
+                    super::insert_explicit_target_now(&text, shortcut, || guard.dispatch_current()
+                        && reader.as_ref().and_then(|reader| reader.current_observation().ok()) == Some(true))
+                } else { super::insert_with_clipboard_restore_now(&text, restore, shortcut) };
                 #[cfg(target_os = "macos")]
                 let result = {
                     let _ = (restore, shortcut);
@@ -912,6 +1015,7 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                 });
             }
             None => {}
+            Some(Command::ExplicitTarget(..)) => unreachable!("explicit target normalized before dispatch"),
             Some(Command::Revisable(..)) => unreachable!("revisable command normalized before dispatch"),
             Some(Command::RetainRecording(..)) => unreachable!("recording retention normalized before dispatch"),
         }
@@ -968,6 +1072,34 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
             log::warn!("[insertion] full clipboard retention unconfirmed ticket={} reason=target_receipt_unavailable", job.ticket);
             finish(&mut pending, RetentionResult::Unavailable);
         }
+    }
+}
+
+#[cfg(test)]
+mod explicit_handoff_tests {
+    use super::*;
+    #[test]
+    fn explicit_handoff_cancel_and_commit_have_one_winner() {
+        let permit = ExplicitPastePermit::new(Duration::from_secs(10));
+        assert!(permit.cancel());
+        assert!(!permit.claim(), "cancelled handoff must never dispatch later");
+        let permit = ExplicitPastePermit::new(Duration::from_secs(10));
+        assert!(permit.claim());
+        assert!(!permit.cancel(), "already-dispatching work must not report cancellation success");
+        assert!(!permit.claim(), "one UI action must not insert twice");
+    }
+    #[test]
+    fn explicit_handoff_expired_queue_never_captures_or_writes_a_target() {
+        let permit = std::sync::Arc::new(ExplicitPastePermit::new(Duration::ZERO));
+        let (commands, receiver) = mpsc::channel();
+        let worker = std::thread::spawn(move || run_with_capture(receiver, None,
+            || panic!("expired handoff cannot even query the editor")));
+        let (reply, result) = mpsc::channel();
+        commands.send(Command::ExplicitTarget("must not appear".into(), PasteShortcut::CtrlV,
+            ExplicitTargetGuard { permit, origin: ClipboardTicket { id: 0, revision: None }, target: 0 }, reply)).unwrap();
+        assert_eq!(result.recv_timeout(Duration::from_secs(1)).unwrap().status, InsertStatus::DeferredNoTarget);
+        drop(commands);
+        worker.join().unwrap();
     }
 }
 

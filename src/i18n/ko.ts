@@ -421,6 +421,15 @@ export const ko: typeof zhCN = {
       }
     },
     trial: {
+      insertElsewhere: "다른 앱에 삽입…",
+      insertHint: "삽입을 누른 뒤 5초 안에 대상 입력란에 커서를 놓으세요. 텍스트만 삽입하며 메시지를 전송하지 않습니다. Windows 앱 전용입니다.",
+      insertCountdown: "대상 입력란을 클릭하세요. {{seconds}}초 후 삽입합니다.",
+      insertWorking: "대상을 확인하고 삽입하는 중…",
+      insertConfirmed: "대상 입력란에서 텍스트를 확인했습니다. 전송 전에 검토하세요.",
+      insertSent: "붙여넣기를 보냈습니다. 화면의 텍스트는 확인되지 않았으니 대상을 확인하세요.",
+      insertFailed: "삽입 성공을 확인하지 못했습니다. 대상을 확인하세요. 결과는 여기서 복사할 수 있습니다. 편집 가능한 입력란을 선택하고 기다리는 동안 클립보드를 변경하지 마세요.",
+      insertRecording: "현재 녹음을 마친 뒤 삽입하세요.",
+      insertCancelled: "삽입을 취소했습니다. 결과는 여기에 남아 있습니다.",
       shortNotice: "텍스트만 체험하며 음성 인식은 테스트하지 않습니다. 기본 원문은 요청을 보내지 않으며 다른 스타일이나 사용자 지정 스타일은 텍스트 서비스 요금이 발생할 수 있습니다. 제출 전에는 전송하지 않습니다.",
       detailsSummary: "텍스트 사용 및 체험 안내",
       styleLabel: "체험할 스타일",

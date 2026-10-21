@@ -35,6 +35,7 @@ pub(crate) use clipboard_handoff::{
 };
 pub(crate) use clipboard_handoff::revisable_session_with_receipt;
 pub(crate) use clipboard_handoff::TerminalAppendDecision;
+pub(crate) use clipboard_handoff::{ExplicitPastePermit, explicit_external_target, paste_explicit_target};
 #[cfg(test)]
 pub(crate) use clipboard_handoff::pending_receipt_handle_for_test;
 
@@ -715,6 +716,16 @@ fn copy_to_clipboard_with_restore_plan(text: &str) -> Result<ClipboardRestorePla
         inserted_text: text.to_string(),
         previous,
     })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn insert_explicit_target_now(text: &str, shortcut: PasteShortcut, still_current: impl Fn() -> bool) -> InsertStatus {
+    if copy_to_clipboard_with_restore_plan(text).is_err() { return InsertStatus::Failed; }
+    // Opening/writing the clipboard may have stalled. Recheck the deadline and
+    // exact destination afterwards, immediately before any synthetic keys.
+    if !still_current() { return InsertStatus::CopiedFallback; }
+    if simulate_paste(shortcut).is_err() { return InsertStatus::CopiedFallback; }
+    insertion_success_status()
 }
 
 #[cfg(not(target_os = "macos"))]
