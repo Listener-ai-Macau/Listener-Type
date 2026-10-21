@@ -159,12 +159,14 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
         <Btn size="sm" variant="ghost" onClick={() => attempt(() => reset())}>{t('deviceLayouts.newLayout')}</Btn>
         <Btn size="sm" variant="ghost" onClick={() => attempt(() => reset(undefined, true))}>{t('deviceLayouts.writingStarter')}</Btn>
       </div>
-      {loading && <p role="status">{t('common.loading')}</p>}
-      {loadError && <p role="alert">{loadError}{' '}<Btn size="sm" onClick={() => void refresh()}>{t('common.retry')}</Btn></p>}
+      <div className="ol-device-layout-load-status">
+        {loading && <p role="status">{t('common.loading')}</p>}
+        {loadError && <p role="alert">{loadError}{' '}<Btn size="sm" onClick={() => void refresh()}>{t('common.retry')}</Btn></p>}
+      </div>
       <label className="ol-device-layout-name">{t('deviceLayouts.name')}<input aria-label={t('deviceLayouts.name')} maxLength={80} value={name}
         placeholder={t('deviceLayouts.namePlaceholder')} onChange={event => { setName(event.target.value); markDirty(); }} /></label>
       <p className="ol-device-layout-hint">{t('deviceLayouts.pickKey')}</p>
-      <DeviceLayoutMap profile={profile} group={group} selected={key} onSelect={setKey} />
+      <DeviceLayoutMap profile={profile} group={group} selected={key} onSelect={setKey}>
       {incomingText !== undefined && <section className="ol-device-layout-editor" aria-label={t('keyPhrase.title')}>
         {gestureSelect}
         <label>{t('keyPhrase.text')}<textarea aria-label={t('keyPhrase.text')} rows={3} maxLength={2000} value={phrase} onChange={event => setPhrase(event.target.value)} /></label>
@@ -205,6 +207,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
         </>}
       </div>
       </details>
+      </DeviceLayoutMap>
       <p className="ol-device-layout-hint">{t('deviceLayouts.requirements')}</p>
       {message && <p role="status">{message}</p>}
       <div className="ol-device-layout-toolbar ol-device-layout-footer">

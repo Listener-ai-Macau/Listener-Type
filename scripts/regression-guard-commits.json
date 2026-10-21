@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T02:15:22.752526+08:00",
+  "updated_at": "2026-10-22T02:25:47.369110+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4683,12 +4683,15 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE109-software-20261022-014330\\dispatch-input.txt",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE109-software-20261022-014330\\experience.txt",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE109-software-20261022-014330\\operations.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE109-software-20261022-014330\\04-formal-and-light.png"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE109-software-20261022-014330\\04-formal-and-light.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\05-copied-and-continued.png"
       ],
       "unverified": [
         "Independent109 chose Light/Formal message task, each0.9s, conditions retained, saw Copied. No paste/external-input proof. Did not explore layout/photo or recorded audio: those benefits remain unknown. Temporarily declines49 hardware; free text task sufficient. F109-01 is a future wish to retrieve chosen long drafts, not an observed loss.",
         "Value clarity is an engineering hypothesis responding to repeated free-software-sufficient refusals. No requested photo feature or autonomous purchase intent is invented.",
-        "Live speech, real physical controls, long-term use, external automatic input and actual purchase remain unknown."
+        "Live speech, real physical controls, long-term use, external automatic input and actual purchase remain unknown.",
+        "Independent110 later actually used photo-linked layout entry, one single-click template and saved-phrase copy/paste/practice. Did not try double/hold, physical controls or live voice. Long form and load shift reported as F110-01; purchase deferred."
       ]
     },
     {
@@ -4696,7 +4699,7 @@
       "repo": "type",
       "commit": "278a7fed5fb966ab56977f0ae65630f9f2d8683f",
       "subject": "Explicitly save current edited text with original in a separate immutable local draft library",
-      "state": "exact110_native_save_reload_copy_paste_delete_verified_customer_pending",
+      "state": "exact110_native_saved_drafts_verified_independent_customer_used_layout_phrases_only",
       "protects": [
         "Save is explicit, stores exact original and current edited result as local text, makes no service call and does not create speech History/audio/metrics or automatic insertion. No automatic retention.",
         "Immutable UUID bound to one exact save payload makes an uncertain same-request retry idempotent; changed id content is rejected.0empty/oversize text,50-entry/4MiB bounds, bad files retained and no automatic old-draft eviction.",
@@ -4718,10 +4721,14 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE109-software-20261022-014330\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\dispatch-input.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\dispatch-input.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\02-layout-form.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\05-copied-and-continued.png"
       ],
       "unverified": [
-        "Independent110 report pending. F109-01 is a future retrieval wish, not an observed lost-text incident.",
+        "Independent110 did not use Saved drafts. Instead saved own key1 phrase, copied it and ordinary-pasted/continued writing in private practice field; screenshot matches. F110-01 loading geometry and long configuration form need work. F110-02 first Practice click during Copy pending: timing unknown, do not remove correct busy guard. Temporarily declines49; free software useful, physical appeal hypothetical.",
         "Source/native correctness not customer usefulness or hardware purchase willingness. Live speech/physical/external automatic input/long term/real purchase remain unknown."
       ]
     }
