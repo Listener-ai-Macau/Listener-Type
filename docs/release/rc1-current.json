@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T06:22:47.702623+08:00",
+  "updatedAt": "2026-10-22T06:41:03.452631+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 122,
-    "source": "049128d283b0a30a69d2b887f37f8dba1ded1590",
-    "sourceTag": "build-source/type122-20261022",
+    "build": 123,
+    "source": "db025dbc713d808412944361fd45e63f2dd9bd6b",
+    "sourceTag": "build-source/type123-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "600f17d7bb32dd94d501feb02a8a6307efdf1197ad2412eed1b1ac3c22c84883",
-    "sizeBytes": 299118592,
-    "exeSha256": "621a85a0ed4faca007de210db68d3c83459529feb92f9efec63ac8059c3c8fe4",
+    "sha256": "40b63b11bc297b299849db78abca4e80f7d691410add2e0589e6eec1c91764fe",
+    "sizeBytes": 299114496,
+    "exeSha256": "0f95e1833e5003032580d3d532593687f07e8a879005e6a4357c1dcb275c5ed0",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -230,8 +230,16 @@
     "type122OptionalCloudBackendUnchanged": true,
     "type122VerificationScope": "Exact122 private native: actual121 common request-question failure explicitly replayed, two local courteous/softer choices visible on open, zero extra request, exact body3pm/conditional remainder retained, accepted draft saved/reopened. Backend/IPC unchanged from121; no repeated cloud-alternative call. Eight affected React cases and exactMSI verified. LimitedEnglish, no global grammar/live/hardware/purchase qualification.",
     "customer121CommonQuestionNoOption": true,
-    "customer122Reviewed": false,
-    "customer122PurchaseQualification": false
+    "customer122Reviewed": true,
+    "customer122PurchaseQualification": false,
+    "type123InstalledExeAndPreferencesVerified": false,
+    "type123KeylessRawLocalOptionsNativeVerified": true,
+    "type123IdentityResponseUiVerified": true,
+    "type123CloudBackendUnchanged": true,
+    "type123VerificationScope": "Exact123 private native with actual empty scoped ASR/text credentials: Raw customer122 text→request-span local choices→explicit softer revision→save/reopen, greeting/date/remainder exact, zeroLLMPOST. Identity service-response feedback and disabled unconfigured cloud action verified in controlled React. Backend/IPC unchanged from121, no new cloud request/global grammar/live/hardware/purchase claim.",
+    "customer122GreetingSpanAndIdentityFeedbackOpen": true,
+    "customer123Reviewed": false,
+    "customer123PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -248,6 +256,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build122-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build123-20261022"
   }
 }

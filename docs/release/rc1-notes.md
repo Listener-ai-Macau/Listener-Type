@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build122 / Firmware33
+# Listener v1.0.6-rc1 · Type build123 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -7,13 +7,15 @@
 
 ## In this app update
 
-**Formal result → Wording options** sits beside **Copy result** and **Save draft**. Opening it reveals local choices without moving input focus or requesting a service. Common short English requests, including “Can/Could/Would/Will you…?”, can offer **Courteous request** and **Softer question**. For example, “Could you send the agenda by 3 pm?” can become “Could you please send the agenda by 3 pm?” or “Would you be able to send the agenda by 3 pm?”. The request body and the rest of the message stay intact. Compare, review and explicitly choose **Use this wording**, then copy or save. These are limited English shortcuts, not general grammar or multilingual rewriting; unsupported wording stays editable. Local options have no extra service request or charge.
+**Original text → Wording options** works without a text-service account. Enter your own text, choose **Try this text**, then compare local English request wording beside Copy and Save. Your original remains available; nothing changes until you choose **Use this wording**. This local path makes no cloud request. Other result styles can use these options too.
 
-**Ask text service for alternatives** is separate and optional. Clicking sends the current result to your already configured text service and can incur normal charges. Read each original/replacement pair, select wanted edits and choose **Use selected edits**, or keep your wording. Nothing is preselected. The existing optional cloud path and its fees are unchanged from121.
+The options now find the request within a sentence instead of requiring the entire sentence to start with it. For example, “Hi, could you send the schedule by Friday?” can offer “Hi, could you please send the schedule by Friday?” or “Hi, would you be able to send the schedule by Friday?”. Greetings, addressees, dates, preceding conditions and the rest of the message stay intact. These are limited English request shortcuts, not general grammar or multilingual rewriting; review meaning and choose whether they suit you.
 
-Untrusted service proposals still require exact unique, non-overlapping local spans. Checks screen recognised numbers, dates, firm requirements, negations and protected code/URL anchors. These checks are limited, not a semantic or all-language guarantee: review meaning and names. Earlier replies cannot overwrite newer wording; failed replies keep your text. The recomputed local option does not relax these service-proposal checks.
+**Ask text service for alternatives** stays separate, with its fee notice before the action. It is disabled when no text service is configured; local choices remain available. Configuring a service is optional for this local path. Its existing endpoint/model/prompt and guarded local-span response checks are unchanged.
 
-Default Formal, selected dictation style, recognition, accounts, providers/models and firmware remain unchanged. No local model is added. Existing original/edit/save protections remain.
+If a text service returns exactly your original draft, Type now explicitly labels it **unchanged** and says no reason was provided. It does not invent a judgement that your draft is already good or claim a rewrite happened. You can keep it, edit directly or compare local options.
+
+Default Original text, selected dictation style, recognition, accounts and firmware remain unchanged. No local model or new provider is added. Original/edit/save, stale reply and cloud-proposal guards remain.
 
 ## Settings reliability retained
 
@@ -36,14 +38,14 @@ Type is free; US$49 is the hardware price. Cloud service setup and usage are sep
 
 | Component | Exact source | SHA-256 |
 | --- | --- | --- |
-| Type122 MSI · 299118592 bytes | [049128d283b0](https://github.com/Listener-ai-Macau/Listener-Type/commit/049128d283b0a30a69d2b887f37f8dba1ded1590) | `600f17d7bb32dd94d501feb02a8a6307efdf1197ad2412eed1b1ac3c22c84883` |
+| Type123 MSI · 299114496 bytes | [db025dbc713d](https://github.com/Listener-ai-Macau/Listener-Type/commit/db025dbc713d808412944361fd45e63f2dd9bd6b) | `40b63b11bc297b299849db78abca4e80f7d691410add2e0589e6eec1c91764fe` |
 | Firmware33 ZIP · 1956905 bytes | [149b6d950ebc](https://github.com/Listener-ai-Macau/Listener-Firmware/commit/149b6d950ebc5f416924c8670cf2b207bdc2b5b7) | `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272` |
 
 ## 中文说明
 
-122支持常见英文请求问句（含Can/Could/Would/Will you），即时提供礼貌请求与更柔和问句两种本地措辞。比较后主动采用，请求主体、日期和其余正文保留；展开即显示选项，不改变输入焦点，也不额外请求服务或收费。这是有限英文便利功能，不是通用语法/多语言改写；不支持的文字仍可手动编辑。
+123的默认原文路径可直接使用本地英文措辞，无需文本服务账号。输入文字、明确处理原文后，点击措辞选项，比较礼貌请求与更柔和问句，主动采用后才改稿，不调用云端。请求按句内片段定位，招呼、称呼、日期、前置条件与其余正文保留；这是有限英文请求便利，不是通用语法或多语言改写，采用前仍需核对含义。
 
-「向文本服务获取其它建议」单独选择、按原服务正常计费。可选云路径沿用121，不重复改提示或模型；原有强制要求、否定、日期/数字与精确片段检查保留。有限保护仍需核对名字与含义，失败/过时回复不覆盖正文。默认正式表达、实时输入、账号/模型/提供商不改，无新增本地模型。
+云建议与费用单独呈现，未配置文本服务时禁用云按钮，本地选项仍可用。既有云后端/模型/提示和局部保护不改。服务输出与原稿完全相同时，明确标为原样返回/未提供原因，不编造原稿已足够好的解释。原文、修订保存与旧回复保护保留，默认原文和实时输入路径不变，Firmware33不变。
 
 118补全保存错误结果追踪：即使失败先于关闭返回，也会明确提醒；同一字段后续重试成功才清除错误，旧失败不盖新成功，不把已放下的上次窗口错误带到新窗口。原稿/改稿继续保留。117提供的「转写已有录音→打开文字工作区→文本服务设置」入口保留。使用原有文本提供商配置面板，原录音稿、草稿和修订结果留在下方。点击关闭或Esc先提交当前字段，等保存结束再返回并刷新就绪状态；保存失败明确留在设置中，也可选择返回文字。不会自动发送文字、复制、改默认风格或写设备，沿用既有凭据后台和服务配置。
 

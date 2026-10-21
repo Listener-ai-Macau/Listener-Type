@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T06:34:47.195039+08:00",
+  "updated_at": "2026-10-22T06:41:03.361685+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5197,6 +5197,39 @@
         "122经历/操作及04/08截图完整读取：Hi, could you…Friday原稿，Formal0.9s完全相同、本地无选项、另一次服务0.7s无可用修改；保留原文后界面Copied，未保存/外部粘贴。仍暂缓49，想要保留理由或可比较措辞，不把这次扩大为整机不值。",
         "F122-01招呼前缀导致整句锚定漏请求，并原F121-01/F96-02；F122-02服务原样返回但无明确事实反馈，F122-03付费仍无备选。"
       ]
+    },
+    {
+      "id": "customer123_request_spans_keyless_raw_local_options_identity_feedback",
+      "repo": "type",
+      "commit": "db025dbc713d808412944361fd45e63f2dd9bd6b",
+      "subject": "Fix request-span detection, remove cloud prerequisite for local wording, report identical service response factually",
+      "state": "exact123_keyless_native_verified_customer_pending",
+      "previous_source_evidence": "122 natural Hi,could-you request: Formal0.9s identical, local no option, extra0.7s no edits; customer deferred49 and wanted explanation or a comparable alternative. Whole-sentence-start matching missed request after greeting.",
+      "protects": [
+        "Find finite English request span; leave greeting/addressee/preceding condition/date/rest outside it intact. Local chosen option recomputed on current source; exact body and literal tokens, no preselection/auto apply. Limited English, not general/multilingual grammar.",
+        "Default Raw and other result styles expose local options without text-service credentials. Local route makes zero LLM request; unconfigured cloud action disabled. No account/model/provider/default dictation/ASR/firmware change.",
+        "Exact identical text-service result labelled unchanged/no reason provided, not invented already-good judgement. Existing original/edit/save/cache/primary actions/paid cloud proposal and stale/failure guards retained."
+      ],
+      "guards": [
+        "Node actual120/121/122, greeting/name/preceding condition/date/mandatory/negative/statement/code/URL/duplicate/stale/literal cases and tsc.",
+        "ProductionReact11 affected checks: keyless Raw, local source/body/save, disabled unconfigured cloud action, exact unchanged/no invented reason, original eight local/service lifecycle/layout cases.",
+        "Exact123 actual empty scoped credentials native Raw text→two local options→softer→save/reopen: both text/ASR status false,0LLMPOST, Hi/Friday/remainder exact. Backend/IPC unchanged from122/121, no repeated cloud-alternative trial."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\politeness123-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wording123-keyless-ui.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\src\\lib\\politeEdits.test.ts",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native123-snapshot-20261022-064006\\wording123-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native123-snapshot-20261022-064006\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build123\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE122-software-20261022-062500\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE122-software-20261022-062500\\operations.txt"
+      ],
+      "unverified": [
+        "Fresh123 customer not yet dispatched. Actual cloud identity reason not available; labelled fact only. Global Formal/multilingual quality, live/external input/physical/hardware value/order not qualified."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5904,7 +5937,8 @@
         "customer119_courtesy_edits_native_verified_held_for_primary_action_regression",
         "customer120_reviewed_courtesy_edits_keep_primary_text_actions_first",
         "customer121_immediate_local_english_request_option_before_paid_alternatives",
-        "customer122_common_request_questions_two_local_tones"
+        "customer122_common_request_questions_two_local_tones",
+        "customer123_request_spans_keyless_raw_local_options_identity_feedback"
       ],
       "paths": {
         "type": [
