@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T05:13:39.739388+08:00",
+  "updated_at": "2026-10-22T05:26:18.505980+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5060,6 +5060,33 @@
       "unverified": [
         "No product feature or customer benefit yet. Four-case research is not global language/semantic qualification."
       ]
+    },
+    {
+      "id": "customer119_courtesy_edits_native_verified_held_for_primary_action_regression",
+      "repo": "type",
+      "commit": "8e2c420a1c8ed4e97fce5a7ac71b3123c7d8f3b0",
+      "subject": "Explicit local courtesy proposals actually work, but hold119 until original primary Copy/Save position restored",
+      "state": "not_published_native_feature_verified_visual_layout_regression",
+      "protects": [
+        "Actual private119 using existing DeepSeek: initial Formal0.7s then explicit suggestions0.8s, no automatic edit, chosen send me your notes→please send me your notes accepted, saved and reopened exact. Original/source/history/preferences/style isolation retained.",
+        "Actual raw prototype must removal rejected by local guards. Exact120 follow-up should retain implementation while restoring result/Copy/Save before optional suggestions.",
+        "Do not label119 ready/published: proposal screenshot shows new optional block ahead of primary actions, regression against112 result-first baseline. Source/body/primary actions remain ahead of extra features."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\politeness119-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native119-snapshot-20261022-052220\\politeness119-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native119-snapshot-20261022-052220\\politeness119-native-proposals.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native119-snapshot-20261022-052220\\politeness119-native-reopened.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native119-snapshot-20261022-052220\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build119\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE117-software-20261022-044800\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE118-software-20261022-050500\\experience.txt"
+      ],
+      "unverified": [
+        "No customer119, no purchase improvement. Original default Formal/global grammar quality remains open. Limited local safety rules do not guarantee all meanings/languages."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5763,7 +5790,8 @@
         "type116_credential_edit_acknowledgement_preserves_latest_draft",
         "formal116_two_stage_and_existing_provider_pro_not_adopted",
         "customer117_recorded_text_nested_provider_setup_preserves_work",
-        "type118_settled_provider_save_failure_survives_close"
+        "type118_settled_provider_save_failure_survives_close",
+        "customer119_courtesy_edits_native_verified_held_for_primary_action_regression"
       ],
       "paths": {
         "type": [
@@ -5836,7 +5864,10 @@
           "scripts/check-credential-edit-ack-ui.py",
           "src/components/TextServiceSettingsDialog.tsx",
           "src/lib/providerWriteBarrier.ts",
-          "scripts/check-audio-workspace-provider-setup-ui.py"
+          "scripts/check-audio-workspace-provider-setup-ui.py",
+          "src/components/PoliteEditSuggestions.tsx",
+          "src/lib/politeEdits.ts",
+          "scripts/check-polite-edit-suggestions-ui.py"
         ]
       },
       "known_failures": [

@@ -286,8 +286,6 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
               updateEditedOutput(value);
             }} />
           <p className="ol-style-trial-hint">{t('style.trial.editHint')}</p>
-          {pack.baseMode === 'formal' && <PoliteEditSuggestions text={resultOutput}
-            disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />}
           <div className="ol-style-trial-primary-actions">
             <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
@@ -297,6 +295,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           </div>
           <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t(savedCurrentDraft ? 'textDraft.savedRetention' : 'textDraft.retention')}</p>
           {restored && <p role="note" className="ol-style-trial-hint" data-style-trial-restored>{t('style.trial.restoredResult')}</p>}
+          {pack.baseMode === 'formal' && <PoliteEditSuggestions text={resultOutput}
+            disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />}
           <details className="ol-style-trial-details ol-style-trial-more-actions">
             <summary>{t('style.trial.moreActions')}</summary>
             <div className="ol-style-trial-secondary-actions">
