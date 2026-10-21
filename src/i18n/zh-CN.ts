@@ -2,6 +2,11 @@
 // 添加新 key 时，必须同步更新 en.ts，否则首次切换到 English 会回落到中文残留。
 
 export const zhCN = {
+  keyActionHelp: {
+    moreOptions: '更多按键选项',
+    switchStyle: '切到上一个已启用的风格，到首项后循环。作用于之后的录音，不会改写已选文字。请在「风格」页启用至少两个风格。',
+    switchStylePractice: '在设备上，此键为之后的录音选择上一个已启用的风格，不处理已选文字。练习不会更改当前风格；可在「风格」页选择启用哪些风格。',
+  },
   keyPhrase: {
     "unsaved": "这段短语有尚未用于布局的修改。放弃未保存的草稿并关闭吗？",
     "open": "放到按键布局…",
@@ -1222,7 +1227,7 @@ export const zhCN = {
           copyShortcut: '复制 Ctrl+C',
           pasteShortcut: '粘贴 Ctrl+V',
           undoShortcut: '撤销 Ctrl+Z',
-          switchStyle: '切换风格',
+          switchStyle: '上一个已启用风格',
           translation: '翻译听写',
           selectionAsk: '划词问答',
         pasteTemplate: '粘贴模板',

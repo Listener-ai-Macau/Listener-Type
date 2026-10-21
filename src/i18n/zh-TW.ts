@@ -4,6 +4,11 @@ import type { zhCN } from './zh-CN';
 // 新增 key 時，必須同步更新 en.ts，避免切換到 English 後出現中文殘留。
 
 export const zhTW: typeof zhCN = {
+  keyActionHelp: {
+    moreOptions: '更多按鍵選項',
+    switchStyle: '切到上一個已啟用的風格，到首項後循環。用於之後的錄音，不會改寫已選文字。請在「風格」頁啟用至少兩個風格。',
+    switchStylePractice: '在裝置上，此鍵為之後的錄音選擇上一個已啟用的風格，不處理已選文字。練習不會變更目前風格；可在「風格」頁選擇啟用哪些風格。',
+  },
   keyPhrase: {
     "unsaved": "這段短語有尚未用於配置的修改。要捨棄未儲存的草稿並關閉嗎？",
     "open": "放到按鍵配置…",
@@ -1224,7 +1229,7 @@ export const zhTW: typeof zhCN = {
         copyShortcut: '複製 Ctrl+C',
         pasteShortcut: '貼上 Ctrl+V',
         undoShortcut: '復原 Ctrl+Z',
-        switchStyle: '切換風格',
+        switchStyle: '上一個已啟用風格',
         translation: '翻譯聽寫',
         selectionAsk: '劃詞問答',
         pasteTemplate: '貼上模板',

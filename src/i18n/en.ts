@@ -5,6 +5,11 @@ import { enDeviceMaintenance, enFirmwareMaintenance } from './enDeviceMaintenanc
 
 // Type-level guarantee that en mirrors the zh-CN shape.
 export const en: typeof zhCN = {
+  keyActionHelp: {
+    moreOptions: 'More key options',
+    switchStyle: 'Changes the active style to the previous enabled style, looping back at the start. This applies to later recordings; it does not rewrite selected text. Enable at least two styles on the Styles page.',
+    switchStylePractice: 'On the device, this key selects the previous enabled style for later recordings, not for text already selected. Practice leaves your active style unchanged. You can choose enabled styles on the Styles page.',
+  },
   keyPhrase: {
     "unsaved": "This phrase has edits that have not been used in the layout. Discard the unsaved draft and close?",
     "open": "Use as a key phrase…",
@@ -1227,7 +1232,7 @@ export const en: typeof zhCN = {
           copyShortcut: 'Copy Ctrl+C',
           pasteShortcut: 'Paste Ctrl+V',
           undoShortcut: 'Undo Ctrl+Z',
-          switchStyle: 'Switch style',
+          switchStyle: 'Previous enabled style',
           translation: 'Translation dictation',
           selectionAsk: 'Selection Ask',
         pasteTemplate: 'Paste template',

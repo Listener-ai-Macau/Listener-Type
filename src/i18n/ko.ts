@@ -6,6 +6,11 @@ import { en } from './en.ts';
 // 갱신해 주세요(갱신되지 않은 key 는 ...en 으로 영어로 fallback 됩니다).
 export const ko: typeof zhCN = {
   ...en,
+  keyActionHelp: {
+    moreOptions: '추가 키 옵션',
+    switchStyle: '이전의 활성 스타일로 바꾸며, 첫 항목에서는 마지막으로 돌아갑니다. 이후 녹음에 적용되고 선택한 텍스트를 다시 쓰지는 않습니다. 스타일 페이지에서 두 개 이상 활성화하세요.',
+    switchStylePractice: '기기에서는 이후 녹음에 쓸 이전 활성 스타일로 바꿉니다. 선택한 텍스트를 처리하지 않습니다. 연습에서는 현재 스타일을 바꾸지 않으며, 활성 스타일은 스타일 페이지에서 고를 수 있습니다.',
+  },
   keyPhrase: {
     "unsaved": "레이아웃에 적용하지 않은 문구 수정이 있습니다. 저장하지 않은 초안을 버리고 닫을까요?",
     "open": "키 문구로 사용…",
@@ -1182,7 +1187,7 @@ export const ko: typeof zhCN = {
         copyShortcut: '복사 Ctrl+C',
         pasteShortcut: '붙여넣기 Ctrl+V',
         undoShortcut: '실행 취소 Ctrl+Z',
-        switchStyle: '스타일 전환',
+        switchStyle: '이전 활성 스타일',
         translation: '번역 받아쓰기',
         selectionAsk: '선택 질문',
         pasteTemplate: '템플릿 붙여넣기',

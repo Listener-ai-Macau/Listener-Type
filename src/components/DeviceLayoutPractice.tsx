@@ -45,6 +45,7 @@ export function DeviceLayoutPractice({ profile, onInteract }: { profile: DeviceK
     if (mapping.action === 'pasteShortcut') return paste();
     if (mapping.action === 'undoShortcut') return goBack();
     if (mapping.action === 'disabled') return setStatus(t('devicePractice.disabled'));
+    if (mapping.action === 'switchStyle') return setStatus(t('keyActionHelp.switchStylePractice'));
     if (mapping.action === 'sendShortcut' && mapping.shortcut) {
       const primary = mapping.shortcut.primary.toLowerCase();
       const mods = mapping.shortcut.modifiers;
@@ -73,6 +74,7 @@ export function DeviceLayoutPractice({ profile, onInteract }: { profile: DeviceK
     <div className="ol-device-layout-pad ol-device-practice-keys">
       {layoutKeyIds.filter(id => id !== 'knob').map(id => <button key={id} type="button" onMouseDown={event => event.preventDefault()} onClick={() => press(profile.deviceCustomKeys[id])}>
         <strong>{t('deviceLayouts.key', {number:id.slice(3)})}</strong><span>{t(`settings.deviceKeys.actions.${profile.deviceCustomKeys[id].action}`)}</span>
+        {profile.deviceCustomKeys[id].action === 'pasteTemplate' && <span className="ol-device-key-phrase" title={profile.deviceCustomKeys[id].pasteTemplate}>{profile.deviceCustomKeys[id].pasteTemplate}</span>}
       </button>)}
     </div>
     <p role="status" className="ol-device-layout-practice-status">{status || t('devicePractice.ready')}</p>

@@ -6,6 +6,11 @@ import { en } from './en.ts';
 // 更新してください（更新されない key は ...en で英語にフォールバックします）。
 export const ja: typeof zhCN = {
   ...en,
+  keyActionHelp: {
+    moreOptions: 'その他のキー設定',
+    switchStyle: '有効なスタイルを一つ前に切り替えます。先頭からは末尾に戻ります。以降の録音に使われ、選択済みテキストは書き換えません。「スタイル」で二つ以上有効にしてください。',
+    switchStylePractice: '実機では以降の録音に使うスタイルを一つ前に切り替えます。選択済みテキストは処理しません。練習中は現在のスタイルを変更しません。有効なスタイルは「スタイル」で選べます。',
+  },
   keyPhrase: {
     "unsaved": "レイアウトに未適用の定型文の編集があります。未保存の下書きを破棄して閉じますか？",
     "open": "キーの定型文にする…",
@@ -1182,7 +1187,7 @@ export const ja: typeof zhCN = {
         copyShortcut: 'コピー Ctrl+C',
         pasteShortcut: '貼り付け Ctrl+V',
         undoShortcut: '元に戻す Ctrl+Z',
-        switchStyle: 'スタイル切替',
+        switchStyle: '前の有効なスタイル',
         translation: '翻訳ディクテーション',
         selectionAsk: '選択質問',
         pasteTemplate: 'テンプレート貼付',

@@ -14,6 +14,9 @@
 .ol-device-layout-pad button[aria-pressed=true] { border-color: var(--ol-blue); background: var(--ol-blue-soft); }
 .ol-device-layout-pad strong,.ol-device-layout-pad span { display: block; overflow-wrap: anywhere; }
 .ol-device-layout-pad span { margin-top: 8px; font-size: 11px; color: var(--ol-ink-3); }
+.ol-device-layout-pad .ol-device-key-phrase { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; color: var(--ol-ink); line-height: 1.5; text-align: left; }
+.ol-device-key-options > summary { cursor: pointer; color: var(--ol-ink-3); font-size: 13px; margin: 12px 0; }
+.ol-device-key-options[open] > summary { color: var(--ol-ink); }
 .ol-device-layout-editor { margin: 18px 0; padding: 16px; border: 1px solid var(--ol-line); border-radius: 12px; display: grid; gap: 12px; }
 .ol-device-layout-editor h3 { margin: 0; font-size: 15px; }
 .ol-device-layout-modifiers { display: flex; flex-wrap: wrap; gap: 16px; }

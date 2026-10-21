@@ -44,6 +44,9 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
   const [confirmation, setConfirmation] = useState<{ text: string; action: () => void } | null>(null);
   const actionGroup = key === 'knob' ? 'deviceCustomKeys' : group;
   const mapping = profile[actionGroup][key];
+  const gestureSelect = key !== 'knob' && <label>{t('deviceLayouts.gesture')}<select aria-label={t('deviceLayouts.gesture')} value={group} onChange={event => setGroup(event.target.value as Group)}>
+    {layoutGestures.map((value, i) => <option key={value} value={value}>{t(`settings.deviceKeys.gestures.${['singleClick','doubleClick','longPress'][i]}`)}</option>)}
+  </select></label>;
   const remember = (id: string | null) => {
     if (!rememberSelection) return;
     try { if (id) sessionStorage.setItem(overviewLayoutKey, id); else sessionStorage.removeItem(overviewLayoutKey); } catch { /* A session hint must not block editing or saving. */ }
@@ -153,9 +156,11 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
         {layoutKeyIds.map(id => <button type="button" key={id} aria-pressed={key === id} onClick={() => setKey(id)}>
           <strong>{id === 'knob' ? t('settings.deviceKeys.knob.title') : t('deviceLayouts.key', { number: id.slice(3) })}</strong>
           <span>{t(`settings.deviceKeys.actions.${profile[id === 'knob' ? 'deviceCustomKeys' : group][id].action}`)}</span>
+          {profile[id === 'knob' ? 'deviceCustomKeys' : group][id].action === 'pasteTemplate' && <span className="ol-device-key-phrase" title={profile[id === 'knob' ? 'deviceCustomKeys' : group][id].pasteTemplate}>{profile[id === 'knob' ? 'deviceCustomKeys' : group][id].pasteTemplate}</span>}
         </button>)}
       </div>
       {incomingText !== undefined && <section className="ol-device-layout-editor" aria-label={t('keyPhrase.title')}>
+        {gestureSelect}
         <label>{t('keyPhrase.text')}<textarea aria-label={t('keyPhrase.text')} rows={3} maxLength={2000} value={phrase} onChange={event => setPhrase(event.target.value)} /></label>
         <p className="ol-device-layout-hint">{t('keyPhrase.hint')}</p>
         {phrase.length > 2000 && <p role="alert" className="ol-device-layout-hint">{t('keyPhrase.tooLong')}</p>}
@@ -163,17 +168,18 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
           {t('keyPhrase.use', {key:key === 'knob' ? t('settings.deviceKeys.knob.title') : t('deviceLayouts.key', {number:key.slice(3)}), gesture:t(`settings.deviceKeys.gestures.${key === 'knob' ? 'singleClick' : ['singleClick','doubleClick','longPress'][layoutGestures.indexOf(group)]}`)})}
         </Btn>
       </section>}
+      <details className="ol-device-key-options" open={incomingText === undefined ? true : undefined}>
+      <summary hidden={incomingText === undefined}>{t('keyActionHelp.moreOptions')}</summary>
       <div className="ol-device-layout-editor">
         <h3>{key === 'knob' ? t('settings.deviceKeys.knob.title') : t('deviceLayouts.key', { number: key.slice(3) })}</h3>
-        {key !== 'knob' && <label>{t('deviceLayouts.gesture')}<select aria-label={t('deviceLayouts.gesture')} value={group} onChange={event => setGroup(event.target.value as Group)}>
-          {layoutGestures.map((value, i) => <option key={value} value={value}>{t(`settings.deviceKeys.gestures.${['singleClick','doubleClick','longPress'][i]}`)}</option>)}
-        </select></label>}
+        {incomingText === undefined && gestureSelect}
         <label>{t('deviceLayouts.action')}<select aria-label={t('deviceLayouts.action')} value={mapping.action} onChange={event => {
           const action = event.target.value as DeviceCustomKeyMapping['action'];
           edit({ ...mapping, action, shortcut: action === 'sendShortcut' ? mapping.shortcut ?? {primary:'F1',modifiers:[]} : mapping.shortcut });
         }}>
           {layoutActions.map(action => <option key={action} value={action}>{t(`settings.deviceKeys.actions.${action}`)}</option>)}
         </select></label>
+        {mapping.action === 'switchStyle' && <p role="note" className="ol-device-layout-hint">{t('keyActionHelp.switchStyle')}</p>}
         {mapping.action === 'pasteTemplate' && <label>{t('deviceLayouts.template')}<textarea rows={3} maxLength={2000} aria-label={t('deviceLayouts.template')} value={mapping.pasteTemplate} onChange={event => edit({...mapping,pasteTemplate:event.target.value})} /></label>}
         {mapping.action === 'openApp' && <label>{t('deviceLayouts.page')}<select aria-label={t('deviceLayouts.page')} value={mapping.appPage} onChange={event => edit({...mapping,appPage:event.target.value as DeviceCustomKeyMapping['appPage']})}>
           {layoutAppPages.map(page => <option value={page} key={page}>{t(`settings.deviceKeys.appPages.${page}`)}</option>)}
@@ -192,6 +198,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
           <p className="ol-device-layout-hint">{t('deviceLayouts.fixedKnob')}</p>
         </>}
       </div>
+      </details>
       <p className="ol-device-layout-hint">{t('deviceLayouts.requirements')}</p>
       {message && <p role="status">{message}</p>}
       <div className="ol-device-layout-toolbar ol-device-layout-footer">
