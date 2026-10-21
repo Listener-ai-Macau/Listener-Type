@@ -6,7 +6,7 @@ import type { StyleTextTrialReadiness } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 
 /** Uses the same saved-style policy as the trial, including customized Raw packs. */
-export function StyleTrialAvailability({ packId, revision }: { packId: string; revision: string }) {
+export function StyleTrialAvailability({ packId, revision }: { packId: string; revision?: string | null }) {
   const { t } = useTranslation();
   const [readiness, setReadiness] = useState<StyleTextTrialReadiness | null>(null);
   const [failed, setFailed] = useState(false);
