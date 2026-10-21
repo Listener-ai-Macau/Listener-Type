@@ -973,7 +973,7 @@ export function getCredentials(): Promise<CredentialsStatus> {
 }
 
 export async function setCredential(account: string, value: string): Promise<void> {
-  await trackProviderWrite(() => invokeOrMock('set_credential', { account, value }, () => undefined));
+  await trackProviderWrite(`credential:${account}`, () => invokeOrMock('set_credential', { account, value }, () => undefined));
   notifyCredentialsStatusChanged();
 }
 

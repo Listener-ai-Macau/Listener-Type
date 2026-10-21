@@ -255,7 +255,7 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
   //   3. 仅 setCommittedLlmProvider 之后 CredentialField 才 remount 读新 entry，
   //      此时后端 root.active.llm 已经是 id，lookup_account 落到正确 entry。
   //   4. endpoint/model 默认值仅在该 provider entry 该字段为空时才填，不覆盖用户自定义。
-  const onLlmProviderChange = (id: LlmPresetId) => trackProviderWrite(async () => {
+  const onLlmProviderChange = (id: LlmPresetId) => trackProviderWrite('llm-provider', async () => {
     setLlmProvider(id);
     const seq = ++llmSwitchSeqRef.current;
     emitSaved('saving', t('common.saving'));
@@ -298,7 +298,7 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
 
   const onLlmThinkingToggle = (enabled: boolean) => {
     if (!prefs) return;
-    void trackProviderWrite(() => updatePrefs(current => ({ ...current, llmThinkingEnabled: enabled }))).catch(error => {
+    void trackProviderWrite('llm-thinking', () => updatePrefs(current => ({ ...current, llmThinkingEnabled: enabled }))).catch(error => {
       console.error('[settings] failed to update LLM thinking mode', error);
       emitSaved('failed', t('common.operationFailed'));
     });

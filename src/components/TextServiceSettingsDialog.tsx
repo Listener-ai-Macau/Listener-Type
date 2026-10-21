@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ProvidersSection } from '../pages/settings/ProvidersSection';
 import { Btn } from '../pages/_atoms';
-import { waitForProviderWrites } from '../lib/providerWriteBarrier';
+import { providerWriteRevision, waitForProviderWrites } from '../lib/providerWriteBarrier';
 import './StyleTextTrial.css';
 
 /** A sibling modal: the text workspace and its source transcript stay mounted. */
@@ -10,6 +10,7 @@ export function TextServiceSettingsDialog({ onClose }: { onClose: () => void }) 
   const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   const closing = useRef(false);
+  const openedAt = useRef(providerWriteRevision());
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -24,7 +25,7 @@ export function TextServiceSettingsDialog({ onClose }: { onClose: () => void }) 
     const active = document.activeElement;
     if (active instanceof HTMLElement && dialog.current?.contains(active)) active.blur();
     setSaving(true); setFailed(false);
-    const saved = await waitForProviderWrites();
+    const saved = await waitForProviderWrites(openedAt.current);
     if (saved) { onClose(); return; }
     closing.current = false; setSaving(false); setFailed(true);
   };

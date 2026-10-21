@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T04:45:21.413339+08:00",
+  "updated_at": "2026-10-22T04:53:03.295607+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4975,7 +4975,7 @@
       "repo": "type",
       "commit": "0d47630aefa59e6fa2e12a07a21b54cc93089679",
       "subject": "Configure the text service from recorded-text workspace, retaining transcript/draft/result and refreshing after actual settings writes",
-      "state": "exact117_missing_service_ui_before_after_and_normal_native_return_verified_customer_pending",
+      "state": "exact117_engineering_verified_customer_typed_formal_save_reopen_settings_untried",
       "protects": [
         "Missing-service condition reproduced with disabled Try and zero settings entry before. New sibling native dialog reuses text-only existing provider controls; source, input, style and edited result remain mounted.",
         "Escape flushes focused credential edit before unmount; wait for existing credential/full text-provider switch writes, then recheck readiness without automatic processing. Failed pending write leaves settings and explicit return option. No credential values retained by write barrier, no reordering or provider/account/default change.",
@@ -4995,10 +4995,15 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build117\\type-artifact-verification.json"
       ],
       "customer_evidence": [
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE116-software-20261022-042500\\experience.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE116-software-20261022-042500\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE117-software-20261022-044800\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE117-software-20261022-044800\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE117-software-20261022-044800\\03-formal-result.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE117-software-20261022-044800\\09-copy-confirmed.png"
       ],
       "unverified": [
-        "New setup flow not yet independently tried; no purchase improvement, external input, live recording, Bluetooth or physical qualification.116 chose typed Light/save/reopen, no blocker,49 deferred."
+        "117 full feedback/operations read,03/09 viewed: typed Formal0.5s facts retained, customer manually makes request more polite, saves/reopens edited draft and sees Copied. F117-01 send me your notes remains direct: mergeF96-02.49 deferred/free typed task enough. New nested settings and recorded audio untried.",
+        "No external paste/live/physical/order. No customer evidence for new settings flow."
       ]
     }
   ],
