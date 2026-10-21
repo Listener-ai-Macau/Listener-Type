@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T03:50:13.581828+08:00",
+  "updated_at": "2026-10-22T04:00:23.455566+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4884,7 +4884,7 @@
       "repo": "type",
       "commit": "adaf0c1cef03ca7412a191657433864459335feb",
       "subject": "Explicitly bring a current recorded transcript copy to the existing editable style workspace without manual transfer",
-      "state": "exact115_native_asr_text_service_edit_save_reopen_verified_customer_pending",
+      "state": "exact115_native_bridge_verified_customer_chose_typed_formal_save_reopen_bridge_untried",
       "protects": [
         "Entry appears only for a returned transcript and copies current editable wording, leaving the source and independent earlier typed draft intact. Opening never processes text or copies/inserts it automatically.",
         "Style selection and submission remain explicit; existing service readiness/charges, original-result comparisons, editing, copy/save boundaries retained. Nested workspace Escape/Close returns to transcript without triggering source discard.",
@@ -4903,11 +4903,15 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-90-software-20261021\\return-use-ai-starter.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE114-software-20261022-033700\\experience.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE114-software-20261022-033700\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE115-software-20261022-035200\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE115-software-20261022-035200\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE115-software-20261022-035200\\03-formal-result.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE115-software-20261022-035200\\06-draft-recovered.png"
       ],
       "unverified": [
         "OriginalR90A-01 wish has prior framing/return-use influence and is not new114 feedback.114 typed use succeeded but49 deferred; this bridge is engineering follow-through to original sound→Light/manual-transfer value candidate.",
-        "Independent115 actual use and purchase value pending. No live hardware, actual external editor insertion, long-term or order proof."
+        "Independent115 naturally chose typed Formal0.8s, saved and recovered same text, no blocker. F115-01 formalness mild merges F96-02/F111-01. Recorded transcript bridge untried; no Copy/Paste/external/live/physical test.49 deferred, free short-text task sufficient, no purchase intent/order."
       ]
     }
   ],

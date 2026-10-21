@@ -797,7 +797,11 @@ function CredentialField({ label, account, placeholder, mono, mask, defaultValue
   const [value, setValue] = useState('');
   const [revealed, setRevealed] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  // An acknowledgement belongs to the edit it saved, never a later draft.
+  // Dirty is read synchronously on blur, before closing can cancel debounce.
+  const dirty = useRef(false);
+  const editRevision = useRef(0);
+  const alive = useRef(true);
   const [status, setStatus] = useState<CredentialFieldStatus>('idle');
   const debounceRef = useRef<number | null>(null);
   const statusRef = useRef<number | null>(null);
@@ -805,7 +809,8 @@ function CredentialField({ label, account, placeholder, mono, mask, defaultValue
   useEffect(() => {
     let cancelled = false;
     setLoaded(false);
-    setDirty(false);
+    dirty.current = false;
+    ++editRevision.current;
     setStatus('idle');
     setValue('');
     if (debounceRef.current) {
@@ -830,7 +835,9 @@ function CredentialField({ label, account, placeholder, mono, mask, defaultValue
   }, [account]);
 
   useEffect(() => {
+    alive.current = true;
     return () => {
+      alive.current = false;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (statusRef.current) clearTimeout(statusRef.current);
     };
@@ -839,34 +846,38 @@ function CredentialField({ label, account, placeholder, mono, mask, defaultValue
   // 改造：除 readError（持续错误，留在输入旁标识字段不可用）外，所有 saving / saved /
   //   saveError / copied / copyError 一律发到右上角 SavedToast。原内联文案太挤、跟其它
   //   页面 toast 风格不统一。
-  const showTemporaryStatus = (next: CredentialFieldStatus) => {
+  const showTemporaryStatus = (next: CredentialFieldStatus, feedbackRevision?: number) => {
     if (next === 'saving') {
-      emitSaved('saving', t('common.saving'));
+      emitSaved('saving', t('common.saving'), feedbackRevision);
     } else if (next === 'saved') {
-      emitSaved('saved', t('common.saved'));
+      emitSaved('saved', t('common.saved'), feedbackRevision);
     } else if (next === 'saveError') {
-      emitSaved('failed', t('common.operationFailed'));
+      emitSaved('failed', t('common.operationFailed'), feedbackRevision);
     } else if (next === 'copied') {
-      emitSaved('saved', t('common.copied'));
+      emitSaved('saved', t('common.copied'), feedbackRevision);
     } else if (next === 'copyError') {
-      emitSaved('failed', t('common.operationFailed'));
+      emitSaved('failed', t('common.operationFailed'), feedbackRevision);
     }
+    if (!alive.current) return;
     setStatus(next);
     if (statusRef.current) clearTimeout(statusRef.current);
     statusRef.current = window.setTimeout(() => setStatus('idle'), 1600);
   };
 
   const save = async (v: string, force = false) => {
-    if (!loaded || (!dirty && !force)) return;
+    if (!loaded || (!dirty.current && !force)) return;
+    const revision = editRevision.current;
     setStatus('saving');
-    emitSaved('saving', t('common.saving'));
+    const feedbackRevision = emitSaved('saving', t('common.saving'));
     try {
       await setCredential(account, v);
-      setDirty(false);
-      showTemporaryStatus('saved');
+      if (revision !== editRevision.current) return;
+      dirty.current = false;
+      showTemporaryStatus('saved', feedbackRevision);
     } catch (error) {
+      if (revision !== editRevision.current) return;
       console.error('[settings] failed to save credential', account, error);
-      showTemporaryStatus('saveError');
+      showTemporaryStatus('saveError', feedbackRevision);
     }
   };
 
@@ -874,13 +885,14 @@ function CredentialField({ label, account, placeholder, mono, mask, defaultValue
     const v = e.target.value;
     setValue(v);
     if (!loaded) return;
-    setDirty(true);
+    dirty.current = true;
+    ++editRevision.current;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = window.setTimeout(() => save(v, true), 300);
   };
 
   const onBlur = () => {
-    if (!loaded || !dirty) return;
+    if (!loaded || !dirty.current) return;
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
       debounceRef.current = null;
@@ -891,7 +903,8 @@ function CredentialField({ label, account, placeholder, mono, mask, defaultValue
   const fillDefault = async () => {
     if (!loaded || !defaultValue) return;
     setValue(defaultValue);
-    setDirty(true);
+    dirty.current = true;
+    ++editRevision.current;
     await save(defaultValue, true);
   };
 

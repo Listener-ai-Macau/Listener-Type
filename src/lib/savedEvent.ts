@@ -18,10 +18,17 @@ export interface SavedToastDetail {
   message: string;
 }
 
-export function emitSaved(state: SavedToastEventState, message: string): void {
+let savedEventRevision = 0;
+
+// Async callers can finish only the feedback operation they started.
+// Existing synchronous callers may continue to omit expectedRevision.
+export function emitSaved(state: SavedToastEventState, message: string, expectedRevision?: number): number {
+  if (expectedRevision !== undefined && expectedRevision !== savedEventRevision) return savedEventRevision;
+  const revision = ++savedEventRevision;
   window.dispatchEvent(
     new CustomEvent<SavedToastDetail>(SAVED_TOAST_EVENT, { detail: { state, message } }),
   );
+  return revision;
 }
 
 interface ToastSnapshot {
