@@ -97,6 +97,10 @@ pub async fn transcribe_audio_file_trial(
     let duration = pcm.len() as u64 / 32;
     let recognize = async {
         asr.open_session().await.map_err(|e| e.to_string())?;
+        // This path owns all input already; unlike live dictation there is no
+        // deferred bridge to publish delivery readiness. The provider must
+        // leave Opening before the final frame is allowed to drain/send.
+        asr.mark_audio_delivery_ready();
         for chunk in pcm.chunks(6_400) { asr.consume_pcm_chunk(chunk); }
         asr.send_last_frame().await.map_err(|e| e.to_string())?;
         let result = asr.await_final_result().await.map_err(|e| e.to_string())?;
