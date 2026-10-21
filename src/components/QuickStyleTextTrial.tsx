@@ -5,6 +5,7 @@ import { everydayListStyle, isEverydayListStyle } from '../lib/everydayListStyle
 import type { StylePack } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import { StyleTextTrial } from './StyleTextTrial';
+import { TextServiceSettingsDialog } from './TextServiceSettingsDialog';
 
 /** A text workspace, not a style activation or a shortcut to pack management. */
 export function QuickStyleTextTrial({ draft, onDraftChange, onClose, onOpenProviders }: {
@@ -20,6 +21,8 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, onOpenProvi
   const [attempt, setAttempt] = useState(0);
   const [adding, setAdding] = useState(false);
   const [addFailed, setAddFailed] = useState(false);
+  const [providersOpen, setProvidersOpen] = useState(false);
+  const [readinessRevision, setReadinessRevision] = useState(0);
   const addingRef = useRef(false);
   const mounted = useRef(false);
   useEffect(() => {
@@ -59,15 +62,20 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, onOpenProvi
       if (mounted.current) setAdding(false);
     }
   };
-  return selected ? <StyleTextTrial pack={selected} packs={packs}
+  return <>{selected ? <StyleTextTrial pack={selected} packs={packs}
     onSelectPack={setSelectedId} draft={draft} onDraftChange={onDraftChange}
     extraStyleChoice={selected.id === 'builtin.structured' ? {
       label: t(savedEverydayList ? 'style.everydayList.choose' : 'style.everydayList.add'),
       hint: t('style.everydayList.hint'), pending: adding,
       error: addFailed ? t('style.everydayList.failed') : '', onChoose: () => void chooseEverydayList(),
     } : undefined}
-    onClose={onClose} onOpenProviders={onOpenProviders} /> :
-    <TrialLoading failed={failed} onRetry={() => setAttempt(value => value + 1)} onClose={onClose} title={t('overview.tryTypedText')} />;
+    onClose={onClose} onOpenProviders={onOpenProviders ?? (() => setProvidersOpen(true))}
+    readinessRevision={readinessRevision} /> :
+    <TrialLoading failed={failed} onRetry={() => setAttempt(value => value + 1)} onClose={onClose} title={t('overview.tryTypedText')} />}
+    {providersOpen && <TextServiceSettingsDialog onClose={() => {
+      setProvidersOpen(false); setReadinessRevision(value => value + 1);
+    }} />}
+  </>;
 }
 
 function TrialLoading({ failed, onRetry, onClose, title }: {

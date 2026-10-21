@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T04:22:30.740610+08:00",
+  "updated_at": "2026-10-22T04:34:35.508345+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4919,7 +4919,7 @@
       "repo": "type",
       "commit": "a24621bc5132fb9c87f0e6233bf41dc762ca0d71",
       "subject": "Do not clear a later credential edit from an older save acknowledgement; preserve latest blur/close and feedback ownership",
-      "state": "exact116_artifact_controlled_ui_before_after_and_normal_native_private_save_reopen_verified_customer_pending",
+      "state": "exact116_engineering_verified_customer_typed_path_complete_settings_untried",
       "previous_source_evidence": "6020853ec introduced existing CredentialField behaviour; not a115 regression",
       "protects": [
         "Per-edit revision owns save result. Synchronous dirty state survives old ack and lets blur submit latest value before debounce is cancelled by close.",
@@ -4938,10 +4938,13 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build116\\type-artifact-verification.json"
       ],
       "customer_evidence": [
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE115-software-20261022-035200\\experience.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE115-software-20261022-035200\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE116-software-20261022-042500\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE116-software-20261022-042500\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE116-software-20261022-042500\\10-copy-confirmed.png"
       ],
       "unverified": [
-        "Independent116 not dispatched. No broad quota/livelong/physical/hardware purchase qualification; original software/voice obligations remain."
+        "116 full feedback read: self-selected typed Light0.9s, saved/reopened/Copied, no blocker,49 deferred/free Type sufficient. Credential edit fix and audio bridge untried. No external paste/live/physical/order."
       ]
     },
     {

@@ -18,6 +18,7 @@ import {
 } from '../../lib/ipc';
 import { providerDemoRecoveryForKind } from '../../lib/demoMode';
 import { emitSaved } from '../../lib/savedEvent';
+import { trackProviderWrite } from '../../lib/providerWriteBarrier';
 import { classifyProviderConnectionError } from '../../lib/providerSetup';
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { SelectLite } from '../../components/ui/SelectLite';
@@ -208,7 +209,7 @@ const ASR_PRESETS: ReadonlyArray<{ id: AsrPresetId; nameKey: string; baseUrl: st
 
 // ─── ProvidersSection ─────────────────────────────────────────────────
 
-export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false }: { onOpenLocalAsr: () => void; prioritizeTextService?: boolean }) {
+export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false, textOnly = false }: { onOpenLocalAsr: () => void; prioritizeTextService?: boolean; textOnly?: boolean }) {
   const { t } = useTranslation();
   const { prefs, updatePrefs } = useHotkeySettings();
   // `*Provider` 立即跟随 <select> 改动（受控组件必须实时反映用户输入）；
@@ -254,7 +255,7 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
   //   3. 仅 setCommittedLlmProvider 之后 CredentialField 才 remount 读新 entry，
   //      此时后端 root.active.llm 已经是 id，lookup_account 落到正确 entry。
   //   4. endpoint/model 默认值仅在该 provider entry 该字段为空时才填，不覆盖用户自定义。
-  const onLlmProviderChange = async (id: LlmPresetId) => {
+  const onLlmProviderChange = (id: LlmPresetId) => trackProviderWrite(async () => {
     setLlmProvider(id);
     const seq = ++llmSwitchSeqRef.current;
     emitSaved('saving', t('common.saving'));
@@ -293,11 +294,11 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
       }
       throw err;
     }
-  };
+  });
 
   const onLlmThinkingToggle = (enabled: boolean) => {
     if (!prefs) return;
-    void updatePrefs(current => ({ ...current, llmThinkingEnabled: enabled })).catch(error => {
+    void trackProviderWrite(() => updatePrefs(current => ({ ...current, llmThinkingEnabled: enabled }))).catch(error => {
       console.error('[settings] failed to update LLM thinking mode', error);
       emitSaved('failed', t('common.operationFailed'));
     });
@@ -534,7 +535,7 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
       <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.6, marginBottom: 10 }}>
         {t('settings.providers.credentialStorageNotice')}
       </div>
-      {prioritizeTextService ? [llmCard, asrCard] : [asrCard, llmCard]}
+      {textOnly ? llmCard : prioritizeTextService ? [llmCard, asrCard] : [asrCard, llmCard]}
     </>
   );
 }

@@ -10,7 +10,7 @@ import './StyleTextTrial.css';
 import { DeviceLayoutsDialog } from './DeviceLayoutsDialog';
 import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
 
-export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draft, onDraftChange, onClose, onOpenProviders }: {
+export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draft, onDraftChange, onClose, onOpenProviders, readinessRevision = 0 }: {
   pack: StylePack;
   packs?: StylePack[];
   onSelectPack?: (id: string) => void;
@@ -19,6 +19,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   onDraftChange: (text: string) => void;
   onClose: () => void;
   onOpenProviders?: () => void;
+  readinessRevision?: number;
 }) {
   const { t } = useTranslation();
   const presentation = stylePackPresentation(pack, t);
@@ -99,7 +100,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       if (current) setReadinessError(true);
     });
     return () => { current = false; };
-  }, [pack.id, readinessAttempt]);
+  }, [pack.id, readinessAttempt, readinessRevision]);
 
   useEffect(() => {
     const element = dialog.current;

@@ -4,6 +4,7 @@
 // not mock server state; they require the Rust command layer.
 
 import { notifyCredentialsStatusChanged } from './credentialsStatusEvents';
+import { trackProviderWrite } from './providerWriteBarrier';
 
 import type {
   CloudAccountStatus,
@@ -972,7 +973,7 @@ export function getCredentials(): Promise<CredentialsStatus> {
 }
 
 export async function setCredential(account: string, value: string): Promise<void> {
-  await invokeOrMock('set_credential', { account, value }, () => undefined);
+  await trackProviderWrite(() => invokeOrMock('set_credential', { account, value }, () => undefined));
   notifyCredentialsStatusChanged();
 }
 
