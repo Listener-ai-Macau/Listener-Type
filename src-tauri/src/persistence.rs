@@ -48,6 +48,9 @@ const ATOMIC_WRITE_RETRY_DELAYS_MS: [u64; 6] = [20, 50, 100, 200, 350, 500];
 const LEGACY_CREDS_DIR: &str = ".listener-type";
 const LEGACY_CREDS_FILE: &str = "credentials.json";
 
+#[path = "persistence/credential_scope.rs"]
+mod credential_scope;
+
 const KEYRING_CREDENTIALS_ACCOUNT: &str = "credentials.v1";
 const KEYRING_CREDENTIALS_CHUNK_PREFIX: &str = "credentials.v1.chunk.";
 // Windows Credential Manager caps one credential blob at 2560 bytes. keyring stores
@@ -694,6 +697,12 @@ impl CredsLlmEntry {
 }
 
 fn credentials_path() -> Result<PathBuf> {
+    // An opt-in private profile must never read, migrate, or delete the daily
+    // profile's old plaintext credentials, even if its own vault is missing or
+    // its namespace is invalid. Private credentials stay in its OS vault only.
+    if std::env::var_os("LISTENER_TYPE_CREDENTIAL_NAMESPACE").is_some() {
+        return Err(anyhow!("private profiles do not use legacy credential files"));
+    }
     // macOS / Linux: ~/.listener-type/credentials.json (与 Swift 同源)
     // Windows: %APPDATA%\Listener Type\credentials.json (Windows 没有标准 HOME 环境变量)
     #[cfg(target_os = "windows")]
@@ -721,7 +730,15 @@ fn keyring_entry_for(account: &str) -> Result<keyring::Entry> {
     if let Some(service) = TEST_CREDENTIAL_SERVICE.with(|value| value.borrow().clone()) {
         return keyring::Entry::new(&service, account).context("open isolated test credential vault");
     }
-    keyring::Entry::new(CredentialsVault::SERVICE_NAME, account)
+    let namespace = std::env::var_os("LISTENER_TYPE_CREDENTIAL_NAMESPACE");
+    let profile_dir = std::env::var_os("LISTENER_TYPE_DATA_DIR");
+    let service = credential_scope::service_name(
+        CredentialsVault::SERVICE_NAME,
+        namespace.as_deref(),
+        profile_dir.as_deref(),
+    )
+    .map_err(|message| anyhow!(message))?;
+    keyring::Entry::new(&service, account)
         .context("open system credential vault")
 }
 
