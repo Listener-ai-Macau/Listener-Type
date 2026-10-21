@@ -11,7 +11,7 @@
 
 客户体验优先：工程师负责从入口、说明、响应、稳定性、功能和价值定位并改进；客户困惑、停用或不买作为产品反馈承接，不以客户不会用、理解错或模型没按要求操作归责客户。事实/假设/依赖诚实分开，体验条件不足由工程推进补足，不否定客户感受或编造成功。
 
-- Companion与Listener共用`C:/Users/Billy/Desktop/Denzic/ai-collaboration-workflow/docs/customer_engineering_workflow.md`，同步标识`CEW-20261020-v5`。每轮实际采用时先读该规则，不串用Companion硬件/美术/屏幕要求。
+- Companion与Listener共用`C:/Users/Billy/Desktop/Denzic/ai-collaboration-workflow/docs/customer_engineering_workflow.md`，同步标识`CEW-20261020-v5`；Owner 2026-10-21补充的购买门槛迭代与跨会话接续见该规则第8节。每轮实际采用时先读该规则，不串用Companion硬件/美术/屏幕要求。
 - 由“Listener 整体修复”`01a106a7-7daf-77b3-92a7-5a28ac126fb3`直接派发临时客户子代理并完整承接反馈；Owner已归档“Listener 客户体验”`01a15774-1ed1-7f00-8d28-59ab901abcb7`，仅保留历史，不再向其派发或重建侧边栏客户。
 - 客户围绕自己的日常目的实际使用，保留困惑、求助、放下和不买；不读工程历史/源码，不按工程清单逐项验收，不替Owner或市场下结论。工程师不交付旧意见、预期答案或修复理由来引导观感。
 - 按Owner已明确要求，后续有实质候选时默认FIRST_USE：工程会话直接调用 `collaboration.spawn_agent`、实际设置 `fork_turns="none"` 安排临时体验员，仅传公开入口、49美元、必要环境边界；不传旧评价/工程清单、不读归档。同一聊天不声称清空记忆；明确要求回访时记RETURN_USE，保留学会的操作和旧经历。两类结果不混为同一人的连续亲历。
