@@ -406,6 +406,11 @@ export const zhTW: typeof zhCN = {
   },
   style: {
     trial: {
+      serviceFree: "原文 · 無需文字服務",
+      serviceMissing: "需文字服務 · 尚未設定",
+      serviceConfigured: "文字服務已設定",
+      serviceUnknown: "暫時無法讀取文字服務狀態",
+      previewOnly: "預覽 · 請在桌面版試用",
       needsService: "這個風格需要文字服務，設定後才能處理你的文字；現有語音辨識設定可以保持原樣。",
       checking: "正在檢查試用條件…",
       readinessFailed: "暫時無法確認試用條件。",

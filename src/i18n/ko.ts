@@ -364,6 +364,11 @@ export const ko: typeof zhCN = {
   },
   style: {
     trial: {
+      serviceFree: "원문 · 텍스트 서비스 불필요",
+      serviceMissing: "텍스트 서비스 필요 · 미설정",
+      serviceConfigured: "텍스트 서비스 설정됨",
+      serviceUnknown: "텍스트 서비스 상태를 확인할 수 없음",
+      previewOnly: "미리보기 · 데스크톱 앱에서 사용",
       needsService: "이 스타일을 사용하려면 텍스트 서비스를 설정하세요. 음성 인식 설정은 그대로 유지할 수 있습니다.",
       checking: "체험 가능 여부 확인 중…",
       readinessFailed: "체험 준비 상태를 확인하지 못했습니다.",

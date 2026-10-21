@@ -20,6 +20,7 @@ import { Icon } from '../components/Icon';
 import { SavedToast, type SaveToastState } from '../components/SavedToast';
 import { MarketplaceModal } from '../components/MarketplaceModal';
 import { StyleTextTrial } from '../components/StyleTextTrial';
+import { StyleTrialAvailability } from '../components/StyleTrialAvailability';
 
 type BusyAction =
   | 'loading'
@@ -726,6 +727,7 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
                 )}
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                {rawPack && <StyleTrialAvailability packId={rawPack.id} revision={rawPack.updatedAt} />}
                 {rawPack && <Btn size="sm" variant="ghost" onClick={() => setTrialPack(clonePack(rawPack))}>
                   {t('style.trial.open', { name: rawPack.name })}
                 </Btn>}
@@ -836,6 +838,9 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
                     ))}
                   </div>
 
+                  <div style={{ marginBottom: 12 }}>
+                    <StyleTrialAvailability packId={pack.id} revision={pack.updatedAt} />
+                  </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 'auto' }}>
                     <Btn size="sm" variant="blue" onClick={() => setTrialPack(clonePack(pack))}>
                       {t('style.trial.open', { name: pack.name })}

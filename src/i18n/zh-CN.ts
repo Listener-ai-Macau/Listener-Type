@@ -404,6 +404,11 @@ export const zhCN = {
   },
   style: {
     trial: {
+      serviceFree: "原文 · 无需文本服务",
+      serviceMissing: "需文本服务 · 尚未配置",
+      serviceConfigured: "文本服务已配置",
+      serviceUnknown: "暂时无法读取文本服务状态",
+      previewOnly: "预览 · 请在桌面版试用",
       needsService: "这个风格需要文本服务，配置后才能处理你的文字；已有语音识别配置可以保持原样。",
       checking: "正在检查试用条件…",
       readinessFailed: "暂时无法确认试用条件。",

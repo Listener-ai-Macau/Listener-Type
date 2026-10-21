@@ -364,6 +364,11 @@ export const ja: typeof zhCN = {
   },
   style: {
     trial: {
+      serviceFree: "原文 · テキストサービス不要",
+      serviceMissing: "テキストサービスが必要 · 未設定",
+      serviceConfigured: "テキストサービス設定済み",
+      serviceUnknown: "テキストサービスの状態を取得できません",
+      previewOnly: "プレビュー · デスクトップアプリで試用",
       needsService: "このスタイルにはテキストサービスの設定が必要です。音声認識の設定はそのまま使えます。",
       checking: "試用できるか確認中…",
       readinessFailed: "試用の準備状態を確認できませんでした。",

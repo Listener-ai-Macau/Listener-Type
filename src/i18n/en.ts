@@ -407,6 +407,11 @@ export const en: typeof zhCN = {
   },
   style: {
     trial: {
+      serviceFree: "Original text · no text service needed",
+      serviceMissing: "Text service required · not configured",
+      serviceConfigured: "Text service configured",
+      serviceUnknown: "Text-service status unavailable",
+      previewOnly: "Preview · try in the desktop app",
       needsService: "This style needs a text service. Configure it to try your text; your speech-recognition setup can stay as it is.",
       checking: "Checking trial availability…",
       readinessFailed: "Could not check whether this trial is ready.",
