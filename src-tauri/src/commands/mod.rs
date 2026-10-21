@@ -1852,6 +1852,7 @@ pub async fn repolish(
 
 include!("style_pack_commands.rs");
 include!("style_trial_delivery.rs");
+include!("local_device_layouts.rs");
 
 #[tauri::command]
 pub fn check_accessibility_permission() -> PermissionStatus {

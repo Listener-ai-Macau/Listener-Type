@@ -8,7 +8,7 @@ use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock},
 };
-const MAX_BYTES: usize = 4096;
+pub(crate) const MAX_BYTES: usize = 4096;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceKeyProfile {
@@ -257,7 +257,7 @@ pub fn read(io: &mut dyn SettingsIo) -> Result<Option<OnboardKeys>, String> {
     }
     Ok(Some(keys))
 }
-fn compact_profile_bytes(profile: &DeviceKeyProfile) -> Result<Vec<u8>, String> {
+pub(crate) fn compact_profile_bytes(profile: &DeviceKeyProfile) -> Result<Vec<u8>, String> {
     let mut value = serde_json::to_value(profile).map_err(|e| e.to_string())?;
     let defaults =
         serde_json::to_value(DeviceCustomKeyMapping::default()).map_err(|e| e.to_string())?;

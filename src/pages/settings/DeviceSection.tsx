@@ -49,6 +49,8 @@ import {
 } from '../../lib/deviceSettingsDefaults';
 import { shouldRefreshDeviceSettingsOnFocus } from '../../lib/deviceSettingsRefresh';
 import { DeviceSettingsDraft } from '../../lib/deviceSettingsDraft';
+import { DeviceLayoutsDialog } from '../../components/DeviceLayoutsDialog';
+import { defaultDeviceKeyProfile } from '../../lib/deviceKeyLayouts';
 
 const DEVICE_KEYS = [
   { id: 'key1' },
@@ -137,22 +139,6 @@ const fallbackShortcut = (): ShortcutBinding => ({
   modifiers: [],
 });
 
-const defaultDeviceKeyboardKey = (primary: string, modifiers: string[] = []): DeviceCustomKeyMapping => ({
-  action: 'sendShortcut',
-  appPage: 'settingsDevice',
-  externalAppPath: '',
-  pasteTemplate: '',
-  shortcut: { primary, modifiers },
-});
-
-const defaultDeviceDictationKey = (): DeviceCustomKeyMapping => ({
-  action: 'dictation',
-  appPage: 'settingsDevice',
-  externalAppPath: '',
-  pasteTemplate: '',
-  shortcut: null,
-});
-
 function isDeviceFallbackReservedPrimary(primary: string): boolean {
   const match = /^F(\d{1,2})$/i.exec(primary.trim());
   if (!match) return false;
@@ -169,13 +155,7 @@ export function DeviceSection() {
     <FirmwareOtaPanel supported={detectOS() === 'win'} />
   </>;
 }
-function emptyDeviceKeyProfile(): DeviceKeyProfile {
-  const disabled = (): DeviceCustomKeys => {
-    const key = (): DeviceCustomKeyMapping => ({action:'disabled',appPage:'settingsDevice',externalAppPath:'',pasteTemplate:'',shortcut:null});
-    return {key1:key(),key2:key(),key3:key(),key4:key(),knob:key()};
-  };
-  return { schema:1, hid:[], deviceCustomKeys:{key1:defaultDeviceKeyboardKey('RightControl'),key2:defaultDeviceKeyboardKey('C',['ctrl']),key3:defaultDeviceKeyboardKey('V',['ctrl']),key4:defaultDeviceKeyboardKey('Enter'),knob:defaultDeviceDictationKey()},deviceCustomKeyDoubleClicks:disabled(),deviceCustomKeyLongPresses:disabled() };
-}
+const emptyDeviceKeyProfile = defaultDeviceKeyProfile;
 function snapshotKnob(value: SelectedDeviceSettings | null): DeviceKnobRotationAction {
   switch(value?.snapshot.knobRotationAction) { case 'screen_brightness': case 'screenBrightness': return 'screenBrightness';case 'disabled':return 'disabled';default:return 'systemVolume'; }
 }
@@ -186,6 +166,7 @@ function SelectedDeviceKeysCard({device,value,onRead}:{device:SettingsDevice|nul
   const [busy,setBusy]=useState(false);
   const [dirty,setDirty]=useState(false);
   const [message,setMessage]=useState('');
+  const [layoutsOpen,setLayoutsOpen]=useState(false);
   const [installedApps,setInstalledApps]=useState<InstalledApplication[]>([]);
   const [installedAppsLoading,setInstalledAppsLoading]=useState(false);
   const autoOpenDeviceKeyActionMenu=import.meta.env.DEV && new URLSearchParams(window.location.search).get('openDeviceKeyActionMenu')==='1';
@@ -266,11 +247,21 @@ function SelectedDeviceKeysCard({device,value,onRead}:{device:SettingsDevice|nul
         />
         <div style={{fontSize: 12, color: 'var(--ol-ink-4)', marginTop: 12}}>{t('settings.deviceKeys.onboardDescription', '按键设置保存在当前选中的设备中；修改后请写入。')}</div>
         {message && <div role="status" style={{fontSize: 12, marginTop: 10}}>{message}</div>}
-        <div style={{display: 'flex', gap: 8, marginTop: 12}}>
+        <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12}}>
+          <Btn variant="ghost" size="sm" onClick={() => setLayoutsOpen(true)}>{t('deviceLayouts.library')}</Btn>
           <Btn variant="ghost" size="sm" onClick={() => void read()} disabled={!device || busy}>{t('settings.device.readFromDevice', '读取')}</Btn>
           <Btn variant="blue" size="sm" onClick={() => void save()} disabled={!device || busy || !dirty}>{busy ? t('settings.device.writing', '写入中') : t('settings.device.writeToDevice', '写入')}</Btn>
         </div>
         </fieldset>
+        {layoutsOpen && <DeviceLayoutsDialog initialProfile={profile} initialKnob={knobRotationAction}
+          onClose={() => setLayoutsOpen(false)}
+          onUseLayout={device ? layout => {
+            for (const gesture of DEVICE_GESTURES) {
+              for (const id of ['key1','key2','key3','key4','knob'] as const) editKey(gesture.mapKey,id,layout.profile[gesture.mapKey][id]);
+            }
+            void updateKnobRotationAction(layout.knobRotationAction);
+            setMessage(t('deviceLayouts.loadedDraft'));
+          } : undefined} />}
       </Card>
 
   );

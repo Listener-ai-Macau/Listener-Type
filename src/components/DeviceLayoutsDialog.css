@@ -1,0 +1,22 @@
+.ol-device-layout-dialog { width: min(900px, calc(100vw / var(--ol-font-scale, 1) - 40px)); max-height: calc(100vh / var(--ol-font-scale, 1) - 40px); margin: 20px auto; padding: 24px; box-sizing: border-box; border: 1px solid var(--ol-line-strong); border-radius: 20px; background: var(--ol-surface); color: var(--ol-ink); }
+.ol-device-layout-dialog::backdrop { background: rgba(15,17,22,.4); backdrop-filter: blur(6px); }
+.ol-device-layout-heading,.ol-device-layout-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.ol-device-layout-heading { justify-content: space-between; }
+.ol-device-layout-heading h2 { font-size: 21px; margin: 0; }
+.ol-device-layout-hint { color: var(--ol-ink-3); font-size: 12px; line-height: 1.65; }
+.ol-device-layout-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.ol-device-layout-dialog label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.ol-device-layout-dialog input:not([type=checkbox]),.ol-device-layout-dialog select,.ol-device-layout-dialog textarea { box-sizing: border-box; border: 1px solid var(--ol-line-strong); border-radius: 8px; padding: 8px 10px; background: var(--ol-surface-2); color: var(--ol-ink); font: inherit; max-width: 100%; }
+.ol-device-layout-toolbar > label { flex: 1; min-width: 160px; }
+.ol-device-layout-name { margin: 18px 0; }
+.ol-device-layout-pad { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 10px; }
+.ol-device-layout-pad button { min-height: 85px; min-width: 0; padding: 12px 8px; border: 1px solid var(--ol-line-strong); border-radius: 12px; background: var(--ol-surface-2); color: var(--ol-ink); font: inherit; }
+.ol-device-layout-pad button[aria-pressed=true] { border-color: var(--ol-blue); background: var(--ol-blue-soft); }
+.ol-device-layout-pad strong,.ol-device-layout-pad span { display: block; overflow-wrap: anywhere; }
+.ol-device-layout-pad span { margin-top: 8px; font-size: 11px; color: var(--ol-ink-3); }
+.ol-device-layout-editor { margin: 18px 0; padding: 16px; border: 1px solid var(--ol-line); border-radius: 12px; display: grid; gap: 12px; }
+.ol-device-layout-editor h3 { margin: 0; font-size: 15px; }
+.ol-device-layout-modifiers { display: flex; flex-wrap: wrap; gap: 16px; }
+.ol-device-layout-modifiers label { flex-direction: row; align-items: center; }
+.ol-device-layout-confirm { margin: 12px 0; padding: 12px; background: var(--ol-blue-soft); border-radius: 8px; }
+@media(max-width:600px) { .ol-device-layout-pad { grid-template-columns: repeat(2,minmax(0,1fr)); } }

@@ -14,6 +14,7 @@ import type {
   SettingsDevice,
   SelectedDeviceSettings,
   DeviceKeyProfile,
+  DeviceLayout,
   DeviceKnobRotationAction,
   DeviceSettingsUpdateRequest,
   DictationSession,
@@ -1365,6 +1366,26 @@ export function getDeviceSettings(): Promise<DeviceSettingsSnapshot> {
 }
 
 const mockSettingsDevice: SettingsDevice = { id: 'usb:demo', transport: 'usb', label: 'Listener · USB' };
+let mockDeviceLayouts: DeviceLayout[] = [];
+export const nativeDeviceLayoutsAvailable = isTauri;
+export function listLocalDeviceLayouts(): Promise<DeviceLayout[]> {
+  return invokeOrMock('list_local_device_layouts', undefined, () => structuredClone(mockDeviceLayouts));
+}
+export function saveLocalDeviceLayout(id: string | null, revision: number | null, name: string, profile: DeviceKeyProfile, knobRotationAction: DeviceKnobRotationAction): Promise<DeviceLayout> {
+  return invokeOrMock('save_local_device_layout', { id, revision, name, profile, knobRotationAction }, () => {
+    const index = mockDeviceLayouts.findIndex(layout => layout.id === id);
+    if (id !== null && (index < 0 || mockDeviceLayouts[index].revision !== revision)) throw new Error('device_layout_stale');
+    const value = { id: id ?? crypto.randomUUID(), revision: index < 0 ? 1 : mockDeviceLayouts[index].revision + 1, name: name.trim(), profile: structuredClone(profile), knobRotationAction };
+    mockDeviceLayouts = index < 0 ? [...mockDeviceLayouts, value] : mockDeviceLayouts.map((layout, i) => i === index ? value : layout);
+    return structuredClone(value);
+  });
+}
+export function deleteLocalDeviceLayout(id: string, revision: number): Promise<void> {
+  return invokeOrMock('delete_local_device_layout', { id, revision }, () => {
+    if (!mockDeviceLayouts.some(layout => layout.id === id && layout.revision === revision)) throw new Error('device_layout_stale');
+    mockDeviceLayouts = mockDeviceLayouts.filter(layout => layout.id !== id);
+  });
+}
 let mockSettingsRevision = 1;
 export function listSettingsDevices(): Promise<SettingsDevice[]> {
   return invokeOrMock('list_settings_devices', undefined, () => [mockSettingsDevice]);

@@ -68,6 +68,7 @@ mod timeline;
 mod transcript_boundary;
 mod types;
 mod device_key_profile;
+mod device_layouts;
 mod unicode_keystroke;
 mod wake_phrase;
 mod windows_ime_ipc;
@@ -1029,6 +1030,9 @@ pub fn run() {
             commands::preview_style_pack_runtime,
             commands::try_style_pack_text,
             commands::copy_style_trial_result,
+            commands::list_local_device_layouts,
+            commands::save_local_device_layout,
+            commands::delete_local_device_layout,
             commands::insert_style_trial_result,
             commands::cancel_style_trial_insert,
             commands::get_style_text_trial_readiness,

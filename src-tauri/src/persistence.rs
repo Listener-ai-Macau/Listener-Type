@@ -189,6 +189,15 @@ pub(crate) fn capsule_placement_path() -> Result<PathBuf> {
     Ok(data_dir()?.join("capsule-position.json"))
 }
 
+pub(crate) fn local_device_layouts_path() -> Result<PathBuf> {
+    Ok(data_dir()?.join("device-layouts.json"))
+}
+
+pub(crate) fn write_local_device_layouts(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() { fs::create_dir_all(parent)?; }
+    atomic_write(path, bytes)
+}
+
 pub(crate) fn write_capsule_placement(path: &Path, bytes: &[u8]) -> Result<()> {
     atomic_write(path, bytes)
 }

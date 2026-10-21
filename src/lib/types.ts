@@ -722,6 +722,14 @@ export interface DeviceKeyProfile {
 }
 export interface OnboardKeys { deviceUid: string; revision: number; profile: DeviceKeyProfile }
 
+export interface DeviceLayout {
+  id: string;
+  name: string;
+  revision: number;
+  profile: DeviceKeyProfile;
+  knobRotationAction: DeviceKnobRotationAction;
+}
+
 export interface SelectedDeviceSettings {
   keys: OnboardKeys | null;
   keysError: string | null;
