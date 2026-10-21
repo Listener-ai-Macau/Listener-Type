@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T17:52:40.872268+08:00",
+  "updated_at": "2026-10-21T19:22:26.134514+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4158,9 +4158,48 @@
         "Customer93 coordinate misses are a usability clue; this controlled movement reproduction is not a unique reconstruction of every original click.",
         "Independent94 reaction, speech, physical hardware, other target applications, installation over daily92 and purchase remain separate."
       ]
+    },
+    {
+      "id": "customer95_reviewed_result_explicit_handoff",
+      "repo": "type",
+      "commit": "8238b83157d7291320bb85b2768065b2fcbd7453",
+      "subject": "Explicit reviewed-result handoff with bounded native clipboard and target ownership",
+      "state": "candidate95_native_cancel_refusal_and_queue_guards_verified_external_success_unverified",
+      "protects": [
+        "Only an explicit reviewed-result action arms a five-second handoff; text processing alone never inserts or sends a message.",
+        "Cancelled, stale and expired work cannot acquire a target or update a newer result. Cancellation and dispatch have one winner.",
+        "Worker checks original clipboard ownership, current external editable target and deadline before write; checks target/deadline again after clipboard access before any synthetic input.",
+        "Ordinary dictation and History keep their existing default routes; the new guarded path is opt-in only.",
+        "Native confirmation, synthetic paste sent, unconfirmed result and cancelled operation remain distinct UI facts."
+      ],
+      "guards": [
+        "npm run build",
+        "python scripts/check-style-trial-handoff-ui.py --url <owned frontend> --report <output>",
+        "Existing text-trial lifecycle check; no service/hardware call in that UI fixture.",
+        "Release native tests filtered explicit_handoff:3 actual cases passed.",
+        "Native existing noneditable_stream_and_final_do_not_borrow_clipboard_or_confirm_a_receipt:1 actual case passed.",
+        "Exact95 private native ordinary UI cancellation and no-external-target refusal checks."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\handoff95-engineering-checks.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\handoff95-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style95-affected-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native95-snapshot-20261021-191531\\handoff-native-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native95-snapshot-20261021-191531\\setup-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build95\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE94-technical-purpose-20261021-180539\\return-software-friction.txt"
+      ],
+      "unverified": [
+        "Fresh independent95 use and buying judgement pending.",
+        "Successful insertion through the new button into an external app not verified by a noninteractive private station; do not substitute old92 recorded-file proof.",
+        "Not live speech, physical control, BLE or whole-product sale acceptance.",
+        "Not installed over daily92 or published over public94."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-21T17:52:40.872268+08:00",
+  "feature_routes_updated_at": "2026-10-21T19:22:26.134514+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -4803,7 +4842,8 @@
         "customer92_draft_independent_of_service_readiness",
         "public_entry_product_before_setup_20261021",
         "customer93_trial_retention_visible_at_result",
-        "customer94_trial_control_layout_stability"
+        "customer94_trial_control_layout_stability",
+        "customer95_reviewed_result_explicit_handoff"
       ],
       "paths": {
         "type": [
@@ -4924,6 +4964,28 @@
       },
       "known_failures": [
         "Frozen71 SDK disappears and page cancellation leaves opacity0; both pre-fix samples are preserved."
+      ]
+    },
+    {
+      "id": "reviewed-text-handoff",
+      "baseline_state": "candidate95_cancellation_and_native_refusal_verified_successful_external_handoff_pending",
+      "accepted_scope": "Explicit UI lifecycle, cancellation/expiry/ownership gates; no complete external-field success claim.",
+      "guard_entries": [
+        "customer95_reviewed_result_explicit_handoff"
+      ],
+      "paths": {
+        "type": [
+          "src/components/StyleTextTrial.tsx",
+          "src/lib/ipc.ts",
+          "src-tauri/src/commands/style_trial_delivery.rs",
+          "src-tauri/src/insertion.rs",
+          "src-tauri/src/insertion/clipboard_handoff.rs",
+          "scripts/check-style-trial-handoff-ui.py"
+        ]
+      },
+      "known_failures": [
+        "F94T-03 RETURN_USE: structured text useful but manual transfer to coding AI adds a step;95 candidate addresses software workflow rather than requiring physical evaluation.",
+        "Intermediate engineering namespace/fixture/preparation assertions were corrected before customer95; they are not released-product regressions."
       ]
     }
   ]
