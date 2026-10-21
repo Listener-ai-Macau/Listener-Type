@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T06:52:51.645674+08:00",
+  "updated_at": "2026-10-22T07:01:54.777779+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5238,6 +5238,39 @@
         "F123-A01：滚动后沿用旧坐标误点云按钮属隔离适配器问题，不算本地按钮偷发请求；泛用实时命中检查补到工具。",
         "无实体/外部应用/真人购买证明。"
       ]
+    },
+    {
+      "id": "customer124_wording_service_reply_origin_and_local_recovery",
+      "repo": "type",
+      "commit": "b40f163fcd5313a3ddc248b5bdebf56597070a98",
+      "subject": "Separate incomplete service requests from unusable delivered proposals and stale-source errors",
+      "state": "exact124_controlled_error_recovery_verified_customer_pending",
+      "previous_source_evidence": "Customer123 main Light0.9s worked; optional reply logged response_chars379/elapsed1028ms, then generic Check text service. Original response unavailable; do not invent exact rejected span or quota/credential failure.",
+      "protects": [
+        "Received-but-unusable proposal is distinct from request not completed, including native rejected response code. No recommendation to change a working account from parse/guard failure.",
+        "Original and local options retained; only explicit apply/copy/save/retry. No automatic paid retry or credential changes. No relaxed untrusted proposal checks.",
+        "Errors bound to submitted source; a late failure must not attach to a newer draft. Local accepted option clears old error."
+      ],
+      "guards": [
+        "Actual production React controlled successful main result then malformed/unsupported/missing-span/overlong/native rejected replies. Before db025 failed with old check-service message; new124 passes.",
+        "Controlled transport rejection, source edit while pending, local recovery/save and original preservation; prior eight suggestion lifecycle/layout/protection checks retained, tsc.",
+        "Generic private adapter stable visible exact button hit before scoped CDP input; exact124 empty credentials Raw local choice, zero service request. Adapter error not product misclick evidence."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wording124-before-counterexample.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wording124-errors-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wording124-retained-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native124-snapshot-20261022-070119\\adapter124-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native124-snapshot-20261022-070119\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build124\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE123-software-20261022-064300\\experience.txt"
+      ],
+      "unverified": [
+        "New124 customer not yet dispatched. No actual live service invalid reply repeated; controlled response classification is engineering proof only.",
+        "Whole-text concise value wish F123-02 remains open; polite options do not shorten full paragraph. Live recognition, external editor, physical qualification and49 purchase not proven."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5946,7 +5979,8 @@
         "customer120_reviewed_courtesy_edits_keep_primary_text_actions_first",
         "customer121_immediate_local_english_request_option_before_paid_alternatives",
         "customer122_common_request_questions_two_local_tones",
-        "customer123_request_spans_keyless_raw_local_options_identity_feedback"
+        "customer123_request_spans_keyless_raw_local_options_identity_feedback",
+        "customer124_wording_service_reply_origin_and_local_recovery"
       ],
       "paths": {
         "type": [

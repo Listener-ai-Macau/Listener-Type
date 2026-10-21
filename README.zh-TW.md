@@ -8,7 +8,7 @@
 
 | 用途 | 直接下載 |
 | --- | --- |
-| **Windows 軟體** | **[下載 MSI · Type build123](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 軟體** | **[下載 MSI · Type build124](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **韌體：USB 燒寫 / 藍牙 OTA** | **[下載韌體 ZIP · 兩種方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 [English](README.md) · **繁體中文** · [简体中文](README.zh-CN.md)
@@ -36,7 +36,7 @@
 Type 預設使用 **USB 有線燒寫**，能力已內建；無需另裝 Python、ESP-IDF 或其他燒寫軟體。
 裝置設定各自獨立：選擇一台有線／藍牙裝置，讀取後修改並寫入；名稱、燈光、電源、按鍵與旋鈕設定保存在該裝置。請配套使用本頁 MSI 與韌體 ZIP。
 
-Type build123在預設原文路徑也提供本機英文措辭選項，無需文字服務帳號；按句內請求片段定位，招呼、稱呼、日期與其餘正文保留，比較禮貌/柔和語氣後主動採用，不呼叫雲端。其他雲建議需單獨設定文字服務；服務原樣傳回會明確標為未改。Firmware33不變。
+Type build124區分措辭請求未完成與服務已傳回但建議無法安全採用；保留已有正文與本機選項，不自動重試、不要求改帳號。舊稿錯誤不掛到新稿。免帳號的本機英文措辭、主動複製/儲存與Firmware33保留。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

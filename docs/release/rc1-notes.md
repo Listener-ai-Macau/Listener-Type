@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build123 / Firmware33
+# Listener v1.0.6-rc1 · Type build124 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,12 @@
 | **ESP32-S3 firmware · USB flashing / Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+Optional text-service suggestions now distinguish **a request that did not complete** from **a reply that could not be used safely**. A rejected suggestion does not tell you to change a working account. Your existing text remains available: continue with local wording choices, edit directly, copy or save. No automatic retry sends another paid request.
+
+Failed suggestions stay associated with the text that was submitted. If you edit the draft while a request runs, its later failure does not appear against your newer draft. Unsafe proposals remain unavailable, and edits still require an explicit choice. Recognition, accounts, providers, models, prompts and live dictation defaults are unchanged.
+
+## Local wording retained from build123
 
 **Original text → Wording options** works without a text-service account. Enter your own text, choose **Try this text**, then compare local English request wording beside Copy and Save. Your original remains available; nothing changes until you choose **Use this wording**. This local path makes no cloud request. Other result styles can use these options too.
 
@@ -38,10 +44,12 @@ Type is free; US$49 is the hardware price. Cloud service setup and usage are sep
 
 | Component | Exact source | SHA-256 |
 | --- | --- | --- |
-| Type123 MSI · 299114496 bytes | [db025dbc713d](https://github.com/Listener-ai-Macau/Listener-Type/commit/db025dbc713d808412944361fd45e63f2dd9bd6b) | `40b63b11bc297b299849db78abca4e80f7d691410add2e0589e6eec1c91764fe` |
+| Type124 MSI · 299118592 bytes | [b40f163fcd53](https://github.com/Listener-ai-Macau/Listener-Type/commit/b40f163fcd5313a3ddc248b5bdebf56597070a98) | `e0d1076e98e0b2803c536d862041fd39c9cfa80f570df25446506df6569a1ab8` |
 | Firmware33 ZIP · 1956905 bytes | [149b6d950ebc](https://github.com/Listener-ai-Macau/Listener-Firmware/commit/149b6d950ebc5f416924c8670cf2b207bdc2b5b7) | `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272` |
 
 ## 中文说明
+
+124区分“请求未完成”与“服务已返回但建议无法安全采用”，不把后者误导成需要改账号；原文、本地选项、主动复制/保存保留，不自动付费重试。编辑了新稿后，旧请求的错误不会挂在新稿上。原建议校验保持，不改云模型/提示、默认识别或固件。
 
 123的默认原文路径可直接使用本地英文措辞，无需文本服务账号。输入文字、明确处理原文后，点击措辞选项，比较礼貌请求与更柔和问句，主动采用后才改稿，不调用云端。请求按句内片段定位，招呼、称呼、日期、前置条件与其余正文保留；这是有限英文请求便利，不是通用语法或多语言改写，采用前仍需核对含义。
 

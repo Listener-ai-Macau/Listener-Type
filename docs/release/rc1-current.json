@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T06:41:03.452631+08:00",
+  "updatedAt": "2026-10-22T07:01:55.382376+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 123,
-    "source": "db025dbc713d808412944361fd45e63f2dd9bd6b",
-    "sourceTag": "build-source/type123-20261022",
+    "build": 124,
+    "source": "b40f163fcd5313a3ddc248b5bdebf56597070a98",
+    "sourceTag": "build-source/type124-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "40b63b11bc297b299849db78abca4e80f7d691410add2e0589e6eec1c91764fe",
-    "sizeBytes": 299114496,
-    "exeSha256": "0f95e1833e5003032580d3d532593687f07e8a879005e6a4357c1dcb275c5ed0",
+    "sha256": "e0d1076e98e0b2803c536d862041fd39c9cfa80f570df25446506df6569a1ab8",
+    "sizeBytes": 299118592,
+    "exeSha256": "687e2b14e42ab4ceaed76919b3f05787e1495dde1525f65192f98a961e8c5885",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -238,8 +238,15 @@
     "type123CloudBackendUnchanged": true,
     "type123VerificationScope": "Exact123 private native with actual empty scoped ASR/text credentials: Raw customer122 text→request-span local choices→explicit softer revision→save/reopen, greeting/date/remainder exact, zeroLLMPOST. Identity service-response feedback and disabled unconfigured cloud action verified in controlled React. Backend/IPC unchanged from121, no new cloud request/global grammar/live/hardware/purchase claim.",
     "customer122GreetingSpanAndIdentityFeedbackOpen": true,
-    "customer123Reviewed": false,
-    "customer123PurchaseQualification": false
+    "customer123Reviewed": true,
+    "customer123PurchaseQualification": false,
+    "type124InstalledExeAndPreferencesVerified": false,
+    "type124WordingErrorOriginAndLocalRecoveryUiVerified": true,
+    "type124PrivateNativeAdapterVerified": true,
+    "type124CloudBackendUnchanged": true,
+    "type124VerificationScope": "Controlled production React distinguishes incomplete request from received-but-unusable replies, keeps local recovery and original/save protection, and does not attach old errors to newer drafts. Exact private native validates stable visible-button input with no service requests. Backend/IPC, provider/model/prompts and live recording paths unchanged. Not live-cloud failure reproduction, hardware or purchase proof.",
+    "customer124Reviewed": false,
+    "customer124PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -256,6 +263,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build123-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build124-20261022"
   }
 }
