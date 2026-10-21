@@ -59,7 +59,7 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, onOpenProvi
       if (mounted.current) setAdding(false);
     }
   };
-  return selected ? <StyleTextTrial key={selected.id} pack={selected} packs={packs}
+  return selected ? <StyleTextTrial pack={selected} packs={packs}
     onSelectPack={setSelectedId} draft={draft} onDraftChange={onDraftChange}
     extraStyleChoice={selected.id === 'builtin.structured' ? {
       label: t(savedEverydayList ? 'style.everydayList.choose' : 'style.everydayList.add'),

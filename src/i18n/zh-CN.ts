@@ -505,6 +505,7 @@ export const zhCN = {
     trial: {
       resultInput: "结果正文",
       editedResult: "已在此修改 · 复制和插入使用这份正文。",
+      restoredResult: '已恢复本次试写结果 · 未重新请求服务。关闭试写后清除这些对比结果。',
       editHint: "可以直接修改结果，再复制或插入；修改只留在本机。",
       insertElsewhere: "插入到另一应用…",
       insertHint: "点击插入后，请在5秒内把光标放到目标输入框。只插入文字，不发送消息。仅限 Windows 应用。",

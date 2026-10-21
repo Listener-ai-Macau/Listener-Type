@@ -1,0 +1,24 @@
+"""Owned headless UI: compare completed styles without new calls or cross-draft text."""
+import argparse,json,re
+from pathlib import Path
+from playwright.sync_api import sync_playwright,expect
+p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--report',required=True,type=Path);a=p.parse_args();checks=[]
+with sync_playwright() as pw:
+ b=pw.chromium.launch(headless=True,channel='msedge')
+ try:
+  page=b.new_page(viewport={'width':1280,'height':1000});page.set_default_timeout(5000)
+  page.add_init_script("""localStorage.setItem('ol.locale','en');sessionStorage.setItem('ol.providerSetupPromptDeferredThisSession','1');window.__comparisons=[];window.__copies=[];Object.defineProperty(navigator,'clipboard',{value:{writeText:text=>{window.__copies.push(text);return Promise.resolve();}}});window.__compareFixture=(cmd,args,mock)=>{if(cmd==='get_style_text_trial_readiness')return {available:true,requiresTextService:args.stylePackId!=='builtin.raw',textServiceConfigured:true};if(cmd==='try_style_pack_text'){window.__comparisons.push(args);return {packId:args.stylePackId,packName:args.stylePackId,outputText:args.stylePackId+': '+args.rawText,usedTextService:true,elapsedMs:800};}return mock();};""")
+  def fixture(route):
+   r=route.fetch();s=r.text();old='if (!isTauri) {\n    return mock();\n  }';assert s.count(old)==1;route.fulfill(response=r,body=s.replace(old,'if (!isTauri) {\n    return window.__compareFixture(cmd,args,mock);\n  }',1))
+  page.route(re.compile(r'/src/lib/ipc\.ts(?:\?.*)?$'),fixture);page.goto(a.url,wait_until='networkidle');page.get_by_role('button',name='Try typed text',exact=True).click();d=page.get_by_role('dialog');style=d.get_by_role('combobox',name='Trial style');entry=d.get_by_label('Your text');result=d.get_by_label('Result text');run=d.get_by_role('button',name='Try this text',exact=True)
+  original='Maybe Monday, if testing passes. 😀';light='Reviewed Light — 保留条件。';formal='Reviewed Formal — no added commitment.'
+  style.select_option('builtin.light');entry.fill(original);run.click();expect(result).to_have_value('builtin.light: '+original);result.fill(light)
+  style.select_option('builtin.formal');expect(result).to_have_count(0);expect(entry).to_have_value(original);checks.append('a newly selected style never displays the prior style result')
+  run.click();expect(result).to_have_value('builtin.formal: '+original);result.fill(formal);style.select_option('builtin.light');expect(result).to_have_value(light);expect(d.locator('[data-style-trial-restored]')).to_contain_text('no new service request');assert page.evaluate('window.__comparisons.length')==2;checks.append('switching back restores the matching locally edited result without another paid call')
+  d.get_by_role('button',name='Copy result',exact=True).click();expect(d.get_by_role('button',name='Copied',exact=True)).to_be_visible();assert page.evaluate('window.__copies.at(-1)')==light;style.select_option('builtin.formal');expect(result).to_have_value(formal);expect(d.get_by_role('button',name='Copied',exact=True)).to_have_count(0);checks.append('copy captures this style edit and acknowledgements never transfer to another style')
+  style.select_option('builtin.light');entry.fill('A different draft');expect(result).to_have_count(0);style.select_option('builtin.formal');expect(result).to_have_count(0);checks.append('changing the draft hides all results belonging to another input')
+  entry.fill(original);expect(result).to_have_value(formal);assert page.evaluate('window.__comparisons.length')==2;checks.append('restoring the exact original input can recover its corresponding completed comparison')
+  d.get_by_role('button',name='Close',exact=True).click();page.get_by_role('button',name='Try typed text',exact=True).click();style=d.get_by_role('combobox',name='Trial style');style.select_option('builtin.formal');expect(entry).to_have_value(original);expect(result).to_have_count(0);checks.append('closing clears comparison results while the existing draft retention remains')
+  run.click();expect(result).to_have_value('builtin.formal: '+original);assert page.evaluate('window.__comparisons.length')==3;checks.append('an explicit rerun makes exactly one new request')
+  d.screenshot(path=str(a.report.with_suffix('.png')));a.report.write_text(json.dumps({'scope':'Isolated headless UI with controlled style and clipboard fixtures, not cloud quality/native clipboard/customer success.','passed':True,'checks':checks},ensure_ascii=False,indent=2)+'\n',encoding='utf-8');print(json.dumps({'passed':True,'checks':checks},ensure_ascii=False))
+ finally:b.close()

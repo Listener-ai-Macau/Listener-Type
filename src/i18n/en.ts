@@ -508,6 +508,7 @@ export const en: typeof zhCN = {
     trial: {
       resultInput: "Result text",
       editedResult: "Edited here · Copy and Insert use this text.",
+      restoredResult: 'Kept from this trial · no new service request. Close the trial to clear these comparisons.',
       editHint: "You can edit this result before copying or inserting it. Edits stay local.",
       insertElsewhere: "Insert in another app…",
       insertHint: "Click Insert, then place the cursor in your destination within 5 seconds. Inserts only; never sends the message. Windows app only.",

@@ -28,8 +28,14 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const running = useRef(false);
   const copyRunning = useRef(false);
   const [pending, setPending] = useState(false);
-  const [result, setResult] = useState<StyleTextTrialResult | null>(null);
+  const [storedResult, setResult] = useState<StyleTextTrialResult | null>(null);
+  const [resultSignature, setResultSignature] = useState('');
   const [editedOutput, setEditedOutput] = useState<string | null>(null);
+  // Session-only comparisons, never History or persistent customer text storage.
+  const completed = useRef(new Map<string, { signature: string; result: StyleTextTrialResult; edited: string | null }>());
+  const signature = JSON.stringify([draft, pack.prompt]);
+  const result = storedResult?.packId === pack.id && resultSignature === signature ? storedResult : null;
+  const [restored, setRestored] = useState(false);
   const [copying, setCopying] = useState(false);
   const [copiedResult, setCopiedResult] = useState<StyleTextTrialResult | null>(null);
   const [copyError, setCopyError] = useState(false);
@@ -44,6 +50,20 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const delivering = deliveryStarted !== null;
   const resultOutput = editedOutput ?? result?.outputText ?? '';
   const canProcess = !!readiness?.available && (!readiness.requiresTextService || readiness.textServiceConfigured);
+
+  useEffect(() => {
+    ++generation.current;
+    running.current = false;
+    setPending(false);
+    const saved = completed.current.get(pack.id);
+    const matching = saved?.signature === signature ? saved : null;
+    setResult(matching?.result ?? null); setResultSignature(signature); setEditedOutput(matching?.edited ?? null); setRestored(!!matching);
+    setCopiedResult(null); setCopyError(false); setError(''); setDeliveryMessage('');
+    if (deliveryRequest.current) {
+      void cancelStyleTrialInsert(deliveryRequest.current).catch(() => {});
+      deliveryRequest.current = null; setDeliveryStarted(null);
+    }
+  }, [pack.id, signature]);
 
   useEffect(() => {
     // Keep a new result reachable in a short/narrow dialog without moving focus.
@@ -81,13 +101,19 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     setPending(true);
     setResult(null);
     setEditedOutput(null);
+    setRestored(false);
     setCopiedResult(null);
     setCopyError(false);
     setError('');
     setDeliveryMessage('');
     try {
       const value = await tryStylePackText(pack.id, draft);
-      if (generation.current === request) setResult(value);
+      if (generation.current === request) {
+        completed.current.delete(pack.id);
+        completed.current.set(pack.id, { signature, result: value, edited: null });
+        if (completed.current.size > 8) completed.current.delete(completed.current.keys().next().value!);
+        setResult(value); setResultSignature(signature);
+      }
     } catch (cause) {
       if (generation.current === request) {
         const message = String(cause instanceof Error ? cause.message : cause);
@@ -229,6 +255,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
             </div>
           </div>
           <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t('style.trial.keepResult')}</p>
+          {restored && <p role="note" className="ol-style-trial-hint" data-style-trial-restored>{t('style.trial.restoredResult')}</p>}
           <p className="ol-style-trial-hint">{editedOutput !== null ? t('style.trial.editedResult') : t(result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}</p>
           <textarea className="ol-style-trial-result-body ol-style-trial-result-editor ol-thinscroll"
             aria-label={t('style.trial.resultInput')} value={resultOutput} rows={8} maxLength={100000}
@@ -236,7 +263,9 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
             onChange={event => {
               if (copyRunning.current || deliveryRequest.current) return;
               const value = event.target.value;
-              setEditedOutput(value === result.outputText ? null : value);
+              const edited = value === result.outputText ? null : value;
+              setEditedOutput(edited);
+              completed.current.set(pack.id, { signature, result, edited });
               setCopiedResult(null); setCopyError(false); setDeliveryMessage('');
             }} />
           <p className="ol-style-trial-hint">{t('style.trial.editHint')}</p>

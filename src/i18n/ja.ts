@@ -465,6 +465,7 @@ export const ja: typeof zhCN = {
     trial: {
       resultInput: "結果の本文",
       editedResult: "ここで編集済み · コピーと挿入にはこの本文を使用します。",
+      restoredResult: '今回の試用結果を再表示 · 新しいリクエストは送信していません。閉じると比較結果は消去されます。',
       editHint: "結果を編集してからコピーまたは挿入できます。編集内容は端末内に留まります。",
       insertElsewhere: "別のアプリに挿入…",
       insertHint: "挿入を押し、5秒以内に挿入先の入力欄へカーソルを置いてください。文字の挿入のみで、メッセージは送信しません。Windowsアプリ限定。",
