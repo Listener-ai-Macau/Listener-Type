@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T01:30:47.450907+08:00",
+  "updated_at": "2026-10-22T01:44:51.834123+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4652,6 +4652,41 @@
         "Programmatic app-tab change verified in isolated frontend fixture; not physical hardware-page key proof.",
         "Native108check used no cloud. Exact107synthetic-file service evidence inherited; live speech/BLE/external automatic input/physical usefulness and real purchase remain unknown."
       ]
+    },
+    {
+      "id": "customer109_physical_layout_map_and_independent_press_practice",
+      "repo": "type",
+      "commit": "439f444f6afe22aaf8218a1454ed09dd538e343c",
+      "subject": "Connect actual product photo to key configuration and practise each independent press mapping",
+      "state": "exact109_native_photo_three_press_persistence_verified_customer_pending",
+      "protects": [
+        "Photo is a factual layout preview; selected key matches its physical position. Key buttons select existing editor mappings without executing them. No device connection/write success is invented.",
+        "Local practice explicitly selects single/double/hold mapping for four keys. One software click runs only that selected action in the private practice field; no real global double click/hold, clipboard, service or recording. Unsupported real actions keep their honest boundary.",
+        "Save/reopen retains each press mapping independently; transient practice text/copy buffer still clears on close or layout reload. Device load/write remains explicit and revision-bound; knob fixed gestures unchanged.",
+        "Existing saved-phrase/native clipboard and draft/unsaved guards retained."
+      ],
+      "guards": [
+        "scripts/check-hardware-layout-ui.py:6 photo/mapping/native-store fixture/layout/scope checks; existing12 practice+12 layout+6 saved-copy checks and tsc.",
+        "Exact109 ordinary native photo loaded, key4 highlighted, three Unicode/newline templates saved/read from native library and each practised. Ordinary reload retains all mappings and clears temporary text; engineering layout deleted.0cloud."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\hardware109-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\practice109-existing.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\layout109-existing.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\saved109-existing.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native109-snapshot-20261022-014220\\hardware-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native109-snapshot-20261022-014220\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build109\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE108-software-20261022-011800\\experience.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE109-software-20261022-014330\\dispatch-input.txt"
+      ],
+      "unverified": [
+        "Independent109 report pending.",
+        "Value clarity is an engineering hypothesis responding to repeated free-software-sufficient refusals. No requested photo feature or autonomous purchase intent is invented.",
+        "Live speech, real physical controls, long-term use, external automatic input and actual purchase remain unknown."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5341,7 +5376,8 @@
         "customer104_actual_key_targets_and_local_page_use",
         "customer105_saved_phrase_explicit_clipboard_reuse",
         "customer107_explicit_audio_file_transcription",
-        "customer108_earlier_result_snapshot_and_audio_window_lifetime"
+        "customer108_earlier_result_snapshot_and_audio_window_lifetime",
+        "customer109_physical_layout_map_and_independent_press_practice"
       ],
       "paths": {
         "type": [
@@ -5397,7 +5433,9 @@
           "src-tauri/src/commands/audio_file_trial.rs",
           "src/components/AudioFileTrial.tsx",
           "scripts/check-audio-file-trial-ui.py",
-          "scripts/check-earlier-trial-result-ui.py"
+          "scripts/check-earlier-trial-result-ui.py",
+          "src/components/DeviceLayoutMap.tsx",
+          "scripts/check-hardware-layout-ui.py"
         ]
       },
       "known_failures": [
@@ -5493,7 +5531,8 @@
         "customer104_actual_key_targets_and_local_page_use",
         "customer105_saved_phrase_explicit_clipboard_reuse",
         "customer107_explicit_audio_file_transcription",
-        "customer108_earlier_result_snapshot_and_audio_window_lifetime"
+        "customer108_earlier_result_snapshot_and_audio_window_lifetime",
+        "customer109_physical_layout_map_and_independent_press_practice"
       ],
       "paths": {
         "type": [
@@ -5514,7 +5553,10 @@
           "src-tauri/src/commands/audio_file_trial.rs",
           "src/components/AudioFileTrial.tsx",
           "scripts/check-audio-file-trial-ui.py",
-          "scripts/check-earlier-trial-result-ui.py"
+          "scripts/check-earlier-trial-result-ui.py",
+          "src/components/DeviceLayoutMap.tsx",
+          "src/components/DeviceLayoutPractice.tsx",
+          "scripts/check-hardware-layout-ui.py"
         ]
       },
       "known_failures": [
