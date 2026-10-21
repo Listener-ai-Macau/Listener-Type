@@ -2,7 +2,17 @@
 
 **English** · [Chinese](USAGE.md)
 
-This guide covers the Windows setup and user controls shown on the current product pages. Check the installed app and firmware versions before applying device settings. The keyboard is optional; use a computer microphone to try the app first.
+This guide covers the current [v1.0.6-rc1 Windows candidate](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1). Check its build, checksum and known limits on the release page, and use the paired [firmware release](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1). The keyboard is optional; use a computer microphone to try the app first. Earlier 1.0.5 release documents are historical.
+
+## No API key: choose a starting point
+
+| What you want | Current path | What it requires |
+| --- | --- | --- |
+| Turn speech into text | Prepare Foundry Local and a Whisper model in Windows local-recognition settings; select Computer microphone and start with default Raw | Internet and disk space for the first download; memory while running. Speed depends on the computer. No cloud ASR key |
+| Remove fillers or organize a message automatically | Configure an available text service, then select Light, Structured or Formal | Separate from recognition; a downloaded speech model does not also provide these text services. Provider charges may apply |
+| Use your existing cloud recognizer | Enter that provider's required credentials, endpoint and model, then try Raw | Provider availability, quota and charges |
+
+You can view, edit and import/export built-in style packs locally. **That does not make Light text processing offline.** Default Raw needs no text service; a customized Raw pack can have different requirements. Check its card and trial status. “Configured” does not guarantee remaining quota or a successful request.
 
 ## Install and make your first dictation
 
