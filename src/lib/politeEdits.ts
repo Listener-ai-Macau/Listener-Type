@@ -14,18 +14,26 @@ export function localPoliteOptions(source: string): LocalPoliteOption[] {
   if (!Segmenter) return [];
   const edits: LocalPoliteOption[] = [];
   for (const { segment } of new Segmenter('en', { granularity: 'sentence' }).segment(source)) {
-    const old = segment.trim();
-    if (old.length > 200 || /[\r\n`]|https?:|www\.|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/iu.test(old)) continue;
-    const match = /^(?:(?:could|can|would|will)\s+you\s+(?:please\s+)?|(?:please|kindly)\s+)?(send|share|check|review|confirm|provide|bring|update|let|tell|give|take|return|submit|forward|attach)\s+([^?!]+?)[.!?]?$/iu.exec(old);
-    if (!match || /\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|etc|[A-Z])\.$/u.test(old)) continue;
+    const sentence = segment.trim();
+    if (sentence.length > 240 || /[\r\n`]|https?:|www\.|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/iu.test(sentence)) continue;
+    // Find the request span rather than requiring the whole sentence to begin
+    // with it. Greetings, addressees and preceding conditions stay outside it.
+    const question = /\b(?:could|can|would|will)[ \t]+you[ \t]+(?:please[ \t]+)?(send|share|check|review|confirm|provide|bring|update|let|tell|give|take|return|submit|forward|attach)[ \t]+([^?!]+?)\?$/iu.exec(sentence);
+    const imperative = /(?:^|,[ \t]+)((?:(?:please|kindly)[ \t]+)?(send|share|check|review|confirm|provide|bring|update|let|tell|give|take|return|submit|forward|attach)[ \t]+([^?!]+?)[.!]?)$/iu.exec(sentence);
+    if (!question && !imperative) continue;
+    const old = question?.[0] ?? imperative![1];
+    const verb = question?.[1] ?? imperative![2];
+    const object = question?.[2] ?? imperative![3];
+    if (/\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|etc|[A-Z])\.$/u.test(old)) continue;
     if (source.indexOf(old) !== source.lastIndexOf(old)) continue;
-    const body = `${match[1].toLowerCase()} ${match[2]}`;
+    const body = `${verb.toLowerCase()} ${object}`;
     const choices: { tone: LocalPoliteOption['tone']; prefix: string }[] = [
       { tone: 'courteous', prefix: 'Could you please' },
       { tone: 'softer', prefix: 'Would you be able to' },
     ];
     for (const { tone, prefix } of choices) {
-      const replacement = `${prefix} ${body}?`;
+      const caseMatchedPrefix = /^[a-z]/u.test(old) ? prefix[0].toLowerCase() + prefix.slice(1) : prefix;
+      const replacement = `${caseMatchedPrefix} ${body}?`;
       if (old === replacement) continue;
       const proposed = source.replace(old, () => replacement);
       if (same(anchors(source), anchors(proposed)) && same(markers(source), markers(proposed))) edits.push({ old, new: replacement, tone });

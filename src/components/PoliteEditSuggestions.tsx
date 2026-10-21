@@ -4,8 +4,9 @@ import { suggestPoliteTextEdits } from '../lib/ipc';
 import { applyLocalPoliteOption, applyPoliteEdits, localPoliteOptions, reviewPoliteEdits, type PoliteEditReview } from '../lib/politeEdits';
 import { Btn } from '../pages/_atoms';
 
-export function PoliteEditSuggestions({ text, disabled, onApply }: {
+export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured = true }: {
   text: string; disabled: boolean; onApply: (text: string) => void;
+  cloudConfigured?: boolean;
 }) {
   const { t } = useTranslation();
   const alive = useRef(false);
@@ -27,7 +28,7 @@ export function PoliteEditSuggestions({ text, disabled, onApply }: {
   const current = reply?.source === text ? reply : null;
   const localOptions = localPoliteOptions(text);
   const request = async () => {
-    if (running.current || disabled || !text.trim() || text.length > 4000) return;
+    if (running.current || disabled || !cloudConfigured || !text.trim() || text.length > 4000) return;
     const source = text;
     running.current = true; setPending(true); setError(''); setReply(null); setSelected([]); setApplied(null);
     try {
@@ -63,8 +64,8 @@ export function PoliteEditSuggestions({ text, disabled, onApply }: {
         } catch { setError('failed'); }
       }}>{t('politeEdits.useLocal')}</Btn>
     </div>)}
-    <p className="ol-style-trial-hint">{t('politeEdits.cost')}</p>
-    <Btn size="sm" variant="ghost" disabled={disabled || pending || !text.trim() || text.length > 4000} onClick={() => void request()}>
+    <p className="ol-style-trial-hint">{t(cloudConfigured ? 'politeEdits.cost' : 'politeEdits.cloudSetupHint')}</p>
+    <Btn size="sm" variant="ghost" disabled={disabled || pending || !cloudConfigured || !text.trim() || text.length > 4000} onClick={() => void request()}>
       {t(pending ? 'politeEdits.pending' : 'politeEdits.request')}
     </Btn>
     {current && <>

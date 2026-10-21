@@ -26,6 +26,16 @@ assert.equal(applyLocalPoliteOption(customer121, questionOptions[1]), customer12
 for (const modal of ['Can', 'Could', 'Would', 'Will']) assert.equal(localPoliteOptions(`${modal} you share the notes by 3 pm?`).length, 2);
 assert.deepEqual(localPoliteOptions('Could you please send the log?').map(edit => edit.tone), ['softer']);
 assert.throws(() => applyLocalPoliteOption(customer121.replace('3 pm', '4 pm'), questionOptions[1]));
+const customer122 = 'Hi, could you send me the updated schedule by Friday? I need it to plan the handover. Thanks!';
+const greetingOptions = localPoliteOptions(customer122);
+assert.equal(greetingOptions.length, 2);
+assert.equal(greetingOptions[0].old, 'could you send me the updated schedule by Friday?');
+assert.equal(applyLocalPoliteOption(customer122, greetingOptions[1]), 'Hi, would you be able to send me the updated schedule by Friday? I need it to plan the handover. Thanks!');
+assert.equal(applyLocalPoliteOption('Hello Zoë, please send the draft by Friday.', localPoliteOptions('Hello Zoë, please send the draft by Friday.')[0]), 'Hello Zoë, could you please send the draft by Friday?');
+const conditionalRequest = 'If the draft is ready, could you share it by 18:00? Otherwise, keep it private.';
+assert.equal(applyLocalPoliteOption(conditionalRequest, localPoliteOptions(conditionalRequest)[0]), conditionalRequest.replace('could you share', 'could you please share'));
+assert.deepEqual(localPoliteOptions('Hi, you must send the draft by Friday.'), []);
+assert.deepEqual(localPoliteOptions('He will send the draft by Friday.'), []);
 
 const source = "Tomorrow's design review at 3 won't work for me. Could we move it to 4? If not, send me your notes and I'll reply by Friday. Thanks!";
 const edits = [{ old: 'Could we move it to 4?', new: 'Could we please move it to 4?' }, { old: 'send me your notes', new: 'please send me your notes' }];

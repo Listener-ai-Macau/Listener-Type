@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T06:22:47.539686+08:00",
+  "updated_at": "2026-10-22T06:34:47.195039+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5166,7 +5166,7 @@
       "repo": "type",
       "commit": "049128d283b0a30a69d2b887f37f8dba1ded1590",
       "subject": "Cover actual121 Could-you failure with distinct local courteous/softer options",
-      "state": "exact122_native_local_question_choices_verified_customer_pending",
+      "state": "customer122_greeting_request_span_missed_identity_response_unexplained_123_in_progress",
       "previous_source_evidence": "121 actual customer Could you send…3pm: local no option, optional cloud1.8s no usable edit, saved existing Formal and deferred49. Preserve full report/refusal originalL09/F96-02.",
       "protects": [
         "Common Can/Could/Would/Will you requests and prior imperatives offer explicit distinct courteous/softer local choices. Request body, dates, conditions and remaining message preserved; no auto-apply/service call.",
@@ -5187,10 +5187,15 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE121-software-20261022-060400\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE121-software-20261022-060400\\operations.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE121-software-20261022-060400\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE122-software-20261022-062500\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE122-software-20261022-062500\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE122-software-20261022-062500\\04-formal-result.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE122-software-20261022-062500\\08-no-edits-visible.png"
       ],
       "unverified": [
-        "122 independent customer not dispatched. Default Formal/global style quality, live speech/external editor/physical/hardware value/purchase/order not qualified."
+        "122经历/操作及04/08截图完整读取：Hi, could you…Friday原稿，Formal0.9s完全相同、本地无选项、另一次服务0.7s无可用修改；保留原文后界面Copied，未保存/外部粘贴。仍暂缓49，想要保留理由或可比较措辞，不把这次扩大为整机不值。",
+        "F122-01招呼前缀导致整句锚定漏请求，并原F121-01/F96-02；F122-02服务原样返回但无明确事实反馈，F122-03付费仍无备选。"
       ]
     }
   ],

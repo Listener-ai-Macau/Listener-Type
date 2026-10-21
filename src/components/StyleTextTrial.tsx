@@ -276,7 +276,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
             <div style={{ fontWeight: 600 }}>{t('style.trial.output')}</div>
           </div>
-          <p className="ol-style-trial-hint">{editedOutput !== null ? t('style.trial.editedResult') : t(result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}</p>
+          <p className="ol-style-trial-hint">{editedOutput !== null ? t('style.trial.editedResult') : t(result.usedTextService ? result.outputText === draft ? 'politeEdits.unchangedResult' : 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}</p>
           <textarea className="ol-style-trial-result-body ol-style-trial-result-editor ol-thinscroll"
             aria-label={t('style.trial.resultInput')} value={resultOutput} rows={8} maxLength={100000}
             disabled={copying || delivering || draftSaving}
@@ -292,8 +292,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
             </Btn>
             <SaveTextDraft name={presentation.name} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving}
               onSaved={text => setSavedDraftSignature(JSON.stringify([presentation.name, draft, text]))} />
-            {pack.baseMode === 'formal' && <PoliteEditSuggestions text={resultOutput}
-              disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />}
+            <PoliteEditSuggestions text={resultOutput} cloudConfigured={readiness?.textServiceConfigured === true}
+              disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />
           </div>
           <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t(savedCurrentDraft ? 'textDraft.savedRetention' : 'textDraft.retention')}</p>
           {restored && <p role="note" className="ol-style-trial-hint" data-style-trial-restored>{t('style.trial.restoredResult')}</p>}
