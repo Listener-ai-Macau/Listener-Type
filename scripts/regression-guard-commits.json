@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T03:33:57.448766+08:00",
+  "updated_at": "2026-10-22T03:43:20.115408+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4854,7 +4854,7 @@
       "repo": "type",
       "commit": "dcb03ddd66e3c03e1f12042531cc3d03751454a6",
       "subject": "Confirm current draft retention only after actual successful save; edits invalidate the statement",
-      "state": "exact114_artifact_and_affected_frontend_checked_native_customer_pending",
+      "state": "exact114_independent_typed_edit_save_reopen_copy_ordinary_paste_observed",
       "protects": [
         "Typed result retention note matches acknowledged name/original/current edit. Pending and failed saves keep copy/save reminder. Later edits cannot claim the saved version, restoring the exact payload may.",
         "Recorded transcript note follows existing exact savedText acknowledgement, preserving close/edit/discard/copy busy locks. Five locale messages, no backend/storage/ASR/clipboard/device changes."
@@ -4869,10 +4869,14 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE113-software-20261022-031730\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE113-software-20261022-031730\\operations.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE113-software-20261022-031730\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE114-software-20261022-033700\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE114-software-20261022-033700\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE114-software-20261022-033700\\05-saved-confirmation.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE114-software-20261022-033700\\08-pasted-saved-text.png"
       ],
       "unverified": [
-        "F113-01 was minor contradictory advice after a successful save/recovery, not lost data. Native114 customer review pending; no new native persistence, voice, external insertion, hardware or purchase proof."
+        "Independent114 chose Light1.2s, editedcan→could, explicitly saved, read accurate current-version guidance, reopened and ordinary pasted exact edit. No blocker or new actionable defect. Close attempted during Working did not complete, then Copied and Close succeeded; no failure diagnosis or guard removal. Audio untried,49 deferred, free short-text gain limited."
       ]
     }
   ],

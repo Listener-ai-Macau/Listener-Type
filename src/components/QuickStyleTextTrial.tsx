@@ -11,7 +11,7 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, onOpenProvi
   draft: string;
   onDraftChange: (text: string) => void;
   onClose: () => void;
-  onOpenProviders: () => void;
+  onOpenProviders?: () => void;
 }) {
   const { t } = useTranslation();
   const [packs, setPacks] = useState<StylePack[]>([]);

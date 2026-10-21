@@ -6,6 +6,7 @@ import sampleUrl from '../../docs/assets/voice-example/voice-sample.wav?url';
 import { detectOS } from './WindowChrome';
 import { Btn } from '../pages/_atoms';
 import { SaveTextDraft } from './SaveTextDraft';
+import { QuickStyleTextTrial } from './QuickStyleTextTrial';
 import './StyleTextTrial.css';
 
 const MAX_WAV = 60 * 32_000 + 65_536;
@@ -31,6 +32,8 @@ export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => vo
   const [savedText, setSavedText] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [closeConfirm, setCloseConfirm] = useState(false);
+  const [textWorkspaceOpen, setTextWorkspaceOpen] = useState(false);
+  const [textWorkspaceDraft, setTextWorkspaceDraft] = useState('');
   const supported = status?.activeAsrProvider === 'volcengine';
   const ready = supported && status.asrConfigured;
   useEffect(() => {
@@ -97,7 +100,7 @@ export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => vo
     catch { if (version === generation.current) setError(t('audioFile.copyFailed')); }
     finally { copyBusy.current = false; if (version === generation.current) setCopying(false); }
   };
-  return <dialog ref={dialog} className="ol-style-trial" aria-labelledby="audio-file-title" onCancel={event => { event.preventDefault(); close(); }}>
+  return <><dialog ref={dialog} className="ol-style-trial" aria-labelledby="audio-file-title" onCancel={event => { event.preventDefault(); close(); }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
       <h2 id="audio-file-title" style={{ margin: 0, fontSize: 20 }}>{t('audioFile.title')}</h2>
       <Btn variant="ghost" disabled={copying || saving || loading} onClick={close}>{t('audioFile.close')}</Btn>
@@ -136,15 +139,23 @@ export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => vo
             if (value) { setError(''); setCloseConfirm(false); }
           }}
           onSaved={value => { setSavedText(value); setCloseConfirm(false); }} />
+        <Btn variant="ghost" disabled={copying || saving || !text.trim() || text.length > 4000} onClick={() => {
+          if (copyBusy.current || saveBusy.current || !text.trim() || text.length > 4000) return;
+          setTextWorkspaceDraft(text); setTextWorkspaceOpen(true);
+        }}>{t('audioFile.openTextWorkspace')}</Btn>
         <Btn variant="ghost" disabled={copying || saving} onClick={() => {
           if (saveBusy.current || copyBusy.current) return;
           setCloseConfirm(false); setResult(null); setText(''); setCopied(false); setSavedText(null); setError('');
         }}>{t('audioFile.discard')}</Btn>
       </div>
+      <p className="ol-style-trial-hint">{t(text.length > 4000 ? 'audioFile.textWorkspaceLimit' : 'audioFile.textWorkspaceHint')}</p>
     </section>}
     {error && <p role="alert" className="ol-style-trial-hint" style={{ color: 'var(--ol-red)' }}>{error}</p>}
     {closeConfirm && <div role="alert" style={{ marginTop: 14 }}><p>{t('audioFile.confirmClose')}</p><Btn disabled={copying || saving} onClick={() => setCloseConfirm(false)}>{t('audioFile.keep')}</Btn> <Btn variant="ghost" disabled={copying || saving} onClick={() => {
       if (!saveBusy.current && !copyBusy.current) onClose();
     }}>{t('audioFile.closeWithoutCopy')}</Btn></div>}
-  </dialog>;
+  </dialog>
+    {textWorkspaceOpen && <QuickStyleTextTrial draft={textWorkspaceDraft} onDraftChange={setTextWorkspaceDraft}
+      onClose={() => setTextWorkspaceOpen(false)} />}
+  </>;
 }
