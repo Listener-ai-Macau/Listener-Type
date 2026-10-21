@@ -58,6 +58,8 @@ Listener puts a microphone and a physical start/stop control beside your working
 
 The full hardware-audio path currently uses **Windows Type**. RC1 is a prerelease; check the [current limits and release notes](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) before deciding. The purchase link has not yet been announced.
 
+**What changes in an ordinary writing session?** Keep the destination field focused and Type running. With your computer microphone, Right Ctrl starts and stops; with Listener, its microphone and knob can stay at a fixed spot beside your hand, the knob starts and stops, and the device lights show status. You still review the words and use the same configured services. Consider the hardware if a dedicated desk microphone and physical controls fit repeated voice-input sessions; try the free app first to decide whether those controls add value to your own setup.
+
 
 ## Stay where you are writing
 
@@ -116,6 +118,8 @@ Streaming insertion is enabled in preferences by default; actual incremental ins
 **QA setup:** Voice questions currently use Volcengine streaming ASR. Configure its App Key / Access Key and a text provider; another ASR provider or local model selected for dictation does not replace this requirement.
 
 **Raw is the default.** Styles and translation require configuration. For example, Light may turn “um, remind me about tomorrow's three o'clock meeting” into “Remind me about tomorrow's 3 pm meeting.” This illustrates a style, not a guaranteed output.
+
+Want to compare styles before speaking? Use **Overview → Try typed text** with your own draft, then **Copy result**. [Choosing Light or Formal](docs/USAGE.en.md#choose-light-or-formal-for-the-message-you-have) explains what changes to expect; [estimating service costs](docs/USAGE.en.md#estimate-your-own-service-costs) separates audio recognition from text processing and shows where to check actual usage.
 
 ## One knob. Four keys. Six status lights.
 

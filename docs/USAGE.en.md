@@ -44,7 +44,30 @@ Raw is the default and filler cleanup is off by default. Styles, translation and
 
 Network routing is configurable per provider: Direct, System or Custom. Custom routing needs a complete proxy URL. A configured proxy must still be running. Local recognition with a cloud text provider still sends text to that provider.
 
+### Estimate your own service costs
+
+Check **Overview** for the selected speech recognizer and text provider; **Settings → Providers** shows their configuration. They can be different services. “Configured” describes setup, not a balance or a free allowance. Type does not currently display a consolidated provider bill or remaining credit.
+
+| What you do | Which service may charge |
+| --- | --- |
+| Default Raw dictation using cloud recognition | The selected speech recognizer for audio |
+| Dictation with Light, Structured, Formal or translation | Speech recognition, plus the text provider for the text operation |
+| A typed-text trial with a non-Raw or customized style | The text provider; this trial does not submit audio to a recognizer |
+| Default Raw typed-text trial | No service request |
+
+To estimate recognition use, multiply your average spoken minutes per day by the number of days you expect to use it. For example, 5 minutes on each of 20 days is 100 spoken minutes. Apply your provider's current charging unit, rates and account terms; some services use a different unit or minimum. For text operations, check that provider's input/output usage and rates after a representative short trial. Text length, the saved prompt and output length can all affect usage. The response time shown in Type is not a price estimate.
+
+Use the provider's own account page for actual usage and remaining credit. Hardware at US$49 does not include these charges in the current release. No monthly dollar amount is promised here because the selected provider, its rates and your usage determine it.
+
 ## Text, styles and translation
+
+### Choose Light or Formal for the message you have
+
+**Light** keeps your conversational voice and cleans up fillers, punctuation and flow. **Formal** aims for restrained workplace wording: complete sentences and a professional tone, without adding promises, facts or stock greetings. It is not an automatic email template. A short message that is already clear may change very little in either style; selecting Formal does not guarantee a longer message, subject line or signature.
+
+For example, an illustrative draft, “hey Maya can we move Thursday's review to Friday at 10:30 I can send the link by 6 pm Thursday,” could keep its chat tone in Light or use a more restrained request in Formal. In both, Maya, the proposed change, the times and **can send** must remain intact. A proposal must not become a confirmed meeting, and “can send” must not become a promise. These are examples of what to compare, not guaranteed model outputs.
+
+From **Overview → Try typed text**, try a saved style with your own non-sensitive draft and compare the result before using it for dictation. This uses the selected saved prompt without activating it. **Copy result** puts the returned text on the clipboard only when you request it; wait for **Copied**, then paste. Processing alone does not save a History entry or write the clipboard. The saved example is an illustration, separate from your result.
 
 | Task | Controls |
 | --- | --- |
