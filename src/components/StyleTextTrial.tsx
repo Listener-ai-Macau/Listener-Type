@@ -182,13 +182,6 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         </select>
       </label>}
       <p className="ol-style-trial-hint ol-style-trial-purpose" data-style-trial-purpose>{presentation.description}</p>
-      {extraStyleChoice && <div className="ol-style-trial-alternative">
-        <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || extraStyleChoice.pending} onClick={extraStyleChoice.onChoose}>
-          {extraStyleChoice.pending ? t('style.everydayList.adding') : extraStyleChoice.label}
-        </Btn>
-        <p className="ol-style-trial-hint">{extraStyleChoice.hint}</p>
-        {extraStyleChoice.error && <p role="alert" className="ol-style-trial-hint">{extraStyleChoice.error}</p>}
-      </div>}
       <div className="ol-style-trial-availability">
       {readiness?.available === false && <p role="status" className="ol-style-trial-hint">{t('style.trial.nativeRequired')}</p>}
       {readiness?.available && readiness.requiresTextService && !readiness.textServiceConfigured && <p role="status" className="ol-style-trial-hint">{t('style.trial.needsService')}</p>}
@@ -250,6 +243,13 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         <p className="ol-style-trial-hint">{t('style.trial.resultPlaceholder')}</p>
       </div>}
       </div>
+      {extraStyleChoice && <div className="ol-style-trial-alternative">
+        <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || extraStyleChoice.pending} onClick={extraStyleChoice.onChoose}>
+          {extraStyleChoice.pending ? t('style.everydayList.adding') : extraStyleChoice.label}
+        </Btn>
+        <p className="ol-style-trial-hint">{extraStyleChoice.hint}</p>
+        {extraStyleChoice.error && <p role="alert" className="ol-style-trial-hint">{extraStyleChoice.error}</p>}
+      </div>}
       <details className="ol-style-trial-details">
         <summary>{t('style.trial.detailsSummary')}</summary>
         <p className="ol-style-trial-hint">{t('style.trial.description')}</p>

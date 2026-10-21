@@ -36,12 +36,16 @@ with sync_playwright() as pw:
         page.evaluate('window.__resolveLayout({available:true,requiresTextService:false,textServiceConfigured:true})')
         expect(run).to_be_enabled()
         capture('rawReady')
-        dialog.get_by_role('combobox',name='Trial style').select_option('builtin.light')
-        expect(dialog.get_by_role('status')).to_contain_text('Checking trial availability')
-        capture('lightChecking')
-        page.evaluate('window.__resolveLayout({available:true,requiresTextService:true,textServiceConfigured:true})')
-        expect(run).to_be_enabled()
-        capture('lightReady')
+        # Structured has an optional alternative-style panel. The earlier Raw/Light
+        # comparison missed that extra content pushing the active draft downward.
+        for style in ('light','structured','formal','raw'):
+            name='rawReturn' if style=='raw' else style
+            dialog.get_by_role('combobox',name='Trial style').select_option('builtin.'+style)
+            expect(dialog.get_by_role('status')).to_contain_text('Checking trial availability')
+            capture(name+'Checking')
+            page.evaluate('window.__resolveLayout({available:true,requiresTextService:'+str(style!='raw').lower()+',textServiceConfigured:true})')
+            expect(run).to_be_enabled()
+            capture(name+'Ready')
         report['samples']=samples
         report['rawReadinessButtonMovementPx']=samples['rawReady']['run']['y']-samples['rawChecking']['run']['y']
         report['lightReadinessButtonMovementPx']=samples['lightReady']['run']['y']-samples['lightChecking']['run']['y']
