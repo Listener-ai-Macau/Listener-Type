@@ -8,7 +8,7 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build114](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build115](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 **English** · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md)
@@ -36,7 +36,7 @@ Firmware: **ESP32-S3 N16R8**, build `e7bd1f1619b696a1`. Select the same ZIP for 
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device, read its settings, then write changes back to that device. Names, lights, power, keys and knob configuration stay on the board. Use this paired MSI and firmware ZIP.
 
-Type build114 shows saved-version guidance after an explicit draft save succeeds. If you edit the text again, the reminder to copy or save returns. The same acknowledgement rule applies to typed and recorded-audio results. Local drafts, independent key layouts and Firmware33 remain.
+Type build115 connects recorded transcripts to the existing text workspace: choose Open in text workspace to style or edit a copy without manually copying it. The transcript stays in its own window. Opening makes no text-service request; processing remains explicit and uses your existing service. Firmware33 is unchanged.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

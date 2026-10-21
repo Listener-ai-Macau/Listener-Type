@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build114 / Firmware33
+# Listener v1.0.6-rc1 · Type build115 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,12 @@
 | **ESP32-S3 firmware · USB flashing / Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+- After a recorded transcript returns, choose **Open in text workspace** to bring a copy of its current wording into the existing editable style workspace. This removes manual copying between these two entries. The recording transcript stays in its own window and is not changed by edits to the copy.
+- Choose a style and explicitly submit when ready. Opening makes no text-service request; processing uses your existing configured service and its usual charges. You can review, edit, Copy or Save draft there, then return to the transcript. A saved styled draft preserves its text-workspace input and edited result.
+- The existing 4,000-character text limit is checked before opening; longer edited transcripts stay intact and are not silently truncated. An earlier separate typed draft is not overwritten. This is recorded-file processing, not live hardware or Bluetooth qualification.
+
+## Retained from build114
 
 - After **Save draft** actually succeeds, the retention note confirms that this version is saved separately from recording History. It no longer asks you to save the version you just saved.
 - Editing the result again restores the copy/save reminder; only the exact acknowledged version is called saved. Failure and pending states retain their existing protections. Typed and recorded-audio results follow the same rule.
@@ -78,14 +84,16 @@ This is an **RC1 prerelease for Windows**. Review final words in noise or overla
 
 ## Check which file you have
 
-The MSI is **Type build114**, source **dcb03ddd66e3** (also shown in the app footer/About). Firmware is **build33**, runtime **e7bd1f1619b696a1**. Filenames stay fixed within RC1; the source and SHA-256 identify the files.
+The MSI is **Type build115**, source **adaf0c1cef03** (also shown in the app footer/About). Firmware is **build33**, runtime **e7bd1f1619b696a1**. Filenames stay fixed within RC1; the source and SHA-256 identify the files.
 
 | Component | Exact source | SHA-256 |
 | --- | --- | --- |
-| Type114 MSI · 299098112 bytes | [dcb03ddd66e3](https://github.com/Listener-ai-Macau/Listener-Type/commit/dcb03ddd66e3c03e1f12042531cc3d03751454a6) | `ddca5027a5595d4c979850577df9d3361de0d973e626d21b126e74eef54d63ee` |
+| Type115 MSI · 299098112 bytes | [adaf0c1cef03](https://github.com/Listener-ai-Macau/Listener-Type/commit/adaf0c1cef03ca7412a191657433864459335feb) | `df45d2199b9fccd678d171601bf628534fccc394695a42add1a6965b58241923` |
 | Firmware33 ZIP · 1956905 bytes | [149b6d950ebc](https://github.com/Listener-ai-Macau/Listener-Firmware/commit/149b6d950ebc5f416924c8670cf2b207bdc2b5b7) | `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272` |
 
 ## 中文说明
+
+115把录音转写与现有文字工作区接起来：明确打开当前稿的副本，选择样式并提交后才请求既有文字服务；可编辑、复制或保存结果，再回到保留的转写窗口。没有自动发送、复制、激活风格或覆盖其它键入草稿；超过原4,000字符限制不截断。仍是文件转写，不是实时硬件或蓝牙验收。
 
 114修正保存后的矛盾提示：仅当前版本确实收到成功回执才显示已保存，后续修改重新提示复制或保存，失败或未完成不会误报成功。文字和录音转写结果一致；没有改变存储、识别、剪贴板或固件。
 
@@ -109,4 +117,4 @@ The MSI is **Type build114**, source **dcb03ddd66e3** (also shown in the app foo
 
 「使用已保存短语」可明确复制真实保存的内容，再正常粘贴到写作位置；这项复制才使用系统剪贴板，失败保留内容可重试，不自动上屏。卡片显示实际目标，支持的Type本机页面可从练习中明确打开；未保存保护保持。长配置窗口的顶部模式入口保持可见。
 
-Type免费，49美元是硬件价，云服务配置和用量另计。试用不启动录音、不改变当前风格、不写历史；非原文风格可能产生现有文字服务费用。Firmware33不变；本次不声称修复强干扰、偶发提前结束、唤醒或蓝牙，也不代表新的实物/真实语音/外部输入整体验收。当前Type114/dcb03ddd66e3与Firmware33的校验值见上表。
+Type免费，49美元是硬件价，云服务配置和用量另计。试用不启动录音、不改变当前风格、不写历史；非原文风格可能产生现有文字服务费用。Firmware33不变；本次不声称修复强干扰、偶发提前结束、唤醒或蓝牙，也不代表新的实物/真实语音/外部输入整体验收。当前Type115/adaf0c1cef03与Firmware33的校验值见上表。

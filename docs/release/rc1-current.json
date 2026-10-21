@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T03:33:57.548425+08:00",
+  "updatedAt": "2026-10-22T03:50:13.722412+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 114,
-    "source": "dcb03ddd66e3c03e1f12042531cc3d03751454a6",
-    "sourceTag": "build-source/type114-20261022",
+    "build": 115,
+    "source": "adaf0c1cef03ca7412a191657433864459335feb",
+    "sourceTag": "build-source/type115-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "ddca5027a5595d4c979850577df9d3361de0d973e626d21b126e74eef54d63ee",
+    "sha256": "df45d2199b9fccd678d171601bf628534fccc394695a42add1a6965b58241923",
     "sizeBytes": 299098112,
-    "exeSha256": "7355a824bbfffd1190a2e855550159cde53bed351c82ebbbc580758ea2a3f013",
+    "exeSha256": "b9c51263cdd2b37bcdf8e171919a50cc3db85663e4123f4f3c399cc9515edde8",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -182,8 +182,14 @@
     "type114VerificationScope": "Exact MSI and embedded executable/source verified. Existing headless typed/audio lifecycle checks cover failure/pending acknowledgement, saved current version and edit invalidation. Native customer experience pending. No backend, recording, clipboard or firmware change.",
     "customer113TypedSaveRecovered": true,
     "customer113AudioSaveObserved": false,
-    "customer114Reviewed": false,
-    "customer114PurchaseQualification": false
+    "customer114Reviewed": true,
+    "customer114PurchaseQualification": false,
+    "type115InstalledExeAndPreferencesVerified": false,
+    "type115ExactPrivateNativeWorkflowVerified": true,
+    "type115VerificationScope": "Exact isolated native MSI: existing direct Volcengine bundled synthetic WAV→editable transcript→explicit independent text workspace copy→explicit existing DeepSeek Light→local edit/save→ordinary reload/reopen exact input and final wording. Opening makes no text-service request; source transcript, earlier typed draft and actual service-submit boundaries retained. Not live speech, external app, physical or purchase qualification.",
+    "customer114OwnEditedSavePasteReopenObserved": true,
+    "customer115Reviewed": false,
+    "customer115PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -200,6 +206,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build114-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build115-20261022"
   }
 }

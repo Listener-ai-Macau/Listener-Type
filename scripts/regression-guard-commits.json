@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T03:43:20.115408+08:00",
+  "updated_at": "2026-10-22T03:50:13.581828+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4878,6 +4878,37 @@
       "unverified": [
         "Independent114 chose Light1.2s, editedcan→could, explicitly saved, read accurate current-version guidance, reopened and ordinary pasted exact edit. No blocker or new actionable defect. Close attempted during Working did not complete, then Copied and Close succeeded; no failure diagnosis or guard removal. Audio untried,49 deferred, free short-text gain limited."
       ]
+    },
+    {
+      "id": "customer115_recorded_transcript_to_independent_text_workspace",
+      "repo": "type",
+      "commit": "adaf0c1cef03ca7412a191657433864459335feb",
+      "subject": "Explicitly bring a current recorded transcript copy to the existing editable style workspace without manual transfer",
+      "state": "exact115_native_asr_text_service_edit_save_reopen_verified_customer_pending",
+      "protects": [
+        "Entry appears only for a returned transcript and copies current editable wording, leaving the source and independent earlier typed draft intact. Opening never processes text or copies/inserts it automatically.",
+        "Style selection and submission remain explicit; existing service readiness/charges, original-result comparisons, editing, copy/save boundaries retained. Nested workspace Escape/Close returns to transcript without triggering source discard.",
+        "Existing 4000-character input limit is checked without silent truncation. Audio save/copy/discard/close locks retained; no live mic/BLE/preferences/provider/device/firmware or local-model changes."
+      ],
+      "guards": [
+        "New bridge UI checks exact Unicode/newline transfer, no request on open, independent edit/close/Escape, explicit processing/save identity, over-limit retention and separate earlier typed draft. Existing9 audio lifecycle checks and tsc pass.",
+        "Exact isolated native115 bundled11.48s synthetic WAV→existing direct Volcengine actual transcript→explicit workspace→one existing DeepSeek Light→Unicode/newline final edit→Save→ordinary reload/reopen exact input/final. Source transcript and private preferences/history/styles unchanged. Two screenshots viewed."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\audio-workspace115-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\audio115-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native115-snapshot-20261022-034845\\audio-workspace-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native115-snapshot-20261022-034845\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build115\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-90-software-20261021\\return-use-ai-starter.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE114-software-20261022-033700\\experience.txt"
+      ],
+      "unverified": [
+        "OriginalR90A-01 wish has prior framing/return-use influence and is not new114 feedback.114 typed use succeeded but49 deferred; this bridge is engineering follow-through to original sound→Light/manual-transfer value candidate.",
+        "Independent115 actual use and purchase value pending. No live hardware, actual external editor insertion, long-term or order proof."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5573,7 +5604,8 @@
         "customer111_stable_compact_key_layout_editor",
         "customer112_result_first_actions_and_safe_technical_label",
         "customer113_recorded_transcript_explicit_local_drafts",
-        "customer114_acknowledged_saved_version_guidance"
+        "customer114_acknowledged_saved_version_guidance",
+        "customer115_recorded_transcript_to_independent_text_workspace"
       ],
       "paths": {
         "type": [
@@ -5640,7 +5672,8 @@
           "src/components/DeviceLayoutsDialog.tsx",
           "src/components/DeviceLayoutsDialog.css",
           "scripts/check-layout-editor-stability-ui.py",
-          "scripts/check-result-reading-ui.py"
+          "scripts/check-result-reading-ui.py",
+          "scripts/check-audio-text-workspace-ui.py"
         ]
       },
       "known_failures": [
@@ -5742,7 +5775,8 @@
         "customer111_stable_compact_key_layout_editor",
         "customer112_result_first_actions_and_safe_technical_label",
         "customer113_recorded_transcript_explicit_local_drafts",
-        "customer114_acknowledged_saved_version_guidance"
+        "customer114_acknowledged_saved_version_guidance",
+        "customer115_recorded_transcript_to_independent_text_workspace"
       ],
       "paths": {
         "type": [
@@ -5778,7 +5812,8 @@
           "src/components/StyleTextTrial.css",
           "src/lib/stylePackPresentation.ts",
           "src/lib/stylePackPresentation.test.ts",
-          "scripts/check-result-reading-ui.py"
+          "scripts/check-result-reading-ui.py",
+          "scripts/check-audio-text-workspace-ui.py"
         ]
       },
       "known_failures": [
