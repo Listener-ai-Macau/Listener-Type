@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T05:26:18.505980+08:00",
+  "updated_at": "2026-10-22T05:32:26.415692+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5087,6 +5087,37 @@
       "unverified": [
         "No customer119, no purchase improvement. Original default Formal/global grammar quality remains open. Limited local safety rules do not guarantee all meanings/languages."
       ]
+    },
+    {
+      "id": "customer120_reviewed_courtesy_edits_keep_primary_text_actions_first",
+      "repo": "type",
+      "commit": "6311902575d6121826fd9980fd779a02992c0687",
+      "subject": "Ship optional reviewed local courtesy edits while preserving result-first Copy/Save placement",
+      "state": "exact120_artifact_targeted_layout_verified_inherit_unchanged119_native_provider_flow_customer_pending",
+      "previous_source_evidence": "119/8e2c420a held before publication: real service/edit/save worked, visual optional block pushed original Copy/Save down.120 only moves optional section after primary actions/retention.",
+      "protects": [
+        "Original source/result and Copy/Save remain first at native-sized viewport. Optional service action does not start automatically or change default Formal, selected dictation style or live recording.",
+        "Exact unique/nonoverlap local proposals, recognised number/date/firm/negation/condition/code/URL checks; no preselection. Explicit chosen edits only, stale/failed replies preserve current text and invalidate obsolete saved version. Limited checks require user review of meaning/names; not a global semantic guarantee.",
+        "Source120 backend,IPC,parser and proposal-component identical to actual119 native service flow.119 one Formal+one explicit proposal at0.8s, chosen courtesy request saved/reopened exact; do not re-label it as a separate120 cloud test."
+      ],
+      "guards": [
+        "Actual120 React native-size viewport plus stale/select/apply/save/failure5cases; Node actual must counterexample, date/number/negation/protected partial span/Unicode/stale tests, tsc/build.",
+        "Exact120 embeddedEXE/source/MSI and same-version upgrade verified;119 backend evidence retained unchanged with code diff empty."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\politeness120-ui.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\src\\lib\\politeEdits.test.ts",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native119-snapshot-20261022-052220\\politeness119-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native119-snapshot-20261022-052220\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build120\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE117-software-20261022-044800\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE118-software-20261022-050500\\experience.txt"
+      ],
+      "unverified": [
+        "No independent120 customer yet, no hardware purchase intent/order, no new external input/live/physical/BLE qualification. Default Formal/general grammar quality remains open."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5791,7 +5822,8 @@
         "formal116_two_stage_and_existing_provider_pro_not_adopted",
         "customer117_recorded_text_nested_provider_setup_preserves_work",
         "type118_settled_provider_save_failure_survives_close",
-        "customer119_courtesy_edits_native_verified_held_for_primary_action_regression"
+        "customer119_courtesy_edits_native_verified_held_for_primary_action_regression",
+        "customer120_reviewed_courtesy_edits_keep_primary_text_actions_first"
       ],
       "paths": {
         "type": [

@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build118 / Firmware33
+# Listener v1.0.6-rc1 · Type build120 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,16 @@
 | **ESP32-S3 firmware · USB flashing / Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+**Formal result → Suggest more courteous requests** is optional and uses your existing configured text service. Opening a result does not request suggestions. Clicking sends the current result and can incur normal service charges.
+
+Read the proposed original/replacement pairs, select the changes you want, then choose **Use selected edits**. Nothing is preselected or automatically applied. Keep your wording instead if preferred. Your original draft stays beside the result, and accepted edits can be reviewed, copied or saved using the existing actions.
+
+Suggestions must match unique, non-overlapping local source spans. Checks screen changes to recognised numbers, dates, firm requirements, negations and protected code/URL anchors. These are limited checks, not a semantic or all-language guarantee: review meaning and names before accepting. If you edit while a request is running, its earlier suggestions cannot overwrite the new text. Failed or unusable replies leave your current text intact.
+
+This does not replace default Formal wording, change the selected dictation style, add a provider/model or run a local model. Previous save/edit protections remain.
+
+## Settings reliability retained
 
 A text-service settings save failure now remains visible when you close, even if the save already finished. A newer successful retry for that field clears the failure; unrelated writes and obsolete failures cannot misreport it. Returning explicitly without saving keeps your text. An earlier dismissed visit does not block a later visit without edits.
 
@@ -26,10 +36,13 @@ Type is free; US$49 is the hardware price. Cloud service setup and usage are sep
 
 | Component | Exact source | SHA-256 |
 | --- | --- | --- |
-| Type118 MSI · 299106304 bytes | [6d9a18bafacd](https://github.com/Listener-ai-Macau/Listener-Type/commit/6d9a18bafacdec1bf83eb3b25b2662ad66f0858a) | `724007124bff911edfabf59bd68dc999de99cb559ca6097fe8b8cd42318f5030` |
+| Type120 MSI · 299110400 bytes | [6311902575d6](https://github.com/Listener-ai-Macau/Listener-Type/commit/6311902575d6121826fd9980fd779a02992c0687) | `98d0ecf78c4bc45c32452d364d928c8923eaee2b9d1a8607630df3136202e397` |
 | Firmware33 ZIP · 1956905 bytes | [149b6d950ebc](https://github.com/Listener-ai-Macau/Listener-Firmware/commit/149b6d950ebc5f416924c8670cf2b207bdc2b5b7) | `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272` |
 
 ## 中文说明
+
+120针对需要更礼貌请求的成稿，增加明确请求既有服务→比较局部原句/建议→选中后采用的可选动作。打开结果不调用，点击获取可能按原服务正常计费；建议默认不选、不自动修改。原文保留，接受后的稿仍用原复制/保存入口。数字、日期、强制/否定词及URL/代码锚点检查只是有限保护，不保证全部语义或语言，采用前应核对含义和名字；旧稿回复和失败不覆盖新稿。不替换默认正式表达，不改实时输入/账号/提供商/模型。
+
 
 118补全保存错误结果追踪：即使失败先于关闭返回，也会明确提醒；同一字段后续重试成功才清除错误，旧失败不盖新成功，不把已放下的上次窗口错误带到新窗口。原稿/改稿继续保留。117提供的「转写已有录音→打开文字工作区→文本服务设置」入口保留。使用原有文本提供商配置面板，原录音稿、草稿和修订结果留在下方。点击关闭或Esc先提交当前字段，等保存结束再返回并刷新就绪状态；保存失败明确留在设置中，也可选择返回文字。不会自动发送文字、复制、改默认风格或写设备，沿用既有凭据后台和服务配置。
 
