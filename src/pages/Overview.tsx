@@ -28,6 +28,7 @@ import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { Btn, Card, PageHeader, Pill } from './_atoms';
 import { EmbeddedBleStatusPanel } from '../components/EmbeddedBleStatusPanel';
 import { DeviceLayoutsDialog } from '../components/DeviceLayoutsDialog';
+import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
 
 interface OverviewProps {
   onOpenProvidersSettings?: () => void;
@@ -64,7 +65,7 @@ const LLM_NAME_KEY_BY_ID: Record<string, string> = {
 
 export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onOpenLocalAsrSettings, onStartDemoMode, onOpenStyles }: OverviewProps) {
   const { t } = useTranslation();
-  const [layoutsOpen, setLayoutsOpen] = useState(false);
+  const [layoutsOpen, setLayoutsOpen] = useState<'configure' | 'practice' | null>(null);
   const [history, setHistory] = useState<DictationSession[]>([]);
   const [historyError, setHistoryError] = useState(false);
   const [credsError, setCredsError] = useState(false);
@@ -324,11 +325,12 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onO
           </div>
         )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginTop: 12 }}>
-          <Btn size="sm" variant="ghost" onClick={() => setLayoutsOpen(true)}>{t('deviceLayouts.open')}</Btn>
+          <Btn size="sm" variant="ghost" onClick={() => setLayoutsOpen('practice')}>{t('devicePractice.open')}</Btn>
+          <Btn size="sm" variant="ghost" onClick={() => setLayoutsOpen('configure')}>{t('deviceLayouts.open')}</Btn>
           <span style={{ fontSize: 12, color: 'var(--ol-ink-3)' }}>{t('deviceLayouts.entryHint')}</span>
         </div>
       </Card>
-      {layoutsOpen && <DeviceLayoutsDialog onClose={() => setLayoutsOpen(false)} />}
+      {layoutsOpen && <DeviceLayoutsDialog initialPractice={layoutsOpen === 'practice'} initialProfile={layoutsOpen === 'practice' ? writingDeviceKeyProfile() : undefined} onClose={() => setLayoutsOpen(null)} />}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 12 }}>
         <ProviderCard

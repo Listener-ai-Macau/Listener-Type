@@ -20,3 +20,11 @@
 .ol-device-layout-modifiers label { flex-direction: row; align-items: center; }
 .ol-device-layout-confirm { margin: 12px 0; padding: 12px; background: var(--ol-blue-soft); border-radius: 8px; }
 @media(max-width:600px) { .ol-device-layout-pad { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+.ol-device-layout-mode { display: flex; gap: 8px; margin: 14px 0; }
+.ol-device-layout-mode button { border: 1px solid var(--ol-line-strong); border-radius: 8px; background: var(--ol-surface-2); color: var(--ol-ink); font: inherit; padding: 8px 14px; }
+.ol-device-layout-mode button[aria-pressed=true] { border-color: var(--ol-blue); background: var(--ol-blue-soft); }
+.ol-device-layout-practice h3 { margin: 18px 0 8px; }
+.ol-device-layout-practice textarea { width: 100%; resize: vertical; line-height: 1.6; min-height: 140px; }
+.ol-device-practice-keys { grid-template-columns: repeat(4,minmax(0,1fr)); margin-top: 18px; }
+.ol-device-layout-practice-status { min-height: 2.4em; font-size: 13px; line-height: 1.6; color: var(--ol-blue); }
+@media(max-width:600px) { .ol-device-practice-keys { grid-template-columns: repeat(2,minmax(0,1fr)); } }

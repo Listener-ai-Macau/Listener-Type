@@ -281,7 +281,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       )}
       {!result && <div className="ol-style-trial-placeholder" data-style-trial-placeholder>
         <h3>{t('style.trial.output')}</h3>
-        <p className="ol-style-trial-hint">{t('style.trial.resultPlaceholder')}</p>
+        <p className="ol-style-trial-hint">{t(pending ? 'style.trial.running' : 'style.trial.resultPlaceholder')}</p>
       </div>}
       </div>
       {extraStyleChoice && <div className="ol-style-trial-alternative">

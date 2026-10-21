@@ -5,6 +5,29 @@ import { enDeviceMaintenance, enFirmwareMaintenance } from './enDeviceMaintenanc
 
 // Type-level guarantee that en mirrors the zh-CN shape.
 export const en: typeof zhCN = {
+  devicePractice: {
+    "title": "Try your four keys",
+    "description": "Type something here, then click a key below. The buttons use the single-press actions in your current layout.",
+    "text": "Practice text",
+    "placeholder": "A reply, a note, or any text you want to try…",
+    "ready": "Choose a key below, or switch to Configure & save to change its action.",
+    "scope": "Software practice only. These buttons edit this field and use a private copy buffer; they do not touch the system clipboard. Recording, AI, app launch, other shortcuts and the knob are not simulated. Practice text is cleared when you close this window or load another layout.",
+    "tooLong": "This field can hold up to 4,000 characters.",
+    "inserted": "Inserted into your practice text.",
+    "selectFirst": "Select some text in the practice field first.",
+    "copied": "Copied to the practice buffer.",
+    "copyFirst": "Use the practice Copy key first.",
+    "nothingToUndo": "Nothing to undo yet.",
+    "undone": "Undid the last edit.",
+    "disabled": "This key is disabled in this layout.",
+    "selected": "Selected all practice text.",
+    "notSimulated": "This action needs the real device or another app and does not run in this practice field.",
+    "intro": "Explore a four-key layout in Type before connecting a device. Configure & save lets you change the same layout and keep it for later.",
+    "mode": "Layout mode",
+    "configure": "Configure & save",
+    "practice": "Practice here",
+    "open": "Try the four keys"
+  },
   deviceLayouts: {
     "title": "Your key layouts",
     "description": "Plan four keys and a knob for your own tasks. Save layouts on this computer; loading one in Device settings prepares a draft. Only Write changes the selected device.",

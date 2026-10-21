@@ -5,13 +5,15 @@ import { defaultDeviceKeyProfile, layoutActions, layoutAppPages, layoutGestures,
 import type { DeviceCustomKeyId, DeviceCustomKeyMapping, DeviceKeyProfile, DeviceKnobRotationAction, DeviceLayout } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import './DeviceLayoutsDialog.css';
+import { DeviceLayoutPractice } from './DeviceLayoutPractice';
 
 type Group = typeof layoutGestures[number];
 const primaryKeys = ['RightControl','LeftControl','RightShift','LeftShift','RightAlt','LeftAlt', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', 'Enter','Tab','Space','Escape','Backspace','Delete','Insert','Home','End','PageUp','PageDown','ArrowUp','ArrowDown','ArrowLeft','ArrowRight', ...Array.from({length:12},(_,i)=>`F${i+1}`)];
 
-export function DeviceLayoutsDialog({ initialProfile, initialKnob, onUseLayout, onClose }: {
+export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPractice = false, onUseLayout, onClose }: {
   initialProfile?: DeviceKeyProfile;
   initialKnob?: DeviceKnobRotationAction;
+  initialPractice?: boolean;
   onUseLayout?: (layout: DeviceLayout) => void;
   onClose: () => void;
 }) {
@@ -29,6 +31,8 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, onUseLayout, 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [practice, setPractice] = useState(initialPractice);
+  const [practiceRevision, setPracticeRevision] = useState(0);
   const [message, setMessage] = useState('');
   const [confirmation, setConfirmation] = useState<{ text: string; action: () => void } | null>(null);
   const actionGroup = key === 'knob' ? 'deviceCustomKeys' : group;
@@ -57,6 +61,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, onUseLayout, 
     setProfile(structuredClone(value?.profile ?? (writing ? writingDeviceKeyProfile() : defaultDeviceKeyProfile())));
     setKnob(value?.knobRotationAction ?? 'systemVolume'); setGroup('deviceCustomKeys');
     setDirty(writing); setMessage(''); setConfirmation(null);
+    setPracticeRevision(value => value + 1);
   };
   const edit = (value: DeviceCustomKeyMapping) => {
     setProfile(current => ({ ...current, [actionGroup]: { ...current[actionGroup], [key]: value } }));
@@ -89,7 +94,11 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, onUseLayout, 
       <h2 id="device-layout-title">{t('deviceLayouts.title')}</h2>
       <Btn size="sm" variant="ghost" disabled={busy} onClick={() => attempt(onClose)}>{t('common.close')}</Btn>
     </div>
-    <p className="ol-device-layout-hint">{t('deviceLayouts.description')}</p>
+    <p className="ol-device-layout-hint">{t(practice ? 'devicePractice.intro' : 'deviceLayouts.description')}</p>
+    <div className="ol-device-layout-mode" role="group" aria-label={t('devicePractice.mode')}>
+      <button type="button" aria-pressed={!practice} disabled={busy} onClick={() => setPractice(false)}>{t('devicePractice.configure')}</button>
+      <button type="button" aria-pressed={practice} disabled={busy} onClick={() => setPractice(true)}>{t('devicePractice.practice')}</button>
+    </div>
     {!nativeDeviceLayoutsAvailable && <p role="note" className="ol-device-layout-hint">{t('deviceLayouts.previewOnly')}</p>}
     {confirmation && <div role="alert" className="ol-device-layout-confirm">
       <p>{confirmation.text}</p>
@@ -97,6 +106,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, onUseLayout, 
       <Btn size="sm" variant="ghost" onClick={confirmation.action}>{t('deviceLayouts.discardContinue')}</Btn>
     </div>}
     <fieldset disabled={busy} className="ol-device-layout-fields">
+      <div hidden={practice}>
       <div className="ol-device-layout-toolbar">
         <label>{t('deviceLayouts.library')}
           <select aria-label={t('deviceLayouts.library')} value={editing?.id ?? ''} disabled={loading} onChange={event => {
@@ -154,6 +164,8 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, onUseLayout, 
         {editing && <Btn size="sm" variant="ghost" onClick={() => setConfirmation({ text: t('deviceLayouts.deleteConfirm', {name:editing.name}), action: () => void remove(editing) })}>{t('deviceLayouts.delete')}</Btn>}
         {dirty && <span className="ol-device-layout-hint">{t('deviceLayouts.unsavedShort')}</span>}
       </div>
+      </div>
+      <div hidden={!practice}><DeviceLayoutPractice key={practiceRevision} profile={profile} /></div>
     </fieldset>
   </dialog>;
 }
