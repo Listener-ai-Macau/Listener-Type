@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T00:09:59.040704+08:00",
+  "updated_at": "2026-10-22T00:19:35.232050+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4541,6 +4541,41 @@
         "Independent104 naturally used custom template/native save/private copy-paste-undo, actual Everyday list1.0s and edited-template→key1 save/reuse; not local page action. Mild interest/deferred49. Page route remains engineer-confirmed only; long-config navigation continues105.",
         "F103R-01 saved phrase back to writing position remains main follow-up; current104 only improves actual local page use."
       ]
+    },
+    {
+      "id": "customer105_saved_phrase_explicit_clipboard_reuse",
+      "repo": "type",
+      "commit": "e80c3d943ff6076a3140ed423956132fc3e3074b",
+      "subject": "Reuse saved key phrases through explicit clipboard copy",
+      "state": "candidate105_exact_native_saved_copy_ordinary_paste_verified_customer_pending",
+      "protects": [
+        "Use saved phrases reads saved layout text keyed by actual key/gesture, independently of unsaved mapping drafts and the practice buffer. No placeholder copies.",
+        "Explicit copy reuses the existing generic clipboard worker. Copied appears only after success; failure retains saved phrase and retry. Busy closes/layout changes are held until completion.",
+        "Copies actual Unicode/line breaks without implicit insertion, cloud request, device/config/history mutation. Existing trial copy export preserved.",
+        "Dialog title/modes stay in view while configuring/using phrases; existing dirty/unapplied-phrase close and board guards remain."
+      ],
+      "guards": [
+        "scripts/check-saved-layout-phrases-ui.py:6 saved-revision/copy-promise/retry/busy/gesture/nonmutation checks.",
+        "Existing31 trial lifecycle,9 phrase bridge,5 local-page route and tsc.",
+        "Exact105 native saved key phrase Copy confirmation→ordinary Ctrl+V in own input→continue typing, exact text;0cloud. Engineer station then destroyed before separate fresh customer station."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\saved105-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style105-lifecycle.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\phrase105-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\page105-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native105-snapshot-20261022-001505\\phrase-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native105-snapshot-20261022-001505\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build105\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE103-software-20261021-232600\\clarification-return-use.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE105-software-20261022-001700\\dispatch-input.txt"
+      ],
+      "unverified": [
+        "Independent105 full feedback pending. Native saved Copy/Paste into own input is not automatic external insertion or physical-key proof.",
+        "F103R-01 original current-writing-position outcome only partly addressed: manual clipboard reuse is available; automatic target insertion remains separate. Automatic Formal quality and105 physical/live speech/real purchase remain unknown."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5101,7 +5136,8 @@
         "customer100_scoped_four_key_practice",
         "customer102_reviewed_result_key_phrase",
         "customer103_distinguishable_reply_keys_and_style_purpose",
-        "customer104_actual_key_targets_and_local_page_use"
+        "customer104_actual_key_targets_and_local_page_use",
+        "customer105_saved_phrase_explicit_clipboard_reuse"
       ],
       "paths": {
         "type": [
@@ -5113,7 +5149,9 @@
           "scripts/check-result-key-phrase-ui.py",
           "src/components/DeviceKeyActionPreview.tsx",
           "src/state/DevicePageNavigationContext.ts",
-          "scripts/check-key-page-practice-ui.py"
+          "scripts/check-key-page-practice-ui.py",
+          "src/components/SavedLayoutPhrases.tsx",
+          "scripts/check-saved-layout-phrases-ui.py"
         ],
         "firmware": [
           "components/device_settings/device_settings.c",
@@ -5142,7 +5180,8 @@
         "customer100_scoped_four_key_practice",
         "customer102_reviewed_result_key_phrase",
         "customer103_distinguishable_reply_keys_and_style_purpose",
-        "customer104_actual_key_targets_and_local_page_use"
+        "customer104_actual_key_targets_and_local_page_use",
+        "customer105_saved_phrase_explicit_clipboard_reuse"
       ],
       "paths": {
         "type": [
@@ -5163,7 +5202,9 @@
           "scripts/check-result-key-phrase-ui.py",
           "src/components/DeviceKeyActionPreview.tsx",
           "src/state/DevicePageNavigationContext.ts",
-          "scripts/check-key-page-practice-ui.py"
+          "scripts/check-key-page-practice-ui.py",
+          "src/components/SavedLayoutPhrases.tsx",
+          "scripts/check-saved-layout-phrases-ui.py"
         ],
         "firmware": [
           "components/device_settings/device_key_profile.c",
@@ -5221,7 +5262,8 @@
         "customer101_visible_style_comparisons",
         "customer102_reviewed_result_key_phrase",
         "customer103_distinguishable_reply_keys_and_style_purpose",
-        "customer104_actual_key_targets_and_local_page_use"
+        "customer104_actual_key_targets_and_local_page_use",
+        "customer105_saved_phrase_explicit_clipboard_reuse"
       ],
       "paths": {
         "type": [
@@ -5271,7 +5313,9 @@
           "scripts/check-result-key-phrase-ui.py",
           "src/components/DeviceKeyActionPreview.tsx",
           "src/state/DevicePageNavigationContext.ts",
-          "scripts/check-key-page-practice-ui.py"
+          "scripts/check-key-page-practice-ui.py",
+          "src/components/SavedLayoutPhrases.tsx",
+          "scripts/check-saved-layout-phrases-ui.py"
         ]
       },
       "known_failures": [
@@ -5364,7 +5408,8 @@
         "customer101_visible_style_comparisons",
         "customer102_reviewed_result_key_phrase",
         "customer103_distinguishable_reply_keys_and_style_purpose",
-        "customer104_actual_key_targets_and_local_page_use"
+        "customer104_actual_key_targets_and_local_page_use",
+        "customer105_saved_phrase_explicit_clipboard_reuse"
       ],
       "paths": {
         "type": [
@@ -5379,7 +5424,9 @@
           "scripts/check-result-key-phrase-ui.py",
           "src/components/DeviceKeyActionPreview.tsx",
           "src/state/DevicePageNavigationContext.ts",
-          "scripts/check-key-page-practice-ui.py"
+          "scripts/check-key-page-practice-ui.py",
+          "src/components/SavedLayoutPhrases.tsx",
+          "scripts/check-saved-layout-phrases-ui.py"
         ]
       },
       "known_failures": [
