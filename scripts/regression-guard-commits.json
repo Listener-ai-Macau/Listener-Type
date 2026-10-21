@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T02:43:31.420571+08:00",
+  "updated_at": "2026-10-22T02:54:01.551863+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4772,6 +4772,42 @@
         "Independent111 did not use layouts. Chose Formal1.0s, facts retained, explicit Save→close→reopen same full result→Copied observed. No actual paste or external input. F111-02 result controls/retention above body push end below viewport, next112. Formal restrainedness subjective F111-01;49 still deferred, free software sufficient.",
         "No live speech/BLE/device/external automatic input/physical qualification or purchase claim. F110-02 first Practice click during copy pending remains timing unknown; correct busy protection retained."
       ]
+    },
+    {
+      "id": "customer112_result_first_actions_and_safe_technical_label",
+      "repo": "type",
+      "commit": "f7ecc471a630163199d7e9dc4b4b1433d9de682e",
+      "subject": "Read result before explicit Copy/Save; reveal secondary actions on demand; label unchanged technical factory style accurately",
+      "state": "exact112_affected_native_workflow_verified_customer_pending",
+      "protects": [
+        "Current result/editor and service source appear before primary Copy/Save and visible retention notice; secondary key phrase/explicit external insertion stay available by ordinary disclosure. Insertion Cancel stays outside it.",
+        "Existing edited result signature, prior comparison, native-copy acknowledgement, save idempotency/failure locks, local-only storage, nested phrase dirty protection and explicit external insertion cancellation remain. No automatic mutation.",
+        "Factory display Technical instructions in all five locales only applies to unchanged canonical structured name. Legacy persisted Chinese name, renamed/imported content, prompt/examples/IDs/default recording style unchanged."
+      ],
+      "guards": [
+        "Controlled short multiline result fully readable before actions on desktop; wide/narrow no horizontal overflow. Disclosure exposes old actions without triggering them. Existing draft save/retry/locks/reopen, insertion/cancel/late completion including collapsed disclosure, phrase nesting/navigation checks passed.",
+        "Existing five-locale presentation test still matches Rust factory defaults, preserves renamed/imported names and all fields. Ordinary readiness/all-style input controls remain0px movement.",
+        "Exact native MSI result first/folded secondary/technical label, local Unicode/newline edit→Save→reload/reopen→native Copy→ordinary Paste/continued input exact→confirmed delete.0cloud."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\result112-reading.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\handoff112-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\drafts112-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\result-phrase112-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\key-page112-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\layout112-trial.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native112-snapshot-20261022-025305\\drafts-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native112-snapshot-20261022-025305\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build112\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE111-software-20261022-023700\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE104-software-20261021-235730\\experience.txt"
+      ],
+      "unverified": [
+        "Independent112 pending.111 own saved draft useful; still deferred49;112 presentation usefulness not yet customer observed.",
+        "Formal lightness F111-01 stays one subjective sample, no prompt/quality fix claimed. No voice/BLE/external target/physical or purchase qualification."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5464,7 +5500,8 @@
         "customer108_earlier_result_snapshot_and_audio_window_lifetime",
         "customer109_physical_layout_map_and_independent_press_practice",
         "customer110_explicit_local_edited_draft_retention",
-        "customer111_stable_compact_key_layout_editor"
+        "customer111_stable_compact_key_layout_editor",
+        "customer112_result_first_actions_and_safe_technical_label"
       ],
       "paths": {
         "type": [
@@ -5530,7 +5567,8 @@
           "scripts/check-saved-text-drafts-ui.py",
           "src/components/DeviceLayoutsDialog.tsx",
           "src/components/DeviceLayoutsDialog.css",
-          "scripts/check-layout-editor-stability-ui.py"
+          "scripts/check-layout-editor-stability-ui.py",
+          "scripts/check-result-reading-ui.py"
         ]
       },
       "known_failures": [
@@ -5629,7 +5667,8 @@
         "customer108_earlier_result_snapshot_and_audio_window_lifetime",
         "customer109_physical_layout_map_and_independent_press_practice",
         "customer110_explicit_local_edited_draft_retention",
-        "customer111_stable_compact_key_layout_editor"
+        "customer111_stable_compact_key_layout_editor",
+        "customer112_result_first_actions_and_safe_technical_label"
       ],
       "paths": {
         "type": [
@@ -5661,7 +5700,11 @@
           "scripts/check-saved-text-drafts-ui.py",
           "src/components/DeviceLayoutsDialog.tsx",
           "src/components/DeviceLayoutsDialog.css",
-          "scripts/check-layout-editor-stability-ui.py"
+          "scripts/check-layout-editor-stability-ui.py",
+          "src/components/StyleTextTrial.css",
+          "src/lib/stylePackPresentation.ts",
+          "src/lib/stylePackPresentation.test.ts",
+          "scripts/check-result-reading-ui.py"
         ]
       },
       "known_failures": [

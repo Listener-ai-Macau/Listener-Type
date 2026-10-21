@@ -8,7 +8,7 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build111](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build112](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 **English** · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md)
@@ -36,7 +36,7 @@ Firmware: **ESP32-S3 N16R8**, build `e7bd1f1619b696a1`. Select the same ZIP for 
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device, read its settings, then write changes back to that device. Names, lights, power, keys and knob configuration stay on the board. Use this paired MSI and firmware ZIP.
 
-Type build111 keeps the key-layout name field in place while layouts load. Pick a key above its editor and see the selected physical position beside it, with fewer trips up and down the form. Explicit local saved drafts, saved phrases and independent press mappings remain. Firmware33 is unchanged.
+Type build112 puts your result before its actions: read or edit the words, then Copy or Save draft. Key phrases and external insertion remain under More ways to use this text. The default technical style is labelled Technical instructions without changing its saved prompt or your own names. Firmware33 is unchanged.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

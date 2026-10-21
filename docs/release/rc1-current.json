@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T02:34:35.844289+08:00",
+  "updatedAt": "2026-10-22T02:54:01.638668+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 111,
-    "source": "c1c5e4e3bdcd18ceb0f1d0b426261f868e6281a7",
-    "sourceTag": "build-source/type111-20261022",
+    "build": 112,
+    "source": "f7ecc471a630163199d7e9dc4b4b1433d9de682e",
+    "sourceTag": "build-source/type112-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "252beb7e2be85c88e888bf740d597718b8b7fe51189e654f39df9f1a09c2aad2",
-    "sizeBytes": 299106304,
-    "exeSha256": "78d4340dde1fa50b3dab3beecd6a36251ed3b901040a3e680ef5b8c7d4cc438f",
+    "sha256": "27f1201a53085aaa8d9e6850c221d3e8b0e370065823e6037adaf20121562b6f",
+    "sizeBytes": 299102208,
+    "exeSha256": "1804e28eff8572c1697547ca21a2693539ffee101da0db372ea03d421c9e2420",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -162,8 +162,14 @@
     "type111VerificationScope": "Exact isolated native MSI: key editor beside physical preview, selected key location matches, independent single/double/hold templates saved and practised, ordinary reload retains mappings and clears temporary practice. Controlled delayed-load frontend name displacement38.594px→0.016px; typed draft retained. Daily92 unchanged, no cloud/device/voice/physical qualification.",
     "customer110SavedDraftUseObserved": false,
     "customer110SavedPhraseCopyPasteObserved": true,
-    "customer111Reviewed": false,
-    "customer111PurchaseQualification": false
+    "customer111Reviewed": true,
+    "customer111PurchaseQualification": false,
+    "type112InstalledExeAndPreferencesVerified": false,
+    "type112ExactPrivateNativeWorkflowVerified": true,
+    "type112VerificationScope": "Exact isolated native MSI: result before primary Copy/Save, secondary actions initially folded and available by ordinary disclosure, technical factory display label visible; edited Unicode/newline result→explicit Save→reload/reopen→native Copy→ordinary Paste/continued input exact, confirmed delete.0cloud, daily92 unchanged. Controlled UI retains save/insert/cancel/phrase/dirty/signature guards. No voice/device/external input/physical qualification.",
+    "customer111OwnSavedDraftUseObserved": true,
+    "customer112Reviewed": false,
+    "customer112PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -180,6 +186,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build111-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build112-20261022"
   }
 }

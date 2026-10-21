@@ -8,7 +8,7 @@
 
 | 用途 | 直接下载 |
 | --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build111](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 软件** | **[下载 MSI · Type build112](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 [English](README.md) · **简体中文** · [繁體中文](README.zh-TW.md)
@@ -36,7 +36,7 @@
 Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
 设备设置各自独立：选择一台有线／蓝牙设备，读取后修改并写入；名称、灯光、电源、按键和旋钮设置保存在该设备中。请配套使用本页 MSI 与固件 ZIP。
 
-Type build111固定布局载入时的名称框位置；选键卡片在编辑区上方，实物位置照片在编辑区旁，减少来回滚动。明确保存成稿、已保存短语和独立按法配置保持；Firmware33不变。
+Type build112先展示结果正文，再明确复制或保存；按键短语与外部插入仍可从「更多文字用途」展开。默认技术风格显示为「技术指令」，不改变已保存提示词或用户自定义名称。Firmware33不变。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
