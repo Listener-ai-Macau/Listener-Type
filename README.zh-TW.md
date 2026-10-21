@@ -1,155 +1,113 @@
-## 下载 Listener · RC1
+## 下載 Listener · RC1
 
 **第一次使用 Type？** 先下載 Windows MSI，設定語音辨識，並選擇電腦麥克風或 Listener。把游標放進可編輯輸入框，按 **Right Ctrl** 說話，再按一次結束。
 
 **聽寫必需：** 可用的收音裝置與已設定的辨識服務。**可選：** 文字服務用於潤色或翻譯；韌體 ZIP 用於更新 Listener 硬體。
 
-| 用途 | 直接下载 |
+| 用途 | 直接下載 |
 | --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build85](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
-| **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
+| **Windows 軟體** | **[下載 MSI · Type build85](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **韌體：USB 燒寫 / 藍牙 OTA** | **[下載韌體 ZIP · 兩種方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <details>
-<summary>已有设备：固件与设置说明</summary>
+<summary>已有裝置：韌體與設定說明</summary>
 
-固件适用 **ESP32-S3 N16R8**，构建 `e7bd1f1619b696a1`。USB 和蓝牙更新选择同一个 ZIP，无需再猜下载哪一个。
-Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
-设备设置各自独立：选择一台有线／蓝牙设备，读取后修改并写入；名称、灯光、电源、按键和旋钮设置保存在该设备中。请配套使用本页 MSI 与固件 ZIP。
+韌體適用 **ESP32-S3 N16R8**，建置 `e7bd1f1619b696a1`。USB 與藍牙更新選擇同一個 ZIP。
+Type 預設使用 **USB 有線燒寫**，能力已內建；無需另裝 Python、ESP-IDF 或其他燒寫軟體。
+裝置設定各自獨立：選擇一台有線／藍牙裝置，讀取後修改並寫入；名稱、燈光、電源、按鍵與旋鈕設定保存在該裝置。請配套使用本頁 MSI 與韌體 ZIP。
 
 </details>
 
-RC1 仍为候选版本，偶发提前结束及强干扰限制见发布说明。
-Type build85 在打开试用前显示每个已存风格是否需要文本服务、是否已配置，包含自定义原文风格；配置改变会刷新，读取失败可重试。保留84历史点选/复制及更早修复，Firmware33不变。
-[软件发布说明与校验](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [固件发布说明与烧写方法](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
+RC1 仍為候選版本，偶發提前結束與強干擾限制見發布說明。
+Type build85 在開啟試用前顯示每個已存風格的文字服務需求與設定狀態，包含自訂原文風格；設定改變後會更新，讀取失敗可重試。保留84歷史點選／複製與更早修復，Firmware33不變。
+[軟體發布說明與校驗](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [韌體發布說明與燒寫方法](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 [English first setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [English user guide](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)
 
 ---
 
-<p align="center">
-  <img src="src-tauri/icons/128x128@2x.png" alt="Listener Type" width="96" />
-</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/listener/type-hero-dark.png">
+  <img src="docs/assets/listener/type-hero.png" alt="Listener Type：把說的話寫入目前輸入框" width="1600">
+</picture>
+
+**繁體中文** · [English](README.md) · [简体中文](README.zh-CN.md)
 
 # Listener Type
 
-在正在工作的地方直接說，文字回到目前游標。Listener Type 把語音變成文字，還可以按需要去口癖、補標點、整理結構或翻譯。Windows、macOS、Linux 使用電腦麥克風就能執行；配上 Listener 語音鍵盤後，多了實體錄音控制、藍牙收音、狀態燈和裝置設定。
+**用說話起草較長的訊息、郵件或筆記，文字回到正在使用的輸入框。**
 
-[English](README.md) · [简体中文](README.zh.md) · [下載](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [使用說明](docs/USAGE.md) · [功能目錄](docs/product/features.md)
+[首次設定](#先完成一次輸入) · [使用指南（簡體中文）](docs/USAGE.md) · [English guide](docs/USAGE.en.md)
 
-<p align="center">
-  <img src="docs/assets/readme/overview.png" alt="Listener Type 主介面：辨識、模型、裝置和使用狀態" width="900" />
-</p>
+免費開源 · 硬體可選 · 首次需設定辨識服務或本機模型。
 
-## 為什麼是 Listener
+## 放在手邊的語音輸入控制器 · 49 美元
 
-- **買鍵盤，送訂閱。** 軟體開源免費，下載就能用，不用註冊；鍵盤會附贈雲端服務訂閱。不想用雲也行，辨識可以完全跑在本機，聲音去哪你自己定。
-- **說完就是成品。** 它會順手去掉「呃」「那個」，補上標點，把一段嘮叨理成能直接發出去的文字。
-- **手不用回到鍵盤。** 說一聲「開始錄音」就開工，再按一下旋鈕就停，人不用湊在電腦前。
-- **只認你的聲音。** 錄三段聲紋之後，旁邊同事聊什麼不會進你的稿子。
-- **選中就能問。** 看到一段不懂的文字，選中它，直接開口問。
-- **六顆燈各管一件事。** 綠是好了，金是在聽，紫是在想，紅是有事——不用看螢幕。
-- **放在桌上不難看。** 透明鍵帽，金屬旋鈕，每個燈區的亮度都能單獨調。
-- **按鍵出廠就有用。** KEY3 預設就是貼上，四個鍵的單擊、雙擊、長按都能改；沒設定的鍵不會亂打字，只發系統用不上的備援鍵碼。
-- **沒人理就自己去睡。** 放著不管，一分鐘左右滅燈打盹，碰任意鍵就醒；十來分鐘沒動靜會自動關機，按一下旋鈕帶回來。
+Listener 把麥克風與實體錄音開關放在工作時順手的位置，適合在桌前交替說話和打字，起草較長的訊息、郵件或筆記。
 
-系統內建的語音輸入把字打出來就不管了。Listener 多做半步：整理、翻譯，還記你的詞庫——資料交給誰，由你選的 Provider 說了算。
-
-## 30 秒開始使用
-
-1. Windows 從 [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) 安裝最新 MSI；macOS/Linux 可以從原始碼建置。
-2. 允許麥克風權限，在設定 → 錄音中選擇「電腦麥克風」，並選一個辨識引擎：填入雲端服務 API Key，或下載本機模型離線辨識。
-3. 游標點進輸入框，Windows 按一下右 Ctrl，說話，再按一下；macOS 預設是右 Option。
-
-結果會插回原來的游標位置。目標應用程式不允許直接插入時，Listener 會把文字保留在剪貼簿並提示貼上。錄音中按 `Esc` 可以取消。
-
-## 一個產品，兩個倉庫
-
-| 部分 | 負責什麼 | 倉庫 |
+| 桌前使用 | 免費 Type 軟體 | 配合 Listener 硬體 |
 | --- | --- | --- |
-| Listener Type | 錄音工作階段、語音辨識、文字處理、游標插入、設定、歷史和桌面端裝置體驗 | 目前倉庫 |
-| Listener Firmware | 麥克風採集、BLE 音訊與 HID、按鍵、旋鈕、燈、電池與電源管理、診斷和 OTA | [Listener-Firmware](https://github.com/Listener-ai-Macau/Listener-Firmware) |
+| 收音 | 電腦麥克風 | 裝置自己的麥克風，透過藍牙傳給 Type |
+| 開始、結束錄音 | Right Ctrl | 單擊旋鈕，無需在螢幕上找結束按鈕 |
+| 其他控制 | 常用鍵盤與螢幕 | 音量旋鈕、四個可自訂按鍵與六顆狀態燈 |
+| 辨識並寫入文字 | 電腦上設定的辨識服務 | 使用同一套 Type 辨識與文字輸出流程 |
 
-沒有語音鍵盤，軟體也能獨立使用。鍵盤擴充的是同一條聽寫流程；它本身不負責把語音辨識成文字。
+**49 美元為硬體價格。** 辨識服務需另行設定，費用分別計算；目前版本沒有附帶開箱可用的 Listener 雲端帳號或辨識額度。如果現有麥克風與快速鍵已夠順手，可以繼續使用免費軟體。硬體增加的是桌面收音與實體控制，辨識效果和速度仍取決於所選服務、收音環境及電腦。
 
-## Listener 包含的完整能力
+完整硬體音訊路徑目前使用 **Windows Type**。RC1 仍為候選版本，購買前請查看[目前限制與發布說明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1)；購買入口尚未公布。
 
-| 範圍 | 功能 |
+## 先完成一次輸入
+
+| 你現在有什麼 | 從哪裡開始 |
 | --- | --- |
-| 聽寫 | 切換式錄音、手動停止、自動結束、取消、膠囊即時預覽、電腦麥克風和 Listener BLE 音訊 |
-| 辨識 | 火山引擎串流、OpenAI 相容批次 ASR、百鍊即時、macOS Qwen 本機辨識（Apple Speech 規劃中）、Windows Foundry Local Whisper |
-| 文字處理 | Raw、Light、Structured、Formal；語氣詞清理、標點、糾錯規則、翻譯、自訂風格包和 ZIP 匯入匯出 |
-| 個人詞庫 | 人名、術語、縮寫和熱詞；供支援的辨識及潤飾服務使用 |
-| 後續處理 | 對選取文字提問、為上一條結果切換風格、可設定全域快速鍵 |
-| 輸出 | 目前焦點框插入、剪貼簿備援、可選 Windows TSF 驗證路徑、macOS 輔助使用插入 |
-| 歷史 | 本機工作階段歷史、上一條結果、保留期限和可選診斷錄音 |
-| Provider | 自備雲端 Key 或使用本機引擎；每個服務可選直連、系統代理或自訂代理 |
-| 桌面體驗 | 系統匣、開機啟動、單一執行個體、深色模式、更新介面、權限狀態和診斷包匯出 |
-| 語音鍵盤 | 配對與健康狀態、四顆自訂鍵、按壓/旋轉旋鈕、燈光亮度、低功耗時間、電量、韌體線上升級（OTA）和裝置復原 |
+| 只有電腦 | 安裝 MSI，允許麥克風存取，在「設定 → 錄音」選擇**電腦麥克風**。 |
+| 已有 Listener | 在「設定 → 裝置」配對，確認就緒；錄音來源選 **Listener BLE**。 |
 
-## 從說話到游標
+接著設定辨識服務所需憑證與模型，或在本機辨識設定中準備執行環境及模型。把游標放進可編輯欄位，按右 Ctrl 開始，說一句話，再按一次結束；使用 Listener 時也可單擊旋鈕開始／結束。
 
-<p align="center">
-  <img src="docs/assets/readme/flow.png" alt="對著鍵盤說話，Listener 辨識並整理，文字落在游標處" width="900" />
-</p>
+軟體免費，正常本機使用無需 Listener 帳號。雲端服務自備憑證，費用、額度與試用條件由提供方決定；軟體不內附雲端密鑰。Windows 可準備 Foundry Local 與 Whisper 進行本機原文辨識，首次需下載，速度取決於電腦。文字整理、翻譯與語音問答另有服務需求。
 
-> **你說**：「呃明天那個，就是，下午三點的會，幫我記一下」
->
-> **你得到**：「明天下午三點的會，幫我記一下。」
+## 原文與整理按需要選擇
 
-Light 清理獨立語氣詞並補標點，同時保留原意；Structured 整理需求和筆記；Formal 收拾商務表達；Raw 儘量保持辨識原文；翻譯按已選目標語言輸出。潤飾服務不可用時，Listener 會保住可用的辨識原文，不讓整段聽寫遺失。
-
-## Listener 語音鍵盤
-
-**49 美元為硬體價格：** 包含裝置本身的麥克風、傳至 Type 的藍牙音訊、錄音／音量旋鈕、四個可自訂按鍵及六顆狀態燈。麥克風與控制可擺在工作時順手的位置，每台裝置保留各自設定。
-
-免費軟體可使用電腦麥克風與 Right Ctrl；選用 Listener 時，聲音來自裝置麥克風。兩種方式均使用電腦上設定的辨識服務或本機模型，硬體價格不包含雲端用量。完整裝置音訊路徑需 Windows Type；雜音或多人同說時仍需複核文字。
-
-
-<p align="center">
-  <img src="docs/assets/readme/keyboard-front.jpg" alt="Listener 語音鍵盤：四顆透明鍵帽、金屬旋鈕和狀態燈" width="900" />
-</p>
-
-在設定 → 裝置中配對。單擊旋鈕開始或停止，雙擊重設配對，長按關機，旋轉可調音量或亮度。KEY1–KEY4 的單擊、雙擊、長按都能設定動作。PWR、BLE、REC、AI、OK、WARN 六顆燈替裝置說話，完整「燈語」見韌體倉庫的[燈效說明](https://github.com/Listener-ai-Macau/Listener-Firmware/blob/master/README.zh-TW.md#燈在說什麼)。
-
-開口即錄：自訂喚醒詞，說一句話就開始；可選錄三段引導聲紋，讓裝置優先認你的聲音，旁邊人的閒聊不進正文。韌體可以在 Listener Type 中 OTA，正常升級會保留配對和裝置設定。
-
-詳細操作見[語音鍵盤手冊](docs/quickstart/voice-keyboard-readme.md)和[韌體倉庫](https://github.com/Listener-ai-Macau/Listener-Firmware)。
-
-<p align="center">
-  <img src="docs/assets/readme/recording-settings.png" alt="Listener Type 錄音設定" width="720" />
-</p>
-
-## 本機優先
-
-設定、歷史、詞庫、風格和糾錯規則保存在電腦上。Provider 憑證進入系統憑證庫，應用程式不內建任何服務商 Key。可選診斷錄音預設關閉。診斷包用於報告產品和連線狀態，不包含 API Key 和轉寫正文；只有你主動開啟過診斷錄音，才會附帶最近的診斷音訊樣本。
-
-核心使用鏈路不依賴 Listener 自營後端。遠端市集和帳號功能只有明確設定相容後端後才啟用。
-
-## 平台支援與目前邊界
-
-| 平台或能力 | 目前範圍 |
+| 你的目的 | 對應能力 |
 | --- | --- |
-| Windows | 主要發布路徑；支援電腦麥克風、Listener BLE 音訊與裝置控制、安裝包和游標插入 |
-| macOS 12+ | 規劃中：Apple Speech 辨識、輔助使用插入、正式安裝包。目前可從原始碼建置：電腦麥克風、本機模型辨識、全域快速鍵 |
-| Linux | 電腦麥克風；X11 全域快速鍵盡力支援，Wayland 使用桌面環境綁定 CLI 命令 |
-| 自動喚醒與聲紋 | 用於輸入便利和降低干擾；遠距離或嘈雜環境要複核最終文字 |
-| 多人或重疊說話 | 仍在持續修復，1.0.5 不保證可靠過濾 |
-| Windows 輸入法 | 標準安裝包向焦點框插入文字，不會把 Listener 註冊成系統輸入法 |
+| 保留措辭 | 預設原文模式（Raw）、錄音膠囊預覽、游標插入與剪貼簿備援 |
+| 整理訊息、郵件或任務 | Light / Structured / Formal；需設定相應文字服務，風格可編輯與匯入／匯出 |
+| 翻譯 | 先選目標語言，錄音時按 Shift 啟用本次翻譯；需設定相應服務 |
+| 協助辨識人名與術語 | 本機詞庫、預設與字面糾錯規則 |
+| 取回剛才的結果 | 歷史查看、複製、刪除與保留期限設定 |
 
-這些邊界屬於產品說明的一部分，詳細行為見[功能目錄](docs/product/features.md)。
+串流插入預設開啟，實際逐段寫入取決於平台、模式與服務。膠囊文字為預覽，不代表已寫入目標欄位；目標應用阻擋寫入時，依提示貼上並檢查結果。
 
-## 下載與文件
+語音問答目前固定使用火山引擎串流辨識，需 App Key / Access Key 與文字服務；普通聽寫所選的其他辨識服務或本機模型不能替代這項設定。
 
-- [最新發布](https://github.com/Listener-ai-Macau/Listener-Type/releases)
-- [1.0.5 版本說明](docs/release/1.0.5.md)
-- [使用說明](docs/USAGE.md)
-- [產品功能目錄](docs/product/features.md)
-- [語音鍵盤與裝置復原](docs/quickstart/voice-keyboard-readme.md)
-- [安全策略](SECURITY.md)
+## 一只旋鈕、四個按鍵、六顆狀態燈
 
-## 從原始碼建置
+![Listener 實物照片：四個按鍵與旋鈕](docs/assets/readme/keyboard-front.jpg)
 
-Listener Type 使用 Tauri 2、Rust、React、TypeScript 和 Vite。
+在「設定 → 裝置」連接。單擊旋鈕開始／停止錄音，旋轉預設調音量；雙擊重設配對，持續長按至確認完成後關機。四鍵支援自訂單擊、雙擊與長按，各裝置保留自己的設定。
+
+喚醒詞與聲紋在裝置頁設定。依引導錄三次目前喚醒詞，改詞後重新登記。聲紋可協助降低干擾，但不能保證排除旁人、外放或重疊人聲；這些情況仍需複核最後文字。刪除聲紋不會關閉語音喚醒。登記後在本機建立受保護模板，不保留原始樣本錄音。
+
+[硬體操作與燈語](https://github.com/Listener-ai-Macau/Listener-Firmware/blob/master/README.zh-TW.md) · [折頁指南（簡體中文）](docs/manuals/Listener-fold-ZH.pdf)
+
+## 資料去向與平台範圍
+
+設定、詞庫、風格與歷史保存在本機，憑證使用系統憑證庫。雲端辨識會處理音訊；雲端整理、翻譯與問答處理相關文字。本機辨識搭配雲端文字服務仍會傳送文字。診斷錄音預設關閉。
+
+| 平台 | 目前路徑 |
+| --- | --- |
+| Windows | MSI；電腦麥克風、主要 Listener BLE 音訊與裝置設定 |
+| macOS 12+ | 目前從原始碼建置：電腦麥克風、本機模型與全域快速鍵；Apple Speech、輔助使用插入及正式安裝包仍規劃中 |
+| Linux | 原始碼建置、電腦麥克風；X11 快速鍵盡力支援，Wayland 使用桌面綁定 CLI 命令 |
+
+標準安裝包不註冊系統輸入法。喚醒與聲紋不保證在任意距離、噪音或多人同說時可靠分離。
+
+## 文件與開發
+
+[使用指南（簡體中文）](docs/USAGE.md) · [English guide](docs/USAGE.en.md) · [功能目錄](docs/product/features.md) · [問題回報](https://github.com/Listener-ai-Macau/Listener-Type/issues) · [發布記錄](https://github.com/Listener-ai-Macau/Listener-Type/releases)
+
+Listener Type 使用 Tauri 2、Rust、React、TypeScript 與 Vite；完整桌面建置還需 `third_party/denzic-platform` 子模組。
 
 ```bash
 npm ci
@@ -157,4 +115,4 @@ npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-完整桌面建置還需要 `third_party/denzic-platform` 子模組。貢獻前請閱讀 [CONTRIBUTING.md](CONTRIBUTING.md)。本倉庫以 [Apache-2.0 授權條款](LICENSE) 開源。
+[貢獻指南](CONTRIBUTING.md) · [安全政策](SECURITY.md) · [Apache-2.0](LICENSE)

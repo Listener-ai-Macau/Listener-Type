@@ -43,6 +43,21 @@ Type build85 shows each saved style’s text-service requirements and configurat
 
 Free and open source · Keyboard optional · Set up a recognition service or local model first.
 
+## A desk control for voice input · US$49
+
+Listener puts a microphone and a physical start/stop control beside your working hand. It is designed for desk work where you alternate between speaking and typing longer messages, emails or notes.
+
+| At your desk | Free Type app | With Listener hardware |
+| --- | --- | --- |
+| Pick up your voice | Computer microphone | Listener's own microphone, sent to Type over Bluetooth |
+| Start and finish a recording | Right Ctrl | Click the knob; finish without finding a control on screen |
+| Other controls | Your usual keyboard and screen | Volume knob, four customizable keys and six status lights |
+| Recognize and write the words | Your configured recognizer on the computer | The same Type recognition and text-output workflow |
+
+**US$49 is the hardware price.** Recognition setup and service costs are separate. The current build does not include a ready-to-use Listener cloud account or bundled recognition allowance. If your existing microphone and shortcut already suit your work, you can keep using the free app. The hardware adds the desk microphone and physical controls; recognition quality and speed still depend on the selected service, input conditions and computer.
+
+The full hardware-audio path currently uses **Windows Type**. RC1 is a prerelease; check the [current limits and release notes](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) before deciding. The purchase link has not yet been announced.
+
 
 ## Stay where you are writing
 
