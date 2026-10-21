@@ -32,6 +32,16 @@
   max-height: min(42vh, 420px);
   overflow-y: auto;
 }
+.ol-style-trial-result-editor {
+  width: 100%;
+  min-height: 180px;
+  box-sizing: border-box;
+  border: 1px solid var(--ol-line-strong);
+  color: var(--ol-ink);
+  font: inherit;
+  line-height: 1.75;
+  resize: vertical;
+}
 .ol-style-trial-picker { display: flex; align-items: center; gap: 12px; font-size: 13px; }
 .ol-style-trial-picker select {
   min-width: 0;

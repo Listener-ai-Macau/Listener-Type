@@ -10,10 +10,10 @@ with sync_playwright() as pw:
     try:
         page=browser.new_page(viewport={'width':1280,'height':1000})
         page.add_init_script("""localStorage.setItem('ol.locale','en');sessionStorage.setItem('ol.providerSetupPromptDeferredThisSession','1');
-window.__handoffs=[];window.__cancels=[];
+window.__handoffs=[];window.__cancels=[];window.__trialCount=0;
 window.__trialFixture=(cmd,args,mock)=>{
 if(cmd==='get_style_text_trial_readiness')return {available:true,requiresTextService:false,textServiceConfigured:true};
-if(cmd==='try_style_pack_text')return {packId:args.stylePackId,packName:'Original text',outputText:args.rawText,usedTextService:false,elapsedMs:0};
+if(cmd==='try_style_pack_text'){window.__trialCount++;return {packId:args.stylePackId,packName:'Original text',outputText:args.rawText,usedTextService:false,elapsedMs:0};}
 if(cmd==='insert_style_trial_result')return new Promise((resolve,reject)=>window.__handoffs.push({args,resolve,reject}));
 if(cmd==='cancel_style_trial_insert'){window.__cancels.push(args.requestId);return true;}
 return mock();};""")
@@ -34,9 +34,18 @@ return mock();};""")
         expect(insert).to_be_visible()
         assert page.evaluate('window.__handoffs.length')==0
         checks.append('processing a draft never starts insertion automatically')
-        insert.click();expect(entry).to_be_disabled();expect(insert).to_be_disabled()
+        editor=dialog.get_by_role('textbox',name='Result text')
+        editor.fill('Reviewed final text. 😀 保留约束。')
+        assert page.evaluate('window.__trialCount')==1
+        expect(entry).to_have_value('Keep all requirements. 同名文件不要覆盖。 😀')
+        checks.append('editing the result is local and preserves the original draft')
+        editor.fill('   ')
+        expect(insert).to_be_disabled();expect(dialog.get_by_role('button',name='Copy result',exact=True)).to_be_disabled()
+        checks.append('empty edited output cannot replace clipboard or arm insertion')
+        editor.fill('Reviewed final text. 😀 保留约束。')
+        insert.click();expect(entry).to_be_disabled();expect(insert).to_be_disabled();expect(editor).to_be_disabled()
         expect(dialog.get_by_role('status')).to_contain_text('Click your destination text field now')
-        assert page.evaluate('window.__handoffs[0].args.text')=='Keep all requirements. 同名文件不要覆盖。 😀'
+        assert page.evaluate('window.__handoffs[0].args.text')=='Reviewed final text. 😀 保留约束。'
         checks.append('explicit click binds exact reviewed Unicode result and disables conflicting edits')
         dialog.get_by_role('button',name='Cancel',exact=True).click();expect(entry).to_be_enabled()
         page.evaluate("window.__handoffs[0].resolve('confirmed')")
@@ -51,5 +60,5 @@ return mock();};""")
         checks.append('closing the workspace cancels the still-pending handoff')
     finally:browser.close()
 a.report.parent.mkdir(parents=True,exist_ok=True)
-a.report.write_text(json.dumps({'scope':'Private headless frontend with explicit mock handoff; no native focus, clipboard, service or hardware action.','checks':checks,'passed':len(checks)==5},ensure_ascii=False,indent=2),encoding='utf-8')
+a.report.write_text(json.dumps({'scope':'Private headless frontend with explicit mock handoff; no native focus, clipboard, service or hardware action.','checks':checks,'passed':len(checks)==7},ensure_ascii=False,indent=2),encoding='utf-8')
 print(json.dumps({'checks':len(checks),'passed':True}))

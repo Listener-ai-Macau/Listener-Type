@@ -463,6 +463,9 @@ export const zhTW: typeof zhCN = {
       }
     },
     trial: {
+      resultInput: "結果正文",
+      editedResult: "已在此修改 · 複製與插入使用這份正文。",
+      editHint: "可直接修改結果，再複製或插入；修改只留在本機。",
       insertElsewhere: "插入到另一應用程式…",
       insertHint: "點擊插入後，請在5秒內把游標放到目標輸入框。只插入文字，不傳送訊息。僅限 Windows 應用程式。",
       insertCountdown: "請現在點擊目標輸入框，{{seconds}} 秒後插入。",

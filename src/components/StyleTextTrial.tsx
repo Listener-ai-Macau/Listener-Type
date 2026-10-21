@@ -29,6 +29,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const copyRunning = useRef(false);
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<StyleTextTrialResult | null>(null);
+  const [editedOutput, setEditedOutput] = useState<string | null>(null);
   const [copying, setCopying] = useState(false);
   const [copiedResult, setCopiedResult] = useState<StyleTextTrialResult | null>(null);
   const [copyError, setCopyError] = useState(false);
@@ -41,6 +42,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const [deliverySeconds, setDeliverySeconds] = useState(5);
   const [deliveryMessage, setDeliveryMessage] = useState('');
   const delivering = deliveryStarted !== null;
+  const resultOutput = editedOutput ?? result?.outputText ?? '';
   const canProcess = !!readiness?.available && (!readiness.requiresTextService || readiness.textServiceConfigured);
 
   useEffect(() => {
@@ -78,6 +80,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     const request = ++generation.current;
     setPending(true);
     setResult(null);
+    setEditedOutput(null);
     setCopiedResult(null);
     setCopyError(false);
     setError('');
@@ -104,7 +107,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   };
 
   const copyResult = async () => {
-    if (!result || copyRunning.current || running.current || deliveryRequest.current) return;
+    if (!result || !resultOutput.trim() || copyRunning.current || running.current || deliveryRequest.current) return;
     const selectedResult = result;
     const request = generation.current;
     copyRunning.current = true;
@@ -112,7 +115,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     setCopiedResult(null);
     setCopyError(false);
     try {
-      await copyStyleTrialResult(selectedResult.outputText, detectOS() === 'win');
+      await copyStyleTrialResult(resultOutput, detectOS() === 'win');
       if (generation.current === request) setCopiedResult(selectedResult);
     } catch {
       if (generation.current === request) setCopyError(true);
@@ -129,14 +132,14 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   }, [deliveryStarted]);
 
   const insertElsewhere = async () => {
-    if (!result || running.current || copyRunning.current || deliveryRequest.current) return;
+    if (!result || !resultOutput.trim() || running.current || copyRunning.current || deliveryRequest.current) return;
     const id = crypto.randomUUID();
     deliveryRequest.current = id;
     setDeliveryMessage('');
     setDeliverySeconds(5);
     setDeliveryStarted(Date.now());
     try {
-      const status = await insertStyleTrialResult(id, result.outputText);
+      const status = await insertStyleTrialResult(id, resultOutput);
       if (deliveryRequest.current === id) setDeliveryMessage(t(status === 'confirmed' ? 'style.trial.insertConfirmed' : 'style.trial.insertSent'));
     } catch (cause) {
       if (deliveryRequest.current === id) {
@@ -219,15 +222,24 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
             <div style={{ fontWeight: 600 }}>{t('style.trial.output')}</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <Btn size="sm" variant="ghost" disabled={copying || delivering} onClick={() => void copyResult()}>
+            <Btn size="sm" variant="ghost" disabled={copying || delivering || !resultOutput.trim()} onClick={() => void copyResult()}>
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
             </Btn>
-            {canInsertStyleTrialResult && <Btn size="sm" variant="blue" disabled={copying || delivering} onClick={() => void insertElsewhere()}>{t('style.trial.insertElsewhere')}</Btn>}
+            {canInsertStyleTrialResult && <Btn size="sm" variant="blue" disabled={copying || delivering || !resultOutput.trim()} onClick={() => void insertElsewhere()}>{t('style.trial.insertElsewhere')}</Btn>}
             </div>
           </div>
           <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t('style.trial.keepResult')}</p>
-          <p className="ol-style-trial-hint">{t(result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}</p>
-          <div className="ol-style-trial-result-body ol-thinscroll" tabIndex={0}>{result.outputText}</div>
+          <p className="ol-style-trial-hint">{editedOutput !== null ? t('style.trial.editedResult') : t(result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}</p>
+          <textarea className="ol-style-trial-result-body ol-style-trial-result-editor ol-thinscroll"
+            aria-label={t('style.trial.resultInput')} value={resultOutput} rows={8} maxLength={100000}
+            disabled={copying || delivering}
+            onChange={event => {
+              if (copyRunning.current || deliveryRequest.current) return;
+              const value = event.target.value;
+              setEditedOutput(value === result.outputText ? null : value);
+              setCopiedResult(null); setCopyError(false); setDeliveryMessage('');
+            }} />
+          <p className="ol-style-trial-hint">{t('style.trial.editHint')}</p>
           {canInsertStyleTrialResult && <p className="ol-style-trial-hint">{t('style.trial.insertHint')}</p>}
           {delivering && <div role="status" className="ol-style-trial-hint">
             {t(deliverySeconds > 0 ? 'style.trial.insertCountdown' : 'style.trial.insertWorking', { seconds: deliverySeconds })}

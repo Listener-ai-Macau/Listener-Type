@@ -421,6 +421,9 @@ export const ko: typeof zhCN = {
       }
     },
     trial: {
+      resultInput: "결과 본문",
+      editedResult: "여기서 수정됨 · 복사와 삽입은 이 본문을 사용합니다.",
+      editHint: "결과를 수정한 뒤 복사하거나 삽입할 수 있습니다. 수정 내용은 기기에만 남습니다.",
       insertElsewhere: "다른 앱에 삽입…",
       insertHint: "삽입을 누른 뒤 5초 안에 대상 입력란에 커서를 놓으세요. 텍스트만 삽입하며 메시지를 전송하지 않습니다. Windows 앱 전용입니다.",
       insertCountdown: "대상 입력란을 클릭하세요. {{seconds}}초 후 삽입합니다.",
