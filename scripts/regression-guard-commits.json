@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T21:47:30.664177+08:00",
+  "updated_at": "2026-10-21T22:14:12.159753+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4320,7 +4320,7 @@
       "repo": "type",
       "commit": "c99f78cf44bcdf3ed14981eec4d9879dd248474e",
       "subject": "Keep completed style comparisons and local edits in the open trial",
-      "state": "candidate99_exact_native_session_comparison_and_own_input_copy_verified_customer_pending",
+      "state": "candidate99_exact_native_comparison_verified_independent99_did_not_revisit_purchase_declined",
       "protects": [
         "Switching styles keeps the current dialog and up to8 completed session results, keyed to exact draft and saved style prompt. No auto-processing or activation.",
         "Local edits are retained per matching style/input. A changed input or prompt cannot display or copy another input result; acknowledgement does not cross selections.",
@@ -4345,15 +4345,50 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE98-software-20261021-211050\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE99-software-20261021-214530\\dispatch-input.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE99-software-20261021-214530\\dispatch-input.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE99-software-20261021-214530\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE99-software-20261021-214530\\operations.txt"
       ],
       "unverified": [
-        "New independent99 experience/purchase report pending. AutomaticFormal quality remains open; no claim that this comparison feature resolves it.",
+        "Independent99 completed two typed styles but never switched back to use cached comparison or opened layouts; declined49 hardware. No independent cache benefit proof. F99-02 pending caption is addressed100; automaticFormal remains open.",
         "New99 external-field Insert success, real voice/physical device/long-term/from-zero service setup and real payment remain distinct unknowns."
+      ]
+    },
+    {
+      "id": "customer100_scoped_four_key_practice",
+      "repo": "type",
+      "commit": "e18e20c8e7a012801f9a13bfef10e2bb362b40db",
+      "subject": "Let customers practice their own four-key layouts without a device",
+      "state": "candidate100_exact_native_practice_and_local_layout_reuse_verified_customer_pending",
+      "protects": [
+        "Practice uses the same current layout single-press mappings for own-field templates, selection copy/paste/undo and common editing shortcuts, with Unicode-safe selection offsets.",
+        "Button copy buffer stays in component memory; no system clipboard, global shortcut, IPC/cloud or device execution. Unsupported recording/AI/app/knob actions are explicitly not simulated.",
+        "Configure/practice switch preserves temporary text. Loading a layout or closing clears temporary text and buffer; real layout save/reload retains existing atomic/CAS/board-draft guards.",
+        "New practice does not send board writes or replace actual hardware/voice verification. Current ordinary dictation/defaults/providers unchanged.",
+        "Pending style request displays Processing in empty result panel, not an instruction to submit again."
+      ],
+      "guards": [
+        "scripts/check-device-key-practice-ui.py: scoped Unicode selection/undo, actual editable mapping, saved-layout reload, no side effects, narrow rendering and pending caption.",
+        "scripts/check-device-layouts-ui.py: affected12 original save/conflict/selected-board/draft contracts.",
+        "Exact100 private ordinary UI: Unicode copy/paste/undo; edit/save/reload/use actual phrase; temporary text/buffer cleared; engineering layout deleted;0 cloud."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\practice100-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\layout100-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native100-snapshot-20261021-221137\\practice-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261021-build100\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE99-software-20261021-214530\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE100-software-20261021-221230\\dispatch-input.txt"
+      ],
+      "unverified": [
+        "Independent100 full feedback/purchase view pending. Four-key practice is an experience opportunity, not proven purchase improvement.",
+        "AutomaticFormal quality, true speech/external-field input, physical controls/from-zero service setup/long-term and real payment remain separate unknowns."
       ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-21T21:47:30.664177+08:00",
+  "feature_routes_updated_at": "2026-10-21T22:14:12.159753+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -4907,13 +4942,16 @@
         "device_onboard_keys60_exact_uid_and_bounded_transaction",
         "firmware32_device_owned_profiles_atomic_nvs",
         "selected_rename66_verify_before_terminal_apply",
-        "firmware33_atomic_power_state_breaks_settings_pm_lock_cycle"
+        "firmware33_atomic_power_state_breaks_settings_pm_lock_cycle",
+        "customer100_scoped_four_key_practice"
       ],
       "paths": {
         "type": [
           "src/pages/settings/DeviceSection.tsx",
           "src-tauri/src/commands/device/settings_selection.rs",
-          "src-tauri/src/embedded_ble/windows_ble/settings_target.rs"
+          "src-tauri/src/embedded_ble/windows_ble/settings_target.rs",
+          "src/components/DeviceLayoutPractice.tsx",
+          "scripts/check-device-key-practice-ui.py"
         ],
         "firmware": [
           "components/device_settings/device_settings.c",
@@ -4938,7 +4976,8 @@
         "device_onboard_profiles59_timeout_failure",
         "device_onboard_keys60_exact_uid_and_bounded_transaction",
         "firmware32_device_owned_profiles_atomic_nvs",
-        "customer98_reusable_local_key_layouts"
+        "customer98_reusable_local_key_layouts",
+        "customer100_scoped_four_key_practice"
       ],
       "paths": {
         "type": [
@@ -4953,7 +4992,9 @@
           "src-tauri/src/commands/local_device_layouts.rs",
           "src/components/DeviceLayoutsDialog.tsx",
           "src/lib/deviceKeyLayouts.ts",
-          "scripts/check-device-layouts-ui.py"
+          "scripts/check-device-layouts-ui.py",
+          "src/components/DeviceLayoutPractice.tsx",
+          "scripts/check-device-key-practice-ui.py"
         ],
         "firmware": [
           "components/device_settings/device_key_profile.c",
@@ -5006,7 +5047,8 @@
         "customer95_reviewed_result_explicit_handoff",
         "customer96_all_builtin_trial_layout",
         "customer97_local_result_revision_delivery",
-        "customer99_session_style_comparisons"
+        "customer99_session_style_comparisons",
+        "customer100_scoped_four_key_practice"
       ],
       "paths": {
         "type": [
@@ -5050,7 +5092,9 @@
           "src/components/QuickStyleTextTrial.tsx",
           "src/components/StyleTextTrial.css",
           "src/lib/everydayListStyle.ts",
-          "scripts/check-style-trial-comparison-ui.py"
+          "scripts/check-style-trial-comparison-ui.py",
+          "src/components/DeviceLayoutPractice.tsx",
+          "scripts/check-device-key-practice-ui.py"
         ]
       },
       "known_failures": [
