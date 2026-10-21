@@ -21,6 +21,8 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 - **Shape the words:** keep the original by default, or choose a text style or translation with a configured text service.
 - **Make it yours:** assign the four keys and adjust lights or power settings. Each device keeps its own settings.
 
+**[Hear a short message become text · 25-second software example](docs/VOICE_EXAMPLE.md).** Prerecorded synthetic voice and actual Type results; no hardware operation shown.
+
 **Before you start:** the full hardware-audio path needs Windows Type and a configured recognition service or local model. Cloud usage is billed separately; no ready-to-use official cloud account or allowance is included in this release.
 
 **RC1 is a prerelease.** Strong-interference separation is incomplete and intermittent early-close cases remain under review. [Current limits and release notes](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1). Hardware purchase link not yet announced.

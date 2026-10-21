@@ -1,0 +1,21 @@
+{
+  "typeSource": "7ecdadcdeb98405a94fcbc0c7d96bc1423ee5ed8",
+  "recordedAt": "2026-10-21T16:09:39.337285+08:00",
+  "input": {
+    "kind": "Microsoft Zira Desktop locally synthesized nonsensitive English WAV",
+    "seconds": 11.48,
+    "sha256": "cb26582f2b443e91e39e98da358b08fbecf467f4fad6006826756abec275497e",
+    "words": "Hi Sam, let's meet on Thursday at three. I'll send the notes before lunch. Please keep the budget at fifty dollars, and tell me if the time needs to change."
+  },
+  "recognition": {
+    "provider": "Existing configured Volcengine",
+    "actualRawTranscript": "Hi, Sam. Let's meet on Thursday at 3.  I'll send the notes before lunch.  Please keep the budget at 50 dollars, and tell me if the time needs to change.",
+    "fileReplaySeconds": 2.187
+  },
+  "lightPolish": {
+    "provider": "Existing configured DeepSeek",
+    "actualResult": "Hi Sam, let's meet on Thursday at 3. I'll send the notes before lunch. Please keep the budget at 50 dollars, and tell me if the time needs to change.",
+    "uiDisplayedSeconds": 0.8
+  },
+  "presentation": "Edited audio and actual screenshots, not continuous screen recording. Recognition used an internal file entry; transcript then submitted in normal text trial. No live microphone, BLE, physical control, external-app insertion, independent customer or general quality/latency claim."
+}
