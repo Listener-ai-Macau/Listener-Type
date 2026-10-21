@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T04:53:03.295607+08:00",
+  "updated_at": "2026-10-22T05:01:11.990025+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5005,6 +5005,56 @@
         "117 full feedback/operations read,03/09 viewed: typed Formal0.5s facts retained, customer manually makes request more polite, saves/reopens edited draft and sees Copied. F117-01 send me your notes remains direct: mergeF96-02.49 deferred/free typed task enough. New nested settings and recorded audio untried.",
         "No external paste/live/physical/order. No customer evidence for new settings flow."
       ]
+    },
+    {
+      "id": "type118_settled_provider_save_failure_survives_close",
+      "repo": "type",
+      "commit": "6d9a18bafacdec1bf83eb3b25b2662ad66f0858a",
+      "subject": "A failed settings write that settled before Close must remain explicit until same-field retry success or explicit return",
+      "state": "exact118_artifact_and_actual_react_controlled_failure_verified_customer_pending",
+      "previous_source_evidence": "0d47630a new117 nested settings window only waited pending failures; settled failure before Close reproduced. Source transcript remains intact, configuration edit could silently close.",
+      "protects": [
+        "Per-field/switch operation revisions retain latest outcome, scoped to this settings visit. Same-field success clears failure; unrelated success cannot; obsolete failure cannot overwrite newer success.",
+        "No credential values retained, no serial queue or account/provider/default mutation. Old dismissed visit does not trap a new visit; explicit return still preserves source and edited text.",
+        "118 changes frontend outcome tracking only.117 exact ordinary native persistence/return evidence inherited with scope explicit; no repeated118 cloud transcription or claimed native failure injection."
+      ],
+      "guards": [
+        "Actual React controlled storage:117 before silent close reproduced;118 seven cases pass including settled error, retry, stale failure and old-visit boundary.116 edit/ack regression and TypeScript pass.",
+        "Exact118 MSI embeddedEXE matches source build; same-version upgrade allowed."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\settled118-before.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\settled118-after.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\credential118-existing-ack.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build118\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE117-software-20261022-044800\\experience.txt"
+      ],
+      "unverified": [
+        "Customer117 chose typed Formal/save/reopen, new settings untried,49 deferred.118 not independently tried yet; no live/BLE/external input/physical/purchase qualification."
+      ]
+    },
+    {
+      "id": "formal118_exact_edits_not_global_replacement_politeness_requires_guards",
+      "repo": "type",
+      "commit": "6d9a18bafacdec1bf83eb3b25b2662ad66f0858a",
+      "subject": "Retain118 exact-span research limits; no default Formal replacement and no unguarded politeness rollout",
+      "state": "research_only_not_adopted",
+      "protects": [
+        "Whole-raw-message local edits contract:117 please improves, old96 when works persists, Chinese edit boundary misses punctuation. Reject as automatic Formal/grammar replacement. No unchanged repeat.",
+        "Narrow explicit request-politeness on drafted result improves actual117 plus Chinese/Japanese samples at0.813–1.047s, but mandatory control removes must. Do not ship unguarded; next evaluate exact-span factual/modal protections and user-reviewed optional proposals, not silent default/model change."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\formal118-local-edits-prototype.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\politeness118-result-edits-prototype.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE117-software-20261022-044800\\experience.txt"
+      ],
+      "unverified": [
+        "No product feature or customer benefit yet. Four-case research is not global language/semantic qualification."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5707,7 +5757,8 @@
         "customer115_recorded_transcript_to_independent_text_workspace",
         "type116_credential_edit_acknowledgement_preserves_latest_draft",
         "formal116_two_stage_and_existing_provider_pro_not_adopted",
-        "customer117_recorded_text_nested_provider_setup_preserves_work"
+        "customer117_recorded_text_nested_provider_setup_preserves_work",
+        "type118_settled_provider_save_failure_survives_close"
       ],
       "paths": {
         "type": [

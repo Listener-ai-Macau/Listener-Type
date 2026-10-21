@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T04:45:21.501797+08:00",
+  "updatedAt": "2026-10-22T05:01:12.084889+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 117,
-    "source": "0d47630aefa59e6fa2e12a07a21b54cc93089679",
-    "sourceTag": "build-source/type117-20261022",
+    "build": 118,
+    "source": "6d9a18bafacdec1bf83eb3b25b2662ad66f0858a",
+    "sourceTag": "build-source/type118-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "5e09d4498cad4b5027086552907d1295e66d79cfd81d8e18a72f6010baef95bd",
-    "sizeBytes": 299094016,
-    "exeSha256": "bfef1cb88b3bc65a27ebb1bec7d726a5d510a0d0335929c4e071ed0e66394982",
+    "sha256": "724007124bff911edfabf59bd68dc999de99cb559ca6097fe8b8cd42318f5030",
+    "sizeBytes": 299106304,
+    "exeSha256": "1a482d6945b793e4146f69cf1a53a2913cc291d6158f9b2a59f10af48a2b59d1",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -202,8 +202,15 @@
     "type117VerificationScope": "Missing-service production React counterexample reproduced. Nested existing text-only settings preserve source, draft and result; Escape flushes the current edit and waits for existing writes before readiness refresh. Delayed success/failure fixture and prior bridge/116 ack checks pass. Exact private native ordinary existing Volcengine sample transcript→nested dummy model edit/close/reopen/restore preserves source/draft; no LLM request. Not customer, live recording, hardware or purchase qualification.",
     "customer116TypedLightSavedRecovered": true,
     "customer116SettingsObserved": false,
-    "customer117Reviewed": false,
-    "customer117PurchaseQualification": false
+    "customer117Reviewed": true,
+    "customer117PurchaseQualification": false,
+    "type118InstalledExeAndPreferencesVerified": false,
+    "type118SettledSaveErrorUiVerified": true,
+    "type118VerificationScope": "Production React/fake storage reproduces117: save fails before Close, then failed edit silently closes.118 keeps latest outcome by field/switch and settings-visit revision; same-field retry success clears failure, older failure cannot override newer success, dismissed old-window failure does not trap next visit. Seven affected UI scenarios and116 ack pass. Credential persistence unchanged; no separate118 native delay/failure injection or new cloud/live/hardware claim.",
+    "customer117TypedFormalEditedSavedRecovered": true,
+    "customer117NestedSettingsObserved": false,
+    "customer118Reviewed": false,
+    "customer118PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -220,6 +227,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build117-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build118-20261022"
   }
 }

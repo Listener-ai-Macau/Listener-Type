@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build117 / Firmware33
+# Listener v1.0.6-rc1 · Type build118 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,10 @@
 | **ESP32-S3 firmware · USB flashing / Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+A text-service settings save failure now remains visible when you close, even if the save already finished. A newer successful retry for that field clears the failure; unrelated writes and obsolete failures cannot misreport it. Returning explicitly without saving keeps your text. An earlier dismissed visit does not block a later visit without edits.
+
+## Recorded-text workspace retained
 
 From **Transcribe recorded audio → Open in text workspace**, **Text-service settings** now opens the existing text-provider controls without discarding your transcript, working draft or edited result. Close or Escape flushes the focused credential edit and waits for existing writes before returning and refreshing availability. If that save fails, the settings stay open with an explicit choice to return to your text. Opening or closing settings never sends your text for processing.
 
@@ -22,12 +26,12 @@ Type is free; US$49 is the hardware price. Cloud service setup and usage are sep
 
 | Component | Exact source | SHA-256 |
 | --- | --- | --- |
-| Type117 MSI · 299094016 bytes | [0d47630aefa5](https://github.com/Listener-ai-Macau/Listener-Type/commit/0d47630aefa59e6fa2e12a07a21b54cc93089679) | `5e09d4498cad4b5027086552907d1295e66d79cfd81d8e18a72f6010baef95bd` |
+| Type118 MSI · 299106304 bytes | [6d9a18bafacd](https://github.com/Listener-ai-Macau/Listener-Type/commit/6d9a18bafacdec1bf83eb3b25b2662ad66f0858a) | `724007124bff911edfabf59bd68dc999de99cb559ca6097fe8b8cd42318f5030` |
 | Firmware33 ZIP · 1956905 bytes | [149b6d950ebc](https://github.com/Listener-ai-Macau/Listener-Firmware/commit/149b6d950ebc5f416924c8670cf2b207bdc2b5b7) | `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272` |
 
 ## 中文说明
 
-117补通「转写已有录音→打开文字工作区→文本服务设置」。使用原有文本提供商配置面板，原录音稿、草稿和修订结果留在下方。点击关闭或Esc先提交当前字段，等保存结束再返回并刷新就绪状态；保存失败明确留在设置中，也可选择返回文字。不会自动发送文字、复制、改默认风格或写设备，沿用既有凭据后台和服务配置。
+118补全保存错误结果追踪：即使失败先于关闭返回，也会明确提醒；同一字段后续重试成功才清除错误，旧失败不盖新成功，不把已放下的上次窗口错误带到新窗口。原稿/改稿继续保留。117提供的「转写已有录音→打开文字工作区→文本服务设置」入口保留。使用原有文本提供商配置面板，原录音稿、草稿和修订结果留在下方。点击关闭或Esc先提交当前字段，等保存结束再返回并刷新就绪状态；保存失败明确留在设置中，也可选择返回文字。不会自动发送文字、复制、改默认风格或写设备，沿用既有凭据后台和服务配置。
 
 已有文字试用、录音转写、原地修订、明确保存成稿/重开、布局库和软件练习保留。成稿与录音历史独立，不存音频，不自动保存/删除。文件转写仍仅支持自行配置的火山服务和16kHz/16位/单声道WAV（最长60秒）；选择文件不上传，点击转写才请求服务并正常计费。原稿副本超过4,000字符不截断。
 
