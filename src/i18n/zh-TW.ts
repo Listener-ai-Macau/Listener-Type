@@ -877,6 +877,17 @@ export const zhTW: typeof zhCN = {
       llmProviderDesc: '選擇後將自動填入 Base URL 默認值。',
       credentialStorageNotice: '憑據儲存在系統憑據庫中。舊版本機 JSON 憑據會遷移到系統憑據庫，並在成功寫入後刪除。',
       codexOAuthNotice: 'Codex OAuth 使用本機 Codex 登入狀態（~/.codex/auth.json），無需在 Listener Type 中保存 API Key 或 Base URL。',
+      setupGuide: {
+        "title": "如何設定{{provider}}的文字處理",
+        "scope": "語音辨識與文字整理是兩項能力。預設原文聽寫不需要文字服務，已有語音辨識設定可以保持原樣。",
+        "account": "在這家服務商的帳號取得 API 金鑰，再填到下方。它是供應用程式存取服務的金鑰；只登入過聊天網頁，不一定已開通 API。",
+        "model": "使用同一帳號、同一地區對應的介面位址。點「取得模型」選擇可用文字模型；不支援時，依官方說明填入 API 模型 ID。輸入框中的範例不代表帳號已開通該模型。",
+        "check": "先確認帳號的價格與餘額，再點下方的連線驗證。驗證會向服務商發出真實請求；成功不代表以後一直有額度。",
+        "setupLink": "{{provider}} · 官方設定說明",
+        "pricingLink": "模型與計費說明",
+        "other": "此服務請依帳號提供方的設定與計費說明，確認介面、模型與方案允許目前用途；不能只根據訂閱名稱判斷 API 權限或已包含用量。",
+        "cost": "文字處理可能由服務商另外計費，取決於模型與實際用量。硬體價格不附帶固定的每句費用或服務額度。"
+      },
       localSetupHint: '也可以在這台電腦上識別，無需 ASR 金鑰。首次需準備本地執行元件和模型，會下載檔案並佔用磁碟空間。',
       localSetupAction: '準備本地識別',
       asrProviderDesc: '切換後將自動選用對應憑據。',

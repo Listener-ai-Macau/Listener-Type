@@ -880,6 +880,17 @@ export const en: typeof zhCN = {
       llmProviderDesc: 'Selecting a preset auto-fills the default Base URL.',
       credentialStorageNotice: 'Credentials are stored in the OS credential vault. Legacy local JSON credentials are migrated into the vault and removed after a successful write.',
       codexOAuthNotice: 'Codex OAuth uses the local Codex login state (~/.codex/auth.json). Listener Type does not store an API key or Base URL for this provider.',
+      setupGuide: {
+        "title": "Set up {{provider}} for text processing",
+        "scope": "Recognition and text polishing are separate. Default Raw dictation needs no text service; keep your existing speech-recognition setup.",
+        "account": "Obtain an API key from this provider’s account and enter it below. This is the access key for apps; a web-chat login alone may not include API access.",
+        "model": "Use the endpoint for the same account and region. Use “Fetch models” to choose an available text model, or enter the API model ID from the provider’s instructions. Placeholder values are examples, not confirmation that a model is enabled.",
+        "check": "Check the account’s pricing and balance, then use “Verify connection” below. This sends a real provider request; successful verification does not guarantee future quota.",
+        "setupLink": "{{provider}} · official setup",
+        "pricingLink": "Models and pricing",
+        "other": "For this service, use the account owner’s setup and billing instructions. Confirm that its endpoint, model and plan allow this use; a subscription name alone does not establish API access or included usage.",
+        "cost": "Text processing can be billed separately by the provider. Prices depend on the model and usage; no fixed per-message price or allowance is bundled with the hardware."
+      },
       localSetupHint: 'Prefer recognition on this computer? No ASR API key is needed. First prepare a local runtime and model; downloads and disk space are required.',
       localSetupAction: 'Set up local recognition',
       asrProviderDesc: 'Switching providers automatically loads the matching credentials.',

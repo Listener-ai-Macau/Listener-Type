@@ -875,6 +875,17 @@ export const zhCN = {
       llmProviderDesc: '选择后将自动填入 Base URL 默认值。',
       credentialStorageNotice: '凭据保存在系统凭据库中。旧版本地 JSON 凭据会迁移到系统凭据库，并在成功写入后删除。',
       codexOAuthNotice: 'Codex OAuth 使用本机 Codex 登录状态（~/.codex/auth.json），无需在 Listener Type 中保存 API Key 或 Base URL。',
+      setupGuide: {
+        "title": "怎样配置{{provider}}的文字处理",
+        "scope": "语音识别和文字整理是两项能力。默认原文听写不需要文字服务，已有语音识别配置可以保持原样。",
+        "account": "在这家服务商的账号中取得 API 密钥，再填到下方。它是供应用访问服务的口令；只登录过聊天网页，不一定已经开通 API。",
+        "model": "使用同一账号、同一区域对应的接口地址。点“拉取模型”选择可用的文字模型；不支持拉取时，按官方说明填 API 模型 ID。输入框中的示例不代表账号已开通该模型。",
+        "check": "先确认账号的价格和余额，再点下方“验证连接”。验证会向服务商发出真实请求；验证成功不代表以后一直有额度。",
+        "setupLink": "{{provider}} · 官方配置说明",
+        "pricingLink": "模型与计费说明",
+        "other": "此服务请以账号提供方的配置与计费说明为准，确认接口、模型和套餐允许当前用途；不能只根据订阅名称判断 API 权限或已包含用量。",
+        "cost": "文字处理可能由服务商另外计费，取决于模型和实际用量。硬件价格不附带固定的每句费用或服务额度。"
+      },
       localSetupHint: '也可以在这台电脑上识别，无需 ASR 密钥。首次需准备本地运行组件和模型，会下载文件并占用磁盘空间。',
       localSetupAction: '准备本地识别',
       asrProviderDesc: '切换后将自动选用对应凭据。',

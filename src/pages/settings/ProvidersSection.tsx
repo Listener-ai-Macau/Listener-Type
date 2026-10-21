@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../../components/Icon';
+import { ProviderSetupGuide } from '../../components/ProviderSetupGuide';
 import { detectOS } from '../../components/WindowChrome';
 import {
   listProviderModels,
@@ -498,6 +499,12 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
             style={{ ...inputStyle, maxWidth: 200 }}
           />
         </SettingRow>
+        <ProviderSetupGuide
+          key={`setup-guide:${committedLlmProvider}`}
+          providerId={committedLlmProvider}
+          providerName={t(`settings.providers.presets.${preset.nameKey}`)}
+          expanded={prioritizeTextService}
+        />
         {codexOAuthSelected ? (
           <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.6, margin: '2px 0 10px' }}>
             {t('settings.providers.codexOAuthNotice')}
