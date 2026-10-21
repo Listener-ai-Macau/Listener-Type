@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T10:01:56.386102+08:00",
+  "updated_at": "2026-10-21T10:15:16.010984+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3652,7 +3652,7 @@
       "commit": "88663dd8ada0bece852fa70209633cf9842de043",
       "subject": "Guide text-provider account model and billing setup without changing credentials",
       "commit_subject": "Guide text-provider account model and billing setup without changing credentials",
-      "state": "installed86_passive_provider_guide_affected_ui_verified",
+      "state": "installed86_independent_native_guide_understood_raw_trial_completed_purchase_declined",
       "protects": [
         "Help uses the committed selected provider and a distinct sibling React key; old provider instructions do not remain after switching.",
         "Expanding help sends no service or credentials/provider/model-list request and changes no saved configuration.",
@@ -3670,12 +3670,15 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build86\\type86-installed.json"
       ],
       "customer_evidence": [
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-85-background-native-20261021\\REPORT.txt"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-85-background-native-20261021\\REPORT.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-86-native-20261021\\FIRST_USE-report.txt"
       ],
       "unverified": [
-        "Customer85 requested account/model/cost clarity on85; customer86 reuse not performed.",
-        "Guidance is not account preparation or successful text processing; no live speech, hardware or purchase qualification."
-      ]
+        "Actual text-service account preparation and polished output were not experienced; guidance does not provision accounts.",
+        "Raw typed-text trial is not ASR, external-editor insertion, hardware qualification or actual purchase.",
+        "Public web reader returned84; same-time primary GitHub API/HTML/raw all show86. Observation retained, cause not conclusively attributed to cache."
+      ],
+      "customer_result": "Independent86 actually understood account/API/region/model/cost guidance, submitted own text to default Raw and saw exact unchanged result without a text service, and retained own draft across settings. No app-blocking error reported. Still will not order49USD hardware; wants personally observed ordinary voice-to-target-field benefit and later physical-control convenience."
     }
   ],
   "feature_routes_updated_at": "2026-10-21T10:01:56.386102+08:00",
