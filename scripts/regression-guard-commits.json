@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T08:30:21.638107+08:00",
+  "updated_at": "2026-10-21T09:15:13.324646+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3599,6 +3599,32 @@
         "Customer84 requested upfront status on84; customer85 reuse not performed.",
         "Configured status is not successful cloud processing/remaining quota. No live speech, external editor, hardware or purchase qualification."
       ]
+    },
+    {
+      "id": "customer_public_rc1_usage_and_service_scope",
+      "repo": "type",
+      "commit": "bbaa17a86c4bec000d67f9acb0929239452a31d9",
+      "subject": "Keep public current-version and style service claims consistent with actual RC1 behavior",
+      "state": "published_public_docs_only_no_new_binary_or_customer_use_claim",
+      "protects": [
+        "Built-in styles are locally stored/editable; Light/Structured/Formal processing needs a configured available text service. Default Raw and customized Raw policy remain distinct.",
+        "Current user guide points to current RC1 release and matching firmware; historical1.0.5 remains history, not the current baseline.",
+        "49USD hardware value is desk microphone and physical controls. Do not restore unconditional speaker-exclusion or bundled cloud entitlement claims."
+      ],
+      "guards": [],
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\public-hardware-entry-delivered-20261021.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\current-usage-delivered-20261021.json"
+      ],
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-public-hardware-20261021\\REPORT.txt"
+      ],
+      "unverified": [
+        "Public-entry AI understood the hardware scope but did not buy; no app/hardware interaction.",
+        "No new app binary, live speech, accuracy, physical convenience or real-market qualification."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T08:30:21.638107+08:00",
@@ -4223,7 +4249,8 @@
         "customer82_committed_history_live_views",
         "customer83_history_source_media_duration",
         "customer84_history_recent_selection_copy",
-        "customer85_style_trial_upfront_service_status"
+        "customer85_style_trial_upfront_service_status",
+        "customer_public_rc1_usage_and_service_scope"
       ],
       "paths": {
         "type": [
@@ -4279,7 +4306,8 @@
         "Actual81 stored a131-character recognition successfully while already-mounted History stayed empty; old mount/manual-only refresh lacked store notifications.",
         "Customer82 saw2.5seconds for29-second recorded media: successful History bound RawTranscript provider elapsed time, while its saved PCM evidence gives28953ms.",
         "Old History recent list spans all modes but detail falls back inside the active style filter: clicking Raw A while filtering Light copied Light B. Earliest fallback ^732a863; recent list3ca9f850, not an83 regression.",
-        "Independent84 only learned style service requirements after opening trial; missing service is a dependency, not a false successful output.85 exposes status on cards."
+        "Independent84 only learned style service requirements after opening trial; missing service is a dependency, not a false successful output.85 exposes status on cards.",
+        "Public reader found ChineseUSAGE1.0.5 and offlineLight promise conflicting with current entry. Source4d4b8890/735cc9aa retained; bbaa17a corrects guide, not runtime. Mixed web-reader build labels remain observed/cache-unknown; actualGitHub blobs match current contents."
       ]
     },
     {
