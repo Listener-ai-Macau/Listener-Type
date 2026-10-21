@@ -17,18 +17,25 @@ pub fn create_style_pack_from_template(
     coord: CoordinatorState<'_>,
     app: AppHandle,
     template: StylePack,
+    trial_only: Option<bool>,
 ) -> Result<StylePack, String> {
     log::info!(
         "[style-pack] command create_from_template name={} base_mode={:?}",
         template.name,
         template.base_mode
     );
-    let created = coord
-        .style_packs()
-        .create_from_template(template)
-        .map_err(|e| e.to_string())?;
-    let prefs = coord.prefs().get();
-    let _ = sync_style_pack_prefs_and_persist(&*coord, &app, prefs)?;
+    let trial_only = trial_only.unwrap_or(false);
+    let created = if trial_only {
+        coord.style_packs().create_for_text_trial(template)
+    } else {
+        coord.style_packs().create_from_template(template)
+    }.map_err(|e| e.to_string())?;
+    // Text workspaces save an inactive preset only. Do not rewrite preferences
+    // or refresh the daily style cycle just because someone tried a template.
+    if !trial_only {
+        let prefs = coord.prefs().get();
+        let _ = sync_style_pack_prefs_and_persist(&*coord, &app, prefs)?;
+    }
     Ok(created)
 }
 

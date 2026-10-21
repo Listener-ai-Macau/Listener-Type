@@ -2,6 +2,7 @@ import { textDraftTranslations } from './textDraft.ts';
 import { hardwareLayoutTranslations } from './hardwareLayout.ts';
 import { audioFileTranslations } from './audioFile.ts';
 import { politeEditsTranslations } from './politeEdits.ts';
+import { conciseDraftTranslations } from './conciseDraft.ts';
 import type { zhCN } from './zh-CN';
 
 // 繁體中文資源 — 與產品當前文案保持一致。
@@ -9,6 +10,7 @@ import type { zhCN } from './zh-CN';
 
 export const zhTW: typeof zhCN = {
   politeEdits: politeEditsTranslations['zh-TW'],
+  conciseDraft: conciseDraftTranslations['zh-TW'],
   textDraft: textDraftTranslations['zh-TW'],
   hardwareLayout: hardwareLayoutTranslations['zh-TW'],
   earlierTrial: {"title": "上一份結果 · 供對照", "hint": "原稿或儲存的風格已改變。此處保留上一份結果及你的修訂，不是目前原稿的新輸出，也沒有重新請求服務。僅保留在目前視窗，直到本風格產生新結果。", "input": "這份舊結果使用的原稿"},

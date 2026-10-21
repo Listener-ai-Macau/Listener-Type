@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T07:01:54.777779+08:00",
+  "updated_at": "2026-10-22T07:09:08.676130+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5244,7 +5244,7 @@
       "repo": "type",
       "commit": "b40f163fcd5313a3ddc248b5bdebf56597070a98",
       "subject": "Separate incomplete service requests from unusable delivered proposals and stale-source errors",
-      "state": "exact124_controlled_error_recovery_verified_customer_pending",
+      "state": "customer124_core_text_copy_save_completed_optional_error_branch_not_used_purchase_deferred",
       "previous_source_evidence": "Customer123 main Light0.9s worked; optional reply logged response_chars379/elapsed1028ms, then generic Check text service. Original response unavailable; do not invent exact rejected span or quota/credential failure.",
       "protects": [
         "Received-but-unusable proposal is distinct from request not completed, including native rejected response code. No recommendation to change a working account from parse/guard failure.",
@@ -5265,11 +5265,16 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build124\\type-artifact-verification.json"
       ],
       "customer_evidence": [
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE123-software-20261022-064300\\experience.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE123-software-20261022-064300\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE124-software-20261022-070400\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE124-software-20261022-070400\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE124-software-20261022-070400\\03-light-request.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE124-software-20261022-070400\\05-saved-draft.png"
       ],
       "unverified": [
-        "New124 customer not yet dispatched. No actual live service invalid reply repeated; controlled response classification is engineering proof only.",
-        "Whole-text concise value wish F123-02 remains open; polite options do not shorten full paragraph. Live recognition, external editor, physical qualification and49 purchase not proven."
+        "124全文/操作/03与05截图已读：自拟Sam通知Light0.9s仅删um，Friday3/暂别发邀请/投影仪待确认/明天午前名单保留；普通私有复制粘贴、保存重开亲验，无阻断。未选额外建议，不能算124错误分支客户通过。仍49暂缓，收益不足、先用免费Type。",
+        "F124-01并原L09/F96-02与F123-02：文字改进幅度小，不买原因具体，下一只评估显式简洁稿价值，不反复替换Formal prompt/模型，不改默认。",
+        "真实语音/外部应用/实物/真人付费未知，软件可执行价值迭代不等待这些。"
       ]
     }
   ],

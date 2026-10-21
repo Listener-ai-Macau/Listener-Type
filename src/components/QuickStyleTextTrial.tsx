@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createStylePackFromTemplate, listStylePacks } from '../lib/ipc';
 import { everydayListStyle, isEverydayListStyle } from '../lib/everydayListStyle';
+import { conciseDraftStyle, isConciseDraftStyle } from '../lib/conciseDraftStyle';
 import type { StylePack } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import { StyleTextTrial } from './StyleTextTrial';
@@ -19,8 +20,8 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, onOpenProvi
   const [selectedId, setSelectedId] = useState('');
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [adding, setAdding] = useState(false);
-  const [addFailed, setAddFailed] = useState(false);
+  const [adding, setAdding] = useState<'list' | 'concise' | null>(null);
+  const [addFailed, setAddFailed] = useState<'list' | 'concise' | null>(null);
   const [providersOpen, setProvidersOpen] = useState(false);
   const [readinessRevision, setReadinessRevision] = useState(0);
   const addingRef = useRef(false);
@@ -43,31 +44,38 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, onOpenProvi
   }, [attempt]);
   const selected = packs.find(pack => pack.id === selectedId);
   const savedEverydayList = packs.find(isEverydayListStyle);
-  const chooseEverydayList = async () => {
+  const savedConcise = packs.find(isConciseDraftStyle);
+  const chooseTemplate = async (kind: 'list' | 'concise') => {
     if (addingRef.current) return;
-    if (savedEverydayList) { setSelectedId(savedEverydayList.id); return; }
+    const saved = kind === 'list' ? savedEverydayList : savedConcise;
+    if (saved) { setSelectedId(saved.id); return; }
     addingRef.current = true;
-    setAdding(true);
-    setAddFailed(false);
+    setAdding(kind);
+    setAddFailed(null);
     try {
-      const created = await createStylePackFromTemplate(everydayListStyle(t));
+      const created = await createStylePackFromTemplate(kind === 'list' ? everydayListStyle(t) : conciseDraftStyle(t), true);
       if (mounted.current) {
         setPacks(current => [...current.filter(pack => pack.id !== created.id), created]);
         setSelectedId(created.id);
       }
     } catch {
-      if (mounted.current) setAddFailed(true);
+      if (mounted.current) setAddFailed(kind);
     } finally {
       addingRef.current = false;
-      if (mounted.current) setAdding(false);
+      if (mounted.current) setAdding(null);
     }
   };
   return <>{selected ? <StyleTextTrial pack={selected} packs={packs}
     onSelectPack={setSelectedId} draft={draft} onDraftChange={onDraftChange}
     extraStyleChoice={selected.id === 'builtin.structured' ? {
       label: t(savedEverydayList ? 'style.everydayList.choose' : 'style.everydayList.add'),
-      hint: t('style.everydayList.hint'), pending: adding,
-      error: addFailed ? t('style.everydayList.failed') : '', onChoose: () => void chooseEverydayList(),
+      hint: t('style.everydayList.hint'), pending: adding !== null,
+      error: addFailed === 'list' ? t('style.everydayList.failed') : '', onChoose: () => void chooseTemplate('list'),
+    } : undefined}
+    presetStyleChoice={!isConciseDraftStyle(selected) ? {
+      label: t(adding === 'concise' ? 'conciseDraft.adding' : savedConcise ? 'conciseDraft.choose' : 'conciseDraft.add'),
+      hint: t('conciseDraft.hint'), pending: adding !== null,
+      error: addFailed === 'concise' ? t('conciseDraft.failed') : '', onChoose: () => void chooseTemplate('concise'),
     } : undefined}
     onClose={onClose} onOpenProviders={onOpenProviders ?? (() => setProvidersOpen(true))}
     readinessRevision={readinessRevision} /> :

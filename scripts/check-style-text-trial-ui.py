@@ -124,8 +124,11 @@ with sync_playwright() as pw:
         check('Returned text is rendered as text, without executing markup',output.locator('b').count()==0)
         page.set_viewport_size({'width':1280,'height':800})
         check('Returned body sits beside the draft with its copy action in view',output.bounding_box()['x']>entry.bounding_box()['x']+entry.bounding_box()['width'] and output.get_by_role('button',name='Copy result',exact=True).is_visible())
-        expect(dialog.locator('.ol-style-trial-details')).not_to_have_attribute('open','')
-        check('Compact cost and text-only notice stays visible before the draft while full details remain available',dialog.get_by_text('Text-only trial, not speech recognition.',exact=False).is_visible() and dialog.locator('.ol-style-trial-details summary').is_visible())
+        # The retained More actions section also uses the shared details style.
+        # Target the information disclosure rather than requiring one details node.
+        info_details=dialog.locator('.ol-style-trial-details:not(.ol-style-trial-more-actions)')
+        expect(info_details).not_to_have_attribute('open','')
+        check('Compact cost and text-only notice stays visible before the draft while full details remain available',dialog.get_by_text('Text-only trial, not speech recognition.',exact=False).is_visible() and info_details.locator('summary').is_visible())
         if a.screenshot:page.screenshot(path=str(a.screenshot),full_page=True)
         copy=dialog.get_by_role('button',name='Copy result',exact=True)
         copy.click()

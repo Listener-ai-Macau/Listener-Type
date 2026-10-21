@@ -1748,14 +1748,14 @@ export function saveStylePack(stylePack: StylePack): Promise<StylePack> {
   });
 }
 
-export function createStylePackFromTemplate(template: StylePack): Promise<StylePack> {
-  return invokeOrMock('create_style_pack_from_template', { template }, () => {
+export function createStylePackFromTemplate(template: StylePack, trialOnly = false): Promise<StylePack> {
+  return invokeOrMock('create_style_pack_from_template', { template, trialOnly }, () => {
     const created: StylePack = {
       ...cloneStylePack(template),
       id: `imported-mock-${Date.now()}`,
       kind: 'imported',
       active: false,
-      enabled: true,
+      enabled: !trialOnly,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

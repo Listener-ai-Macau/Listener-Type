@@ -11,11 +11,12 @@ import { DeviceLayoutsDialog } from './DeviceLayoutsDialog';
 import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
 import { PoliteEditSuggestions } from './PoliteEditSuggestions';
 
-export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draft, onDraftChange, onClose, onOpenProviders, readinessRevision = 0 }: {
+export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, presetStyleChoice, draft, onDraftChange, onClose, onOpenProviders, readinessRevision = 0 }: {
   pack: StylePack;
   packs?: StylePack[];
   onSelectPack?: (id: string) => void;
   extraStyleChoice?: { label: string; hint: string; pending: boolean; error: string; onChoose: () => void };
+  presetStyleChoice?: { label: string; hint: string; pending: boolean; error: string; onChoose: () => void };
   draft: string;
   onDraftChange: (text: string) => void;
   onClose: () => void;
@@ -23,6 +24,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   readinessRevision?: number;
 }) {
   const { t } = useTranslation();
+  const styleChangePending = extraStyleChoice?.pending || presetStyleChoice?.pending;
   const presentation = stylePackPresentation(pack, t);
   const savedExamples = pack.examples
     .filter(example => example.input.trim() && example.output.trim())
@@ -114,7 +116,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   }, []);
 
   const runTrial = async () => {
-    if (draftSaving || running.current || copyRunning.current || deliveryRequest.current || extraStyleChoice?.pending || !canProcess || !draft.trim()) return;
+    if (draftSaving || running.current || copyRunning.current || deliveryRequest.current || styleChangePending || !canProcess || !draft.trim()) return;
     running.current = true;
     const request = ++generation.current;
     setPending(true);
@@ -232,13 +234,18 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       <p id="style-trial-description" className="ol-style-trial-hint">{t('style.trial.shortNotice')}</p>
       {packs && onSelectPack && <label className="ol-style-trial-picker">
         <span>{t('style.trial.styleLabel')}</span>
-        <select aria-label={t('style.trial.styleLabel')} value={pack.id} disabled={pending || copying || delivering || draftSaving || extraStyleChoice?.pending}
+        <select aria-label={t('style.trial.styleLabel')} value={pack.id} disabled={pending || copying || delivering || draftSaving || styleChangePending}
           onChange={event => onSelectPack(event.target.value)}>
           {packs.map(option => <option key={option.id} value={option.id}>{stylePackPresentation(option, t).name}</option>)}
         </select>
       </label>}
       <p className="ol-style-trial-hint ol-style-trial-purpose" data-style-trial-purpose>{presentation.description}</p>
       <div className="ol-style-trial-availability">
+      {presetStyleChoice && <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending} onClick={presetStyleChoice.onChoose}>{presetStyleChoice.label}</Btn>
+        <span className="ol-style-trial-hint">{presetStyleChoice.hint}</span>
+        {presetStyleChoice.error && <span role="alert" className="ol-style-trial-hint">{presetStyleChoice.error}</span>}
+      </div>}
       {readiness?.available === false && <p role="status" className="ol-style-trial-hint">{t('style.trial.nativeRequired')}</p>}
       {readiness?.available && readiness.requiresTextService && !readiness.textServiceConfigured && <p role="status" className="ol-style-trial-hint">{t('style.trial.needsService')}</p>}
       {!readiness && !readinessError && <p role="status" className="ol-style-trial-hint">{t('style.trial.checking')}</p>}
@@ -255,13 +262,13 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         maxLength={4000}
         rows={6}
         // Readiness gates submission, not drafting: checking/failure must not discard typing.
-        disabled={pending || copying || delivering || draftSaving || extraStyleChoice?.pending}
+        disabled={pending || copying || delivering || draftSaving || styleChangePending}
         placeholder={t('style.trial.placeholder')}
         onChange={event => { onDraftChange(event.target.value); setResult(null); setError(''); setCopiedResult(null); setCopyError(false); }}
         style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', minHeight: 110, padding: 12, borderRadius: 12, border: '1px solid var(--ol-line-strong)', color: 'var(--ol-ink)', background: 'var(--ol-surface-2)', font: 'inherit', lineHeight: 1.65 }}
       />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginTop: 12 }}>
-        <Btn variant="blue" disabled={pending || copying || delivering || draftSaving || extraStyleChoice?.pending || !canProcess || !draft.trim()} onClick={() => void runTrial()}>
+        <Btn variant="blue" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !draft.trim()} onClick={() => void runTrial()}>
           {t(pending ? 'style.trial.running' : 'style.trial.run')}
         </Btn>
         {readiness?.available && onOpenProviders && <Btn variant="ghost" disabled={draftSaving} onClick={onOpenProviders}>{t('style.trial.providers')}</Btn>}
@@ -330,7 +337,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         {comparisons.map(previous => <article key={previous.pack.id}>
           <div className="ol-style-trial-comparison-heading">
             <h4>{stylePackPresentation(previous.pack, t).name}</h4>
-            {onSelectPack && <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || extraStyleChoice?.pending}
+            {onSelectPack && <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending}
               onClick={() => onSelectPack(previous.pack.id)}>{t('styleComparisons.open', {name:stylePackPresentation(previous.pack, t).name})}</Btn>}
           </div>
           <pre>{previous.text}</pre>

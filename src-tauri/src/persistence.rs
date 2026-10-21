@@ -1584,6 +1584,16 @@ impl StylePackStore {
     /// 跟 ZIP 导入不同：没有 manifest.json、没有 assets，纯空白模板。
     /// 调用方负责 set `prefs.active_style_pack_id` 等高层 wiring（这里只管落盘）。
     pub fn create_from_template(&self, template: StylePack) -> Result<StylePack> {
+        self.create_from_template_with_enabled(template, true)
+    }
+
+    /// A saved text-trial preset is available for explicit trials, but must not
+    /// join the hardware/dictation style cycle until separately enabled.
+    pub fn create_for_text_trial(&self, template: StylePack) -> Result<StylePack> {
+        self.create_from_template_with_enabled(template, false)
+    }
+
+    fn create_from_template_with_enabled(&self, template: StylePack, enabled: bool) -> Result<StylePack> {
         let mut packs = self.state.lock();
         let base_id = if template.id.trim().is_empty() {
             format!("imported-{}", Uuid::new_v4().simple())
@@ -1598,7 +1608,7 @@ impl StylePackStore {
         pack.created_at = Some(now.clone());
         pack.updated_at = Some(now);
         pack.active = false;
-        pack.enabled = true;
+        pack.enabled = enabled;
         packs.push(pack.clone());
         write_style_packs_file(&self.path, &packs)?;
         log::info!(
@@ -3321,6 +3331,38 @@ mod tests {
         assert!(validate_correction_rule_syntax("{num}", "{num}例").is_err());
         assert!(validate_correction_rule_syntax("{num}到{num}粒", "{num}例").is_err());
         assert!(validate_correction_rule_syntax("几粒", "{num}例").is_err());
+    }
+
+    #[test]
+    fn text_trial_templates_stay_out_of_daily_cycle_and_keep_normal_creation_compatible() {
+        use super::{read_or_default, StylePackStore};
+        use crate::types::{PolishMode, StylePack, UserPreferences};
+        use parking_lot::Mutex;
+        use uuid::Uuid;
+        let root = std::env::temp_dir().join(format!("listener-trial-style-{}", Uuid::new_v4().simple()));
+        fs::create_dir_all(&root).expect("private test directory");
+        let mut packs = builtin_style_packs();
+        for pack in &mut packs { pack.enabled = pack.base_mode == PolishMode::Raw; }
+        let store = StylePackStore { path: root.join("style-packs.json"), asset_root: root.join("assets"), state: Mutex::new(packs.clone()) };
+        let mut prefs = UserPreferences::default();
+        prefs.active_style_pack_id = "builtin.raw".into();
+        prefs.default_mode = PolishMode::Raw;
+        sync_style_pack_preferences(&mut prefs, &packs);
+        let before = serde_json::to_value(&prefs).expect("baseline preferences");
+        let template = packs.iter().find(|pack| pack.base_mode == PolishMode::Light).expect("light template").clone();
+        let trial = store.create_for_text_trial(template.clone()).expect("trial preset");
+        assert!(!trial.enabled && !trial.active);
+        assert_eq!(store.get(&trial.id).expect("trial remains addressable").prompt, template.prompt);
+        let persisted: Vec<StylePack> = read_or_default(&store.path).expect("saved trial preset");
+        assert!(!persisted.iter().find(|pack| pack.id == trial.id).expect("persisted trial").enabled);
+        assert!(!sync_style_pack_preferences(&mut prefs, &store.list().expect("list after trial")));
+        assert_eq!(serde_json::to_value(&prefs).expect("after trial"), before);
+        let ordinary = store.create_from_template(template).expect("ordinary creation");
+        assert!(ordinary.enabled && !ordinary.active);
+        assert!(sync_style_pack_preferences(&mut prefs, &store.list().expect("normal list")));
+        assert!(prefs.enabled_modes.contains(&PolishMode::Light));
+        assert!(root.starts_with(std::env::temp_dir()));
+        fs::remove_dir_all(root).expect("remove owned test directory");
     }
 
     #[test]
