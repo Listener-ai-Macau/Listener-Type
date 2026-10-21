@@ -42,6 +42,7 @@ import {
 import { type SettingsSectionId } from '../pages/Settings';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { useAppState, type AppTab } from '../state/useAppState';
+import { DevicePageNavigationContext } from '../state/DevicePageNavigationContext';
 
 interface NavItem {
   id: AppTab;
@@ -307,6 +308,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   };
 
   return (
+    <DevicePageNavigationContext.Provider value={openDeviceKeyAppPage}>
     <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0, paddingTop: os === 'mac' ? 28 : 0 }}>
       <div
         style={{
@@ -582,6 +584,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
         }
       `}</style>
     </div>
+    </DevicePageNavigationContext.Provider>
   );
 }
 

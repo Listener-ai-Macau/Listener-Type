@@ -337,7 +337,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           ))}
         </details>
       )}
-      {keyPhrase !== null && <DeviceLayoutsDialog rememberSelection initialProfile={writingDeviceKeyProfile()} incomingText={keyPhrase} onClose={() => setKeyPhrase(null)} />}
+      {keyPhrase !== null && <DeviceLayoutsDialog rememberSelection initialProfile={writingDeviceKeyProfile()} incomingText={keyPhrase} onLeaveForPage={onClose} onClose={() => setKeyPhrase(null)} />}
     </dialog>
   );
 }

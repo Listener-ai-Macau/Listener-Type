@@ -7,6 +7,10 @@ import { enDeviceMaintenance, enFirmwareMaintenance } from './enDeviceMaintenanc
 export const en: typeof zhCN = {
   keyActionHelp: {
     moreOptions: 'More key options',
+    pageReady: 'This key opens {{page}} in Type. Use the button below to leave practice and open it.',
+    openPage: 'Open {{page}} in Type',
+    leavePractice: 'Opening the page closes this key window and clears practice text. Saved layouts stay; unsaved layout changes will ask before leaving.',
+    leaveTrial: 'Opening the page closes this key window and the text trial. Copy any result you need first. Saved layouts stay; unsaved changes will ask before leaving.',
     switchStyle: 'Changes the active style to the previous enabled style, looping back at the start. This applies to later recordings; it does not rewrite selected text. Enable at least two styles on the Styles page.',
     switchStylePractice: 'On the device, this key selects the previous enabled style for later recordings, not for text already selected. Practice leaves your active style unchanged. You can choose enabled styles on the Styles page.',
   },
@@ -30,7 +34,7 @@ export const en: typeof zhCN = {
     "text": "Practice text",
     "placeholder": "A reply, a note, or any text you want to try…",
     "ready": "Choose a key below, or switch to Configure & save to change its action.",
-    "scope": "Software practice only. These buttons edit this field and use a private copy buffer; they do not touch the system clipboard. Recording, AI, app launch, other shortcuts and the knob are not simulated. Practice text is cleared when you close this window or load another layout.",
+    "scope": "Software practice only. These buttons edit this field and use a private copy buffer; they do not touch the system clipboard. Type page actions offer a separate Open button. Recording, AI, external app launch, other shortcuts and the knob are not simulated. Practice text is cleared when you close this window or load another layout.",
     "tooLong": "This field can hold up to 4,000 characters.",
     "inserted": "Inserted into your practice text.",
     "selectFirst": "Select some text in the practice field first.",

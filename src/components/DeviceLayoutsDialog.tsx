@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { deleteLocalDeviceLayout, listLocalDeviceLayouts, nativeDeviceLayoutsAvailable, saveLocalDeviceLayout } from '../lib/ipc';
 import { defaultDeviceKeyProfile, layoutActions, layoutAppPages, layoutGestures, layoutKeyIds, writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
@@ -6,21 +6,25 @@ import type { DeviceCustomKeyId, DeviceCustomKeyMapping, DeviceKeyProfile, Devic
 import { Btn } from '../pages/_atoms';
 import './DeviceLayoutsDialog.css';
 import { DeviceLayoutPractice } from './DeviceLayoutPractice';
+import { DeviceKeyActionPreview } from './DeviceKeyActionPreview';
+import { DevicePageNavigationContext } from '../state/DevicePageNavigationContext';
 
 type Group = typeof layoutGestures[number];
 const primaryKeys = ['RightControl','LeftControl','RightShift','LeftShift','RightAlt','LeftAlt', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', 'Enter','Tab','Space','Escape','Backspace','Delete','Insert','Home','End','PageUp','PageDown','ArrowUp','ArrowDown','ArrowLeft','ArrowRight', ...Array.from({length:12},(_,i)=>`F${i+1}`)];
 const overviewLayoutKey = 'ol.overviewLastDeviceLayout';
 
-export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPractice = false, rememberSelection = false, incomingText, onUseLayout, onClose }: {
+export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPractice = false, rememberSelection = false, incomingText, onUseLayout, onLeaveForPage, onClose }: {
   initialProfile?: DeviceKeyProfile;
   initialKnob?: DeviceKnobRotationAction;
   initialPractice?: boolean;
   rememberSelection?: boolean;
   incomingText?: string;
   onUseLayout?: (layout: DeviceLayout) => void;
+  onLeaveForPage?: () => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const openPage = useContext(DevicePageNavigationContext);
   const dialog = useRef<HTMLDialogElement>(null);
   const alive = useRef(true);
   const initialRestore = useRef(true);
@@ -42,6 +46,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
   const phraseCheckpoint = useRef(incomingText ?? '');
   const [message, setMessage] = useState('');
   const [confirmation, setConfirmation] = useState<{ text: string; action: () => void } | null>(null);
+  useEffect(() => { if (confirmation) dialog.current?.querySelector('.ol-device-layout-confirm')?.scrollIntoView({block:'nearest'}); }, [confirmation]);
   const actionGroup = key === 'knob' ? 'deviceCustomKeys' : group;
   const mapping = profile[actionGroup][key];
   const gestureSelect = key !== 'knob' && <label>{t('deviceLayouts.gesture')}<select aria-label={t('deviceLayouts.gesture')} value={group} onChange={event => setGroup(event.target.value as Group)}>
@@ -83,8 +88,9 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
   }, []);
   const attempt = (action: () => void) => dirty
     ? setConfirmation({ text: t('deviceLayouts.unsaved'), action }) : action();
-  const closeAttempt = () => incomingText !== undefined && phrase !== phraseCheckpoint.current
-    ? setConfirmation({ text: t('keyPhrase.unsaved'), action:onClose }) : attempt(onClose);
+  const leave = (action: () => void) => incomingText !== undefined && phrase !== phraseCheckpoint.current
+    ? setConfirmation({ text: t('keyPhrase.unsaved'), action }) : attempt(action);
+  const closeAttempt = () => leave(onClose);
   const reset = (value?: DeviceLayout, writing = false) => {
     setEditing(value ?? null); setName(value?.name ?? '');
     setProfile(structuredClone(value?.profile ?? (writing ? writingDeviceKeyProfile() : defaultDeviceKeyProfile())));
@@ -156,7 +162,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
         {layoutKeyIds.map(id => <button type="button" key={id} aria-pressed={key === id} onClick={() => setKey(id)}>
           <strong>{id === 'knob' ? t('settings.deviceKeys.knob.title') : t('deviceLayouts.key', { number: id.slice(3) })}</strong>
           <span>{t(`settings.deviceKeys.actions.${profile[id === 'knob' ? 'deviceCustomKeys' : group][id].action}`)}</span>
-          {profile[id === 'knob' ? 'deviceCustomKeys' : group][id].action === 'pasteTemplate' && <span className="ol-device-key-phrase" title={profile[id === 'knob' ? 'deviceCustomKeys' : group][id].pasteTemplate}>{profile[id === 'knob' ? 'deviceCustomKeys' : group][id].pasteTemplate}</span>}
+          <DeviceKeyActionPreview mapping={profile[id === 'knob' ? 'deviceCustomKeys' : group][id]} />
         </button>)}
       </div>
       {incomingText !== undefined && <section className="ol-device-layout-editor" aria-label={t('keyPhrase.title')}>
@@ -208,7 +214,8 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
         {dirty && <span className="ol-device-layout-hint">{t('deviceLayouts.unsavedShort')}</span>}
       </div>
       </div>
-      <div hidden={!practice}><DeviceLayoutPractice key={practiceRevision} profile={profile} onInteract={() => { touched.current = true; }} /></div>
+      <div hidden={!practice}><DeviceLayoutPractice key={practiceRevision} profile={profile} onInteract={() => { touched.current = true; }} leavingTrial={!!onLeaveForPage}
+        onOpenPage={openPage ? page => leave(() => { onClose(); onLeaveForPage?.(); openPage(page); }) : undefined} /></div>
     </fieldset>
   </dialog>;
 }

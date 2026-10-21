@@ -1,15 +1,19 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { DeviceCustomKeyMapping, DeviceKeyProfile } from '../lib/types';
+import type { DeviceCustomKeyAppPage, DeviceCustomKeyMapping, DeviceKeyProfile } from '../lib/types';
 import { layoutKeyIds } from '../lib/deviceKeyLayouts';
+import { DeviceKeyActionPreview } from './DeviceKeyActionPreview';
+import { Btn } from '../pages/_atoms';
 
 /** A scoped software practice field. Never dispatches shortcuts, IPC or clipboard calls. */
-export function DeviceLayoutPractice({ profile, onInteract }: { profile: DeviceKeyProfile; onInteract?: () => void }) {
+export function DeviceLayoutPractice({ profile, onInteract, onOpenPage, leavingTrial = false }: { profile: DeviceKeyProfile; onInteract?: () => void; onOpenPage?: (page: DeviceCustomKeyAppPage) => void; leavingTrial?: boolean }) {
   const { t } = useTranslation();
   const field = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState('');
   const [buffer, setBuffer] = useState<string | null>(null);
   const [status, setStatus] = useState('');
+  const [pageToOpen, setPageToOpen] = useState<DeviceCustomKeyAppPage | null>(null);
+  useEffect(() => { setPageToOpen(null); }, [profile]);
   const undo = useRef<Array<{ text: string; start: number; end: number }>>([]);
   const selection = useRef({ start: 0, end: 0 });
   const range = () => ({ start: field.current?.selectionStart ?? text.length, end: field.current?.selectionEnd ?? text.length });
@@ -40,6 +44,8 @@ export function DeviceLayoutPractice({ profile, onInteract }: { profile: DeviceK
   };
   const press = (mapping: DeviceCustomKeyMapping) => {
     onInteract?.();
+    setPageToOpen(null);
+    if (mapping.action === 'openApp' && onOpenPage) { setPageToOpen(mapping.appPage); setStatus(t('keyActionHelp.pageReady', {page:t(`settings.deviceKeys.appPages.${mapping.appPage}`)})); return; }
     if (mapping.action === 'pasteTemplate') return replace(mapping.pasteTemplate);
     if (mapping.action === 'copyShortcut') return copy();
     if (mapping.action === 'pasteShortcut') return paste();
@@ -74,10 +80,14 @@ export function DeviceLayoutPractice({ profile, onInteract }: { profile: DeviceK
     <div className="ol-device-layout-pad ol-device-practice-keys">
       {layoutKeyIds.filter(id => id !== 'knob').map(id => <button key={id} type="button" onMouseDown={event => event.preventDefault()} onClick={() => press(profile.deviceCustomKeys[id])}>
         <strong>{t('deviceLayouts.key', {number:id.slice(3)})}</strong><span>{t(`settings.deviceKeys.actions.${profile.deviceCustomKeys[id].action}`)}</span>
-        {profile.deviceCustomKeys[id].action === 'pasteTemplate' && <span className="ol-device-key-phrase" title={profile.deviceCustomKeys[id].pasteTemplate}>{profile.deviceCustomKeys[id].pasteTemplate}</span>}
+        <DeviceKeyActionPreview mapping={profile.deviceCustomKeys[id]} />
       </button>)}
     </div>
     <p role="status" className="ol-device-layout-practice-status">{status || t('devicePractice.ready')}</p>
+    {pageToOpen && onOpenPage && <div className="ol-device-practice-open-page">
+      <p className="ol-device-layout-hint">{t(leavingTrial ? 'keyActionHelp.leaveTrial' : 'keyActionHelp.leavePractice')}</p>
+      <Btn size="sm" onClick={() => onOpenPage(pageToOpen)}>{t('keyActionHelp.openPage', {page:t(`settings.deviceKeys.appPages.${pageToOpen}`)})}</Btn>
+    </div>}
     <p className="ol-device-layout-hint">{t('devicePractice.scope')}</p>
   </section>;
 }

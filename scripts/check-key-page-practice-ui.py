@@ -1,0 +1,35 @@
+"""Actual in-app navigation from a customer's own key mapping; scoped browser fixture."""
+import argparse,json,re
+from pathlib import Path
+from playwright.sync_api import sync_playwright,expect
+p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--report',required=True,type=Path);a=p.parse_args();checks=[]
+with sync_playwright() as pw:
+ b=pw.chromium.launch(headless=True,channel='msedge')
+ try:
+  page=b.new_page(viewport={'width':1280,'height':1000});page.set_default_timeout(6000)
+  page.add_init_script("""localStorage.setItem('ol.locale','en');sessionStorage.setItem('ol.providerSetupPromptDeferredThisSession','1');window.__pageCalls=[];window.__pageFixture=(cmd,args,mock)=>{window.__pageCalls.push({cmd,args});if(cmd==='get_style_text_trial_readiness')return {available:true,requiresTextService:false,textServiceConfigured:true};if(cmd==='try_style_pack_text')return {packId:args.stylePackId,packName:args.stylePackId,outputText:args.rawText,usedTextService:false,elapsedMs:1};return mock();};""")
+  def fixture(route):
+   r=route.fetch();s=r.text();old='if (!isTauri) {\n    return mock();\n  }';assert s.count(old)==1;route.fulfill(response=r,body=s.replace(old,'if (!isTauri) {\n    return window.__pageFixture(cmd,args,mock);\n  }',1))
+  page.route(re.compile(r'/src/lib/ipc\.ts(?:\?.*)?$'),fixture);page.goto(a.url,wait_until='networkidle')
+  def overview():page.get_by_role('button',name='Overview',exact=True).click()
+  def open_layout():page.get_by_role('button',name='Design your keys',exact=True).click()
+  d=page.get_by_role('dialog',name='Your key layouts',exact=True)
+  def config_key(n):return d.locator('.ol-device-layout-pad').first.get_by_role('button',name=re.compile('^Key '+str(n)+' '))
+  def practice_key(n):return d.locator('.ol-device-practice-keys').get_by_role('button',name=re.compile('^Key '+str(n)+' '))
+  def configure():d.get_by_role('button',name='Configure & save',exact=True).click()
+  def practice():d.get_by_role('button',name='Practice here',exact=True).click()
+  def save():d.get_by_role('button',name='Save layout',exact=True).click();expect(d.get_by_role('status')).to_contain_text('Saved on this computer')
+  open_layout();d.get_by_label('Layout name').fill('Own desk');config_key(4).click();d.get_by_label('Action',exact=True).select_option('openApp');d.get_by_label('Type page',exact=True).select_option('history');expect(config_key(4).locator('.ol-device-key-phrase')).to_have_text('History');save();practice();expect(practice_key(4).locator('.ol-device-key-phrase')).to_have_text('History');d.get_by_label('Practice text').fill('My own draft');practice_key(4).click();expect(d).to_be_visible();expect(d.get_by_label('Practice text')).to_have_value('My own draft');expect(d.get_by_text('Opening the page closes',exact=False)).to_be_visible();d.get_by_role('button',name='Open History in Type',exact=True).click();expect(d).to_have_count(0);expect(page.get_by_role('heading',name='History',exact=True)).to_be_visible();checks.append('saved page target is visible on its actual key and explicit Open reaches real History without dispatching device/OS action')
+  overview();open_layout();config_key(4).click();d.get_by_label('Type page',exact=True).select_option('style');practice();practice_key(4).click();d.get_by_role('button',name='Open Style in Type',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('unsaved');expect(d.get_by_role('button',name='Keep editing',exact=True)).to_be_in_viewport();d.get_by_role('button',name='Keep editing',exact=True).click();expect(d).to_be_visible();d.get_by_role('button',name='Open Style in Type',exact=True).click();d.get_by_role('button',name='Continue',exact=True).click();expect(d).to_have_count(0);expect(page.get_by_role('heading',name='Style Packs',exact=True)).to_be_visible();checks.append('leaving a dirty layout scrolls its existing discard protection into view; Keep editing stays, explicit discard navigates without saving')
+  overview();open_layout();config_key(4).click();expect(d.get_by_label('Type page',exact=True)).to_have_value('history');d.get_by_label('Type page',exact=True).select_option('settingsLanguage');save();practice();practice_key(4).click();d.get_by_role('button',name='Open Language settings in Type',exact=True).click();expect(d).to_have_count(0);expect(page.get_by_text('Interface language',exact=True)).to_be_visible();page.get_by_role('button',name='Close',exact=True).click();checks.append('settings-page mappings use the existing settings router; previous discarded mapping was not persisted')
+  open_layout();config_key(4).click();d.get_by_label('Type page',exact=True).select_option('history');save();d.get_by_role('button',name='Close',exact=True).click()
+  page.get_by_role('button',name='Try typed text',exact=True).click();trial=page.locator('dialog.ol-style-trial')
+  trial.get_by_label('Your text',exact=True).fill('Keep my own words.');trial.get_by_role('button',name='Try this text',exact=True).click();expect(trial.get_by_label('Result text',exact=True)).to_have_value('Keep my own words.')
+  trial.get_by_role('button',name='Use as a key phrase…',exact=True).click();expect(d.get_by_label('Layout name')).to_have_value('Own desk');d.get_by_label('Phrase to use').fill('My unapplied draft');practice();practice_key(4).click()
+  expect(d.get_by_text('Opening the page closes this key window and the text trial.',exact=False)).to_be_visible()
+  d.get_by_role('button',name='Open History in Type',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('not been used');d.get_by_role('button',name='Keep editing',exact=True).click();expect(d).to_be_visible()
+  d.get_by_role('button',name='Open History in Type',exact=True).click();d.get_by_role('button',name='Continue',exact=True).click();expect(page.locator('dialog[open]')).to_have_count(0);expect(page.get_by_role('heading',name='History',exact=True)).to_be_visible()
+  checks.append('nested path warns both windows will close, protects unapplied phrase edits, and only explicit discard leaves for the real page with no blocking modal')
+  calls=page.evaluate('window.__pageCalls');assert not any(x['cmd'] in {'set_selected_device_key_profile','set_selected_device_settings','update_preferences','start_dictation','set_hotkey','copy_style_trial_result','insert_style_trial_result'} for x in calls);assert sum(x['cmd']=='save_local_device_layout' for x in calls)==3;checks.append('local page navigation does not write devices, global preferences, OS clipboard, start recording or implicitly save a layout')
+  a.report.parent.mkdir(parents=True,exist_ok=True);page.screenshot(path=str(a.report.with_suffix('.png')));a.report.write_text(json.dumps({'passed':True,'scope':'Owned browser fixture with actual app router; not native storage/hardware or customer purchase evidence.','checks':checks},ensure_ascii=False,indent=2)+'\n',encoding='utf-8');print(json.dumps({'passed':True,'checks':checks},ensure_ascii=False))
+ finally:b.close()
