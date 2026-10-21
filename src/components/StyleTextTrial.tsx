@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getStyleTextTrialReadiness, tryStylePackText } from '../lib/ipc';
-import { stylePackPresentation } from '../lib/stylePackPresentation';
+import { stylePackExamplePresentation, stylePackPresentation } from '../lib/stylePackPresentation';
 import type { StylePack, StyleTextTrialReadiness, StyleTextTrialResult } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import './StyleTextTrial.css';
@@ -15,6 +15,9 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
 }) {
   const { t } = useTranslation();
   const presentation = stylePackPresentation(pack, t);
+  const savedExamples = pack.examples
+    .filter(example => example.input.trim() && example.output.trim())
+    .map(example => stylePackExamplePresentation(pack, example, t));
   const dialog = useRef<HTMLDialogElement>(null);
   const generation = useRef(0);
   const running = useRef(false);
@@ -93,6 +96,21 @@ export function StyleTextTrial({ pack, draft, onDraftChange, onClose, onOpenProv
       {readiness?.available && readiness.requiresTextService && !readiness.textServiceConfigured && <p role="status" className="ol-style-trial-hint">{t('style.trial.needsService')}</p>}
       {!readiness && !readinessError && <p role="status" className="ol-style-trial-hint">{t('style.trial.checking')}</p>}
       {readinessError && <p role="alert" className="ol-style-trial-hint">{t('style.trial.readinessFailed')} <Btn size="sm" onClick={() => setReadinessAttempt(value => value + 1)}>{t('common.retry')}</Btn></p>}
+      {readiness?.requiresTextService && savedExamples.length > 0 && (
+        <details className="ol-style-saved-examples" data-style-saved-examples>
+          <summary>{t('style.trial.exampleSummary')}</summary>
+          <p className="ol-style-trial-hint" role="note">{t('style.trial.exampleNotice')}</p>
+          {savedExamples.map((example, index) => (
+            <article key={index} className="ol-style-saved-example">
+              <div style={{ fontWeight: 600 }}>{example.title || t('style.trial.exampleUntitled', { number: index + 1 })}</div>
+              <div className="ol-style-trial-hint">{t('style.trial.exampleInput')}</div>
+              <pre>{example.input}</pre>
+              <div className="ol-style-trial-hint">{t('style.trial.exampleOutput')}</div>
+              <pre>{example.output}</pre>
+            </article>
+          ))}
+        </details>
+      )}
       <label htmlFor="style-trial-input" style={{ display: 'block', fontWeight: 600, marginTop: 20, marginBottom: 8 }}>
         {t('style.trial.input')}
       </label>

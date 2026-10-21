@@ -408,28 +408,53 @@ export const zhCN = {
         "name": "原文",
         "description": "尽量保留原话的顺序、语气和信息密度，只做必要断句与标点整理。",
         "tag0": "原文",
-        "tag1": "最小改写"
+        "tag1": "最小改写",
+        "example": {
+          "title": "最小整理",
+          "input": "今天下午那个会先别取消我晚点再确认一下然后把下周二也先空出来",
+          "output": "今天下午那个会先别取消，我晚点再确认一下。然后把下周二也先空出来。"
+        }
       },
       "light": {
         "name": "轻度润色",
         "description": "把口语整理成顺畅、自然、可直接发送的文字，但不扩写事实。",
         "tag0": "日常沟通",
-        "tag1": "顺滑"
+        "tag1": "顺滑",
+        "example": {
+          "title": "聊天消息",
+          "input": "你帮我跟设计那边说一下这个首页先别上线我晚上再过一遍",
+          "output": "你帮我跟设计那边说一下，这个首页先别上线，我今晚再过一遍。"
+        }
       },
       "structured": {
         "name": "清晰结构",
         "description": "面向 AI 编程协作、技术排障和模型资讯，优先保证术语与结构准确。",
         "tag0": "AI 编程",
-        "tag1": "技术结构化"
+        "tag1": "技术结构化",
+        "example": {
+          "title": "AI 编程任务",
+          "input": "帮我给 codex 提个任务先把登录页 bug 修掉然后补一下 README 里面的环境变量说明还有那个西克瑞特 key 别写死到代码里顺便检查一下还有哪些 issue",
+          "output": "帮忙给 Codex 提个任务，主要包含以下内容：\n\n1. 登录页修复\n   (a) 修复登录页相关 bug。\n2. 文档与配置\n   (a) 补充 README 中的环境变量说明。\n   (b) 确认 Secret Key 不被硬编码到代码里。\n\n最后再检查一下还有哪些 issue 需要处理。"
+        }
       },
       "formal": {
         "name": "正式表达",
         "description": "适合邮件、周报、跨团队同步等场景，语气更完整、专业、克制。",
         "tag0": "正式",
-        "tag1": "工作沟通"
+        "tag1": "工作沟通",
+        "example": {
+          "title": "工作同步",
+          "input": "你帮我发个消息说一下这个需求今天先不上了等测试和产品都确认完我们再一起推进",
+          "output": "麻烦帮我同步一下：这个需求今天先不上线，待测试和产品都确认完成后，我们再统一推进。"
+        }
       }
     },
     trial: {
+      exampleSummary: "查看保存示例 · 非实时结果",
+      exampleNotice: "这是随风格包保存的示例，不是为你的文字实时生成，也未验证当前模型效果。查看不会发送服务请求或改动你的草稿。",
+      exampleInput: "示例原稿",
+      exampleOutput: "示例表达",
+      exampleUntitled: "示例 {{number}}",
       serviceFree: "原文 · 无需文本服务",
       serviceMissing: "需文本服务 · 尚未配置",
       serviceConfigured: "文本服务已配置",

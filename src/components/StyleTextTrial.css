@@ -19,3 +19,28 @@
   line-height: 1.65;
   margin: 10px 0;
 }
+.ol-style-saved-examples {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--ol-line);
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.ol-style-saved-examples summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.ol-style-saved-example + .ol-style-saved-example {
+  margin-top: 14px;
+}
+.ol-style-saved-example pre {
+  margin: 0;
+  padding: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  border-radius: 8px;
+  background: var(--ol-surface-2);
+  user-select: text;
+}

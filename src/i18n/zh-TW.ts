@@ -410,28 +410,53 @@ export const zhTW: typeof zhCN = {
         "name": "原文",
         "description": "盡量保留原話的順序、語氣和資訊密度，只做必要斷句與標點整理。",
         "tag0": "原文",
-        "tag1": "最小改寫"
+        "tag1": "最小改寫",
+        "example": {
+          "title": "最小整理",
+          "input": "今天下午那個會先別取消我晚點再確認一下然後把下週二也先空出來",
+          "output": "今天下午那個會先別取消，我晚點再確認一下。然後把下週二也先空出來。"
+        }
       },
       "light": {
         "name": "輕度潤色",
         "description": "把口語整理成順暢、自然、可直接傳送的文字，但不擴寫事實。",
         "tag0": "日常溝通",
-        "tag1": "順暢"
+        "tag1": "順暢",
+        "example": {
+          "title": "聊天訊息",
+          "input": "你幫我跟設計那邊說一下這個首頁先別上線我晚上再看一遍",
+          "output": "你幫我跟設計那邊說一下，這個首頁先別上線，我今晚再看一遍。"
+        }
       },
       "structured": {
         "name": "清晰結構",
         "description": "面向 AI 程式協作、技術排障和模型資訊，優先確保術語與結構準確。",
         "tag0": "AI 程式",
-        "tag1": "技術結構化"
+        "tag1": "技術結構化",
+        "example": {
+          "title": "AI 程式任務",
+          "input": "幫我給 Codex 提個任務先把登入頁 bug 修掉然後補一下 README 裡的環境變數說明還有那個 Secret Key 別寫死到程式裡順便檢查一下還有哪些 issue",
+          "output": "幫忙給 Codex 提個任務，主要包含：\n\n1. 登入頁修復\n   修復登入頁相關 bug。\n2. 文件與設定\n   補充 README 的環境變數說明。\n   確認 Secret Key 不被硬編碼。\n\n最後再檢查有哪些 issue 需要處理。"
+        }
       },
       "formal": {
         "name": "正式表達",
         "description": "適合郵件、週報、跨團隊同步等情境，語氣更完整、專業、克制。",
         "tag0": "正式",
-        "tag1": "工作溝通"
+        "tag1": "工作溝通",
+        "example": {
+          "title": "工作同步",
+          "input": "你幫我發個訊息說一下這個需求今天先不上了等測試和產品都確認完我們再一起推進",
+          "output": "麻煩幫我同步一下：這個需求今天先不上線，待測試和產品都確認完成後，我們再統一推進。"
+        }
       }
     },
     trial: {
+      exampleSummary: "查看已存範例 · 非即時結果",
+      exampleNotice: "這是隨風格包儲存的範例，不是為你的文字即時產生，也未驗證目前模型的效果。查看不會傳送服務請求或改動你的草稿。",
+      exampleInput: "範例原稿",
+      exampleOutput: "範例表達",
+      exampleUntitled: "範例 {{number}}",
       serviceFree: "原文 · 無需文字服務",
       serviceMissing: "需文字服務 · 尚未設定",
       serviceConfigured: "文字服務已設定",

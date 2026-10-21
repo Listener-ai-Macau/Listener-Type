@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createInstance } from 'i18next';
-import { stylePackPresentation } from './stylePackPresentation.ts';
+import { stylePackExamplePresentation, stylePackPresentation } from './stylePackPresentation.ts';
 import { zhCN } from '../i18n/zh-CN.ts';
 import { zhTW } from '../i18n/zh-TW.ts';
 import { en } from '../i18n/en.ts';
@@ -23,10 +23,16 @@ function factory(mode: PolishMode): StylePack {
   assert.equal(body.match(/\n\s*description: "([^"]*)"/)?.[1], canonical.description);
   const tags = [...body.match(/tags: vec!\[([^\]]*)\]/)![1].matchAll(/"([^"]*)"\.into\(\)/g)].map(m => m[1]);
   assert.deepEqual(tags, [canonical.tag0, canonical.tag1]);
+  const example = {
+    title: JSON.parse('"' + body.match(/title: Some\("((?:\\.|[^"\\])*)"/)![1] + '"'),
+    input: JSON.parse('"' + body.match(/\n\s*input: "((?:\\.|[^"\\])*)"/)![1] + '"'),
+    output: JSON.parse('"' + body.match(/\n\s*output: "((?:\\.|[^"\\])*)"/)![1] + '"'),
+  };
+  assert.deepEqual(example, canonical.example, 'display examples must match actual saved factory examples');
   return {
     id: `builtin.${mode}`, name: canonical.name, description: canonical.description,
     kind: 'builtin', baseMode: mode, prompt: 'Saved prompt — 不改写提示词',
-    examples: [{ input: '保留原始示例', output: 'Stored example' }],
+    examples: [example],
     tags, enabled: true, active: mode === 'raw', version: '1.0.0',
   };
 }
@@ -44,6 +50,15 @@ for (const [locale, resource] of Object.entries(locales)) {
       tags: [resource.style.builtinPacks[mode].tag0, resource.style.builtinPacks[mode].tag1],
     });
     assert.equal(JSON.stringify(pack), saved, 'presentation must not mutate stored fields or prompt');
+    assert.deepEqual(stylePackExamplePresentation(pack, pack.examples[0], i18n.t), resource.style.builtinPacks[mode].example);
+    for (const changed of [
+      { ...pack.examples[0], input: 'My own edited input' },
+      { ...pack.examples[0], output: 'My own edited output' },
+      { ...pack.examples[0], title: 'My own title' },
+    ]) {
+      assert.deepEqual(stylePackExamplePresentation(pack, changed, i18n.t), changed, 'edited pairs stay together without mixing translated factory output');
+    }
+    assert.equal(JSON.stringify(pack), saved, 'viewing examples must not mutate a saved prompt or pair');
   }
 
   const custom = factory('light');
@@ -62,6 +77,7 @@ for (const [locale, resource] of Object.entries(locales)) {
     { ...factory('light'), id: 'builtin.formal' },
   ]) {
     assert.deepEqual(stylePackPresentation(pack, i18n.t), { name: pack.name, description: pack.description, tags: pack.tags });
+    assert.deepEqual(stylePackExamplePresentation(pack, pack.examples[0], i18n.t), pack.examples[0]);
   }
 }
-console.log('PASS: five-locale factory metadata, custom/imported identity boundaries, and unchanged stored prompts/examples.');
+console.log('PASS: five-locale factory metadata/examples match Rust defaults; edited/imported pairs stay intact and saved prompts/examples are unchanged.');

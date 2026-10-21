@@ -411,28 +411,53 @@ export const en: typeof zhCN = {
         "name": "Original text",
         "description": "Keep the original order, tone and information, with only necessary punctuation and sentence breaks.",
         "tag0": "Original text",
-        "tag1": "Minimal rewriting"
+        "tag1": "Minimal rewriting",
+        "example": {
+          "title": "Minimal editing",
+          "input": "don't cancel this afternoon's meeting yet I'll confirm later and keep next Tuesday free too",
+          "output": "Don't cancel this afternoon's meeting yet. I'll confirm later, and keep next Tuesday free too."
+        }
       },
       "light": {
         "name": "Light polish",
         "description": "Turn spoken wording into smooth, natural, sendable text without adding facts.",
         "tag0": "Everyday communication",
-        "tag1": "Natural flow"
+        "tag1": "Natural flow",
+        "example": {
+          "title": "Chat message",
+          "input": "could you tell design not to ship the home page yet I'll have another look this evening",
+          "output": "Could you tell design not to ship the home page yet? I'll have another look this evening."
+        }
       },
       "structured": {
         "name": "Clear structure",
         "description": "For AI coding collaboration, technical troubleshooting and model information, with accurate terminology and structure.",
         "tag0": "AI coding",
-        "tag1": "Technical structure"
+        "tag1": "Technical structure",
+        "example": {
+          "title": "AI coding task",
+          "input": "give Codex a task fix the login page bug update the README environment variable instructions don't hardcode the secret key and check what issues remain",
+          "output": "Please give Codex a task covering:\n\n1. Login page\n   Fix the login page bug.\n2. Documentation and configuration\n   Update the README environment variable instructions.\n   Make sure the secret key is not hardcoded.\n\nThen check what issues remain."
+        }
       },
       "formal": {
         "name": "Formal wording",
         "description": "For email, weekly reports and cross-team updates, with a complete, professional and restrained tone.",
         "tag0": "Formal",
-        "tag1": "Work communication"
+        "tag1": "Work communication",
+        "example": {
+          "title": "Work update",
+          "input": "tell the team this request won't go live today wait until testing and product both confirm before we proceed",
+          "output": "Please let the team know that this request will not go live today. We will proceed once testing and product have both confirmed."
+        }
       }
     },
     trial: {
+      exampleSummary: "View a saved example · illustration",
+      exampleNotice: "Illustrations saved with this style pack. They were not generated for your text or verified against your model. Viewing them sends no service request and leaves your draft unchanged.",
+      exampleInput: "Example draft",
+      exampleOutput: "Example wording",
+      exampleUntitled: "Example {{number}}",
       serviceFree: "Original text · no text service needed",
       serviceMissing: "Text service required · not configured",
       serviceConfigured: "Text service configured",
