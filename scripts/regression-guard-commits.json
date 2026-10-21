@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T02:34:35.734595+08:00",
+  "updated_at": "2026-10-22T02:43:31.420571+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4699,7 +4699,7 @@
       "repo": "type",
       "commit": "278a7fed5fb966ab56977f0ae65630f9f2d8683f",
       "subject": "Explicitly save current edited text with original in a separate immutable local draft library",
-      "state": "exact110_native_saved_drafts_verified_independent_customer_used_layout_phrases_only",
+      "state": "exact110_native_edited_drafts_verified111_customer_saved_reopened_own_formal_result",
       "protects": [
         "Save is explicit, stores exact original and current edited result as local text, makes no service call and does not create speech History/audio/metrics or automatic insertion. No automatic retention.",
         "Immutable UUID bound to one exact save payload makes an uncertain same-request retry idempotent; changed id content is rejected.0empty/oversize text,50-entry/4MiB bounds, bad files retained and no automatic old-draft eviction.",
@@ -4725,11 +4725,14 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\experience.txt",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\operations.txt",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\02-layout-form.png",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\05-copied-and-continued.png"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\05-copied-and-continued.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE111-software-20261022-023700\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE111-software-20261022-023700\\06-recovered-draft.png"
       ],
       "unverified": [
         "Independent110 did not use Saved drafts. Instead saved own key1 phrase, copied it and ordinary-pasted/continued writing in private practice field; screenshot matches. F110-01 loading geometry and long configuration form need work. F110-02 first Practice click during Copy pending: timing unknown, do not remove correct busy guard. Temporarily declines49; free software useful, physical appeal hypothetical.",
-        "Source/native correctness not customer usefulness or hardware purchase willingness. Live speech/physical/external automatic input/long term/real purchase remain unknown."
+        "Source/native correctness not customer usefulness or hardware purchase willingness. Live speech/physical/external automatic input/long term/real purchase remain unknown.",
+        "Independent111 actually saved/reopened own service result and saw Copied. Did not edit before saving or prove external paste. F111-02 result above-body crowding remains, saved retention itself useful. No purchase/physical proof."
       ]
     },
     {
@@ -4737,7 +4740,7 @@
       "repo": "type",
       "commit": "c1c5e4e3bdcd18ceb0f1d0b426261f868e6281a7",
       "subject": "Keep layout-name geometry stable through local read and place selected-key editor beside actual hardware preview",
-      "state": "exact111_affected_native_workflow_verified_customer_pending",
+      "state": "exact111_native_layout_verified_independent_customer_used_formal_saved_drafts",
       "protects": [
         "Reserve loading status space above layout name; ordinary name input during read stays fixed and is not replaced by remembered-layout restore. Existing touched/dirty protection retained.",
         "Wide editor places five selection cards above action fields and actual photo beside them; narrow editor precedes photo. Selection highlights the real physical position without running actions.",
@@ -4759,10 +4762,14 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build111\\type-artifact-verification.json"
       ],
       "customer_evidence": [
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\experience.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE111-software-20261022-023700\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE111-software-20261022-023700\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE111-software-20261022-023700\\03-formal-result.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE111-software-20261022-023700\\06-recovered-draft.png"
       ],
       "unverified": [
-        "Independent111 pending.110 completed own phrase task but reported long form/loading displacement; this change not yet customer experienced.",
+        "Independent111 did not use layouts. Chose Formal1.0s, facts retained, explicit Save→close→reopen same full result→Copied observed. No actual paste or external input. F111-02 result controls/retention above body push end below viewport, next112. Formal restrainedness subjective F111-01;49 still deferred, free software sufficient.",
         "No live speech/BLE/device/external automatic input/physical qualification or purchase claim. F110-02 first Practice click during copy pending remains timing unknown; correct busy protection retained."
       ]
     }

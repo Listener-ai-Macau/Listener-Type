@@ -263,17 +263,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         <section ref={resultSection} className="ol-style-trial-result" aria-label={t('style.trial.output')} aria-live="polite">
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
             <div style={{ fontWeight: 600 }}>{t('style.trial.output')}</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <Btn size="sm" variant="ghost" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
-              {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
-            </Btn>
-            <Btn size="sm" variant="ghost" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => setKeyPhrase(resultOutput)}>{t('keyPhrase.open')}</Btn>
-            {canInsertStyleTrialResult && <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void insertElsewhere()}>{t('style.trial.insertElsewhere')}</Btn>}
-            </div>
           </div>
-          <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t('textDraft.retention')}</p>
-          <SaveTextDraft name={presentation.name} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving} />
-          {restored && <p role="note" className="ol-style-trial-hint" data-style-trial-restored>{t('style.trial.restoredResult')}</p>}
           <p className="ol-style-trial-hint">{editedOutput !== null ? t('style.trial.editedResult') : t(result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}</p>
           <textarea className="ol-style-trial-result-body ol-style-trial-result-editor ol-thinscroll"
             aria-label={t('style.trial.resultInput')} value={resultOutput} rows={8} maxLength={100000}
@@ -287,7 +277,22 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
               setCopiedResult(null); setCopyError(false); setDeliveryMessage('');
             }} />
           <p className="ol-style-trial-hint">{t('style.trial.editHint')}</p>
-          {canInsertStyleTrialResult && <p className="ol-style-trial-hint">{t('style.trial.insertHint')}</p>}
+          <div className="ol-style-trial-primary-actions">
+            <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
+              {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
+            </Btn>
+            <SaveTextDraft name={presentation.name} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving} />
+          </div>
+          <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t('textDraft.retention')}</p>
+          {restored && <p role="note" className="ol-style-trial-hint" data-style-trial-restored>{t('style.trial.restoredResult')}</p>}
+          <details className="ol-style-trial-details ol-style-trial-more-actions">
+            <summary>{t('style.trial.moreActions')}</summary>
+            <div className="ol-style-trial-secondary-actions">
+              <Btn size="sm" variant="ghost" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => setKeyPhrase(resultOutput)}>{t('keyPhrase.open')}</Btn>
+              {canInsertStyleTrialResult && <Btn size="sm" variant="ghost" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void insertElsewhere()}>{t('style.trial.insertElsewhere')}</Btn>}
+            </div>
+            {canInsertStyleTrialResult && <p className="ol-style-trial-hint">{t('style.trial.insertHint')}</p>}
+          </details>
           {delivering && <div role="status" className="ol-style-trial-hint">
             {t(deliverySeconds > 0 ? 'style.trial.insertCountdown' : 'style.trial.insertWorking', { seconds: deliverySeconds })}
             {' '}<Btn size="sm" variant="ghost" onClick={() => void cancelInsert()}>{t('common.cancel')}</Btn>

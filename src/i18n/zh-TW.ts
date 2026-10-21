@@ -1,6 +1,6 @@
-import { textDraftTranslations } from './textDraft';
-import { hardwareLayoutTranslations } from './hardwareLayout';
-import { audioFileTranslations } from './audioFile';
+import { textDraftTranslations } from './textDraft.ts';
+import { hardwareLayoutTranslations } from './hardwareLayout.ts';
+import { audioFileTranslations } from './audioFile.ts';
 import type { zhCN } from './zh-CN';
 
 // 繁體中文資源 — 與產品當前文案保持一致。
@@ -522,6 +522,7 @@ export const zhTW: typeof zhCN = {
       hint: '獨立可選風格，適合日常訊息。在這裡新增或選擇，不會變更錄音預設風格，也不會傳送文字。',
       failed: '無法新增風格，草稿已保留，可以重試。',
     },
+    builtinDisplayNames: { structured: '技術指令' },
     builtinPacks: {
       "raw": {
         "name": "原文",
@@ -569,6 +570,7 @@ export const zhTW: typeof zhCN = {
       }
     },
     trial: {
+      moreActions: '更多文字用途',
       resultInput: "結果正文",
       editedResult: "已在此修改 · 複製與插入使用這份正文。",
       restoredResult: '已還原本次試寫結果 · 未重新請求服務。關閉試寫後清除這些比較結果。',

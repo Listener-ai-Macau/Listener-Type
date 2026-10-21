@@ -25,7 +25,7 @@ with sync_playwright() as pw:
   open_layout();config_key(4).click();d.get_by_label('Type page',exact=True).select_option('history');save();d.get_by_role('button',name='Close',exact=True).click()
   page.get_by_role('button',name='Try typed text',exact=True).click();trial=page.locator('dialog.ol-style-trial')
   trial.get_by_label('Your text',exact=True).fill('Keep my own words.');trial.get_by_role('button',name='Try this text',exact=True).click();expect(trial.get_by_label('Result text',exact=True)).to_have_value('Keep my own words.')
-  trial.get_by_role('button',name='Use as a key phrase…',exact=True).click();expect(d.get_by_label('Layout name')).to_have_value('Own desk');d.get_by_label('Phrase to use').fill('My unapplied draft');practice();practice_key(4).click()
+  trial.locator('.ol-style-trial-more-actions').evaluate('(e)=>e.open') or trial.get_by_text('More ways to use this text',exact=True).click();trial.get_by_role('button',name='Use as a key phrase…',exact=True).click();expect(d.get_by_label('Layout name')).to_have_value('Own desk');d.get_by_label('Phrase to use').fill('My unapplied draft');practice();practice_key(4).click()
   expect(d.get_by_text('Opening the page closes this key window and the text trial.',exact=False)).to_be_visible()
   d.get_by_role('button',name='Open History in Type',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('not been used');d.get_by_role('button',name='Keep editing',exact=True).click();expect(d).to_be_visible()
   d.get_by_role('button',name='Open History in Type',exact=True).click();d.get_by_role('button',name='Continue',exact=True).click();expect(page.locator('dialog[open]')).to_have_count(0);expect(page.get_by_role('heading',name='History',exact=True)).to_be_visible()

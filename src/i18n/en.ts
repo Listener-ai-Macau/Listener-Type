@@ -1,6 +1,6 @@
-import { textDraftTranslations } from './textDraft';
-import { hardwareLayoutTranslations } from './hardwareLayout';
-import { audioFileTranslations } from './audioFile';
+import { textDraftTranslations } from './textDraft.ts';
+import { hardwareLayoutTranslations } from './hardwareLayout.ts';
+import { audioFileTranslations } from './audioFile.ts';
 // English resources — translated from zh-CN.ts. Keep keys in sync.
 
 import type { zhCN } from './zh-CN';
@@ -523,6 +523,7 @@ export const en: typeof zhCN = {
       hint: 'Optional, separate style for everyday messages. Adding or choosing it here does not change your recording default or send your text.',
       failed: 'Could not add the style. Your draft is unchanged; you can try again.',
     },
+    builtinDisplayNames: { structured: 'Technical instructions' },
     builtinPacks: {
       "raw": {
         "name": "Original text",
@@ -570,6 +571,7 @@ export const en: typeof zhCN = {
       }
     },
     trial: {
+      moreActions: 'More ways to use this text',
       resultInput: "Result text",
       editedResult: "Edited here · Copy and Insert use this text.",
       restoredResult: 'Kept from this trial · no new service request. Close the trial to clear these comparisons.',

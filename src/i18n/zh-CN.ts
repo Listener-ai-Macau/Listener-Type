@@ -1,6 +1,6 @@
-import { textDraftTranslations } from './textDraft';
-import { hardwareLayoutTranslations } from './hardwareLayout';
-import { audioFileTranslations } from './audioFile';
+import { textDraftTranslations } from './textDraft.ts';
+import { hardwareLayoutTranslations } from './hardwareLayout.ts';
+import { audioFileTranslations } from './audioFile.ts';
 // 简体中文资源 — 与产品当前文案保持一致。
 // 添加新 key 时，必须同步更新 en.ts，否则首次切换到 English 会回落到中文残留。
 
@@ -520,6 +520,7 @@ export const zhCN = {
       hint: '独立可选风格，适合日常消息。在这里添加或选择，不会改变录音默认风格，也不会发送文字。',
       failed: '未能添加风格，草稿已保留，可以重试。',
     },
+    builtinDisplayNames: { structured: '技术指令' },
     builtinPacks: {
       "raw": {
         "name": "原文",
@@ -567,6 +568,7 @@ export const zhCN = {
       }
     },
     trial: {
+      moreActions: '更多文字用途',
       resultInput: "结果正文",
       editedResult: "已在此修改 · 复制和插入使用这份正文。",
       restoredResult: '已恢复本次试写结果 · 未重新请求服务。关闭试写后清除这些对比结果。',

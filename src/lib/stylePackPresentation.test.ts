@@ -45,7 +45,7 @@ for (const [locale, resource] of Object.entries(locales)) {
     const saved = JSON.stringify(pack);
     const view = stylePackPresentation(pack, i18n.t);
     assert.deepEqual(view, {
-      name: resource.style.builtinPacks[mode].name,
+      name: mode === 'structured' ? resource.style.builtinDisplayNames.structured : resource.style.builtinPacks[mode].name,
       description: resource.style.builtinPacks[mode].description,
       tags: [resource.style.builtinPacks[mode].tag0, resource.style.builtinPacks[mode].tag1],
     });
@@ -70,6 +70,15 @@ for (const [locale, resource] of Object.entries(locales)) {
     tags: ['Personal tag', resource.style.builtinPacks.light.tag1],
   });
   assert.equal(JSON.stringify(custom), customSaved);
+
+  const technical = factory('structured');
+  assert.equal(technical.name, '清晰结构', 'legacy stored factory name remains unchanged');
+  technical.name = 'My technical workflow';
+  const technicalSaved = JSON.stringify(technical);
+  assert.equal(stylePackPresentation(technical, i18n.t).name, technical.name, 'a customer-renamed builtin remains theirs');
+  assert.equal(JSON.stringify(technical), technicalSaved);
+  const imported = { ...factory('structured'), kind: 'imported' as const };
+  assert.equal(stylePackPresentation(imported, i18n.t).name, imported.name, 'an imported canonical-looking name is not relabelled');
 
   for (const pack of [
     { ...factory('light'), kind: 'imported' as const },

@@ -1,6 +1,6 @@
-import { textDraftTranslations } from './textDraft';
-import { hardwareLayoutTranslations } from './hardwareLayout';
-import { audioFileTranslations } from './audioFile';
+import { textDraftTranslations } from './textDraft.ts';
+import { hardwareLayoutTranslations } from './hardwareLayout.ts';
+import { audioFileTranslations } from './audioFile.ts';
 import type { zhCN } from './zh-CN';
 import { en } from './en.ts';
 
@@ -480,6 +480,7 @@ export const ja: typeof zhCN = {
       hint: '日常のメッセージ向けの任意の独立スタイルです。ここで追加・選択しても、録音の既定スタイルは変わらず、文章も送信されません。',
       failed: 'スタイルを追加できませんでした。下書きは保持されています。もう一度試せます。',
     },
+    builtinDisplayNames: { structured: '技術的な指示' },
     builtinPacks: {
       "raw": {
         "name": "原文",
@@ -527,6 +528,7 @@ export const ja: typeof zhCN = {
       }
     },
     trial: {
+      moreActions: 'この文章のほかの使い方',
       resultInput: "結果の本文",
       editedResult: "ここで編集済み · コピーと挿入にはこの本文を使用します。",
       restoredResult: '今回の試用結果を再表示 · 新しいリクエストは送信していません。閉じると比較結果は消去されます。',

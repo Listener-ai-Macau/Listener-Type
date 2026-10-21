@@ -10,7 +10,9 @@ export function stylePackPresentation(pack: StylePack, t: TFunction) {
   if (!canonical) return original;
   const prefix = `style.builtinPacks.${pack.baseMode}`;
   return {
-    name: pack.name === canonical.name ? t(`${prefix}.name`) : pack.name,
+    name: pack.name === canonical.name
+      ? t(pack.baseMode === 'structured' ? 'style.builtinDisplayNames.structured' : `${prefix}.name`)
+      : pack.name,
     description: pack.description === canonical.description ? t(`${prefix}.description`) : pack.description,
     tags: pack.tags.map(tag => {
       if (tag === canonical.tag0) return t(`${prefix}.tag0`);

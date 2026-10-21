@@ -1,6 +1,6 @@
-import { textDraftTranslations } from './textDraft';
-import { hardwareLayoutTranslations } from './hardwareLayout';
-import { audioFileTranslations } from './audioFile';
+import { textDraftTranslations } from './textDraft.ts';
+import { hardwareLayoutTranslations } from './hardwareLayout.ts';
+import { audioFileTranslations } from './audioFile.ts';
 import type { zhCN } from './zh-CN';
 import { en } from './en.ts';
 
@@ -480,6 +480,7 @@ export const ko: typeof zhCN = {
       hint: '일상 메시지를 위한 별도의 선택형 스타일입니다. 여기서 추가하거나 선택해도 녹음 기본 스타일은 바뀌지 않고 텍스트도 전송되지 않습니다.',
       failed: '스타일을 추가하지 못했습니다. 초안은 유지되어 있으며 다시 시도할 수 있습니다.',
     },
+    builtinDisplayNames: { structured: '기술 지시' },
     builtinPacks: {
       "raw": {
         "name": "원문",
@@ -527,6 +528,7 @@ export const ko: typeof zhCN = {
       }
     },
     trial: {
+      moreActions: '이 텍스트의 다른 활용 방법',
       resultInput: "결과 본문",
       editedResult: "여기서 수정됨 · 복사와 삽입은 이 본문을 사용합니다.",
       restoredResult: '이번 체험 결과를 다시 표시했습니다 · 새 요청은 보내지 않았습니다. 닫으면 비교 결과가 지워집니다.',
