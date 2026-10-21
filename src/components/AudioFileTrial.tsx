@@ -127,7 +127,7 @@ export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => vo
       <h3 style={{ fontSize: 15 }}>{t('audioFile.result')}</h3>
       <p className="ol-style-trial-hint">{t('audioFile.receipt', { source: result.source, duration: (result.audioDurationMs / 1000).toFixed(1), time: (result.elapsedMs / 1000).toFixed(1) })}</p>
       <textarea aria-label={t('audioFile.result')} className="ol-style-trial-result-body ol-style-trial-result-editor" value={text} disabled={copying || saving} onChange={event => { setText(event.target.value); setCopied(false); setCloseConfirm(false); }} />
-      <p className="ol-style-trial-hint">{t('audioFile.retention')}</p>
+      <p className="ol-style-trial-hint" data-audio-file-retention>{t(savedText === text ? 'textDraft.savedRetention' : 'audioFile.retention')}</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
         <Btn variant="blue" disabled={copying || saving || !text.trim()} onClick={() => void copy()}>{t(copying ? 'audioFile.copying' : copied ? 'audioFile.copied' : 'audioFile.copy')}</Btn>
         <SaveTextDraft name={result.source} original={result.text} text={text} disabled={copying}

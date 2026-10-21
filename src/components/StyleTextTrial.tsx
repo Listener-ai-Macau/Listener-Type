@@ -32,6 +32,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const copyRunning = useRef(false);
   const [pending, setPending] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
+  const [savedDraftSignature, setSavedDraftSignature] = useState('');
   const [keyPhrase, setKeyPhrase] = useState<string | null>(null);
   const [storedResult, setResult] = useState<StyleTextTrialResult | null>(null);
   const [resultSignature, setResultSignature] = useState('');
@@ -64,6 +65,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const [deliveryMessage, setDeliveryMessage] = useState('');
   const delivering = deliveryStarted !== null;
   const resultOutput = editedOutput ?? result?.outputText ?? '';
+  const savedCurrentDraft = savedDraftSignature === JSON.stringify([presentation.name, draft, resultOutput]);
   const canProcess = !!readiness?.available && (!readiness.requiresTextService || readiness.textServiceConfigured);
 
   useEffect(() => {
@@ -281,9 +283,10 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
             <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
             </Btn>
-            <SaveTextDraft name={presentation.name} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving} />
+            <SaveTextDraft name={presentation.name} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving}
+              onSaved={text => setSavedDraftSignature(JSON.stringify([presentation.name, draft, text]))} />
           </div>
-          <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t('textDraft.retention')}</p>
+          <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t(savedCurrentDraft ? 'textDraft.savedRetention' : 'textDraft.retention')}</p>
           {restored && <p role="note" className="ol-style-trial-hint" data-style-trial-restored>{t('style.trial.restoredResult')}</p>}
           <details className="ol-style-trial-details ol-style-trial-more-actions">
             <summary>{t('style.trial.moreActions')}</summary>

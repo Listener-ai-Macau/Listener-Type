@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T03:15:58.605698+08:00",
+  "updated_at": "2026-10-22T03:27:45.321101+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4819,7 +4819,7 @@
       "repo": "type",
       "commit": "8c8191520411305ec935c7ad8bff716fa79e466f",
       "subject": "Keep actual recognized original plus edited recorded transcript through explicit local Save draft and ordinary reopen",
-      "state": "exact113_recorded_transcript_save_reopen_native_copy_paste_verified_customer_pending",
+      "state": "exact113_native_recorded_save_verified_customer_typed_save_reopen_success_audio_untried",
       "protects": [
         "Audio-file result saves only by explicit Save draft, using actual ASR result.text as original and current edited text, source as name; no sample reference substitution/audio retention/recording History or added recognition call. Existing local draft library bounds preserved.",
         "Saving uses synchronous busy ref and UI locks for close/Escape/confirmation, result edits, copy and discard; failure leaves transcript. Exact saved current text may close; edits or a different result cannot borrow its saved acknowledgement.",
@@ -4838,10 +4838,14 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE109-software-20261022-014330\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE112-software-20261022-025600\\experience.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE112-software-20261022-025600\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE113-software-20261022-031730\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE113-software-20261022-031730\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE113-software-20261022-031730\\03-saved-edited-draft.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE113-software-20261022-031730\\06-copied-confirmation.png"
       ],
       "unverified": [
-        "Independent113 pending. Extends F109-01 explicit retention to recorded transcripts by engineering consistency decision;112 did not report lost recording or use audio.",
+        "Independent113 naturally chose typed Light1.0s, edited3→3pm, saved and recovered exact edit, visible copy acknowledgement only. No blocker, audio save untried. F113-01 minor contradictory post-save retention advice, not lost data.49 deferred; free typed task sufficient. No purchase intent/order.",
         "112 typed task useful but49 hardware deferred. No independent113 use, live speech/BLE/hardware/external automatic input or purchase qualification."
       ]
     }
