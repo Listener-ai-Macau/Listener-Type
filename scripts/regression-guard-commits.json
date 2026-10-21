@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T06:02:26.106512+08:00",
+  "updated_at": "2026-10-22T06:11:37.439772+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5129,7 +5129,7 @@
       "repo": "type",
       "commit": "1474b5bd8b5c9699b7f7fc9c2dc48e8772132e35",
       "subject": "Resolve actual120 second paid Please-kindly failure with explicit local request option and visible action",
-      "state": "exact121_engineering_native_verified_customer_pending",
+      "state": "customer121_common_question_unsupported_no_alternative_actual_failure122_in_progress",
       "previous_source_evidence": "120 customer actual1.4s Formal/0.9s optional proposal only Please kindly; rejected, manually wrote Could you please. Full120 feedback preserved under originalL09/F96-02/F117-01.",
       "protects": [
         "Wording options beside original Copy/Save; opening and selecting local simple English question makes no additional service request or charge; no automatic application. Request body/rest of message exact, explicit choice, original preserved and saved/reopened accepted text.",
@@ -5150,10 +5150,15 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE120-software-20261022-053500\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE120-software-20261022-053500\\operations.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE120-software-20261022-053500\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE121-software-20261022-060400\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE121-software-20261022-060400\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE121-software-20261022-060400\\07-wording-options-scrolled.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE121-software-20261022-060400\\08-service-alternatives.png"
       ],
       "unverified": [
-        "Fresh121 customer not yet dispatched. Default Formal/general grammar, live speech/external input/physical/strong interference/hardware purchase/order not newly qualified."
+        "121完整经历/操作及07/08截图已读：Light/Formal各1.1s，差异仅去Hey；常见Could you send…问句本地无选项，明确云请求1.8s也无可用修改，保留Formal后保存/重开/界面Copied成功。49美元仍暂缓，免费文字收益不足以形成硬件购买理由。",
+        "F121-01常见英文问句未覆盖，F121-02额外请求仍无候选，合并原L09/F96-02/F117-01/F120-01。原120命令句的工程通过不推广到本轮问句。"
       ]
     }
   ],

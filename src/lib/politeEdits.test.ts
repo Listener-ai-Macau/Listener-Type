@@ -4,11 +4,11 @@ import { applyLocalPoliteOption, applyPoliteEdits, localPoliteOptions, reviewPol
 // FIRST_USE120 rejected Please kindly and manually chose a courteous question.
 const customer120 = "Please send me the revised draft by Thursday. I need time to review it before Friday's meeting. Thanks.";
 const local = localPoliteOptions(customer120);
-assert.deepEqual(local, [{ old: 'Please send me the revised draft by Thursday.', new: 'Could you please send me the revised draft by Thursday?' }]);
+assert.deepEqual(local, [{ old: 'Please send me the revised draft by Thursday.', new: 'Could you please send me the revised draft by Thursday?', tone: 'courteous' }, { old: 'Please send me the revised draft by Thursday.', new: 'Would you be able to send me the revised draft by Thursday?', tone: 'softer' }]);
 assert.equal(applyLocalPoliteOption(customer120, local[0]), "Could you please send me the revised draft by Thursday? I need time to review it before Friday's meeting. Thanks.");
 assert.equal(applyLocalPoliteOption('Send me the log by 18:00.', localPoliteOptions('Send me the log by 18:00.')[0]), 'Could you please send me the log by 18:00?');
 assert.equal(applyLocalPoliteOption('  Share the notes with Zoë on Friday!  ', localPoliteOptions('  Share the notes with Zoë on Friday!  ')[0]), '  Could you please share the notes with Zoë on Friday?  ');
-for (const unsupported of ['You must send the log by 18:00.', 'Please do not send the log.', 'Could you please send the log?', 'Send me `API_KEY`.', 'Send me https://example.com/log.', 'Send Dr.', 'Send me the log. Send me the log.', '请发日志。', 'Send\nme the log.']) assert.deepEqual(localPoliteOptions(unsupported), [], unsupported);
+for (const unsupported of ['You must send the log by 18:00.', 'Please do not send the log.', 'Could you not send the log?', 'Could you please not send the log?', 'Send me `API_KEY`.', 'Send me https://example.com/log.', 'Send Dr.', 'Send me the log. Send me the log.', '请发日志。', 'Send\nme the log.']) assert.deepEqual(localPoliteOptions(unsupported), [], unsupported);
 assert.throws(() => applyLocalPoliteOption(customer120.replace('Thursday', 'Monday'), local[0]));
 assert.throws(() => applyLocalPoliteOption(customer120, { ...local[0], new: 'Could you please send me the draft by Monday?' }));
 const literalTokens = 'Send $& and $\' and $` as literal text.';
@@ -17,6 +17,15 @@ const literalTokens = 'Send $& and $\' and $` as literal text.';
 assert.deepEqual(localPoliteOptions(literalTokens), []);
 const dollars = 'Send $& and $$ as literal text. Thanks.';
 assert.equal(applyLocalPoliteOption(dollars, localPoliteOptions(dollars)[0]), 'Could you please send $& and $$ as literal text? Thanks.');
+// FIRST_USE121's natural question fell outside121's imperative-only grammar.
+const customer121 = "Could you send me the revised agenda by 3 pm today? I need to prepare the handout. If that won't work, just let me know when you can get it over. Thanks.";
+const questionOptions = localPoliteOptions(customer121);
+assert.equal(questionOptions.length, 2);
+assert.equal(applyLocalPoliteOption(customer121, questionOptions[0]), customer121.replace('Could you send', 'Could you please send'));
+assert.equal(applyLocalPoliteOption(customer121, questionOptions[1]), customer121.replace('Could you send', 'Would you be able to send'));
+for (const modal of ['Can', 'Could', 'Would', 'Will']) assert.equal(localPoliteOptions(`${modal} you share the notes by 3 pm?`).length, 2);
+assert.deepEqual(localPoliteOptions('Could you please send the log?').map(edit => edit.tone), ['softer']);
+assert.throws(() => applyLocalPoliteOption(customer121.replace('3 pm', '4 pm'), questionOptions[1]));
 
 const source = "Tomorrow's design review at 3 won't work for me. Could we move it to 4? If not, send me your notes and I'll reply by Friday. Thanks!";
 const edits = [{ old: 'Could we move it to 4?', new: 'Could we please move it to 4?' }, { old: 'send me your notes', new: 'please send me your notes' }];

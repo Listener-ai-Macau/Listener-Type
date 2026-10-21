@@ -1,26 +1,35 @@
 export interface PoliteEdit { old: string; new: string }
 export interface PoliteEditReview { edits: PoliteEdit[]; skipped: number }
+export interface LocalPoliteOption extends PoliteEdit { tone: 'courteous' | 'softer' }
 
 /** A deliberately narrow, local English option. Only the request prefix and final
  * punctuation change; the request body is copied exactly. This is not a general
  * grammar or multilingual rewriter. Applying recomputes the option for current text.
  */
-export function localPoliteOptions(source: string): PoliteEdit[] {
+export function localPoliteOptions(source: string): LocalPoliteOption[] {
   if (!source.trim() || source.length > 4000) return [];
   const Segmenter = (Intl as unknown as { Segmenter?: new (locale: string, options: { granularity: string }) => {
     segment(text: string): Iterable<{ segment: string }>;
   } }).Segmenter;
   if (!Segmenter) return [];
-  const edits: PoliteEdit[] = [];
+  const edits: LocalPoliteOption[] = [];
   for (const { segment } of new Segmenter('en', { granularity: 'sentence' }).segment(source)) {
     const old = segment.trim();
     if (old.length > 200 || /[\r\n`]|https?:|www\.|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/iu.test(old)) continue;
-    const match = /^(?:(?:please|kindly)\s+)?(send|share|check|review|confirm|provide|bring|update|let|tell|give|take|return|submit|forward|attach)\s+([^?!]+?)[.!]?$/iu.exec(old);
+    const match = /^(?:(?:could|can|would|will)\s+you\s+(?:please\s+)?|(?:please|kindly)\s+)?(send|share|check|review|confirm|provide|bring|update|let|tell|give|take|return|submit|forward|attach)\s+([^?!]+?)[.!?]?$/iu.exec(old);
     if (!match || /\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|etc|[A-Z])\.$/u.test(old)) continue;
-    const replacement = `Could you please ${match[1].toLowerCase()} ${match[2]}?`;
     if (source.indexOf(old) !== source.lastIndexOf(old)) continue;
-    const proposed = source.replace(old, () => replacement);
-    if (same(anchors(source), anchors(proposed)) && same(markers(source), markers(proposed))) edits.push({ old, new: replacement });
+    const body = `${match[1].toLowerCase()} ${match[2]}`;
+    const choices: { tone: LocalPoliteOption['tone']; prefix: string }[] = [
+      { tone: 'courteous', prefix: 'Could you please' },
+      { tone: 'softer', prefix: 'Would you be able to' },
+    ];
+    for (const { tone, prefix } of choices) {
+      const replacement = `${prefix} ${body}?`;
+      if (old === replacement) continue;
+      const proposed = source.replace(old, () => replacement);
+      if (same(anchors(source), anchors(proposed)) && same(markers(source), markers(proposed))) edits.push({ old, new: replacement, tone });
+    }
   }
   return edits;
 }
