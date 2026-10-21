@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-21T11:46:59.226143+08:00",
+  "updatedAt": "2026-10-21T12:41:59.239927+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 89,
-    "source": "fbd701fcee34b3076a15b6c2589cda018f8776cf",
-    "sourceTag": "build-source/type89-20261021",
+    "build": 90,
+    "source": "eaf0de83582cefc04e4d208c08a069240ac0807b",
+    "sourceTag": "build-source/type90-20261021",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "e4d80c32ba552775dfd75b4340401e629b23462d306aabb00f6f683a23382e67",
+    "sha256": "99b7e46e2be3b6d75d1f477dc7e3b6a6f5bf1d943c35e8a9e01f1dbf969162cc",
     "sizeBytes": 298631168,
-    "exeSha256": "3fe561c443d8258403831ec932191af155a0774fa5abe90d3b478e97b0539c5a",
+    "exeSha256": "8118a52dd55d139493adcf71f7abf741c86580e3885fa285f9aa7551574bf903",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -104,7 +104,10 @@
     "existingServiceTrial88Scope": "One synthetic engineer text trial, ordinary private native UI, existing DeepSeek. Not personal speech, hardware or purchase proof.",
     "type89InstalledExeAndPreferencesVerified": true,
     "textTrial89OverviewEntryAndNativeCopyVerified": true,
-    "textTrial89VerificationScope": "Exact native package, synthetic Raw result explicitly copied and pasted unchanged into own private input. No cloud, live speech, external target or physical acceptance."
+    "textTrial89VerificationScope": "Exact native package, synthetic Raw result explicitly copied and pasted unchanged into own private input. No cloud, live speech, external target or physical acceptance.",
+    "type90InstalledExeAndPreferencesVerified": true,
+    "textTrial90DirectWorkspaceAndNativeCopyVerified": true,
+    "textTrial90VerificationScope": "Exact private native Raw UI: Overview directly opens draft, result/native Copy and ordinary paste into own field. No service, live speech, external editor or hardware qualification."
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -121,6 +124,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build89-20261021"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build90-20261021"
   }
 }
