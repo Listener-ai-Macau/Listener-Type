@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T04:22:30.824700+08:00",
+  "updatedAt": "2026-10-22T04:45:21.501797+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 116,
-    "source": "a24621bc5132fb9c87f0e6233bf41dc762ca0d71",
-    "sourceTag": "build-source/type116-20261022",
+    "build": 117,
+    "source": "0d47630aefa59e6fa2e12a07a21b54cc93089679",
+    "sourceTag": "build-source/type117-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "853baac22a4fb531c07f2facccabfb45d42ed32f0867cba13de376aea861425f",
-    "sizeBytes": 299106304,
-    "exeSha256": "ec06d91f7d6b2b6f2df332cb1f70c4ab1881bb4325dce3c63ee31d00ae254ac2",
+    "sha256": "5e09d4498cad4b5027086552907d1295e66d79cfd81d8e18a72f6010baef95bd",
+    "sizeBytes": 299094016,
+    "exeSha256": "bfef1cb88b3bc65a27ebb1bec7d726a5d510a0d0335929c4e071ed0e66394982",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -195,8 +195,15 @@
     "type116VerificationScope": "Production React controlled delayed-write counterexample fails before and passes after: later edit is flushed on blur/close, old failure cannot override newer success, completion after close settles feedback and old save cannot replace newer Copy feedback. Exact private native ordinary dummy model edits/close/reopen pass. Native persistence, credential scope/account/provider/model defaults unchanged. Prior quota reports are not proved caused by this UI defect.",
     "customer115TypedFormalSaveRecovered": true,
     "customer115AudioBridgeObserved": false,
-    "customer116Reviewed": false,
-    "customer116PurchaseQualification": false
+    "customer116Reviewed": true,
+    "customer116PurchaseQualification": false,
+    "type117InstalledExeAndPreferencesVerified": false,
+    "type117NestedTextServiceSetupUiVerified": true,
+    "type117VerificationScope": "Missing-service production React counterexample reproduced. Nested existing text-only settings preserve source, draft and result; Escape flushes the current edit and waits for existing writes before readiness refresh. Delayed success/failure fixture and prior bridge/116 ack checks pass. Exact private native ordinary existing Volcengine sample transcript→nested dummy model edit/close/reopen/restore preserves source/draft; no LLM request. Not customer, live recording, hardware or purchase qualification.",
+    "customer116TypedLightSavedRecovered": true,
+    "customer116SettingsObserved": false,
+    "customer117Reviewed": false,
+    "customer117PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -213,6 +220,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build116-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build117-20261022"
   }
 }
