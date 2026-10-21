@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T03:50:13.722412+08:00",
+  "updatedAt": "2026-10-22T04:22:30.824700+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 115,
-    "source": "adaf0c1cef03ca7412a191657433864459335feb",
-    "sourceTag": "build-source/type115-20261022",
+    "build": 116,
+    "source": "a24621bc5132fb9c87f0e6233bf41dc762ca0d71",
+    "sourceTag": "build-source/type116-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "df45d2199b9fccd678d171601bf628534fccc394695a42add1a6965b58241923",
-    "sizeBytes": 299098112,
-    "exeSha256": "b9c51263cdd2b37bcdf8e171919a50cc3db85663e4123f4f3c399cc9515edde8",
+    "sha256": "853baac22a4fb531c07f2facccabfb45d42ed32f0867cba13de376aea861425f",
+    "sizeBytes": 299106304,
+    "exeSha256": "ec06d91f7d6b2b6f2df332cb1f70c4ab1881bb4325dce3c63ee31d00ae254ac2",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -188,8 +188,15 @@
     "type115ExactPrivateNativeWorkflowVerified": true,
     "type115VerificationScope": "Exact isolated native MSI: existing direct Volcengine bundled synthetic WAV→editable transcript→explicit independent text workspace copy→explicit existing DeepSeek Light→local edit/save→ordinary reload/reopen exact input and final wording. Opening makes no text-service request; source transcript, earlier typed draft and actual service-submit boundaries retained. Not live speech, external app, physical or purchase qualification.",
     "customer114OwnEditedSavePasteReopenObserved": true,
-    "customer115Reviewed": false,
-    "customer115PurchaseQualification": false
+    "customer115Reviewed": true,
+    "customer115PurchaseQualification": false,
+    "type116InstalledExeAndPreferencesVerified": false,
+    "type116CredentialAcknowledgementUiVerified": true,
+    "type116VerificationScope": "Production React controlled delayed-write counterexample fails before and passes after: later edit is flushed on blur/close, old failure cannot override newer success, completion after close settles feedback and old save cannot replace newer Copy feedback. Exact private native ordinary dummy model edits/close/reopen pass. Native persistence, credential scope/account/provider/model defaults unchanged. Prior quota reports are not proved caused by this UI defect.",
+    "customer115TypedFormalSaveRecovered": true,
+    "customer115AudioBridgeObserved": false,
+    "customer116Reviewed": false,
+    "customer116PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -206,6 +213,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build115-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build116-20261022"
   }
 }

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T04:00:23.455566+08:00",
+  "updated_at": "2026-10-22T04:22:30.740610+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4913,6 +4913,59 @@
         "OriginalR90A-01 wish has prior framing/return-use influence and is not new114 feedback.114 typed use succeeded but49 deferred; this bridge is engineering follow-through to original sound→Light/manual-transfer value candidate.",
         "Independent115 naturally chose typed Formal0.8s, saved and recovered same text, no blocker. F115-01 formalness mild merges F96-02/F111-01. Recorded transcript bridge untried; no Copy/Paste/external/live/physical test.49 deferred, free short-text task sufficient, no purchase intent/order."
       ]
+    },
+    {
+      "id": "type116_credential_edit_acknowledgement_preserves_latest_draft",
+      "repo": "type",
+      "commit": "a24621bc5132fb9c87f0e6233bf41dc762ca0d71",
+      "subject": "Do not clear a later credential edit from an older save acknowledgement; preserve latest blur/close and feedback ownership",
+      "state": "exact116_artifact_controlled_ui_before_after_and_normal_native_private_save_reopen_verified_customer_pending",
+      "previous_source_evidence": "6020853ec introduced existing CredentialField behaviour; not a115 regression",
+      "protects": [
+        "Per-edit revision owns save result. Synchronous dirty state survives old ack and lets blur submit latest value before debounce is cancelled by close.",
+        "Stale failure cannot overwrite newer edit success. Completion after unmount settles its own feedback without setState; late save cannot replace a newer copy/save feedback operation. Existing emitSaved callers remain compatible.",
+        "No credential backend/scope/account/API/provider/model-default, ASR/recording/BLE/firmware change. This is not proved the cause of previous quota reports."
+      ],
+      "guards": [
+        "Production React/fake credential backend/control clock fails before: old value only. After: latest value submitted and stored, stale failure ignored, feedback finishes after close, newer Copy feedback retained. Other account fields never written. TypeScript passes.",
+        "Exact native private ordinary Settings: dummy private model-name edits→close→reopen actual latest model retained via existing protected backend, no key read/network test. Delayed-write condition is frontend fixture evidence, not a native timing injection."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\credential116-before.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\credential116-after.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native116-snapshot-20261022-042038\\credential-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native116-snapshot-20261022-042038\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build116\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE115-software-20261022-035200\\experience.txt"
+      ],
+      "unverified": [
+        "Independent116 not dispatched. No broad quota/livelong/physical/hardware purchase qualification; original software/voice obligations remain."
+      ]
+    },
+    {
+      "id": "formal116_two_stage_and_existing_provider_pro_not_adopted",
+      "repo": "type",
+      "commit": "adaf0c1cef03ca7412a191657433864459335feb",
+      "subject": "Preserve rejected116 formal-quality research so identical methods are not rerun as new",
+      "state": "not_adopted_no_product_default_change",
+      "protects": [
+        "Two-stage semantic plan→professional write: four cases no stable improvement,1.969–2.406s; do not adopt/repeat unchanged.",
+        "Same-account Pro/JSON: English improvement but Chinese addressee changed into topic; reject model/default switch. One literalACK control proves endpoint follows system. Official oldFlash alias mapping normal, not quota/config rollback evidence."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\formal116-research-decision.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\formal116-semantic-plan-prototype.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\formal116-instruction-control.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\formal116-existing-provider-pro.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE115-software-20261022-035200\\experience.txt"
+      ],
+      "unverified": [
+        "No global Formal quality fix or purchase value established; no unchanged retry without actual new condition/evidence."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5285,12 +5338,15 @@
           "src-tauri/src/net_health.rs",
           "src-tauri/src/network_health_state.rs",
           "src/components/Capsule.tsx",
-          "src/pages/settings/ProvidersSection.tsx"
+          "src/pages/settings/ProvidersSection.tsx",
+          "src/lib/savedEvent.ts",
+          "scripts/check-credential-edit-ack-ui.py"
         ]
       },
       "guard_entries": [
         "type_windows_credential_mutation_preserves_latest_resource",
-        "type_windows_credential_persistence_scope_does_not_resurrect_old_configuration"
+        "type_windows_credential_persistence_scope_does_not_resurrect_old_configuration",
+        "type116_credential_edit_acknowledgement_preserves_latest_draft"
       ],
       "baseline_state": "root_cause_reproduced_live_repaired_machine_verified_not_reboot_retested",
       "accepted_scope": "Actual Local2/Roaming3 same-target duplicate selection reproduced, canonical live vault repaired without restarting Type; unrelated writes and fresh process retain the authorized document, original provider final succeeds. Natural Windows reboot observation remains pending. Do not run the negative scope fixture while Type is running.",
@@ -5609,7 +5665,9 @@
         "customer112_result_first_actions_and_safe_technical_label",
         "customer113_recorded_transcript_explicit_local_drafts",
         "customer114_acknowledged_saved_version_guidance",
-        "customer115_recorded_transcript_to_independent_text_workspace"
+        "customer115_recorded_transcript_to_independent_text_workspace",
+        "type116_credential_edit_acknowledgement_preserves_latest_draft",
+        "formal116_two_stage_and_existing_provider_pro_not_adopted"
       ],
       "paths": {
         "type": [
@@ -5677,7 +5735,9 @@
           "src/components/DeviceLayoutsDialog.css",
           "scripts/check-layout-editor-stability-ui.py",
           "scripts/check-result-reading-ui.py",
-          "scripts/check-audio-text-workspace-ui.py"
+          "scripts/check-audio-text-workspace-ui.py",
+          "src/lib/savedEvent.ts",
+          "scripts/check-credential-edit-ack-ui.py"
         ]
       },
       "known_failures": [
