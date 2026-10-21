@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T16:30:26.773906+08:00",
+  "updated_at": "2026-10-21T16:53:20.107763+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4060,6 +4060,39 @@
         "Owned WinForms editor in a noninteractive window station can be UIA-writable/focused but SetForegroundWindow returned false; the product foreground precondition remains unsatisfied. Do not remove protection or call this a product failure.",
         "No installed WindowsSandbox/VM control found on PATH or running VM process in bounded20261021 check. No runtime/model/driver/service installation performed."
       ]
+    },
+    {
+      "id": "type92_recorded_audio_to_original_popup",
+      "repo": "type",
+      "commit": "7ecdadcdeb98405a94fcbc0c7d96bc1423ee5ed8",
+      "subject": "Exact installed92 recorded sample reaches a real writable original-popup input, same final text",
+      "state": "one_coordinated_recorded_file_actual_input_verified_not_live_or_customer",
+      "protects": [
+        "Current92 original-popup actual input equals the same new History.finalText; preserve same-session identity.",
+        "Exact writable UIA focus and actual foreground held throughout; keep product focus/readonly and user clipboard ownership protections.",
+        "No repeat of this accepted sample merely to create progress or purchase interest. Retest when affected code or a new related failure warrants it."
+      ],
+      "guards": [
+        "real_editor92.py defaults to preparation; execution uses separately coordinated foreground window."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\real-editor92-20261021-164908\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\real-editor92-20261021-164908\\actual-input.private.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\real-editor92-prepared.json"
+      ],
+      "facts": {
+        "actualInputChars": 152,
+        "actualInputEqualsFinal": true,
+        "focusObservations": 79,
+        "sourceAudioSha256": "cb26582f2b443e91e39e98da358b08fbecf467f4fad6006826756abec275497e",
+        "installedExeSha256": "e6902307762050618311417a7b21d15294ea133b4c07b5f8acbecc1fab347662",
+        "settingsAndCredentialStatusUnchanged": true
+      },
+      "limits": [
+        "One ordinary WinForms editor, not all target applications.",
+        "Prerecorded nonsensitive synthetic voice, not live capture, wake, automatic endpoint, BLE or physical device use.",
+        "No independent customer improvement, word accuracy certificate, direct clipboard read or purchase claim."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T15:36:22.106983+08:00",
@@ -4180,7 +4213,8 @@
         "type_recording_preview_text_stability",
         "type_native_writable_document_paste_observation",
         "type_recording_origin_clipboard_retention",
-        "type79_recorded_audio_to_original_popup"
+        "type79_recorded_audio_to_original_popup",
+        "type92_recorded_audio_to_original_popup"
       ],
       "paths": {
         "type": [
@@ -4203,6 +4237,12 @@
         "exe_sha256": "F6B0DCAF8CCE58B28DC693408B79ACF52676A47F40119F41F893187EA335444B",
         "installed_at": "2026-10-17T16:37:20.3284227+08:00",
         "scope": "Natural build37 histories match archived intended final text; no complete same-recording clipboard recovery field certificate yet."
+      },
+      "latest_observed_single_field_proof": {
+        "build": 92,
+        "source": "7ecdadcdeb98405a94fcbc0c7d96bc1423ee5ed8",
+        "entry": "type92_recorded_audio_to_original_popup",
+        "scope": "One prerecorded sample in a real ordinary WinForms input; historical38 candidate scope preserved separately."
       }
     },
     {

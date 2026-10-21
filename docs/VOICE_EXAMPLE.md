@@ -22,4 +22,8 @@ The clip combines the source audio and screenshots captured from the actual run.
 
 Live microphone capture, Bluetooth, pressing the device, automatic insertion into another app and performance in noise are not demonstrated here. One clean synthetic sample cannot establish general recognition quality or real-time latency.
 
+## Separate destination-field check
+
+The same prerecorded sample was also processed by the installed Type92 into one ordinary, writable Windows Forms input. All **152 characters** were read back from that real input and exactly matched the saved final text. The input retained writable focus throughout 79 observations. This was a separate coordinated check, not part of the clip above; it does not establish other applications, live speech or physical-control convenience. [Recorded source and result](assets/voice-example/example.json).
+
 Type is free and open source; US$49 is the Listener hardware price. The services in this example were already configured and have separate provider charges. No ready-to-use official account or cloud allowance is included in the current release. [Get Type and see current limits](../README.md) · [Sample source and unedited returned text](assets/voice-example/example.json).

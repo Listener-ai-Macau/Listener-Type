@@ -17,5 +17,18 @@
     "actualResult": "Hi Sam, let's meet on Thursday at 3. I'll send the notes before lunch. Please keep the budget at 50 dollars, and tell me if the time needs to change.",
     "uiDisplayedSeconds": 0.8
   },
-  "presentation": "Edited audio and actual screenshots, not continuous screen recording. Recognition used an internal file entry; transcript then submitted in normal text trial. No live microphone, BLE, physical control, external-app insertion, independent customer or general quality/latency claim."
+  "presentation": "Edited audio and actual screenshots, not continuous screen recording. Recognition used an internal file entry; transcript then submitted in normal text trial. No live microphone, BLE, physical control, external-app insertion, independent customer or general quality/latency claim.",
+  "destinationFieldCheck": {
+    "recordedAt": "2026-10-21T16:49:13.218073+08:00",
+    "typeSource": "7ecdadcdeb98405a94fcbc0c7d96bc1423ee5ed8",
+    "inputAudioSha256": "cb26582f2b443e91e39e98da358b08fbecf467f4fad6006826756abec275497e",
+    "target": "One ordinary writable Windows Forms text input in the original acceptance popup",
+    "actualInput": "Hi, Sam. Let's meet on Thursday at 3.  I'll send the notes before lunch.  Please keep the budget at 50 dollars, and tell me if the time needs to change.",
+    "characterCount": 152,
+    "equalsSavedFinalText": true,
+    "writableFocusObservations": 79,
+    "allObservedFocusOwnedAndWritable": true,
+    "settingsAndCredentialStatusUnchanged": true,
+    "scope": "Separate current-Type92 recorded-file check in an Owner-coordinated input window. Not part of the edited clip. No live microphone, physical knob, BLE, automatic end-of-speech, other target applications, direct clipboard-content verification, independent customer or purchase claim."
+  }
 }
