@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T19:41:53.162842+08:00",
+  "updated_at": "2026-10-21T20:04:54.516744+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4233,9 +4233,45 @@
         "Independent96 report pending; AI feedback not human payment or market evidence.",
         "No new external handoff success, live speech, hardware or install-over-daily claim."
       ]
+    },
+    {
+      "id": "customer97_local_result_revision_delivery",
+      "repo": "type",
+      "commit": "f7f472c28c5bb130cc68cea1ee8ae01af92b06fe",
+      "subject": "Finish reviewed text locally and hand off exactly the edited body",
+      "state": "candidate97_exact_native_edited_copy_verified_independent_use_running",
+      "protects": [
+        "Editing a result preserves the original input and does not send another text-service request.",
+        "Edited text is visibly distinguished from the original generated result; prior Copy/Insert acknowledgements are cleared.",
+        "Copy and explicit Insert capture the current edited Unicode body; editing is locked during transfer and empty text cannot arm transfer.",
+        "Result identity stays stable while editing, avoiding per-keystroke result-arrival scroll effects.",
+        "Raw/default prompts/dictation/BLE and previous cancellation/expiry/native ownership gates remain unchanged."
+      ],
+      "guards": [
+        "Existing text-trial lifecycle plus local result edit/copy guards:31 actual controlled cases.",
+        "Existing explicit handoff plus edited-body binding/empty output guards:7 actual controlled cases.",
+        "Exact97 private native original draft, local edit, native Copy acknowledgement and own-input Ctrl+V exact equality;0 cloud calls.",
+        "Exact97 all4style/result coordinates remain0px movement."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style97-affected-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\handoff97-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native97-snapshot-20261021-200233\\editor-native-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native97-snapshot-20261021-200233\\layout-native-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build97\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE96-software-20261021-193906\\experience.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE97-software-20261021-200233\\dispatch-input.txt"
+      ],
+      "unverified": [
+        "Independent97 report pending; no customer improvement or buying claim yet.",
+        "F96-02 automatic Formal quality remains open. Four private prompt trials not reliable; product prompt defaults preserved.",
+        "Successful new-button external insertion, real voice/hardware, from-zero setup and real payment remain distinct unknowns."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-21T19:41:53.162842+08:00",
+  "feature_routes_updated_at": "2026-10-21T20:04:54.516744+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -4880,7 +4916,8 @@
         "customer93_trial_retention_visible_at_result",
         "customer94_trial_control_layout_stability",
         "customer95_reviewed_result_explicit_handoff",
-        "customer96_all_builtin_trial_layout"
+        "customer96_all_builtin_trial_layout",
+        "customer97_local_result_revision_delivery"
       ],
       "paths": {
         "type": [
@@ -4958,7 +4995,8 @@
         "F91-02 readiness-disabled draft originates in8e92b182;92 separates local editing from asynchronous submission eligibility. Frozen91 ordinary typing was discarded; candidate92 retained text across pending/failure/retry without processing.",
         "FEXP-02: independent92 customer briefly expected trial output in History until opening details. 93 surfaces existing retention semantics at the result; no actual lost-data failure or purchase improvement claimed.",
         "F93-02 actual control movement56.859px reproduced. Original dialog geometry8eed884b and result-width changeeaf0de83 are historical causes;94 anchors/reserves geometry. Initial94 narrow font-zoom overflow fixed before packaging; failure retained.",
-        "F95-02: Structured-only optional recommendation from8162b6e sat above the draft;94 Raw/Light-only coverage missed72.375px native movement.96 relocates ancillary content, all4style guards now included."
+        "F95-02: Structured-only optional recommendation from8162b6e sat above the draft;94 Raw/Light-only coverage missed72.375px native movement.96 relocates ancillary content, all4style guards now included.",
+        "F96-03: result body read-only, so a customer who wanted to repair one awkward phrase could not finish it in place.97 adds local result editing and binds Copy/Insert to edited text; automatic Formal quality F96-02 is not thereby solved."
       ]
     },
     {
@@ -5009,7 +5047,8 @@
       "baseline_state": "candidate95_cancellation_and_native_refusal_verified_successful_external_handoff_pending",
       "accepted_scope": "Explicit UI lifecycle, cancellation/expiry/ownership gates; no complete external-field success claim.",
       "guard_entries": [
-        "customer95_reviewed_result_explicit_handoff"
+        "customer95_reviewed_result_explicit_handoff",
+        "customer97_local_result_revision_delivery"
       ],
       "paths": {
         "type": [
@@ -5023,7 +5062,8 @@
       },
       "known_failures": [
         "F94T-03 RETURN_USE: structured text useful but manual transfer to coding AI adds a step;95 candidate addresses software workflow rather than requiring physical evaluation.",
-        "Intermediate engineering namespace/fixture/preparation assertions were corrected before customer95; they are not released-product regressions."
+        "Intermediate engineering namespace/fixture/preparation assertions were corrected before customer95; they are not released-product regressions.",
+        "F96-03: result body read-only, so a customer who wanted to repair one awkward phrase could not finish it in place.97 adds local result editing and binds Copy/Insert to edited text; automatic Formal quality F96-02 is not thereby solved."
       ]
     }
   ]
