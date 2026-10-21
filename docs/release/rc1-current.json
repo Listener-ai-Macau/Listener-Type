@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T02:15:22.862916+08:00",
+  "updatedAt": "2026-10-22T02:34:35.844289+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 110,
-    "source": "278a7fed5fb966ab56977f0ae65630f9f2d8683f",
-    "sourceTag": "build-source/type110-20261022",
+    "build": 111,
+    "source": "c1c5e4e3bdcd18ceb0f1d0b426261f868e6281a7",
+    "sourceTag": "build-source/type111-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "3826090cabcc4c42bb3689eebdbba5afc7b2a2e97e38d2ff1ea0036d009635fe",
-    "sizeBytes": 299102208,
-    "exeSha256": "ad04a84e1f727ffe8d55507edc56a566555c9c84ba2f2f00df164fe44dbe6c3e",
+    "sha256": "252beb7e2be85c88e888bf740d597718b8b7fe51189e654f39df9f1a09c2aad2",
+    "sizeBytes": 299106304,
+    "exeSha256": "78d4340dde1fa50b3dab3beecd6a36251ed3b901040a3e680ef5b8c7d4cc438f",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -155,8 +155,15 @@
     "type110InstalledExeAndPreferencesVerified": false,
     "type110ExactPrivateNativeWorkflowVerified": true,
     "type110VerificationScope": "Exact isolated native MSI: explicitly save edited Unicode/newline text and original; actual local file matches, ordinary reload/reopen retains it, native Copy and ordinary Paste/continued input exact, explicit confirmed deletion. Other private JSON files and daily92 unchanged.0cloud, no speech History/audio/device/external automatic input/physical qualification.",
-    "customer110Reviewed": false,
-    "customer110PurchaseQualification": false
+    "customer110Reviewed": true,
+    "customer110PurchaseQualification": false,
+    "type111InstalledExeAndPreferencesVerified": false,
+    "type111ExactPrivateNativeWorkflowVerified": true,
+    "type111VerificationScope": "Exact isolated native MSI: key editor beside physical preview, selected key location matches, independent single/double/hold templates saved and practised, ordinary reload retains mappings and clears temporary practice. Controlled delayed-load frontend name displacement38.594px→0.016px; typed draft retained. Daily92 unchanged, no cloud/device/voice/physical qualification.",
+    "customer110SavedDraftUseObserved": false,
+    "customer110SavedPhraseCopyPasteObserved": true,
+    "customer111Reviewed": false,
+    "customer111PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -173,6 +180,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build110-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build111-20261022"
   }
 }

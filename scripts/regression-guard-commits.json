@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T02:25:47.369110+08:00",
+  "updated_at": "2026-10-22T02:34:35.734595+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4731,6 +4731,40 @@
         "Independent110 did not use Saved drafts. Instead saved own key1 phrase, copied it and ordinary-pasted/continued writing in private practice field; screenshot matches. F110-01 loading geometry and long configuration form need work. F110-02 first Practice click during Copy pending: timing unknown, do not remove correct busy guard. Temporarily declines49; free software useful, physical appeal hypothetical.",
         "Source/native correctness not customer usefulness or hardware purchase willingness. Live speech/physical/external automatic input/long term/real purchase remain unknown."
       ]
+    },
+    {
+      "id": "customer111_stable_compact_key_layout_editor",
+      "repo": "type",
+      "commit": "c1c5e4e3bdcd18ceb0f1d0b426261f868e6281a7",
+      "subject": "Keep layout-name geometry stable through local read and place selected-key editor beside actual hardware preview",
+      "state": "exact111_affected_native_workflow_verified_customer_pending",
+      "protects": [
+        "Reserve loading status space above layout name; ordinary name input during read stays fixed and is not replaced by remembered-layout restore. Existing touched/dirty protection retained.",
+        "Wide editor places five selection cards above action fields and actual photo beside them; narrow editor precedes photo. Selection highlights the real physical position without running actions.",
+        "Single/double/hold remain independent. Explicit local Save, stale/error/dirty protection, saved phrase copy pending acknowledgement, selected-device write scope and incoming reviewed phrase protection retained."
+      ],
+      "guards": [
+        "Controlled delayed local read old y displacement -38.59375px vs new -0.015625px rendering roundoff; typed draft exact. Wide/narrow editor geometry, name and Unicode/newline local-save payload checked.",
+        "Exact native MSI ordinary key selection, three independent mappings→Save→practice→reload retained mappings/temporary field clears→confirmed delete.0cloud. Existing local layout, result-to-phrase and explicit copy guards passed."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\layout111-before.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\layout111-after.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\hardware111-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\layout111-existing.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\phrases111-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\result-phrase111-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native111-snapshot-20261022-023317\\hardware-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native111-snapshot-20261022-023317\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build111\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE110-software-20261022-021400\\experience.txt"
+      ],
+      "unverified": [
+        "Independent111 pending.110 completed own phrase task but reported long form/loading displacement; this change not yet customer experienced.",
+        "No live speech/BLE/device/external automatic input/physical qualification or purchase claim. F110-02 first Practice click during copy pending remains timing unknown; correct busy protection retained."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5422,7 +5456,8 @@
         "customer107_explicit_audio_file_transcription",
         "customer108_earlier_result_snapshot_and_audio_window_lifetime",
         "customer109_physical_layout_map_and_independent_press_practice",
-        "customer110_explicit_local_edited_draft_retention"
+        "customer110_explicit_local_edited_draft_retention",
+        "customer111_stable_compact_key_layout_editor"
       ],
       "paths": {
         "type": [
@@ -5485,7 +5520,10 @@
           "src-tauri/src/commands/saved_text_drafts.rs",
           "src/components/SaveTextDraft.tsx",
           "src/components/SavedTextDraftsDialog.tsx",
-          "scripts/check-saved-text-drafts-ui.py"
+          "scripts/check-saved-text-drafts-ui.py",
+          "src/components/DeviceLayoutsDialog.tsx",
+          "src/components/DeviceLayoutsDialog.css",
+          "scripts/check-layout-editor-stability-ui.py"
         ]
       },
       "known_failures": [
@@ -5583,7 +5621,8 @@
         "customer107_explicit_audio_file_transcription",
         "customer108_earlier_result_snapshot_and_audio_window_lifetime",
         "customer109_physical_layout_map_and_independent_press_practice",
-        "customer110_explicit_local_edited_draft_retention"
+        "customer110_explicit_local_edited_draft_retention",
+        "customer111_stable_compact_key_layout_editor"
       ],
       "paths": {
         "type": [
@@ -5612,7 +5651,10 @@
           "src-tauri/src/commands/saved_text_drafts.rs",
           "src/components/SaveTextDraft.tsx",
           "src/components/SavedTextDraftsDialog.tsx",
-          "scripts/check-saved-text-drafts-ui.py"
+          "scripts/check-saved-text-drafts-ui.py",
+          "src/components/DeviceLayoutsDialog.tsx",
+          "src/components/DeviceLayoutsDialog.css",
+          "scripts/check-layout-editor-stability-ui.py"
         ]
       },
       "known_failures": [

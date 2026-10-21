@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build110 / Firmware33
+# Listener v1.0.6-rc1 · Type build111 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,12 @@
 | **ESP32-S3 firmware · USB flashing / Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+- The layout name stays in place when saved layouts finish loading. Text entered while loading remains your draft.
+- Select a key from the row above its action editor. The actual product photo shows that key beside the editor, rather than pushing the form below it. Narrow windows put editing first and retain the save controls.
+- Existing separate single/double/hold mappings, unsaved-change protection, explicit local saves and clipboard-copy confirmation remain. This update does not write device settings automatically.
+
+## Retained from build110
 
 - Choose **Save draft** beside your current text result to keep both its original input and your edited wording in a separate local draft library. This is explicit saving, not automatic retention or a recording History entry. No audio is stored and no service request is made.
 - Open **Overview → Saved drafts** to find a saved version, review its original, explicitly copy the saved text for normal pasting, or delete it after confirmation. Local text remains on this computer until deleted here; the library holds up to 50 drafts within 4 MiB, without silently deleting older entries. Browser previews retain drafts only for the current page session.
@@ -50,18 +56,20 @@ Typed processing uses your configured text service and may incur its usual charg
 
 **Type is free. US$49 is the Listener hardware price.** The device adds its own desk microphone, physical recording/volume control, four customizable keys and status lights. The free app can use a computer microphone and Right Ctrl; both routes use the recognizer configured on the computer. Cloud setup and usage cost extra. The current release does not include a ready-to-use Listener cloud account or bundled usage; a purchase link has not yet been announced.
 
-This is an **RC1 prerelease for Windows**. Review final words in noise or overlapping speech. Strong-interference filtering is limited, and intermittent early-close field reports remain unresolved; use the manual finish control when needed. This build adds explicit local text-draft storage; it does not claim new wake, recording-stop or Bluetooth fixes. Firmware33 is unchanged, so a device already on that firmware needs no reflash. One synthetic English file was checked through the existing service; this does not establish general recognition quality, new live-speech, external-editor or physical qualification.
+This is an **RC1 prerelease for Windows**. Review final words in noise or overlapping speech. Strong-interference filtering is limited, and intermittent early-close field reports remain unresolved; use the manual finish control when needed. This build improves the local key-layout editor; it does not claim new wake, recording-stop or Bluetooth fixes. Firmware33 is unchanged, so a device already on that firmware needs no reflash. One synthetic English file was checked through the existing service; this does not establish general recognition quality, new live-speech, external-editor or physical qualification.
 
 ## Check which file you have
 
-The MSI is **Type build110**, source **278a7fed5fb9** (also shown in the app footer/About). Firmware is **build33**, runtime **e7bd1f1619b696a1**. Filenames stay fixed within RC1; the source and SHA-256 identify the files.
+The MSI is **Type build111**, source **c1c5e4e3bdcd** (also shown in the app footer/About). Firmware is **build33**, runtime **e7bd1f1619b696a1**. Filenames stay fixed within RC1; the source and SHA-256 identify the files.
 
 | Component | Exact source | SHA-256 |
 | --- | --- | --- |
-| Type110 MSI · 299102208 bytes | [278a7fed5fb9](https://github.com/Listener-ai-Macau/Listener-Type/commit/278a7fed5fb966ab56977f0ae65630f9f2d8683f) | `3826090cabcc4c42bb3689eebdbba5afc7b2a2e97e38d2ff1ea0036d009635fe` |
+| Type111 MSI · 299106304 bytes | [c1c5e4e3bdcd](https://github.com/Listener-ai-Macau/Listener-Type/commit/c1c5e4e3bdcd18ceb0f1d0b426261f868e6281a7) | `252beb7e2be85c88e888bf740d597718b8b7fe51189e654f39df9f1a09c2aad2` |
 | Firmware33 ZIP · 1956905 bytes | [149b6d950ebc](https://github.com/Listener-ai-Macau/Listener-Firmware/commit/149b6d950ebc5f416924c8670cf2b207bdc2b5b7) | `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272` |
 
 ## 中文说明
+
+111固定载入前后的布局名称框位置，保留载入时已输入草稿；选键横排、编辑与实物照片并列，窄窗先显示编辑，减少来回滚动。原单双长按独立映射、未保存保护、显式保存和实际复制确认保持。本次不自动写设备。
 
 110可在当前文字结果旁明确「保存成稿」，保留确切原文及当前修订稿到本机文本文件；从「总览 → 已保存成稿」重开、复制、确认删除。与录音历史／时长／音频独立，不自动保存、不请求服务、不自动上屏。最多50份且文件上限4MiB，不自动清旧稿；保存失败保留当前文字，同次重试不重复建档，坏库或满库不覆盖。浏览器预览只保留在当前页面会话，安装版才写本机。
 
@@ -77,4 +85,4 @@ The MSI is **Type build110**, source **278a7fed5fb9** (also shown in the app foo
 
 「使用已保存短语」可明确复制真实保存的内容，再正常粘贴到写作位置；这项复制才使用系统剪贴板，失败保留内容可重试，不自动上屏。卡片显示实际目标，支持的Type本机页面可从练习中明确打开；未保存保护保持。长配置窗口的顶部模式入口保持可见。
 
-Type免费，49美元是硬件价，云服务配置和用量另计。试用不启动录音、不改变当前风格、不写历史；非原文风格可能产生现有文字服务费用。Firmware33不变；本次不声称修复强干扰、偶发提前结束、唤醒或蓝牙，也不代表新的实物/真实语音/外部输入整体验收。当前Type110/278a7fed5fb9与Firmware33的校验值见上表。
+Type免费，49美元是硬件价，云服务配置和用量另计。试用不启动录音、不改变当前风格、不写历史；非原文风格可能产生现有文字服务费用。Firmware33不变；本次不声称修复强干扰、偶发提前结束、唤醒或蓝牙，也不代表新的实物/真实语音/外部输入整体验收。当前Type111/c1c5e4e3bdcd与Firmware33的校验值见上表。

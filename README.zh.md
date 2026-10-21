@@ -8,7 +8,7 @@
 
 | 用途 | 直接下载 |
 | --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build110](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 软件** | **[下载 MSI · Type build111](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 [English](README.md) · **简体中文** · [繁體中文](README.zh-TW.md)
@@ -36,7 +36,7 @@
 Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
 设备设置各自独立：选择一台有线／蓝牙设备，读取后修改并写入；名称、灯光、电源、按键和旋钮设置保存在该设备中。请配套使用本页 MSI 与固件 ZIP。
 
-Type build110在文字结果旁提供「保存成稿」，将原文和当前修订稿明确保存在本机独立成稿库；可从总览的「已保存成稿」重开、复制或删除。保存不请求服务、不生成录音历史。照片对应布局和三种按法练习保持，Firmware33不变。
+Type build111固定布局载入时的名称框位置；选键卡片在编辑区上方，实物位置照片在编辑区旁，减少来回滚动。明确保存成稿、已保存短语和独立按法配置保持；Firmware33不变。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
