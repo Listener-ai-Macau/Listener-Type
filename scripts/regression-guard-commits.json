@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T15:36:22.106983+08:00",
+  "updated_at": "2026-10-21T16:30:26.773906+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4018,23 +4018,47 @@
       ],
       "machine_evidence": [
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-public-entry-20261021\\entry-change.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-public-entry-20261021\\layout-preview.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-public-entry-20261021\\layout-preview.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\software-voice-example-20261021\\recognition-provenance.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\software-voice-example-20261021\\polish-provenance.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\private-editor-focus-20261021-162750\\result.json"
       ],
       "customer_evidence": [
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-entry-20261021-152645\\experience.txt",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-entry-20261021-152645\\dispatch-input.txt",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-entry-20261021-152645\\06-result.png",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-entry-20261021-152645\\09-pasted.png"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-entry-20261021-152645\\09-pasted.png",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-voice-example-20261021-161718\\experience.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-voice-example-20261021-161718\\dispatch-input.txt"
       ],
       "customer_feedback": {
         "FENTRY-01": "Chose own Nora rescheduling note; Light actual0.8s, parallel original/result and Copied then same-private-field CtrlV succeeded. No blocking problem in this path. Initial Checking not typed into this round.",
         "FENTRY-02": "Understands49USD hardware/free app/separate services; would try free software, declines hardware today. Wants personal voice-to-working-field/physical convenience; no fake purchase or repeated reframing.",
-        "FENTRY-03": "Prepared service does not establish own from-zero effort or recurring costs; originalL09 dependency, not a newly reproduced setup failure."
+        "FENTRY-03": "Prepared service does not establish own from-zero effort or recurring costs; originalL09 dependency, not a newly reproduced setup failure.",
+        "FVOICE-01": "Own fictional Jo reschedule message processed by Light, preserves uncertainty/other plans, actualUI0.8s/Copied. No new obstacle; external paste unknown.",
+        "FVOICE-02": "Still defers49USD. Wants own physical voice-to-working-field convenience. Do not reinterpret as hearing/watching the demonstration or purchase improvement.",
+        "FVOICE-03": "Web reader yielded text from example and image-file pages; no media playback/public pixels. Tool experience boundary, not proved broken public assets."
       },
       "unverified": [
         "No causal proof that entry layout changed purchase interest or that every part of the page was visually examined.",
         "Actual microphone/ASR, external field consumption, hardware/long-term/billing/real purchase not experienced.",
         "Headless GFM layout uses approximate typography, not a full live GitHub screenshot."
+      ],
+      "recorded_voice_example": {
+        "source": "bd8411eb05748f3cd34f9040aa2f6f055bbc9237",
+        "firmwareEntrySource": "dd98cdad1b19366512b0bbbdfd89fcffd2245e78",
+        "typeBinarySource": "7ecdadcdeb98405a94fcbc0c7d96bc1423ee5ed8",
+        "inputKind": "11.48s locally synthesized nonsensitive English WAV",
+        "audioSha256": "cb26582f2b443e91e39e98da358b08fbecf467f4fad6006826756abec275497e",
+        "actualAsrFileReplaySeconds": 2.187,
+        "actualTextTrialUiSeconds": 0.8,
+        "presentation": "Edited original audio plus actual screenshots; not continuous screen recording, live microphone, BLE, physical control or external insertion.",
+        "privateProtection": "Unique protected credential namespace and window station; both private jobs terminal0, four daily state hashes and full vault unchanged; private entries removed0errors.",
+        "customerScope": "New independent FIRST_USE read example text only; did not play/hear media or see public screenshot pixels. Own Light text task succeeded, Copied observed, no external paste, still defers49USD hardware."
+      },
+      "environment_limits": [
+        "Owned WinForms editor in a noninteractive window station can be UIA-writable/focused but SetForegroundWindow returned false; the product foreground precondition remains unsatisfied. Do not remove protection or call this a product failure.",
+        "No installed WindowsSandbox/VM control found on PATH or running VM process in bounded20261021 check. No runtime/model/driver/service installation performed."
       ]
     }
   ],
@@ -4641,7 +4665,7 @@
     },
     {
       "id": "customer-first-use",
-      "baseline_state": "installed_public92_latest_entry_customer_text_task_and_private_paste_succeeded_no_hardware_order",
+      "baseline_state": "installed_public92_recorded_software_example_delivered_latest_customer_own_text_copied_no_hardware_order",
       "accepted_scope": "First-use guidance and explicit personal-text trial navigation; precise native History copy proof is separate. No live speech, hardware or market qualification.",
       "guard_entries": [
         "customer_setup68_asr_ready_does_not_require_optional_llm",
