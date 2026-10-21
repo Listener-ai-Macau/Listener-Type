@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T00:28:56.957974+08:00",
+  "updated_at": "2026-10-22T01:02:27.135919+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4578,6 +4578,41 @@
         "Independent105 completed a self-chosen email task with actual existing text service, local result editing and native UI Copy confirmation; did not explore saved phrases. Saved-phrase customer value remains unknown; temporarily declines49 hardware, prefers free app for this text task.",
         "F103R-01 original current-writing-position outcome only partly addressed: manual clipboard reuse is available; automatic target insertion remains separate. Automatic Formal quality and105 physical/live speech/real purchase remain unknown."
       ]
+    },
+    {
+      "id": "customer107_explicit_audio_file_transcription",
+      "repo": "type",
+      "commit": "0a52991628e2760fa454e3a77a8b4d42acf594fa",
+      "subject": "Recognize an explicitly selected bounded WAV separately from live dictation and insertion",
+      "state": "exact107_native_existing_service_copy_paste_verified_customer_pending",
+      "protects": [
+        "Only explicit Transcribe submits selected16k/16bit/mono WAV≤60s to existing direct Volcengine. Selecting a local sample/file makes no service request. No provider switch, model download or new service.",
+        "Separate recognizer owns no microphone, device, coordinator recording, History or insertion target. Copy is separate explicit action and uses edited text; failure retains text.",
+        "After successful open, caller must mark_audio_delivery_ready before consuming/finishing. Failed106 omitted it and never sent its final frame despite provider152char partials. Do not alter live coordinator/global provider to hide this caller error.",
+        "UUID-owned cancellation includes cancel-before-begin tombstones, bounded retained IDs and drop cleanup. Busy rejects a concurrent file request; stopping one does not cancel live capture or another ID.",
+        "Default Original text terminology matches the English picker; existing stored canonical style names/prompts unchanged."
+      ],
+      "guards": [
+        "2 actual Rust WAV-boundary and cancellation ownership checks;6 browser lifecycle checks and TypeScript.",
+        "Exact107 ordinary native UI included synthetic11.48s sample→real existing Volcengine returned1.5s→editable transcript→native Copy→ordinary Paste into own Type input and continued typing.",
+        "Engineer station9003 actually terminated before a new independent customer station54847; two private protected entries deleted,0errors,daily4hashes same."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\audio106-checks.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\audio106-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native107-snapshot-20261022-005918\\audio-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native107-snapshot-20261022-005918\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build107\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build106\\native-failure.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE107-software-20261022-010100\\dispatch-input.txt"
+      ],
+      "unverified": [
+        "Independent107 report pending.",
+        "Only one actual synthetic English file request qualified. Not live mic, automatic end, wake, BLE, external automatic insertion, speaker isolation, physical convenience, from-zero setup or real purchase.",
+        "Other ASR providers/managed route not supported by this new file entry. Original live paths retain their own evidence/limits."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5265,7 +5300,8 @@
         "customer102_reviewed_result_key_phrase",
         "customer103_distinguishable_reply_keys_and_style_purpose",
         "customer104_actual_key_targets_and_local_page_use",
-        "customer105_saved_phrase_explicit_clipboard_reuse"
+        "customer105_saved_phrase_explicit_clipboard_reuse",
+        "customer107_explicit_audio_file_transcription"
       ],
       "paths": {
         "type": [
@@ -5317,7 +5353,10 @@
           "src/state/DevicePageNavigationContext.ts",
           "scripts/check-key-page-practice-ui.py",
           "src/components/SavedLayoutPhrases.tsx",
-          "scripts/check-saved-layout-phrases-ui.py"
+          "scripts/check-saved-layout-phrases-ui.py",
+          "src-tauri/src/commands/audio_file_trial.rs",
+          "src/components/AudioFileTrial.tsx",
+          "scripts/check-audio-file-trial-ui.py"
         ]
       },
       "known_failures": [
@@ -5411,7 +5450,8 @@
         "customer102_reviewed_result_key_phrase",
         "customer103_distinguishable_reply_keys_and_style_purpose",
         "customer104_actual_key_targets_and_local_page_use",
-        "customer105_saved_phrase_explicit_clipboard_reuse"
+        "customer105_saved_phrase_explicit_clipboard_reuse",
+        "customer107_explicit_audio_file_transcription"
       ],
       "paths": {
         "type": [
@@ -5428,7 +5468,10 @@
           "src/state/DevicePageNavigationContext.ts",
           "scripts/check-key-page-practice-ui.py",
           "src/components/SavedLayoutPhrases.tsx",
-          "scripts/check-saved-layout-phrases-ui.py"
+          "scripts/check-saved-layout-phrases-ui.py",
+          "src-tauri/src/commands/audio_file_trial.rs",
+          "src/components/AudioFileTrial.tsx",
+          "scripts/check-audio-file-trial-ui.py"
         ]
       },
       "known_failures": [

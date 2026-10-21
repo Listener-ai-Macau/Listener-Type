@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build105 / Firmware33
+# Listener v1.0.6-rc1 · Type build107 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,12 @@
 | **ESP32-S3 firmware · USB flashing / Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+- **Overview → Transcribe recorded audio** accepts an uncompressed 16 kHz/16-bit mono WAV up to 60 seconds. Choose a file or the included synthetic English sample; selection stays local until you explicitly choose **Transcribe**. It uses your existing direct Volcengine recognition service and its normal charges. Other providers and managed accounts are not supported in this new file entry.
+- Review and edit the actual returned transcript, then explicitly copy it for normal pasting. File results are not saved in History; copy before closing. Cancellation stops only that file request; it does not stop a live recording. No microphone, device command, automatic insertion or local-model download is involved. Sample reference words are labelled separately from recognition results; file-processing time is not live recording latency.
+- The English typed-trial notice now uses **Original text**, matching its picker.
+
+## Retained workspace features
 
 - Edit the returned text before copying it. Completed results for the same input remain visibly labelled in the open window; reopen one to revise or copy without requesting it again. These temporary results are not History entries.
 - Plan your own four-key-and-knob layouts from Overview. Save layouts on this computer and reload them later. Loading a layout in Device settings prepares a draft; only **Write** changes the selected device.
@@ -25,18 +31,20 @@ Typed processing uses your configured text service and may incur its usual charg
 
 **Type is free. US$49 is the Listener hardware price.** The device adds its own desk microphone, physical recording/volume control, four customizable keys and status lights. The free app can use a computer microphone and Right Ctrl; both routes use the recognizer configured on the computer. Cloud setup and usage cost extra. The current release does not include a ready-to-use Listener cloud account or bundled usage; a purchase link has not yet been announced.
 
-This is an **RC1 prerelease for Windows**. Review final words in noise or overlapping speech. Strong-interference filtering is limited, and intermittent early-close field reports remain unresolved; use the manual finish control when needed. This build improves the text and key-layout workspace; it does not claim new wake, recording-stop or Bluetooth fixes. Firmware33 is unchanged, so a device already on that firmware needs no reflash. These software checks do not establish new live-speech, external-editor or physical qualification.
+This is an **RC1 prerelease for Windows**. Review final words in noise or overlapping speech. Strong-interference filtering is limited, and intermittent early-close field reports remain unresolved; use the manual finish control when needed. This build adds file transcription alongside the text and key-layout workspace; it does not claim new wake, recording-stop or Bluetooth fixes. Firmware33 is unchanged, so a device already on that firmware needs no reflash. One synthetic English file was checked through the existing service; this does not establish general recognition quality, new live-speech, external-editor or physical qualification.
 
 ## Check which file you have
 
-The MSI is **Type build105**, source **e80c3d943ff6** (also shown in the app footer/About). Firmware is **build33**, runtime **e7bd1f1619b696a1**. Filenames stay fixed within RC1; the source and SHA-256 identify the files.
+The MSI is **Type build107**, source **0a52991628e2** (also shown in the app footer/About). Firmware is **build33**, runtime **e7bd1f1619b696a1**. Filenames stay fixed within RC1; the source and SHA-256 identify the files.
 
 | Component | Exact source | SHA-256 |
 | --- | --- | --- |
-| Type105 MSI · 298561536 bytes | [e80c3d943ff6](https://github.com/Listener-ai-Macau/Listener-Type/commit/e80c3d943ff6076a3140ed423956132fc3e3074b) | `7ebcb2c17e24725b80f70b8e60467e48137cd1a2d34a6312b253687d9561c26a` |
+| Type107 MSI · 298835968 bytes | [0a52991628e2](https://github.com/Listener-ai-Macau/Listener-Type/commit/0a52991628e2760fa454e3a77a8b4d42acf594fa) | `5df52471f7f1fb1f3b936375963a61115db2fc4a4cef939a1e1a64e16eaea8f1` |
 | Firmware33 ZIP · 1956905 bytes | [149b6d950ebc](https://github.com/Listener-ai-Macau/Listener-Firmware/commit/149b6d950ebc5f416924c8670cf2b207bdc2b5b7) | `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272` |
 
 ## 中文说明
+
+「总览 → 转写已有录音」可选择未压缩16 kHz、16位单声道WAV（最长60秒）或内置英文合成样例，明确点击「转写」才上传到当前自行配置的火山识别服务并正常计费；暂不支持其它提供商或托管账号。返回文字可核对、修订和明确复制，不写历史，关闭前复制需要保留的内容。取消只停止这条文件请求，不中断实时录音。此入口不采音、不控制设备、不自动上屏、不下载本地模型；样例参考词和实际识别结果分开，文件耗时不代表实时延迟。
 
 本版可原地修订文字结果，在当前窗口查看同一原文已完成的不同风格结果，打开旧结果不会再次请求服务。主页可保存自己的四键/旋钮布局，并用独立练习框试支持的短语、复制、粘贴、撤销单击动作。练习复制使用私有缓冲，不操作系统剪贴板，不模拟录音、AI、外部应用、其它快捷键或旋钮。
 
@@ -44,4 +52,4 @@ The MSI is **Type build105**, source **e80c3d943ff6** (also shown in the app foo
 
 「使用已保存短语」可明确复制真实保存的内容，再正常粘贴到写作位置；这项复制才使用系统剪贴板，失败保留内容可重试，不自动上屏。卡片显示实际目标，支持的Type本机页面可从练习中明确打开；未保存保护保持。长配置窗口的顶部模式入口保持可见。
 
-Type免费，49美元是硬件价，云服务配置和用量另计。试用不启动录音、不改变当前风格、不写历史；非原文风格可能产生现有文字服务费用。Firmware33不变；本次不声称修复强干扰、偶发提前结束、唤醒或蓝牙，也不代表新的实物/真实语音/外部输入整体验收。当前Type105/e80c3d943ff6与Firmware33的校验值见上表。
+Type免费，49美元是硬件价，云服务配置和用量另计。试用不启动录音、不改变当前风格、不写历史；非原文风格可能产生现有文字服务费用。Firmware33不变；本次不声称修复强干扰、偶发提前结束、唤醒或蓝牙，也不代表新的实物/真实语音/外部输入整体验收。当前Type107/0a52991628e2与Firmware33的校验值见上表。
