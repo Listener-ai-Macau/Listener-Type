@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T05:32:26.503252+08:00",
+  "updatedAt": "2026-10-22T06:02:26.199240+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 120,
-    "source": "6311902575d6121826fd9980fd779a02992c0687",
-    "sourceTag": "build-source/type120-20261022",
+    "build": 121,
+    "source": "1474b5bd8b5c9699b7f7fc9c2dc48e8772132e35",
+    "sourceTag": "build-source/type121-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "98d0ecf78c4bc45c32452d364d928c8923eaee2b9d1a8607630df3136202e397",
-    "sizeBytes": 299110400,
-    "exeSha256": "11307029cc90748514629d1c6c8e855d22609870b6cdf18e6733e17091c93bee",
+    "sha256": "3a1a3c513a9535d83c157209fa0783d8cea23a407652e3e76c2b757347e51cba",
+    "sizeBytes": 299106304,
+    "exeSha256": "2b8cfc340c88717a42835c00342efff4d5e8178b7c2d77e583e45488b4f03581",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -216,8 +216,15 @@
     "type120NativeBackendEvidenceInherited119": true,
     "type120VerificationScope": "Actual119 unchanged provider/parser/component code: explicit existing-service local proposals, choose/accept/save/reopen exact.120 only repositions optional suggestions after original Copy/Save/retention;1240x800 actual React layout plus lifecycle checks pass, exact120 MSI verified. No repeated120 cloud request or semantic/all-language/hardware/purchase guarantee. Default Formal/live dictation unchanged.",
     "customer118TypedFormalEditedSavedRecovered": true,
-    "customer120Reviewed": false,
-    "customer120PurchaseQualification": false
+    "customer120Reviewed": true,
+    "customer120PurchaseQualification": false,
+    "type121InstalledExeAndPreferencesVerified": false,
+    "type121LocalRequestOptionsNativeVerified": true,
+    "type121OptionalChangedCloudPromptNativeVerified": true,
+    "type121VerificationScope": "Exact121 private native: actual120 failed wording explicitly replayed through ordinary result editing; open/accept local option zero extra calls, original preserved, accepted draft saved/reopened. Separate explicit existing-provider request checks changed optional prompt. Native-size React guards and exact MSI verified. No default Formal/global grammar, hardware, live dictation or purchase qualification.",
+    "customer120RejectedPleaseKindlySuggestion": true,
+    "customer121Reviewed": false,
+    "customer121PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -234,6 +241,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build120-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build121-20261022"
   }
 }

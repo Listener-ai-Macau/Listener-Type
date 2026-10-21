@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T05:49:08.899397+08:00",
+  "updated_at": "2026-10-22T06:02:26.106512+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5123,6 +5123,38 @@
         "120全文/操作与07/10截图已读：Formal1.4s仅Please/大小写；客户自然打开额外付费礼貌建议0.9s，Please kindly被拒绝，Keep my wording后自己改Could you please问句；保存重开成功/界面Copied，未外部上屏。49美元暂缓，免费软件足够/语气收益不足。",
         "F120-01并原L09/F96-02/F117-01：第二次请求仍未改善语气；F120-02建议入口需滚动。默认Formal/实物/真实订单仍未完成。"
       ]
+    },
+    {
+      "id": "customer121_immediate_local_english_request_option_before_paid_alternatives",
+      "repo": "type",
+      "commit": "1474b5bd8b5c9699b7f7fc9c2dc48e8772132e35",
+      "subject": "Resolve actual120 second paid Please-kindly failure with explicit local request option and visible action",
+      "state": "exact121_engineering_native_verified_customer_pending",
+      "previous_source_evidence": "120 customer actual1.4s Formal/0.9s optional proposal only Please kindly; rejected, manually wrote Could you please. Full120 feedback preserved under originalL09/F96-02/F117-01.",
+      "protects": [
+        "Wording options beside original Copy/Save; opening and selecting local simple English question makes no additional service request or charge; no automatic application. Request body/rest of message exact, explicit choice, original preserved and saved/reopened accepted text.",
+        "Local option recomputed against current source; literal dollar replacement tokens remain literal. Does not loosen untrusted cloud exact-span/anchor/modality/date/negation checks. Unsupported text remains editable, no multilingual/general grammar guarantee.",
+        "Optional existing cloud request separate/fee-labelled, prompt permits ordinary-request question grammar while preserving firm requirements; no provider/model/default dictation/recording/firmware change."
+      ],
+      "guards": [
+        "Node actual120 source, whole short request, firm/negation/URLs/code/duplicates/Unicode/stale/forged choice/literal dollar counterexamples.",
+        "ActualReact6cases: native-size primary actions/options visible, local zero call/apply/save, cloud stale/unsafe date/explicit selection/failure keeps text.",
+        "Exact121 native ordinary UI actual120 failed result explicitly replayed, local open/accept zero extra requests, actual changed optional cloud prompt separately, original/accepted saved/reopened. ExactMSI/source/embeddedEXE upgrade verified."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\politeness121-ui.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\src\\lib\\politeEdits.test.ts",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native121-snapshot-20261022-060135\\politeness121-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native121-snapshot-20261022-060135\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build121\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE120-software-20261022-053500\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE120-software-20261022-053500\\operations.txt"
+      ],
+      "unverified": [
+        "Fresh121 customer not yet dispatched. Default Formal/general grammar, live speech/external input/physical/strong interference/hardware purchase/order not newly qualified."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5828,7 +5860,8 @@
         "customer117_recorded_text_nested_provider_setup_preserves_work",
         "type118_settled_provider_save_failure_survives_close",
         "customer119_courtesy_edits_native_verified_held_for_primary_action_regression",
-        "customer120_reviewed_courtesy_edits_keep_primary_text_actions_first"
+        "customer120_reviewed_courtesy_edits_keep_primary_text_actions_first",
+        "customer121_immediate_local_english_request_option_before_paid_alternatives"
       ],
       "paths": {
         "type": [

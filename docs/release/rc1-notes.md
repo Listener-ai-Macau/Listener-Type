@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build120 / Firmware33
+# Listener v1.0.6-rc1 · Type build121 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -7,13 +7,13 @@
 
 ## In this app update
 
-**Formal result → Suggest more courteous requests** is optional and uses your existing configured text service. Opening a result does not request suggestions. Clicking sends the current result and can incur normal service charges.
+**Formal result → Wording options** sits beside **Copy result** and **Save draft**. Opening it makes no service request. For supported simple English requests, Type immediately offers a local courteous question, such as “Please send me the draft by Thursday.” → “Could you please send me the draft by Thursday?” Your request body and the rest of the message stay unchanged. Choose **Use this wording** explicitly, then review, copy or save. This is a narrow English convenience, not a general grammar or multilingual rewriting tool; unsupported text stays editable.
 
-Read the proposed original/replacement pairs, select the changes you want, then choose **Use selected edits**. Nothing is preselected or automatically applied. Keep your wording instead if preferred. Your original draft stays beside the result, and accepted edits can be reviewed, copied or saved using the existing actions.
+**Ask text service for alternatives** is separate and optional. Clicking sends the current result to your already configured text service and can incur normal charges. Read each original/replacement pair, select wanted edits and choose **Use selected edits**, or keep your wording. Nothing is preselected. The optional service prompt now permits ordinary request grammar to become a courteous question, instead of merely stacking polite words.
 
-Suggestions must match unique, non-overlapping local source spans. Checks screen changes to recognised numbers, dates, firm requirements, negations and protected code/URL anchors. These are limited checks, not a semantic or all-language guarantee: review meaning and names before accepting. If you edit while a request is running, its earlier suggestions cannot overwrite the new text. Failed or unusable replies leave your current text intact.
+Untrusted service proposals still require exact unique, non-overlapping local spans. Checks screen recognised numbers, dates, firm requirements, negations and protected code/URL anchors. These checks are limited, not a semantic or all-language guarantee: review meaning and names. Earlier replies cannot overwrite newer wording; failed replies keep your text. The recomputed local option does not relax these service-proposal checks.
 
-This does not replace default Formal wording, change the selected dictation style, add a provider/model or run a local model. Previous save/edit protections remain.
+Default Formal, selected dictation style, recognition, accounts, providers/models and firmware remain unchanged. No local model is added. Existing original/edit/save protections remain.
 
 ## Settings reliability retained
 
@@ -36,13 +36,14 @@ Type is free; US$49 is the hardware price. Cloud service setup and usage are sep
 
 | Component | Exact source | SHA-256 |
 | --- | --- | --- |
-| Type120 MSI · 299110400 bytes | [6311902575d6](https://github.com/Listener-ai-Macau/Listener-Type/commit/6311902575d6121826fd9980fd779a02992c0687) | `98d0ecf78c4bc45c32452d364d928c8923eaee2b9d1a8607630df3136202e397` |
+| Type121 MSI · 299106304 bytes | [1474b5bd8b5c](https://github.com/Listener-ai-Macau/Listener-Type/commit/1474b5bd8b5c9699b7f7fc9c2dc48e8772132e35) | `3a1a3c513a9535d83c157209fa0783d8cea23a407652e3e76c2b757347e51cba` |
 | Firmware33 ZIP · 1956905 bytes | [149b6d950ebc](https://github.com/Listener-ai-Macau/Listener-Firmware/commit/149b6d950ebc5f416924c8670cf2b207bdc2b5b7) | `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272` |
 
 ## 中文说明
 
-120针对需要更礼貌请求的成稿，增加明确请求既有服务→比较局部原句/建议→选中后采用的可选动作。打开结果不调用，点击获取可能按原服务正常计费；建议默认不选、不自动修改。原文保留，接受后的稿仍用原复制/保存入口。数字、日期、强制/否定词及URL/代码锚点检查只是有限保护，不保证全部语义或语言，采用前应核对含义和名字；旧稿回复和失败不覆盖新稿。不替换默认正式表达，不改实时输入/账号/提供商/模型。
+121把「措辞选项」放到复制、保存旁。打开不请求服务；支持的简单英文请求在本机即时提供礼貌问句，主体与其余正文保持原样，核对后明确采用，不额外收费。这是有限的英文便利功能，不是通用语法/多语言改写；不支持的正文仍可手动编辑。
 
+「向文本服务获取其它建议」单独选择、按原服务正常计费。可选云提示允许把普通请求改成自然礼貌问句，避免只叠加Please/kindly；原有强制要求、否定、日期/数字与精确片段检查保留。有限保护仍需核对名字与含义，失败/过时回复不覆盖正文。默认正式表达、实时输入、账号/模型/提供商不改，无新增本地模型。
 
 118补全保存错误结果追踪：即使失败先于关闭返回，也会明确提醒；同一字段后续重试成功才清除错误，旧失败不盖新成功，不把已放下的上次窗口错误带到新窗口。原稿/改稿继续保留。117提供的「转写已有录音→打开文字工作区→文本服务设置」入口保留。使用原有文本提供商配置面板，原录音稿、草稿和修订结果留在下方。点击关闭或Esc先提交当前字段，等保存结束再返回并刷新就绪状态；保存失败明确留在设置中，也可选择返回文字。不会自动发送文字、复制、改默认风格或写设备，沿用既有凭据后台和服务配置。
 
