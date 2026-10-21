@@ -26,6 +26,8 @@ export function readFontScale(): FontScaleId {
 
 export function applyFontScale(id: FontScaleId): void {
   const scale = FONT_SCALE_VALUES[id];
+  // Viewport-sized overlays must convert screen dimensions back to zoomed layout units.
+  document.documentElement.style.setProperty('--ol-font-scale', String(scale));
   // CSS zoom 不在 W3C 标准里但 WebKit/Blink 都支持；Tauri 桌面端走 Wry/WebKit，没问题。
   (document.documentElement.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(scale);
 }

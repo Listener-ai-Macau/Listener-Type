@@ -135,7 +135,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           {packs.map(option => <option key={option.id} value={option.id}>{stylePackPresentation(option, t).name}</option>)}
         </select>
       </label>}
-      {presentation.description && <p className="ol-style-trial-hint" data-style-trial-purpose>{presentation.description}</p>}
+      <p className="ol-style-trial-hint ol-style-trial-purpose" data-style-trial-purpose>{presentation.description}</p>
       {extraStyleChoice && <div className="ol-style-trial-alternative">
         <Btn size="sm" variant="ghost" disabled={pending || copying || extraStyleChoice.pending} onClick={extraStyleChoice.onChoose}>
           {extraStyleChoice.pending ? t('style.everydayList.adding') : extraStyleChoice.label}
@@ -143,10 +143,12 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         <p className="ol-style-trial-hint">{extraStyleChoice.hint}</p>
         {extraStyleChoice.error && <p role="alert" className="ol-style-trial-hint">{extraStyleChoice.error}</p>}
       </div>}
+      <div className="ol-style-trial-availability">
       {readiness?.available === false && <p role="status" className="ol-style-trial-hint">{t('style.trial.nativeRequired')}</p>}
       {readiness?.available && readiness.requiresTextService && !readiness.textServiceConfigured && <p role="status" className="ol-style-trial-hint">{t('style.trial.needsService')}</p>}
       {!readiness && !readinessError && <p role="status" className="ol-style-trial-hint">{t('style.trial.checking')}</p>}
       {readinessError && <p role="alert" className="ol-style-trial-hint">{t('style.trial.readinessFailed')} <Btn size="sm" onClick={() => setReadinessAttempt(value => value + 1)}>{t('common.retry')}</Btn></p>}
+      </div>
       <div className="ol-style-trial-workspace">
       <div className="ol-style-trial-draft">
       <label htmlFor="style-trial-input" style={{ display: 'block', fontWeight: 600, marginBottom: 8 }}>
@@ -188,6 +190,10 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           {copyError && <p role="alert" className="ol-style-trial-hint">{t('style.trial.copyFailed')}</p>}
         </section>
       )}
+      {!result && <div className="ol-style-trial-placeholder" data-style-trial-placeholder>
+        <h3>{t('style.trial.output')}</h3>
+        <p className="ol-style-trial-hint">{t('style.trial.resultPlaceholder')}</p>
+      </div>}
       </div>
       <details className="ol-style-trial-details">
         <summary>{t('style.trial.detailsSummary')}</summary>

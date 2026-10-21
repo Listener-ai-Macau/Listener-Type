@@ -428,6 +428,7 @@ export const ko: typeof zhCN = {
 
       copyResult: "결과 복사",
       keepResult: "이 체험 결과는 기록에 저장되지 않습니다. 보관할 결과는 닫기 전에 복사하세요.",
+      resultPlaceholder: "텍스트를 제출하면 여기에 결과가 표시됩니다. 제출 전에는 처리하지 않습니다.",
       copying: "복사 중…",
       copied: "복사됨",
       copyFailed: "결과를 복사하지 못했습니다. 다시 시도하거나 텍스트를 선택해 복사하세요.",

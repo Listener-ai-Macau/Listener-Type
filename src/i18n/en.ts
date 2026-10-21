@@ -471,6 +471,7 @@ export const en: typeof zhCN = {
 
       copyResult: "Copy result",
       keepResult: "This trial is not saved in History. Copy any result you want to keep before closing.",
+      resultPlaceholder: "Submit your text to see its result here. Nothing is processed until you submit.",
       copying: "Copying…",
       copied: "Copied",
       copyFailed: "Could not copy the result. Try again, or select the text and copy it.",

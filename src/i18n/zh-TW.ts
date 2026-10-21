@@ -470,6 +470,7 @@ export const zhTW: typeof zhCN = {
 
       copyResult: "複製結果",
       keepResult: "本次試用不會加入歷史記錄。需要保留時，請在關閉前複製結果。",
+      resultPlaceholder: "提交文字後，結果會顯示在這裡。提交前不會處理。",
       copying: "正在複製…",
       copied: "已複製",
       copyFailed: "未能複製結果。請重試，或選取文字後複製。",

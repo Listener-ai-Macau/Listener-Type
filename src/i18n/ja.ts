@@ -428,6 +428,7 @@ export const ja: typeof zhCN = {
 
       copyResult: "結果をコピー",
       keepResult: "この試用結果は履歴に保存されません。残したい結果は閉じる前にコピーしてください。",
+      resultPlaceholder: "送信すると、ここに結果が表示されます。送信前に処理されることはありません。",
       copying: "コピー中…",
       copied: "コピーしました",
       copyFailed: "結果をコピーできませんでした。再試行するか、文章を選択してコピーしてください。",

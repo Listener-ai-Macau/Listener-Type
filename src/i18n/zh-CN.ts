@@ -468,6 +468,7 @@ export const zhCN = {
 
       copyResult: "复制结果",
       keepResult: "本次试用不会加入历史记录。需要保留时，请在关闭前复制结果。",
+      resultPlaceholder: "提交文字后，结果会显示在这里。提交前不会处理。",
       copying: "正在复制…",
       copied: "已复制",
       copyFailed: "未能复制结果。请重试，或选中文字后复制。",
