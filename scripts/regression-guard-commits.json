@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T23:28:13.813311+08:00",
+  "updated_at": "2026-10-21T23:49:49.678638+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4479,7 +4479,7 @@
       "repo": "type",
       "commit": "d735c6b4f88ceaf8ee06e60f2c19267028b402ca",
       "subject": "Record independent102 reply reuse and remaining key friction",
-      "state": "candidate103_exact_native_reply_previews_and_action_semantics_verified_customer_pending",
+      "state": "candidate103_independent_reply_preview_save_reuse_observed_purchase_deferred",
       "protects": [
         "Each template key previews its own actual mapping in configuration and scoped practice; no new stored field, cloud summary or truncated stored text.",
         "Previous enabled style action is accurately named and described; practice explains without changing active style or selected text. Existing device action remains unchanged.",
@@ -4498,15 +4498,18 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE102-software-20261021-230100\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE103-software-20261021-232600\\dispatch-input.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE103-software-20261021-232600\\dispatch-input.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE103-software-20261021-232600\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE103-software-20261021-232600\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE103-software-20261021-232600\\28-edited-reply-used.png"
       ],
       "unverified": [
-        "Independent103 full feedback pending; UI/native engineering pass does not establish purchase desire.",
+        "Independent103 saved own template, private copy/paste, actual Light0.8s twice, edited result→key1 save→practice reuse; preview useful. Still deferred49, initial interest only. New F103-01 actual page target omitted and F103-02 local page blocked in practice continue104. Previous-style action was not used by103.",
         "Automatic Formal quality, physical/voice/external input/long-term/real sale remain open."
       ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-21T23:28:13.813311+08:00",
+  "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
