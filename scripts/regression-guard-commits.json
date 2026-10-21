@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T06:11:37.439772+08:00",
+  "updated_at": "2026-10-22T06:22:47.539686+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5160,6 +5160,38 @@
         "121完整经历/操作及07/08截图已读：Light/Formal各1.1s，差异仅去Hey；常见Could you send…问句本地无选项，明确云请求1.8s也无可用修改，保留Formal后保存/重开/界面Copied成功。49美元仍暂缓，免费文字收益不足以形成硬件购买理由。",
         "F121-01常见英文问句未覆盖，F121-02额外请求仍无候选，合并原L09/F96-02/F117-01/F120-01。原120命令句的工程通过不推广到本轮问句。"
       ]
+    },
+    {
+      "id": "customer122_common_request_questions_two_local_tones",
+      "repo": "type",
+      "commit": "049128d283b0a30a69d2b887f37f8dba1ded1590",
+      "subject": "Cover actual121 Could-you failure with distinct local courteous/softer options",
+      "state": "exact122_native_local_question_choices_verified_customer_pending",
+      "previous_source_evidence": "121 actual customer Could you send…3pm: local no option, optional cloud1.8s no usable edit, saved existing Formal and deferred49. Preserve full report/refusal originalL09/F96-02.",
+      "protects": [
+        "Common Can/Could/Would/Will you requests and prior imperatives offer explicit distinct courteous/softer local choices. Request body, dates, conditions and remaining message preserved; no auto-apply/service call.",
+        "Open reveals panel without changing focus; primary Copy/Save retained. Each option has unique old+new key, applicable only if recomputed on current source. Unsupported text stays editable, limited English grammar not global/multilingual semantic guarantee.",
+        "Untrusted cloud span/date/negation/firm/anchor protections unchanged, separate optional fee before cloud action. Backend/provider/IPC identical to121; do not claim separate122 cloud suggestion trial. No defaults/recording/firmware changes."
+      ],
+      "guards": [
+        "Node actual120 and actual121 source, both tones, common modal prefixes, no-op suppression, date/stale/forged/mandatory/negative/Unicode/code/URL/literal dollar cases.",
+        "Actual React8cases includes automatic reveal with focus retained, native-size primary controls, actual120/121 local zero-call edits and original cloud stale/unsafe/failed branches.",
+        "Exact122 one initial Formal request completed; returned wording was not retained in the early geometry probe. Saved121 failure explicitly replayed, both local headings visible on open, softer choice preserves3pm/conditional remainder, zero extra request, save/reopen exact."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\politeness122-ui.json",
+        "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\src\\lib\\politeEdits.test.ts",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native122-snapshot-20261022-062008\\politeness122-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native122-snapshot-20261022-062008\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build122\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE121-software-20261022-060400\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE121-software-20261022-060400\\operations.txt"
+      ],
+      "unverified": [
+        "122 independent customer not dispatched. Default Formal/global style quality, live speech/external editor/physical/hardware value/purchase/order not qualified."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5866,7 +5898,8 @@
         "type118_settled_provider_save_failure_survives_close",
         "customer119_courtesy_edits_native_verified_held_for_primary_action_regression",
         "customer120_reviewed_courtesy_edits_keep_primary_text_actions_first",
-        "customer121_immediate_local_english_request_option_before_paid_alternatives"
+        "customer121_immediate_local_english_request_option_before_paid_alternatives",
+        "customer122_common_request_questions_two_local_tones"
       ],
       "paths": {
         "type": [
