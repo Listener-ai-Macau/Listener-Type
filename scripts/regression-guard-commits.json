@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T14:39:05.881680+08:00",
+  "updated_at": "2026-10-21T14:54:53.060035+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3959,9 +3959,42 @@
         "F91-02": "Immediate typing after choosing Light left entry empty while Checking trial availability. Exact event cause unknown; controlled91 reproduces same-class discarded typing because readiness disables draft; source8e92b182.",
         "F91-03": "Would reuse free text function, does not yet buy49USD hardware. No firsthand voice/control convenience or from-zero account/billing experience; retain hypothesis and refusal."
       }
+    },
+    {
+      "id": "customer92_draft_independent_of_service_readiness",
+      "repo": "type",
+      "commit": "7ecdadcdeb98405a94fcbc0c7d96bc1423ee5ed8",
+      "subject": "Readiness protects submission without disabling or replacing a customer draft",
+      "state": "controlled_before_after_and_exact92_native_raw_verified_independent_reuse_pending",
+      "protects": [
+        "Checking, failed, retried or unavailable readiness leaves draft editing enabled and never replaces its value.",
+        "Submission still requires actual readiness and non-empty text; no automatic processing, activation or settings write.",
+        "Actual processing, pending copy or pending style creation retains its input lock.",
+        "Existing default style, service providers, history, clipboard acknowledgement and previous styles remain."
+      ],
+      "guards": [
+        "npm run build",
+        "python scripts/check-style-draft-readiness-ui.py --url <owned URL> --report <owned path>",
+        "python scripts/check-style-text-trial-ui.py --url <owned URL> --report <owned path>",
+        "Exact92 private native Raw Copy acknowledgement and ordinary own-field paste."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\draft91-readiness-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\draft92-readiness-after.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style92-affected-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style92-native-copy.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build92\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-91-natural-20261021\\experience.txt"
+      ],
+      "unverified": [
+        "Customer91 used source8162b6e, not92. Its original focus/layout timing cannot be uniquely inferred from the same-class controlled reproduction.",
+        "Independent92 actual improvement, new voice, external target field, physical device, billing and purchase remain separate."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-21T14:39:05.881680+08:00",
+  "feature_routes_updated_at": "2026-10-21T14:54:53.060035+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -4564,7 +4597,7 @@
     },
     {
       "id": "customer-first-use",
-      "baseline_state": "91_native_optional_list_verified_latest90_independent_conditionally_interested_not_ordered",
+      "baseline_state": "92_readiness_draft_fix_verified_latest91_software_useful_no_hardware_order",
       "accepted_scope": "First-use guidance and explicit personal-text trial navigation; precise native History copy proof is separate. No live speech, hardware or market qualification.",
       "guard_entries": [
         "customer_setup68_asr_ready_does_not_require_optional_llm",
@@ -4593,7 +4626,8 @@
         "customer89_software_value_public_information",
         "customer90_direct_trial_workspace_and_result_readability",
         "customer90_optional_ai_starter_value_and_real_photo",
-        "customer91_optional_everyday_list_and_trial_purpose"
+        "customer91_optional_everyday_list_and_trial_purpose",
+        "customer92_draft_independent_of_service_readiness"
       ],
       "paths": {
         "type": [
@@ -4667,7 +4701,8 @@
         "Independent public-value89 wanted a draft but Overview navigated to pack management; old text-trial stacked full notices/examples/draft before result, pushing the short email tail below the viewport. F89PV-02/03 retained; not ASR/BLE faults.",
         "Independent90 used correct builtin.structured saved6415-char prompt with explicit3-item formatting and Structured native dispatch, yet the retained reading-group draft returned one paragraph. UI selection/source dispatch confirmed, format-compliance root cause remains open; not a new speech/BLE fault.",
         "F90-02: a reading-group message stayed one paragraph under builtin.structured despite correct dispatch. This factory prompt has technical focus since732a863;90 trial selector hid its saved purpose.91 exposes purpose and adds a separate optional everyday list; original/custom prompts remain intact.",
-        "F91-02: readiness checking disables draft input since8e92b182, so a click/type before availability can discard text. Controlled91 ordinary input reproduced; customer-specific focus/layout timing remains unknown."
+        "F91-02: readiness checking disables draft input since8e92b182, so a click/type before availability can discard text. Controlled91 ordinary input reproduced; customer-specific focus/layout timing remains unknown.",
+        "F91-02 readiness-disabled draft originates in8e92b182;92 separates local editing from asynchronous submission eligibility. Frozen91 ordinary typing was discarded; candidate92 retained text across pending/failure/retry without processing."
       ]
     },
     {
