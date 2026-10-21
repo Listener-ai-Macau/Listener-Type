@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T03:15:58.684085+08:00",
+  "updatedAt": "2026-10-22T03:33:57.548425+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 113,
-    "source": "8c8191520411305ec935c7ad8bff716fa79e466f",
-    "sourceTag": "build-source/type113-20261022",
+    "build": 114,
+    "source": "dcb03ddd66e3c03e1f12042531cc3d03751454a6",
+    "sourceTag": "build-source/type114-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "9997e09515fcdf7ea7a1c0e15122122b5b083a3f7a0838656a42d6cf0fb8613f",
-    "sizeBytes": 299102208,
-    "exeSha256": "6a10a1391557051becc7452852534caa84f76698e08716804496a5e8eda78ace",
+    "sha256": "ddca5027a5595d4c979850577df9d3361de0d973e626d21b126e74eef54d63ee",
+    "sizeBytes": 299098112,
+    "exeSha256": "7355a824bbfffd1190a2e855550159cde53bed351c82ebbbc580758ea2a3f013",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -174,8 +174,16 @@
     "type113ExactPrivateNativeWorkflowVerified": true,
     "type113VerificationScope": "Exact isolated native MSI: included synthetic11.48s WAV→existing direct Volcengine actual transcript→local Unicode/newline edit→explicit Save→ordinary reload/reopen exact original recognized text and edit→native Copy/ordinary Paste and continued writing→confirmed delete. Other private state/daily92 unchanged. File ASR/cancel/Ready path unchanged. Not live speech, external input, hardware or purchase qualification.",
     "customer112OwnEditedSavePasteReopenObserved": true,
-    "customer113Reviewed": false,
-    "customer113PurchaseQualification": false
+    "customer113Reviewed": true,
+    "customer113PurchaseQualification": false,
+    "type114InstalledExeAndPreferencesVerified": false,
+    "type114ExactArtifactVerified": true,
+    "type114RetentionUiVerified": true,
+    "type114VerificationScope": "Exact MSI and embedded executable/source verified. Existing headless typed/audio lifecycle checks cover failure/pending acknowledgement, saved current version and edit invalidation. Native customer experience pending. No backend, recording, clipboard or firmware change.",
+    "customer113TypedSaveRecovered": true,
+    "customer113AudioSaveObserved": false,
+    "customer114Reviewed": false,
+    "customer114PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -192,6 +200,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build113-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build114-20261022"
   }
 }

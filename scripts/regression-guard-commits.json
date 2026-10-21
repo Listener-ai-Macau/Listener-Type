@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T03:27:45.321101+08:00",
+  "updated_at": "2026-10-22T03:33:57.448766+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4848,6 +4848,32 @@
         "Independent113 naturally chose typed Light1.0s, edited3→3pm, saved and recovered exact edit, visible copy acknowledgement only. No blocker, audio save untried. F113-01 minor contradictory post-save retention advice, not lost data.49 deferred; free typed task sufficient. No purchase intent/order.",
         "112 typed task useful but49 hardware deferred. No independent113 use, live speech/BLE/hardware/external automatic input or purchase qualification."
       ]
+    },
+    {
+      "id": "customer114_acknowledged_saved_version_guidance",
+      "repo": "type",
+      "commit": "dcb03ddd66e3c03e1f12042531cc3d03751454a6",
+      "subject": "Confirm current draft retention only after actual successful save; edits invalidate the statement",
+      "state": "exact114_artifact_and_affected_frontend_checked_native_customer_pending",
+      "protects": [
+        "Typed result retention note matches acknowledged name/original/current edit. Pending and failed saves keep copy/save reminder. Later edits cannot claim the saved version, restoring the exact payload may.",
+        "Recorded transcript note follows existing exact savedText acknowledgement, preserving close/edit/discard/copy busy locks. Five locale messages, no backend/storage/ASR/clipboard/device changes."
+      ],
+      "guards": [
+        "Existing typed/audio lifecycle checks extended for retention before/after actual acknowledgement, error/pending states and exact-edit invalidation; TypeScript compile passes. Exact MSI embedded EXE/source and same-version upgrade checked."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\drafts114-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\audio114-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build114\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE113-software-20261022-031730\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE113-software-20261022-031730\\operations.txt"
+      ],
+      "unverified": [
+        "F113-01 was minor contradictory advice after a successful save/recovery, not lost data. Native114 customer review pending; no new native persistence, voice, external insertion, hardware or purchase proof."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5542,7 +5568,8 @@
         "customer110_explicit_local_edited_draft_retention",
         "customer111_stable_compact_key_layout_editor",
         "customer112_result_first_actions_and_safe_technical_label",
-        "customer113_recorded_transcript_explicit_local_drafts"
+        "customer113_recorded_transcript_explicit_local_drafts",
+        "customer114_acknowledged_saved_version_guidance"
       ],
       "paths": {
         "type": [
@@ -5710,7 +5737,8 @@
         "customer110_explicit_local_edited_draft_retention",
         "customer111_stable_compact_key_layout_editor",
         "customer112_result_first_actions_and_safe_technical_label",
-        "customer113_recorded_transcript_explicit_local_drafts"
+        "customer113_recorded_transcript_explicit_local_drafts",
+        "customer114_acknowledged_saved_version_guidance"
       ],
       "paths": {
         "type": [
