@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T21:10:23.605568+08:00",
+  "updated_at": "2026-10-21T21:47:30.664177+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4287,7 +4287,7 @@
       "repo": "type",
       "commit": "31ad48b3f345e224c06f0cccd61c6f9a0c76fb4f",
       "subject": "feat: save reusable key layouts without changing connected devices",
-      "state": "candidate98_native_local_save_reload_passed_independent_customer_pending",
+      "state": "candidate98_native_local_library_verified_independent_library_unexplored_purchase_declined",
       "protects": [
         "Named local layouts never enumerate, connect to, write, or run a board action. Default key output is unchanged.",
         "Loading into selected-device settings only edits that target draft. Explicit Write retains fresh read-token/settings/profile revision and exact peer guards.",
@@ -4306,15 +4306,54 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261021-build98\\type-artifact-verification.json"
       ],
       "customer_evidence": [
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE97-software-20261021-200233\\experience.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE97-software-20261021-200233\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE98-software-20261021-211050\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE98-software-20261021-211050\\operations.txt"
       ],
       "unverified": [
-        "New independent98 use/purchase interest is pending;97 declined49 hardware despite useful software.",
+        "Independent98 chose typed drafting, used local result editing and still declined49 hardware. Did not open key-layout library; its independent value remains unknown, not a negative usability result.",
         "Physical key presses, new98 physical layout writing, real voice/from-zero setup/external Insert/long-term/real payment remain unknown. Headless target fixture is not a BLE or two-physical-board acceptance."
+      ]
+    },
+    {
+      "id": "customer99_session_style_comparisons",
+      "repo": "type",
+      "commit": "c99f78cf44bcdf3ed14981eec4d9879dd248474e",
+      "subject": "Keep completed style comparisons and local edits in the open trial",
+      "state": "candidate99_exact_native_session_comparison_and_own_input_copy_verified_customer_pending",
+      "protects": [
+        "Switching styles keeps the current dialog and up to8 completed session results, keyed to exact draft and saved style prompt. No auto-processing or activation.",
+        "Local edits are retained per matching style/input. A changed input or prompt cannot display or copy another input result; acknowledgement does not cross selections.",
+        "Restored comparisons visibly disclose no new request. Closing unmounts and clears comparisons; existing independent draft retention is unchanged.",
+        "Explicit rerun is one new request. Copy/Insert captures the current restored edited body and retains cancellation/ownership protections.",
+        "No new cloud request format, prompt, reasoning/provider, dictation/BLE/hardware or daily config change."
+      ],
+      "guards": [
+        "scripts/check-style-trial-comparison-ui.py:7 focused identity/cache/draft/edit/copy/close/request checks.",
+        "scripts/check-style-text-trial-ui.py:existing31 affected lifecycle/edit safety checks.",
+        "scripts/check-style-trial-handoff-ui.py:existing7 generation/cancel/edited-body checks.",
+        "scripts/check-style-trial-layout-ui.py:all4 built-in input/run positions0px.",
+        "Exact99 private ordinary UI:2 actualLLM requests, revisit editedLight/Formal without new requests, restoredUnicodeCopy→own input exact."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style99-comparison.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style99-lifecycle.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style99-handoff.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style99-layout.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native99-snapshot-20261021-214432\\comparison-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261021-build99\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE98-software-20261021-211050\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE99-software-20261021-214530\\dispatch-input.txt"
+      ],
+      "unverified": [
+        "New independent99 experience/purchase report pending. AutomaticFormal quality remains open; no claim that this comparison feature resolves it.",
+        "New99 external-field Insert success, real voice/physical device/long-term/from-zero service setup and real payment remain distinct unknowns."
       ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-21T21:10:23.605568+08:00",
+  "feature_routes_updated_at": "2026-10-21T21:47:30.664177+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -4966,7 +5005,8 @@
         "customer94_trial_control_layout_stability",
         "customer95_reviewed_result_explicit_handoff",
         "customer96_all_builtin_trial_layout",
-        "customer97_local_result_revision_delivery"
+        "customer97_local_result_revision_delivery",
+        "customer99_session_style_comparisons"
       ],
       "paths": {
         "type": [
@@ -5009,7 +5049,8 @@
           "docs/release/rc1-notes.md",
           "src/components/QuickStyleTextTrial.tsx",
           "src/components/StyleTextTrial.css",
-          "src/lib/everydayListStyle.ts"
+          "src/lib/everydayListStyle.ts",
+          "scripts/check-style-trial-comparison-ui.py"
         ]
       },
       "known_failures": [
@@ -5097,7 +5138,8 @@
       "accepted_scope": "Explicit UI lifecycle, cancellation/expiry/ownership gates; no complete external-field success claim.",
       "guard_entries": [
         "customer95_reviewed_result_explicit_handoff",
-        "customer97_local_result_revision_delivery"
+        "customer97_local_result_revision_delivery",
+        "customer99_session_style_comparisons"
       ],
       "paths": {
         "type": [
@@ -5106,7 +5148,9 @@
           "src-tauri/src/commands/style_trial_delivery.rs",
           "src-tauri/src/insertion.rs",
           "src-tauri/src/insertion/clipboard_handoff.rs",
-          "scripts/check-style-trial-handoff-ui.py"
+          "scripts/check-style-trial-handoff-ui.py",
+          "src/components/QuickStyleTextTrial.tsx",
+          "scripts/check-style-trial-comparison-ui.py"
         ]
       },
       "known_failures": [
