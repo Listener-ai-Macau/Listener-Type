@@ -43,13 +43,15 @@ Type build90 opens a typed-text workspace directly from Overview. Choose a trial
 
 Free and open source · Keyboard optional · Set up a recognition service or local model first.
 
-## A desk control for voice input · US$49
+## An AI starter gadget for your desk · US$49
 
-An optional little desk gadget: enjoy a physical knob, four keys you can make your own, and a voice-to-text interaction to try whenever it suits you. It can earn a place on your desk because you like using it, even for occasional messages.
+A small, customizable piece of hardware for trying AI interactions: explore voice input, see how text styles change a message, and make four desk keys your own. Enjoy the knob and the visible electronics, learn by trying a small task, or use it occasionally when it feels handy. Normal Type use does not require programming.
+
+The board provides the microphone, physical controls and Bluetooth audio. Windows Type connects that audio and text to your selected recognition and text services; the AI workflow is not provided by the board alone.
 
 <img src="docs/assets/readme/keyboard-front.jpg" alt="Repository photograph of Listener hardware with four transparent keys, a black knob and status lights" width="820">
 
-*Repository hardware photograph. It shows the appearance; hand size, control feel and the final shipping batch are not established by this image.*
+*Planned US$49 hardware appearance: transparent case, transparent keycaps and a black knob, broadly as shown. The photograph does not demonstrate hand size, control feel or sound.*
 
 Listener puts a microphone and a physical start/stop control beside your working hand. It is designed for desk work where you alternate between speaking and typing longer messages, emails or notes.
 
