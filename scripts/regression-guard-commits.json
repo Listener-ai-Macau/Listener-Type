@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T22:14:12.159753+08:00",
+  "updated_at": "2026-10-21T22:31:42.735266+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4359,7 +4359,7 @@
       "repo": "type",
       "commit": "e18e20c8e7a012801f9a13bfef10e2bb362b40db",
       "subject": "Let customers practice their own four-key layouts without a device",
-      "state": "candidate100_exact_native_practice_and_local_layout_reuse_verified_customer_pending",
+      "state": "candidate100_engineering_practice_verified_independent100_did_not_use_purchase_deferred",
       "protects": [
         "Practice uses the same current layout single-press mappings for own-field templates, selection copy/paste/undo and common editing shortcuts, with Unicode-safe selection offsets.",
         "Button copy buffer stays in component memory; no system clipboard, global shortcut, IPC/cloud or device execution. Unsupported recording/AI/app/knob actions are explicitly not simulated.",
@@ -4380,15 +4380,53 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE99-software-20261021-214530\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE100-software-20261021-221230\\dispatch-input.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE100-software-20261021-221230\\dispatch-input.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE100-software-20261021-221230\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE100-software-20261021-221230\\operations.txt"
       ],
       "unverified": [
-        "Independent100 full feedback/purchase view pending. Four-key practice is an experience opportunity, not proven purchase improvement.",
+        "Independent100 saw practice entry but chose typed drafting only, edited final text and deferred49 hardware. Practice value remains unexplored. Its switch-style perceived loss is addressed101 as visible comparison, not claimed fixed by the invisible99 cache.",
         "AutomaticFormal quality, true speech/external-field input, physical controls/from-zero service setup/long-term and real payment remain separate unknowns."
+      ]
+    },
+    {
+      "id": "customer101_visible_style_comparisons",
+      "repo": "type",
+      "commit": "640ee87568a6a593fdffad070447cc9717eaadcd",
+      "subject": "Keep labelled completed results visible while comparing another style",
+      "state": "candidate101_exact_native_visible_comparison_and_own_input_copy_verified_customer_pending",
+      "protects": [
+        "Other completed styles remain visibly labelled while the selected new style has no result. Open recovers that exact local edit without a service call.",
+        "Visible prior text is filtered by exact draft and unchanged saved style prompt; deleted/different styles and other inputs cannot leak into comparison.",
+        "Only the current editable result has Copy/Insert; a labelled prior preview has Open, not ambiguous delivery. Existing cancellation/identity and acknowledgement guards remain.",
+        "Closing clears all comparison bodies. Default dictation, prompts, credentials, BLE and hardware are untouched."
+      ],
+      "guards": [
+        "scripts/check-style-trial-comparison-ui.py:9 affected exact-input/cache/visible-preview/Open/edit/copy/close/request checks.",
+        "Existing31 text-trial lifecycle and7 handoff checks passed.",
+        "All4 styles input/button coordinates0px at1280 and390 widths.",
+        "Exact101 two actual service requests; visibly labelled prior edit; Open without third request; native current edited Copy→own input exact; new draft hides previews."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style101-comparison.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style101-lifecycle.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style101-handoff.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style101-layout.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style101-narrow.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native101-snapshot-20261021-222854\\comparison-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261021-build101\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE100-software-20261021-221230\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE101-software-20261021-223000\\dispatch-input.txt"
+      ],
+      "unverified": [
+        "Independent101 natural feedback pending; no claim comparison or prior practice creates purchase desire.",
+        "AutomaticFormal quality, external insertion/real voice/physical controls/from-zero setup/long-term and real payment remain distinct unknowns."
       ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-21T22:14:12.159753+08:00",
+  "feature_routes_updated_at": "2026-10-21T22:31:42.735266+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -5048,7 +5086,8 @@
         "customer96_all_builtin_trial_layout",
         "customer97_local_result_revision_delivery",
         "customer99_session_style_comparisons",
-        "customer100_scoped_four_key_practice"
+        "customer100_scoped_four_key_practice",
+        "customer101_visible_style_comparisons"
       ],
       "paths": {
         "type": [
@@ -5183,7 +5222,8 @@
       "guard_entries": [
         "customer95_reviewed_result_explicit_handoff",
         "customer97_local_result_revision_delivery",
-        "customer99_session_style_comparisons"
+        "customer99_session_style_comparisons",
+        "customer101_visible_style_comparisons"
       ],
       "paths": {
         "type": [
