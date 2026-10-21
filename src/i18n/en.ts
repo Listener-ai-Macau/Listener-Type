@@ -1,3 +1,4 @@
+import { hardwareLayoutTranslations } from './hardwareLayout';
 import { audioFileTranslations } from './audioFile';
 // English resources — translated from zh-CN.ts. Keep keys in sync.
 
@@ -6,6 +7,7 @@ import { enDeviceMaintenance, enFirmwareMaintenance } from './enDeviceMaintenanc
 
 // Type-level guarantee that en mirrors the zh-CN shape.
 export const en: typeof zhCN = {
+  hardwareLayout: hardwareLayoutTranslations['en'],
   earlierTrial: {"title": "Earlier result for comparison", "hint": "Your input or saved style has changed. This is the earlier result, including your edits, not an output for the current draft. No new request was made. It stays only in this open window, until replaced by a new result for this style.", "input": "Input used for this earlier result"},
   audioFile: audioFileTranslations.en,
   savedPhrases: {
@@ -44,7 +46,7 @@ export const en: typeof zhCN = {
   },
   devicePractice: {
     "title": "Try your four keys",
-    "description": "Type something here, then click a key below. The buttons use the single-press actions in your current layout.",
+    "description": "Type something here, choose a press, then click a key below to try that action from your current layout.",
     "text": "Practice text",
     "placeholder": "A reply, a note, or any text you want to try…",
     "ready": "Choose a key below, or switch to Configure & save to change its action.",

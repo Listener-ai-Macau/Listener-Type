@@ -1,3 +1,4 @@
+import { hardwareLayoutTranslations } from './hardwareLayout';
 import { audioFileTranslations } from './audioFile';
 import type { zhCN } from './zh-CN';
 import { en } from './en.ts';
@@ -7,6 +8,7 @@ import { en } from './en.ts';
 // 갱신해 주세요(갱신되지 않은 key 는 ...en 으로 영어로 fallback 됩니다).
 export const ko: typeof zhCN = {
   ...en,
+  hardwareLayout: hardwareLayoutTranslations['ko'],
   earlierTrial: {"title": "비교할 이전 결과", "hint": "입력 또는 저장한 스타일이 바뀌었습니다. 수정 내용을 포함한 이전 결과이며 현재 원고의 새 출력이 아닙니다. 다시 요청하지 않았으며 이 창을 닫거나 같은 스타일의 새 결과가 나올 때까지 보관합니다.", "input": "이전 결과에 사용한 원고"},
   audioFile: audioFileTranslations.ko,
   savedPhrases: {
@@ -45,7 +47,7 @@ export const ko: typeof zhCN = {
   },
   devicePractice: {
     "title": "네 개의 키 사용해 보기",
-    "description": "여기에 텍스트를 입력한 다음 아래 키를 눌러 보세요. 현재 레이아웃의 한 번 누르기 동작을 사용합니다.",
+    "description": "여기에 입력하고 누르기 방식을 고른 뒤 아래 키를 클릭하면 현재 레이아웃의 해당 동작을 실행합니다。",
     "text": "연습 텍스트",
     "placeholder": "답장이나 메모 등 원하는 텍스트를 입력하세요…",
     "ready": "아래 키를 사용하거나 구성 및 저장에서 동작을 바꿔 보세요.",

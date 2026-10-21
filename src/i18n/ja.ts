@@ -1,3 +1,4 @@
+import { hardwareLayoutTranslations } from './hardwareLayout';
 import { audioFileTranslations } from './audioFile';
 import type { zhCN } from './zh-CN';
 import { en } from './en.ts';
@@ -7,6 +8,7 @@ import { en } from './en.ts';
 // 更新してください（更新されない key は ...en で英語にフォールバックします）。
 export const ja: typeof zhCN = {
   ...en,
+  hardwareLayout: hardwareLayoutTranslations['ja'],
   earlierTrial: {"title": "比較用の前の結果", "hint": "入力や保存したスタイルが変わりました。編集内容を含む前の結果で、現在の入力に対する新しい出力ではありません。再送信せず、この画面を閉じるか同じスタイルで新しい結果を得るまで保持します。", "input": "この前の結果に使った入力"},
   audioFile: audioFileTranslations.ja,
   savedPhrases: {
@@ -45,7 +47,7 @@ export const ja: typeof zhCN = {
   },
   devicePractice: {
     "title": "4つのキーを試す",
-    "description": "ここにテキストを入力し、下のキーをクリックしてください。現在のレイアウトの1回押しの動作を試せます。",
+    "description": "ここに入力し、押し方を選んでから下のキーをクリックすると、現在の配置の対応する動作を試せます。",
     "text": "練習用テキスト",
     "placeholder": "返信やメモなど、自分のテキストを入力…",
     "ready": "下のキーを試すか、「設定と保存」で動作を変更できます。",

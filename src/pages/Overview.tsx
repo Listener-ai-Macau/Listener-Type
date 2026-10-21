@@ -29,6 +29,7 @@ import { Btn, Card, PageHeader, Pill } from './_atoms';
 import { EmbeddedBleStatusPanel } from '../components/EmbeddedBleStatusPanel';
 import { DeviceLayoutsDialog } from '../components/DeviceLayoutsDialog';
 import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
+import { hardwarePhoto } from '../components/DeviceLayoutMap';
 
 interface OverviewProps {
   onOpenProvidersSettings?: () => void;
@@ -334,6 +335,18 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onO
         </div>
       </Card>
       {layoutsOpen && <DeviceLayoutsDialog rememberSelection initialPractice={layoutsOpen === 'practice'} initialPhrases={layoutsOpen === 'phrases'} initialProfile={layoutsOpen === 'practice' ? writingDeviceKeyProfile() : undefined} onClose={() => setLayoutsOpen(null)} />}
+
+      <Card style={{ marginBottom: 14 }}>
+        <div className="ol-listener-hardware-entry">
+          <img src={hardwarePhoto} alt={t('hardwareLayout.photo')} width={210} height={148} />
+          <div>
+            <h2 style={{ margin: '0 0 8px', fontSize: 16 }}>{t('hardwareLayout.entryTitle')}</h2>
+            <p className="ol-device-layout-hint">{t('hardwareLayout.entryBody')}</p>
+            <Btn size="sm" variant="ghost" onClick={() => setLayoutsOpen('configure')}>{t('hardwareLayout.design')}</Btn>
+            <p className="ol-device-layout-hint">{t('hardwareLayout.price')}</p>
+          </div>
+        </div>
+      </Card>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 12 }}>
         <ProviderCard

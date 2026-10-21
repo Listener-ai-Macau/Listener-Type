@@ -1,14 +1,14 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { deleteLocalDeviceLayout, listLocalDeviceLayouts, nativeDeviceLayoutsAvailable, saveLocalDeviceLayout } from '../lib/ipc';
-import { defaultDeviceKeyProfile, layoutActions, layoutAppPages, layoutGestures, layoutKeyIds, writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
+import { defaultDeviceKeyProfile, layoutActions, layoutAppPages, layoutGestures, writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
 import type { DeviceCustomKeyId, DeviceCustomKeyMapping, DeviceKeyProfile, DeviceKnobRotationAction, DeviceLayout } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import './DeviceLayoutsDialog.css';
 import { DeviceLayoutPractice } from './DeviceLayoutPractice';
-import { DeviceKeyActionPreview } from './DeviceKeyActionPreview';
 import { DevicePageNavigationContext } from '../state/DevicePageNavigationContext';
 import { SavedLayoutPhrases } from './SavedLayoutPhrases';
+import { DeviceLayoutMap } from './DeviceLayoutMap';
 
 type Group = typeof layoutGestures[number];
 const primaryKeys = ['RightControl','LeftControl','RightShift','LeftShift','RightAlt','LeftAlt', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', 'Enter','Tab','Space','Escape','Backspace','Delete','Insert','Home','End','PageUp','PageDown','ArrowUp','ArrowDown','ArrowLeft','ArrowRight', ...Array.from({length:12},(_,i)=>`F${i+1}`)];
@@ -164,13 +164,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
       <label className="ol-device-layout-name">{t('deviceLayouts.name')}<input aria-label={t('deviceLayouts.name')} maxLength={80} value={name}
         placeholder={t('deviceLayouts.namePlaceholder')} onChange={event => { setName(event.target.value); markDirty(); }} /></label>
       <p className="ol-device-layout-hint">{t('deviceLayouts.pickKey')}</p>
-      <div className="ol-device-layout-pad">
-        {layoutKeyIds.map(id => <button type="button" key={id} aria-pressed={key === id} onClick={() => setKey(id)}>
-          <strong>{id === 'knob' ? t('settings.deviceKeys.knob.title') : t('deviceLayouts.key', { number: id.slice(3) })}</strong>
-          <span>{t(`settings.deviceKeys.actions.${profile[id === 'knob' ? 'deviceCustomKeys' : group][id].action}`)}</span>
-          <DeviceKeyActionPreview mapping={profile[id === 'knob' ? 'deviceCustomKeys' : group][id]} />
-        </button>)}
-      </div>
+      <DeviceLayoutMap profile={profile} group={group} selected={key} onSelect={setKey} />
       {incomingText !== undefined && <section className="ol-device-layout-editor" aria-label={t('keyPhrase.title')}>
         {gestureSelect}
         <label>{t('keyPhrase.text')}<textarea aria-label={t('keyPhrase.text')} rows={3} maxLength={2000} value={phrase} onChange={event => setPhrase(event.target.value)} /></label>

@@ -1,3 +1,4 @@
+import { hardwareLayoutTranslations } from './hardwareLayout';
 import { audioFileTranslations } from './audioFile';
 import type { zhCN } from './zh-CN';
 
@@ -5,6 +6,7 @@ import type { zhCN } from './zh-CN';
 // 新增 key 時，必須同步更新 en.ts，避免切換到 English 後出現中文殘留。
 
 export const zhTW: typeof zhCN = {
+  hardwareLayout: hardwareLayoutTranslations['zh-TW'],
   earlierTrial: {"title": "上一份結果 · 供對照", "hint": "原稿或儲存的風格已改變。此處保留上一份結果及你的修訂，不是目前原稿的新輸出，也沒有重新請求服務。僅保留在目前視窗，直到本風格產生新結果。", "input": "這份舊結果使用的原稿"},
   audioFile: audioFileTranslations.zhTW,
   savedPhrases: {
@@ -43,7 +45,7 @@ export const zhTW: typeof zhCN = {
   },
   devicePractice: {
     "title": "試試我的四個鍵",
-    "description": "在這裡輸入文字，再點選下方按鍵。按鍵使用目前配置的單按動作。",
+    "description": "在這裡輸入文字，選擇按法，再點擊下方按鍵，試用目前配置的對應動作。",
     "text": "練習文字",
     "placeholder": "試試一則回覆、筆記，或自己的文字…",
     "ready": "點選下方按鍵，或切換至「設定與儲存」修改動作。",

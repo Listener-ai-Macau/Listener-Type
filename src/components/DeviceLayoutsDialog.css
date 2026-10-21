@@ -34,4 +34,17 @@
 .ol-device-layout-practice textarea { width: 100%; resize: vertical; line-height: 1.6; min-height: 140px; }
 .ol-device-practice-keys { grid-template-columns: repeat(4,minmax(0,1fr)); margin-top: 18px; }
 .ol-device-layout-practice-status { min-height: 2.4em; font-size: 13px; line-height: 1.6; color: var(--ol-blue); }
+.ol-device-layout-map { display: grid; grid-template-columns: minmax(0,1.25fr) minmax(0,1fr); gap: 16px; align-items: start; }
+.ol-device-layout-map figure { margin: 0; min-width: 0; }
+.ol-device-layout-photo { position: relative; max-width: 300px; margin: auto; border-radius: 12px; overflow: hidden; background: var(--ol-surface-2); }
+.ol-device-layout-photo img { display: block; width: 100%; height: auto; }
+.ol-device-layout-photo span { position: absolute; transform: translate(-50%,-50%); display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #26282c; color: white; border: 2px solid white; font-size: 13px; font-weight: 700; box-shadow: 0 1px 4px #0008; }
+.ol-device-layout-photo span[data-selected=true] { background: #2563eb; box-shadow: 0 0 0 4px #fff9; }
+.ol-device-layout-map figcaption { font-size: 11px; line-height: 1.6; color: var(--ol-ink-3); margin-top: 8px; }
+.ol-device-layout-map .ol-device-layout-pad { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.ol-device-layout-map .ol-device-layout-pad button { min-height: 68px; padding: 8px; }
+.ol-listener-hardware-entry { display: flex; align-items: center; gap: 20px; }
+.ol-listener-hardware-entry > img { display: block; max-width: 34%; height: auto; border-radius: 12px; }
+.ol-listener-hardware-entry > div { flex: 1; min-width: 0; }
+@media(max-width:600px) { .ol-device-layout-map { grid-template-columns: 1fr; } .ol-device-layout-photo { max-width: 420px; margin: auto; } .ol-listener-hardware-entry { align-items: start; gap: 12px; } }
 @media(max-width:600px) { .ol-device-practice-keys { grid-template-columns: repeat(2,minmax(0,1fr)); } }

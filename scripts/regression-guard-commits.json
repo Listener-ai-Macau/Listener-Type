@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T01:19:03.538458+08:00",
+  "updated_at": "2026-10-22T01:30:47.450907+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4621,7 +4621,7 @@
       "repo": "type",
       "commit": "94dd0ce480bfbd0da56b4c4d1f996aee90c2b859",
       "subject": "Keep earlier edited result for comparison without restoring stale output authority",
-      "state": "exact108_native_paste_compare_restore_verified_customer_pending",
+      "state": "exact108_native_and_independent_earlier_result_comparison_observed_purchase_deferred",
       "protects": [
         "Editing input still invalidates current result, Copy/Insert acknowledgement and insertion authority; earlier result is separately labelled read-only comparison with exact original input. No re-request, History write or implicit insertion.",
         "Only one completed snapshot per style within existing eight-style session bound. A successful new result replaces it; matching exact input/prompt restores edited matching result; closing clears temporary results.",
@@ -4642,10 +4642,13 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE107-software-20261022-010100\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE108-software-20261022-011800\\dispatch-input.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE108-software-20261022-011800\\dispatch-input.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE108-software-20261022-011800\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE108-software-20261022-011800\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE108-software-20261022-011800\\05-paste-after-status.png"
       ],
       "unverified": [
-        "Independent108 report pending.",
+        "Independent108 chose typed Light1.1s, used Copy and ordinary Paste into own draft, saw the labelled earlier result without another request. First Paste while Copying did not change draft; after Copied it succeeded. Exact cause not uniquely established. Declines49 for now; free text task sufficient. Recorded audio, live input and physical controls unexplored.",
         "Programmatic app-tab change verified in isolated frontend fixture; not physical hardware-page key proof.",
         "Native108check used no cloud. Exact107synthetic-file service evidence inherited; live speech/BLE/external automatic input/physical usefulness and real purchase remain unknown."
       ]

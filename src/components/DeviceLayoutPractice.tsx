@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { DeviceCustomKeyAppPage, DeviceCustomKeyMapping, DeviceKeyProfile } from '../lib/types';
-import { layoutKeyIds } from '../lib/deviceKeyLayouts';
+import { layoutGestures, layoutKeyIds } from '../lib/deviceKeyLayouts';
 import { DeviceKeyActionPreview } from './DeviceKeyActionPreview';
 import { Btn } from '../pages/_atoms';
 
@@ -13,6 +13,7 @@ export function DeviceLayoutPractice({ profile, onInteract, onOpenPage, leavingT
   const [buffer, setBuffer] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [pageToOpen, setPageToOpen] = useState<DeviceCustomKeyAppPage | null>(null);
+  const [gesture, setGesture] = useState<typeof layoutGestures[number]>('deviceCustomKeys');
   useEffect(() => { setPageToOpen(null); }, [profile]);
   const undo = useRef<Array<{ text: string; start: number; end: number }>>([]);
   const selection = useRef({ start: 0, end: 0 });
@@ -77,10 +78,14 @@ export function DeviceLayoutPractice({ profile, onInteract, onOpenPage, leavingT
         if (undo.current.length > 32) undo.current.shift();
         setText(event.target.value); selection.current = { start: event.target.selectionStart, end: event.target.selectionEnd }; setStatus('');
       }} /></label>
+    <label>{t('hardwareLayout.practiceGesture')}<select aria-label={t('hardwareLayout.practiceGesture')} value={gesture} onChange={event => { setGesture(event.target.value as typeof gesture); setPageToOpen(null); setStatus(''); }}>
+      {layoutGestures.map((value, i) => <option key={value} value={value}>{t(`settings.deviceKeys.gestures.${['singleClick','doubleClick','longPress'][i]}`)}</option>)}
+    </select></label>
+    <p className="ol-device-layout-hint">{t('hardwareLayout.practiceHint')}</p>
     <div className="ol-device-layout-pad ol-device-practice-keys">
-      {layoutKeyIds.filter(id => id !== 'knob').map(id => <button key={id} type="button" onMouseDown={event => event.preventDefault()} onClick={() => press(profile.deviceCustomKeys[id])}>
-        <strong>{t('deviceLayouts.key', {number:id.slice(3)})}</strong><span>{t(`settings.deviceKeys.actions.${profile.deviceCustomKeys[id].action}`)}</span>
-        <DeviceKeyActionPreview mapping={profile.deviceCustomKeys[id]} />
+      {layoutKeyIds.filter(id => id !== 'knob').map(id => <button key={id} type="button" onMouseDown={event => event.preventDefault()} onClick={() => press(profile[gesture][id])}>
+        <strong>{t('deviceLayouts.key', {number:id.slice(3)})}</strong><span>{t(`settings.deviceKeys.actions.${profile[gesture][id].action}`)}</span>
+        <DeviceKeyActionPreview mapping={profile[gesture][id]} />
       </button>)}
     </div>
     <p role="status" className="ol-device-layout-practice-status">{status || t('devicePractice.ready')}</p>
