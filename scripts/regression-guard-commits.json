@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T01:10:22.712755+08:00",
+  "updated_at": "2026-10-22T01:19:03.538458+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4615,6 +4615,40 @@
         "Only one actual synthetic English file request qualified. Not live mic, automatic end, wake, BLE, external automatic insertion, speaker isolation, physical convenience, from-zero setup or real purchase.",
         "Other ASR providers/managed route not supported by this new file entry. Original live paths retain their own evidence/limits."
       ]
+    },
+    {
+      "id": "customer108_earlier_result_snapshot_and_audio_window_lifetime",
+      "repo": "type",
+      "commit": "94dd0ce480bfbd0da56b4c4d1f996aee90c2b859",
+      "subject": "Keep earlier edited result for comparison without restoring stale output authority",
+      "state": "exact108_native_paste_compare_restore_verified_customer_pending",
+      "protects": [
+        "Editing input still invalidates current result, Copy/Insert acknowledgement and insertion authority; earlier result is separately labelled read-only comparison with exact original input. No re-request, History write or implicit insertion.",
+        "Only one completed snapshot per style within existing eight-style session bound. A successful new result replaces it; matching exact input/prompt restores edited matching result; closing clears temporary results.",
+        "File transcription dialog belongs to FloatingShell, so a background app-page change cannot unmount Overview and discard its active request/transcript. Explicit close/cancel lifecycle remains.",
+        "Inherited107 file recognizer Ready admission and actual provider evidence retained; no change to live ASR, provider defaults or firmware."
+      ],
+      "guards": [
+        "scripts/check-earlier-trial-result-ui.py:5 actual frontend state/source/callback/lifetime checks; old31 trial lifecycle and TypeScript.",
+        "Exact108 native ordinary Raw→edit→Copy→Paste into changed draft→labelled original-input comparison without old current actions→restore original source recovers edited result. Audio modal opens from Shell,0cloud.",
+        "Engineer85777 actually terminated before fresh customer2912;2private credentials deleted0errors,daily four states same."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\earlier108-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style108-lifecycle.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native108-snapshot-20261022-011610\\earlier-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native108-snapshot-20261022-011610\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build108\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE107-software-20261022-010100\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE108-software-20261022-011800\\dispatch-input.txt"
+      ],
+      "unverified": [
+        "Independent108 report pending.",
+        "Programmatic app-tab change verified in isolated frontend fixture; not physical hardware-page key proof.",
+        "Native108check used no cloud. Exact107synthetic-file service evidence inherited; live speech/BLE/external automatic input/physical usefulness and real purchase remain unknown."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -5303,7 +5337,8 @@
         "customer103_distinguishable_reply_keys_and_style_purpose",
         "customer104_actual_key_targets_and_local_page_use",
         "customer105_saved_phrase_explicit_clipboard_reuse",
-        "customer107_explicit_audio_file_transcription"
+        "customer107_explicit_audio_file_transcription",
+        "customer108_earlier_result_snapshot_and_audio_window_lifetime"
       ],
       "paths": {
         "type": [
@@ -5358,7 +5393,8 @@
           "scripts/check-saved-layout-phrases-ui.py",
           "src-tauri/src/commands/audio_file_trial.rs",
           "src/components/AudioFileTrial.tsx",
-          "scripts/check-audio-file-trial-ui.py"
+          "scripts/check-audio-file-trial-ui.py",
+          "scripts/check-earlier-trial-result-ui.py"
         ]
       },
       "known_failures": [
@@ -5453,7 +5489,8 @@
         "customer103_distinguishable_reply_keys_and_style_purpose",
         "customer104_actual_key_targets_and_local_page_use",
         "customer105_saved_phrase_explicit_clipboard_reuse",
-        "customer107_explicit_audio_file_transcription"
+        "customer107_explicit_audio_file_transcription",
+        "customer108_earlier_result_snapshot_and_audio_window_lifetime"
       ],
       "paths": {
         "type": [
@@ -5473,7 +5510,8 @@
           "scripts/check-saved-layout-phrases-ui.py",
           "src-tauri/src/commands/audio_file_trial.rs",
           "src/components/AudioFileTrial.tsx",
-          "scripts/check-audio-file-trial-ui.py"
+          "scripts/check-audio-file-trial-ui.py",
+          "scripts/check-earlier-trial-result-ui.py"
         ]
       },
       "known_failures": [

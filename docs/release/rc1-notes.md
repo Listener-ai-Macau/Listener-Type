@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build107 / Firmware33
+# Listener v1.0.6-rc1 · Type build108 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,11 @@
 | **ESP32-S3 firmware · USB flashing / Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+- When you change a trial draft, **Earlier result for comparison** keeps the previous edited result with its exact input available to read. It is clearly separate from a result for the new draft; no old Copy/Insert authority or service request is carried over. Restoring the exact input restores its matching edited result. A successful new result for that style replaces its previous snapshot; closing clears these temporary comparisons.
+- Recorded-audio requests and transcripts stay in their window when the underlying Type page changes.
+
+## Recorded audio · retained from build107
 
 - **Overview → Transcribe recorded audio** accepts an uncompressed 16 kHz/16-bit mono WAV up to 60 seconds. Choose a file or the included synthetic English sample; selection stays local until you explicitly choose **Transcribe**. It uses your existing direct Volcengine recognition service and its normal charges. Other providers and managed accounts are not supported in this new file entry.
 - Review and edit the actual returned transcript, then explicitly copy it for normal pasting. File results are not saved in History; copy before closing. Cancellation stops only that file request; it does not stop a live recording. No microphone, device command, automatic insertion or local-model download is involved. Sample reference words are labelled separately from recognition results; file-processing time is not live recording latency.
@@ -35,14 +40,16 @@ This is an **RC1 prerelease for Windows**. Review final words in noise or overla
 
 ## Check which file you have
 
-The MSI is **Type build107**, source **0a52991628e2** (also shown in the app footer/About). Firmware is **build33**, runtime **e7bd1f1619b696a1**. Filenames stay fixed within RC1; the source and SHA-256 identify the files.
+The MSI is **Type build108**, source **94dd0ce480bf** (also shown in the app footer/About). Firmware is **build33**, runtime **e7bd1f1619b696a1**. Filenames stay fixed within RC1; the source and SHA-256 identify the files.
 
 | Component | Exact source | SHA-256 |
 | --- | --- | --- |
-| Type107 MSI · 298835968 bytes | [0a52991628e2](https://github.com/Listener-ai-Macau/Listener-Type/commit/0a52991628e2760fa454e3a77a8b4d42acf594fa) | `5df52471f7f1fb1f3b936375963a61115db2fc4a4cef939a1e1a64e16eaea8f1` |
+| Type108 MSI · 298835968 bytes | [94dd0ce480bf](https://github.com/Listener-ai-Macau/Listener-Type/commit/94dd0ce480bfbd0da56b4c4d1f996aee90c2b859) | `0c5b48d6c31ab2e30be9bfb737b86dc2326743bb8394d91b80cc49d8a2e74248` |
 | Firmware33 ZIP · 1956905 bytes | [149b6d950ebc](https://github.com/Listener-ai-Macau/Listener-Firmware/commit/149b6d950ebc5f416924c8670cf2b207bdc2b5b7) | `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272` |
 
 ## 中文说明
+
+改稿后可只读对照「上一份结果」和对应原输入，不将旧结果当作新稿的输出，也不会重新请求服务。恢复完全相同的原稿时可恢复匹配修订；本风格生成新结果才替换旧快照，关闭清除。已有录音窗口由主界面持有，底层换页不会丢掉它的请求或文字。
 
 「总览 → 转写已有录音」可选择未压缩16 kHz、16位单声道WAV（最长60秒）或内置英文合成样例，明确点击「转写」才上传到当前自行配置的火山识别服务并正常计费；暂不支持其它提供商或托管账号。返回文字可核对、修订和明确复制，不写历史，关闭前复制需要保留的内容。取消只停止这条文件请求，不中断实时录音。此入口不采音、不控制设备、不自动上屏、不下载本地模型；样例参考词和实际识别结果分开，文件耗时不代表实时延迟。
 
@@ -52,4 +59,4 @@ The MSI is **Type build107**, source **0a52991628e2** (also shown in the app foo
 
 「使用已保存短语」可明确复制真实保存的内容，再正常粘贴到写作位置；这项复制才使用系统剪贴板，失败保留内容可重试，不自动上屏。卡片显示实际目标，支持的Type本机页面可从练习中明确打开；未保存保护保持。长配置窗口的顶部模式入口保持可见。
 
-Type免费，49美元是硬件价，云服务配置和用量另计。试用不启动录音、不改变当前风格、不写历史；非原文风格可能产生现有文字服务费用。Firmware33不变；本次不声称修复强干扰、偶发提前结束、唤醒或蓝牙，也不代表新的实物/真实语音/外部输入整体验收。当前Type107/0a52991628e2与Firmware33的校验值见上表。
+Type免费，49美元是硬件价，云服务配置和用量另计。试用不启动录音、不改变当前风格、不写历史；非原文风格可能产生现有文字服务费用。Firmware33不变；本次不声称修复强干扰、偶发提前结束、唤醒或蓝牙，也不代表新的实物/真实语音/外部输入整体验收。当前Type108/94dd0ce480bf与Firmware33的校验值见上表。

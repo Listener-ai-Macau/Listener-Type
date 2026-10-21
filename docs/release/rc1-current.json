@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T01:03:15.712547+08:00",
+  "updatedAt": "2026-10-22T01:20:23.796988+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 107,
-    "source": "0a52991628e2760fa454e3a77a8b4d42acf594fa",
-    "sourceTag": "build-source/type107-20261022",
+    "build": 108,
+    "source": "94dd0ce480bfbd0da56b4c4d1f996aee90c2b859",
+    "sourceTag": "build-source/type108-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "5df52471f7f1fb1f3b936375963a61115db2fc4a4cef939a1e1a64e16eaea8f1",
+    "sha256": "0c5b48d6c31ab2e30be9bfb737b86dc2326743bb8394d91b80cc49d8a2e74248",
     "sizeBytes": 298835968,
-    "exeSha256": "8996f7211c421f8e23a9483ab86d2266545a4a458fd1960790baf8f253abe052",
+    "exeSha256": "838e6c5428079dbae76532d2b472d07e54a2525415c1b53cff9c5f2f83257aab",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -140,8 +140,13 @@
     "type107InstalledExeAndPreferencesVerified": false,
     "type107ExactPrivateNativeWorkflowVerified": true,
     "type107VerificationScope": "Exact isolated native MSI: ordinary UI submits included synthetic11.48s file to existing direct Volcengine; actual152char transcript returned in1.5s, edited with Unicode/newline, explicit native Copy then ordinary Paste into own Type input and continued typing. Private preferences/history/styles and daily four states unchanged. Not live mic, wake/stop, BLE, external automatic input or physical qualification. Daily92 stays running.",
-    "customer107Reviewed": false,
-    "customer107PurchaseQualification": false
+    "customer107Reviewed": true,
+    "customer107PurchaseQualification": false,
+    "type108InstalledExeAndPreferencesVerified": false,
+    "type108ExactPrivateNativeWorkflowVerified": true,
+    "type108VerificationScope": "Exact isolated native MSI: ordinary Raw→edited native Copy→Paste into changed input→labelled earlier result with exact original source, no old current Copy/Insert controls; restoring the exact input restores the matching edited result. Audio window opens from Shell. No cloud in108 engineer check; actual synthetic file service evidence remains107. Daily92 remains open; no new live speech, BLE, external automatic input or physical qualification.",
+    "customer108Reviewed": false,
+    "customer108PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -158,6 +163,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build107-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build108-20261022"
   }
 }
