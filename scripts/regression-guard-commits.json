@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T20:14:30.284075+08:00",
+  "updated_at": "2026-10-21T21:10:23.605568+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3958,7 +3958,8 @@
         "F91-01": "Independent91 chose own Sam rescheduling message; Light purpose description clarified choice, actual0.8s service result and Copied-then-private-CtrlV useful. Did not use Everyday list.",
         "F91-02": "Immediate typing after choosing Light left entry empty while Checking trial availability. Exact event cause unknown; controlled91 reproduces same-class discarded typing because readiness disables draft; source8e92b182.",
         "F91-03": "Would reuse free text function, does not yet buy49USD hardware. No firsthand voice/control convenience or from-zero account/billing experience; retain hypothesis and refusal."
-      }
+      },
+      "commit_subject": "Offer an optional everyday list style with visible trial purpose"
     },
     {
       "id": "customer92_draft_independent_of_service_readiness",
@@ -3998,7 +3999,8 @@
       "customer_feedback": {
         "F92-01": "Independent customer chose own lunch rescheduling message; could type during Checking and retained draft; Light0.8s/Formal1.2s actual prepared text service results and Copied acknowledgement. No external paste, voice or physical use.",
         "F92-02": "Would keep free software; currently declines49USD hardware. Personal ordinary voice/control/physical convenience remains its purchase hypothesis, not an imposed universal gate. No follow-up reframing or unchanged new customer."
-      }
+      },
+      "commit_subject": "Keep drafts editable while style service readiness is checked"
     },
     {
       "id": "public_entry_product_before_setup_20261021",
@@ -4059,7 +4061,8 @@
       "environment_limits": [
         "Owned WinForms editor in a noninteractive window station can be UIA-writable/focused but SetForegroundWindow returned false; the product foreground precondition remains unsatisfied. Do not remove protection or call this a product failure.",
         "No installed WindowsSandbox/VM control found on PATH or running VM process in bounded20261021 check. No runtime/model/driver/service installation performed."
-      ]
+      ],
+      "commit_subject": "Put hardware, uses and direct downloads before setup details"
     },
     {
       "id": "type92_recorded_audio_to_original_popup",
@@ -4092,7 +4095,8 @@
         "One ordinary WinForms editor, not all target applications.",
         "Prerecorded nonsensitive synthetic voice, not live capture, wake, automatic endpoint, BLE or physical device use.",
         "No independent customer improvement, word accuracy certificate, direct clipboard read or purchase claim."
-      ]
+      ],
+      "commit_subject": "Keep drafts editable while style service readiness is checked"
     },
     {
       "id": "customer93_trial_retention_visible_at_result",
@@ -4119,7 +4123,8 @@
       "unverified": [
         "The independent customer used92 and expressed only a transient History expectation, not confirmed lost data.",
         "93 is not installed over the daily92 app; no new customer buying interest, live speech, hardware, external paste or Bluetooth qualification."
-      ]
+      ],
+      "commit_subject": "Show trial retention beside the result before customers close it"
     },
     {
       "id": "customer94_trial_control_layout_stability",
@@ -4158,7 +4163,8 @@
         "Customer93 coordinate misses are a usability clue; this controlled movement reproduction is not a unique reconstruction of every original click.",
         "Independent94 reaction, speech, physical hardware, other target applications, installation over daily92 and purchase remain separate.",
         "F95-02 actual Structured optional panel displaced controls72.375px despite prior Raw/Light guard.96 source203fac3 repairs this uncovered conditional branch;94 prior evidence retained within its original scope."
-      ]
+      ],
+      "commit_subject": "Keep trial controls stable across readiness and style changes"
     },
     {
       "id": "customer95_reviewed_result_explicit_handoff",
@@ -4198,7 +4204,8 @@
         "Successful insertion through the new button into an external app not verified by a noninteractive private station; do not substitute old92 recorded-file proof.",
         "Not live speech, physical control, BLE or whole-product sale acceptance.",
         "Not installed over daily92 or published over public94."
-      ]
+      ],
+      "commit_subject": "Hand reviewed trial results to an explicit current input destination"
     },
     {
       "id": "customer96_all_builtin_trial_layout",
@@ -4232,7 +4239,8 @@
       "unverified": [
         "Independent96 report pending; AI feedback not human payment or market evidence.",
         "No new external handoff success, live speech, hardware or install-over-daily claim."
-      ]
+      ],
+      "commit_subject": "Keep optional style suggestions below the active drafting workspace"
     },
     {
       "id": "customer97_local_result_revision_delivery",
@@ -4271,10 +4279,42 @@
         "Independent97 naturally used Light and edited its result in place, preserved original, completed its message draft. Did not choose Copy/Insert; still prefers free Type over49 hardware. AI use is not human payment or hardware acceptance.",
         "F96-02 automatic Formal quality remains open. Four private prompt trials not reliable; product prompt defaults preserved.",
         "Successful new-button external insertion, real voice/hardware, from-zero setup and real payment remain distinct unknowns."
+      ],
+      "commit_subject": "Let users finish and hand off edited trial results locally"
+    },
+    {
+      "id": "customer98_reusable_local_key_layouts",
+      "repo": "type",
+      "commit": "31ad48b3f345e224c06f0cccd61c6f9a0c76fb4f",
+      "subject": "feat: save reusable key layouts without changing connected devices",
+      "state": "candidate98_native_local_save_reload_passed_independent_customer_pending",
+      "protects": [
+        "Named local layouts never enumerate, connect to, write, or run a board action. Default key output is unchanged.",
+        "Loading into selected-device settings only edits that target draft. Explicit Write retains fresh read-token/settings/profile revision and exact peer guards.",
+        "Device switch unmounts old target draft. Library never synchronizes mappings through global preferences.",
+        "Atomic local persistence enforces20 layouts, device4096-byte compiled profile bound,256KiB file bound and revision CAS. Unreadable library never overwritten.",
+        "Unsaved edits require explicit discard; failed save preserves draft. Native saved layout survives UI reload."
+      ],
+      "guards": [
+        "cargo test --release --target x86_64-pc-windows-msvc --manifest-path src-tauri/Cargo.toml local_layouts --lib --jobs2: two actual storage boundary tests passed.",
+        "scripts/check-device-layouts-ui.py: affected local lifecycle, isolated target-draft load, explicit fresh exact-target write and target-switch checks.",
+        "Exact98 private ordinary UI saves Unicode phrase to real local file and reopens exact name/body after Page.reload; noLLM POST."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\layout98-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native98-snapshot-20261021-210607\\key-layout-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261021-build98\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE97-software-20261021-200233\\experience.txt"
+      ],
+      "unverified": [
+        "New independent98 use/purchase interest is pending;97 declined49 hardware despite useful software.",
+        "Physical key presses, new98 physical layout writing, real voice/from-zero setup/external Insert/long-term/real payment remain unknown. Headless target fixture is not a BLE or two-physical-board acceptance."
       ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-21T20:14:30.284075+08:00",
+  "feature_routes_updated_at": "2026-10-21T21:10:23.605568+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -4854,11 +4894,12 @@
     {
       "id": "device-onboard-key-profiles",
       "baseline_state": "installed60_fw32_single_peer_write_read_restore_passed",
-      "accepted_scope": "Independent board-owned configuration and installed single-peer read/write/restore. Native actual C two-NVS-bank separation. Two physical boards and physical key presses remain unclaimed.",
+      "accepted_scope": "Independent board-owned configuration and installed single-peer read/write/restore. Native actual C two-NVS-bank separation. Two physical boards and physical key presses remain unclaimed. Candidate98 additionally verifies real local reusable-layout persistence and controlled draft loading; no new physical acceptance.",
       "guard_entries": [
         "device_onboard_profiles59_timeout_failure",
         "device_onboard_keys60_exact_uid_and_bounded_transaction",
-        "firmware32_device_owned_profiles_atomic_nvs"
+        "firmware32_device_owned_profiles_atomic_nvs",
+        "customer98_reusable_local_key_layouts"
       ],
       "paths": {
         "type": [
@@ -4868,7 +4909,12 @@
           "src-tauri/src/coordinator/embedded_ble_runtime.rs",
           "src-tauri/src/embedded_ble/settings_target.rs",
           "src-tauri/src/embedded_ble/windows_ble/settings_target.rs",
-          "src/pages/settings/DeviceSection.tsx"
+          "src/pages/settings/DeviceSection.tsx",
+          "src-tauri/src/device_layouts.rs",
+          "src-tauri/src/commands/local_device_layouts.rs",
+          "src/components/DeviceLayoutsDialog.tsx",
+          "src/lib/deviceKeyLayouts.ts",
+          "scripts/check-device-layouts-ui.py"
         ],
         "firmware": [
           "components/device_settings/device_key_profile.c",
