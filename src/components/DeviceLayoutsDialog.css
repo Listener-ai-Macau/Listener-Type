@@ -19,6 +19,7 @@
 .ol-device-layout-modifiers { display: flex; flex-wrap: wrap; gap: 16px; }
 .ol-device-layout-modifiers label { flex-direction: row; align-items: center; }
 .ol-device-layout-confirm { margin: 12px 0; padding: 12px; background: var(--ol-blue-soft); border-radius: 8px; }
+.ol-device-layout-footer { position: sticky; bottom: -24px; z-index: 1; padding: 12px 0 24px; border-top: 1px solid var(--ol-line); background: var(--ol-surface); }
 @media(max-width:600px) { .ol-device-layout-pad { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 .ol-device-layout-mode { display: flex; gap: 8px; margin: 14px 0; }
 .ol-device-layout-mode button { border: 1px solid var(--ol-line-strong); border-radius: 8px; background: var(--ol-surface-2); color: var(--ol-ink); font: inherit; padding: 8px 14px; }

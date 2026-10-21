@@ -4,6 +4,15 @@ import type { zhCN } from './zh-CN';
 // 新增 key 時，必須同步更新 en.ts，避免切換到 English 後出現中文殘留。
 
 export const zhTW: typeof zhCN = {
+  keyPhrase: {
+    "unsaved": "這段短語有尚未用於配置的修改。要捨棄未儲存的草稿並關閉嗎？",
+    "open": "放到按鍵配置…",
+    "title": "給按鍵的文字",
+    "text": "要使用的短語",
+    "hint": "選取按鍵與按法，再將短語放入草稿。確認後儲存配置；這裡不寫入裝置，原始結果仍保留在試用視窗。",
+    "tooLong": "請先將短語縮短至 2,000 個字元以內，再用於單一按鍵。",
+    "use": "用於{{key}} · {{gesture}}"
+  },
   styleComparisons: {
     "title": "這段原文已完成的結果",
     "hint": "這些結果保留在目前視窗，不會重新請求服務。開啟相應結果後可編輯或複製。",

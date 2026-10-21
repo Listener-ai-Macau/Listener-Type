@@ -6,6 +6,8 @@ import { stylePackExamplePresentation, stylePackPresentation } from '../lib/styl
 import type { StylePack, StyleTextTrialReadiness, StyleTextTrialResult } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import './StyleTextTrial.css';
+import { DeviceLayoutsDialog } from './DeviceLayoutsDialog';
+import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
 
 export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draft, onDraftChange, onClose, onOpenProviders }: {
   pack: StylePack;
@@ -28,6 +30,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const running = useRef(false);
   const copyRunning = useRef(false);
   const [pending, setPending] = useState(false);
+  const [keyPhrase, setKeyPhrase] = useState<string | null>(null);
   const [storedResult, setResult] = useState<StyleTextTrialResult | null>(null);
   const [resultSignature, setResultSignature] = useState('');
   const [editedOutput, setEditedOutput] = useState<string | null>(null);
@@ -260,6 +263,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
             <Btn size="sm" variant="ghost" disabled={copying || delivering || !resultOutput.trim()} onClick={() => void copyResult()}>
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
             </Btn>
+            <Btn size="sm" variant="ghost" disabled={copying || delivering || !resultOutput.trim()} onClick={() => setKeyPhrase(resultOutput)}>{t('keyPhrase.open')}</Btn>
             {canInsertStyleTrialResult && <Btn size="sm" variant="blue" disabled={copying || delivering || !resultOutput.trim()} onClick={() => void insertElsewhere()}>{t('style.trial.insertElsewhere')}</Btn>}
             </div>
           </div>
@@ -333,6 +337,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           ))}
         </details>
       )}
+      {keyPhrase !== null && <DeviceLayoutsDialog rememberSelection initialProfile={writingDeviceKeyProfile()} incomingText={keyPhrase} onClose={() => setKeyPhrase(null)} />}
     </dialog>
   );
 }

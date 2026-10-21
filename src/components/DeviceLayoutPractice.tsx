@@ -4,7 +4,7 @@ import type { DeviceCustomKeyMapping, DeviceKeyProfile } from '../lib/types';
 import { layoutKeyIds } from '../lib/deviceKeyLayouts';
 
 /** A scoped software practice field. Never dispatches shortcuts, IPC or clipboard calls. */
-export function DeviceLayoutPractice({ profile }: { profile: DeviceKeyProfile }) {
+export function DeviceLayoutPractice({ profile, onInteract }: { profile: DeviceKeyProfile; onInteract?: () => void }) {
   const { t } = useTranslation();
   const field = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState('');
@@ -39,6 +39,7 @@ export function DeviceLayoutPractice({ profile }: { profile: DeviceKeyProfile })
     setText(previous.text); place(previous.start, previous.end); setStatus(t('devicePractice.undone'));
   };
   const press = (mapping: DeviceCustomKeyMapping) => {
+    onInteract?.();
     if (mapping.action === 'pasteTemplate') return replace(mapping.pasteTemplate);
     if (mapping.action === 'copyShortcut') return copy();
     if (mapping.action === 'pasteShortcut') return paste();
@@ -64,6 +65,7 @@ export function DeviceLayoutPractice({ profile }: { profile: DeviceKeyProfile })
       placeholder={t('devicePractice.placeholder')}
       onSelect={() => { selection.current = range(); }}
       onChange={event => {
+        onInteract?.();
         undo.current.push({ text, ...selection.current });
         if (undo.current.length > 32) undo.current.shift();
         setText(event.target.value); selection.current = { start: event.target.selectionStart, end: event.target.selectionEnd }; setStatus('');

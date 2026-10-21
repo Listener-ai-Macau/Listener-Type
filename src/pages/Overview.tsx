@@ -330,7 +330,7 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onO
           <span style={{ fontSize: 12, color: 'var(--ol-ink-3)' }}>{t('deviceLayouts.entryHint')}</span>
         </div>
       </Card>
-      {layoutsOpen && <DeviceLayoutsDialog initialPractice={layoutsOpen === 'practice'} initialProfile={layoutsOpen === 'practice' ? writingDeviceKeyProfile() : undefined} onClose={() => setLayoutsOpen(null)} />}
+      {layoutsOpen && <DeviceLayoutsDialog rememberSelection initialPractice={layoutsOpen === 'practice'} initialProfile={layoutsOpen === 'practice' ? writingDeviceKeyProfile() : undefined} onClose={() => setLayoutsOpen(null)} />}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 12 }}>
         <ProviderCard

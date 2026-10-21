@@ -9,17 +9,22 @@ import { DeviceLayoutPractice } from './DeviceLayoutPractice';
 
 type Group = typeof layoutGestures[number];
 const primaryKeys = ['RightControl','LeftControl','RightShift','LeftShift','RightAlt','LeftAlt', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', 'Enter','Tab','Space','Escape','Backspace','Delete','Insert','Home','End','PageUp','PageDown','ArrowUp','ArrowDown','ArrowLeft','ArrowRight', ...Array.from({length:12},(_,i)=>`F${i+1}`)];
+const overviewLayoutKey = 'ol.overviewLastDeviceLayout';
 
-export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPractice = false, onUseLayout, onClose }: {
+export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPractice = false, rememberSelection = false, incomingText, onUseLayout, onClose }: {
   initialProfile?: DeviceKeyProfile;
   initialKnob?: DeviceKnobRotationAction;
   initialPractice?: boolean;
+  rememberSelection?: boolean;
+  incomingText?: string;
   onUseLayout?: (layout: DeviceLayout) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   const alive = useRef(true);
+  const initialRestore = useRef(true);
+  const touched = useRef(false);
   const [layouts, setLayouts] = useState<DeviceLayout[]>([]);
   const [editing, setEditing] = useState<DeviceLayout | null>(null);
   const [name, setName] = useState('');
@@ -33,10 +38,17 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
   const [busy, setBusy] = useState(false);
   const [practice, setPractice] = useState(initialPractice);
   const [practiceRevision, setPracticeRevision] = useState(0);
+  const [phrase, setPhrase] = useState(incomingText ?? '');
+  const phraseCheckpoint = useRef(incomingText ?? '');
   const [message, setMessage] = useState('');
   const [confirmation, setConfirmation] = useState<{ text: string; action: () => void } | null>(null);
   const actionGroup = key === 'knob' ? 'deviceCustomKeys' : group;
   const mapping = profile[actionGroup][key];
+  const remember = (id: string | null) => {
+    if (!rememberSelection) return;
+    try { if (id) sessionStorage.setItem(overviewLayoutKey, id); else sessionStorage.removeItem(overviewLayoutKey); } catch { /* A session hint must not block editing or saving. */ }
+  };
+  const markDirty = () => { touched.current = true; setDirty(true); setMessage(''); };
   const errorText = (cause: unknown) => {
     const code = String(cause).replace(/^Error: /, '');
     const known = ['stale','invalid_name','limit','profile_too_large','invalid_file','file_too_large'];
@@ -44,7 +56,19 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
   };
   const refresh = async () => {
     setLoading(true); setLoadError('');
-    try { const value = await listLocalDeviceLayouts(); if (alive.current) setLayouts(value); }
+    try {
+      const value = await listLocalDeviceLayouts();
+      if (alive.current) {
+        setLayouts(value);
+        if (initialRestore.current) {
+          initialRestore.current = false;
+          let last: string | null = null;
+          if (rememberSelection) { try { last = sessionStorage.getItem(overviewLayoutKey); } catch { /* Optional session hint. */ } }
+          const previous = value.find(layout => layout.id === last);
+          if (previous && !touched.current) reset(previous);
+        }
+      }
+    }
     catch (cause) { if (alive.current) setLoadError(errorText(cause)); }
     finally { if (alive.current) setLoading(false); }
   };
@@ -56,16 +80,19 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
   }, []);
   const attempt = (action: () => void) => dirty
     ? setConfirmation({ text: t('deviceLayouts.unsaved'), action }) : action();
+  const closeAttempt = () => incomingText !== undefined && phrase !== phraseCheckpoint.current
+    ? setConfirmation({ text: t('keyPhrase.unsaved'), action:onClose }) : attempt(onClose);
   const reset = (value?: DeviceLayout, writing = false) => {
     setEditing(value ?? null); setName(value?.name ?? '');
     setProfile(structuredClone(value?.profile ?? (writing ? writingDeviceKeyProfile() : defaultDeviceKeyProfile())));
     setKnob(value?.knobRotationAction ?? 'systemVolume'); setGroup('deviceCustomKeys');
     setDirty(writing); setMessage(''); setConfirmation(null);
     setPracticeRevision(value => value + 1);
+    remember(value?.id ?? null);
   };
   const edit = (value: DeviceCustomKeyMapping) => {
     setProfile(current => ({ ...current, [actionGroup]: { ...current[actionGroup], [key]: value } }));
-    setDirty(true); setMessage('');
+    markDirty();
   };
   const save = async () => {
     if (busy || loading || loadError || !name.trim()) return;
@@ -76,6 +103,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
       setLayouts(current => [...current.filter(layout => layout.id !== value.id), value]);
       setEditing(value); setProfile(value.profile); setName(value.name); setDirty(false); setConfirmation(null);
       setMessage(t('deviceLayouts.saved'));
+      remember(value.id);
     } catch (cause) { if (alive.current) setMessage(errorText(cause)); }
     finally { if (alive.current) setBusy(false); }
   };
@@ -89,10 +117,10 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
     finally { if (alive.current) setBusy(false); }
   };
   return <dialog ref={dialog} className="ol-device-layout-dialog ol-thinscroll" aria-labelledby="device-layout-title"
-    onCancel={event => { event.preventDefault(); if (!busy) attempt(onClose); }}>
+    onCancel={event => { event.preventDefault(); event.stopPropagation(); if (!busy) closeAttempt(); }}>
     <div className="ol-device-layout-heading">
       <h2 id="device-layout-title">{t('deviceLayouts.title')}</h2>
-      <Btn size="sm" variant="ghost" disabled={busy} onClick={() => attempt(onClose)}>{t('common.close')}</Btn>
+      <Btn size="sm" variant="ghost" disabled={busy} onClick={closeAttempt}>{t('common.close')}</Btn>
     </div>
     <p className="ol-device-layout-hint">{t(practice ? 'devicePractice.intro' : 'deviceLayouts.description')}</p>
     <div className="ol-device-layout-mode" role="group" aria-label={t('devicePractice.mode')}>
@@ -119,7 +147,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
       {loading && <p role="status">{t('common.loading')}</p>}
       {loadError && <p role="alert">{loadError}{' '}<Btn size="sm" onClick={() => void refresh()}>{t('common.retry')}</Btn></p>}
       <label className="ol-device-layout-name">{t('deviceLayouts.name')}<input aria-label={t('deviceLayouts.name')} maxLength={80} value={name}
-        placeholder={t('deviceLayouts.namePlaceholder')} onChange={event => { setName(event.target.value); setDirty(true); setMessage(''); }} /></label>
+        placeholder={t('deviceLayouts.namePlaceholder')} onChange={event => { setName(event.target.value); markDirty(); }} /></label>
       <p className="ol-device-layout-hint">{t('deviceLayouts.pickKey')}</p>
       <div className="ol-device-layout-pad">
         {layoutKeyIds.map(id => <button type="button" key={id} aria-pressed={key === id} onClick={() => setKey(id)}>
@@ -127,6 +155,14 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
           <span>{t(`settings.deviceKeys.actions.${profile[id === 'knob' ? 'deviceCustomKeys' : group][id].action}`)}</span>
         </button>)}
       </div>
+      {incomingText !== undefined && <section className="ol-device-layout-editor" aria-label={t('keyPhrase.title')}>
+        <label>{t('keyPhrase.text')}<textarea aria-label={t('keyPhrase.text')} rows={3} maxLength={2000} value={phrase} onChange={event => setPhrase(event.target.value)} /></label>
+        <p className="ol-device-layout-hint">{t('keyPhrase.hint')}</p>
+        {phrase.length > 2000 && <p role="alert" className="ol-device-layout-hint">{t('keyPhrase.tooLong')}</p>}
+        <Btn size="sm" variant="blue" disabled={!phrase.trim() || phrase.length > 2000} onClick={() => { edit({...mapping, action:'pasteTemplate', pasteTemplate:phrase}); phraseCheckpoint.current = phrase; }}>
+          {t('keyPhrase.use', {key:key === 'knob' ? t('settings.deviceKeys.knob.title') : t('deviceLayouts.key', {number:key.slice(3)}), gesture:t(`settings.deviceKeys.gestures.${key === 'knob' ? 'singleClick' : ['singleClick','doubleClick','longPress'][layoutGestures.indexOf(group)]}`)})}
+        </Btn>
+      </section>}
       <div className="ol-device-layout-editor">
         <h3>{key === 'knob' ? t('settings.deviceKeys.knob.title') : t('deviceLayouts.key', { number: key.slice(3) })}</h3>
         {key !== 'knob' && <label>{t('deviceLayouts.gesture')}<select aria-label={t('deviceLayouts.gesture')} value={group} onChange={event => setGroup(event.target.value as Group)}>
@@ -150,7 +186,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
           <div className="ol-device-layout-modifiers">{['ctrl','shift','alt','super'].map(modifier => <label key={modifier}><input type="checkbox" checked={mapping.shortcut?.modifiers.includes(modifier) ?? false} onChange={event => edit({...mapping,shortcut:{primary:mapping.shortcut?.primary ?? 'F1',modifiers:event.target.checked ? [...(mapping.shortcut?.modifiers ?? []),modifier] : (mapping.shortcut?.modifiers ?? []).filter(value => value !== modifier)}})} />{modifier === 'super' ? 'Win / Command' : modifier}</label>)}</div>
         </>}
         {key === 'knob' && <>
-          <label>{t('settings.deviceKeys.knob.gestures.rotate')}<select aria-label={t('settings.deviceKeys.knob.gestures.rotate')} value={knob} onChange={event => { setKnob(event.target.value as DeviceKnobRotationAction); setDirty(true); }}>
+          <label>{t('settings.deviceKeys.knob.gestures.rotate')}<select aria-label={t('settings.deviceKeys.knob.gestures.rotate')} value={knob} onChange={event => { setKnob(event.target.value as DeviceKnobRotationAction); markDirty(); }}>
             {(['systemVolume','screenBrightness','disabled'] as const).map(value => <option key={value} value={value}>{t(`settings.deviceKeys.knob.actions.${value}`)}</option>)}
           </select></label>
           <p className="ol-device-layout-hint">{t('deviceLayouts.fixedKnob')}</p>
@@ -158,14 +194,14 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
       </div>
       <p className="ol-device-layout-hint">{t('deviceLayouts.requirements')}</p>
       {message && <p role="status">{message}</p>}
-      <div className="ol-device-layout-toolbar">
+      <div className="ol-device-layout-toolbar ol-device-layout-footer">
         <Btn variant="blue" disabled={loading || !!loadError || !name.trim() || !dirty} onClick={() => void save()}>{t(busy ? 'deviceLayouts.saving' : 'deviceLayouts.save')}</Btn>
         {onUseLayout && <Btn variant="ghost" disabled={!editing || dirty} onClick={() => { if (editing) { onUseLayout(editing); onClose(); } }}>{t('deviceLayouts.loadIntoSettings')}</Btn>}
         {editing && <Btn size="sm" variant="ghost" onClick={() => setConfirmation({ text: t('deviceLayouts.deleteConfirm', {name:editing.name}), action: () => void remove(editing) })}>{t('deviceLayouts.delete')}</Btn>}
         {dirty && <span className="ol-device-layout-hint">{t('deviceLayouts.unsavedShort')}</span>}
       </div>
       </div>
-      <div hidden={!practice}><DeviceLayoutPractice key={practiceRevision} profile={profile} /></div>
+      <div hidden={!practice}><DeviceLayoutPractice key={practiceRevision} profile={profile} onInteract={() => { touched.current = true; }} /></div>
     </fieldset>
   </dialog>;
 }

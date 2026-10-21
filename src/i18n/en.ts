@@ -5,6 +5,15 @@ import { enDeviceMaintenance, enFirmwareMaintenance } from './enDeviceMaintenanc
 
 // Type-level guarantee that en mirrors the zh-CN shape.
 export const en: typeof zhCN = {
+  keyPhrase: {
+    "unsaved": "This phrase has edits that have not been used in the layout. Discard the unsaved draft and close?",
+    "open": "Use as a key phrase…",
+    "title": "Text for a key",
+    "text": "Phrase to use",
+    "hint": "Choose a key and press type, then use this phrase in its draft. Save the layout when ready; this does not write to a device. Your original result stays in the trial window.",
+    "tooLong": "Shorten this phrase to 2,000 characters or fewer before using it for one key.",
+    "use": "Use for {{key}} · {{gesture}}"
+  },
   styleComparisons: {
     "title": "Completed for this text",
     "hint": "These results stay in this open window without a new service request. Open a result to edit or copy it.",
