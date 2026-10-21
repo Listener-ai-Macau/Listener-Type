@@ -4,6 +4,8 @@ import { suggestPoliteTextEdits } from '../lib/ipc';
 import { applyLocalPoliteOption, applyPoliteEdits, localPoliteOptions, reviewPoliteEdits, type PoliteEditReview } from '../lib/politeEdits';
 import { Btn } from '../pages/_atoms';
 
+type SuggestionFailure = 'native' | 'requestFailed' | 'unusableReply' | 'applyFailed';
+
 export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured = true }: {
   text: string; disabled: boolean; onApply: (text: string) => void;
   cloudConfigured?: boolean;
@@ -14,7 +16,7 @@ export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured
   const [pending, setPending] = useState(false);
   const [reply, setReply] = useState<{ source: string; review: PoliteEditReview; elapsedMs: number } | null>(null);
   const [selected, setSelected] = useState<number[]>([]);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<{ source: string; kind: SuggestionFailure } | null>(null);
   const [applied, setApplied] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const panel = useRef<HTMLElement>(null);
@@ -30,13 +32,20 @@ export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured
   const request = async () => {
     if (running.current || disabled || !cloudConfigured || !text.trim() || text.length > 4000) return;
     const source = text;
-    running.current = true; setPending(true); setError(''); setReply(null); setSelected([]); setApplied(null);
+    running.current = true; setPending(true); setError(null); setReply(null); setSelected([]); setApplied(null);
+    let receivedReply = false;
     try {
       const response = await suggestPoliteTextEdits(source);
+      receivedReply = true;
       const review = reviewPoliteEdits(source, response.proposalJson);
       if (alive.current) setReply({ source, review, elapsedMs: response.elapsedMs });
     } catch (cause) {
-      if (alive.current) setError(String(cause).includes('native_required') ? 'native' : 'failed');
+      // A delivered but unusable proposal is not evidence of broken credentials.
+      // The native endpoint can also reject an empty/oversized service response.
+      const message = String(cause);
+      const kind: SuggestionFailure = receivedReply || message.includes('polite_edits_invalid_response')
+        ? 'unusableReply' : message.includes('native_required') ? 'native' : 'requestFailed';
+      if (alive.current) setError({ source, kind });
     } finally {
       running.current = false;
       if (alive.current) setPending(false);
@@ -47,7 +56,7 @@ export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured
     try {
       const updated = applyPoliteEdits(text, selected.map(index => current.review.edits[index]));
       onApply(updated); setApplied(updated); setReply(null); setSelected([]);
-    } catch { setError('failed'); }
+    } catch { setError({ source: text, kind: 'applyFailed' }); }
   };
   return <>
     <Btn size="sm" variant="ghost" disabled={disabled || !text.trim()} onClick={() => setOpen(value => !value)}>{t('politeEdits.open')}</Btn>
@@ -60,8 +69,8 @@ export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured
       <Btn size="sm" disabled={disabled || pending} onClick={() => {
         try {
           const updated = applyLocalPoliteOption(text, edit);
-          onApply(updated); setApplied(updated); setReply(null); setSelected([]); setError('');
-        } catch { setError('failed'); }
+          onApply(updated); setApplied(updated); setReply(null); setSelected([]); setError(null);
+        } catch { setError({ source: text, kind: 'applyFailed' }); }
       }}>{t('politeEdits.useLocal')}</Btn>
     </div>)}
     <p className="ol-style-trial-hint">{t(cloudConfigured ? 'politeEdits.cost' : 'politeEdits.cloudSetupHint')}</p>
@@ -81,7 +90,7 @@ export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured
     </>}
     {reply && !current && <p role="status" className="ol-style-trial-hint">{t('politeEdits.stale')}</p>}
     {applied === text && <p role="status" className="ol-style-trial-hint">{t('politeEdits.applied')}</p>}
-    {error && <p role="alert" className="ol-style-trial-hint">{t(`politeEdits.${error}`)}</p>}
+    {error?.source === text && <p role="alert" className="ol-style-trial-hint">{t(`politeEdits.${error.kind}`)}</p>}
   </section>}
   </>;
 }

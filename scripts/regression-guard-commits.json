@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T06:41:03.361685+08:00",
+  "updated_at": "2026-10-22T06:52:51.645674+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5203,7 +5203,7 @@
       "repo": "type",
       "commit": "db025dbc713d808412944361fd45e63f2dd9bd6b",
       "subject": "Fix request-span detection, remove cloud prerequisite for local wording, report identical service response factually",
-      "state": "exact123_keyless_native_verified_customer_pending",
+      "state": "customer123_local_choice_save_recovery_improved_optional_service_reply_rejected_generic_error_open",
       "previous_source_evidence": "122 natural Hi,could-you request: Formal0.9s identical, local no option, extra0.7s no edits; customer deferred49 and wanted explanation or a comparable alternative. Whole-sentence-start matching missed request after greeting.",
       "protects": [
         "Find finite English request span; leave greeting/addressee/preceding condition/date/rest outside it intact. Local chosen option recomputed on current source; exact body and literal tokens, no preselection/auto apply. Limited English, not general/multilingual grammar.",
@@ -5225,10 +5225,18 @@
       ],
       "customer_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE122-software-20261022-062500\\experience.txt",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE122-software-20261022-062500\\operations.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE122-software-20261022-062500\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE123-software-20261022-064300\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE123-software-20261022-064300\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE123-software-20261022-064300\\06-options-after-click.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE123-software-20261022-064300\\09-saved-draft-recovered.png"
       ],
       "unverified": [
-        "Fresh123 customer not yet dispatched. Actual cloud identity reason not available; labelled fact only. Global Formal/multilingual quality, live/external input/physical/hardware value/order not qualified."
+        "123全文/操作/06与09截图已读：自选会议通知Light0.9s有效整理，实际本地礼貌修改、保存重开，第二次普通粘贴到私有自有输入框成立；仍49暂缓/愿先用免费Type。额外建议实际1.028s返回379字符，前端未能采用却笼统要求检查服务；不是已证网络或凭据故障。",
+        "F123-01并原L09/F96-02：追加建议返回/采用失败分类不清，124修请求与响应校验错误路径，不放宽保护。",
+        "F123-02整体简洁愿望并原L09/F96-02，礼貌选项不冒充缩短全文；尚待实际价值方案。",
+        "F123-A01：滚动后沿用旧坐标误点云按钮属隔离适配器问题，不算本地按钮偷发请求；泛用实时命中检查补到工具。",
+        "无实体/外部应用/真人购买证明。"
       ]
     }
   ],
