@@ -4,6 +4,17 @@ import type { zhCN } from './zh-CN';
 // 新增 key 時，必須同步更新 en.ts，避免切換到 English 後出現中文殘留。
 
 export const zhTW: typeof zhCN = {
+  savedPhrases: {
+    title: '使用已儲存定型文',
+    intro: '使用已儲存配置中的定型文。複製到剪貼簿後，貼到正在寫作的位置。配置變更需先儲存才會出現在這裡。',
+    choose: '選擇已儲存配置',
+    empty: '請在上方選擇已儲存配置，或到「設定與儲存」將按鍵設為「貼上範本」並儲存。',
+    copy: '複製{{key}} · {{gesture}}',
+    copying: '正在複製…',
+    copied: '已複製',
+    paste: '已複製到剪貼簿。可貼到訊息中，繼續寫作。',
+    failed: '無法複製這段定型文。儲存內容仍在，請重新複製。',
+  },
   keyActionHelp: {
     moreOptions: '更多按鍵選項',
     pageReady: '此鍵開啟 Type 的「{{page}}」。點擊下方按鈕可離開練習並開啟。',

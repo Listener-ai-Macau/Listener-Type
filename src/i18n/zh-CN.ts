@@ -2,6 +2,17 @@
 // 添加新 key 时，必须同步更新 en.ts，否则首次切换到 English 会回落到中文残留。
 
 export const zhCN = {
+  savedPhrases: {
+    title: '使用已保存短语',
+    intro: '使用已保存布局中的短语。复制到剪贴板后，粘贴到正在写作的位置。布局修改需先保存才会出现在这里。',
+    choose: '选择已保存布局',
+    empty: '请在上方选择已保存布局，或到「配置与保存」给按键设为「粘贴模板」并保存。',
+    copy: '复制{{key}} · {{gesture}}',
+    copying: '正在复制…',
+    copied: '已复制',
+    paste: '已复制到剪贴板。可粘贴到消息中，继续写作。',
+    failed: '未能复制这段短语。保存内容仍在，请重新复制。',
+  },
   keyActionHelp: {
     moreOptions: '更多按键选项',
     pageReady: '此键打开 Type 的「{{page}}」。点击下方按钮可离开练习并打开。',

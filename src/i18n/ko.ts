@@ -6,6 +6,17 @@ import { en } from './en.ts';
 // 갱신해 주세요(갱신되지 않은 key 는 ...en 으로 영어로 fallback 됩니다).
 export const ko: typeof zhCN = {
   ...en,
+  savedPhrases: {
+    title: '저장한 문구 사용',
+    intro: '저장된 레이아웃에서 문구를 복사해 작성 중인 곳에 붙여 넣으세요. 레이아웃 수정 사항은 먼저 저장해야 여기에 반영됩니다.',
+    choose: '저장된 레이아웃 선택',
+    empty: '위에서 저장된 레이아웃을 선택하거나 설정 및 저장에서 문구 붙여넣기 키를 추가하고 저장하세요.',
+    copy: '{{key}} · {{gesture}} 복사',
+    copying: '복사 중…',
+    copied: '복사됨',
+    paste: '클립보드에 복사했습니다. 메시지에 붙여 넣고 계속 작성하세요.',
+    failed: '문구를 복사하지 못했습니다. 저장된 내용은 그대로 있으니 다시 복사하세요.',
+  },
   keyActionHelp: {
     moreOptions: '추가 키 옵션',
     pageReady: '이 키는 Type의 {{page}} 페이지를 엽니다. 아래 버튼으로 연습을 나가 해당 페이지를 열 수 있습니다.',

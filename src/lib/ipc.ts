@@ -1013,11 +1013,14 @@ export async function copyHistoryEntry(id: string, expectedText: string, nativeW
   await navigator.clipboard.writeText(expectedText);
 }
 
-export async function copyStyleTrialResult(text: string, nativeWindows: boolean): Promise<void> {
+// This legacy native endpoint accepts explicit text, independently of any trial.
+export async function copyExplicitText(text: string, nativeWindows: boolean): Promise<void> {
   if (isTauri && nativeWindows) return invokeOrMock<void>('copy_style_trial_result', { text }, () => undefined);
   if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
   await navigator.clipboard.writeText(text);
 }
+
+export const copyStyleTrialResult = copyExplicitText;
 
 export const canInsertStyleTrialResult = isTauri && /Windows/i.test(navigator.userAgent);
 export function insertStyleTrialResult(requestId: string, text: string): Promise<'confirmed' | 'sent'> {

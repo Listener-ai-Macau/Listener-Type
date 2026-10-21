@@ -8,15 +8,17 @@ import './DeviceLayoutsDialog.css';
 import { DeviceLayoutPractice } from './DeviceLayoutPractice';
 import { DeviceKeyActionPreview } from './DeviceKeyActionPreview';
 import { DevicePageNavigationContext } from '../state/DevicePageNavigationContext';
+import { SavedLayoutPhrases } from './SavedLayoutPhrases';
 
 type Group = typeof layoutGestures[number];
 const primaryKeys = ['RightControl','LeftControl','RightShift','LeftShift','RightAlt','LeftAlt', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', 'Enter','Tab','Space','Escape','Backspace','Delete','Insert','Home','End','PageUp','PageDown','ArrowUp','ArrowDown','ArrowLeft','ArrowRight', ...Array.from({length:12},(_,i)=>`F${i+1}`)];
 const overviewLayoutKey = 'ol.overviewLastDeviceLayout';
 
-export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPractice = false, rememberSelection = false, incomingText, onUseLayout, onLeaveForPage, onClose }: {
+export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPractice = false, initialPhrases = false, rememberSelection = false, incomingText, onUseLayout, onLeaveForPage, onClose }: {
   initialProfile?: DeviceKeyProfile;
   initialKnob?: DeviceKnobRotationAction;
   initialPractice?: boolean;
+  initialPhrases?: boolean;
   rememberSelection?: boolean;
   incomingText?: string;
   onUseLayout?: (layout: DeviceLayout) => void;
@@ -41,6 +43,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
   const [loadError, setLoadError] = useState('');
   const [busy, setBusy] = useState(false);
   const [practice, setPractice] = useState(initialPractice);
+  const [usePhrases, setUsePhrases] = useState(initialPhrases);
   const [practiceRevision, setPracticeRevision] = useState(0);
   const [phrase, setPhrase] = useState(incomingText ?? '');
   const phraseCheckpoint = useRef(incomingText ?? '');
@@ -127,15 +130,18 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
   };
   return <dialog ref={dialog} className="ol-device-layout-dialog ol-thinscroll" aria-labelledby="device-layout-title"
     onCancel={event => { event.preventDefault(); event.stopPropagation(); if (!busy) closeAttempt(); }}>
+    <div className="ol-device-layout-nav">
     <div className="ol-device-layout-heading">
       <h2 id="device-layout-title">{t('deviceLayouts.title')}</h2>
       <Btn size="sm" variant="ghost" disabled={busy} onClick={closeAttempt}>{t('common.close')}</Btn>
     </div>
-    <p className="ol-device-layout-hint">{t(practice ? 'devicePractice.intro' : 'deviceLayouts.description')}</p>
     <div className="ol-device-layout-mode" role="group" aria-label={t('devicePractice.mode')}>
-      <button type="button" aria-pressed={!practice} disabled={busy} onClick={() => setPractice(false)}>{t('devicePractice.configure')}</button>
-      <button type="button" aria-pressed={practice} disabled={busy} onClick={() => setPractice(true)}>{t('devicePractice.practice')}</button>
+      <button type="button" aria-pressed={!practice && !usePhrases} disabled={busy} onClick={() => { setUsePhrases(false); setPractice(false); }}>{t('devicePractice.configure')}</button>
+      <button type="button" aria-pressed={practice && !usePhrases} disabled={busy} onClick={() => { setUsePhrases(false); setPractice(true); }}>{t('devicePractice.practice')}</button>
+      <button type="button" aria-pressed={usePhrases} disabled={busy} onClick={() => { setUsePhrases(true); setPractice(false); }}>{t('savedPhrases.title')}</button>
     </div>
+    </div>
+    <p className="ol-device-layout-hint">{t(usePhrases ? 'savedPhrases.intro' : practice ? 'devicePractice.intro' : 'deviceLayouts.description')}</p>
     {!nativeDeviceLayoutsAvailable && <p role="note" className="ol-device-layout-hint">{t('deviceLayouts.previewOnly')}</p>}
     {confirmation && <div role="alert" className="ol-device-layout-confirm">
       <p>{confirmation.text}</p>
@@ -143,7 +149,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
       <Btn size="sm" variant="ghost" onClick={confirmation.action}>{t('deviceLayouts.discardContinue')}</Btn>
     </div>}
     <fieldset disabled={busy} className="ol-device-layout-fields">
-      <div hidden={practice}>
+      <div hidden={practice || usePhrases}>
       <div className="ol-device-layout-toolbar">
         <label>{t('deviceLayouts.library')}
           <select aria-label={t('deviceLayouts.library')} value={editing?.id ?? ''} disabled={loading} onChange={event => {
@@ -214,8 +220,10 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
         {dirty && <span className="ol-device-layout-hint">{t('deviceLayouts.unsavedShort')}</span>}
       </div>
       </div>
-      <div hidden={!practice}><DeviceLayoutPractice key={practiceRevision} profile={profile} onInteract={() => { touched.current = true; }} leavingTrial={!!onLeaveForPage}
+      <div hidden={!practice || usePhrases}><DeviceLayoutPractice key={practiceRevision} profile={profile} onInteract={() => { touched.current = true; }} leavingTrial={!!onLeaveForPage}
         onOpenPage={openPage ? page => leave(() => { onClose(); onLeaveForPage?.(); openPage(page); }) : undefined} /></div>
+      {usePhrases && <SavedLayoutPhrases layouts={layouts} selectedId={editing?.id ?? null} loading={loading} error={loadError} onBusy={setBusy}
+        onSelect={value => { touched.current = true; attempt(() => reset(value)); }} />}
     </fieldset>
   </dialog>;
 }

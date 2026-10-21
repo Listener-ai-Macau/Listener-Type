@@ -5,6 +5,17 @@ import { enDeviceMaintenance, enFirmwareMaintenance } from './enDeviceMaintenanc
 
 // Type-level guarantee that en mirrors the zh-CN shape.
 export const en: typeof zhCN = {
+  savedPhrases: {
+    title: 'Use my saved phrases',
+    intro: 'Use phrases from a saved layout. Copy to your clipboard, then paste where you are writing. Save layout edits first to use them here.',
+    choose: 'Choose a saved layout',
+    empty: 'Choose a saved layout above, or add a Paste template key in Configure & save and save it.',
+    copy: 'Copy {{key}} · {{gesture}}',
+    copying: 'Copying…',
+    copied: 'Copied',
+    paste: 'Copied to your clipboard. Paste in your message and keep writing.',
+    failed: 'Could not copy this phrase. It stays saved; try Copy again.',
+  },
   keyActionHelp: {
     moreOptions: 'More key options',
     pageReady: 'This key opens {{page}} in Type. Use the button below to leave practice and open it.',
