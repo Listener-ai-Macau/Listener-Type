@@ -29,7 +29,6 @@ import { Btn, Card, PageHeader, Pill } from './_atoms';
 import { EmbeddedBleStatusPanel } from '../components/EmbeddedBleStatusPanel';
 import { DeviceLayoutsDialog } from '../components/DeviceLayoutsDialog';
 import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
-import { AudioFileTrial } from '../components/AudioFileTrial';
 
 interface OverviewProps {
   onOpenProvidersSettings?: () => void;
@@ -37,6 +36,7 @@ interface OverviewProps {
   onOpenLocalAsrSettings?: () => void;
   onStartDemoMode?: () => void;
   onOpenStyles?: () => void;
+  onOpenAudioFile?: () => void;
 }
 
 const ASR_NAME_KEY_BY_ID: Record<string, string> = {
@@ -64,10 +64,9 @@ const LLM_NAME_KEY_BY_ID: Record<string, string> = {
   custom: 'custom',
 };
 
-export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onOpenLocalAsrSettings, onStartDemoMode, onOpenStyles }: OverviewProps) {
+export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onOpenLocalAsrSettings, onStartDemoMode, onOpenStyles, onOpenAudioFile }: OverviewProps) {
   const { t } = useTranslation();
   const [layoutsOpen, setLayoutsOpen] = useState<'configure' | 'practice' | 'phrases' | null>(null);
-  const [audioFileOpen, setAudioFileOpen] = useState(false);
   const [history, setHistory] = useState<DictationSession[]>([]);
   const [historyError, setHistoryError] = useState(false);
   const [credsError, setCredsError] = useState(false);
@@ -327,7 +326,7 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onO
           </div>
         )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginTop: 12 }}>
-          <Btn size="sm" variant="ghost" onClick={() => setAudioFileOpen(true)}>{t('audioFile.title')}</Btn>
+          {onOpenAudioFile && <Btn size="sm" variant="ghost" onClick={onOpenAudioFile}>{t('audioFile.title')}</Btn>}
           <Btn size="sm" variant="ghost" onClick={() => setLayoutsOpen('practice')}>{t('devicePractice.open')}</Btn>
           <Btn size="sm" variant="ghost" onClick={() => setLayoutsOpen('configure')}>{t('deviceLayouts.open')}</Btn>
           <Btn size="sm" variant="ghost" onClick={() => setLayoutsOpen('phrases')}>{t('savedPhrases.title')}</Btn>
@@ -335,7 +334,6 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onO
         </div>
       </Card>
       {layoutsOpen && <DeviceLayoutsDialog rememberSelection initialPractice={layoutsOpen === 'practice'} initialPhrases={layoutsOpen === 'phrases'} initialProfile={layoutsOpen === 'practice' ? writingDeviceKeyProfile() : undefined} onClose={() => setLayoutsOpen(null)} />}
-      {audioFileOpen && <AudioFileTrial onClose={() => setAudioFileOpen(false)} onOpenProviders={onOpenProvidersSettings ? () => { setAudioFileOpen(false); onOpenProvidersSettings(); } : undefined} />}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 12 }}>
         <ProviderCard

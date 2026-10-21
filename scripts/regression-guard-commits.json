@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T01:02:27.135919+08:00",
+  "updated_at": "2026-10-22T01:10:22.712755+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4584,7 +4584,7 @@
       "repo": "type",
       "commit": "0a52991628e2760fa454e3a77a8b4d42acf594fa",
       "subject": "Recognize an explicitly selected bounded WAV separately from live dictation and insertion",
-      "state": "exact107_native_existing_service_copy_paste_verified_customer_pending",
+      "state": "exact107_native_file_service_and_copy_verified_customer_used_text_only",
       "protects": [
         "Only explicit Transcribe submits selected16k/16bit/mono WAV≤60s to existing direct Volcengine. Selecting a local sample/file makes no service request. No provider switch, model download or new service.",
         "Separate recognizer owns no microphone, device, coordinator recording, History or insertion target. Copy is separate explicit action and uses edited text; failure retains text.",
@@ -4606,10 +4606,12 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build106\\native-failure.json"
       ],
       "customer_evidence": [
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE107-software-20261022-010100\\dispatch-input.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE107-software-20261022-010100\\dispatch-input.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE107-software-20261022-010100\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE107-software-20261022-010100\\operations.txt"
       ],
       "unverified": [
-        "Independent107 report pending.",
+        "Independent107 used Light0.8s, edited pm/am and explicitly copied/pasted into own draft. Did not use recorded audio, so its customer value stays unknown. Temporarily declines49 hardware; F107-01 comparison lost after changing draft is carried to108.",
         "Only one actual synthetic English file request qualified. Not live mic, automatic end, wake, BLE, external automatic insertion, speaker isolation, physical convenience, from-zero setup or real purchase.",
         "Other ASR providers/managed route not supported by this new file entry. Original live paths retain their own evidence/limits."
       ]

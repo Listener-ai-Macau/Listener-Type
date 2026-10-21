@@ -6,6 +6,7 @@ import { enDeviceMaintenance, enFirmwareMaintenance } from './enDeviceMaintenanc
 
 // Type-level guarantee that en mirrors the zh-CN shape.
 export const en: typeof zhCN = {
+  earlierTrial: {"title": "Earlier result for comparison", "hint": "Your input or saved style has changed. This is the earlier result, including your edits, not an output for the current draft. No new request was made. It stays only in this open window, until replaced by a new result for this style.", "input": "Input used for this earlier result"},
   audioFile: audioFileTranslations.en,
   savedPhrases: {
     title: 'Use my saved phrases',

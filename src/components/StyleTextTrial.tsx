@@ -35,9 +35,11 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const [resultSignature, setResultSignature] = useState('');
   const [editedOutput, setEditedOutput] = useState<string | null>(null);
   // Session-only comparisons, never History or persistent customer text storage.
-  const completed = useRef(new Map<string, { signature: string; result: StyleTextTrialResult; edited: string | null }>());
+  const completed = useRef(new Map<string, { signature: string; input: string; result: StyleTextTrialResult; edited: string | null }>());
   const signature = JSON.stringify([draft, pack.prompt]);
   const result = storedResult?.packId === pack.id && resultSignature === signature ? storedResult : null;
+  const savedForPack = completed.current.get(pack.id);
+  const earlier = !result && savedForPack && savedForPack.signature !== signature ? savedForPack : null;
   // Previous styles stay visibly labelled while a new style has no result yet.
   // They belong only to this exact input and unchanged saved prompt, never a new draft.
   const comparisons = (packs ?? [pack]).flatMap(option => {
@@ -121,7 +123,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       const value = await tryStylePackText(pack.id, draft);
       if (generation.current === request) {
         completed.current.delete(pack.id);
-        completed.current.set(pack.id, { signature, result: value, edited: null });
+        completed.current.set(pack.id, { signature, input: draft, result: value, edited: null });
         if (completed.current.size > 8) completed.current.delete(completed.current.keys().next().value!);
         setResult(value); setResultSignature(signature);
       }
@@ -278,7 +280,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
               const value = event.target.value;
               const edited = value === result.outputText ? null : value;
               setEditedOutput(edited);
-              completed.current.set(pack.id, { signature, result, edited });
+              completed.current.set(pack.id, { signature, input: draft, result, edited });
               setCopiedResult(null); setCopyError(false); setDeliveryMessage('');
             }} />
           <p className="ol-style-trial-hint">{t('style.trial.editHint')}</p>
@@ -296,6 +298,12 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         <h3>{t('style.trial.output')}</h3>
         <p className="ol-style-trial-hint">{t(pending ? 'style.trial.running' : 'style.trial.resultPlaceholder')}</p>
       </div>}
+      {earlier && <section className="ol-style-trial-comparisons" aria-label={t('earlierTrial.title')} data-style-trial-earlier-result>
+        <h3>{t('earlierTrial.title')}</h3>
+        <p className="ol-style-trial-hint">{t('earlierTrial.hint')}</p>
+        <pre>{earlier.edited ?? earlier.result.outputText}</pre>
+        <details className="ol-style-trial-details"><summary>{t('earlierTrial.input')}</summary><pre>{earlier.input}</pre></details>
+      </section>}
       {comparisons.length > 0 && <section className="ol-style-trial-comparisons" aria-label={t('styleComparisons.title')} data-style-trial-comparisons>
         <h3>{t('styleComparisons.title')}</h3>
         <p className="ol-style-trial-hint">{t('styleComparisons.hint')}</p>

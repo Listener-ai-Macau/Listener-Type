@@ -7,6 +7,7 @@ import { en } from './en.ts';
 // 갱신해 주세요(갱신되지 않은 key 는 ...en 으로 영어로 fallback 됩니다).
 export const ko: typeof zhCN = {
   ...en,
+  earlierTrial: {"title": "비교할 이전 결과", "hint": "입력 또는 저장한 스타일이 바뀌었습니다. 수정 내용을 포함한 이전 결과이며 현재 원고의 새 출력이 아닙니다. 다시 요청하지 않았으며 이 창을 닫거나 같은 스타일의 새 결과가 나올 때까지 보관합니다.", "input": "이전 결과에 사용한 원고"},
   audioFile: audioFileTranslations.ko,
   savedPhrases: {
     title: '저장한 문구 사용',

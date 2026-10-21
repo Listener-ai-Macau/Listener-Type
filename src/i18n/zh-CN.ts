@@ -3,6 +3,7 @@ import { audioFileTranslations } from './audioFile';
 // 添加新 key 时，必须同步更新 en.ts，否则首次切换到 English 会回落到中文残留。
 
 export const zhCN = {
+  earlierTrial: {"title": "上一份结果 · 供对照", "hint": "原稿或保存的风格已改变。这里保留上一份结果及你的修订，不是当前原稿的新输出，也没有重新请求服务。只保留在当前窗口，直到本风格生成新结果。", "input": "这份旧结果使用的原稿"},
   audioFile: audioFileTranslations.zhCN,
   savedPhrases: {
     title: '使用已保存短语',

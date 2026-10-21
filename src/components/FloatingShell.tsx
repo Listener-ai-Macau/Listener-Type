@@ -13,6 +13,7 @@ import { WindowChrome, detectOS, type OS } from './WindowChrome';
 import { SettingsModal } from './SettingsModal';
 import { Overview } from '../pages/Overview';
 import { QuickStyleTextTrial } from './QuickStyleTextTrial';
+import { AudioFileTrial } from './AudioFileTrial';
 import { History } from '../pages/History';
 import { Vocab } from '../pages/Vocab';
 import { Style } from '../pages/Style';
@@ -90,6 +91,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const [demoModeSession, setDemoModeSession] = useState<DemoModeSession | null>(null);
   const [quickTrialOpen, setQuickTrialOpen] = useState(false);
   const [quickTrialDraft, setQuickTrialDraft] = useState('');
+  const [audioFileOpen, setAudioFileOpen] = useState(false);
 
   // displayTab 是实际渲染的 tab，currentTab 是用户点中的目标 tab。
   const [displayTab, setDisplayTab] = useState<AppTab>(initialTab);
@@ -480,6 +482,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                   onOpenLocalAsrSettings={() => openSettings('localAsr')}
                   onStartDemoMode={startProviderDemoMode}
                   onOpenStyles={() => setQuickTrialOpen(true)}
+                  onOpenAudioFile={() => setAudioFileOpen(true)}
                 />
               ) : displayTab === 'style' ? (
                 <Style onOpenProviders={() => openSettings('providers', 'llm')} />
@@ -494,6 +497,8 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
       {quickTrialOpen && <QuickStyleTextTrial draft={quickTrialDraft} onDraftChange={setQuickTrialDraft}
         onClose={() => setQuickTrialOpen(false)}
         onOpenProviders={() => { setQuickTrialOpen(false); openSettings('providers', 'llm'); }} />}
+      {audioFileOpen && <AudioFileTrial onClose={() => setAudioFileOpen(false)}
+        onOpenProviders={() => { setAudioFileOpen(false); openSettings('providers'); }} />}
 
       {/* Footer — 透明地坐在外层磨砂底板上，跟 sidebar 同一片磨砂玻璃 */}
       <div
