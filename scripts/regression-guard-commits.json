@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-21T11:24:18.034890+08:00",
+  "updated_at": "2026-10-21T11:33:17.460303+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -3722,7 +3722,7 @@
       "commit": "57636034bf9a9746c1dd9e9e91d622897280fd47",
       "subject": "Expose clearly labeled saved style illustrations without processing drafts",
       "commit_subject": "Expose clearly labeled saved style illustrations without processing drafts",
-      "state": "installed88_native_illustration_and_one_real_text_trial_verified_not_customer_reused",
+      "state": "installed88_independent_own_text_result_useful_saved_illustration_not_customer_opened_purchase_declined",
       "protects": [
         "Saved illustrations are read-only, explicitly not personal or model-verified output; viewing sends no request or populates a draft.",
         "Only complete unchanged factory example pairs are localized; custom/imported pairs remain literal and saved prompts/examples do not change.",
@@ -3738,9 +3738,14 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build88\\type88-installed.json"
       ],
       "unverified": [
-        "Independent88 reuse pending; no speech, external field, physical value or purchasing proof.",
+        "Independent88 actual text trial succeeded, but saved illustration was not opened. Result Copy/Overview entry wishes remain pending; no speech/external field/physical/purchase proof.",
         "Result text was observed in native DOM; initial result screenshot shows an earlier scroll area, not a visual result proof."
-      ]
+      ],
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-88-ready-text-20261021\\report.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE-88-ready-text-20261021\\04-result.png"
+      ],
+      "customer_result": "Independent88 chose own book-club message, ordinary Try Light polish returned useful original-content-preserving result0.8s. Did not open saved illustration or copy/send. Overview typed-trial discoverability and explicit result Copy requested; not implemented yet. Still declines49USD hardware absent real voice/physical convenience proof."
     },
     {
       "id": "customer88_private_credential_profile_does_not_write_daily_vault",
@@ -3763,7 +3768,8 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native88-customer-20261021-111918\\setup-result.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native88-customer-20261021-112034\\setup-result.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style88-native-trial.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build88\\type88-installed.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261021-build88\\type88-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native88-customer-20261021-112617\\setup-result.json"
       ],
       "unverified": [
         "Native private seeding uses only existing DeepSeek, no ASR or new account; not a newly delivered free service.",
