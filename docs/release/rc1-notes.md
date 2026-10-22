@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build129 / Firmware33
+# Listener v1.0.6-rc1 · Type build130 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -7,25 +7,23 @@
 
 ## In this app update
 
-Opening **Text-service settings** from a text workspace now keeps that workspace open underneath, whether you started from Overview, Style or a recorded transcript. Previously, the Overview and Style routes closed it: your input remained, but an edited result or a response still arriving could be lost.
+If you select a recording before configuring recognition, **Speech settings** now opens over that recording. Returning keeps the same selected file. It waits for settings writes to finish and checks readiness again; an unsaved setting remains explicit. Nothing is uploaded until you press **Transcribe**.
 
-Your original draft, selected style and reviewed result stay available on return. A response already requested can finish while settings are open. Returning rechecks service readiness and does not automatically send your text again. Existing save-failure feedback and explicit return remain.
-
-The local Help center, explicit saved drafts, recording settings and Firmware33 are retained. This update does not change your configured accounts, daily dictation mode, firmware, recognition or Bluetooth transport. USB flashing and Bluetooth OTA use the same ZIP.
+Speech and text setup share the existing save/failure protection. The text workspace still retains drafts, reviewed results and pending replies. **Saved drafts** now explains that it includes recorded-audio transcripts as well as text-workspace results.
 
 ## Before using
 
-US$49 is the hardware price. Type is free and open source. Recognition and optional text services require preparation and have separate usage charges; this release does not include a ready-to-use official cloud account or allowance. Review important text. Optional rewriting can still require manual edits.
+US$49 is the hardware price. Type is free and open source. Recognition and optional text services require preparation and have separate usage charges. This release does not include a ready-to-use official cloud account or allowance. File transcription currently accepts short16kHz/16-bit mono WAV through direct Volcengine. Review important words; optional rewriting can require manual edits.
 
-RC1 is a prerelease. Strong background speech separation remains incomplete and intermittent early-close cases remain under review. This update does not qualify new live-wake, automatic-ending, global-input or physical-hardware behavior. It has not been installed over the daily Type instance as part of this publication.
+RC1 is a prerelease. Strong background speech separation remains incomplete and intermittent early-close cases remain under review. This UI update does not qualify new live-wake, automatic-ending, global-input, BLE throughput or physical-hardware behavior. Daily recording and Firmware33 are retained. This publication does not install over the daily Type instance. USB flashing and Bluetooth OTA use the same ZIP.
 
 ## File identity
 
-- Type source: `a793bce05c3428a5519c2a64a4311183832e8b1b` · `build-source/type129-20261022`
-- Type129 MSI: 299110400 bytes · SHA256 `8a5987ed586212d5f20ebaf0862b53e0e53c6c5f0dfed33bcb3e2ce52bcf5007`
+- Type source: `cd327e23827289503cbd9af9fba4035608816ab6` · `build-source/type130-20261022`
+- Type130 MSI: 299175936 bytes · SHA256 `e0b7ddc8bdebe21485eb83f866155d70717ff825065fe003945a2630d8828e83`
 - Firmware33 source: `149b6d950ebc5f416924c8670cf2b207bdc2b5b7` · runtime `e7bd1f1619b696a1`
 - Firmware ZIP: 1956905 bytes · SHA256 `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272`
 
 ## 中文说明
 
-129统一文字工作区的设置窗口生命周期。首页、风格页和录音稿入口进入文字服务设置后，原稿、手改结果及已开始的处理返回都会保留；返回不重发文字，设置写入失败仍明确提示。49美元为纯硬件价，云服务准备与用量另计。固件、日常录音与蓝牙未改，改写质量、强干扰与偶发提前结束的原有限制保留。
+130修复选好录音后进入语音设置会丢选择的问题。原录音保留，设置写入完成才返回重查；保存失败仍明确提示，不自动上传。五语言保存列表也说明包括录音转写。文字保稿和已验路径保留。49美元为纯硬件，云服务准备与用量另计；固件、日常录音与蓝牙未改，原强干扰/偶发提前结束及改写质量限制保留。

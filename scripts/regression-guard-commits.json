@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T11:31:47.692384+08:00",
+  "updated_at": "2026-10-22T12:00:58.150449+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5590,6 +5590,47 @@
         "outcome": "Real prerecorded ASR/save/reopen/copy UI useful;49 purchase deferred. New settings-return repair not selected; external/live/hardware not qualified.",
         "unpackaged_copy": "21f055f27eb21ea6f23121884d53b7de2ae629f5"
       }
+    },
+    {
+      "id": "customer130_recording_selection_survives_speech_setup",
+      "repo": "type",
+      "commit": "cd327e23827289503cbd9af9fba4035608816ab6",
+      "commit_subject": "Preserve selected recordings while configuring speech service",
+      "subject": "Keep a selected local WAV and its bytes while configuring speech service; reuse existing write barrier for text and speech",
+      "state": "exact130_native_keyless_and_controlled_write_barrier_verified_no_independent130",
+      "humanAccepted": false,
+      "previous_source_evidence": "FloatingShell closes audioFileOpen before provider navigation, introduced94dd0ce4/public107;129 only protected text workspaces. Original selected WAV lost on return, reproduced before repair.",
+      "protects": [
+        "The audio source remains mounted while a sibling ProviderSettingsDialog shows speech-only settings. Text workspaces reuse the same lifecycle/barrier with text-only settings.",
+        "Close/Escape flushes edits and waits for actual writes; failed saves stay explicit and permit deliberate return. Speech readiness refreshes only on return, no automatic recognition.",
+        "Controlled same custom WAV is submitted byte-for-byte only once by explicit Transcribe after setup; opening/closing alone never changes provider/default/device or starts capture.",
+        "Keep129 text result/pending retention and117/118 save/failure protections. Saved-draft descriptions also explicitly include audio transcripts in five languages."
+      ],
+      "guards": [
+        "python scripts/check-audio-setup-return-ui.py --url <isolated-vite-url> --report <output-json>",
+        "python scripts/check-audio-workspace-provider-setup-ui.py --url <isolated-vite-url> --report <output-json>",
+        "python scripts/check-style-workspace-settings-return-ui.py --url <isolated-vite-url> --report <output-json>"
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\audio-setup130-before.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\audio-setup130-after.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\audio-setup130-text-barrier.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\audio-setup130-text-entry-retention.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\audio-setup130-build.log",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native130-snapshot-20261022-115925\\speech130-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native130-snapshot-20261022-115925\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build130\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\audio-setup130-after-visible-panels.json"
+      ],
+      "unverified": [
+        "No actual native credential-write failure or ASR request in this130 keyless check; these are prior service evidence/controlled React cases.",
+        "No independent130 customer reuse or49 purchase proof.129 prerecorded task useful and hardware purchase deferred; all old refusals retained.",
+        "No new BLE/noise/live-wake/end/external insertion/physical qualification; daily92 andFW33 remain."
+      ],
+      "failure_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native130-snapshot-20261022-115819\\speech130-native-result.json"
+      ],
+      "failure_explanation": "Private helper initially assumed a Speech recognition heading, but actual existing heading is ASR (transcription); same untouched130 EXE passed after inspecting screenshot and correcting only helper. Controlled guard now also asserts the real speech heading and absence of LLM (polishing)."
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -6305,7 +6346,8 @@
         "customer127_direct_shorter_action_reuses_edits_without_default_activation",
         "release_asset_upload_failure_preserves_previous_download",
         "customer128_bundled_help_without_github_dependency",
-        "customer129_all_workspace_settings_detours_preserve_work"
+        "customer129_all_workspace_settings_detours_preserve_work",
+        "customer130_recording_selection_survives_speech_setup"
       ],
       "paths": {
         "type": [
@@ -6376,7 +6418,7 @@
           "scripts/check-audio-text-workspace-ui.py",
           "src/lib/savedEvent.ts",
           "scripts/check-credential-edit-ack-ui.py",
-          "src/components/TextServiceSettingsDialog.tsx",
+          "src/components/ProviderSettingsDialog.tsx",
           "src/lib/providerWriteBarrier.ts",
           "scripts/check-audio-workspace-provider-setup-ui.py",
           "src/components/PoliteEditSuggestions.tsx",

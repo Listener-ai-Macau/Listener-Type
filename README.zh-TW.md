@@ -8,7 +8,7 @@
 
 | 用途 | 直接下載 |
 | --- | --- |
-| **Windows 軟體** | **[下載 MSI · Type build129](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 軟體** | **[下載 MSI · Type build130](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **韌體：USB 燒寫 / 藍牙 OTA** | **[下載韌體 ZIP · 兩種方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 [English](README.md) · **繁體中文** · [简体中文](README.zh-CN.md)
@@ -36,7 +36,7 @@
 Type 預設使用 **USB 有線燒寫**，能力已內建；無需另裝 Python、ESP-IDF 或其他燒寫軟體。
 裝置設定各自獨立：選擇一台有線／藍牙裝置，讀取後修改並寫入；名稱、燈光、電源、按鍵與旋鈕設定保存在該裝置。請配套使用本頁 MSI 與韌體 ZIP。
 
-Type build129修復從首頁、風格頁或錄音稿工作區進入文字服務設定時的內容保留：原稿、手改結果和已開始的處理回覆都會保留，返回不會自動重傳文字。本機說明和現有錄音行為保留，Firmware33不變。
+Type build130修復選好錄音後進入語音服務設定會遺失檔案選擇的問題：返回會等待設定寫入，保留同一錄音，不會自動上傳。儲存草稿說明也明確包含錄音轉寫。文字工作區保護、日常錄音與Firmware33保留。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
