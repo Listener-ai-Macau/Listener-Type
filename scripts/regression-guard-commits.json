@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T21:44:44.541981+08:00",
+  "updated_at": "2026-10-22T22:14:23.426151+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5825,9 +5825,46 @@
         "No new corresponding air/HCI/firmware triad captured. No RF-loss, throughput improvement or full physical qualification claim."
       ],
       "commit_subject": "Keep stopped wake tails and device cancellation bound to their owner"
+    },
+    {
+      "id": "customer136_trial_request_origin_and_selected_language_date",
+      "repo": "type",
+      "commit": "75bb8024c3451ce399991b88303e89a35bca34b3",
+      "commit_subject": "Keep fresh trial results distinct from cache restoration",
+      "subject": "Fresh trial request provenance survives target style selection; saved dates follow selected language",
+      "state": "source_affected_frontend_verified_candidate_not_delivered",
+      "humanAccepted": false,
+      "protects": [
+        "Fresh Make shorter result is not labelled restored/no new request, including an existing preset on a new draft.",
+        "True cached result reuse retains edits without a new service call; failed rerun retains the prior body and separate error without a no-request claim.",
+        "Saved-draft dates follow the selected app language even when the system/browser language differs; bodies and storage timestamps are unchanged."
+      ],
+      "guards": [
+        "python scripts/check-concise-style-choice-ui.py --url <owned-vite-url> --report <report>",
+        "python scripts/check-style-trial-comparison-ui.py --url <owned-vite-url> --report <report>",
+        "python scripts/check-saved-text-drafts-ui.py --url <owned-vite-url> --report <report>",
+        "npx tsc --noEmit"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\customer136-feedback.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\fresh-result136-before.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\fresh-result136-final.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\fresh-result136-comparisons.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\locale136-before.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\locale136-final.json"
+      ],
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE136-20261022\\experience.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE136-20261022\\operations.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE136-20261022\\07-shortened-result.png"
+      ],
+      "limits": [
+        "Controlled frontend service/storage fixtures, no paid request and no native/physical/customer qualification of the fix.",
+        "Installed/public136 is unchanged. Candidate is held for a related batch, not a new release or purchase success."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-22T21:44:44.541981+08:00",
+  "feature_routes_updated_at": "2026-10-22T22:14:23.426151+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -6544,7 +6581,8 @@
         "release_asset_upload_failure_preserves_previous_download",
         "customer128_bundled_help_without_github_dependency",
         "customer129_all_workspace_settings_detours_preserve_work",
-        "customer130_recording_selection_survives_speech_setup"
+        "customer130_recording_selection_survives_speech_setup",
+        "customer136_trial_request_origin_and_selected_language_date"
       ],
       "paths": {
         "type": [
