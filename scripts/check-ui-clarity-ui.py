@@ -1,4 +1,4 @@
-"""Controlled frontend layout/navigation checks for the observed build133 feedback.
+"""Controlled frontend layout/navigation checks for observed customer feedback.
 
 Headless browser fixtures only: no user desktop, recordings, cloud or clipboard.
 Appearance preference remains a separate customer judgment.
@@ -48,7 +48,7 @@ with sync_playwright() as pw:
   utilities=page.locator('.ol-overview-utilities');expect(utilities).not_to_have_attribute('open','')
   expect(utilities.get_by_role('button',name='Saved drafts',exact=True)).not_to_be_visible()
   expect(page.get_by_role('button',name='Try typed text',exact=True)).to_be_visible()
-  page.screenshot(path=str(a.report.with_name('ui134-overview.png')))
+  page.screenshot(path=str(a.report.with_name(a.report.stem+'-overview.png')))
   utilities.locator('summary').click()
   for name in ['Saved drafts','Transcribe recorded audio','Try the four keys','Design your keys','Use my saved phrases']:
    utilities.get_by_role('button',name=name,exact=True).click()
@@ -59,6 +59,10 @@ with sync_playwright() as pw:
   expect(trial.locator('.ol-style-trial-availability')).to_have_count(0)
   gap=trial.evaluate("e=>e.querySelector('label[for=style-trial-input]').getBoundingClientRect().top-e.querySelector('[data-style-trial-purpose]').getBoundingClientRect().bottom")
   assert 0<=gap<45,gap
+  expect(trial.locator('[data-style-trial-service-notice]')).to_contain_text('may incur charges')
+  help=trial.locator('details').filter(has_text='How this trial uses your text')
+  expect(help).not_to_have_attribute('open','')
+  expect(trial.get_by_text('Make shorter uses your text service.',exact=False)).not_to_be_visible()
   text='Reviewed text — 条件😀\nKeep Thursday at three.'
   trial.get_by_label('Your text',exact=True).fill(text);trial.get_by_role('button',name='Try this text',exact=True).click()
   expect(trial.get_by_label('Result text',exact=True)).to_have_value(text)
@@ -66,14 +70,20 @@ with sync_playwright() as pw:
   assert abs(boxes['#style-trial-input']-boxes['.ol-style-trial-result-editor'])<=2,boxes
   for label in ['Copy result','Save draft']:
    box=trial.get_by_role('button',name=label,exact=True).bounding_box();assert box and box['y']>=0 and box['y']+box['height']<=800,box
-  trial.screenshot(path=str(a.report.with_name('ui134-text-result.png')))
+  trial.screenshot(path=str(a.report.with_name(a.report.stem+'-text-result.png')))
+  tops=trial.evaluate("e=>[e.querySelector('#style-trial-input'),e.querySelector('.ol-style-trial-result-editor')].map(x=>x.getBoundingClientRect().top)")
+  assert abs(tops[0]-tops[1])<3,tops
+  help.locator('summary').click();expect(help).to_contain_text('Make shorter uses your text service');help.locator('summary').click()
+  report['checks'].append({'editorTopAlignment':tops,'longInstructionsCollapsedButReachable':True})
   report['checks'].append({'readyWorkspaceReservedGap':gap,'balancedEditorHeights':boxes,'copyAndSaveInViewport':True})
   trial.get_by_role('button',name='Save draft',exact=True).click();expect(trial.get_by_role('button',name='Saved draft',exact=True)).to_be_disabled()
   trial.get_by_role('button',name='Close',exact=True).click();page.locator('aside nav').get_by_role('button',name='History',exact=True).click();expect(page.locator('[data-history-empty]')).to_be_visible();settled(page)
   expect(page.get_by_text('Last 7 days',exact=True)).to_have_count(0);expect(page.get_by_role('button',name='Clear',exact=True)).to_have_count(0)
-  page.screenshot(path=str(a.report.with_name('ui134-empty-history.png')))
+  page.screenshot(path=str(a.report.with_name(a.report.stem+'-empty-history.png')))
   page.get_by_role('button',name='Saved drafts',exact=True).first.click();saved=page.get_by_role('dialog',name='Saved drafts',exact=True)
-  expect(saved.get_by_role('textbox',name='Saved text',exact=True)).to_have_value(text);saved.get_by_role('button',name='Close',exact=True).click()
+  label=saved.get_by_label('Choose a saved draft',exact=True).locator('option').first.inner_text();assert label.startswith('Reviewed text — 条件😀'),label
+  expect(saved.locator('section > p.ol-device-layout-hint')).to_have_count(0)
+  expect(saved.get_by_role('textbox',name='Saved text',exact=True)).to_have_value(text);saved.screenshot(path=str(a.report.with_name(a.report.stem+'-saved-drafts.png')));saved.get_by_role('button',name='Close',exact=True).click()
   page.evaluate("window.__historyMode='populated'");page.get_by_role('button',name='Refresh',exact=True).first.click();expect(page.locator('[data-history-empty]')).to_have_count(0);expect(page.get_by_text('Retained recording',exact=True).last).to_be_visible()
   page.evaluate("window.__historyMode='error'");page.get_by_role('button',name='Refresh',exact=True).first.click();expect(page.get_by_role('button',name='Retry',exact=True)).to_be_visible();expect(page.locator('[data-history-empty]')).to_have_count(0)
   report['checks'].append('empty history uses one state and opens the exact saved draft; populated and read-error history retain their normal views')

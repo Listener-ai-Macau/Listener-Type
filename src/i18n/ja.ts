@@ -1,3 +1,4 @@
+import { textWorkspaceTranslations } from './textWorkspace.ts';
 import { firstUseTranslations } from './firstUse.ts';
 import { textDraftTranslations } from './textDraft.ts';
 import { hardwareLayoutTranslations } from './hardwareLayout.ts';
@@ -16,6 +17,7 @@ export const ja: typeof zhCN = {
   politeEdits: politeEditsTranslations.ja,
   conciseDraft: conciseDraftTranslations.ja,
   offlineHelp: offlineHelpTranslations.ja,
+  textWorkspace: textWorkspaceTranslations['ja'],
   textDraft: textDraftTranslations['ja'],
   hardwareLayout: hardwareLayoutTranslations['ja'],
   earlierTrial: {"title": "比較用の前の結果", "hint": "入力や保存したスタイルが変わりました。編集内容を含む前の結果で、現在の入力に対する新しい出力ではありません。再送信せず、この画面を閉じるか同じスタイルで新しい結果を得るまで保持します。", "input": "この前の結果に使った入力"},

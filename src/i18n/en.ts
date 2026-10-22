@@ -1,3 +1,4 @@
+import { textWorkspaceTranslations } from './textWorkspace.ts';
 import { firstUseTranslations } from './firstUse.ts';
 import { textDraftTranslations } from './textDraft.ts';
 import { hardwareLayoutTranslations } from './hardwareLayout.ts';
@@ -15,6 +16,7 @@ export const en: typeof zhCN = {
   politeEdits: politeEditsTranslations.en,
   conciseDraft: conciseDraftTranslations.en,
   offlineHelp: offlineHelpTranslations.en,
+  textWorkspace: textWorkspaceTranslations['en'],
   textDraft: textDraftTranslations['en'],
   hardwareLayout: hardwareLayoutTranslations['en'],
   earlierTrial: {"title": "Earlier result for comparison", "hint": "Your input or saved style has changed. This is the earlier result, including your edits, not an output for the current draft. No new request was made. It stays only in this open window, until replaced by a new result for this style.", "input": "Input used for this earlier result"},

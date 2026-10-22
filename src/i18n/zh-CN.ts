@@ -1,3 +1,4 @@
+import { textWorkspaceTranslations } from './textWorkspace.ts';
 import { firstUseTranslations } from './firstUse.ts';
 import { textDraftTranslations } from './textDraft.ts';
 import { hardwareLayoutTranslations } from './hardwareLayout.ts';
@@ -12,6 +13,7 @@ export const zhCN = {
   politeEdits: politeEditsTranslations['zh-CN'],
   conciseDraft: conciseDraftTranslations['zh-CN'],
   offlineHelp: offlineHelpTranslations['zh-CN'],
+  textWorkspace: textWorkspaceTranslations['zh-CN'],
   textDraft: textDraftTranslations['zh-CN'],
   hardwareLayout: hardwareLayoutTranslations['zh-CN'],
   earlierTrial: {"title": "上一份结果 · 供对照", "hint": "原稿或保存的风格已改变。这里保留上一份结果及你的修订，不是当前原稿的新输出，也没有重新请求服务。只保留在当前窗口，直到本风格生成新结果。", "input": "这份旧结果使用的原稿"},

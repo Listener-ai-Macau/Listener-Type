@@ -1,7 +1,7 @@
 import { SaveTextDraft } from './SaveTextDraft';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { canInsertStyleTrialResult, cancelStyleTrialInsert, copyStyleTrialResult, getStyleTextTrialReadiness, insertStyleTrialResult, tryStylePackText } from '../lib/ipc';
+import { canInsertStyleTrialResult, cancelStyleTrialInsert, copyStyleTrialResult, getStyleTextTrialReadiness, insertStyleTrialResult, isTauri, tryStylePackText } from '../lib/ipc';
 import { detectOS } from './WindowChrome';
 import { stylePackExamplePresentation, stylePackPresentation } from '../lib/stylePackPresentation';
 import type { StylePack, StyleTextTrialReadiness, StyleTextTrialResult } from '../lib/types';
@@ -250,7 +250,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         <h2 id="style-trial-title" style={{ margin: 0, fontSize: 21 }}>{t('style.trial.title', { name: presentation.name })}</h2>
         <Btn size="sm" variant="ghost" disabled={draftSaving} onClick={() => { if (!draftSaving) onClose(); }}>{t('common.close')}</Btn>
       </div>
-      <p id="style-trial-description" className="ol-style-trial-hint">{t('style.trial.shortNotice')}</p>
+      <p id="style-trial-description" className="ol-style-trial-hint" data-style-trial-service-notice>{t(readiness?.requiresTextService === false ? prepareShorter ? 'textWorkspace.localWithShorterNotice' : 'textWorkspace.localNotice' : 'textWorkspace.cloudNotice')}</p>
       {packs && onSelectPack && <label className="ol-style-trial-picker">
         <span>{t('style.trial.styleLabel')}</span>
         <select aria-label={t('style.trial.styleLabel')} value={pack.id} disabled={pending || copying || delivering || draftSaving || styleChangePending}
@@ -290,17 +290,19 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         {readiness?.available && <Btn variant="ghost" disabled={draftSaving} onClick={() => setProvidersOpen(true)}>{t('style.trial.providers')}</Btn>}
         {readiness?.available === false && <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1" target="_blank" rel="noreferrer noopener" style={{ color: 'var(--ol-blue)', fontSize: 13 }}>{t('style.trial.download')}</a>}
       </div>
-      {prepareShorter && <p className="ol-style-trial-hint">{t('conciseDraft.runHint')}</p>}
       {pending && <p role="status" className="ol-style-trial-hint">{t('style.trial.pending')}</p>}
       {error && <p role="alert" style={{ color: 'var(--ol-err)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.6 }}>{error}</p>}
       </div>
       <div className="ol-style-trial-outputs">
       {result && (
         <section ref={resultSection} className="ol-style-trial-result" aria-label={t('style.trial.output')} aria-live="polite">
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+          <div className="ol-style-trial-result-heading">
             <div style={{ fontWeight: 600 }}>{t('style.trial.output')}</div>
+            <span className="ol-style-trial-result-meta" title={t(editedOutput !== null ? 'style.trial.editedResult' : result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}>
+              {t(editedOutput !== null ? 'textWorkspace.editedResult' : result.usedTextService ? 'textWorkspace.serviceResult' : 'textWorkspace.localResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}
+            </span>
           </div>
-          <p className="ol-style-trial-hint">{editedOutput !== null ? t('style.trial.editedResult') : t(result.usedTextService ? result.outputText === draft ? 'politeEdits.unchangedResult' : 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}</p>
+          {result.usedTextService && result.outputText === draft && editedOutput === null && <p role="note" className="ol-style-trial-hint">{t('politeEdits.unchangedResult')}</p>}
           <textarea className="ol-style-trial-result-body ol-style-trial-result-editor ol-thinscroll"
             aria-label={t('style.trial.resultInput')} value={resultOutput} rows={8} maxLength={100000}
             disabled={copying || delivering || draftSaving}
@@ -309,17 +311,16 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
               const value = event.target.value;
               updateEditedOutput(value);
             }} />
-          <p className="ol-style-trial-hint">{t('style.trial.editHint')}</p>
           <div className="ol-style-trial-primary-actions">
             <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
             </Btn>
-            <SaveTextDraft name={presentation.name} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving}
+            <SaveTextDraft compact name={presentation.name} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving}
               onSaved={text => setSavedDraftSignature(JSON.stringify([presentation.name, draft, text]))} />
             <PoliteEditSuggestions text={resultOutput} cloudConfigured={readiness?.textServiceConfigured === true}
               disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />
           </div>
-          <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t(savedCurrentDraft ? 'textDraft.savedRetention' : 'textDraft.retention')}</p>
+          <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t(savedCurrentDraft ? isTauri ? 'textWorkspace.saved' : 'textDraft.browserSaved' : isTauri ? 'textWorkspace.unsaved' : 'textWorkspace.browserUnsaved')}</p>
           {restored && <p role="note" className="ol-style-trial-hint" data-style-trial-restored>{t('style.trial.restoredResult')}</p>}
           <details className="ol-style-trial-details ol-style-trial-more-actions">
             <summary>{t('style.trial.moreActions')}</summary>
@@ -371,8 +372,12 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       </div>}
       <details className="ol-style-trial-details">
         <summary>{t('style.trial.detailsSummary')}</summary>
+        <p className="ol-style-trial-hint">{t('style.trial.shortNotice')}</p>
         <p className="ol-style-trial-hint">{t('style.trial.description')}</p>
         <p className="ol-style-trial-hint">{t('style.trial.serviceNotice')}</p>
+        {prepareShorter && <p className="ol-style-trial-hint">{t('conciseDraft.runHint')}</p>}
+        <p className="ol-style-trial-hint">{t('style.trial.editHint')}</p>
+        <p className="ol-style-trial-hint">{t('textDraft.retention')}</p>
       </details>
       {readiness?.requiresTextService && savedExamples.length > 0 && (
         <details className="ol-style-saved-examples" data-style-saved-examples>

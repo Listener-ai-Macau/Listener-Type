@@ -3,9 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { isTauri, saveTextDraft } from '../lib/ipc';
 import { Btn } from '../pages/_atoms';
 
-export function SaveTextDraft({ name, original, text, disabled, onBusy, onSaved }: {
+export function SaveTextDraft({ name, original, text, disabled, onBusy, onSaved, compact = false }: {
   name: string; original: string; text: string; disabled: boolean; onBusy: (busy: boolean) => void;
   onSaved?: (text: string) => void;
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   const signature = JSON.stringify([name,original,text]);
@@ -32,7 +33,7 @@ export function SaveTextDraft({ name, original, text, disabled, onBusy, onSaved 
     <Btn size="sm" variant="ghost" disabled={disabled||saving||!text.trim()||saved===signature} onClick={()=>void save()}>
       {t(saving?'textDraft.saving':saved===signature?'textDraft.saved':'textDraft.save')}
     </Btn>
-    {saved===signature&&<span role="status" className="ol-style-trial-hint"> {t(isTauri?'textDraft.savedWhere':'textDraft.browserSaved')}</span>}
+    {saved===signature&&<span role="status" className="ol-style-trial-hint"> {t(isTauri?compact?'textWorkspace.savedWhere':'textDraft.savedWhere':'textDraft.browserSaved')}</span>}
     {error&&<p role="alert" className="ol-style-trial-hint">{error}</p>}
   </div>;
 }
