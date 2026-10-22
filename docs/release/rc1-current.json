@@ -1,6 +1,6 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T08:26:16.643646+08:00",
+  "updatedAt": "2026-10-22T09:13:21.194200+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
@@ -260,7 +260,7 @@
     "type127DirectShorterActionNativeVerified": true,
     "type127CachedEditedOutputAndSaveVerified": true,
     "type127VerificationScope": "Exact127 private ordinary UI on actual125 draft: direct Make shorter sends one existing-service request, source retained; exact edited cache reused with0 further calls; Save/reopen exact and inactive preset outside daily cycle. Controlled failed-save/request/close boundaries verified. Same125 prompt; automatic shortening gain and customer127 purchase judgment not proven.",
-    "customer127Reviewed": false,
+    "customer127Reviewed": true,
     "customer127PurchaseQualification": false
   },
   "remainingLimits": [

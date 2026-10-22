@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T08:26:16.643646+08:00",
+  "updated_at": "2026-10-22T09:13:21.194200+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5349,7 +5349,7 @@
       "repo": "type",
       "commit": "06b272a27e24b0bdacdb96b0ff08f6faa9b237f8",
       "subject": "Direct Make shorter task with exact edited cache, explicit paid request and prior-result recovery",
-      "state": "exact127_native_direct_action_and_cache_save_verified_customer_pending",
+      "state": "customer127_chose_saved_keys_successfully_new_shorter_action_untried_purchase_deferred",
       "previous_source_evidence": "125 customer naturally had to find Add concise style, then submit again; wanted a direct shorter purpose. Original250→240 remained weak; all refusals and unsuccessful prompt/envelope probes retained.",
       "protects": [
         "One explicit action prepares/reuses disabled inactive trial style and submits once; no daily style activation, preferences or backend/provider/model/prompt change.",
@@ -5368,11 +5368,46 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build127\\type-artifact-verification.json"
       ],
       "customer_evidence": [
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE125-software-20261022-073400\\experience.txt"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE125-software-20261022-073400\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE127-software-20261022-083000\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE127-software-20261022-083000\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE127-software-20261022-083000\\06-reply-inserted.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE127-software-20261022-083000\\09-copy-pasted.png"
       ],
       "unverified": [
-        "127 independent customer not yet used. Entry friction improvement is not a language-quality or purchase result.",
-        "Same125 prompt and limited automatic shortening; F125-01 remains open. No live speech/external app/physical qualification/order."
+        "127全文/操作/06与09截图已读：自然自选Follow-up reply，保存Paste template→Key1练习→保存短语Copy→普通清空/Paste，原句完整，无产品阻断；未用新Make shorter或语音/AI。公开GitHub入口ERR_CONNECTION_CLOSED，仍49暂缓。",
+        "F127-01公开入口网络失败沿原L09/FENTRY，不能用CLI上传成功证明浏览器已恢复。F127-02短语框需滚动但未阻断，沿F102-03暂排实际主障碍后。F127-03并F97-03：当次一个回复免费软件已够，不强迫客户需要硬件。",
+        "F125-01自动缩短省力仍有限；F125-02直接动作工程成立，本客户未选因此客户改善未知。实物/实时/外部应用/成交仍开放。"
+      ]
+    },
+    {
+      "id": "release_asset_upload_failure_preserves_previous_download",
+      "repo": "type",
+      "commit": "0e8e6cc4fe2f92db1ed660065f623ec37481f70e",
+      "subject": "Upload staged asset and verify before canonical promotion; retain previous download on failed upload",
+      "state": "six_failure_contract_tests_and_current_asset_real_idempotency_verified_full_new_promotion_not_yet_live",
+      "previous_source_evidence": "127 historical handoff publish127-before-staged-assets.py used gh --clobber before successful upload.408/EOF removed the old asset leaving none; native app remained usable. Three CLI attempts and an observed urllib send failed. Windows curl same loopback7897 route completed299122688B in40.55s with matching server digest.",
+      "protects": [
+        "Upload failure must not rename/delete the previous canonical download; staged identity must match uploaded state/size/SHA first.",
+        "Promotion/verification failure restores prior canonical name where API reachable; lost-success reply reconciles actual server state before retry. Old content removed only after candidate canonical proof.",
+        "Developer upload uses existing gh auth through stdin, curl with inherited proxy route and TLS verification; no token argv/output or global network configuration changes."
+      ],
+      "guards": [
+        "python scripts/publish-release-asset-safely.test.py:6 methods, failed upload/bad staged size/failed promotion/bad final proof/old rename lost reply/new rename lost reply/reuse/current no-op branches.",
+        "Real CLI current127 returns alreadyCurrent with matching server id/digest; no new upload or promotion. Future handoff publish template invokes this helper before replacing public metadata."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build127\\curl-upload-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build127\\observed-upload-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build127\\safe-publisher-current-asset.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build127\\published.json"
+      ],
+      "failure_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\publish127-before-staged-assets.py"
+      ],
+      "unverified": [
+        "Full staged upload/promotion against a new actual release asset not yet run; fault cases use a controlled API state machine.",
+        "Two server renames are not zero-gap atomicity. Browser ERR_CONNECTION_CLOSED not diagnosed by successful upload."
       ]
     }
   ],
@@ -6086,7 +6121,8 @@
         "customer124_wording_service_reply_origin_and_local_recovery",
         "customer125_optional_concise_preset_keeps_trial_creation_out_of_daily_cycle",
         "customer126_failed_style_persistence_keeps_previous_visible_state",
-        "customer127_direct_shorter_action_reuses_edits_without_default_activation"
+        "customer127_direct_shorter_action_reuses_edits_without_default_activation",
+        "release_asset_upload_failure_preserves_previous_download"
       ],
       "paths": {
         "type": [
