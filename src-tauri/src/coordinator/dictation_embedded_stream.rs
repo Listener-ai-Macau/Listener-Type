@@ -1003,19 +1003,7 @@ impl EmbeddedStreamingDictation {
                     // has not transitioned the product state yet. Retire only
                     // this actor's owner, so local cleanup cannot leave its
                     // capsule Listening or cancel a newer product session.
-                    let cancelled_owner = self.session.as_ref().and_then(|session| {
-                        let mut state = inner.state.lock();
-                        let transition = apply_dictation_event(&mut state,
-                            DictationEvent::Cancel { session_id: session.session_id });
-                        (!matches!(transition, DictationTransition::Ignored { .. }))
-                            .then_some(session.session_id)
-                    });
-                    self.discard_active_session_after_user_cancel(inner);
-                    if let Some(owner) = cancelled_owner {
-                        native_composition_retire(inner, owner);
-                        publish_dictation_capsule(inner, owner, DictationUiState::Cancelled, 0.0, None, None);
-                        schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(owner));
-                    }
+                    self.cancel_owned_streaming_session(inner);
                     // This actor already consumed the device cancellation;
                     // do not requeue a shared soft-abort for a later owner.
                     return Ok(false);

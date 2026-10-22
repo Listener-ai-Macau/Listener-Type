@@ -109,8 +109,11 @@ impl EmbeddedStreamingDictation {
             ensure.replacement_wait_started_at.is_some()
         );
         self.abort_accepted_wake_capture_ensure("continuation_timeout");
-        cancel_session(inner);
-        let _ = self.discard_active_session_after_user_cancel(inner);
+        // This timeout belongs to the actor's original owner, not whichever
+        // recording is current when the async takeover deadline is polled.
+        // The actor consumes this cancellation now; do not queue a shared
+        // abort that a later owner would consume on its next loop iteration.
+        self.cancel_owned_streaming_session(inner);
         true
     }
 
@@ -298,6 +301,26 @@ impl EmbeddedStreamingDictation {
         }
         schedule_capsule_idle(inner, CAPSULE_STREAM_ERROR_HIDE_DELAY_MS, event_session_id);
         self.terminal_received = true;
+    }
+
+    /// A terminal stream event or takeover timeout cancels only this actor's
+    /// product owner. Unlike the user-facing Cancel command, it must neither
+    /// cancel a newer owner nor enqueue another capture/session cancellation.
+    fn cancel_owned_streaming_session(&mut self, inner: &Arc<Inner>) -> bool {
+        let cancelled_owner = self.session.as_ref().and_then(|session| {
+            let mut state = inner.state.lock();
+            let transition = apply_dictation_event(&mut state,
+                DictationEvent::Cancel { session_id: session.session_id });
+            (!matches!(transition, DictationTransition::Ignored { .. }))
+                .then_some(session.session_id)
+        });
+        let discarded = self.discard_active_session_after_user_cancel(inner);
+        if let Some(owner) = cancelled_owner {
+            native_composition_retire(inner, owner);
+            publish_dictation_capsule(inner, owner, DictationUiState::Cancelled, 0.0, None, None);
+            schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(owner));
+        }
+        discarded
     }
 
     /// User/capsule cancel while the continuous background notify must stay open.

@@ -21802,6 +21802,50 @@ async fn ended_ensure_tail_cannot_be_rebound_by_an_unconfirmed_start() {
 }
 
 #[tokio::test]
+async fn expired_ensure_cannot_cancel_or_queue_abort_for_a_later_owner() {
+    for newer_owner in [true, false] {
+        for phase in [SessionPhase::Starting, SessionPhase::Listening] {
+            let coordinator = Coordinator::new();
+            let inner = &coordinator.inner;
+            let session_abort = Arc::new(AtomicBool::new(false));
+            register_embedded_ble_cancel_flag(inner, &session_abort);
+            let old_id = new_session_id();
+            let active_id = if newer_owner { new_session_id() } else { old_id };
+            {
+                let mut state = inner.state.lock();
+                state.session_id = active_id;
+                state.phase = phase;
+                state.cancelled = false;
+            }
+            let consumer: Arc<dyn crate::recorder::AudioConsumer> = Arc::new(CountingConsumer::default());
+            let mut stream = EmbeddedStreamingDictation::background_listener();
+            stream.session = Some(embedded_audio_test_session(old_id, consumer));
+            stream.embedded_session_id = Some(93);
+            stream.arm_owned_capture_ensure(11, 93);
+            let past = Instant::now() - Duration::from_secs(30);
+            let ensure = stream.accepted_wake_capture_ensure.as_mut().unwrap();
+            ensure.requested_at = past;
+            ensure.deadline_at = past + super::EMBEDDED_ACCEPTED_WAKE_CAPTURE_REPLACEMENT_TIMEOUT;
+            ensure.replacement_wait_started_at = Some(past);
+            assert!(stream.expire_accepted_wake_capture_if_due(inner));
+            assert!(stream.session.is_none());
+            assert!(stream.accepted_wake_capture_ensure.is_none());
+            let state = inner.state.lock();
+            assert_eq!(state.session_id, active_id);
+            if newer_owner {
+                assert_eq!(state.phase, phase, "an old ENSURE timeout cannot close a later product owner");
+                assert!(!state.cancelled);
+            } else {
+                assert_eq!(state.phase, SessionPhase::Idle);
+                assert!(state.cancelled);
+            }
+            assert!(!session_abort.load(Ordering::SeqCst),
+                "a timeout already consumed by this actor must not queue an abort for the next owner");
+        }
+    }
+}
+
+#[tokio::test]
 async fn ended_ensure_predecessor_still_honors_cancel_before_successor_confirmation() {
     for parked in [false,true] {
         for newer_owner in [false,true] {
