@@ -32,6 +32,7 @@ import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
 import { hardwarePhoto } from '../components/DeviceLayoutMap';
 
 interface OverviewProps {
+  onDismissOverview?: () => void;
   onOpenProvidersSettings?: () => void;
   onOpenRecordingSettings?: () => void;
   onOpenLocalAsrSettings?: () => void;
@@ -66,7 +67,7 @@ const LLM_NAME_KEY_BY_ID: Record<string, string> = {
   custom: 'custom',
 };
 
-export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onOpenLocalAsrSettings, onStartDemoMode, onOpenStyles, onOpenAudioFile, onOpenSavedDrafts }: OverviewProps) {
+export function Overview({ onDismissOverview, onOpenProvidersSettings, onOpenRecordingSettings, onOpenLocalAsrSettings, onStartDemoMode, onOpenStyles, onOpenAudioFile, onOpenSavedDrafts }: OverviewProps) {
   const { t } = useTranslation();
   const [layoutsOpen, setLayoutsOpen] = useState<'configure' | 'practice' | 'phrases' | null>(null);
   const [history, setHistory] = useState<DictationSession[]>([]);
@@ -300,7 +301,8 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onO
 
   return (
     <>
-      <PageHeader title={t('overview.title')} />
+      <PageHeader title={t('firstUse.title')} desc={t('firstUse.description')}
+        right={onDismissOverview && <Btn size="sm" onClick={onDismissOverview}>{t('firstUse.skip')}</Btn>} />
 
       <Card style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>

@@ -29,6 +29,7 @@ import { createDemoModeSession, type DemoModeSession } from '../lib/demoMode';
 import { embeddedBleProbeErrorMessage, runEmbeddedBleProbeWithTimeout, type EmbeddedBleProbeStatus } from '../lib/embeddedBleProbe';
 import { buildFirstRunPairingWizard, type FirstRunPairingAction, type FirstRunPairingStageStatus } from '../lib/firstRunPairingWizard';
 import { applyFontScale, readFontScale } from '../lib/fontScale';
+import { initialOverviewTab, readOverviewHidden, rememberOverviewHidden } from '../lib/firstUseOverview';
 import {
   getCredentials,
   getEmbeddedBleRuntimeStatus,
@@ -91,7 +92,10 @@ export function FloatingShell({ os: osProp, initialTab = 'overview', initialSett
 function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initialTab: AppTab; initialSettings: boolean }) {
   const { t } = useTranslation();
   const { prefs, updatePrefs } = useHotkeySettings();
-  const { currentTab, setCurrentTab, settingsOpen, setSettingsOpen } = useAppState(initialTab, initialSettings);
+  const [overviewHidden, setOverviewHidden] = useState(readOverviewHidden);
+  const [overviewSaveFailed, setOverviewSaveFailed] = useState(false);
+  const entryTab = initialOverviewTab(initialTab, overviewHidden);
+  const { currentTab, setCurrentTab, settingsOpen, setSettingsOpen } = useAppState(entryTab, initialSettings);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionId | undefined>();
   const [settingsProviderFocus, setSettingsProviderFocus] = useState<'llm' | undefined>();
   const [providerPromptOpen, setProviderPromptOpen] = useState(false);
@@ -103,7 +107,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const [savedDraftsOpen, setSavedDraftsOpen] = useState(false);
 
   // displayTab 是实际渲染的 tab，currentTab 是用户点中的目标 tab。
-  const [displayTab, setDisplayTab] = useState<AppTab>(initialTab);
+  const [displayTab, setDisplayTab] = useState<AppTab>(entryTab);
   const [tabPhase, setTabPhase] = useState<'idle' | 'exiting'>('idle');
   useEffect(() => {
     if (currentTab === displayTab) {
@@ -125,8 +129,9 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   }, []);
 
   const NAV = useMemo(
-    () => PRIMARY_NAV.map(b => ({ ...b, name: t(`nav.${b.id}`) })),
-    [t],
+    () => PRIMARY_NAV.filter(b => !overviewHidden || b.id !== 'overview')
+      .map(b => ({ ...b, name: t(`nav.${b.id}`) })),
+    [t, overviewHidden],
   );
   const Page = (NAV_BASE.find((n) => n.id === displayTab) ?? NAV_BASE[0]).cmp;
   const primaryTab = isToolTab(currentTab) ? 'tools' : currentTab;
@@ -138,7 +143,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   useLayoutEffect(() => {
     const idx = NAV.findIndex(n => n.id === primaryTab);
     const el = navItemRefs.current[idx];
-    if (!el) return;
+    if (!el) { setPillRect(null); return; }
     setPillRect({ top: el.offsetTop, height: el.offsetHeight });
   }, [primaryTab, NAV]);
 
@@ -319,6 +324,12 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     setBlePairingPromptOpen(false);
   };
 
+  const dismissOverview = () => {
+    setOverviewSaveFailed(!rememberOverviewHidden());
+    setOverviewHidden(true);
+    setCurrentTab('history');
+  };
+
   return (
     <DevicePageNavigationContext.Provider value={openDeviceKeyAppPage}>
     <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0, paddingTop: os === 'mac' ? 28 : 0 }}>
@@ -415,6 +426,12 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
           </nav>
 
           <div style={{ flex: 1 }} />
+          <button type="button" data-open-overview onClick={() => setCurrentTab('overview')}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+              border: 0, background: 'transparent', color: 'var(--ol-ink-3)', font: 'inherit',
+              fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>
+            <Icon name="help" size={14} />{t('firstUse.reopen')}
+          </button>
         </aside>
 
         {/* Main content — v1.3.1-8 用户希望"sidebar / main panel / caption 三处玻璃统一"。
@@ -475,6 +492,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                 flexDirection: 'column',
               }}
             >
+              {overviewSaveFailed && <p role="status" style={{ fontSize: 12, color: 'var(--ol-ink-3)' }}>{t('firstUse.sessionOnly')}</p>}
               {demoModeSession ? (
                 <DemoModeBanner
                   source={demoModeSession.source}
@@ -487,6 +505,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
               ) : null}
               {displayTab === 'overview' ? (
                 <Overview
+                  onDismissOverview={dismissOverview}
                   onOpenProvidersSettings={() => openSettings('providers')}
                   onOpenRecordingSettings={() => openSettings('recording')}
                   onOpenLocalAsrSettings={() => openSettings('localAsr')}
@@ -496,7 +515,8 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                   onOpenSavedDrafts={() => setSavedDraftsOpen(true)}
                 />
               ) : displayTab === 'tools' ? (
-                <Tools onOpen={setCurrentTab} />
+                <Tools onOpen={setCurrentTab} onTryText={() => setQuickTrialOpen(true)}
+                  onOpenAudioFile={() => setAudioFileOpen(true)} onOpenSavedDrafts={() => setSavedDraftsOpen(true)} />
               ) : (
                 <>
                   {isToolTab(displayTab) && <button type="button" onClick={() => setCurrentTab('tools')}

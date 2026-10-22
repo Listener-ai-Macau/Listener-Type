@@ -1,3 +1,4 @@
+import { firstUseTranslations } from './firstUse.ts';
 import { textDraftTranslations } from './textDraft.ts';
 import { hardwareLayoutTranslations } from './hardwareLayout.ts';
 import { audioFileTranslations } from './audioFile.ts';
@@ -165,6 +166,7 @@ export const zhCN = {
     statusThinking: '思考中',
     statusError: '出错了',
   },
+  firstUse: firstUseTranslations['zh-CN'],
   tools: {
     description: "按需要选择一个工具。",
     style: "选择语音转成文字后的表达方式。",

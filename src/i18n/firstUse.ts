@@ -1,0 +1,7 @@
+export const firstUseTranslations = {
+  en: { title: 'Get started with Type', description: 'Use this guide when you need it. You can reopen it from Getting started at the bottom left.', skip: "Skip and don’t show again", reopen: 'Getting started', sessionOnly: 'Hidden for this session. Type could not save the choice, so this guide may appear again next time.', moreTools: 'More tools' },
+  'zh-CN': { title: '开始使用 Type', description: '按需查看这份引导，之后可从左下角“使用入门”重新打开。', skip: '跳过，以后不显示', reopen: '使用入门', sessionOnly: '本次已隐藏，但未能保存这个选择，下次可能重新显示。', moreTools: '更多工具' },
+  'zh-TW': { title: '開始使用 Type', description: '按需查看這份引導，之後可從左下角「使用入門」重新開啟。', skip: '略過，以後不再顯示', reopen: '使用入門', sessionOnly: '本次已隱藏，但無法儲存此選擇，下次可能重新顯示。', moreTools: '更多工具' },
+  ja: { title: 'Type を使い始める', description: '必要なときに確認できます。左下の「はじめに」から再度開けます。', skip: 'スキップして今後は表示しない', reopen: 'はじめに', sessionOnly: '今回は非表示にしましたが、設定を保存できませんでした。次回また表示される場合があります。', moreTools: 'その他のツール' },
+  ko: { title: 'Type 시작하기', description: '필요할 때 확인하세요. 왼쪽 아래의 시작 안내에서 다시 열 수 있습니다.', skip: '건너뛰고 다시 표시하지 않기', reopen: '시작 안내', sessionOnly: '이번에는 숨겼지만 선택을 저장하지 못했습니다. 다음에 다시 표시될 수 있습니다.', moreTools: '다른 도구' },
+};

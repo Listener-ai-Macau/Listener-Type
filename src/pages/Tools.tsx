@@ -1,7 +1,10 @@
 import { useTranslation } from 'react-i18next';
+import { useState } from 'react';
 import { Icon } from '../components/Icon';
+import { DeviceLayoutsDialog } from '../components/DeviceLayoutsDialog';
+import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
 import type { AppTab } from '../state/useAppState';
-import { PageHeader } from './_atoms';
+import { Btn, PageHeader } from './_atoms';
 
 const TOOLS: Array<{ id: AppTab; icon: string }> = [
   { id: 'style', icon: 'style' },
@@ -10,8 +13,12 @@ const TOOLS: Array<{ id: AppTab; icon: string }> = [
   { id: 'selectionAsk', icon: 'selectionAsk' },
 ];
 
-export function Tools({ onOpen }: { onOpen: (tab: AppTab) => void }) {
+export function Tools({ onOpen, onTryText, onOpenAudioFile, onOpenSavedDrafts }: {
+  onOpen: (tab: AppTab) => void; onTryText: () => void;
+  onOpenAudioFile: () => void; onOpenSavedDrafts: () => void;
+}) {
   const { t } = useTranslation();
+  const [layoutsOpen, setLayoutsOpen] = useState<'configure' | 'practice' | 'phrases' | null>(null);
   return <>
     <PageHeader title={t('nav.tools')} desc={t('tools.description')} />
     <div className="ol-tools-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
@@ -30,6 +37,18 @@ export function Tools({ onOpen }: { onOpen: (tab: AppTab) => void }) {
         <Icon name="chevRight" size={15} style={{ color: 'var(--ol-ink-4)', flexShrink: 0 }} />
       </button>)}
     </div>
+    <details style={{ marginTop: 18, color: 'var(--ol-ink-3)', fontSize: 12 }}>
+      <summary style={{ cursor: 'pointer', padding: '7px 0' }}>{t('firstUse.moreTools')}</summary>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, paddingTop: 10 }}>
+        <Btn size="sm" onClick={onTryText}>{t('overview.tryTypedText')}</Btn>
+        <Btn size="sm" onClick={onOpenSavedDrafts}>{t('textDraft.title')}</Btn>
+        <Btn size="sm" onClick={onOpenAudioFile}>{t('audioFile.title')}</Btn>
+        <Btn size="sm" onClick={() => setLayoutsOpen('configure')}>{t('deviceLayouts.open')}</Btn>
+        <Btn size="sm" onClick={() => setLayoutsOpen('practice')}>{t('devicePractice.open')}</Btn>
+        <Btn size="sm" onClick={() => setLayoutsOpen('phrases')}>{t('savedPhrases.title')}</Btn>
+      </div>
+    </details>
+    {layoutsOpen && <DeviceLayoutsDialog rememberSelection initialPractice={layoutsOpen === 'practice'} initialPhrases={layoutsOpen === 'phrases'} initialProfile={layoutsOpen === 'practice' ? writingDeviceKeyProfile() : undefined} onClose={() => setLayoutsOpen(null)} />}
     <style>{`
       .ol-tool-card:hover { border-color: var(--ol-ink-4) !important; }
       .ol-tool-card:focus-visible { outline: 2px solid var(--ol-ink-3); outline-offset: 3px; }

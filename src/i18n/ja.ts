@@ -1,3 +1,4 @@
+import { firstUseTranslations } from './firstUse.ts';
 import { textDraftTranslations } from './textDraft.ts';
 import { hardwareLayoutTranslations } from './hardwareLayout.ts';
 import { audioFileTranslations } from './audioFile.ts';
@@ -169,6 +170,7 @@ export const ja: typeof zhCN = {
     statusThinking: '思考中',
     statusError: 'エラー',
   },
+  firstUse: firstUseTranslations['ja'],
   tools: {
     description: "必要なときにツールを選べます。",
     style: "音声を文章にするときの表現を選びます。",

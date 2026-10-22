@@ -1,3 +1,4 @@
+import { firstUseTranslations } from './firstUse.ts';
 import { textDraftTranslations } from './textDraft.ts';
 import { hardwareLayoutTranslations } from './hardwareLayout.ts';
 import { audioFileTranslations } from './audioFile.ts';
@@ -168,6 +169,7 @@ export const en: typeof zhCN = {
     statusThinking: 'Thinking',
     statusError: 'Error',
   },
+  firstUse: firstUseTranslations['en'],
   tools: {
     description: "Choose a tool when you need it.",
     style: "Choose how your spoken words are written.",

@@ -1,3 +1,4 @@
+import { firstUseTranslations } from './firstUse.ts';
 import { textDraftTranslations } from './textDraft.ts';
 import { hardwareLayoutTranslations } from './hardwareLayout.ts';
 import { audioFileTranslations } from './audioFile.ts';
@@ -167,6 +168,7 @@ export const zhTW: typeof zhCN = {
     statusThinking: '思考中',
     statusError: '出錯了',
   },
+  firstUse: firstUseTranslations['zh-TW'],
   tools: {
     description: "按需要選擇一個工具。",
     style: "選擇語音轉成文字後的表達方式。",

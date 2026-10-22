@@ -1,3 +1,4 @@
+import { firstUseTranslations } from './firstUse.ts';
 import { textDraftTranslations } from './textDraft.ts';
 import { hardwareLayoutTranslations } from './hardwareLayout.ts';
 import { audioFileTranslations } from './audioFile.ts';
@@ -169,6 +170,7 @@ export const ko: typeof zhCN = {
     statusThinking: '생각 중',
     statusError: '오류',
   },
+  firstUse: firstUseTranslations['ko'],
   tools: {
     description: "필요할 때 도구를 선택하세요.",
     style: "말한 내용을 글로 표현하는 방식을 선택합니다.",
