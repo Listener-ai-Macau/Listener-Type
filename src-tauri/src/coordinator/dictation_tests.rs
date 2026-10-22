@@ -21802,6 +21802,56 @@ async fn ended_ensure_tail_cannot_be_rebound_by_an_unconfirmed_start() {
 }
 
 #[tokio::test]
+async fn malformed_unowned_stream_cannot_end_an_existing_recording() {
+    for phase in [SessionPhase::Starting, SessionPhase::Listening, SessionPhase::Processing] {
+        let coordinator = Coordinator::new();
+        let inner = &coordinator.inner;
+        let owner = new_session_id();
+        {
+            let mut state = inner.state.lock();
+            state.session_id = owner;
+            state.phase = phase;
+            state.cancelled = false;
+        }
+        let result = super::submit_embedded_audio_streaming_notifications(inner, vec![vec![0]]).await;
+        assert!(result.is_err(), "malformed input must still be rejected");
+        let state = inner.state.lock();
+        assert_eq!(state.session_id, owner);
+        assert_eq!(state.phase, phase,
+            "a stream that never acquired an owner cannot end an existing recording");
+        assert!(!state.cancelled);
+    }
+}
+
+#[tokio::test]
+async fn owned_stream_abort_closes_only_its_recording() {
+    for newer_owner in [false, true] {
+        for phase in [SessionPhase::Starting, SessionPhase::Listening, SessionPhase::Processing] {
+            let coordinator = Coordinator::new();
+            let inner = &coordinator.inner;
+            let original = new_session_id();
+            let active = if newer_owner { new_session_id() } else { original };
+            {
+                let mut state = inner.state.lock();
+                state.session_id = active;
+                state.phase = phase;
+                state.cancelled = false;
+            }
+            let consumer: Arc<dyn crate::recorder::AudioConsumer> = Arc::new(CountingConsumer::default());
+            let mut stream = EmbeddedStreamingDictation::default();
+            stream.session = Some(embedded_audio_test_session(original, consumer));
+            stream.embedded_session_id = Some(43);
+            stream.abort_active_session(inner, "owned test error");
+            assert!(stream.session.is_none());
+            assert!(stream.terminal_received);
+            let state = inner.state.lock();
+            assert_eq!(state.session_id, active);
+            assert_eq!(state.phase, if newer_owner { phase } else { SessionPhase::Idle });
+        }
+    }
+}
+
+#[tokio::test]
 async fn expired_ensure_cannot_cancel_or_queue_abort_for_a_later_owner() {
     for newer_owner in [true, false] {
         for phase in [SessionPhase::Starting, SessionPhase::Listening] {

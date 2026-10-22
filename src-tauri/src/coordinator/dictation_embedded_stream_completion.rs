@@ -255,12 +255,15 @@ impl EmbeddedStreamingDictation {
         if let Some(session_id) = event_session_id {
             clear_embedded_source_integrity_ledger(inner, session_id);
         }
+        let mut error_display_owner = None;
         if let Some(mut session) = self.session.take() {
             self.preserve_session_candidate_fact_ledger(&mut session);
             crate::observability::record_embedded_audio_failure(session.session_id, message);
             cancel_asr_for_session(inner, session.session_id);
             restore_prepared_windows_ime_session(inner, session.session_id);
-            publish_dictation_pipeline_error(inner, session.session_id, message.to_string());
+            if publish_dictation_pipeline_error(inner, session.session_id, message.to_string()) {
+                error_display_owner = Some(session.session_id);
+            }
         } else {
             if let Some(mut candidate) = self.speaker_candidate.take() {
                 let rejected_bytes = candidate.pcm.len();
@@ -278,28 +281,36 @@ impl EmbeddedStreamingDictation {
                 );
                 self.preserve_candidate_fact_ledger(&mut candidate);
             }
-            let elapsed = inner.state.lock().started_at.elapsed().as_millis() as u64;
-            emit_capsule(
-                inner,
-                CapsuleState::Error,
-                0.0,
-                elapsed,
-                Some(message.to_string()),
-                None,
-            );
-            // Session 90e1415f (2026-09-20 16:46): a stream abort that raced
-            // session begin left the coordinator in Listening with an error
-            // capsule that could never dismiss — schedule_capsule_idle only
-            // fires on phase==Idle, and nothing else drove the state machine
-            // down. Publish the pipeline error against the coordinator's
-            // current session so the phase resets; when the state is already
-            // Idle the event is ignored (InvalidPhase) and this is a no-op.
-            let coordinator_session_id = inner.state.lock().session_id;
-            if coordinator_session_id != uuid::Uuid::nil() {
-                publish_dictation_pipeline_error(inner, coordinator_session_id, message.to_string());
+            // A parser/candidate failure has no product owner. Do not borrow
+            // the current coordinator ID: it may be another recording or an
+            // earlier initialization failure that already published its own
+            // scoped error. Initialization failures close their owner in
+            // begin_embedded_audio_dictation_session before returning here.
+            // Retain idle diagnostics, keyed to that idle generation so a
+            // concurrently starting recording also rejects the display update.
+            let idle_generation = {
+                let state = inner.state.lock();
+                (state.phase == SessionPhase::Idle).then_some((
+                    state.session_id,
+                    state.started_at.elapsed().as_millis() as u64,
+                ))
+            };
+            if let Some((owner, elapsed)) = idle_generation {
+                super::support::emit_capsule_with_session(
+                    inner,
+                    Some(owner),
+                    CapsuleState::Error,
+                    0.0,
+                    elapsed,
+                    Some(message.to_string()),
+                    None,
+                );
+                error_display_owner = Some(owner);
             }
         }
-        schedule_capsule_idle(inner, CAPSULE_STREAM_ERROR_HIDE_DELAY_MS, event_session_id);
+        if let Some(owner) = error_display_owner {
+            schedule_capsule_idle(inner, CAPSULE_STREAM_ERROR_HIDE_DELAY_MS, Some(owner));
+        }
         self.terminal_received = true;
     }
 
