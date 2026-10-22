@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T14:43:38.037229+08:00",
+  "updated_at": "2026-10-22T16:00:39.704845+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5667,6 +5667,39 @@
         "Real populated installed native full export not invoked: daily hidden process has no main-window context. No focus/window change to force it. Full populated data and existing support ZIP are domain-tested; private native file export used an empty capture.",
         "Perceived latency causality, real physical convenience,49USD purchase and all old refusals remain unqualified."
       ]
+    },
+    {
+      "id": "primary_navigation132_three_entries_existing_tools",
+      "repo": "type",
+      "commit": "7b8edfc22428689bb4f2964cee41b6b636fbd9e3",
+      "commit_subject": "Simplify primary navigation and restore complete existing test coverage",
+      "subject": "Keep three primary tabs and every existing secondary tool/device page reachable; discover all frontend unit files in CI",
+      "state": "controlled_ui_exact_native_installed_verified_live_hardware_not_rerun",
+      "humanAccepted": false,
+      "previous_source_evidence": "131 sidebar exposed six peer pages. Owner requested simpler AI/tab entries. Existing test command named14 of21 source files; broad review found five outdated Rust source/fixture contracts and three private-environment differences, not eight demonstrated production defects. Removed near-phrase rescue792d2dd4 stays removed.",
+      "protects": [
+        "Primary navigation has exactly Overview,History,Tools; existing style,vocabulary,translation and selection-ask pages remain accessible under Tools with an explicit return.",
+        "Five UI locales and narrow820px layout retain readable entries; old device-key app-page IDs route to their original page with Tools active. Native event evidence is synthetic routing, not a physical key press.",
+        "npmtest discovers every source .test.ts file; CI executes it. Tests retain authoritative readback, single-flight wake confirmation, owner gate and exact active-device OTA handoff contracts without restoring rejected rescue behavior.",
+        "No changes to backend speech/wake/end/clipboard/Bluetooth parameters or Firmware33. Prior physical evidence stays at its original scope."
+      ],
+      "guards": [
+        "npm test",
+        "python scripts/check-primary-navigation-ui.py --url <controlled-frontend-url> --report <report.json>",
+        "python scripts/check-vocabulary-ui.py --url <controlled-frontend-url> --report <report.json>",
+        "python scripts/check-customer-settings-ui.py --url <controlled-frontend-url> --report <report.json>"
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept132-functional-review.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native132-snapshot-20261022-155809\\navigation132-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native132-snapshot-20261022-155809\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build132\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build132\\type132-installed.json"
+      ],
+      "unverified": [
+        "Fresh real hardware USB/BLE writes/OTA and nRF transport speeds: no Bluetooth/firmware runtime change in this batch; prior evidence retained.",
+        "Ignored optional-model/cloud/real-editor tests, arbitrary foreground text insertion, intermittent early end, strong interfering speech, physical value or buying interest."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -6624,6 +6657,28 @@
           "src-tauri/src/observability/pipeline_diagnostics.rs",
           "src-tauri/src/commands/diagnostics_export.rs",
           "src-tauri/src/commands_tests.rs"
+        ]
+      }
+    },
+    {
+      "id": "primary-navigation",
+      "accepted_scope": "Controlled React and exact native software navigation, retained old native device-page event route; no new physical or purchasing qualification.",
+      "baseline_state": "controlled_ui_exact_native_installed_verified_live_hardware_not_rerun",
+      "guard_entries": [
+        "primary_navigation132_three_entries_existing_tools"
+      ],
+      "known_failures": [
+        "Initial screenshot captured an outgoing180ms fade, corrected test settling; not product blank-page reproduction.",
+        "Historical source-string guards could fail after legitimate refactors or CRLF checkout; scopes updated against current source, failed rescue not re-enabled."
+      ],
+      "paths": {
+        "type": [
+          "src/components/FloatingShell.tsx",
+          "src/pages/Tools.tsx",
+          "src/state/useAppState.ts",
+          "scripts/check-primary-navigation-ui.py",
+          "scripts/test-frontend.mjs",
+          ".github/workflows/ci.yml"
         ]
       }
     }

@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T14:43:38.037229+08:00",
+  "updatedAt": "2026-10-22T16:00:39.704845+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 131,
-    "source": "fd872c301ba11f0a6bf22bfda4c3098246071678",
-    "sourceTag": "build-source/type131-20261022",
+    "build": 132,
+    "source": "7b8edfc22428689bb4f2964cee41b6b636fbd9e3",
+    "sourceTag": "build-source/type132-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "8f893fbca6aad12cd87d04feea9e9ba633ac5e4bf2d8e4a7e40793fcbe56e013",
-    "sizeBytes": 299192320,
-    "exeSha256": "eb1516dd1d99931d35f2f5f87686c5498092e877ffadcd9d7ca3121907d632f5",
+    "sha256": "2206ffc729399114058f2c2ff45c735ebaebd43fe4d4c472924e9cc1bae18b45",
+    "sizeBytes": 299196416,
+    "exeSha256": "3137c31d004d4c86ae8fbb1287525df7377909c48e5fa7682928bea14c6462ed",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -279,7 +279,14 @@
     "pipeline131PrivateNativeEmptyExportVerified": true,
     "pipeline131PopulatedInstalledExportVerified": false,
     "customer131Reviewed": false,
-    "customer131PurchaseQualification": false
+    "customer131PurchaseQualification": false,
+    "type132InstalledExeAndPreferencesVerified": true,
+    "type132ThreePrimaryTabsNativeVerified": true,
+    "type132ExistingSoftwareFunctionalReviewVerified": true,
+    "type132FreshPhysicalHardwareAcceptance": false,
+    "type132VerificationScope": "Owner requested existing software functional review and simpler navigation; controlled/UI/unit evidence, not renewed live hardware/foreground/strong-interference qualification.",
+    "customer132Reviewed": false,
+    "customer132PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -296,6 +303,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build131-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build132-20261022"
   }
 }
