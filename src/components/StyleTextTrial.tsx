@@ -10,7 +10,7 @@ import './StyleTextTrial.css';
 import { DeviceLayoutsDialog } from './DeviceLayoutsDialog';
 import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
 import { PoliteEditSuggestions } from './PoliteEditSuggestions';
-import { TextServiceSettingsDialog } from './TextServiceSettingsDialog';
+import { ProviderSettingsDialog } from './ProviderSettingsDialog';
 
 export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, prepareShorter, draft, onDraftChange, onClose }: {
   pack: StylePack;
@@ -391,7 +391,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       )}
       {keyPhrase !== null && <DeviceLayoutsDialog rememberSelection initialProfile={writingDeviceKeyProfile()} incomingText={keyPhrase} onLeaveForPage={onClose} onClose={() => setKeyPhrase(null)} />}
     </dialog>
-    {providersOpen && <TextServiceSettingsDialog onClose={() => {
+    {providersOpen && <ProviderSettingsDialog kind="text" onClose={() => {
       setProvidersOpen(false); setReadinessAttempt(value => value + 1);
     }} />}</>
   );

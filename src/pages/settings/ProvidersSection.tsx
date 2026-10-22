@@ -209,7 +209,7 @@ const ASR_PRESETS: ReadonlyArray<{ id: AsrPresetId; nameKey: string; baseUrl: st
 
 // ─── ProvidersSection ─────────────────────────────────────────────────
 
-export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false, textOnly = false }: { onOpenLocalAsr: () => void; prioritizeTextService?: boolean; textOnly?: boolean }) {
+export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false, textOnly = false, speechOnly = false }: { onOpenLocalAsr: () => void; prioritizeTextService?: boolean; textOnly?: boolean; speechOnly?: boolean }) {
   const { t } = useTranslation();
   const { prefs, updatePrefs } = useHotkeySettings();
   // `*Provider` 立即跟随 <select> 改动（受控组件必须实时反映用户输入）；
@@ -360,7 +360,7 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
           <div style={{ fontSize: 13, fontWeight: 600 }}>{t('settings.providers.asrTitle')}</div>
           <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>{t('settings.providers.asrDesc')}</div>
         </div>
-        {(os === 'win' || os === 'mac') && (
+        {!speechOnly && (os === 'win' || os === 'mac') && (
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 12 }}>
             <div style={{ flex: '1 1 220px', fontSize: 11.5, color: 'var(--ol-ink-3)', lineHeight: 1.6 }}>
               {t('settings.providers.localSetupHint')}
@@ -535,7 +535,7 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
       <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.6, marginBottom: 10 }}>
         {t('settings.providers.credentialStorageNotice')}
       </div>
-      {textOnly ? llmCard : prioritizeTextService ? [llmCard, asrCard] : [asrCard, llmCard]}
+      {textOnly ? llmCard : speechOnly ? asrCard : prioritizeTextService ? [llmCard, asrCard] : [asrCard, llmCard]}
     </>
   );
 }

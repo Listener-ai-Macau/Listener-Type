@@ -500,8 +500,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
       {quickTrialOpen && <QuickStyleTextTrial draft={quickTrialDraft} onDraftChange={setQuickTrialDraft}
         onClose={() => setQuickTrialOpen(false)} />}
       {savedDraftsOpen && <SavedTextDraftsDialog onClose={() => setSavedDraftsOpen(false)} />}
-      {audioFileOpen && <AudioFileTrial onClose={() => setAudioFileOpen(false)}
-        onOpenProviders={() => { setAudioFileOpen(false); openSettings('providers'); }} />}
+      {audioFileOpen && <AudioFileTrial onClose={() => setAudioFileOpen(false)} />}
 
       {/* Footer — 透明地坐在外层磨砂底板上，跟 sidebar 同一片磨砂玻璃 */}
       <div

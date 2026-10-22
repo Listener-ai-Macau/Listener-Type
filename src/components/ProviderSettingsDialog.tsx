@@ -5,9 +5,11 @@ import { Btn } from '../pages/_atoms';
 import { providerWriteRevision, waitForProviderWrites } from '../lib/providerWriteBarrier';
 import './StyleTextTrial.css';
 
-/** A sibling modal: the text workspace and its source transcript stay mounted. */
-export function TextServiceSettingsDialog({ onClose }: { onClose: () => void }) {
+/** A sibling modal: configuring a service never replaces its originating work. */
+export function ProviderSettingsDialog({ kind, onClose }: { kind: 'text' | 'speech'; onClose: () => void }) {
   const { t } = useTranslation();
+  const title = t(kind === 'text' ? 'style.trial.providers' : 'audioFile.settings');
+  const copy = kind === 'text' ? 'style.trial' : 'audioFile';
   const dialog = useRef<HTMLDialogElement>(null);
   const closing = useRef(false);
   const openedAt = useRef(providerWriteRevision());
@@ -29,18 +31,18 @@ export function TextServiceSettingsDialog({ onClose }: { onClose: () => void }) 
     if (saved) { onClose(); return; }
     closing.current = false; setSaving(false); setFailed(true);
   };
-  return <dialog ref={dialog} className="ol-style-trial" aria-label={t('style.trial.providers')}
+  return <dialog ref={dialog} className="ol-style-trial" aria-label={title}
     onCancel={event => { event.preventDefault(); void close(); }}>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-      <h2>{t('style.trial.providers')}</h2>
+      <h2>{title}</h2>
       <Btn variant="ghost" disabled={saving} onClick={() => void close()}>{t(saving ? 'common.saving' : 'common.close')}</Btn>
     </div>
-    <p className="ol-style-trial-hint">{t('style.trial.setupReturn')}</p>
+    <p className="ol-style-trial-hint">{t(`${copy}.setupReturn`)}</p>
     <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-      <ProvidersSection prioritizeTextService textOnly onOpenLocalAsr={() => {}} />
+      <ProvidersSection prioritizeTextService={kind === 'text'} textOnly={kind === 'text'} speechOnly={kind === 'speech'} onOpenLocalAsr={() => {}} />
     </fieldset>
-    {failed && <div role="alert"><p>{t('style.trial.setupSaveFailed')}</p>
-      <Btn variant="ghost" onClick={onClose}>{t('style.trial.setupCloseAnyway')}</Btn>
+    {failed && <div role="alert"><p>{t(`${copy}.setupSaveFailed`)}</p>
+      <Btn variant="ghost" onClick={onClose}>{t(`${copy}.setupCloseAnyway`)}</Btn>
     </div>}
   </dialog>;
 }

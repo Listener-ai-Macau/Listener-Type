@@ -7,10 +7,11 @@ import { detectOS } from './WindowChrome';
 import { Btn } from '../pages/_atoms';
 import { SaveTextDraft } from './SaveTextDraft';
 import { QuickStyleTextTrial } from './QuickStyleTextTrial';
+import { ProviderSettingsDialog } from './ProviderSettingsDialog';
 import './StyleTextTrial.css';
 
 const MAX_WAV = 60 * 32_000 + 65_536;
-export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => void; onOpenProviders?: () => void }) {
+export function AudioFileTrial({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   const generation = useRef(0);
@@ -34,6 +35,7 @@ export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => vo
   const [closeConfirm, setCloseConfirm] = useState(false);
   const [textWorkspaceOpen, setTextWorkspaceOpen] = useState(false);
   const [textWorkspaceDraft, setTextWorkspaceDraft] = useState('');
+  const [speechSettingsOpen, setSpeechSettingsOpen] = useState(false);
   const supported = status?.activeAsrProvider === 'volcengine';
   const ready = supported && status.asrConfigured;
   useEffect(() => {
@@ -110,7 +112,7 @@ export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => vo
     <div role="status" className="ol-style-trial-hint">
       {statusFailed ? t('audioFile.statusFailed') : !status ? t('audioFile.checking') : !supported ? t('audioFile.provider') : !ready ? t('audioFile.setup') : t('audioFile.ready')}
       {(statusFailed || (status && !ready)) && <Btn size="sm" variant="ghost" onClick={() => setRetry(x => x + 1)}>{t('audioFile.retry')}</Btn>}
-      {status && !ready && onOpenProviders && <Btn size="sm" variant="ghost" onClick={onOpenProviders}>{t('audioFile.settings')}</Btn>}
+      {status && !ready && <Btn size="sm" variant="ghost" onClick={() => setSpeechSettingsOpen(true)}>{t('audioFile.settings')}</Btn>}
     </div>
     <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', margin: '16px 0' }}>
       <label>{t('audioFile.choose')} <input aria-label={t('audioFile.choose')} type="file" accept=".wav,audio/wav" disabled={loading || pending || !!result || copying} onChange={event => {
@@ -155,6 +157,10 @@ export function AudioFileTrial({ onClose, onOpenProviders }: { onClose: () => vo
       if (!saveBusy.current && !copyBusy.current) onClose();
     }}>{t('audioFile.closeWithoutCopy')}</Btn></div>}
   </dialog>
+    {speechSettingsOpen && <ProviderSettingsDialog kind="speech" onClose={() => {
+      setSpeechSettingsOpen(false);
+      setRetry(value => value + 1);
+    }} />}
     {textWorkspaceOpen && <QuickStyleTextTrial draft={textWorkspaceDraft} onDraftChange={setTextWorkspaceDraft}
       onClose={() => setTextWorkspaceOpen(false)} />}
   </>;
