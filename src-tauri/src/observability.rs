@@ -5,6 +5,9 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 use serde::Serialize;
 
+mod pipeline_diagnostics;
+pub(crate) use pipeline_diagnostics::export_audio_pipeline_diagnostics;
+
 use crate::coordinator_state::SessionId;
 use crate::observability_v1::{
     new_host_correlation_id, BleLifecycleState, Capability, CommandResult, ErrorCategory,
@@ -1647,6 +1650,7 @@ fn ensure_segment_counter(
         if let Some(settled) = settled {
             state.segment_counters.remove(&settled);
             state.segment_final_snapshot_emitted.remove(&settled);
+            state.segment_final_counter_logged.remove(&settled);
         }
     }
     if state.segment_counters.len() >= 32 && !state.segment_counters.contains_key(&segment_id) {
@@ -1674,6 +1678,7 @@ struct PipelineObservationState {
     segment_ledger_overflow_bytes: u64,
     segment_ledger_incomplete: bool,
     segment_final_snapshot_emitted: BTreeSet<u32>,
+    segment_final_counter_logged: BTreeSet<u32>,
     source_interval_offsets: BTreeMap<(u64, Option<u32>), u64>,
     source_interval_unknown_segments: BTreeSet<(u64, Option<u32>)>,
     interval_ledger_overflow_count: u64,
@@ -1726,6 +1731,7 @@ impl EmbeddedAudioPipelineObservation {
                 segment_ledger_overflow_bytes: 0,
                 segment_ledger_incomplete: false,
                 segment_final_snapshot_emitted: BTreeSet::new(),
+                segment_final_counter_logged: BTreeSet::new(),
                 source_interval_offsets: BTreeMap::new(),
                 source_interval_unknown_segments: BTreeSet::new(),
                 interval_ledger_overflow_count: 0,
@@ -2659,52 +2665,15 @@ impl EmbeddedAudioPipelineObservation {
 
     pub(crate) fn snapshot(&self, reason: &'static str, force: bool) {
         let now = Instant::now();
-        // Poll snapshots run on the live audio path. Keep only the current
-        // physical segment here: serializing every prior segment once a second
-        // grows the line to tens of KB, stalls capture, and rotates away the
-        // wake/control evidence we need. Terminal/error snapshots retain the
-        // full ledger.
-        if !force && self.snapshot_sink.lock().is_none() {
-            let summary = {
-                let mut state = self.state.lock();
-                if state
-                    .last_snapshot_at
-                    .is_some_and(|last| now.duration_since(last) < Duration::from_secs(1))
-                {
-                    return;
+        // Ordinary lifecycle notifications must not serialize the accumulated
+        // detail ledgers onto the capture path or into a 64 KiB log record.
+        // Explicit diagnostic exports and test sinks retain full evidence.
+        if self.snapshot_sink.lock().is_none() {
+            for summary in self.production_summaries(reason, force) {
+                match serde_json::to_string(&summary) {
+                    Ok(payload) => log::info!("[obs-audio-pipeline] {payload}"),
+                    Err(_) => log::warn!("[obs-audio-pipeline] summary serialization failed"),
                 }
-                state.last_snapshot_at = Some(now);
-                state.snapshot_seq = state.snapshot_seq.saturating_add(1);
-                PipelineSummarySnapshot {
-                    event: "embedded_audio_pipeline_snapshot",
-                    detail: "summary",
-                    reason,
-                    capture_generation: self.capture_generation,
-                    coordinator_session_id: state.coordinator_session_id.clone(),
-                    embedded_session_id: state.embedded_session_id,
-                    snapshot_seq: state.snapshot_seq,
-                    monotonic_ms: now.duration_since(state.started_at).as_millis() as u64,
-                    counters: state.counters,
-                    segment_counters: state
-                        .embedded_session_id
-                        .and_then(|segment_id| {
-                            state
-                                .segment_counters
-                                .get(&segment_id)
-                                .copied()
-                                .map(|counters| (segment_id, counters))
-                        })
-                        .into_iter()
-                        .collect(),
-                    segment_ledger_incomplete: state.segment_ledger_incomplete,
-                    interval_ledger_incomplete: state.interval_ledger_incomplete,
-                    asr_destination_facts_incomplete: state.asr_destination_facts_incomplete,
-                    pcm_stage_facts_incomplete: state.pcm_stage_ledger.capacity_drops().4,
-                }
-            };
-            match serde_json::to_string(&summary) {
-                Ok(payload) => log::info!("[obs-audio-pipeline] {payload}"),
-                Err(_) => log::warn!("[obs-audio-pipeline] summary serialization failed"),
             }
             return;
         }
@@ -2729,53 +2698,7 @@ impl EmbeddedAudioPipelineObservation {
             state
                 .segment_final_snapshot_emitted
                 .extend(settled_segments);
-            PipelineSnapshot {
-                event: "embedded_audio_pipeline_snapshot",
-                reason,
-                capture_generation: self.capture_generation,
-                coordinator_session_id: state.coordinator_session_id.clone(),
-                embedded_session_id: state.embedded_session_id,
-                snapshot_seq: state.snapshot_seq,
-                monotonic_ms: now.duration_since(state.started_at).as_millis() as u64,
-                counters: state.counters,
-                segment_counters: state.segment_counters.clone(),
-                segment_ledger_overflow_count: state.segment_ledger_overflow_count,
-                segment_ledger_overflow_bytes: state.segment_ledger_overflow_bytes,
-                segment_ledger_incomplete: state.segment_ledger_incomplete,
-                interval_ledger_overflow_count: state.interval_ledger_overflow_count,
-                interval_ledger_overflow_bytes: state.interval_ledger_overflow_bytes,
-                interval_ledger_incomplete: state.interval_ledger_incomplete,
-                asr_destination_facts: state.asr_destination_facts.iter().cloned().collect(),
-                asr_destination_fact_update_drop_count: state
-                    .asr_destination_fact_update_drop_count,
-                asr_destination_fact_update_drop_bytes: state
-                    .asr_destination_fact_update_drop_bytes,
-                asr_destination_share_drop_count: state.asr_destination_share_drop_count,
-                asr_destination_share_drop_bytes: state.asr_destination_share_drop_bytes,
-                asr_destination_fact_missing_metadata_count: state
-                    .asr_destination_fact_missing_metadata_count,
-                asr_destination_fact_missing_metadata_bytes: state
-                    .asr_destination_fact_missing_metadata_bytes,
-                asr_destination_fact_conflict_count: state.asr_destination_fact_conflict_count,
-                asr_destination_fact_conflict_bytes: state.asr_destination_fact_conflict_bytes,
-                asr_destination_facts_incomplete: state.asr_destination_facts_incomplete,
-                pcm_stage_facts: state.pcm_stage_ledger.facts(),
-                pcm_stage_fact_update_drop_count: state.pcm_stage_ledger.capacity_drops().0,
-                pcm_stage_fact_update_drop_bytes: state.pcm_stage_ledger.capacity_drops().1,
-                pcm_stage_share_drop_count: state.pcm_stage_ledger.capacity_drops().2,
-                pcm_stage_share_drop_bytes: state.pcm_stage_ledger.capacity_drops().3,
-                pcm_stage_facts_incomplete: state.pcm_stage_ledger.capacity_drops().4,
-                collector_pcm_facts: state.collector_pcm_facts.iter().copied().collect(),
-                collector_pcm_fact_drop_count: state.collector_pcm_fact_drop_count,
-                collector_pcm_fact_drop_bytes: state.collector_pcm_fact_drop_bytes,
-                collector_pcm_facts_incomplete: state.collector_pcm_facts_incomplete,
-                candidate_facts: state.candidate_ledger.facts(),
-                candidate_fact_drop_count: state.candidate_ledger.capacity_drops().0,
-                candidate_fact_drop_bytes: state.candidate_ledger.capacity_drops().1,
-                candidate_source_run_drop_count: state.candidate_ledger.capacity_drops().2,
-                candidate_source_run_drop_bytes: state.candidate_ledger.capacity_drops().3,
-                candidate_facts_incomplete: state.candidate_ledger.capacity_drops().4,
-            }
+            pipeline_diagnostics::full_snapshot(self.capture_generation, reason, now, &state)
         };
         let Ok(payload) = serde_json::to_string(&snapshot) else {
             log::warn!("[obs-audio-pipeline] snapshot serialization failed");
@@ -2911,9 +2834,11 @@ struct PipelineSummarySnapshot {
     event: &'static str,
     detail: &'static str,
     reason: &'static str,
+    full_detail_source: &'static str,
     capture_generation: u64,
     coordinator_session_id: Option<String>,
     embedded_session_id: Option<u32>,
+    segment_snapshot_id: Option<u32>,
     snapshot_seq: u64,
     monotonic_ms: u64,
     counters: PipelineCounters,
@@ -2922,6 +2847,8 @@ struct PipelineSummarySnapshot {
     interval_ledger_incomplete: bool,
     asr_destination_facts_incomplete: bool,
     pcm_stage_facts_incomplete: bool,
+    collector_pcm_facts_incomplete: bool,
+    candidate_facts_incomplete: bool,
 }
 
 #[derive(Serialize)]
@@ -2984,6 +2911,7 @@ impl Drop for EmbeddedAudioPipelineCaptureGuard {
     fn drop(&mut self) {
         self.observation.state.lock().capture_ended = true;
         self.observation.snapshot("capture_end", true);
+        pipeline_diagnostics::remember_ended(&self.observation);
         if let Some(registry) = PIPELINE_OBSERVATIONS.get() {
             let mut registry = registry.lock();
             if registry

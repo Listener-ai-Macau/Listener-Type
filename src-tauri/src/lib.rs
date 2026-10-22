@@ -946,6 +946,7 @@ pub fn run() {
             commands::list_installed_applications,
             commands::record_ui_timeline_event,
             commands::get_capsule_state,
+            commands::export_audio_pipeline_diagnostics,
             commands::get_network_health_state,
             commands::reset_capsule_position,
             commands::move_capsule,

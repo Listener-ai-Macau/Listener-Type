@@ -1853,6 +1853,16 @@ pub async fn repolish(
 include!("style_pack_commands.rs");
 include!("audio_file_trial.rs");
 include!("style_trial_delivery.rs");
+
+/// Export bounded metadata ledgers for engineering diagnosis without changing
+/// capture, recognition, credentials or foreground input.
+#[tauri::command]
+pub async fn export_audio_pipeline_diagnostics(window: Window) -> Result<Value, String> {
+    ensure_main_window(&window)?;
+    tauri::async_runtime::spawn_blocking(crate::observability::export_audio_pipeline_diagnostics)
+        .await.map_err(|_| "audio pipeline diagnostic export worker failed".to_owned())?
+}
+
 include!("local_device_layouts.rs");
 include!("saved_text_drafts.rs");
 
