@@ -121,7 +121,29 @@ impl EmbeddedStreamingDictation {
                 }
             }
         }
-        let event = match self.collector.handle_notification(notification) {
+        // STOP may overtake queued PCM. While ENSURE awaits its successor,
+        // the predecessor's collector is parked, not retired: its tail must
+        // retain the original packet accounting and after-STOP boundary.
+        // A duplicate old START/STOP cannot reclaim the logical owner or
+        // overwrite that parked STOP. Other physical segments keep using the
+        // ordinary collector and the request-tagged continuation gate below.
+        let predecessor_tail = crate::embedded_audio::parse_packet(notification)
+            .ok()
+            .filter(|packet| self.awaiting_ended_predecessor_pcm(packet.header.session_id))
+            .map(|packet| packet.header.packet_type);
+        if matches!(predecessor_tail, Some(crate::embedded_audio::PacketType::SessionStart
+            | crate::embedded_audio::PacketType::SessionStop)) {
+            log::info!("[wake-phrase] ignoring duplicate control for stopped ENSURE predecessor");
+            return Ok(false);
+        }
+        let collector = if predecessor_tail.is_some() {
+            &mut self.ended_ensure_predecessor.as_mut().unwrap().2
+        } else {
+            &mut self.collector
+        };
+        let event_result = collector.handle_notification(notification);
+        let actor_admission_fact = collector.last_admission_fact();
+        let event = match event_result {
             Ok(event) => event,
             Err(err) => {
                 if let Some(observation) = observation.as_ref() {
@@ -188,7 +210,6 @@ impl EmbeddedStreamingDictation {
             crate::embedded_audio::StreamingSessionEvent::PcmChunk(chunk) => chunk.metadata,
             _ => None,
         };
-        let actor_admission_fact = self.collector.last_admission_fact();
         let source_admission_context = Some(CaptureAdmissionSourceContext {
             capture_generation,
             capture_fact: capture_admission_fact.clone(),
@@ -345,7 +366,9 @@ impl EmbeddedStreamingDictation {
         embedded_session_id: u32,
     ) -> Result<(), String> {
         if self.session.is_some() {
-            if self.embedded_session_id != Some(embedded_session_id) {
+            if self.embedded_session_id != Some(embedded_session_id)
+                && !self.awaiting_ended_predecessor_pcm(embedded_session_id)
+            {
                 return Err(format!(
                     "嵌入式音频流式 session 不一致: current={:?}, incoming={embedded_session_id}",
                     self.embedded_session_id

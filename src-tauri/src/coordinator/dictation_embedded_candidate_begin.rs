@@ -49,6 +49,18 @@ impl EmbeddedStreamingDictation {
             })
     }
 
+    fn awaiting_ended_predecessor_pcm(&self, incoming_id: u32) -> bool {
+        self.session.is_some()
+            && self.embedded_session_id.is_none()
+            && self.ended_ensure_predecessor.as_ref()
+                .is_some_and(|(id, _, _)| *id == incoming_id)
+            && self.accepted_wake_capture_ensure.is_some_and(|ensure| {
+                ensure.previous_segment_id == incoming_id
+                    && ensure.replacement_wait_started_at.is_some()
+                    && ensure.confirmed_segment_id.is_none()
+            })
+    }
+
     fn bind_post_activation_segment(
         &mut self,
         inner: &Arc<Inner>,
