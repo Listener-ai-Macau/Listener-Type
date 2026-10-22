@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T22:37:05.905514+08:00",
+  "updated_at": "2026-10-22T23:50:02.684547+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5904,9 +5904,44 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build137\\type-artifact-verification.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build137\\type137-installed.json"
       ]
+    },
+    {
+      "id": "type138_unowned_stream_error_preserves_current_recording",
+      "subject": "An ownerless stream failure cannot terminate an unrelated recording",
+      "state": "production_counterexample_and_exact_package_verified_field_pending",
+      "baseCommit": "d3d02f2470ea5ba32153d6029b38e27a32e6a5ae",
+      "protects": [
+        "Malformed public streaming input without an actor owner cannot end current Starting/Listening/Processing.",
+        "Owned error cleanup closes the matching owner and preserves newer owners.",
+        "Idle error diagnostics carry their captured generation, preserving current-session UI ownership."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib unowned_stream -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib owned_stream_abort -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib background_terminal -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib expired_ensure_cannot -- --test-threads=1"
+      ],
+      "limits": [
+        "Production parser/actor tests use controlled state and consumers; not physical field attribution.",
+        "No new matching RF/HCI/firmware capture; no throughput, ASR, hardware buying or full reliability claim."
+      ],
+      "repo": "type",
+      "commit": "4065fe1a9aef1aab28fbd7eb874a5ffbdc5a7816",
+      "commit_subject": "Keep unowned stream failures from ending an unrelated recording",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\owner138-source-audit.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261022-234131-ee894a\\result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261022-234133-580ac3\\result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261022-234133-016b0e\\result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261022-234134-ddbad5\\result.json",
+        "work\\customer-onboarding-20261020\\isolated-native138-snapshot-20261022-234905\\native138-package-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build138\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build138\\type138-installed.json"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-22T22:37:05.905514+08:00",
+  "feature_routes_updated_at": "2026-10-22T23:50:02.684547+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -5939,13 +5974,14 @@
     {
       "id": "wake-continuation",
       "baseline_state": "exact_failure_not_human_accepted",
-      "accepted_scope": "No human-accepted good commit is registered for these unconfirmed ENSURE/source-EOF failure branches. Keep actual source replay evidence separate from field acceptance; normal endpoint/latency guards do not prove this boundary. Type136: stopped-predecessor PCM routing and matching device-cancel product-state closure verified in production-core replay; physical field attribution remains pending. Type137: an old takeover timeout cannot cancel a newer product owner or queue a second shared abort; production replay and exact package verified, full field attribution pending.",
+      "accepted_scope": "No human-accepted good commit is registered for these unconfirmed ENSURE/source-EOF failure branches. Keep actual source replay evidence separate from field acceptance; normal endpoint/latency guards do not prove this boundary. Type136: stopped-predecessor PCM routing and matching device-cancel product-state closure verified in production-core replay; physical field attribution remains pending. Type137: an old takeover timeout cannot cancel a newer product owner or queue a second shared abort; production replay and exact package verified, full field attribution pending. Type138: ownerless malformed-stream failure cannot end an unrelated active recording; owned errors retain scoped cleanup. Production counterexample and exact package verified; historical physical failure attribution remains pending.",
       "guard_entries": [
         "firmware_same_predecessor_ensure_source_lease",
         "type_session_capture_control_archive",
         "type_optional_capability_nonblocking_recovery",
         "type136_pending_predecessor_tail_and_device_cancel_ownership",
-        "type137_expired_takeover_cancel_stays_with_original_owner"
+        "type137_expired_takeover_cancel_stays_with_original_owner",
+        "type138_unowned_stream_error_preserves_current_recording"
       ],
       "paths": {
         "type": [

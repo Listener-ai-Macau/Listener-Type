@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build137 / Firmware33
+# Listener v1.0.6-rc1 · Type build138 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -7,25 +7,23 @@
 
 ## In this app update
 
-A delayed host takeover timeout now cancels only the recording that created it. It cannot close a newer Starting or Listening recording, and a cancellation already consumed by the stream actor does not queue a second shared abort. Device cancellation uses the same owner-scoped cleanup. Existing live-body and actual-STOP audio-finalization protections remain.
+A malformed stream input that never acquired a recording owner could previously publish an error against whichever recording was current, moving an unrelated Starting recording to Idle. That fallback dates to the earlier fix for a stuck error capsule. It now cannot terminate an unrelated Starting, Listening or Processing recording. Errors with a known recording owner still close only that owner. Idle diagnostics retain their generation identity.
 
-A newly generated shorter draft is no longer labelled as a restored result with no new service request. Actual cached comparisons still reuse their edited results without another request. Saved-draft dates now follow the chosen interface language.
-
-The stale-timeout defect was reproduced in production code before the fix and passes after it. Related private Windows regressions passed; this is not proof that every earlier field failure had the same cause. No new service/model, provider change, wake-threshold change, Bluetooth transport tuning or firmware change is included.
+The public-input counterexample failed before the fix and passed after it, alongside the matching-owner/newer-owner and existing background terminal/timeout protections. No new cloud service or model is included.
 
 ## Before using
 
 US$49 is the hardware price. Type is free and open source. Recognition and optional text services require preparation and separate usage charges; this release does not provide a ready-to-use official cloud account or allowance. USB flashing and Bluetooth OTA use the same firmware ZIP.
 
-RC1 is a prerelease. Strong background-speech separation remains incomplete. Older intermittent early-ending and arbitrary target-field scopes remain open; software checks do not establish physical/long-term reliability or purchase value. This update scopes a delayed host takeover timeout to its original recording and corrects fresh-result and saved-date presentation. Wake thresholds, recognition providers, Bluetooth transport parameters and Firmware33 are unchanged. The specific stale-timeout cancellation counterexample is fixed; complete field attribution of older intermittent failures is still unproven.
+RC1 is a prerelease. Strong background-speech separation remains incomplete. Older intermittent early-ending and arbitrary target-field scopes remain open; software checks do not establish physical/long-term reliability or purchase value. This update fixes the production ownerless-error counterexample, without attributing all older field failures to it. Wake thresholds, providers, timers, Bluetooth transport and Firmware33 are unchanged.
 
 ## File identity
 
-- Type source: `c9d94570e4d799608f11acca98444028bb092b17` · `build-source/type137-20261022`
-- MSI: 299204608 bytes · SHA256 `ae5ef3202bc877aee97af5b8205e055998b6dee42a378cf67f6031ef565d5de2`
+- Type source: `4065fe1a9aef1aab28fbd7eb874a5ffbdc5a7816` · `build-source/type138-20261022`
+- MSI: 299208704 bytes · SHA256 `c923af7e8e7a3d7c4a5cec22135eef11564f0cd338e8c15f620b920293730034`
 - Firmware33 source: `149b6d950ebc5f416924c8670cf2b207bdc2b5b7` · runtime `e7bd1f1619b696a1`
 - ZIP: 1956905 bytes · SHA256 `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272`
 
 ## 中文说明
 
-旧接管超时只清理它原本负责的录音，不取消后来开始的新录音，不再向后续录音留下共享中止标记。设备取消共用按会话归属清理，保留已出正文保护和真实STOP后的音频收尾。另修新缩短结果来源提示、成稿日期语言。生产代码反例前失败后通过；未宣称所有旧现场问题、抗干扰、任意目标上屏或实物长期稳定全部合格。
+无owner的流失败不再借用当前录音编号结束其它录音；保留本次录音真实错误收尾和按代际归属的空闲提示。公开生产入口反例修前失败、修后通过，相关归属与旧保护通过。未宣称所有旧现场提前结束、任意输入框、抗干扰或实物长期稳定已解决。
