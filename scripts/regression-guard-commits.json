@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T22:14:23.426151+08:00",
+  "updated_at": "2026-10-22T22:37:05.905514+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5832,7 +5832,7 @@
       "commit": "75bb8024c3451ce399991b88303e89a35bca34b3",
       "commit_subject": "Keep fresh trial results distinct from cache restoration",
       "subject": "Fresh trial request provenance survives target style selection; saved dates follow selected language",
-      "state": "source_affected_frontend_verified_candidate_not_delivered",
+      "state": "frontend_verified_bundled_in137_customer_reuse_pending",
       "humanAccepted": false,
       "protects": [
         "Fresh Make shorter result is not labelled restored/no new request, including an existing preset on a new draft.",
@@ -5851,7 +5851,9 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\fresh-result136-final.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\fresh-result136-comparisons.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\locale136-before.log",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\locale136-final.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\locale136-final.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build137\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build137\\type137-installed.json"
       ],
       "customer_evidence": [
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE136-20261022\\experience.txt",
@@ -5859,12 +5861,52 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE136-20261022\\07-shortened-result.png"
       ],
       "limits": [
-        "Controlled frontend service/storage fixtures, no paid request and no native/physical/customer qualification of the fix.",
-        "Installed/public136 is unchanged. Candidate is held for a related batch, not a new release or purchase success."
+        "Affected frontend checks use controlled service/storage fixtures; not a real billing or customer qualification.",
+        "Included in137 exact installed package; native startup separately checked, fresh paid-text flow and customer reuse of this fix remain unverified."
+      ],
+      "delivered_with": {
+        "build": 137,
+        "source": "c9d94570e4d799608f11acca98444028bb092b17",
+        "artifact": "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build137\\type-artifact-verification.json"
+      }
+    },
+    {
+      "id": "type137_expired_takeover_cancel_stays_with_original_owner",
+      "subject": "Expired takeover cancellation remains bound to its actor recording owner",
+      "state": "production_counterexample_and_exact_package_verified_field_pending",
+      "baseCommit": "93b56fc3a839432b5d6ff2392567ba68cc260ec0",
+      "protects": [
+        "Old ENSURE expiry cannot close a later Starting/Listening product owner.",
+        "Consumed internal cancellation cannot queue a shared abort for the next actor owner.",
+        "Matching owner cancellation, late-tail accounting, live-body protection and explicit user cancellation retain their contracts."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib ensure -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib pending_stop -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib background_terminal -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib cancel_session_ -- --test-threads=1"
+      ],
+      "limits": [
+        "Scoped production event-order replay with fake capture/consumer edges, not physical field attribution.",
+        "No new matching RF/HCI/firmware triad; no air loss, throughput gain, complete hardware reliability or buying conclusion."
+      ],
+      "repo": "type",
+      "commit": "c9d94570e4d799608f11acca98444028bb092b17",
+      "commit_subject": "Scope expired takeover cancellation to its original recording owner",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\owner137-source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261022-222755-ee416e\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261022-222755-5c60a8\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261022-222755-5dfcc8\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261022-222755-857e0f\\result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native137-snapshot-20261022-223557\\native137-package-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build137\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build137\\type137-installed.json"
       ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-22T22:14:23.426151+08:00",
+  "feature_routes_updated_at": "2026-10-22T22:37:05.905514+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -5897,12 +5939,13 @@
     {
       "id": "wake-continuation",
       "baseline_state": "exact_failure_not_human_accepted",
-      "accepted_scope": "No human-accepted good commit is registered for these unconfirmed ENSURE/source-EOF failure branches. Keep actual source replay evidence separate from field acceptance; normal endpoint/latency guards do not prove this boundary. Type136: stopped-predecessor PCM routing and matching device-cancel product-state closure verified in production-core replay; physical field attribution remains pending.",
+      "accepted_scope": "No human-accepted good commit is registered for these unconfirmed ENSURE/source-EOF failure branches. Keep actual source replay evidence separate from field acceptance; normal endpoint/latency guards do not prove this boundary. Type136: stopped-predecessor PCM routing and matching device-cancel product-state closure verified in production-core replay; physical field attribution remains pending. Type137: an old takeover timeout cannot cancel a newer product owner or queue a second shared abort; production replay and exact package verified, full field attribution pending.",
       "guard_entries": [
         "firmware_same_predecessor_ensure_source_lease",
         "type_session_capture_control_archive",
         "type_optional_capability_nonblocking_recovery",
-        "type136_pending_predecessor_tail_and_device_cancel_ownership"
+        "type136_pending_predecessor_tail_and_device_cancel_ownership",
+        "type137_expired_takeover_cancel_stays_with_original_owner"
       ],
       "paths": {
         "type": [
