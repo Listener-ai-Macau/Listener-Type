@@ -1,0 +1,22 @@
+.ol-overview-start {
+  padding: 0 0 22px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid var(--ol-line);
+}
+.ol-overview-text-entry {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+.ol-overview-utilities {
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--ol-ink-3);
+}
+.ol-overview-utilities > summary {
+  cursor: pointer;
+  width: fit-content;
+  padding: 4px 0;
+}

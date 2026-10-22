@@ -259,12 +259,12 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         </select>
       </label>}
       <p className="ol-style-trial-hint ol-style-trial-purpose" data-style-trial-purpose>{presentation.description}</p>
-      <div className="ol-style-trial-availability">
+      {(!readiness || !readiness.available || (readiness.requiresTextService && !readiness.textServiceConfigured) || readinessError) && <div className="ol-style-trial-availability">
       {readiness?.available === false && <p role="status" className="ol-style-trial-hint">{t('style.trial.nativeRequired')}</p>}
       {readiness?.available && readiness.requiresTextService && !readiness.textServiceConfigured && <p role="status" className="ol-style-trial-hint">{t('style.trial.needsService')}</p>}
       {!readiness && !readinessError && <p role="status" className="ol-style-trial-hint">{t('style.trial.checking')}</p>}
       {readinessError && <p role="alert" className="ol-style-trial-hint">{t('style.trial.readinessFailed')} <Btn size="sm" onClick={() => setReadinessAttempt(value => value + 1)}>{t('common.retry')}</Btn></p>}
-      </div>
+      </div>}
       <div className="ol-style-trial-workspace">
       <div className="ol-style-trial-draft">
       <label htmlFor="style-trial-input" style={{ display: 'block', fontWeight: 600, marginBottom: 8 }}>
@@ -272,6 +272,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       </label>
       <textarea
         id="style-trial-input"
+        className="ol-style-trial-input ol-thinscroll"
         value={draft}
         maxLength={4000}
         rows={6}
@@ -279,7 +280,6 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         disabled={pending || copying || delivering || draftSaving || styleChangePending}
         placeholder={t('style.trial.placeholder')}
         onChange={event => { onDraftChange(event.target.value); setResult(null); setError(''); setCopiedResult(null); setCopyError(false); }}
-        style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', minHeight: 110, padding: 12, borderRadius: 12, border: '1px solid var(--ol-line-strong)', color: 'var(--ol-ink)', background: 'var(--ol-surface-2)', font: 'inherit', lineHeight: 1.65 }}
       />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginTop: 12 }}>
         <Btn variant="blue" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !draft.trim()} onClick={() => void runTrial()}>

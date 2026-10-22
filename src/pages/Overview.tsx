@@ -30,6 +30,7 @@ import { EmbeddedBleStatusPanel } from '../components/EmbeddedBleStatusPanel';
 import { DeviceLayoutsDialog } from '../components/DeviceLayoutsDialog';
 import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
 import { hardwarePhoto } from '../components/DeviceLayoutMap';
+import './Overview.css';
 
 interface OverviewProps {
   onDismissOverview?: () => void;
@@ -304,7 +305,7 @@ export function Overview({ onDismissOverview, onOpenProvidersSettings, onOpenRec
       <PageHeader title={t('firstUse.title')} desc={t('firstUse.description')}
         right={onDismissOverview && <Btn size="sm" onClick={onDismissOverview}>{t('firstUse.skip')}</Btn>} />
 
-      <Card style={{ marginBottom: 14 }}>
+      <section className="ol-overview-start">
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
           <Icon name="mic" size={17} />
           <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('overview.firstDictationTitle')}</h2>
@@ -324,20 +325,23 @@ export function Overview({ onDismissOverview, onOpenProvidersSettings, onOpenRec
           <span style={{ fontSize: 11.5, color: 'var(--ol-ink-4)' }}>{t('overview.firstDictationCancel')}</span>
         </div>
         {onOpenStyles && (
-          <div style={{ borderTop: '1px solid var(--ol-line)', paddingTop: 10, marginTop: 12, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-            <Btn size="sm" variant="ghost" onClick={onOpenStyles}>{t('overview.tryTypedText')}</Btn>
+          <div className="ol-overview-text-entry">
+            <Btn size="sm" variant="blue" onClick={onOpenStyles}>{t('overview.tryTypedText')}</Btn>
             <span style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--ol-ink-3)' }}>{t('overview.tryTypedTextHint')}</span>
           </div>
         )}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginTop: 12 }}>
+        <details className="ol-overview-utilities">
+          <summary>{t('firstUse.moreTools')}</summary>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 10 }}>
           {onOpenSavedDrafts && <Btn size="sm" variant="ghost" onClick={onOpenSavedDrafts}>{t('textDraft.title')}</Btn>}
           {onOpenAudioFile && <Btn size="sm" variant="ghost" onClick={onOpenAudioFile}>{t('audioFile.title')}</Btn>}
           <Btn size="sm" variant="ghost" onClick={() => setLayoutsOpen('practice')}>{t('devicePractice.open')}</Btn>
           <Btn size="sm" variant="ghost" onClick={() => setLayoutsOpen('configure')}>{t('deviceLayouts.open')}</Btn>
           <Btn size="sm" variant="ghost" onClick={() => setLayoutsOpen('phrases')}>{t('savedPhrases.title')}</Btn>
           <span style={{ fontSize: 12, color: 'var(--ol-ink-3)' }}>{t('deviceLayouts.entryHint')}</span>
-        </div>
-      </Card>
+          </div>
+        </details>
+      </section>
       {layoutsOpen && <DeviceLayoutsDialog rememberSelection initialPractice={layoutsOpen === 'practice'} initialPhrases={layoutsOpen === 'phrases'} initialProfile={layoutsOpen === 'practice' ? writingDeviceKeyProfile() : undefined} onClose={() => setLayoutsOpen(null)} />}
 
       <Card style={{ marginBottom: 14 }}>

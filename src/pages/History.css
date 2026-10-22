@@ -1,0 +1,16 @@
+.ol-history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  flex: 1;
+  min-height: 240px;
+  padding: 28px 20px;
+  color: var(--ol-ink-3);
+}
+.ol-history-empty > svg { color: var(--ol-ink-4); }
+.ol-history-empty h2 { margin: 16px 0 8px; font-size: 20px; font-weight: 600; color: var(--ol-ink); }
+.ol-history-empty p { margin: 0; max-width: 420px; font-size: 13px; line-height: 1.7; }
+.ol-history-draft-entry { margin-top: 26px; }
+.ol-history-draft-entry p { margin-bottom: 10px; font-size: 12px; }

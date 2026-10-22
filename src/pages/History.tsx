@@ -11,6 +11,7 @@ import { clearHistory, copyHistoryEntry, deleteHistoryEntry, isTauri, listHistor
 import type { DictationSession, PolishMode } from '../lib/types';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { Btn, Card, PageHeader, Pill } from './_atoms';
+import './History.css';
 
 function useFilters(): Array<{ id: 'all' | PolishMode; label: string }> {
   const { t } = useTranslation();
@@ -33,7 +34,7 @@ function useModeLabel(): Record<PolishMode, string> {
   };
 }
 
-export function History() {
+export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void }) {
   const { t } = useTranslation();
   const os = detectOS();
   const FILTERS = useFilters();
@@ -238,9 +239,10 @@ export function History() {
         title={t('history.title')}
         desc={t('history.desc')}
         right={
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {onOpenSavedDrafts && <Btn size="sm" variant="ghost" onClick={onOpenSavedDrafts}>{t('textDraft.title')}</Btn>}
             <Btn icon="refresh" variant="ghost" size="sm" onClick={() => void refresh(true)}>{t('common.refresh')}</Btn>
-            <Btn icon="trash" variant="ghost" size="sm" onClick={onClear}>{t('common.clear')}</Btn>
+            <Btn icon="trash" variant="ghost" size="sm" disabled={loading || items.length === 0} onClick={onClear}>{t('common.clear')}</Btn>
           </div>
         }
       />
@@ -249,6 +251,17 @@ export function History() {
           {t('history.illustrationNotice')}
         </div>
       )}
+      {!loading && !loadError && items.length === 0 ? (
+        <section className="ol-history-empty" data-history-empty>
+          <Icon name="history" size={28} />
+          <h2>{t('firstUse.emptyHistoryTitle')}</h2>
+          <p>{t('history.empty', { trigger: prefs ? formatComboLabel(prefs.dictationHotkey) : '' })}</p>
+          {onOpenSavedDrafts && <div className="ol-history-draft-entry">
+            <p>{t('firstUse.historyDraftHint')}</p>
+            <Btn size="sm" variant="ghost" onClick={onOpenSavedDrafts}>{t('textDraft.title')}</Btn>
+          </div>}
+        </section>
+      ) : <>
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 0.9fr) minmax(300px, 1.35fr)', gap: 12, marginBottom: 14, flexShrink: 0 }}>
         <Card padding={16} style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 12 }}>
@@ -442,6 +455,7 @@ export function History() {
           )}
         </Card>
       </div>
+      </>}
     </div>
   );
 }
