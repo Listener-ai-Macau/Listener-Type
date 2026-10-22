@@ -2954,6 +2954,15 @@ fn diagnostic_zip_export_writes_desktop_data_and_offline_firmware_summary() {
     assert!(archive.by_name("firmware/diag_log_summary.json").is_ok());
     assert!(archive.by_name("firmware/diag_log.bin").is_err());
 
+    let mut pipeline = String::new();
+    archive.by_name("desktop/audio_pipeline.json").expect("audio pipeline metadata")
+        .read_to_string(&mut pipeline).expect("read audio pipeline metadata");
+    let pipeline: serde_json::Value = serde_json::from_str(&pipeline).expect("complete pipeline JSON");
+    assert_eq!(pipeline["schemaVersion"], 1);
+    assert!(pipeline["captures"].is_array() || pipeline["status"] == "unavailable");
+    assert!(pipeline.get("rawTranscript").is_none());
+    assert!(pipeline.get("pcm").is_none());
+
     let mut summary = String::new();
     archive
         .by_name("firmware/diag_log_summary.json")

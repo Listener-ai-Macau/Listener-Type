@@ -6,7 +6,7 @@ use parking_lot::Mutex;
 use serde::Serialize;
 
 mod pipeline_diagnostics;
-pub(crate) use pipeline_diagnostics::export_audio_pipeline_diagnostics;
+pub(crate) use pipeline_diagnostics::{audio_pipeline_diagnostic_bytes, export_audio_pipeline_diagnostics};
 
 use crate::coordinator_state::SessionId;
 use crate::observability_v1::{

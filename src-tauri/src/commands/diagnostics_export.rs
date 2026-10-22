@@ -338,6 +338,13 @@ fn write_diagnostic_package_zip(
             .map_err(|e| format!("生成音频样本清单失败：{e}"))?;
     let firmware_summary_bytes = serde_json::to_vec_pretty(firmware_log)
         .map_err(|e| format!("生成固件诊断摘要失败：{e}"))?;
+    let pipeline_bytes = match crate::observability::audio_pipeline_diagnostic_bytes() {
+        Ok(bytes) => bytes,
+        Err(error) => serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": 1, "status": "unavailable", "reason": error,
+            "scope": "Audio pipeline metadata export failed; do not infer an empty or complete trace."
+        })).map_err(|e| format!("生成音频诊断状态失败：{e}"))?,
+    };
 
     let mut files = vec![
         DiagnosticZipEntry {
@@ -359,6 +366,11 @@ fn write_diagnostic_package_zip(
             path: "desktop/audio_samples_manifest.json".to_string(),
             kind: "audio_sample_metadata",
             bytes: audio_manifest_bytes.len(),
+        },
+        DiagnosticZipEntry {
+            path: "desktop/audio_pipeline.json".to_string(),
+            kind: "audio_pipeline_bounded_metadata",
+            bytes: pipeline_bytes.len(),
         },
         DiagnosticZipEntry {
             path: "firmware/diag_log_summary.json".to_string(),
@@ -405,6 +417,7 @@ fn write_diagnostic_package_zip(
                 "Desktop logs are exported as a sanitized tail only.",
                 "Only previously retained debug WAV recordings are included as audio samples; no new audio is captured during export.",
                 "Firmware diag_log events are raw firmware diagnostic records without desktop transcript or credential values.",
+                "Audio pipeline diagnostics contain bounded metadata ledgers only; unavailable detail is explicitly marked.",
             ],
         },
     };
@@ -440,6 +453,7 @@ fn write_diagnostic_package_zip(
         &audio_manifest_bytes,
         options,
     )?;
+    write_zip_entry(&mut zip, "desktop/audio_pipeline.json", &pipeline_bytes, options)?;
     write_zip_entry(
         &mut zip,
         "firmware/diag_log_summary.json",

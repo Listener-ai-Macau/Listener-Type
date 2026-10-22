@@ -116,11 +116,20 @@ impl Write for BoundedJson {
     }
 }
 
-fn write_export(path: &Path, payload: &impl Serialize) -> Result<usize, String> {
-    // Serialize first. A size/serialization failure leaves the previous complete
-    // export intact; a partially written JSON file is never advertised as evidence.
+fn encode_bounded(payload: &impl Serialize) -> Result<Vec<u8>, String> {
     let mut encoded = BoundedJson(Vec::new());
     serde_json::to_writer(&mut encoded, payload).map_err(|error| error.to_string())?;
+    Ok(encoded.0)
+}
+
+#[cfg(test)]
+fn write_export(path: &Path, payload: &impl Serialize) -> Result<usize, String> {
+    write_export_bytes(path, &encode_bounded(payload)?)
+}
+
+fn write_export_bytes(path: &Path, encoded: &[u8]) -> Result<usize, String> {
+    // Encoding has completed before this point. Failed encoding or file I/O
+    // never advertises a partial JSON file as the new complete evidence.
     let parent = path
         .parent()
         .ok_or("audio pipeline diagnostic path has no parent")?;
@@ -132,12 +141,11 @@ fn write_export(path: &Path, payload: &impl Serialize) -> Result<usize, String> 
             .create_new(true)
             .open(&temporary)
             .map_err(|error| error.to_string())?;
-        file.write_all(&encoded.0)
-            .map_err(|error| error.to_string())?;
+        file.write_all(encoded).map_err(|error| error.to_string())?;
         file.sync_all().map_err(|error| error.to_string())?;
         drop(file);
         std::fs::rename(&temporary, path).map_err(|error| error.to_string())?;
-        Ok(encoded.0.len())
+        Ok(encoded.len())
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temporary);
@@ -145,10 +153,7 @@ fn write_export(path: &Path, payload: &impl Serialize) -> Result<usize, String> 
     result
 }
 
-/// Called by the main-window diagnostic command on a blocking worker, never
-/// by capture callbacks. Only the latest export is retained (8 MiB maximum).
-pub(crate) fn export_audio_pipeline_diagnostics() -> Result<serde_json::Value, String> {
-    let _export = EXPORT_LOCK.lock();
+fn build_export_bytes() -> Result<(Vec<u8>, Vec<u64>), String> {
     let mut observations = PIPELINE_OBSERVATIONS
         .get()
         .map(|registry| registry.lock().values().cloned().collect::<Vec<_>>())
@@ -180,7 +185,6 @@ pub(crate) fn export_audio_pipeline_diagnostics() -> Result<serde_json::Value, S
         .iter()
         .map(|observation| observation.capture_generation)
         .collect::<Vec<_>>();
-    let path = crate::log_dir_path().join("audio-pipeline-diagnostics/latest.json");
     // Serialize from the owned snapshot once; do not duplicate a large ledger
     // into serde_json::Value before applying the output/memory bound.
     let payload = DiagnosticExport {
@@ -189,7 +193,22 @@ pub(crate) fn export_audio_pipeline_diagnostics() -> Result<serde_json::Value, S
         process_id: std::process::id(),
         captures: &snapshots,
     };
-    let bytes = write_export(&path, &payload)?;
+    Ok((encode_bounded(&payload)?, generations))
+}
+
+/// Used by the existing user-initiated support ZIP, without creating a sidecar
+/// file or requiring a developer connection to the application.
+pub(crate) fn audio_pipeline_diagnostic_bytes() -> Result<Vec<u8>, String> {
+    build_export_bytes().map(|(bytes, _)| bytes)
+}
+
+/// Called by the main-window diagnostic command on a blocking worker, never
+/// by capture callbacks. Only the latest export is retained (8 MiB maximum).
+pub(crate) fn export_audio_pipeline_diagnostics() -> Result<serde_json::Value, String> {
+    let _export = EXPORT_LOCK.lock();
+    let (encoded, generations) = build_export_bytes()?;
+    let path = crate::log_dir_path().join("audio-pipeline-diagnostics/latest.json");
+    let bytes = write_export_bytes(&path, &encoded)?;
     Ok(
         serde_json::json!({"path": path, "bytes": bytes, "limitBytes": EXPORT_LIMIT,
         "captureGenerations": generations, "completeJson": true}),
