@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T12:00:58.150449+08:00",
+  "updated_at": "2026-10-22T14:43:38.037229+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5631,6 +5631,42 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native130-snapshot-20261022-115819\\speech130-native-result.json"
       ],
       "failure_explanation": "Private helper initially assumed a Speech recognition heading, but actual existing heading is ASR (transcription); same untouched130 EXE passed after inspecting screenshot and correcting only helper. Controlled guard now also asserts the real speech heading and absence of LLM (polishing)."
+    },
+    {
+      "id": "audio_pipeline131_bounded_lifecycle_logs_and_full_export",
+      "repo": "type",
+      "commit": "fd872c301ba11f0a6bf22bfda4c3098246071678",
+      "commit_subject": "Include complete pipeline evidence in existing diagnostic packages",
+      "subject": "Keep routine audio lifecycle diagnostics small and parseable; retain bounded full metadata via explicit export and existing support ZIP",
+      "state": "47_affected_checks_exact_native_installed_daily_summary_verified_populated_live_export_pending",
+      "humanAccepted": false,
+      "previous_source_evidence": "304405c4 only bounded poll snapshots. Actual130 daily/identical92 code still force-serialized full cumulative ledgers for normal Started/Stopped/drained;29full records invalid after64KiB logger limit while18summary records parsed. Not introduced by130.",
+      "protects": [
+        "Every ordinary forced lifecycle log uses bounded summary without cloning or serializing cumulative fact ledgers on the hot path; settled predecessor final counters are emitted separately.",
+        "Full ASR/PCM/collector/candidate metadata remains in its bounded in-memory ledger, with current captures and one retained ended capture available by explicit main-window export. No PCM or transcript content added.",
+        "Full export is valid JSON, limited to8MiB, replaces one file atomically and preserves previous complete file on error. Scope/drop/incomplete flags remain explicit.",
+        "Existing user diagnostic ZIP contains desktop/audio_pipeline.json plus manifest entry, or an explicit unavailable status; no developer connection is required for that entry. Existing firmware/debug-WAV policy unchanged.",
+        "No changes to recognition providers, local models, wake decisions, stream/end behavior, clipboard/foreground input or BLE parameters; unit/metadata checks do not qualify160KBps, physical experience or purchase."
+      ],
+      "guards": [
+        "cargo test --target x86_64-pc-windows-msvc --lib observability:: -- --test-threads=1",
+        "cargo test --target x86_64-pc-windows-msvc --lib commands::tests::diagnostic_ -- --test-threads=1",
+        "python E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\check_pipeline_diagnostic_native.py --private-root <verified-private-root> --expected-source fd872c301ba11f0a6bf22bfda4c3098246071678"
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\daily130-pipeline-json-validity.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\daily130-pipeline-snapshot-reasons.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\pipeline131-complete-batch-tests.log",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build131\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native131-snapshot-20261022-143850\\pipeline-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native131-snapshot-20261022-143850\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build131\\type131-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\pipeline131-daily-passive-metadata.json"
+      ],
+      "unverified": [
+        "Real populated installed native full export not invoked: daily hidden process has no main-window context. No focus/window change to force it. Full populated data and existing support ZIP are domain-tested; private native file export used an empty capture.",
+        "Perceived latency causality, real physical convenience,49USD purchase and all old refusals remain unqualified."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -6571,6 +6607,25 @@
         "Intermediate engineering namespace/fixture/preparation assertions were corrected before customer95; they are not released-product regressions.",
         "F96-03: result body read-only, so a customer who wanted to repair one awkward phrase could not finish it in place.97 adds local result editing and binds Copy/Insert to edited text; automatic Formal quality F96-02 is not thereby solved."
       ]
+    },
+    {
+      "id": "audio-pipeline-diagnostics",
+      "accepted_scope": "Machine-confirmed bounded routine lifecycle JSON, complete bounded metadata exports and existing support ZIP; not human recording latency or transport acceptance.",
+      "baseline_state": "machine_verified_live_summaries_private_native_empty_export",
+      "guard_entries": [
+        "audio_pipeline131_bounded_lifecycle_logs_and_full_export"
+      ],
+      "known_failures": [
+        "304405c4 only bounded poll logs; forced Started/Stopped/drained serialized cumulative full ledgers and hit64KiB truncation. Actual130 logs contained29 invalid full JSON records."
+      ],
+      "paths": {
+        "type": [
+          "src-tauri/src/observability.rs",
+          "src-tauri/src/observability/pipeline_diagnostics.rs",
+          "src-tauri/src/commands/diagnostics_export.rs",
+          "src-tauri/src/commands_tests.rs"
+        ]
+      }
     }
   ]
 }

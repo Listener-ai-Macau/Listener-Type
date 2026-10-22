@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T12:00:58.150449+08:00",
+  "updatedAt": "2026-10-22T14:43:38.037229+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 130,
-    "source": "cd327e23827289503cbd9af9fba4035608816ab6",
-    "sourceTag": "build-source/type130-20261022",
+    "build": 131,
+    "source": "fd872c301ba11f0a6bf22bfda4c3098246071678",
+    "sourceTag": "build-source/type131-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "e0b7ddc8bdebe21485eb83f866155d70717ff825065fe003945a2630d8828e83",
-    "sizeBytes": 299175936,
-    "exeSha256": "1a32cb76784a1f8e1f073e07db6b945834b4e083265c31a5b6d4804cf0806e51",
+    "sha256": "8f893fbca6aad12cd87d04feea9e9ba633ac5e4bf2d8e4a7e40793fcbe56e013",
+    "sizeBytes": 299192320,
+    "exeSha256": "eb1516dd1d99931d35f2f5f87686c5498092e877ffadcd9d7ca3121907d632f5",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -30,7 +30,7 @@
     "sameVersionMsiUpgradeEnabled": true,
     "npmAuditVulnerabilities": 0,
     "nativeRegressionEvidenceSource": "0a8085d51be03cba4fc01d2197c736935fe06f22",
-    "newPackageInstalledForThisPublication": false,
+    "newPackageInstalledForThisPublication": true,
     "experimentalThroughputFirmwareIncluded": false,
     "firmware33ActualOtaAndExactBuildConfirmed": true,
     "usbAndBluetoothCoreUiRoundtripVerified": true,
@@ -272,8 +272,14 @@
     "customer129SettingsReturnActuallyUsed": false,
     "customer129GeneralRulesExposure": true,
     "speechSetup130ExactNativeVerified": true,
-    "customer130Reviewed": false,
-    "customer130PurchaseQualification": false
+    "customer130Reviewed": true,
+    "customer130PurchaseQualification": false,
+    "type131InstalledExeAndPreferencesVerified": true,
+    "pipeline131BoundedDailySummaryVerified": true,
+    "pipeline131PrivateNativeEmptyExportVerified": true,
+    "pipeline131PopulatedInstalledExportVerified": false,
+    "customer131Reviewed": false,
+    "customer131PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -290,6 +296,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build127-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build131-20261022"
   }
 }

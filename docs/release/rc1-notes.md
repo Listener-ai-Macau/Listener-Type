@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build130 / Firmware33
+# Listener v1.0.6-rc1 · Type build131 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -7,23 +7,23 @@
 
 ## In this app update
 
-If you select a recording before configuring recognition, **Speech settings** now opens over that recording. Returning keeps the same selected file. It waits for settings writes to finish and checks readiness again; an unsaved setting remains explicit. Nothing is uploaded until you press **Transcribe**.
+Routine audio lifecycle diagnostics now use compact summaries instead of repeatedly serializing accumulated detail. This fixes records exceeding the logger limit and becoming incomplete JSON. Detailed bounded pipeline metadata remains available through the existing **Export diagnostic package** ZIP as `desktop/audio_pipeline.json`; an unavailable export is reported explicitly. No additional audio recording or transcript payload is added by this metadata export.
 
-Speech and text setup share the existing save/failure protection. The text workspace still retains drafts, reviewed results and pending replies. **Saved drafts** now explains that it includes recorded-audio transcripts as well as text-workspace results.
+Recognition providers, wake/end decisions, streaming, clipboard behavior and Bluetooth parameters are unchanged. Build130's selected-recording/settings protection and Firmware33 remain. Installed131 produced92 valid pipeline records, maximum3861bytes in the observed window; this is evidence of repaired diagnostic output, not proof of faster perceived dictation. Populated full export and ZIP have domain-test evidence; the exact native export/file check used an empty private capture. Populated installed export remains unverified.
 
 ## Before using
 
-US$49 is the hardware price. Type is free and open source. Recognition and optional text services require preparation and have separate usage charges. This release does not include a ready-to-use official cloud account or allowance. File transcription currently accepts short16kHz/16-bit mono WAV through direct Volcengine. Review important words; optional rewriting can require manual edits.
+US$49 is the hardware price. Type is free and open source. Recognition and optional text services require preparation and separate usage charges; this release does not include a ready-to-use official cloud account or allowance. File transcription accepts short16kHz/16-bit mono WAV through direct Volcengine. Review important words and optional rewriting.
 
-RC1 is a prerelease. Strong background speech separation remains incomplete and intermittent early-close cases remain under review. This UI update does not qualify new live-wake, automatic-ending, global-input, BLE throughput or physical-hardware behavior. Daily recording and Firmware33 are retained. This publication does not install over the daily Type instance. USB flashing and Bluetooth OTA use the same ZIP.
+RC1 is a prerelease. Strong background-speech separation remains incomplete and intermittent early-close cases remain under review. This update does not qualify new live-wake, automatic-ending, arbitrary external input, BLE throughput or physical-hardware behavior. USB flashing and Bluetooth OTA use the same firmware ZIP.
 
 ## File identity
 
-- Type source: `cd327e23827289503cbd9af9fba4035608816ab6` · `build-source/type130-20261022`
-- Type130 MSI: 299175936 bytes · SHA256 `e0b7ddc8bdebe21485eb83f866155d70717ff825065fe003945a2630d8828e83`
+- Type source: `fd872c301ba11f0a6bf22bfda4c3098246071678` · `build-source/type131-20261022`
+- MSI: 299192320 bytes · SHA256 `8f893fbca6aad12cd87d04feea9e9ba633ac5e4bf2d8e4a7e40793fcbe56e013`
 - Firmware33 source: `149b6d950ebc5f416924c8670cf2b207bdc2b5b7` · runtime `e7bd1f1619b696a1`
-- Firmware ZIP: 1956905 bytes · SHA256 `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272`
+- ZIP: 1956905 bytes · SHA256 `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272`
 
 ## 中文说明
 
-130修复选好录音后进入语音设置会丢选择的问题。原录音保留，设置写入完成才返回重查；保存失败仍明确提示，不自动上传。五语言保存列表也说明包括录音转写。文字保稿和已验路径保留。49美元为纯硬件，云服务准备与用量另计；固件、日常录音与蓝牙未改，原强干扰/偶发提前结束及改写质量限制保留。
+131修复常规音频诊断日志过大导致JSON截断；完整有界元数据按需进入原诊断ZIP，不添加录音或转写正文。实际日用窗口92条均有效，最大3861字节；不据此宣称语音体验提速。语音服务、唤醒结束、流式、剪贴板与蓝牙参数均未改。保留原录音文件选择修复和Firmware33。49美元为纯硬件，云准备与用量另计；强干扰、偶发提前结束与其它未验范围继续保留。
