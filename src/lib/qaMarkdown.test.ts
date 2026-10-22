@@ -1,4 +1,4 @@
-import { renderQaMarkdown } from './qaMarkdown';
+import { renderQaMarkdown } from './qaMarkdown.ts';
 
 function assertIncludes(text: string, expected: string, name: string) {
   if (!text.includes(expected)) {

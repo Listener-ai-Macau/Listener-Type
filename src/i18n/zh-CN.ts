@@ -165,7 +165,15 @@ export const zhCN = {
     statusThinking: '思考中',
     statusError: '出错了',
   },
+  tools: {
+    description: "按需要选择一个工具。",
+    style: "选择语音转成文字后的表达方式。",
+    vocab: "帮助识别姓名、专有名词和常用术语。",
+    translation: "设置翻译语言和快捷键。",
+    selectionAsk: "选中文字后，向 AI 提问。",
+  },
   nav: {
+    tools: "工具",
     overview: '概览',
     history: '历史',
     vocab: '词汇表',

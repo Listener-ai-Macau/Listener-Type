@@ -52,7 +52,7 @@
     "test:demo-mode": "node --experimental-strip-types src/lib/demoMode.test.ts",
     "test:firmware-ota": "node --experimental-strip-types src/lib/firmwareOta.test.ts",
     "test:marketplace-discovery": "node --experimental-strip-types src/lib/marketplaceDiscovery.test.ts",
-    "test": "npm run test:rules && npm run test:capsule-actions && npm run test:capsule-ordering && npm run test:layout && npm run test:capsule-display && npm run test:device-health && npm run test:device-settings-mock && npm run test:device-settings-focus && npm run test:ble-recovery-ui && npm run test:first-run-pairing && npm run test:provider-setup && npm run test:demo-mode && npm run test:firmware-ota && npm run test:marketplace-discovery",
+    "test": "node scripts/test-frontend.mjs",
     "check:dark-mode": "node scripts/check-dark-mode.mjs",
     "verify": "node scripts/verify-frontend.mjs",
     "release:check": "node scripts/release-check.mjs",

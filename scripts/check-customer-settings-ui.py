@@ -69,13 +69,14 @@ with sync_playwright() as p:
         else:
             expect(local).to_be_visible()
             local.click()
-            expect(page.locator('.ol-settings-nav .ol-nav-btn-active')).to_have_text('Advanced')
-            check('Local setup reaches the existing Advanced page', True)
+            expect(page.locator('.ol-settings-nav .ol-nav-btn-active')).to_have_text('Local recognition')
+            check('Local setup reaches the existing Local recognition page', True)
             check('Navigation neither activates nor downloads a model', not any(
                 'prepare' in c or 'download' in c or c == 'set_active_asr_provider'
                 for c in page.evaluate('window.__commands')))
         page.get_by_title('Close', exact=True).click()
-        page.get_by_role('button', name='Translation', exact=True).click()
+        page.locator('aside nav').get_by_role('button', name='Tools', exact=True).click()
+        page.locator('[data-tool="translation"]').click()
         target = page.get_by_role('combobox', name='Translation target language', exact=True)
         expect(target).to_be_visible()
         desc = page.get_by_text('Optional: select languages you regularly use to guide spelling and writing style. This does not choose the translation output language.', exact=True)
@@ -114,7 +115,8 @@ with sync_playwright() as p:
         # Hold initial preferences until Translation has rendered its loading UI.
         page.add_init_script('window.__settingsDelay=true;')
         page.reload(wait_until='networkidle')
-        page.get_by_role('button', name='Translation', exact=True).click()
+        page.locator('aside nav').get_by_role('button', name='Tools', exact=True).click()
+        page.locator('[data-tool="translation"]').click()
         page.wait_for_function('window.__pendingSettings.length>0')
         page.wait_for_timeout(350)
         page.evaluate('window.__settingsDelay=false;window.__pendingSettings.splice(0).forEach(resolve=>resolve());')

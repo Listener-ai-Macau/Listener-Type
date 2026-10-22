@@ -16,6 +16,7 @@ import { Overview } from '../pages/Overview';
 import { QuickStyleTextTrial } from './QuickStyleTextTrial';
 import { AudioFileTrial } from './AudioFileTrial';
 import { History } from '../pages/History';
+import { Tools } from '../pages/Tools';
 import { Vocab } from '../pages/Vocab';
 import { Style } from '../pages/Style';
 import { Translation } from '../pages/Translation';
@@ -61,6 +62,12 @@ const NAV_BASE: Array<Omit<NavItem, 'name'>> = [
   { id: 'translation', icon: 'translate', cmp: Translation },
   { id: 'selectionAsk', icon: 'selectionAsk', cmp: SelectionAsk },
 ];
+const PRIMARY_NAV: Array<{ id: AppTab; icon: string }> = [
+  { id: 'overview', icon: 'overview' },
+  { id: 'history', icon: 'history' },
+  { id: 'tools', icon: 'layout' },
+];
+const isToolTab = (tab: AppTab) => tab !== 'overview' && tab !== 'history' && tab !== 'tools';
 
 const BLE_PAIRING_PROMPT_ACK_KEY = 'ol.blePairingPromptAck';
 const BLE_PAIRING_PROMPT_DEFERRED_KEY = 'ol.blePairingPromptDeferredThisSession';
@@ -117,22 +124,23 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     applyFontScale(readFontScale());
   }, []);
 
-  const NAV = useMemo<NavItem[]>(
-    () => NAV_BASE.map(b => ({ ...b, name: t(`nav.${b.id}`) })),
+  const NAV = useMemo(
+    () => PRIMARY_NAV.map(b => ({ ...b, name: t(`nav.${b.id}`) })),
     [t],
   );
-  const Page = (NAV.find((n) => n.id === displayTab) ?? NAV[0]).cmp;
+  const Page = (NAV_BASE.find((n) => n.id === displayTab) ?? NAV_BASE[0]).cmp;
+  const primaryTab = isToolTab(currentTab) ? 'tools' : currentTab;
 
   // sidebar nav 滑动指示器：测量当前 active button 的 offsetTop / height，
   // 用一个 absolute pill 平滑滑过去，而不是每个按钮各自瞬切背景色。
   const navItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [pillRect, setPillRect] = useState<{ top: number; height: number } | null>(null);
   useLayoutEffect(() => {
-    const idx = NAV.findIndex(n => n.id === currentTab);
+    const idx = NAV.findIndex(n => n.id === primaryTab);
     const el = navItemRefs.current[idx];
     if (!el) return;
     setPillRect({ top: el.offsetTop, height: el.offsetHeight });
-  }, [currentTab, NAV]);
+  }, [primaryTab, NAV]);
 
   useEffect(() => {
     let cancelled = false;
@@ -379,7 +387,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
               />
             )}
             {NAV.map((n, i) => {
-              const active = currentTab === n.id;
+              const active = primaryTab === n.id;
               return (
                 <button
                   key={n.id}
@@ -487,10 +495,18 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                   onOpenAudioFile={() => setAudioFileOpen(true)}
                   onOpenSavedDrafts={() => setSavedDraftsOpen(true)}
                 />
-              ) : displayTab === 'style' ? (
-                <Style />
+              ) : displayTab === 'tools' ? (
+                <Tools onOpen={setCurrentTab} />
               ) : (
-                <Page />
+                <>
+                  {isToolTab(displayTab) && <button type="button" onClick={() => setCurrentTab('tools')}
+                    className="ol-tools-back" style={{ display: 'inline-flex', alignSelf: 'flex-start', alignItems: 'center', gap: 5,
+                      marginBottom: 16, padding: '4px 0', border: 0, background: 'transparent',
+                      color: 'var(--ol-ink-3)', font: 'inherit', fontSize: 12, cursor: 'pointer' }}>
+                    <Icon name="chevLeft" size={14} />{t('nav.tools')}
+                  </button>}
+                  <Page />
+                </>
               )}
             </div>
           </main>

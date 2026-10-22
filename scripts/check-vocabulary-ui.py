@@ -73,7 +73,8 @@ with sync_playwright() as p:
             expect(banner).to_contain_text('does not record or insert speech')
             check('Preview labels service/device/history sample status and session scope',
                   'Changes last for this page session' in banner.inner_text())
-        page.get_by_role('button', name='Vocabulary', exact=True).click()
+        page.locator('aside nav').get_by_role('button', name='Tools', exact=True).click()
+        page.locator('[data-tool="vocab"]').click()
         field = page.get_by_placeholder('Type a word, press Enter or click Add…', exact=True)
         field.wait_for()
         add = page.get_by_role('button', name='Add', exact=True).last
@@ -91,7 +92,8 @@ with sync_playwright() as p:
             page.get_by_role('button', name='Refresh', exact=True).click()
             expect(sdk).to_have_count(1)
             page.get_by_role('button', name='History', exact=True).click()
-            page.get_by_role('button', name='Vocabulary', exact=True).click()
+            page.locator('aside nav').get_by_role('button', name='Tools', exact=True).click()
+            page.locator('[data-tool="vocab"]').click()
             page.wait_for_timeout(550)
             check('Returning during navigation cancels the fade and keeps content opaque',
                   page.locator('main > .ol-thinscroll').evaluate('(el) => Number(getComputedStyle(el).opacity) === 1'))

@@ -169,7 +169,15 @@ export const ja: typeof zhCN = {
     statusThinking: '思考中',
     statusError: 'エラー',
   },
+  tools: {
+    description: "必要なときにツールを選べます。",
+    style: "音声を文章にするときの表現を選びます。",
+    vocab: "名前や専門用語の認識を補助します。",
+    translation: "翻訳言語とショートカットを設定します。",
+    selectionAsk: "選択したテキストについて AI に質問します。",
+  },
   nav: {
+    tools: "ツール",
     overview: '概要',
     history: '履歴',
     vocab: '語彙',

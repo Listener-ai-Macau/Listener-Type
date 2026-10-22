@@ -167,7 +167,15 @@ export const zhTW: typeof zhCN = {
     statusThinking: '思考中',
     statusError: '出錯了',
   },
+  tools: {
+    description: "按需要選擇一個工具。",
+    style: "選擇語音轉成文字後的表達方式。",
+    vocab: "協助辨識姓名、專有名詞和常用術語。",
+    translation: "設定翻譯語言和快捷鍵。",
+    selectionAsk: "選取文字後，向 AI 提問。",
+  },
   nav: {
+    tools: "工具",
     overview: '概覽',
     history: '歷史',
     vocab: '詞彙表',

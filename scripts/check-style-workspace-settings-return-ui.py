@@ -56,7 +56,8 @@ with sync_playwright() as pw:
             if entry == 'overview':
                 page.get_by_role('button', name='Try typed text', exact=True).click()
             else:
-                page.get_by_role('button', name='Style', exact=True).click()
+                page.locator('aside nav').get_by_role('button', name='Tools', exact=True).click()
+                page.locator('[data-tool="style"]').click()
                 page.get_by_role('button', name='Try Light polish', exact=True).click()
             workspace = page.locator('dialog.ol-style-trial').first
             workspace.get_by_role('combobox', name='Trial style', exact=True).select_option('builtin.light')

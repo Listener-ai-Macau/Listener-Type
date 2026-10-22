@@ -5,6 +5,7 @@ import { useState } from 'react';
 export type AppTab =
   | 'overview'
   | 'history'
+  | 'tools'
   | 'vocab'
   | 'style'
   | 'translation'

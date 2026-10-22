@@ -196,7 +196,7 @@ assert.ok(
   'device settings inputs must submit the existing write path on Enter',
 );
 assert.ok(
-  deviceSectionSource.includes('setForm(snapshotToForm(value));'),
+  deviceSectionSource.includes('setForm(snapshotToForm(value.snapshot));'),
   'device settings save must display firmware readback values instead of blindly echoing the submitted form',
 );
 assert.ok(

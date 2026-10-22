@@ -168,7 +168,15 @@ export const en: typeof zhCN = {
     statusThinking: 'Thinking',
     statusError: 'Error',
   },
+  tools: {
+    description: "Choose a tool when you need it.",
+    style: "Choose how your spoken words are written.",
+    vocab: "Help recognition with names and specialist terms.",
+    translation: "Set up translation languages and shortcuts.",
+    selectionAsk: "Ask AI about selected text.",
+  },
   nav: {
+    tools: "Tools",
     overview: 'Overview',
     history: 'History',
     vocab: 'Vocabulary',

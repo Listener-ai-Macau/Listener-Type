@@ -2,7 +2,7 @@ import {
   createHotkeyRecorderState,
   orderHotkeyCodes,
   updateHotkeyRecorderState,
-} from './hotkeyRecorder';
+} from './hotkeyRecorder.ts';
 
 function assertEqual<T>(actual: T, expected: T, name: string) {
   if (actual !== expected) {

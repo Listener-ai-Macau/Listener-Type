@@ -169,7 +169,15 @@ export const ko: typeof zhCN = {
     statusThinking: '생각 중',
     statusError: '오류',
   },
+  tools: {
+    description: "필요할 때 도구를 선택하세요.",
+    style: "말한 내용을 글로 표현하는 방식을 선택합니다.",
+    vocab: "이름과 전문 용어의 인식을 돕습니다.",
+    translation: "번역 언어와 단축키를 설정합니다.",
+    selectionAsk: "선택한 텍스트에 관해 AI에 질문합니다.",
+  },
   nav: {
+    tools: "도구",
     overview: '개요',
     history: '기록',
     vocab: '어휘',

@@ -7095,11 +7095,16 @@ fn personal_vad_silence_fallback_revokes_a_proposal_on_new_possible_or_confirmed
     let now = started + Duration::from_millis(3_300);
     let quiet = LocalSpeechEvidence {
         state: VadState::NonSpeech, revision: 2, analyzed_through_ms: 7_300,
+        activity_epoch: 1, analyzed_through_samples: 116_800,
         last_detected_speech_end_ms: Some(4_000), trailing_non_speech_ms: Some(3_300),
         ..Default::default()
     };
     clock.note_local_vad_evidence_at(quiet, now);
-    clock.observe(&TargetSpeakerUpdate { audio_duration_ms: Some(7_300), ..owner.clone() }, true, now);
+    clock.observe(&TargetSpeakerUpdate {
+        audio_duration_ms: Some(7_300), provider_audio_duration_ms: Some(7_300),
+        qualified_owner_activity_advanced: false, target_activity_advanced: false,
+        ..owner.clone()
+    }, true, now);
     assert!(clock.latest_due_update(now, 3_000).is_some());
     for state in [VadState::PendingSpeech, VadState::Speech, VadState::Unknown] {
         let mut veto = super::LocalVadStopObservation::new(quiet, now);
@@ -15057,10 +15062,13 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
     assert!(body.contains("rolling_kws_rotation_start("));
     assert!(body.contains("STREAMING_KWS_ROTATE_OVERLAP_MS"));
     assert!(body.contains("candidate.kws_fed_bytes = candidate.pcm.len()"));
-    assert!(body.contains("crate::speaker_verification::verify(&pcm, &voiceprint_phrase)"));
+    let verification_join = "join_candidate_owner_verification(candidate, expected_input, &voiceprint_phrase).await";
+    assert!(body.contains(verification_join));
+    assert!(include_str!("dictation_wake_owner_gate.rs")
+        .contains("crate::speaker_verification::verify(&pcm, &phrase)"));
     assert!(
         body.find("detector.accept_pcm(&pcm_to_feed)")
-            < body.find("crate::speaker_verification::verify(&pcm, &voiceprint_phrase)")
+            < body.find(verification_join)
     );
     assert!(
         body.find("let recording_control_task")
@@ -15894,10 +15902,17 @@ fn busy_local_wake_helper_is_retried_without_queue_or_keyword_fallback() {
         "local wake helper did not start"
     ));
 
-    let helper = include_str!("../asr/local/wake_helper.rs");
+    let helper_source = include_str!("../asr/local/wake_helper.rs");
+    let confirm_start = helper_source.find("        fn confirm(")
+        .expect("local wake confirmation implementation must exist");
+    let confirm_end = helper_source[confirm_start..].find("let wav = TempWavFile::create_without_context_padding(pcm)")
+        .map(|offset| confirm_start + offset)
+        .expect("confirmation must acquire its helper before creating request audio");
+    let helper = helper_source[confirm_start..confirm_end]
+        .chars().filter(|c| !c.is_whitespace()).collect::<String>();
     assert!(
-        helper.contains(".process\n                .try_lock()")
-            && !helper.contains("let mut process_slot = self.process.lock();"),
+        helper.contains("self.process.try_lock()")
+            && !helper.contains("self.process.lock()"),
         "local confirmations must be single-flight and non-queueing"
     );
 
@@ -16868,37 +16883,17 @@ fn windows_volcengine_session_refreshes_external_credential_updates_before_readi
 }
 
 #[test]
-fn sustained_near_phrase_rescue_is_wired_with_rollback_and_extraction_upgrade() {
-    // 2026-09-23 干扰吞唤醒修复：声纹失明时由持续近音确认兜底。
-    // 三件事缺一不可：kernel 判定、env 回退、放在分离升级块之前
-    // （救援放行的会话仍要进 !enrolled_owner_matched 分支尝试归属升级）。
+fn sustained_near_phrase_rescue_stays_out_of_the_production_gate() {
+    // 792d2dd4 removed the opt-in rescue from the product path after false-wake
+    // failures. Keep its archived kernel predicate distinct from live authority.
     let stream = include_str!("dictation_embedded_stream.rs");
-    let kernel = include_str!("../speech_decision_kernel.rs");
-    assert!(
-        kernel.contains("fn sustained_near_phrase_wake_can_activate"),
-        "kernel must own the sustained near-phrase rescue predicate"
-    );
-    let rescue = stream
-        .find("sustained_near_phrase_wake_can_activate")
-        .expect("terminal gate must consult the sustained near-phrase rescue");
-    let rollback = stream
-        .find("LISTENER_ENABLE_SUSTAINED_NEAR_PHRASE_RESCUE")
-        .expect("rescue must be opt-in after the 2026-09-23 15:37 drama-audio false wake");
-    let extraction = stream
-        .find("let mut owner_verified_by_extraction = false;")
-        .expect("extraction upgrade block anchor must exist");
-    assert!(
-        rollback < rescue,
-        "rollback switch must gate the rescue predicate call"
-    );
-    assert!(
-        rescue < extraction,
-        "rescue must run before the extraction block so rescued sessions still get attribution upgrade"
-    );
-    assert!(
-        stream.contains("sustained near-phrase wake rescued (owner-blind)"),
-        "rescue must log its own judgment line for decisions-watcher"
-    );
+    let owner_gate = include_str!("dictation_wake_owner_gate.rs");
+    for source in [stream, owner_gate] {
+        assert!(!source.contains("sustained_near_phrase_wake_can_activate"));
+        assert!(!source.contains("LISTENER_ENABLE_SUSTAINED_NEAR_PHRASE_RESCUE"));
+    }
+    assert!(include_str!("../speech_decision_kernel.rs")
+        .contains("fn sustained_near_phrase_wake_can_activate"));
 }
 
 #[test]

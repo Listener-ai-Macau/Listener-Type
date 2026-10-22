@@ -398,7 +398,7 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
         include_str!("windows_ble/ota_open.rs"),
         "\n",
         include_str!("windows_ble/gatt_open.rs")
-    );
+    ).replace("\r\n", "\n");
     assert!(
         source.contains("BLE_OTA_OPERATION_MUTEX_NAME")
             && source.contains("Local\\\\Denzic.Listener.Type.BleOtaOperation")
@@ -468,19 +468,19 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
     );
 
     // Prefer the Windows impl body (mod.rs only has a thin wrapper).
-    let staged_marker =
-        "let prepared = match prepare_listener_ota_v1_transfer_staged_after_active_link_hint(";
-    let staged_marker_at = source
-        .find(staged_marker)
-        .expect("staged Listener OTA transfer helper should exist");
-    let staged_transfer_start = source[..staged_marker_at]
-        .rfind("pub fn transfer_listener_ota_v1_after_active_link_hint_staged")
-        .expect("staged Listener OTA transfer helper should exist");
-    let staged_transfer_end = source[staged_transfer_start..]
-        .find("fn listener_ota_v1_window_chunks")
-        .map(|offset| staged_transfer_start + offset)
-        .expect("staged Listener OTA transfer helper boundary should exist");
-    let staged_transfer = &source[staged_transfer_start..staged_transfer_end];
+    // The shared signaled implementation now serves both active-link and
+    // listener-release entry points. Follow the actual non-exclusive wrapper.
+    let staged_start = source.rfind("pub fn transfer_listener_ota_v1_after_active_link_hint_staged(").unwrap();
+    let staged_end = source[staged_start..].find("pub fn transfer_listener_ota_v1_after_listener_release_staged(").map(|v|staged_start+v).unwrap();
+    let staged_wrapper = source[staged_start..staged_end].chars()
+        .filter(|c| !c.is_whitespace()).collect::<String>();
+    assert!(staged_wrapper.contains("transfer_listener_ota_v1_signaled("));
+    assert!(staged_wrapper.contains("on_progress,false,"));
+    let staged_transfer_start = source.find("fn transfer_listener_ota_v1_signaled(").unwrap();
+    let staged_transfer_end = source[staged_transfer_start..].find("fn listener_ota_v1_window_chunks")
+        .map(|v|staged_transfer_start+v).unwrap();
+    let staged_transfer_owned = source[staged_transfer_start..staged_transfer_end].replace("\r\n", "\n");
+    let staged_transfer = staged_transfer_owned.as_str();
     let target_ready = staged_transfer
         .find("target_ready.send(Ok(()))")
         .expect("staged Listener OTA must report target readiness");
@@ -581,10 +581,13 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
         .expect("Listener OTA v1 reconnect handoff helper boundary should exist");
     let handoff = &source[handoff_start..handoff_end];
     assert!(
-        handoff.contains("send_audio_control_via_active_capture(")
+        handoff.contains("active_audio_control_sender().ok_or_else(")
+            && handoff.contains("if !active.readiness.is_ready()")
+            && handoff.contains("send_audio_control_via_sender(")
+            && !handoff.contains("send_audio_control_via_active_capture(")
             && handoff.contains("TYPE:OBS:OTA:{correlation_id:016X}")
             && handoff.contains("Duration::from_millis(300)")
-            && handoff.contains("observability context handoff skipped: no active capture"),
+            && handoff.contains("reconnect handoff skipped: no active audio capture"),
         "OTA observability handoff must stay bounded to the active capture before the compatible active-link command"
     );
     assert!(
