@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T10:36:14.312712+08:00",
+  "updated_at": "2026-10-22T10:53:19.237774+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5455,7 +5455,7 @@
       "repo": "type",
       "commit": "a793bce05c3428a5519c2a64a4311183832e8b1b",
       "subject": "Keep draft, edited result and pending completion through service settings from all text workspace entries",
-      "state": "exact129_native_keyless_and_controlled_pending_save_barrier_verified_customer_pending",
+      "state": "engineering_verified_customer_save_recover_private_paste_passed_settings_return_untried_rules_exposure_purchase_deferred",
       "previous_source_evidence": "128 FloatingShell closes quickTrialOpen; Style page closes trialPack before provider navigation, losing result and pending callback. Style branch dates to8eed884b/76.117 only protects the recorded-text route without a host callback; old input-only guarantee is not whole-result coverage.",
       "protects": [
         "StyleTextTrial owns the sibling text-service settings dialog, so hosts cannot unmount it for that detour. Overview, Style and recorded text share the same ownership.",
@@ -5476,8 +5476,20 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build129\\type-artifact-verification.json"
       ],
       "unverified": [
-        "Pending native cloud response is controlled React evidence, not a new native provider test.",
-        "No independent129 use, real physical convenience or49 purchase established. Shortening quality remains unresolved."
+        "Customer did not open new service settings; do not claim customer129 used that repair.",
+        "Customer had no old project/customer history but saw generic engineering rules; not fully blind.",
+        "Formal196→200 and Concise196→193 remain weak.49 deferred; no live/physical/external-input/new purchase proof."
+      ],
+      "failure_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native129-snapshot-20261022-103200\\workspace129-native-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native129-snapshot-20261022-103332\\workspace129-native-result.json"
+      ],
+      "failure_scope": "Two native driver failures retained: one-way scrolling missed offscreen Close; next driver clicked disabled Try. Final helper reuses existing stable/enabled hit tests. No product edits between these native runs.",
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-software-20261022-103730\\exposure.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-clean-software-20261022-104200\\experience.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-clean-software-20261022-104200\\operations.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-clean-software-20261022-104200\\09-pasted-replacement.png"
       ]
     }
   ],

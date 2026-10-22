@@ -267,8 +267,10 @@
     "customer128PurchaseQualification": false,
     "customer128HelpActuallyUsed": false,
     "workspace129ExactNativeVerified": true,
-    "customer129Reviewed": false,
-    "customer129PurchaseQualification": false
+    "customer129Reviewed": true,
+    "customer129PurchaseQualification": false,
+    "customer129SettingsReturnActuallyUsed": false,
+    "customer129GeneralRulesExposure": true
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
