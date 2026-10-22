@@ -45,21 +45,37 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, onOpenProvi
   const selected = packs.find(pack => pack.id === selectedId);
   const savedEverydayList = packs.find(isEverydayListStyle);
   const savedConcise = packs.find(isConciseDraftStyle);
-  const chooseTemplate = async (kind: 'list' | 'concise') => {
-    if (addingRef.current) return;
-    const saved = kind === 'list' ? savedEverydayList : savedConcise;
-    if (saved) { setSelectedId(saved.id); return; }
+  const prepareConcise = async (): Promise<StylePack> => {
+    if (savedConcise) return savedConcise;
+    if (addingRef.current) throw new Error('style_trial_prepare_shorter_failed');
     addingRef.current = true;
-    setAdding(kind);
+    setAdding('concise');
     setAddFailed(null);
     try {
-      const created = await createStylePackFromTemplate(kind === 'list' ? everydayListStyle(t) : conciseDraftStyle(t), true);
+      const created = await createStylePackFromTemplate(conciseDraftStyle(t), true);
+      if (mounted.current) setPacks(current => [...current.filter(pack => pack.id !== created.id), created]);
+      return created;
+    } catch {
+      throw new Error('style_trial_prepare_shorter_failed');
+    } finally {
+      addingRef.current = false;
+      if (mounted.current) setAdding(null);
+    }
+  };
+  const chooseEverydayList = async () => {
+    if (addingRef.current) return;
+    if (savedEverydayList) { setSelectedId(savedEverydayList.id); return; }
+    addingRef.current = true;
+    setAdding('list');
+    setAddFailed(null);
+    try {
+      const created = await createStylePackFromTemplate(everydayListStyle(t), true);
       if (mounted.current) {
         setPacks(current => [...current.filter(pack => pack.id !== created.id), created]);
         setSelectedId(created.id);
       }
     } catch {
-      if (mounted.current) setAddFailed(kind);
+      if (mounted.current) setAddFailed('list');
     } finally {
       addingRef.current = false;
       if (mounted.current) setAdding(null);
@@ -70,13 +86,9 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, onOpenProvi
     extraStyleChoice={selected.id === 'builtin.structured' ? {
       label: t(savedEverydayList ? 'style.everydayList.choose' : 'style.everydayList.add'),
       hint: t('style.everydayList.hint'), pending: adding !== null,
-      error: addFailed === 'list' ? t('style.everydayList.failed') : '', onChoose: () => void chooseTemplate('list'),
+      error: addFailed === 'list' ? t('style.everydayList.failed') : '', onChoose: () => void chooseEverydayList(),
     } : undefined}
-    presetStyleChoice={!isConciseDraftStyle(selected) ? {
-      label: t(adding === 'concise' ? 'conciseDraft.adding' : savedConcise ? 'conciseDraft.choose' : 'conciseDraft.add'),
-      hint: t('conciseDraft.hint'), pending: adding !== null,
-      error: addFailed === 'concise' ? t('conciseDraft.failed') : '', onChoose: () => void chooseTemplate('concise'),
-    } : undefined}
+    prepareShorter={prepareConcise}
     onClose={onClose} onOpenProviders={onOpenProviders ?? (() => setProvidersOpen(true))}
     readinessRevision={readinessRevision} /> :
     <TrialLoading failed={failed} onRetry={() => setAttempt(value => value + 1)} onClose={onClose} title={t('overview.tryTypedText')} />}

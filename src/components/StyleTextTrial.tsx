@@ -11,12 +11,12 @@ import { DeviceLayoutsDialog } from './DeviceLayoutsDialog';
 import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
 import { PoliteEditSuggestions } from './PoliteEditSuggestions';
 
-export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, presetStyleChoice, draft, onDraftChange, onClose, onOpenProviders, readinessRevision = 0 }: {
+export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, prepareShorter, draft, onDraftChange, onClose, onOpenProviders, readinessRevision = 0 }: {
   pack: StylePack;
   packs?: StylePack[];
   onSelectPack?: (id: string) => void;
   extraStyleChoice?: { label: string; hint: string; pending: boolean; error: string; onChoose: () => void };
-  presetStyleChoice?: { label: string; hint: string; pending: boolean; error: string; onChoose: () => void };
+  prepareShorter?: () => Promise<StylePack>;
   draft: string;
   onDraftChange: (text: string) => void;
   onClose: () => void;
@@ -24,7 +24,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   readinessRevision?: number;
 }) {
   const { t } = useTranslation();
-  const styleChangePending = extraStyleChoice?.pending || presetStyleChoice?.pending;
+  const styleChangePending = extraStyleChoice?.pending;
   const presentation = stylePackPresentation(pack, t);
   const savedExamples = pack.examples
     .filter(example => example.input.trim() && example.output.trim())
@@ -35,6 +35,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   const running = useRef(false);
   const copyRunning = useRef(false);
   const [pending, setPending] = useState(false);
+  const [shortening, setShortening] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
   const [savedDraftSignature, setSavedDraftSignature] = useState('');
   const [keyPhrase, setKeyPhrase] = useState<string | null>(null);
@@ -76,6 +77,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
     ++generation.current;
     running.current = false;
     setPending(false);
+    setShortening(false);
     const saved = completed.current.get(pack.id);
     const matching = saved?.signature === signature ? saved : null;
     setResult(matching?.result ?? null); setResultSignature(signature); setEditedOutput(matching?.edited ?? null); setRestored(!!matching);
@@ -115,11 +117,13 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
     };
   }, []);
 
-  const runTrial = async () => {
+  const runTrial = async (prepare?: () => Promise<StylePack>) => {
     if (draftSaving || running.current || copyRunning.current || deliveryRequest.current || styleChangePending || !canProcess || !draft.trim()) return;
+    if (prepare && !readiness?.textServiceConfigured) return;
     running.current = true;
     const request = ++generation.current;
     setPending(true);
+    setShortening(!!prepare);
     setResult(null);
     setEditedOutput(null);
     setRestored(false);
@@ -128,12 +132,22 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
     setError('');
     setDeliveryMessage('');
     try {
-      const value = await tryStylePackText(pack.id, draft);
+      const target = prepare ? await prepare() : pack;
+      // Closing the workspace while preparing must not start a paid request.
+      if (generation.current !== request) return;
+      const targetSignature = JSON.stringify([draft, target.prompt]);
+      const cached = prepare ? completed.current.get(target.id) : null;
+      const matching = cached?.signature === targetSignature ? cached : null;
+      const value = matching?.result ?? await tryStylePackText(target.id, draft);
       if (generation.current === request) {
-        completed.current.delete(pack.id);
-        completed.current.set(pack.id, { signature, input: draft, result: value, edited: null });
+        completed.current.delete(target.id);
+        completed.current.set(target.id, { signature: targetSignature, input: draft, result: value, edited: matching?.edited ?? null });
         if (completed.current.size > 8) completed.current.delete(completed.current.keys().next().value!);
-        setResult(value); setResultSignature(signature);
+        if (target.id !== pack.id && onSelectPack) {
+          onSelectPack(target.id);
+        } else {
+          setResult(value); setResultSignature(targetSignature); setEditedOutput(matching?.edited ?? null); setRestored(!!matching);
+        }
       }
     } catch (cause) {
       if (generation.current === request) {
@@ -143,12 +157,15 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
           style_trial_invalid_text: 'invalidText',
           style_trial_timeout: 'timeout',
         }[message];
-        setError(key ? t(`style.trial.${key}`) : t('style.trial.failed', { error: message }));
+        setResult(result); setResultSignature(resultSignature); setEditedOutput(editedOutput);
+        setError(message === 'style_trial_prepare_shorter_failed' ? t('conciseDraft.failed')
+          : key ? t(`style.trial.${key}`) : t('style.trial.failed', { error: message }));
       }
     } finally {
       if (generation.current === request) {
         running.current = false;
         setPending(false);
+        setShortening(false);
       }
     }
   };
@@ -241,11 +258,6 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       </label>}
       <p className="ol-style-trial-hint ol-style-trial-purpose" data-style-trial-purpose>{presentation.description}</p>
       <div className="ol-style-trial-availability">
-      {presetStyleChoice && <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-        <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending} onClick={presetStyleChoice.onChoose}>{presetStyleChoice.label}</Btn>
-        <span className="ol-style-trial-hint">{presetStyleChoice.hint}</span>
-        {presetStyleChoice.error && <span role="alert" className="ol-style-trial-hint">{presetStyleChoice.error}</span>}
-      </div>}
       {readiness?.available === false && <p role="status" className="ol-style-trial-hint">{t('style.trial.nativeRequired')}</p>}
       {readiness?.available && readiness.requiresTextService && !readiness.textServiceConfigured && <p role="status" className="ol-style-trial-hint">{t('style.trial.needsService')}</p>}
       {!readiness && !readinessError && <p role="status" className="ol-style-trial-hint">{t('style.trial.checking')}</p>}
@@ -271,9 +283,12 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         <Btn variant="blue" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !draft.trim()} onClick={() => void runTrial()}>
           {t(pending ? 'style.trial.running' : 'style.trial.run')}
         </Btn>
+        {prepareShorter && <Btn variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !readiness?.textServiceConfigured || !draft.trim()}
+          onClick={() => void runTrial(prepareShorter)}>{t(shortening ? 'conciseDraft.running' : 'conciseDraft.run')}</Btn>}
         {readiness?.available && onOpenProviders && <Btn variant="ghost" disabled={draftSaving} onClick={onOpenProviders}>{t('style.trial.providers')}</Btn>}
         {readiness?.available === false && <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1" target="_blank" rel="noreferrer noopener" style={{ color: 'var(--ol-blue)', fontSize: 13 }}>{t('style.trial.download')}</a>}
       </div>
+      {prepareShorter && <p className="ol-style-trial-hint">{t('conciseDraft.runHint')}</p>}
       {pending && <p role="status" className="ol-style-trial-hint">{t('style.trial.pending')}</p>}
       {error && <p role="alert" style={{ color: 'var(--ol-err)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.6 }}>{error}</p>}
       </div>
