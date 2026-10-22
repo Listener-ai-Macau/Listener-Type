@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build134 / Firmware33
+# Listener v1.0.6-rc1 · Type build135 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -7,11 +7,11 @@
 
 ## In this app update
 
-The getting-started guide now puts the main actions ahead of secondary utilities, which remain available under More tools. The text workspace removes unused status space after readiness completes and balances input/result heights.
+The text workspace keeps service/cost and local-save information visible in short notices while moving longer explanations into expandable help. The result source is a quiet label beside its heading, and original/result editors remain aligned.
 
-History has a direct Saved drafts entry, including a single focused empty state for new recording histories. Saved drafts and recording histories remain separate; existing nonempty history selection, copy and recovery paths are retained. Skip and don’t show again remains persistent and recoverable from Getting started.
+Saved drafts now lead with a text preview. Style and a shorter timestamp remain secondary in the choice, with the adjacent duplicate metadata removed; the exact saved body and original text are retained. Full storage information remains expandable.
 
-This interface update does not change speech services, wake/stop decisions, Bluetooth parameters or firmware.
+This UI update does not change speech services, wake/stop decisions, Bluetooth parameters or firmware.
 
 ## Before using
 
@@ -21,11 +21,11 @@ RC1 is a prerelease. Strong background-speech separation remains incomplete. Old
 
 ## File identity
 
-- Type source: `698042d4a9efb38d08936eda2e01ae899034d076` · `build-source/type134-20261022`
-- MSI: 299208704 bytes · SHA256 `c2463c871867dd8d91de8d8d311f6410243374c0c54a9cd3cae1f807a79cff39`
+- Type source: `a21ab64a9359d80b4fd4c28d22ae9dc81f869bbb` · `build-source/type135-20261022`
+- MSI: 299208704 bytes · SHA256 `3eed99aa4f4be4aa41aa6fdfb73388e068a33cf3d434cd3089ab9d7f3c40e39d`
 - Firmware33 source: `149b6d950ebc5f416924c8670cf2b207bdc2b5b7` · runtime `e7bd1f1619b696a1`
 - ZIP: 1956905 bytes · SHA256 `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272`
 
 ## 中文说明
 
-首次引导减少套框与同等入口，次要功能保留在更多工具；文字工作区就绪后不再留空状态位，输入和结果更均衡。历史页可直接打开已保存成稿；空录音历史只显示一个提示。成稿与录音仍分别保存，已有记录操作、跳过及恢复引导保留。本次不改语音、结束、蓝牙或固件。
+文字工作区保留简短费用与保存提示，长说明按需展开；原稿及结果框保持对齐。成稿选择先显示正文开头，保留风格与简化时间，去掉相邻重复信息，原文仍可展开。本次不改语音、结束、蓝牙或固件。
