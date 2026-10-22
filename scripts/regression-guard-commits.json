@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T11:20:11.521349+08:00",
+  "updated_at": "2026-10-22T11:31:47.692384+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -679,7 +679,10 @@
       ],
       "installedAt": "2026-10-17T17:45:00.3474676+08:00",
       "exeSha256": "09303329962a9223f8d00e333d324e1a60a8ad450246110c34d83c9ee77b4fb4",
-      "commit_subject": "Listener build source snapshot"
+      "commit_subject": "Listener build source snapshot",
+      "commit_availability": "local_snapshot",
+      "local_retention_ref": "refs/tags/regression-baseline/type-4e42c42d39b1",
+      "public_history_exclusion_reason": "Historical local build-source snapshot includes binary model blobs (one890413984B); retained under a fixed local Git tag, not published to GitHub. Original full check verifies the commit and tag; public CI explicitly does not qualify this Git object."
     },
     {
       "id": "firmware_audio_real_block_media_credit",
@@ -743,7 +746,10 @@
         "Seven actual production Rust checks and seven isolated actual React IPC/order cases pass. Actual installed startup backend/UI seq1 matches; natural outage-to-response recovery field transition not yet observed.",
         "A TCP probe is reachability evidence for its targets, not proof of total Internet connectivity. No route changes, paid calls, ASR content/stop permission changes, or forced disconnection tests."
       ],
-      "commit_subject": "Listener build source snapshot"
+      "commit_subject": "Listener build source snapshot",
+      "commit_availability": "local_snapshot",
+      "local_retention_ref": "refs/tags/regression-baseline/type-70aabc376015",
+      "public_history_exclusion_reason": "Historical local build-source snapshot includes binary model blobs (one890413984B); retained under a fixed local Git tag, not published to GitHub. Original full check verifies the commit and tag; public CI explicitly does not qualify this Git object."
     },
     {
       "id": "type_raw215_current40_comparison_rejected",
@@ -776,7 +782,10 @@
         "Early-end original tail-drain branch and originalDocument clipboard restoration still field pending."
       ],
       "commit_subject": "Listener build source snapshot",
-      "validation_kind": "evidence_only"
+      "validation_kind": "evidence_only",
+      "commit_availability": "local_snapshot",
+      "local_retention_ref": "refs/tags/regression-baseline/type-89221f5af6f4",
+      "public_history_exclusion_reason": "Historical local build-source snapshot includes binary model blobs (one890413984B); retained under a fixed local Git tag, not published to GitHub. Original full check verifies the commit and tag; public CI explicitly does not qualify this Git object."
     },
     {
       "id": "type_exclusive_ota_prepared_target_ownership",
@@ -816,7 +825,10 @@
         "Original wake tail-drain early-end and Document clipboard field ranges remain pending; ASR/audio/source-stop/rename settings code was unchanged."
       ],
       "sourceChangeCommit": "46e164469ef7cc45ab198f10cd8767fcd1242820",
-      "commit_subject": "Listener build source snapshot"
+      "commit_subject": "Listener build source snapshot",
+      "commit_availability": "local_snapshot",
+      "local_retention_ref": "refs/tags/regression-baseline/type-b7d6c9751d59",
+      "public_history_exclusion_reason": "Historical local build-source snapshot includes binary model blobs (one890413984B); retained under a fixed local Git tag, not published to GitHub. Original full check verifies the commit and tag; public CI explicitly does not qualify this Git object."
     },
     {
       "id": "type_session_capture_control_archive",
@@ -847,7 +859,10 @@
         "Original7548 outcome still missing; new43 natural7583 records real2004ms WinRT write timeout, no device confirmation; prior7582 sent202/confirmed237ms.",
         "This is working diagnostic retention, not a repair of the WinRT/link failure."
       ],
-      "commit_subject": "Listener build source snapshot"
+      "commit_subject": "Listener build source snapshot",
+      "commit_availability": "local_snapshot",
+      "local_retention_ref": "refs/tags/regression-baseline/type-ad6b8388f0b8",
+      "public_history_exclusion_reason": "Historical local build-source snapshot includes binary model blobs (one890413984B); retained under a fixed local Git tag, not published to GitHub. Original full check verifies the commit and tag; public CI explicitly does not qualify this Git object."
     },
     {
       "id": "type_optional_capability_nonblocking_recovery",
@@ -880,7 +895,10 @@
         "New43 natural7583 timeout occurred before44 and shows no recovery capability branch. Do not assign it to this omission.",
         "Native queued ATT cancellation/air behavior and overall early ending remain field pending."
       ],
-      "commit_subject": "Listener build source snapshot"
+      "commit_subject": "Listener build source snapshot",
+      "commit_availability": "local_snapshot",
+      "local_retention_ref": "refs/tags/regression-baseline/type-6730ed9433bf",
+      "public_history_exclusion_reason": "Historical local build-source snapshot includes binary model blobs (one890413984B); retained under a fixed local Git tag, not published to GitHub. Original full check verifies the commit and tag; public CI explicitly does not qualify this Git object."
     },
     {
       "id": "type_windows_log_rotation_recovery",
@@ -912,7 +930,10 @@
         "During an actual denied I/O operation the failed record may still be lost. This fixes persistent subsequent failure, not every storage failure.",
         "No changed Bluetooth/audio/ASR/endpoint/clipboard behavior. Natural rotation under other software and complete raw OTA air throughput remain unverified."
       ],
-      "commit_subject": "Listener build source snapshot"
+      "commit_subject": "Listener build source snapshot",
+      "commit_availability": "local_snapshot",
+      "local_retention_ref": "refs/tags/regression-baseline/type-543254dfccc8",
+      "public_history_exclusion_reason": "Historical local build-source snapshot includes binary model blobs (one890413984B); retained under a fixed local Git tag, not published to GitHub. Original full check verifies the commit and tag; public CI explicitly does not qualify this Git object."
     },
     {
       "id": "type_passive_connected_endpoint_pairing",
@@ -943,7 +964,10 @@
       ],
       "commit_subject": "Listener build source snapshot",
       "guards": [],
-      "validation_kind": "evidence_only"
+      "validation_kind": "evidence_only",
+      "commit_availability": "local_snapshot",
+      "local_retention_ref": "refs/tags/regression-baseline/type-73e054517530",
+      "public_history_exclusion_reason": "Historical local build-source snapshot includes binary model blobs (one890413984B); retained under a fixed local Git tag, not published to GitHub. Original full check verifies the commit and tag; public CI explicitly does not qualify this Git object."
     },
     {
       "id": "type_raw240_current46_comparison_unproven",
@@ -976,7 +1000,10 @@
         "Peer set differed: firstA PowerOptimized two actual peers, B/A2 one; HCI shows negotiated180ms. A/B/A was same board/image, not a fixed entire radio environment."
       ],
       "commit_subject": "Listener build source snapshot",
-      "validation_kind": "evidence_only"
+      "validation_kind": "evidence_only",
+      "commit_availability": "local_snapshot",
+      "local_retention_ref": "refs/tags/regression-baseline/type-079c11c89910",
+      "public_history_exclusion_reason": "Historical local build-source snapshot includes binary model blobs (one890413984B); retained under a fixed local Git tag, not published to GitHub. Original full check verifies the commit and tag; public CI explicitly does not qualify this Git object."
     },
     {
       "id": "firmware_sniffer_fresh_target_link_and_usb_timing",
@@ -5544,9 +5571,25 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-software-20261022-103730\\exposure.txt",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-clean-software-20261022-104200\\experience.txt",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-clean-software-20261022-104200\\operations.txt",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-clean-software-20261022-104200\\09-pasted-replacement.png"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-clean-software-20261022-104200\\09-pasted-replacement.png",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-recorded-purpose-20261022-105650\\experience.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-recorded-purpose-20261022-105650\\operations.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-recorded-purpose-20261022-105650\\06-transcript.png",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-recorded-purpose-20261022-105650\\09-saved-drafts-loaded.png"
       ],
-      "commit_subject": "Keep text drafts and results mounted during service setup from every entry"
+      "commit_subject": "Keep text drafts and results mounted during service setup from every entry",
+      "recorded_purpose_feedback": {
+        "ids": [
+          "F129R-01",
+          "F129R-02",
+          "F129R-03",
+          "F129R-04",
+          "F129R-05"
+        ],
+        "report": "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-recorded-purpose-20261022-105650\\experience.txt",
+        "outcome": "Real prerecorded ASR/save/reopen/copy UI useful;49 purchase deferred. New settings-return repair not selected; external/live/hardware not qualified.",
+        "unpackaged_copy": "21f055f27eb21ea6f23121884d53b7de2ae629f5"
+      }
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",

@@ -1295,10 +1295,10 @@ Updater metadata is scoped to `Listener-ai-Macau/Listener-Type`. Third-party mir
 
 ## Traceability
 
-Keep the known-good commit, original failure and affected verification in `scripts/regression-guard-commits.json` and the project's single development timeline. The old per-file inventory is historical, not a mandatory check for each source change. In this repository's checkout, validate Type commit anchors with:
+Keep the known-good commit, original failure and affected verification in `scripts/regression-guard-commits.json` and the project's single development timeline. The old per-file inventory is historical, not a mandatory check for each source change. In this repository's checkout, validate public Type commit anchors with (binary-bearing local snapshots are explicitly reported as unverified):
 
 ```bash
-npm run check:guard-commits -- --repo type
+npm run check:guard-commits -- --repo type --history public
 ```
 
 ### Independent extracted-output identity and complete drain
@@ -1512,3 +1512,5 @@ A settings-write or PairAsync result cannot announce audio readiness. The
 rename disconnect reason is consumed at that boundary, so duplicate ready
 callbacks do not repeat the notice. Internal refresh, unconfirmed pairing
 follow-up and unrelated recording ownership conflicts retain suppression.
+
+For retained historical local snapshots, omit `--history public` on the original checkout. This also checks each fixed local tag; no other checkout may claim those Git objects were verified.

@@ -12,13 +12,15 @@ const args = process.argv.slice(2);
 const options = new Map();
 for (let index = 0; index < args.length; index += 2) {
   const option = args[index], value = args[index + 1];
-  if (!['--manifest', '--repo'].includes(option) || !value || value.startsWith('--') || options.has(option)) {
-    throw new Error('Usage: check-regression-guard-commits.mjs [--manifest path] [--repo repository-id]');
+  if (!['--manifest', '--repo', '--history'].includes(option) || !value || value.startsWith('--') || options.has(option)) {
+    throw new Error('Usage: check-regression-guard-commits.mjs [--manifest path] [--repo repository-id] [--history complete|public]');
   }
   options.set(option, value);
 }
 const manifestPath = options.has('--manifest') ? resolve(options.get('--manifest')) : join(scriptDir, 'regression-guard-commits.json');
 const selectedRepo = options.get('--repo');
+const publicHistory = options.get('--history') === 'public';
+if (options.has('--history') && !['complete', 'public'].includes(options.get('--history'))) throw new Error('Unknown history scope');
 
 function fail(message) {
   throw new Error(message);
@@ -74,6 +76,7 @@ for (const [id, repo] of Object.entries(manifest.repositories)) {
 const seenIds = new Set();
 const seenGuardKeys = new Set();
 let verifiedCommits = 0;
+let localSnapshotsNotVerified = 0;
 for (const [index, entry] of manifest.entries.entries()) {
   for (const field of ['id', 'repo', 'commit', 'subject', 'state']) {
     requireString(entry[field], `entries[${index}].${field}`);
@@ -96,12 +99,25 @@ for (const [index, entry] of manifest.entries.entries()) {
   if (!Object.hasOwn(manifest.repositories, entry.repo)) fail(`entry ${entry.id} references unknown repo: ${entry.repo}`);
   const expectedCommitSubject = entry.commit_subject ?? entry.subject;
   requireString(expectedCommitSubject, `entries[${index}].commit_subject`);
+  const localSnapshot = entry.commit_availability === 'local_snapshot';
+  if (entry.commit_availability && !localSnapshot) fail(`unknown commit availability for ${entry.id}`);
+  if (localSnapshot) {
+    if (entry.local_retention_ref !== `refs/tags/regression-baseline/type-${entry.commit.slice(0, 12)}` || entry.repo !== 'type') {
+      fail(`local snapshot ${entry.id} must retain its exact fixed local tag`);
+    }
+    requireString(entry.public_history_exclusion_reason, `entries[${index}].public_history_exclusion_reason`);
+  }
   const repoRoot = repoRoots.get(entry.repo);
-  if (repoRoot) {
+  if (repoRoot && publicHistory && localSnapshot) {
+    localSnapshotsNotVerified += 1;
+  } else if (repoRoot) {
     runGit(repoRoot, ['cat-file', '-e', `${entry.commit}^{commit}`]);
     const actualSubject = runGit(repoRoot, ['show', '-s', '--format=%s', entry.commit]);
     if (actualSubject !== expectedCommitSubject) {
       fail(`entry ${entry.id} subject mismatch for ${entry.commit}: expected '${expectedCommitSubject}', got '${actualSubject}'`);
+    }
+    if (localSnapshot && runGit(repoRoot, ['rev-parse', `${entry.local_retention_ref}^{commit}`]) !== entry.commit) {
+      fail(`local snapshot ${entry.id} fixed tag changed`);
     }
     verifiedCommits += 1;
   }
@@ -122,6 +138,7 @@ for (const requiredGuard of manifest.required_guards ?? []) {
 
 const evidenceOnly = manifest.entries.filter(entry => entry.validation_kind === 'evidence_only').length;
 console.log(`PASS: ${manifest.entries.length} history entries structurally checked; ${verifiedCommits} existing commits verified (scope: ${selectedRepo ?? 'all repositories'}; ${evidenceOnly} evidence-only; this is not a current-runtime feature acceptance).`);
+if (publicHistory) console.log(`Local-only historical snapshots: ${localSnapshotsNotVerified} retained declarations, Git objects NOT verified in public-history mode. Run without --history public on the original checkout to verify them.`);
 if (selectedRepo) console.log('Other repositories retain structural checks only; their Git objects were not verified in this checkout.');
 for (const entry of manifest.entries) {
   console.log(`- ${entry.repo} ${entry.commit.slice(0, 7)} ${entry.id}: ${entry.subject}`);

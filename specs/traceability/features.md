@@ -34,5 +34,5 @@
 | Capability | Source files | Verification |
 | --- | --- | --- |
 | Documentation inheritance | `docs/**`, `specs/**`, `scripts/check-doc-inheritance.mjs` | `npm run check:docs` |
-| Critical-feature regression history | `scripts/regression-guard-commits.json`, `scripts/check-regression-guard-commits.mjs` | `npm run check:guard-commits -- --repo type` in the public checkout; full cross-repository mode locally |
+| Critical-feature regression history | `scripts/regression-guard-commits.json`, `scripts/check-regression-guard-commits.mjs` | `npm run check:guard-commits -- --repo type --history public` in the public checkout (local binary snapshots explicitly unverified); omit `--history public` in the original checkout to verify its retained snapshots, or omit both options for full cross-repository mode |
 | Cloud-service safety | `scripts/check-cloud-services.mjs` | `npm run check:cloud` |

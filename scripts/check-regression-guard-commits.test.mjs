@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 const root = resolve(import.meta.dirname, '..');
 const original = JSON.parse(readFileSync(join(root, 'scripts/regression-guard-commits.json'), 'utf8'));
 const base = original.entries[0];
-function check(mutate, { scopeRepo = base.repo, absentRepository = false } = {}) {
+function check(mutate, { scopeRepo = base.repo, absentRepository = false, publicHistory = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'listener-guard-contract-'));
   assert.equal(dirname(resolve(directory)), resolve(tmpdir()));
   assert.ok(basename(directory).startsWith('listener-guard-contract-'));
@@ -19,6 +19,7 @@ function check(mutate, { scopeRepo = base.repo, absentRepository = false } = {})
     writeFileSync(path, JSON.stringify(value));
     const args = [join(root, 'scripts/check-regression-guard-commits.mjs'), '--manifest', path];
     if (scopeRepo) args.push('--repo', scopeRepo);
+    if (publicHistory) args.push('--history', 'public');
     const result = spawnSync(process.execPath, args, { encoding: 'utf8' });
     return { code: result.status, output: result.stdout + result.stderr };
   } finally { rmSync(directory, { recursive: true }); }
@@ -62,4 +63,30 @@ test('default full verification still rejects a missing repository', () => {
   const result = check(() => {}, { scopeRepo: null, absentRepository: true });
   assert.notEqual(result.code, 0);
   assert.match(result.output, /repository absent path does not exist/);
+});
+
+function retainedLocalSnapshot(entry) {
+  entry.commit = '0'.repeat(40);
+  entry.commit_availability = 'local_snapshot';
+  entry.local_retention_ref = `refs/tags/regression-baseline/type-${entry.commit.slice(0, 12)}`;
+  entry.public_history_exclusion_reason = 'Historical binary-bearing snapshot retained on the original checkout';
+}
+
+test('public history reports retained local snapshots as unverified, not existing public commits', () => {
+  const result = check(retainedLocalSnapshot, { publicHistory: true });
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /0 existing commits verified/);
+  assert.match(result.output, /1 retained declarations, Git objects NOT verified/);
+});
+
+test('complete history still rejects a missing local snapshot commit', () => {
+  const result = check(retainedLocalSnapshot);
+  assert.notEqual(result.code, 0);
+  assert.match(result.output, /cat-file/);
+});
+
+test('public local-snapshot declarations require an exact fixed retention ref', () => {
+  const result = check(entry => { retainedLocalSnapshot(entry); delete entry.local_retention_ref; }, { publicHistory: true });
+  assert.notEqual(result.code, 0);
+  assert.match(result.output, /exact fixed local tag/);
 });

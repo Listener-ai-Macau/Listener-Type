@@ -9,7 +9,7 @@ npm ci
 npm run build
 npm run check:brand
 npm run check:cloud
-npm run check:guard-commits -- --repo type
+npm run check:guard-commits -- --repo type --history public
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
