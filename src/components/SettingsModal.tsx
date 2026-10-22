@@ -7,6 +7,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Icon } from './Icon';
+import { HelpCenter } from './HelpCenter';
 import { AboutUpdateControl, Settings as SettingsContent, type SettingsSectionId } from '../pages/Settings';
 import { Row } from './ui/Row';
 import { SavedToast } from './SavedToast';
@@ -32,7 +33,7 @@ interface SettingsModalProps {
 }
 
 // 稳定 ID（与 i18n key 一致，方便 modal.sections.* 渲染）。
-type ModalSectionId = 'settings' | 'personalize' | 'about';
+type ModalSectionId = 'settings' | 'personalize' | 'about' | 'helpCenter';
 
 interface ModalNavItem {
   id: string;
@@ -45,7 +46,6 @@ interface ModalGroup {
   items: ModalNavItem[];
 }
 
-const HELP_URL = 'https://github.com/Listener-ai-Macau/Listener-Type#readme';
 const RELEASE_NOTES_URL = 'https://github.com/Listener-ai-Macau/Listener-Type/releases';
 
 export function SettingsModal({ os: _os, onClose, initialSettingsSection, initialProviderFocus, onSetupListener }: SettingsModalProps) {
@@ -69,19 +69,19 @@ export function SettingsModal({ os: _os, onClose, initialSettingsSection, initia
     },
     {
       items: [
-        { id: 'helpCenter', icon: 'help', external: true, href: HELP_URL },
+        { id: 'helpCenter', icon: 'help' },
         { id: 'releaseNotes', icon: 'doc', external: true, href: RELEASE_NOTES_URL },
       ],
     },
   ];
 
-  // 与 sidebar nav 一致的滑动指示器：仅第一组（可选中）有 pill；外链组永远不 active 不画 pill。
+  // The first group has a sliding pill; local help has its own active background.
   const firstGroupRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [pillRect, setPillRect] = useState<{ top: number; height: number } | null>(null);
   useLayoutEffect(() => {
     const idx = groups[0].items.findIndex(it => it.id === section);
     const el = firstGroupRefs.current[idx];
-    if (!el) return;
+    if (!el) { setPillRect(null); return; }
     setPillRect({ top: el.offsetTop, height: el.offsetHeight });
   }, [section]);
 
@@ -148,7 +148,7 @@ export function SettingsModal({ os: _os, onClose, initialSettingsSection, initia
                   display: 'flex', alignItems: 'center', gap: 10,
                   padding: '7px 10px',
                   borderRadius: 8, border: 0,
-                  background: 'transparent',
+                  background: active && gi !== 0 ? 'var(--ol-control-active)' : 'transparent',
                   fontFamily: 'inherit', fontSize: 13,
                   cursor: 'default', textAlign: 'left',
                   position: 'relative', zIndex: 1,
@@ -238,7 +238,11 @@ export function SettingsModal({ os: _os, onClose, initialSettingsSection, initia
             // personalize / about 短内容：单一 scroll wrapper，超出时本块滚动。
             <div className="ol-thinscroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '10px 28px 28px' }}>
               {section === 'personalize' && <PersonalizeSection />}
-              {section === 'about' && <AboutMini />}
+              {section === 'about' && <AboutMini onOpenHelp={() => setSection('helpCenter')} />}
+              {section === 'helpCenter' && <HelpCenter onOpenSettings={next => {
+                entrySection.current = next;
+                setSection('settings');
+              }} />}
             </div>
           )}
         </div>
@@ -335,7 +339,7 @@ function PersonalizeSection() {
   );
 }
 
-function AboutMini() {
+function AboutMini({ onOpenHelp }: { onOpenHelp: () => void }) {
   const { t } = useTranslation();
   const [qqCopied, setQqCopied] = useState(false);
   const qqCopiedRef = useRef<number | null>(null);
@@ -392,7 +396,7 @@ function AboutMini() {
       <Row label={t('modal.about.docs')}>
         <button
           style={btnGhost}
-          onClick={() => openExternal('https://github.com/Listener-ai-Macau/Listener-Type#readme')}
+          onClick={onOpenHelp}
         >
           {t('modal.about.docsBtn')}
         </button>

@@ -3,6 +3,7 @@ import { hardwareLayoutTranslations } from './hardwareLayout.ts';
 import { audioFileTranslations } from './audioFile.ts';
 import { politeEditsTranslations } from './politeEdits.ts';
 import { conciseDraftTranslations } from './conciseDraft.ts';
+import { offlineHelpTranslations } from './offlineHelp.ts';
 import type { zhCN } from './zh-CN';
 import { en } from './en.ts';
 
@@ -13,6 +14,7 @@ export const ko: typeof zhCN = {
   ...en,
   politeEdits: politeEditsTranslations.ko,
   conciseDraft: conciseDraftTranslations.ko,
+  offlineHelp: offlineHelpTranslations.ko,
   textDraft: textDraftTranslations['ko'],
   hardwareLayout: hardwareLayoutTranslations['ko'],
   earlierTrial: {"title": "비교할 이전 결과", "hint": "입력 또는 저장한 스타일이 바뀌었습니다. 수정 내용을 포함한 이전 결과이며 현재 원고의 새 출력이 아닙니다. 다시 요청하지 않았으며 이 창을 닫거나 같은 스타일의 새 결과가 나올 때까지 보관합니다.", "input": "이전 결과에 사용한 원고"},
@@ -1382,7 +1384,7 @@ export const ko: typeof zhCN = {
       checkUpdate: '업데이트 확인',
       checkUpdateBtn: '확인',
       docs: '문서',
-      docsBtn: 'GitHub README ↗',
+      docsBtn: 'Type에서 읽기',
       feedback: '피드백 채널',
       feedbackBtn: 'GitHub Issues ↗',
       source: '소스',

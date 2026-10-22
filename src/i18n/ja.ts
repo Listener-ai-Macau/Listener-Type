@@ -3,6 +3,7 @@ import { hardwareLayoutTranslations } from './hardwareLayout.ts';
 import { audioFileTranslations } from './audioFile.ts';
 import { politeEditsTranslations } from './politeEdits.ts';
 import { conciseDraftTranslations } from './conciseDraft.ts';
+import { offlineHelpTranslations } from './offlineHelp.ts';
 import type { zhCN } from './zh-CN';
 import { en } from './en.ts';
 
@@ -13,6 +14,7 @@ export const ja: typeof zhCN = {
   ...en,
   politeEdits: politeEditsTranslations.ja,
   conciseDraft: conciseDraftTranslations.ja,
+  offlineHelp: offlineHelpTranslations.ja,
   textDraft: textDraftTranslations['ja'],
   hardwareLayout: hardwareLayoutTranslations['ja'],
   earlierTrial: {"title": "比較用の前の結果", "hint": "入力や保存したスタイルが変わりました。編集内容を含む前の結果で、現在の入力に対する新しい出力ではありません。再送信せず、この画面を閉じるか同じスタイルで新しい結果を得るまで保持します。", "input": "この前の結果に使った入力"},
@@ -1382,7 +1384,7 @@ export const ja: typeof zhCN = {
       checkUpdate: 'アップデート確認',
       checkUpdateBtn: '確認',
       docs: 'ドキュメント',
-      docsBtn: 'GitHub README ↗',
+      docsBtn: 'Type 内で読む',
       feedback: 'フィードバックチャネル',
       feedbackBtn: 'GitHub Issues ↗',
       source: 'ソース',
