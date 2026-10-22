@@ -36,7 +36,7 @@
 Type 預設使用 **USB 有線燒寫**，能力已內建；無需另裝 Python、ESP-IDF 或其他燒寫軟體。
 裝置設定各自獨立：選擇一台有線／藍牙裝置，讀取後修改並寫入；名稱、燈光、電源、按鍵與旋鈕設定保存在該裝置。請配套使用本頁 MSI 與韌體 ZIP。
 
-Type build125新增可選「簡潔成稿」，用於冗長草稿。文字試用中主動新增/選擇，再明確處理時才用已設定的文字服務。新增不請求服務，不改日常錄音風格或循環。原文、結果比較、編輯、複製/儲存與Firmware33保留；採用前請核對，已簡潔的內容可能不變。
+Type build126修復風格寫入失敗後仍在記憶體留下未儲存修改的問題。建立、編輯、啟停/重設、刪除或匯入失敗時保留原狀態；失敗刪除保留原有資產。可選簡潔成稿與現有日常錄音行為保留；生成內容仍需核對，本次不宣稱文字品質或抗干擾提升。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

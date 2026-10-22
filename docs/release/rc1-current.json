@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T07:31:50.962030+08:00",
+  "updatedAt": "2026-10-22T08:03:14.677454+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 125,
-    "source": "f044eed30ae3db1dbfea6910ed0c7675318b0dfa",
-    "sourceTag": "build-source/type125-20261022",
+    "build": 126,
+    "source": "70b162bf83ef48a2a5ef50773e9614ca28493800",
+    "sourceTag": "build-source/type126-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "efefcd0233be7e8a0fe2a174f05785692199fcf36c9e9c33d62f06843d8191ed",
-    "sizeBytes": 299114496,
-    "exeSha256": "91b0f4922d6cbe8cfb99cc087ff0b36c54467f48c9baca898975e95d29e551b0",
+    "sha256": "5e418d9a0134c9107a8a08c8ed77faa29f3335774914b0629e8f0a33eaaa0492",
+    "sizeBytes": 299110400,
+    "exeSha256": "9b47ccd495c06eee00e0d5d57eede5f98cce9532d89c3b56beea83c773386e7e",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -252,8 +252,11 @@
     "type125TrialPresetOutsideDailyCycleVerified": true,
     "type125NormalStyleCreationCompatible": true,
     "type125VerificationScope": "Exact125 ordinary private UI adds a disabled inactive concise preset without service call or preference/history/builtin changes. Explicit Try uses the existing configured text service, result saved/reopened exactly. Real Rust store regression keeps trial presets out of daily cycle and normal creation enabled. Controlled affected UI verifies cache, pending, original, failed storage and prior lifecycle. Five bounded pre-candidate nonprivate probes include weak unchanged/short drafts as well as wordy English/Chinese/Japanese improvements. No universal language/meaning guarantee or hardware/purchase proof.",
-    "customer125Reviewed": false,
-    "customer125PurchaseQualification": false
+    "customer125Reviewed": true,
+    "customer125PurchaseQualification": false,
+    "type126StylePersistenceFailureRollbackVerified": true,
+    "type126PrivateNativeFailureRetryVerified": true,
+    "type126VerificationScope": "Real Rust store failure reproduction and eight mutation paths. Exact private native ordinary Add fails with draft kept, then retry saves exactly once without changing preferences. Zero cloud requests. No daily installation, customer buying, live or hardware qualification."
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -270,6 +273,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build125-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build126-20261022"
   }
 }

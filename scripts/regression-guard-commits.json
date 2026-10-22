@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T07:40:52.159145+08:00",
+  "updated_at": "2026-10-22T08:03:14.677454+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5319,6 +5319,30 @@
         "下一沿F125-01/02评估直接目的动作及真正有用短稿，先用本次原失败稿有界研究，不换顾客抽好评或把已有好样本冒充普遍。",
         "工程另复现风格持久化失败仍修改内存，67055测试失败为反例，原L09存储信任路径待126修。"
       ]
+    },
+    {
+      "id": "customer126_failed_style_persistence_keeps_previous_visible_state",
+      "repo": "type",
+      "commit": "70b162bf83ef48a2a5ef50773e9614ca28493800",
+      "subject": "Stage style changes until metadata write succeeds; retain old assets after failed deletion",
+      "state": "exact126_store_and_private_native_failure_retry_verified",
+      "previous_source_evidence": "f044eed real store returned Err but retained a new preset; earliest retained boundary732a8631 already has mutate-before-write, not proven introduced by125.",
+      "protects": [
+        "Seven mutation methods publish memory only after a successful metadata write.",
+        "Failed create/edit/origin/enable/reset/delete/import preserves prior logical state; failed deletion retains existing icon.",
+        "Trial-only creation remains disabled/inactive, ordinary creation compatible. No provider/model/default/dictation changes."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\style126-store-test.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native126-snapshot-20261022-080219\\store126-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native126-snapshot-20261022-080219\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build126\\type-artifact-verification.json"
+      ],
+      "unverified": [
+        "No customer has encountered the injected failure; no purchase improvement claimed.",
+        "A newly extracted import icon can remain after metadata failure; not a full filesystem transaction.",
+        "Actual125 short-message value and direct purpose action remain open; no live voice/hardware/external editor qualification."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -6029,7 +6053,8 @@
         "customer122_common_request_questions_two_local_tones",
         "customer123_request_spans_keyless_raw_local_options_identity_feedback",
         "customer124_wording_service_reply_origin_and_local_recovery",
-        "customer125_optional_concise_preset_keeps_trial_creation_out_of_daily_cycle"
+        "customer125_optional_concise_preset_keeps_trial_creation_out_of_daily_cycle",
+        "customer126_failed_style_persistence_keeps_previous_visible_state"
       ],
       "paths": {
         "type": [

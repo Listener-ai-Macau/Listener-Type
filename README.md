@@ -36,7 +36,7 @@ Firmware: **ESP32-S3 N16R8**, build `e7bd1f1619b696a1`. Select the same ZIP for 
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device, read its settings, then write changes back to that device. Names, lights, power, keys and knob configuration stay on the board. Use this paired MSI and firmware ZIP.
 
-Type build125 adds an optional Concise message style for wordy drafts. In Try typed text, explicitly add/select it, then choose Try this text to use your configured text service. Adding the preset makes no service request and does not change your daily recording style or cycle. Original text, result comparisons, editing, copy/save and Firmware33 are retained. Review every result; already concise text may stay unchanged.
+Type build126 fixes failed style saves leaving an unsaved change visible as if it had been saved. A failed creation, edit, enable/reset, deletion or import now keeps the previous style state; a failed deletion keeps its existing assets. Optional concise editing and the existing daily recording behavior are retained. Review generated text; this update does not claim better rewriting or interference removal.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build125 / Firmware33
+# Listener v1.0.6-rc1 · Type build126 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,12 @@
 | **ESP32-S3 firmware · USB flashing / Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+Style preset changes are made visible only after their metadata file has been written successfully. When creation, editing, enabling/resetting, deleting or importing a style fails, the previously saved style state remains in place. A failed deletion also retains the existing icon. You can correct the storage problem and retry without a ghost preset from the failed attempt.
+
+This is a persistence reliability fix. Existing recording behavior, provider/model/account settings and Firmware33 are retained. The concise text option below remains optional; this update makes no additional rewriting or interference-removal claim.
+
+## Concise text retained from build125
 
 **Try typed text → Add concise style** saves an optional **Concise message** preset on this computer and selects it for the text workspace. It is designed to shorten wordy phrasing while preserving details, conditions and the original language. Already concise text may remain unchanged. Review the result before using it; this is text-service processing, not guaranteed semantic preservation or speech recognition.
 
@@ -52,10 +58,12 @@ Type is free; US$49 is the hardware price. Cloud service setup and usage are sep
 
 | Component | Exact source | SHA-256 |
 | --- | --- | --- |
-| Type125 MSI · 299114496 bytes | [f044eed30ae3](https://github.com/Listener-ai-Macau/Listener-Type/commit/f044eed30ae3db1dbfea6910ed0c7675318b0dfa) | `efefcd0233be7e8a0fe2a174f05785692199fcf36c9e9c33d62f06843d8191ed` |
+| Type126 MSI · 299110400 bytes | [70b162bf83ef](https://github.com/Listener-ai-Macau/Listener-Type/commit/70b162bf83ef48a2a5ef50773e9614ca28493800) | `5e418d9a0134c9107a8a08c8ed77faa29f3335774914b0629e8f0a33eaaa0492` |
 | Firmware33 ZIP · 1956905 bytes | [149b6d950ebc](https://github.com/Listener-ai-Macau/Listener-Firmware/commit/149b6d950ebc5f416924c8670cf2b207bdc2b5b7) | `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272` |
 
 ## 中文说明
+
+126修复风格持久化失败后内存仍显示未保存修改的源头：先写元数据，成功后才更新可见状态；失败删除保留原资产。修正存储条件后可重试，不留下失败时的假保存。录音、账号/模型/提供商与Firmware33保持，本次不宣称文字质量或抗干扰提升。
 
 125提供可选“简洁成稿”：文字试用中主动添加并选中，不发送文字；明确处理时才使用既有文本服务并正常计费。用于压缩啰嗦表达，需自行核对信息与条件；已简洁的稿可能不变。原稿、不同风格结果比较与修订复制/保存保留。
 

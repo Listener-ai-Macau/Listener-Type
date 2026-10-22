@@ -36,7 +36,7 @@
 Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
 设备设置各自独立：选择一台有线／蓝牙设备，读取后修改并写入；名称、灯光、电源、按键和旋钮设置保存在该设备中。请配套使用本页 MSI 与固件 ZIP。
 
-Type build125新增可选“简洁成稿”，用于啰嗦草稿。文字试用中主动添加/选择，再明确处理时才用已配置的文本服务。添加不请求服务，不改日常录音风格或循环。原文、结果比较、编辑、复制/保存与Firmware33保留；采用前请核对，已简洁的内容可能不变。
+Type build126修复风格写入失败后仍在内存留下未保存修改的问题。创建、编辑、启停/重置、删除或导入失败时保留原状态；失败删除保留原有资产。可选简洁成稿与现有日常录音行为保留；生成内容仍需核对，本次不宣称文字质量或抗干扰提升。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
