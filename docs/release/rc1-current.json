@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T10:04:51.195613+08:00",
+  "updatedAt": "2026-10-22T10:36:14.312712+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 128,
-    "source": "da266bd0fd6e750831f648af9568ec6cadc76966",
-    "sourceTag": "build-source/type128-20261022",
+    "build": 129,
+    "source": "a793bce05c3428a5519c2a64a4311183832e8b1b",
+    "sourceTag": "build-source/type129-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "fb5b869660496cb063ec3e05bd0dfb23caf66484eb6d3f5782a01f7e56a90037",
+    "sha256": "8a5987ed586212d5f20ebaf0862b53e0e53c6c5f0dfed33bcb3e2ce52bcf5007",
     "sizeBytes": 299110400,
-    "exeSha256": "e7824ca9254ed8bcb71f1eabd16cffdfa589ff266114bc18520f59996af335d7",
+    "exeSha256": "b04f5cc055c69e884bf5760c4d8c6f88795fbc1b0b6119dd635149982ef52b9f",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -265,7 +265,10 @@
     "offlineHelp128ExactNativeVerified": true,
     "customer128Reviewed": true,
     "customer128PurchaseQualification": false,
-    "customer128HelpActuallyUsed": false
+    "customer128HelpActuallyUsed": false,
+    "workspace129ExactNativeVerified": true,
+    "customer129Reviewed": false,
+    "customer129PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T10:04:51.195613+08:00",
+  "updated_at": "2026-10-22T10:36:14.312712+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5449,6 +5449,36 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE128-software-20261022-095600\\03-shorter-result.png",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE128-software-20261022-095600\\05-saved-draft.png"
       ]
+    },
+    {
+      "id": "customer129_all_workspace_settings_detours_preserve_work",
+      "repo": "type",
+      "commit": "a793bce05c3428a5519c2a64a4311183832e8b1b",
+      "subject": "Keep draft, edited result and pending completion through service settings from all text workspace entries",
+      "state": "exact129_native_keyless_and_controlled_pending_save_barrier_verified_customer_pending",
+      "previous_source_evidence": "128 FloatingShell closes quickTrialOpen; Style page closes trialPack before provider navigation, losing result and pending callback. Style branch dates to8eed884b/76.117 only protects the recorded-text route without a host callback; old input-only guarantee is not whole-result coverage.",
+      "protects": [
+        "StyleTextTrial owns the sibling text-service settings dialog, so hosts cannot unmount it for that detour. Overview, Style and recorded text share the same ownership.",
+        "Returning preserves exact input, selected style and edited result. A request started before opening settings is retained, without a second automatic processing request.",
+        "Existing117/118 write settling, blur flush, explicit failure/return and stale acknowledgement protections remain. Readiness is rechecked after return; no default, provider or credential writes merely from opening/closing.",
+        "Native proof uses keyless Original text and no cloud; no wake, ASR, firmware, BLE or external-paste code changes."
+      ],
+      "guards": [
+        "python scripts/check-style-workspace-settings-return-ui.py --url <isolated-vite-url> --report <output-json>",
+        "python scripts/check-audio-workspace-provider-setup-ui.py --url <isolated-vite-url> --report <output-json>"
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\workspace-settings129-before.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\workspace-settings129-after.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\workspace-settings129-existing-audio-barrier.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native129-snapshot-20261022-103506\\workspace129-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native129-snapshot-20261022-103506\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build129\\type-artifact-verification.json"
+      ],
+      "unverified": [
+        "Pending native cloud response is controlled React evidence, not a new native provider test.",
+        "No independent129 use, real physical convenience or49 purchase established. Shortening quality remains unresolved."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -6163,7 +6193,8 @@
         "customer126_failed_style_persistence_keeps_previous_visible_state",
         "customer127_direct_shorter_action_reuses_edits_without_default_activation",
         "release_asset_upload_failure_preserves_previous_download",
-        "customer128_bundled_help_without_github_dependency"
+        "customer128_bundled_help_without_github_dependency",
+        "customer129_all_workspace_settings_detours_preserve_work"
       ],
       "paths": {
         "type": [
