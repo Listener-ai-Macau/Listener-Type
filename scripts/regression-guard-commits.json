@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T09:54:07.299019+08:00",
+  "updated_at": "2026-10-22T10:04:51.195613+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5349,7 +5349,7 @@
       "repo": "type",
       "commit": "06b272a27e24b0bdacdb96b0ff08f6faa9b237f8",
       "subject": "Direct Make shorter task with exact edited cache, explicit paid request and prior-result recovery",
-      "state": "customer127_chose_saved_keys_successfully_new_shorter_action_untried_purchase_deferred",
+      "state": "independent128_direct_purpose_used_one_request_automatic_shortening_gain_insufficient",
       "previous_source_evidence": "125 customer naturally had to find Add concise style, then submit again; wanted a direct shorter purpose. Original250→240 remained weak; all refusals and unsuccessful prompt/envelope probes retained.",
       "protects": [
         "One explicit action prepares/reuses disabled inactive trial style and submits once; no daily style activation, preferences or backend/provider/model/prompt change.",
@@ -5372,12 +5372,16 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE127-software-20261022-083000\\experience.txt",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE127-software-20261022-083000\\operations.txt",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE127-software-20261022-083000\\06-reply-inserted.png",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE127-software-20261022-083000\\09-copy-pasted.png"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE127-software-20261022-083000\\09-copy-pasted.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE128-software-20261022-095600\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE128-software-20261022-095600\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE128-software-20261022-095600\\03-shorter-result.png"
       ],
       "unverified": [
         "127全文/操作/06与09截图已读：自然自选Follow-up reply，保存Paste template→Key1练习→保存短语Copy→普通清空/Paste，原句完整，无产品阻断；未用新Make shorter或语音/AI。公开GitHub入口ERR_CONNECTION_CLOSED，仍49暂缓。",
         "F127-01公开入口网络失败沿原L09/FENTRY，不能用CLI上传成功证明浏览器已恢复。F127-02短语框需滚动但未阻断，沿F102-03暂排实际主障碍后。F127-03并F97-03：当次一个回复免费软件已够，不强迫客户需要硬件。",
-        "F125-01自动缩短省力仍有限；F125-02直接动作工程成立，本客户未选因此客户改善未知。实物/实时/外部应用/成交仍开放。"
+        "F125-01自动缩短省力仍有限；F125-02直接动作工程成立，本客户未选因此客户改善未知。实物/实时/外部应用/成交仍开放。",
+        "128首次独立自选Make shorter实际调用1次，几乎保持原词，未省去手动缩短；并原F125-01，停止同条件提示微调和购买重派，转查通用实现／实际请求与已否决证据。127原未用事实保留。"
       ]
     },
     {
@@ -5385,7 +5389,7 @@
       "repo": "type",
       "commit": "0e8e6cc4fe2f92db1ed660065f623ec37481f70e",
       "subject": "Upload staged asset and verify before canonical promotion; retain previous download on failed upload",
-      "state": "six_failure_contract_tests_and_current_asset_real_idempotency_verified_full_new_promotion_not_yet_live",
+      "state": "controlled_failure_contracts_and_real128_staged_upload_promotion_digest_verified",
       "previous_source_evidence": "127 historical handoff publish127-before-staged-assets.py used gh --clobber before successful upload.408/EOF removed the old asset leaving none; native app remained usable. Three CLI attempts and an observed urllib send failed. Windows curl same loopback7897 route completed299122688B in40.55s with matching server digest.",
       "protects": [
         "Upload failure must not rename/delete the previous canonical download; staged identity must match uploaded state/size/SHA first.",
@@ -5400,14 +5404,16 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build127\\curl-upload-result.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build127\\observed-upload-result.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build127\\safe-publisher-current-asset.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build127\\published.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build127\\published.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build128\\safe-asset-upload.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build128\\published.json"
       ],
       "failure_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\publish127-before-staged-assets.py"
       ],
       "unverified": [
-        "Full staged upload/promotion against a new actual release asset not yet run; fault cases use a controlled API state machine.",
-        "Two server renames are not zero-gap atomicity. Browser ERR_CONNECTION_CLOSED not diagnosed by successful upload."
+        "Failed-upload/promotion-recovery cases use a controlled API state machine;128 actual success does not prove every network/API outage recovery.",
+        "Two server renames are not zero-gap atomicity. Browser ERR_CONNECTION_CLOSED is not diagnosed by successful upload."
       ]
     },
     {
@@ -5415,7 +5421,7 @@
       "repo": "type",
       "commit": "da266bd0fd6e750831f648af9568ec6cadc76966",
       "subject": "Read basic help locally and reach existing Recording/Providers without opening GitHub",
-      "state": "exact128_native_keyless_help_routes_and_persistence_verified_customer_pending",
+      "state": "exact128_native_help_verified_independent128_used_text_not_help_purchase_deferred",
       "previous_source_evidence": "SettingsModal helpCenter and About manual in06b272a2 only opened the external README. Independent127 encountered ERR_CONNECTION_CLOSED; native website root cause remains unknown.",
       "protects": [
         "Help center and About docs read bundled five-language content. Full GitHub guide remains an explicit internet link.",
@@ -5433,9 +5439,15 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\offline-help128-ui-before-transient-classification.json"
       ],
       "unverified": [
-        "No independent128 use yet; AI feedback is not real payment or physical qualification.",
+        "128独立自然使用：Light保留活动条件，Make shorter几乎未缩短，最终自己改稿；Save／Copy界面确认／关窗后Saved drafts找回完整修订成立。未用本机帮助或外部插入，仍49暂缓。 AI模拟非真人或实体资格。",
         "F94T-03 actual new-button external paste still unverified; historical private foreground failure reused, not rerun.",
         "No new wake/end/BLE/noise/160KBps qualification; daily92 andFirmware33 unchanged."
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE128-software-20261022-095600\\experience.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE128-software-20261022-095600\\operations.txt",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE128-software-20261022-095600\\03-shorter-result.png",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE128-software-20261022-095600\\05-saved-draft.png"
       ]
     }
   ],

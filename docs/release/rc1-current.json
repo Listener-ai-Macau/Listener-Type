@@ -1,6 +1,6 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T09:54:07.299019+08:00",
+  "updatedAt": "2026-10-22T10:04:51.195613+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
@@ -263,8 +263,9 @@
     "customer127Reviewed": true,
     "customer127PurchaseQualification": false,
     "offlineHelp128ExactNativeVerified": true,
-    "customer128Reviewed": false,
-    "customer128PurchaseQualification": false
+    "customer128Reviewed": true,
+    "customer128PurchaseQualification": false,
+    "customer128HelpActuallyUsed": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
