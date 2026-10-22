@@ -237,12 +237,12 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
       <PageHeader
         kicker={t('history.kicker')}
         title={t('history.title')}
-        desc={t('history.desc')}
+        desc={items.length === 0 && !loading && !loadError ? undefined : t('history.desc')}
         right={
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {onOpenSavedDrafts && <Btn size="sm" variant="ghost" onClick={onOpenSavedDrafts}>{t('textDraft.title')}</Btn>}
             <Btn icon="refresh" variant="ghost" size="sm" onClick={() => void refresh(true)}>{t('common.refresh')}</Btn>
-            <Btn icon="trash" variant="ghost" size="sm" disabled={loading || items.length === 0} onClick={onClear}>{t('common.clear')}</Btn>
+            {items.length > 0 && <Btn icon="trash" variant="ghost" size="sm" disabled={loading} onClick={onClear}>{t('common.clear')}</Btn>}
           </div>
         }
       />

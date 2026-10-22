@@ -70,7 +70,7 @@ with sync_playwright() as pw:
   report['checks'].append({'readyWorkspaceReservedGap':gap,'balancedEditorHeights':boxes,'copyAndSaveInViewport':True})
   trial.get_by_role('button',name='Save draft',exact=True).click();expect(trial.get_by_role('button',name='Saved draft',exact=True)).to_be_disabled()
   trial.get_by_role('button',name='Close',exact=True).click();page.locator('aside nav').get_by_role('button',name='History',exact=True).click();expect(page.locator('[data-history-empty]')).to_be_visible();settled(page)
-  expect(page.get_by_text('Last 7 days',exact=True)).to_have_count(0);expect(page.get_by_role('button',name='Clear',exact=True)).to_be_disabled()
+  expect(page.get_by_text('Last 7 days',exact=True)).to_have_count(0);expect(page.get_by_role('button',name='Clear',exact=True)).to_have_count(0)
   page.screenshot(path=str(a.report.with_name('ui134-empty-history.png')))
   page.get_by_role('button',name='Saved drafts',exact=True).first.click();saved=page.get_by_role('dialog',name='Saved drafts',exact=True)
   expect(saved.get_by_role('textbox',name='Saved text',exact=True)).to_have_value(text);saved.get_by_role('button',name='Close',exact=True).click()
