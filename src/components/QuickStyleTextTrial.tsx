@@ -6,14 +6,12 @@ import { conciseDraftStyle, isConciseDraftStyle } from '../lib/conciseDraftStyle
 import type { StylePack } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import { StyleTextTrial } from './StyleTextTrial';
-import { TextServiceSettingsDialog } from './TextServiceSettingsDialog';
 
 /** A text workspace, not a style activation or a shortcut to pack management. */
-export function QuickStyleTextTrial({ draft, onDraftChange, onClose, onOpenProviders }: {
+export function QuickStyleTextTrial({ draft, onDraftChange, onClose }: {
   draft: string;
   onDraftChange: (text: string) => void;
   onClose: () => void;
-  onOpenProviders?: () => void;
 }) {
   const { t } = useTranslation();
   const [packs, setPacks] = useState<StylePack[]>([]);
@@ -22,8 +20,6 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, onOpenProvi
   const [attempt, setAttempt] = useState(0);
   const [adding, setAdding] = useState<'list' | 'concise' | null>(null);
   const [addFailed, setAddFailed] = useState<'list' | 'concise' | null>(null);
-  const [providersOpen, setProvidersOpen] = useState(false);
-  const [readinessRevision, setReadinessRevision] = useState(0);
   const addingRef = useRef(false);
   const mounted = useRef(false);
   useEffect(() => {
@@ -89,12 +85,8 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, onOpenProvi
       error: addFailed === 'list' ? t('style.everydayList.failed') : '', onChoose: () => void chooseEverydayList(),
     } : undefined}
     prepareShorter={prepareConcise}
-    onClose={onClose} onOpenProviders={onOpenProviders ?? (() => setProvidersOpen(true))}
-    readinessRevision={readinessRevision} /> :
+    onClose={onClose} /> :
     <TrialLoading failed={failed} onRetry={() => setAttempt(value => value + 1)} onClose={onClose} title={t('overview.tryTypedText')} />}
-    {providersOpen && <TextServiceSettingsDialog onClose={() => {
-      setProvidersOpen(false); setReadinessRevision(value => value + 1);
-    }} />}
   </>;
 }
 

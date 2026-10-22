@@ -10,8 +10,9 @@ import './StyleTextTrial.css';
 import { DeviceLayoutsDialog } from './DeviceLayoutsDialog';
 import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
 import { PoliteEditSuggestions } from './PoliteEditSuggestions';
+import { TextServiceSettingsDialog } from './TextServiceSettingsDialog';
 
-export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, prepareShorter, draft, onDraftChange, onClose, onOpenProviders, readinessRevision = 0 }: {
+export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, prepareShorter, draft, onDraftChange, onClose }: {
   pack: StylePack;
   packs?: StylePack[];
   onSelectPack?: (id: string) => void;
@@ -20,8 +21,6 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   draft: string;
   onDraftChange: (text: string) => void;
   onClose: () => void;
-  onOpenProviders?: () => void;
-  readinessRevision?: number;
 }) {
   const { t } = useTranslation();
   const styleChangePending = extraStyleChoice?.pending;
@@ -64,6 +63,9 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   const [readiness, setReadiness] = useState<StyleTextTrialReadiness | null>(null);
   const [readinessError, setReadinessError] = useState(false);
   const [readinessAttempt, setReadinessAttempt] = useState(0);
+  // All entry points keep this workspace mounted during service setup. A host
+  // navigation callback must not discard paid results, edits, or pending work.
+  const [providersOpen, setProvidersOpen] = useState(false);
   const deliveryRequest = useRef<string | null>(null);
   const [deliveryStarted, setDeliveryStarted] = useState<number | null>(null);
   const [deliverySeconds, setDeliverySeconds] = useState(5);
@@ -105,7 +107,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       if (current) setReadinessError(true);
     });
     return () => { current = false; };
-  }, [pack.id, readinessAttempt, readinessRevision]);
+  }, [pack.id, readinessAttempt]);
 
   useEffect(() => {
     const element = dialog.current;
@@ -237,7 +239,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   };
 
   return (
-    <dialog
+    <><dialog
       ref={dialog}
       className={`ol-style-trial ol-thinscroll${result ? ' ol-style-trial-has-result' : ''}`}
       aria-labelledby="style-trial-title"
@@ -285,7 +287,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         </Btn>
         {prepareShorter && <Btn variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !readiness?.textServiceConfigured || !draft.trim()}
           onClick={() => void runTrial(prepareShorter)}>{t(shortening ? 'conciseDraft.running' : 'conciseDraft.run')}</Btn>}
-        {readiness?.available && onOpenProviders && <Btn variant="ghost" disabled={draftSaving} onClick={onOpenProviders}>{t('style.trial.providers')}</Btn>}
+        {readiness?.available && <Btn variant="ghost" disabled={draftSaving} onClick={() => setProvidersOpen(true)}>{t('style.trial.providers')}</Btn>}
         {readiness?.available === false && <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1" target="_blank" rel="noreferrer noopener" style={{ color: 'var(--ol-blue)', fontSize: 13 }}>{t('style.trial.download')}</a>}
       </div>
       {prepareShorter && <p className="ol-style-trial-hint">{t('conciseDraft.runHint')}</p>}
@@ -389,5 +391,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       )}
       {keyPhrase !== null && <DeviceLayoutsDialog rememberSelection initialProfile={writingDeviceKeyProfile()} incomingText={keyPhrase} onLeaveForPage={onClose} onClose={() => setKeyPhrase(null)} />}
     </dialog>
+    {providersOpen && <TextServiceSettingsDialog onClose={() => {
+      setProvidersOpen(false); setReadinessAttempt(value => value + 1);
+    }} />}</>
   );
 }

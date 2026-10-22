@@ -488,7 +488,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                   onOpenSavedDrafts={() => setSavedDraftsOpen(true)}
                 />
               ) : displayTab === 'style' ? (
-                <Style onOpenProviders={() => openSettings('providers', 'llm')} />
+                <Style />
               ) : (
                 <Page />
               )}
@@ -498,8 +498,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
       </div>
 
       {quickTrialOpen && <QuickStyleTextTrial draft={quickTrialDraft} onDraftChange={setQuickTrialDraft}
-        onClose={() => setQuickTrialOpen(false)}
-        onOpenProviders={() => { setQuickTrialOpen(false); openSettings('providers', 'llm'); }} />}
+        onClose={() => setQuickTrialOpen(false)} />}
       {savedDraftsOpen && <SavedTextDraftsDialog onClose={() => setSavedDraftsOpen(false)} />}
       {audioFileOpen && <AudioFileTrial onClose={() => setAudioFileOpen(false)}
         onOpenProviders={() => { setAudioFileOpen(false); openSettings('providers'); }} />}

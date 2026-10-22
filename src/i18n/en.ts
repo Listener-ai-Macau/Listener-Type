@@ -625,7 +625,7 @@ export const en: typeof zhCN = {
       run: "Try this text",
       running: "Processing…",
       providers: "Text-service settings",
-      setupReturn: "Your transcript and text workspace stay open underneath. Changes save as you edit. Close these settings to return; your text will not be sent automatically.",
+      setupReturn: "Your draft and results stay open underneath. Settings changes save as you edit. Close these settings to return; your text will not be sent automatically.",
       setupSaveFailed: "Some settings could not be saved. Your transcript and draft are still here. Keep editing, or return without claiming these changes were saved.",
       setupCloseAnyway: "Return to my text",
       pending: "The request is running. You can close this window; a request already sent to the service may still be charged.",

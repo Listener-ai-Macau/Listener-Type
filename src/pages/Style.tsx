@@ -122,7 +122,7 @@ function sanitizeZipFileName(name: string) {
   return trimmed.replace(/[<>:"/\\|?*]+/g, '-').replace(/\s+/g, '-').toLowerCase();
 }
 
-export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}) {
+export function Style() {
   const { t, i18n } = useTranslation();
   const [trialPack, setTrialPack] = useState<StylePack | null>(null);
   const [trialDraft, setTrialDraft] = useState('');
@@ -682,7 +682,6 @@ export function Style({ onOpenProviders }: { onOpenProviders?: () => void } = {}
         draft={trialDraft}
         onDraftChange={setTrialDraft}
         onClose={() => setTrialPack(null)}
-        onOpenProviders={onOpenProviders ? () => { setTrialPack(null); onOpenProviders(); } : undefined}
       />}
 
       {marketplaceOpen && (
