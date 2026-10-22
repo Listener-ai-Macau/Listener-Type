@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T09:13:21.194200+08:00",
+  "updated_at": "2026-10-22T09:54:07.299019+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5409,6 +5409,34 @@
         "Full staged upload/promotion against a new actual release asset not yet run; fault cases use a controlled API state machine.",
         "Two server renames are not zero-gap atomicity. Browser ERR_CONNECTION_CLOSED not diagnosed by successful upload."
       ]
+    },
+    {
+      "id": "customer128_bundled_help_without_github_dependency",
+      "repo": "type",
+      "commit": "da266bd0fd6e750831f648af9568ec6cadc76966",
+      "subject": "Read basic help locally and reach existing Recording/Providers without opening GitHub",
+      "state": "exact128_native_keyless_help_routes_and_persistence_verified_customer_pending",
+      "previous_source_evidence": "SettingsModal helpCenter and About manual in06b272a2 only opened the external README. Independent127 encountered ERR_CONNECTION_CLOSED; native website root cause remains unknown.",
+      "protects": [
+        "Help center and About docs read bundled five-language content. Full GitHub guide remains an explicit internet link.",
+        "Recording and Providers actions select the existing settings sections; guide itself does not persist preferences, call recognition/text processing, activate a model or use the clipboard.",
+        "Price49 pure hardware, service preparation/usage, recovery/data and RC1 limitations remain explicit; local guide is not offline speech support."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\offline-help128-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native128-snapshot-20261022-095102\\offline-help128-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native128-snapshot-20261022-095102\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build128\\type-artifact-verification.json"
+      ],
+      "failure_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\offline-help128-ui-before-collector-fix.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\offline-help128-ui-before-transient-classification.json"
+      ],
+      "unverified": [
+        "No independent128 use yet; AI feedback is not real payment or physical qualification.",
+        "F94T-03 actual new-button external paste still unverified; historical private foreground failure reused, not rerun.",
+        "No new wake/end/BLE/noise/160KBps qualification; daily92 andFirmware33 unchanged."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -6122,7 +6150,8 @@
         "customer125_optional_concise_preset_keeps_trial_creation_out_of_daily_cycle",
         "customer126_failed_style_persistence_keeps_previous_visible_state",
         "customer127_direct_shorter_action_reuses_edits_without_default_activation",
-        "release_asset_upload_failure_preserves_previous_download"
+        "release_asset_upload_failure_preserves_previous_download",
+        "customer128_bundled_help_without_github_dependency"
       ],
       "paths": {
         "type": [
