@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T08:03:14.677454+08:00",
+  "updated_at": "2026-10-22T08:26:16.643646+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5343,6 +5343,37 @@
         "A newly extracted import icon can remain after metadata failure; not a full filesystem transaction.",
         "Actual125 short-message value and direct purpose action remain open; no live voice/hardware/external editor qualification."
       ]
+    },
+    {
+      "id": "customer127_direct_shorter_action_reuses_edits_without_default_activation",
+      "repo": "type",
+      "commit": "06b272a27e24b0bdacdb96b0ff08f6faa9b237f8",
+      "subject": "Direct Make shorter task with exact edited cache, explicit paid request and prior-result recovery",
+      "state": "exact127_native_direct_action_and_cache_save_verified_customer_pending",
+      "previous_source_evidence": "125 customer naturally had to find Add concise style, then submit again; wanted a direct shorter purpose. Original250→240 remained weak; all refusals and unsuccessful prompt/envelope probes retained.",
+      "protects": [
+        "One explicit action prepares/reuses disabled inactive trial style and submits once; no daily style activation, preferences or backend/provider/model/prompt change.",
+        "Exact same draft/prompt completed result and local edits reused in this workspace without a new request; changed draft cannot reuse an old result.",
+        "Failed storage sends no request; service failure restores prior output and source; close during preparation cannot start a late request. Normal explicit Try remains available."
+      ],
+      "guards": [
+        "Production React eight purpose/cache/error/close/paid-boundary cases, retained31 lifecycle and TypeScript compile.",
+        "Exact native ordinary UI uses the actual125 source draft from Original via Make shorter without choosing a style: one existing-service request, full source retained; switch back and use purpose reuses edited output with0 extra calls; explicit Save/reopen exact; original packs/preferences/history preserved."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\shorter127-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\shorter127-retained-lifecycle.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native127-snapshot-20261022-082516\\shorter127-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native127-snapshot-20261022-082516\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261022-build127\\type-artifact-verification.json"
+      ],
+      "customer_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE125-software-20261022-073400\\experience.txt"
+      ],
+      "unverified": [
+        "127 independent customer not yet used. Entry friction improvement is not a language-quality or purchase result.",
+        "Same125 prompt and limited automatic shortening; F125-01 remains open. No live speech/external app/physical qualification/order."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",
@@ -6054,7 +6085,8 @@
         "customer123_request_spans_keyless_raw_local_options_identity_feedback",
         "customer124_wording_service_reply_origin_and_local_recovery",
         "customer125_optional_concise_preset_keeps_trial_creation_out_of_daily_cycle",
-        "customer126_failed_style_persistence_keeps_previous_visible_state"
+        "customer126_failed_style_persistence_keeps_previous_visible_state",
+        "customer127_direct_shorter_action_reuses_edits_without_default_activation"
       ],
       "paths": {
         "type": [

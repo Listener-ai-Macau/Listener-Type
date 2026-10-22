@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-22T08:03:14.677454+08:00",
+  "updatedAt": "2026-10-22T08:26:16.643646+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 126,
-    "source": "70b162bf83ef48a2a5ef50773e9614ca28493800",
-    "sourceTag": "build-source/type126-20261022",
+    "build": 127,
+    "source": "06b272a27e24b0bdacdb96b0ff08f6faa9b237f8",
+    "sourceTag": "build-source/type127-20261022",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "5e418d9a0134c9107a8a08c8ed77faa29f3335774914b0629e8f0a33eaaa0492",
-    "sizeBytes": 299110400,
-    "exeSha256": "9b47ccd495c06eee00e0d5d57eede5f98cce9532d89c3b56beea83c773386e7e",
+    "sha256": "b11a531d016329fb5acc1ff0631fb96333c147f6b06d080456dec67620b2dae4",
+    "sizeBytes": 299122688,
+    "exeSha256": "be82f74f899aeb83aaedf9336fd1b389d29cb1537d6773fe50de0da2a4462675",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -256,7 +256,12 @@
     "customer125PurchaseQualification": false,
     "type126StylePersistenceFailureRollbackVerified": true,
     "type126PrivateNativeFailureRetryVerified": true,
-    "type126VerificationScope": "Real Rust store failure reproduction and eight mutation paths. Exact private native ordinary Add fails with draft kept, then retry saves exactly once without changing preferences. Zero cloud requests. No daily installation, customer buying, live or hardware qualification."
+    "type126VerificationScope": "Real Rust store failure reproduction and eight mutation paths. Exact private native ordinary Add fails with draft kept, then retry saves exactly once without changing preferences. Zero cloud requests. No daily installation, customer buying, live or hardware qualification.",
+    "type127DirectShorterActionNativeVerified": true,
+    "type127CachedEditedOutputAndSaveVerified": true,
+    "type127VerificationScope": "Exact127 private ordinary UI on actual125 draft: direct Make shorter sends one existing-service request, source retained; exact edited cache reused with0 further calls; Save/reopen exact and inactive preset outside daily cycle. Controlled failed-save/request/close boundaries verified. Same125 prompt; automatic shortening gain and customer127 purchase judgment not proven.",
+    "customer127Reviewed": false,
+    "customer127PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference speaker isolation is incomplete.",
@@ -273,6 +278,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build126-20261022"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build127-20261022"
   }
 }

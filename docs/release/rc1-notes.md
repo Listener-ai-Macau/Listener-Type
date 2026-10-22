@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build126 / Firmware33
+# Listener v1.0.6-rc1 · Type build127 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -7,15 +7,23 @@
 
 ## In this app update
 
+**Try typed text → Make shorter** is an explicit text-service action beside the input. It prepares or reuses the optional concise preset and processes the draft once; there is no need to add a style, select it, then submit separately. Normal service usage charges apply. Your original stays available.
+
+If this window already has a result for exactly the same draft and concise preset, the action reopens that completed result, including your edits, without another service request. Changing the source requires a new explicit request. **Try this text** remains the way to explicitly process the selected style again. Closing the workspace during preparation does not start a new late request. Failed preparation or processing keeps your draft and previous result.
+
+This update improves the task flow. It uses the existing concise prompt and does not promise a particular reduction or perfect meaning preservation. Review the output. The saved preset remains outside the daily recording cycle, and recording settings, account/provider/model settings and Firmware33 are retained.
+
+## Storage reliability retained from build126
+
 Style preset changes are made visible only after their metadata file has been written successfully. When creation, editing, enabling/resetting, deleting or importing a style fails, the previously saved style state remains in place. A failed deletion also retains the existing icon. You can correct the storage problem and retry without a ghost preset from the failed attempt.
 
 This is a persistence reliability fix. Existing recording behavior, provider/model/account settings and Firmware33 are retained. The concise text option below remains optional; this update makes no additional rewriting or interference-removal claim.
 
 ## Concise text retained from build125
 
-**Try typed text → Add concise style** saves an optional **Concise message** preset on this computer and selects it for the text workspace. It is designed to shorten wordy phrasing while preserving details, conditions and the original language. Already concise text may remain unchanged. Review the result before using it; this is text-service processing, not guaranteed semantic preservation or speech recognition.
+**Make shorter** uses the optional **Concise message** preset on this computer. It is also selectable in the text-workspace style list. It is designed to shorten wordy phrasing while preserving details, conditions and the original language. Already concise text may remain unchanged. Review the result before using it; this is text-service processing, not guaranteed semantic preservation or speech recognition.
 
-Adding or selecting the preset does not send text. Choose **Try this text** when ready to use your configured text service; normal service charges may apply. Original text and other completed style results remain available to compare, and you can edit, copy or explicitly save the result. The saved preset can be selected again without creating a duplicate.
+Selecting a saved style alone does not send text. **Make shorter** or **Try this text** explicitly processes with your configured text service; normal service charges may apply. Original text and other completed style results remain available to compare, and you can edit, copy or explicitly save the result. The saved preset can be selected again without creating a duplicate.
 
 Text-workspace presets are saved outside the daily recording style cycle. Adding Concise message or the optional Everyday list no longer expands that cycle or rewrites recording preferences. They are available for explicit text trials; enabling/activating a style for live dictation remains a separate choice in Style. Existing saved styles, normal style-manager creation, default Original/Light prompts, provider/model/account settings and firmware are retained.
 
@@ -58,10 +66,12 @@ Type is free; US$49 is the hardware price. Cloud service setup and usage are sep
 
 | Component | Exact source | SHA-256 |
 | --- | --- | --- |
-| Type126 MSI · 299110400 bytes | [70b162bf83ef](https://github.com/Listener-ai-Macau/Listener-Type/commit/70b162bf83ef48a2a5ef50773e9614ca28493800) | `5e418d9a0134c9107a8a08c8ed77faa29f3335774914b0629e8f0a33eaaa0492` |
+| Type127 MSI · 299122688 bytes | [06b272a27e24](https://github.com/Listener-ai-Macau/Listener-Type/commit/06b272a27e24b0bdacdb96b0ff08f6faa9b237f8) | `b11a531d016329fb5acc1ff0631fb96333c147f6b06d080456dec67620b2dae4` |
 | Firmware33 ZIP · 1956905 bytes | [149b6d950ebc](https://github.com/Listener-ai-Macau/Listener-Firmware/commit/149b6d950ebc5f416924c8670cf2b207bdc2b5b7) | `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272` |
 
 ## 中文说明
+
+127增加直接“缩短这段文字”：一次明确操作准备/复用可选简洁风格并处理，不需先研究风格。本窗口内同稿已有结果连同修订直接取回、不重复请求；处理失败保留原稿和上次结果，准备中关闭不会补发新请求。既有提示不变，缩短幅度仍因内容而异；不宣称改稿质量或购买意愿已达标。
 
 126修复风格持久化失败后内存仍显示未保存修改的源头：先写元数据，成功后才更新可见状态；失败删除保留原资产。修正存储条件后可重试，不留下失败时的假保存。录音、账号/模型/提供商与Firmware33保持，本次不宣称文字质量或抗干扰提升。
 
