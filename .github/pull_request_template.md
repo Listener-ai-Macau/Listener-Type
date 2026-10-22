@@ -2,14 +2,11 @@
 
 - Describe the Listener Type change and its user-visible impact.
 
-## Verification
+## Evidence for the affected behavior
 
-- [ ] `npm run build`
-- [ ] `npm run check:brand`
-- [ ] `npm run check:cloud`
-- [ ] `npm run check:traceability`
-- [ ] `cargo check --manifest-path src-tauri/Cargo.toml`
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml --lib`
+- Known-good commit and original failure, when fixing a regression:
+- Relevant verification and actual result; reuse still-valid evidence:
+- Remaining limitations or unverified behavior:
 
 ## Platform Notes
 
@@ -20,6 +17,6 @@
 
 - [ ] No upstream product branding or service endpoint was reintroduced.
 - [ ] Marketplace/OAuth remain disabled unless Listener Type-owned config is present.
-- [ ] Traceability docs were updated for changed source files.
+- [ ] The original task/timeline and relevant regression anchor reflect the actual result.
 - [ ] Product status and limitations remain accurate for user-visible changes.
 - [ ] Recording changes include replay or hardware-log evidence for the affected timing boundary.

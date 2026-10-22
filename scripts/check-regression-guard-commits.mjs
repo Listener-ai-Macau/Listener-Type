@@ -9,8 +9,16 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const typeRoot = normalize(join(scriptDir, '..'));
 const listenerRoot = normalize(join(typeRoot, '..'));
 const args = process.argv.slice(2);
-if (args.length && (args.length !== 2 || args[0] !== '--manifest')) throw new Error('Usage: check-regression-guard-commits.mjs [--manifest path]');
-const manifestPath = args.length ? resolve(args[1]) : join(scriptDir, 'regression-guard-commits.json');
+const options = new Map();
+for (let index = 0; index < args.length; index += 2) {
+  const option = args[index], value = args[index + 1];
+  if (!['--manifest', '--repo'].includes(option) || !value || value.startsWith('--') || options.has(option)) {
+    throw new Error('Usage: check-regression-guard-commits.mjs [--manifest path] [--repo repository-id]');
+  }
+  options.set(option, value);
+}
+const manifestPath = options.has('--manifest') ? resolve(options.get('--manifest')) : join(scriptDir, 'regression-guard-commits.json');
+const selectedRepo = options.get('--repo');
 
 function fail(message) {
   throw new Error(message);
@@ -54,8 +62,10 @@ if (!Array.isArray(manifest.entries) || manifest.entries.length === 0) {
 }
 
 const repoRoots = new Map();
+if (selectedRepo && !Object.hasOwn(manifest.repositories, selectedRepo)) fail(`unknown selected repository: ${selectedRepo}`);
 for (const [id, repo] of Object.entries(manifest.repositories)) {
   requireString(repo.path, `repositories.${id}.path`);
+  if (selectedRepo && id !== selectedRepo) continue;
   const repoRoot = resolve(listenerRoot, repo.path);
   if (!existsSync(repoRoot)) fail(`repository ${id} path does not exist: ${repoRoot}`);
   repoRoots.set(id, repoRoot);
@@ -63,6 +73,7 @@ for (const [id, repo] of Object.entries(manifest.repositories)) {
 
 const seenIds = new Set();
 const seenGuardKeys = new Set();
+let verifiedCommits = 0;
 for (const [index, entry] of manifest.entries.entries()) {
   for (const field of ['id', 'repo', 'commit', 'subject', 'state']) {
     requireString(entry[field], `entries[${index}].${field}`);
@@ -82,14 +93,17 @@ for (const [index, entry] of manifest.entries.entries()) {
   if (!/^[0-9a-f]{40}$/i.test(entry.commit)) {
     fail(`entry ${entry.id} commit must be a full 40-character SHA: ${entry.commit}`);
   }
-  const repoRoot = repoRoots.get(entry.repo);
-  if (!repoRoot) fail(`entry ${entry.id} references unknown repo: ${entry.repo}`);
-  runGit(repoRoot, ['cat-file', '-e', `${entry.commit}^{commit}`]);
-  const actualSubject = runGit(repoRoot, ['show', '-s', '--format=%s', entry.commit]);
+  if (!Object.hasOwn(manifest.repositories, entry.repo)) fail(`entry ${entry.id} references unknown repo: ${entry.repo}`);
   const expectedCommitSubject = entry.commit_subject ?? entry.subject;
   requireString(expectedCommitSubject, `entries[${index}].commit_subject`);
-  if (actualSubject !== expectedCommitSubject) {
-    fail(`entry ${entry.id} subject mismatch for ${entry.commit}: expected '${expectedCommitSubject}', got '${actualSubject}'`);
+  const repoRoot = repoRoots.get(entry.repo);
+  if (repoRoot) {
+    runGit(repoRoot, ['cat-file', '-e', `${entry.commit}^{commit}`]);
+    const actualSubject = runGit(repoRoot, ['show', '-s', '--format=%s', entry.commit]);
+    if (actualSubject !== expectedCommitSubject) {
+      fail(`entry ${entry.id} subject mismatch for ${entry.commit}: expected '${expectedCommitSubject}', got '${actualSubject}'`);
+    }
+    verifiedCommits += 1;
   }
   for (const guard of entry.guards) {
     const guardKey = `${entry.repo}:${guard}`;
@@ -107,7 +121,8 @@ for (const requiredGuard of manifest.required_guards ?? []) {
 }
 
 const evidenceOnly = manifest.entries.filter(entry => entry.validation_kind === 'evidence_only').length;
-console.log(`PASS: ${manifest.entries.length} history entries map to existing repository commits (${evidenceOnly} evidence-only; this is not a current-runtime feature acceptance).`);
+console.log(`PASS: ${manifest.entries.length} history entries structurally checked; ${verifiedCommits} existing commits verified (scope: ${selectedRepo ?? 'all repositories'}; ${evidenceOnly} evidence-only; this is not a current-runtime feature acceptance).`);
+if (selectedRepo) console.log('Other repositories retain structural checks only; their Git objects were not verified in this checkout.');
 for (const entry of manifest.entries) {
   console.log(`- ${entry.repo} ${entry.commit.slice(0, 7)} ${entry.id}: ${entry.subject}`);
 }

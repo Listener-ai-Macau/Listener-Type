@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-22T10:53:19.237774+08:00",
+  "updated_at": "2026-10-22T11:20:11.521349+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4614,7 +4614,8 @@
         "Independent107 used Light0.8s, edited pm/am and explicitly copied/pasted into own draft. Did not use recorded audio, so its customer value stays unknown. Temporarily declines49 hardware; F107-01 comparison lost after changing draft is carried to108.",
         "Only one actual synthetic English file request qualified. Not live mic, automatic end, wake, BLE, external automatic insertion, speaker isolation, physical convenience, from-zero setup or real purchase.",
         "Other ASR providers/managed route not supported by this new file entry. Original live paths retain their own evidence/limits."
-      ]
+      ],
+      "commit_subject": "Complete file recognizer delivery readiness before finishing"
     },
     {
       "id": "customer108_earlier_result_snapshot_and_audio_window_lifetime",
@@ -4651,7 +4652,8 @@
         "Independent108 chose typed Light1.1s, used Copy and ordinary Paste into own draft, saw the labelled earlier result without another request. First Paste while Copying did not change draft; after Copied it succeeded. Exact cause not uniquely established. Declines49 for now; free text task sufficient. Recorded audio, live input and physical controls unexplored.",
         "Programmatic app-tab change verified in isolated frontend fixture; not physical hardware-page key proof.",
         "Native108check used no cloud. Exact107synthetic-file service evidence inherited; live speech/BLE/external automatic input/physical usefulness and real purchase remain unknown."
-      ]
+      ],
+      "commit_subject": "Retain labelled earlier text for comparison and keep audio draft across tabs"
     },
     {
       "id": "customer109_physical_layout_map_and_independent_press_practice",
@@ -4692,7 +4694,8 @@
         "Value clarity is an engineering hypothesis responding to repeated free-software-sufficient refusals. No requested photo feature or autonomous purchase intent is invented.",
         "Live speech, real physical controls, long-term use, external automatic input and actual purchase remain unknown.",
         "Independent110 later actually used photo-linked layout entry, one single-click template and saved-phrase copy/paste/practice. Did not try double/hold, physical controls or live voice. Long form and load shift reported as F110-01; purchase deferred."
-      ]
+      ],
+      "commit_subject": "Connect key layout to hardware photo and practise each press mapping"
     },
     {
       "id": "customer110_explicit_local_edited_draft_retention",
@@ -4733,7 +4736,8 @@
         "Independent110 did not use Saved drafts. Instead saved own key1 phrase, copied it and ordinary-pasted/continued writing in private practice field; screenshot matches. F110-01 loading geometry and long configuration form need work. F110-02 first Practice click during Copy pending: timing unknown, do not remove correct busy guard. Temporarily declines49; free software useful, physical appeal hypothetical.",
         "Source/native correctness not customer usefulness or hardware purchase willingness. Live speech/physical/external automatic input/long term/real purchase remain unknown.",
         "Independent111 actually saved/reopened own service result and saw Copied. Did not edit before saving or prove external paste. F111-02 result above-body crowding remains, saved retention itself useful. No purchase/physical proof."
-      ]
+      ],
+      "commit_subject": "Keep explicitly saved edited drafts in a separate local library"
     },
     {
       "id": "customer111_stable_compact_key_layout_editor",
@@ -4771,7 +4775,8 @@
       "unverified": [
         "Independent111 did not use layouts. Chose Formal1.0s, facts retained, explicit Save→close→reopen same full result→Copied observed. No actual paste or external input. F111-02 result controls/retention above body push end below viewport, next112. Formal restrainedness subjective F111-01;49 still deferred, free software sufficient.",
         "No live speech/BLE/device/external automatic input/physical qualification or purchase claim. F110-02 first Practice click during copy pending remains timing unknown; correct busy protection retained."
-      ]
+      ],
+      "commit_subject": "Keep key layout editing stable during load and beside its physical preview"
     },
     {
       "id": "customer112_result_first_actions_and_safe_technical_label",
@@ -4812,7 +4817,8 @@
       "unverified": [
         "Independent112 chose Light1.2s, facts retained, edited2/3→2pm/3pm, Save→Copied→ordinary Paste into own Type input→close/reopen saved exact edit. Result comparison/readability useful, no blocking issue. First paste while Copying did not complete, second afterCopied did; do not call the first success or remove pending guard. Technical label/secondary actions untried. Still defers49 hardware.",
         "Formal lightness F111-01 stays one subjective sample, no prompt/quality fix claimed. No voice/BLE/external target/physical or purchase qualification."
-      ]
+      ],
+      "commit_subject": "Put readable text results before actions and clarify the technical style"
     },
     {
       "id": "customer113_recorded_transcript_explicit_local_drafts",
@@ -4847,7 +4853,8 @@
       "unverified": [
         "Independent113 naturally chose typed Light1.0s, edited3→3pm, saved and recovered exact edit, visible copy acknowledgement only. No blocker, audio save untried. F113-01 minor contradictory post-save retention advice, not lost data.49 deferred; free typed task sufficient. No purchase intent/order.",
         "112 typed task useful but49 hardware deferred. No independent113 use, live speech/BLE/hardware/external automatic input or purchase qualification."
-      ]
+      ],
+      "commit_subject": "Keep explicitly saved recorded transcripts with their original recognized text"
     },
     {
       "id": "customer114_acknowledged_saved_version_guidance",
@@ -4877,7 +4884,8 @@
       ],
       "unverified": [
         "Independent114 chose Light1.2s, editedcan→could, explicitly saved, read accurate current-version guidance, reopened and ordinary pasted exact edit. No blocker or new actionable defect. Close attempted during Working did not complete, then Copied and Close succeeded; no failure diagnosis or guard removal. Audio untried,49 deferred, free short-text gain limited."
-      ]
+      ],
+      "commit_subject": "fix: align draft retention guidance with acknowledged saved version"
     },
     {
       "id": "customer115_recorded_transcript_to_independent_text_workspace",
@@ -4912,7 +4920,8 @@
       "unverified": [
         "OriginalR90A-01 wish has prior framing/return-use influence and is not new114 feedback.114 typed use succeeded but49 deferred; this bridge is engineering follow-through to original sound→Light/manual-transfer value candidate.",
         "Independent115 naturally chose typed Formal0.8s, saved and recovered same text, no blocker. F115-01 formalness mild merges F96-02/F111-01. Recorded transcript bridge untried; no Copy/Paste/external/live/physical test.49 deferred, free short-text task sufficient, no purchase intent/order."
-      ]
+      ],
+      "commit_subject": "feat: bring recorded transcript into an independent text workspace"
     },
     {
       "id": "type116_credential_edit_acknowledgement_preserves_latest_draft",
@@ -4945,7 +4954,8 @@
       ],
       "unverified": [
         "116 full feedback read: self-selected typed Light0.9s, saved/reopened/Copied, no blocker,49 deferred/free Type sufficient. Credential edit fix and audio bridge untried. No external paste/live/physical/order."
-      ]
+      ],
+      "commit_subject": "fix: preserve newer credential edits across delayed save acknowledgements"
     },
     {
       "id": "formal116_two_stage_and_existing_provider_pro_not_adopted",
@@ -4968,6 +4978,17 @@
       ],
       "unverified": [
         "No global Formal quality fix or purchase value established; no unchanged retry without actual new condition/evidence."
+      ],
+      "commit_subject": "feat: bring recorded transcript into an independent text workspace",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "guards": [],
+      "evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\formal116-research-decision.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\formal116-semantic-plan-prototype.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\formal116-instruction-control.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\formal116-existing-provider-pro.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE115-software-20261022-035200\\experience.txt"
       ]
     },
     {
@@ -5004,7 +5025,8 @@
       "unverified": [
         "117 full feedback/operations read,03/09 viewed: typed Formal0.5s facts retained, customer manually makes request more polite, saves/reopens edited draft and sees Copied. F117-01 send me your notes remains direct: mergeF96-02.49 deferred/free typed task enough. New nested settings and recorded audio untried.",
         "No external paste/live/physical/order. No customer evidence for new settings flow."
-      ]
+      ],
+      "commit_subject": "Keep recorded text available while configuring its text service"
     },
     {
       "id": "type118_settled_provider_save_failure_survives_close",
@@ -5038,7 +5060,8 @@
       "unverified": [
         "118 full experience/operations read,04/08 viewed. Typed Formal0.7s, user edits Hi→Hello, saves/reopens same draft. No blocker/no Copy; Formal tone/organisation gain small,49 deferred/free Type enough. New settings flow untried.",
         "F118-01 merges F96-02/F117-01 actual formal-style gain issue. No external input/live/physical/order."
-      ]
+      ],
+      "commit_subject": "Retain failed provider writes until retry or explicit return"
     },
     {
       "id": "formal118_exact_edits_not_global_replacement_politeness_requires_guards",
@@ -5059,6 +5082,15 @@
       ],
       "unverified": [
         "No product feature or customer benefit yet. Four-case research is not global language/semantic qualification."
+      ],
+      "commit_subject": "Retain failed provider writes until retry or explicit return",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "guards": [],
+      "evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\formal118-local-edits-prototype.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\politeness118-result-edits-prototype.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE117-software-20261022-044800\\experience.txt"
       ]
     },
     {
@@ -5086,7 +5118,12 @@
       ],
       "unverified": [
         "No customer119, no purchase improvement. Original default Formal/global grammar quality remains open. Limited local safety rules do not guarantee all meanings/languages."
-      ]
+      ],
+      "commit_subject": "Offer reviewed local courtesy edits without replacing the draft",
+      "guards": [
+        "python scripts/check-polite-edit-suggestions-ui.py --url <isolated-vite-url> --report <output-json>"
+      ],
+      "humanAccepted": false
     },
     {
       "id": "customer120_reviewed_courtesy_edits_keep_primary_text_actions_first",
@@ -5122,7 +5159,8 @@
       "unverified": [
         "120全文/操作与07/10截图已读：Formal1.4s仅Please/大小写；客户自然打开额外付费礼貌建议0.9s，Please kindly被拒绝，Keep my wording后自己改Could you please问句；保存重开成功/界面Copied，未外部上屏。49美元暂缓，免费软件足够/语气收益不足。",
         "F120-01并原L09/F96-02/F117-01：第二次请求仍未改善语气；F120-02建议入口需滚动。默认Formal/实物/真实订单仍未完成。"
-      ]
+      ],
+      "commit_subject": "Keep primary text actions before optional wording suggestions"
     },
     {
       "id": "customer121_immediate_local_english_request_option_before_paid_alternatives",
@@ -5159,7 +5197,8 @@
       "unverified": [
         "121完整经历/操作及07/08截图已读：Light/Formal各1.1s，差异仅去Hey；常见Could you send…问句本地无选项，明确云请求1.8s也无可用修改，保留Formal后保存/重开/界面Copied成功。49美元仍暂缓，免费文字收益不足以形成硬件购买理由。",
         "F121-01常见英文问句未覆盖，F121-02额外请求仍无候选，合并原L09/F96-02/F117-01/F120-01。原120命令句的工程通过不推广到本轮问句。"
-      ]
+      ],
+      "commit_subject": "Keep dollar replacement tokens literal in local request options"
     },
     {
       "id": "customer122_common_request_questions_two_local_tones",
@@ -5196,7 +5235,8 @@
       "unverified": [
         "122经历/操作及04/08截图完整读取：Hi, could you…Friday原稿，Formal0.9s完全相同、本地无选项、另一次服务0.7s无可用修改；保留原文后界面Copied，未保存/外部粘贴。仍暂缓49，想要保留理由或可比较措辞，不把这次扩大为整机不值。",
         "F122-01招呼前缀导致整句锚定漏请求，并原F121-01/F96-02；F122-02服务原样返回但无明确事实反馈，F122-03付费仍无备选。"
-      ]
+      ],
+      "commit_subject": "Cover common request questions with two immediate local wording choices"
     },
     {
       "id": "customer123_request_spans_keyless_raw_local_options_identity_feedback",
@@ -5237,7 +5277,8 @@
         "F123-02整体简洁愿望并原L09/F96-02，礼貌选项不冒充缩短全文；尚待实际价值方案。",
         "F123-A01：滚动后沿用旧坐标误点云按钮属隔离适配器问题，不算本地按钮偷发请求；泛用实时命中检查补到工具。",
         "无实体/外部应用/真人购买证明。"
-      ]
+      ],
+      "commit_subject": "Find request spans and offer local wording without a text-service account"
     },
     {
       "id": "customer124_wording_service_reply_origin_and_local_recovery",
@@ -5275,7 +5316,8 @@
         "124全文/操作/03与05截图已读：自拟Sam通知Light0.9s仅删um，Friday3/暂别发邀请/投影仪待确认/明天午前名单保留；普通私有复制粘贴、保存重开亲验，无阻断。未选额外建议，不能算124错误分支客户通过。仍49暂缓，收益不足、先用免费Type。",
         "F124-01并原L09/F96-02与F123-02：文字改进幅度小，不买原因具体，下一只评估显式简洁稿价值，不反复替换Formal prompt/模型，不改默认。",
         "真实语音/外部应用/实物/真人付费未知，软件可执行价值迭代不等待这些。"
-      ]
+      ],
+      "commit_subject": "Distinguish delivered wording proposals from failed requests and preserve local recovery"
     },
     {
       "id": "customer125_optional_concise_preset_keeps_trial_creation_out_of_daily_cycle",
@@ -5318,7 +5360,8 @@
         "客户成功找到入口且保存自己改稿，不等于自动简洁收益充分；原模拟拒绝保留。试用/日用偏好隔离仅工程确认，客户未观察日常循环。",
         "下一沿F125-01/02评估直接目的动作及真正有用短稿，先用本次原失败稿有界研究，不换顾客抽好评或把已有好样本冒充普遍。",
         "工程另复现风格持久化失败仍修改内存，67055测试失败为反例，原L09存储信任路径待126修。"
-      ]
+      ],
+      "commit_subject": "Offer an explicit concise message style without altering the daily dictation cycle"
     },
     {
       "id": "customer126_failed_style_persistence_keeps_previous_visible_state",
@@ -5342,7 +5385,12 @@
         "No customer has encountered the injected failure; no purchase improvement claimed.",
         "A newly extracted import icon can remain after metadata failure; not a full filesystem transaction.",
         "Actual125 short-message value and direct purpose action remain open; no live voice/hardware/external editor qualification."
-      ]
+      ],
+      "commit_subject": "Keep style preset state unchanged when persistence fails",
+      "guards": [
+        "cargo test --manifest-path ./src-tauri/Cargo.toml failed_trial_style_write_must_not_leave_a_ghost_preset_in_memory"
+      ],
+      "humanAccepted": false
     },
     {
       "id": "customer127_direct_shorter_action_reuses_edits_without_default_activation",
@@ -5382,7 +5430,8 @@
         "F127-01公开入口网络失败沿原L09/FENTRY，不能用CLI上传成功证明浏览器已恢复。F127-02短语框需滚动但未阻断，沿F102-03暂排实际主障碍后。F127-03并F97-03：当次一个回复免费软件已够，不强迫客户需要硬件。",
         "F125-01自动缩短省力仍有限；F125-02直接动作工程成立，本客户未选因此客户改善未知。实物/实时/外部应用/成交仍开放。",
         "128首次独立自选Make shorter实际调用1次，几乎保持原词，未省去手动缩短；并原F125-01，停止同条件提示微调和购买重派，转查通用实现／实际请求与已否决证据。127原未用事实保留。"
-      ]
+      ],
+      "commit_subject": "Make shortening an explicit draft action with cached results and safe retries"
     },
     {
       "id": "release_asset_upload_failure_preserves_previous_download",
@@ -5414,7 +5463,8 @@
       "unverified": [
         "Failed-upload/promotion-recovery cases use a controlled API state machine;128 actual success does not prove every network/API outage recovery.",
         "Two server renames are not zero-gap atomicity. Browser ERR_CONNECTION_CLOSED is not diagnosed by successful upload."
-      ]
+      ],
+      "commit_subject": "Preserve the previous release download until a staged upload verifies"
     },
     {
       "id": "customer128_bundled_help_without_github_dependency",
@@ -5448,7 +5498,12 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE128-software-20261022-095600\\operations.txt",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE128-software-20261022-095600\\03-shorter-result.png",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE128-software-20261022-095600\\05-saved-draft.png"
-      ]
+      ],
+      "commit_subject": "Make first-use help readable in Type without the GitHub website",
+      "guards": [
+        "python C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\check_offline_help128.py --url <isolated-vite-url> --report <output-json>"
+      ],
+      "humanAccepted": false
     },
     {
       "id": "customer129_all_workspace_settings_detours_preserve_work",
@@ -5490,7 +5545,8 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-clean-software-20261022-104200\\experience.txt",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-clean-software-20261022-104200\\operations.txt",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE129-clean-software-20261022-104200\\09-pasted-replacement.png"
-      ]
+      ],
+      "commit_subject": "Keep text drafts and results mounted during service setup from every entry"
     }
   ],
   "feature_routes_updated_at": "2026-10-21T23:28:56.804329+08:00",

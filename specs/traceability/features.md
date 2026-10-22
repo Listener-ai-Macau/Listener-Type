@@ -34,5 +34,5 @@
 | Capability | Source files | Verification |
 | --- | --- | --- |
 | Documentation inheritance | `docs/**`, `specs/**`, `scripts/check-doc-inheritance.mjs` | `npm run check:docs` |
-| Per-file tracking | `specs/traceability/files.md`, `scripts/check-traceability.mjs` | `npm run check:traceability` |
+| Critical-feature regression history | `scripts/regression-guard-commits.json`, `scripts/check-regression-guard-commits.mjs` | `npm run check:guard-commits -- --repo type` in the public checkout; full cross-repository mode locally |
 | Cloud-service safety | `scripts/check-cloud-services.mjs` | `npm run check:cloud` |

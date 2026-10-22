@@ -10,9 +10,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
       - run: npm run check:brand
       - run: npm run check:cloud
-      - run: npm run check:traceability
+      - name: Check regression history for this repository
+        run: npm run check:guard-commits -- --repo type
 
   frontend-build:
     runs-on: ubuntu-latest

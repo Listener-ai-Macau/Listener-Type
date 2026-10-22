@@ -1,6 +1,6 @@
 # File Traceability
 
-Every tracked code/config/script file must be listed here. Regenerate with `npm run check:traceability -- --write`.
+Historical file inventory, retained for lookup. It is not a per-change checklist or CI gate. Current regression traceability uses `scripts/regression-guard-commits.json`, exact commits, original failure evidence and the project's single development timeline. The legacy `check:traceability -- --write` command can regenerate this inventory when needed.
 
 | File | Responsibility | Verification |
 | --- | --- | --- |

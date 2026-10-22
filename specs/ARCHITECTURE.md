@@ -1295,10 +1295,10 @@ Updater metadata is scoped to `Listener-ai-Macau/Listener-Type`. Third-party mir
 
 ## Traceability
 
-Every tracked source/config/script file must appear in `specs/traceability/files.md`. Update it manually or run:
+Keep the known-good commit, original failure and affected verification in `scripts/regression-guard-commits.json` and the project's single development timeline. The old per-file inventory is historical, not a mandatory check for each source change. In this repository's checkout, validate Type commit anchors with:
 
 ```bash
-npm run check:traceability -- --write
+npm run check:guard-commits -- --repo type
 ```
 
 ### Independent extracted-output identity and complete drain

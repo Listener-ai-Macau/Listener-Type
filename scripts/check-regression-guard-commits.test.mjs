@@ -7,16 +7,19 @@ import { spawnSync } from 'node:child_process';
 const root = resolve(import.meta.dirname, '..');
 const original = JSON.parse(readFileSync(join(root, 'scripts/regression-guard-commits.json'), 'utf8'));
 const base = original.entries[0];
-function check(mutate) {
+function check(mutate, { scopeRepo = base.repo, absentRepository = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'listener-guard-contract-'));
   assert.equal(dirname(resolve(directory)), resolve(tmpdir()));
   assert.ok(basename(directory).startsWith('listener-guard-contract-'));
   try {
-    const value = { schema_version: 1, repositories: original.repositories, entries: [structuredClone(base)], required_guards: [] };
+    const value = { schema_version: 1, repositories: { [base.repo]: structuredClone(original.repositories[base.repo]) }, entries: [structuredClone(base)], required_guards: [] };
+    if (absentRepository) value.repositories.absent = { path: join(directory, 'no-checkout') };
     mutate(value.entries[0]);
     const path = join(directory, 'manifest.json');
     writeFileSync(path, JSON.stringify(value));
-    const result = spawnSync(process.execPath, [join(root, 'scripts/check-regression-guard-commits.mjs'), '--manifest', path], { encoding: 'utf8' });
+    const args = [join(root, 'scripts/check-regression-guard-commits.mjs'), '--manifest', path];
+    if (scopeRepo) args.push('--repo', scopeRepo);
+    const result = spawnSync(process.execPath, args, { encoding: 'utf8' });
     return { code: result.status, output: result.stdout + result.stderr };
   } finally { rmSync(directory, { recursive: true }); }
 }
@@ -47,4 +50,16 @@ test('evidence-only records cannot promote themselves to human acceptance', () =
 test('evidence-only records must retain failure evidence references', () => {
   const result = check(entry => { entry.guards = []; entry.validation_kind = 'evidence_only'; entry.humanAccepted = false; entry.state = 'physical_pair_no_gain_rolled_back'; entry.evidence = []; });
   assert.notEqual(result.code, 0); assert.match(result.output, /evidence/);
+});
+
+test('a single-repository checkout can verify its commits without an unrelated checkout', () => {
+  const result = check(() => {}, { absentRepository: true });
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /Other repositories retain structural checks only/);
+});
+
+test('default full verification still rejects a missing repository', () => {
+  const result = check(() => {}, { scopeRepo: null, absentRepository: true });
+  assert.notEqual(result.code, 0);
+  assert.match(result.output, /repository absent path does not exist/);
 });

@@ -2,12 +2,14 @@
 
 ## Local Verification
 
+Choose checks for the behavior being changed and reuse valid evidence. The commands below are available tools, not a requirement to rerun every check for documentation, metadata or unrelated changes. Critical regressions retain exact commits and failures in the existing regression index and development timeline.
+
 ```bash
 npm ci
 npm run build
 npm run check:brand
 npm run check:cloud
-npm run check:traceability
+npm run check:guard-commits -- --repo type
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
