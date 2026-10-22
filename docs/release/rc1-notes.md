@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build135 / Firmware33
+# Listener v1.0.6-rc1 · Type build136 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -7,25 +7,25 @@
 
 ## In this app update
 
-The text workspace keeps service/cost and local-save information visible in short notices while moving longer explanations into expandable help. The result source is a quiet label beside its heading, and original/result editors remain aligned.
+A physical segment may stop while its last audio packets are still draining and Type is waiting for a request-tagged continuation. Those packets now keep their original collector and logical recording instead of failing with a session mismatch. Repeated packets are not submitted twice, and an unconfirmed or later segment cannot inherit that audio.
 
-Saved drafts now lead with a text preview. Style and a shorter timestamp remain secondary in the choice, with the adjacent duplicate metadata removed; the exact saved body and original text are retained. Full storage information remains expandable.
+Device cancellation now closes both its stream actor and the matching product recording state. Stale cancellation cannot close a newer recording, and a consumed device cancellation does not requeue another shared abort.
 
-This UI update does not change speech services, wake/stop decisions, Bluetooth parameters or firmware.
+The fixes have production-core before/after and isolated Windows checks. They do not prove every previously reported field failure had these causes. No new cloud service/model, recognition-provider change, wake-threshold change or firmware update is included.
 
 ## Before using
 
 US$49 is the hardware price. Type is free and open source. Recognition and optional text services require preparation and separate usage charges; this release does not provide a ready-to-use official cloud account or allowance. USB flashing and Bluetooth OTA use the same firmware ZIP.
 
-RC1 is a prerelease. Strong background-speech separation remains incomplete. Older intermittent early-ending and arbitrary target-field scopes remain open; software checks do not establish physical/long-term reliability or purchase value. Recognition, wake/end logic and Bluetooth firmware are unchanged in this UI update.
+RC1 is a prerelease. Strong background-speech separation remains incomplete. Older intermittent early-ending and arbitrary target-field scopes remain open; software checks do not establish physical/long-term reliability or purchase value. This update changes host recording ownership/cleanup at physical STOP and CANCEL boundaries. Wake thresholds, recognition providers, Bluetooth transport parameters and Firmware33 are unchanged. The specific host packet-order counterexample is fixed; complete field attribution of older intermittent failures is still unproven.
 
 ## File identity
 
-- Type source: `a21ab64a9359d80b4fd4c28d22ae9dc81f869bbb` · `build-source/type135-20261022`
-- MSI: 299208704 bytes · SHA256 `3eed99aa4f4be4aa41aa6fdfb73388e068a33cf3d434cd3089ab9d7f3c40e39d`
+- Type source: `374ae18e25d85580294b9e5db5694d95f4e4dca4` · `build-source/type136-20261022`
+- MSI: 299196416 bytes · SHA256 `b8c4eee3580a6856d836abfd43c6f7c9ef5ddf6aa218edec4ae731c7ca38cbb2`
 - Firmware33 source: `149b6d950ebc5f416924c8670cf2b207bdc2b5b7` · runtime `e7bd1f1619b696a1`
 - ZIP: 1956905 bytes · SHA256 `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272`
 
 ## 中文说明
 
-文字工作区保留简短费用与保存提示，长说明按需展开；原稿及结果框保持对齐。成稿选择先显示正文开头，保留风格与简化时间，去掉相邻重复信息，原文仍可展开。本次不改语音、结束、蓝牙或固件。
+修复两处主机录音状态归属遗漏：停止后的同段尾包继续归原录音收取，不因等待续录而报会话不一致；设备取消同时关闭对应产品状态，旧取消不影响新录音，也不再次排入共享中止。生产代码前后对照通过；未把这些反例当作所有旧现场故障的唯一根因。固件及蓝牙参数不变。
