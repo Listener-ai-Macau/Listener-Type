@@ -6,14 +6,14 @@ import { Btn } from '../pages/_atoms';
 import './DeviceLayoutsDialog.css';
 
 export function SavedTextDraftsDialog({onClose}:{onClose:()=>void}) {
-  const {t}=useTranslation();const dialog=useRef<HTMLDialogElement>(null),alive=useRef(true),running=useRef(false);
+  const {t,i18n}=useTranslation();const dialog=useRef<HTMLDialogElement>(null),alive=useRef(true),running=useRef(false);
   const [items,setItems]=useState<SavedTextDraft[]>([]),[selectedId,setSelected]=useState('');
   const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[loadError,setLoadError]=useState(false),[error,setError]=useState(''),[copied,setCopied]=useState(''),[confirm,setConfirm]=useState(false);
   const selected=items.find(d=>d.id===selectedId);
   const draftLabel=(draft:SavedTextDraft)=>{
     const text=Array.from(draft.text.replace(/\s+/g,' ').trim());
     const preview=text.slice(0,55).join('')+(text.length>55?'…':'');
-    const time=new Date(draft.createdAt).toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    const time=new Date(draft.createdAt).toLocaleString(i18n.resolvedLanguage??i18n.language,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
     return `${preview} · ${draft.name} · ${time}`;
   };
   const refresh=async()=>{setLoading(true);setLoadError(false);try{const value=await listSavedTextDrafts();if(alive.current){setItems(value);setSelected(current=>value.some(d=>d.id===current)?current:value[0]?.id??'');}}catch{if(alive.current)setLoadError(true);}finally{if(alive.current)setLoading(false);}};

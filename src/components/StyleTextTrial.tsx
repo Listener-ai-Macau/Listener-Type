@@ -43,6 +43,10 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   const [editedOutput, setEditedOutput] = useState<string | null>(null);
   // Session-only comparisons, never History or persistent customer text storage.
   const completed = useRef(new Map<string, { signature: string; input: string; result: StyleTextTrialResult; edited: string | null }>());
+  // A request can finish before its target style becomes selected. Carry that
+  // exact fresh result through the selection, rather than calling it a restore
+  // merely because it has just been added to the comparison cache.
+  const freshSelectionResult = useRef<{ packId: string; signature: string; result: StyleTextTrialResult } | null>(null);
   const signature = JSON.stringify([draft, pack.prompt]);
   const result = storedResult?.packId === pack.id && resultSignature === signature ? storedResult : null;
   const savedForPack = completed.current.get(pack.id);
@@ -82,7 +86,10 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
     setShortening(false);
     const saved = completed.current.get(pack.id);
     const matching = saved?.signature === signature ? saved : null;
-    setResult(matching?.result ?? null); setResultSignature(signature); setEditedOutput(matching?.edited ?? null); setRestored(!!matching);
+    const arriving = freshSelectionResult.current;
+    freshSelectionResult.current = null;
+    const newlyCompleted = arriving?.packId === pack.id && arriving.signature === signature && arriving.result === matching?.result;
+    setResult(matching?.result ?? null); setResultSignature(signature); setEditedOutput(matching?.edited ?? null); setRestored(!!matching && !newlyCompleted);
     setCopiedResult(null); setCopyError(false); setError(''); setDeliveryMessage('');
     if (deliveryRequest.current) {
       void cancelStyleTrialInsert(deliveryRequest.current).catch(() => {});
@@ -126,6 +133,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
     const request = ++generation.current;
     setPending(true);
     setShortening(!!prepare);
+    freshSelectionResult.current = null;
     setResult(null);
     setEditedOutput(null);
     setRestored(false);
@@ -146,6 +154,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         completed.current.set(target.id, { signature: targetSignature, input: draft, result: value, edited: matching?.edited ?? null });
         if (completed.current.size > 8) completed.current.delete(completed.current.keys().next().value!);
         if (target.id !== pack.id && onSelectPack) {
+          if (!matching) freshSelectionResult.current = { packId: target.id, signature: targetSignature, result: value };
           onSelectPack(target.id);
         } else {
           setResult(value); setResultSignature(targetSignature); setEditedOutput(matching?.edited ?? null); setRestored(!!matching);

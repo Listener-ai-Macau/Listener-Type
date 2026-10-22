@@ -77,13 +77,14 @@ with sync_playwright() as pw:
         finish_add()
         expect(editor).to_have_value(output)
         expect(picker).not_to_have_value('builtin.raw')
+        expect(trial.locator('[data-style-trial-restored]')).to_have_count(0)
         concise_id = picker.input_value()
         assert len(calls('try_style_pack_text')) == 2
         assert calls('try_style_pack_text')[-1]['args'] == {'stylePackId': concise_id, 'rawText': source}
         created = calls('create_style_pack_from_template')
         assert created[0]['args']['trialOnly'] is True and not created[0]['args']['template']['active']
         assert not any(x['cmd'] in {'set_active_style_pack', 'update_preferences', 'set_credential', 'start_dictation'} for x in calls(None))
-        checks.append('One explicit Make shorter prepares/reuses the inactive trial preset and submits exactly once, with no style hunting, daily activation or extra submit; competing input and double submit blocked')
+        checks.append('One explicit Make shorter prepares/reuses the inactive trial preset and submits exactly once; its fresh result is not labelled as restored/no new request, with no daily activation or competing submit')
         expect(trial).to_contain_text(source + ' Keep my edit.')
         editor.fill(output + ' Edited final.')
         trial.get_by_role('button', name='Save draft', exact=True).click()
@@ -94,14 +95,31 @@ with sync_playwright() as pw:
         expect(editor).to_have_value(source + ' Keep my edit.')
         trial.get_by_role('button', name='Make shorter', exact=True).click()
         expect(editor).to_have_value(output + ' Edited final.')
+        expect(trial.locator('[data-style-trial-restored]')).to_contain_text('no new service request')
         assert len(calls('try_style_pack_text')) == 2 and len(calls('create_style_pack_from_template')) == 1
         checks.append('Exact completed shorter result and its local edits reused with zero further request; original edited result, comparisons and explicit Save survive')
+        page.evaluate('window.__failService=true')
+        trial.get_by_role('button', name='Try this text', exact=True).click()
+        expect(trial.get_by_role('alert')).to_contain_text('controlled request failure')
+        expect(editor).to_have_value(output + ' Edited final.')
+        expect(trial.locator('[data-style-trial-restored]')).to_have_count(0)
+        assert len(calls('try_style_pack_text')) == 3
+        page.evaluate('window.__failService=false')
+        checks.append('Failed explicit rerun preserves the prior edited body and visible error, without falsely claiming that no new service request was made')
         trial.get_by_label('Your text', exact=True).fill(source + ' New draft.')
         trial.get_by_role('button', name='Make shorter', exact=True).click()
         expect(editor).to_have_value(output)
-        assert len(calls('try_style_pack_text')) == 3 and calls('try_style_pack_text')[-1]['args']['rawText'] == source + ' New draft.'
+        expect(trial.locator('[data-style-trial-restored]')).to_have_count(0)
+        assert len(calls('try_style_pack_text')) == 4 and calls('try_style_pack_text')[-1]['args']['rawText'] == source + ' New draft.'
         assert len(calls('create_style_pack_from_template')) == 1
         checks.append('Changed source cannot reuse an older shorter result; one new explicit request and no duplicate preset')
+        picker.select_option('builtin.raw')
+        trial.get_by_label('Your text', exact=True).fill(source + ' Another draft.')
+        trial.get_by_role('button', name='Make shorter', exact=True).click()
+        expect(editor).to_have_value(output)
+        expect(trial.locator('[data-style-trial-restored]')).to_have_count(0)
+        assert len(calls('try_style_pack_text')) == 5
+        checks.append('Fresh shorter result for a changed draft remains fresh when switching to an already-created target style')
         trial.get_by_role('button', name='Close', exact=True).click()
         trial = open_trial()
         expect(trial.get_by_role('combobox')).to_have_value('builtin.raw')
