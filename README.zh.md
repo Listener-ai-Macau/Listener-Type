@@ -8,7 +8,7 @@
 
 | 用途 | 直接下载 |
 | --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build144](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 软件** | **[下载 MSI · Type build156](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 [English](README.md) · **简体中文** · [繁體中文](README.zh-TW.md)
@@ -32,11 +32,11 @@
 <details>
 <summary>已有设备：固件、设置与本次版本</summary>
 
-固件适用 **ESP32-S3 N16R8**，构建 `e7bd1f1619b696a1`。USB 和蓝牙更新选择同一个 ZIP，无需再猜下载哪一个。
+固件适用 **ESP32-S3 N16R8**，构建 `9d7fbbe67ed0223d`。USB 和蓝牙更新选择同一个 ZIP，无需再猜下载哪一个。
 Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
-设备设置各自独立：选择一台有线／蓝牙设备，读取后修改并写入；名称、灯光、电源、按键和旋钮设置保存在该设备中。请配套使用本页 MSI 与固件 ZIP。
+设备设置各自独立：选择一台有线／蓝牙设备并读取；完成编辑后自动保存明确修改，读取或切换设备不会写入电脑默认值。名称、灯光、电源、按键和旋钮设置保存在所选设备中。请配套使用本页 MSI 与固件 ZIP。
 
-Type build151 / Firmware37：设备设置改好后自动保存，显示保存中、已保存或失败重试；修改只写选中的设备，读取或切换设备不会触发写入。同时修复USB按键档案回执、减少蓝牙设置重复枚举，并保持录音灯效动画连续；保留此前历史录音播放和处理提示修复。 另修复前次保存未结束时应用新布局被旧请求清掉的问题，确认最新修改保存完成后再显示已保存。
+Type build156 / Firmware37：修复设备翻译按键的音源和停止路径；问答更换选区时携带新原文，历史明确区分问题、回答和保存状态，不再误报自动上屏或复制。保留设备自动保存和按键档案读取恢复。实体翻译／真实问答链路仍待单独检查，固件37未改。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

@@ -8,7 +8,7 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build144](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build156](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 **English** · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md)
@@ -32,11 +32,11 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 <details>
 <summary>Already have a device? Firmware, settings and current build</summary>
 
-Firmware: **ESP32-S3 N16R8**, build `e7bd1f1619b696a1`. Select the same ZIP for USB flashing or Bluetooth OTA in Type.
+Firmware: **ESP32-S3 N16R8**, build `9d7fbbe67ed0223d`. Select the same ZIP for USB flashing or Bluetooth OTA in Type.
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
-Device settings are independent: select one USB/Bluetooth device, read its settings, then write changes back to that device. Names, lights, power, keys and knob configuration stay on the board. Use this paired MSI and firmware ZIP.
+Device settings are independent: select one USB/Bluetooth device and read its settings. Explicit edits save automatically when editing finishes; reading or switching devices does not write computer defaults. Names, lights, power, keys and knob settings stay on the selected board. Use this paired MSI and firmware ZIP.
 
-Type build154 / Firmware37: Routine diagnostics keep small one-second heartbeats instead of repeating unchanged counters, with regular full baselines and complete changed/lifecycle records. Full diagnostic export remains available. Includes selected-device auto-save, clearer key editing and connection-readiness pairing protection from152. Firmware37 is unchanged.
+Type build156 / Firmware37: Device Translation follows the selected recording input and stop path. Q&A carries changed selected text into follow-up questions and labels saved answers without false insertion or clipboard claims. Per-device auto-save and profile-read recovery are retained. Physical Translation/live Q&A checks remain pending; Firmware37 is unchanged.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

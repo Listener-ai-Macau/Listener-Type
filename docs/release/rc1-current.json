@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-23T21:55:35.735363+08:00",
+  "updatedAt": "2026-10-23T23:34:58.734357+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 154,
-    "source": "06e8dc5f6d8133f987f86da9e7cf6207dd25973a",
-    "sourceTag": "build-source/type154-20261023",
+    "build": 156,
+    "source": "1eda7b285849b1af652bd2a1cd059055672afc35",
+    "sourceTag": "build-source/type156-20261023",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "b1afa29fba306b4237acfcd0a3f355b7581a16e80183778af5625267ea48ba6d",
-    "sizeBytes": 299208704,
-    "exeSha256": "8852d8105b62b23165a748596b2e1cf5329c1c433f64d7be61cb5772e1b54f96",
+    "sha256": "4b9e2bacf2a128bab1310b0682a755a5c67227e1b7358fb96d76f99541762656",
+    "sizeBytes": 299220992,
+    "exeSha256": "a97eab943392c60898718c5cac55848f1a0f03eb0a1a9bbd5c19c287ebe6d585",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -29,7 +29,7 @@
     "newMsiEmbeddedExeEqualsBuiltExe": true,
     "sameVersionMsiUpgradeEnabled": true,
     "npmAuditVulnerabilities": 0,
-    "nativeRegressionEvidenceSource": "0a8085d51be03cba4fc01d2197c736935fe06f22",
+    "nativeRegressionEvidenceSource": "a3c89fe512e644feeb5c321f1564468f4732c7d4",
     "newPackageInstalledForThisPublication": true,
     "experimentalThroughputFirmwareIncluded": false,
     "firmware33ActualOtaAndExactBuildConfirmed": true,
@@ -375,7 +375,15 @@
     "type154ControlledFailureAndLongRecordingRecoveryPassed": true,
     "type154ActualRadioFaultInjectionQualified": false,
     "type154PhysicalKeySecondComputerQualified": false,
-    "type154NativePolicyScope": "6 private native recovery-policy cases plus3 existing key-profile cases; actual normal startup read to known UID/revision/size/checksum with passive nRF/HCI/UART; no fullRF/physical press/second-PC claim."
+    "type154NativePolicyScope": "6 private native recovery-policy cases plus3 existing key-profile cases; actual normal startup read to known UID/revision/size/checksum with passive nRF/HCI/UART; no fullRF/physical press/second-PC claim.",
+    "type156InstalledExeAndPreferencesVerified": true,
+    "type155TranslationSelectedSourceControlledCasesPassed": true,
+    "type155PhysicalTranslationQualified": false,
+    "type156QAChangedSelectionAndRetryControlledPassed": true,
+    "type156QANativeSavedHistoryAndPrivateCopyPastePassed": true,
+    "type156QALiveExternalSelectionCloudAnswerQualified": false,
+    "type156PassiveUpdateAudioReadyObserved": true,
+    "fullUserFacingAcceptanceComplete": false
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -393,6 +401,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build154-20261023"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build156-20261023"
   }
 }
