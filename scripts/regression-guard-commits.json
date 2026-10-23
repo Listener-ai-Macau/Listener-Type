@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T23:45:59.210081+08:00",
+  "updated_at": "2026-10-24T00:18:18.640441+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -6835,6 +6835,42 @@
         "Physical Translation key/speech/output and live external selection/global-hotkey/cloud Q&A remain pending; normal startup readiness and synthetic History retrieval are scoped software evidence. No multi-PC/fullRF/hardware purchase qualification."
       ],
       "humanAccepted": false
+    },
+    {
+      "id": "qa_ota_admission_and_canonical_shortcut_label",
+      "repo": "type",
+      "commit": "34fa9fcf6b3c71a94a0b680285fee86c587f3ce5",
+      "commit_subject": "Apply OTA recording exclusion to QA and show its actual configured shortcut",
+      "subject": "QA cannot bypass OTA recording exclusion; capture cleanup preserves panel/answers and shortcut label follows canonical binding",
+      "state": "Type157_source_native_controlled_passed_matching_package_pending",
+      "protects": [
+        "QA start checks the common gate under QA claim lock, before selection capture or session creation, then rechecks after mute await.",
+        "OTA stops an existing QA Recording through owner/phase-bound cleanup outside the callback-join lock. Visible panel and prior answers remain; already Processing answer continues.",
+        "QA initial and live preferences label uses the same canonical dictationHotkey as the registered monitor, not retired hotkey.keys."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib --target x86_64-pc-windows-msvc qa -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib --target x86_64-pc-windows-msvc recording_gate -- --test-threads=1",
+        "Exact packaged private native ordinary shortcut edit; QA label must match saved canonical combo on live change and reload."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build157\\source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-001259-784c1c\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-001644-7cb7d0\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-001644-f874ea\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native156-snapshot-20261024-001150\\qa157-shortcut-result.json"
+      ],
+      "machine_accepted_scope": [
+        "Before actual production QA/OTA2fail+1pass; after34QA and7gate controlled native tests pass,0ignored/cleanup errors/daily persistent changes. Frontend production build passes."
+      ],
+      "known_failures": [
+        "QA start/shortcut-label branch already exists in earliest732a8631; unified OTA gate a2838d74 did not include QA. Not a156 regression or proof of old ordinary dictation symptoms."
+      ],
+      "pending_human_scope": [
+        "No real OTA/QA microphone collision, live selection/cloud answer, global physical key, all target apps, full RF or purchase qualification.",
+        "Existing156 remains installed/public until a matching candidate is qualified."
+      ],
+      "humanAccepted": false
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -7968,7 +8004,8 @@
       "guard_entries": [
         "qa140_session_owner_preserves_replacement_and_pending_question",
         "type145_qa_capsule_cannot_hide_or_replace_active_dictation",
-        "qa_followup_selection_and_honest_saved_answer_history"
+        "qa_followup_selection_and_honest_saved_answer_history",
+        "qa_ota_admission_and_canonical_shortcut_label"
       ],
       "paths": {
         "type": [
@@ -7978,7 +8015,10 @@
           "src-tauri/src/coordinator_tests.rs",
           "src-tauri/src/coordinator/support.rs",
           "src-tauri/src/coordinator/qa_question_context.rs",
-          "src/pages/History.tsx"
+          "src/pages/History.tsx",
+          "src/pages/QaPanel.tsx",
+          "src-tauri/src/coordinator/recording_gate.rs",
+          "src-tauri/src/coordinator/dictation.rs"
         ]
       },
       "known_failures": [
