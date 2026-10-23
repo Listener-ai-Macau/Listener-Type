@@ -571,27 +571,40 @@ function AudioRecordingPlayer({
   const [url, setUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [errorText, setErrorText] = useState<string | null>(null);
+  const mountedRef = useRef(false);
+  const loadPendingRef = useRef(false);
+  const ownedUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      if (url) URL.revokeObjectURL(url);
+      mountedRef.current = false;
+      if (ownedUrlRef.current) URL.revokeObjectURL(ownedUrlRef.current);
+      ownedUrlRef.current = null;
     };
-  }, [url]);
+  }, []);
 
   const load = async () => {
+    if (loadPendingRef.current) return;
+    loadPendingRef.current = true;
     setStatus('loading');
     setErrorText(null);
     try {
       const bytes = await readAudioRecording(sessionId);
+      // The keyed player may already have left History or switched records.
+      // Do not allocate a Blob whose unmounted owner can no longer release it.
+      if (!mountedRef.current) return;
       if (bytes.byteLength === 0) throw new Error('empty recording');
       // typed array 在严格 TS lib 下不直接是 BlobPart；构造独立 ArrayBuffer 后 cast。
       const buffer = new ArrayBuffer(bytes.byteLength);
       new Uint8Array(buffer).set(bytes);
       const blob = new Blob([buffer], { type: 'audio/wav' });
       const objectUrl = URL.createObjectURL(blob);
+      ownedUrlRef.current = objectUrl;
       setUrl(objectUrl);
       setStatus('ready');
     } catch (error) {
+      if (!mountedRef.current) return;
       console.error('[history] load recording failed', error);
       const msg = errorMessage(error);
       // 文件被清理：通知父组件隐藏按钮组，自身不显示 error UI（用户没干错事）。
@@ -601,6 +614,8 @@ function AudioRecordingPlayer({
       }
       setStatus('error');
       setErrorText(msg);
+    } finally {
+      loadPendingRef.current = false;
     }
   };
 
