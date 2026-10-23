@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T12:56:28.564464+08:00",
+  "updated_at": "2026-10-23T13:10:30.531262+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -6119,7 +6119,7 @@
       "commit": "8e63a0c1758c6bd04ab05f4ed7e86992cbb1bbb6",
       "subject": "Release history audio resources only under their mounted recording owner",
       "commit_subject": "Release history audio resources only under their mounted recording owner [skip ci]",
-      "state": "source_candidate_reproduced_142_orphan_and_verified_143_lifecycle_not_packaged",
+      "state": "source_lifetime_passed_but_exact143_playback_blocked_by_preexisting_media_policy_uninstalled",
       "protects": [
         "A recording read that finishes after the keyed History player unmounts cannot allocate an orphan Blob or publish stale state/errors.",
         "A current recording remains playable and its actual object URL is released when switching records or leaving History after its page transition.",
@@ -6139,6 +6139,42 @@
         "Actual synthetic React resource accounting, not measured whole-app RSS growth or proof of a user-reported memory incident.",
         "Unchanged142 native export/retention is verified with8044-byte silence under a confined download directory; current143 player source not yet packaged/installed.",
         "No new independent customer, real speech/noise/hardware or purchase claim."
+      ],
+      "nativeFailure": {
+        "build": 143,
+        "source": "9500bbaad6617032d464bf72e5d37c7ec0291945",
+        "evidence": "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native143-snapshot-20261023-130354\\history143-media-policy-failure.json",
+        "nextBuild": 144
+      }
+    },
+    {
+      "id": "type144_packaged_history_audio_media_policy",
+      "repo": "type",
+      "commit": "336b9cff70c3dc3e9caced5fcb3e2ec7a512603d",
+      "subject": "Allow local retained audio in the packaged media policy",
+      "commit_subject": "Allow local retained audio in the packaged media policy [skip ci]",
+      "state": "source_candidate_native143_CSP_failure_proven_new144_package_required",
+      "protects": [
+        "Packaged audio/video sources explicitly allow same-origin assets and local blob audio, without broadening default/script/network source directives.",
+        "History retained-WAV playback must decode in the actual MSI, not only a permissive development browser.",
+        "Retain143 mounted-player resource ownership; no new microphone, cloud, firmware or global shortcut behavior."
+      ],
+      "guards": [
+        "Exact MSI native retained-WAV playback plus current-resource release under private scoped143-style fixture; require duration0.25s and no media-src violation."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native143-snapshot-20261023-130354\\history143-player-native-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native143-snapshot-20261023-130354\\history143-media-policy-failure.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native143-snapshot-20261023-130354\\history143-player-readiness-diagnostic.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261023-build143\\type-artifact-verification.json"
+      ],
+      "sourceReferences": [
+        "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/media-src",
+        "https://v2.tauri.app/security/csp/"
+      ],
+      "unverified": [
+        "New144 package/native success/installation/publication not yet established;143 is explicitly failed and uninstalled.",
+        "No total RSS, actual speech/strong interference, physical qualification or customer purchase claim."
       ]
     }
   ],
