@@ -672,7 +672,7 @@ export function Marketplace() {
               }}>
                 {(currentLogin || '?').slice(0, 1).toUpperCase()}
               </span>
-              <span>我的发布</span>
+              <span>{t('settingsFeedback.myPacks')}</span>
             </button>
             <Btn icon="refresh" variant="ghost" size="sm" onClick={() => void refresh()}>
               {t('common.refresh')}

@@ -4,6 +4,7 @@
 // 顶部 pill 显示当前 GitHub 登录身份（marketplaceDevLogin），未填时引导跳 Settings。
 
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Icon } from './Icon';
 import { Marketplace } from '../pages/Marketplace';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
@@ -13,6 +14,7 @@ interface MarketplaceModalProps {
 }
 
 export function MarketplaceModal({ onClose }: MarketplaceModalProps) {
+  const { t } = useTranslation();
   const { prefs } = useHotkeySettings();
   const login = (prefs?.marketplaceDevLogin ?? '').trim();
   const loggedIn = login.length > 0;
@@ -65,7 +67,7 @@ export function MarketplaceModal({ onClose }: MarketplaceModalProps) {
           <button
             type="button"
             tabIndex={-1}
-            title={loggedIn ? '当前登录身份 —— 在 Settings → 录音 → 风格市场 修改' : '未登录 —— 去 Settings → 录音 → 风格市场 填一个发布者名'}
+            title={t(loggedIn ? 'settingsFeedback.publisherSetHint' : 'settingsFeedback.publisherUnsetHint')}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 6,
               padding: '4px 10px', borderRadius: 999,
@@ -80,7 +82,7 @@ export function MarketplaceModal({ onClose }: MarketplaceModalProps) {
             }}
           >
             <Icon name="user" size={11} />
-            <span>{loggedIn ? `@${login}` : '未登录'}</span>
+            <span>{loggedIn ? `@${login}` : t('settingsFeedback.publisherUnset')}</span>
           </button>
         </div>
 
@@ -109,7 +111,7 @@ export function MarketplaceModal({ onClose }: MarketplaceModalProps) {
             (e.currentTarget as HTMLButtonElement).style.color = 'var(--ol-ink-2)';
           }}
           aria-label="close"
-          title="关闭"
+          title={t('common.close')}
         >
           <Icon name="close" size={14} />
         </button>

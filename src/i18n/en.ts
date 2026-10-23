@@ -12,7 +12,11 @@ import type { zhCN } from './zh-CN';
 import { enDeviceMaintenance, enFirmwareMaintenance } from './enDeviceMaintenance.ts';
 
 // Type-level guarantee that en mirrors the zh-CN shape.
+import { networkHealthTranslations } from './networkHealth.ts';
+import { settingsFeedbackTranslations } from './settingsFeedback.ts';
 export const en: typeof zhCN = {
+  settingsFeedback: settingsFeedbackTranslations.en,
+  networkHealth: networkHealthTranslations.en,
   politeEdits: politeEditsTranslations.en,
   conciseDraft: conciseDraftTranslations.en,
   offlineHelp: offlineHelpTranslations.en,

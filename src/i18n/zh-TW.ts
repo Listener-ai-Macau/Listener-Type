@@ -11,7 +11,11 @@ import type { zhCN } from './zh-CN';
 // 繁體中文資源 — 與產品當前文案保持一致。
 // 新增 key 時，必須同步更新 en.ts，避免切換到 English 後出現中文殘留。
 
+import { networkHealthTranslations } from './networkHealth.ts';
+import { settingsFeedbackTranslations } from './settingsFeedback.ts';
 export const zhTW: typeof zhCN = {
+  settingsFeedback: settingsFeedbackTranslations['zh-TW'],
+  networkHealth: networkHealthTranslations['zh-TW'],
   politeEdits: politeEditsTranslations['zh-TW'],
   conciseDraft: conciseDraftTranslations['zh-TW'],
   offlineHelp: offlineHelpTranslations['zh-TW'],

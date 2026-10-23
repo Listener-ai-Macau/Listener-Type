@@ -1068,9 +1068,13 @@ export function listVocab(): Promise<DictionaryEntry[]> {
 
 export function addVocab(phrase: string, note?: string): Promise<DictionaryEntry> {
   return invokeOrMock('add_vocab', { phrase, note }, () => {
+    const trimmed = phrase.trim();
+    if (!trimmed) throw new Error('dictionary phrase must not be empty');
+    const existing = mockVocab.find(entry => entry.phrase.trim().toLowerCase() === trimmed.toLowerCase());
+    if (existing) return { ...existing };
     const entry = {
       id: `vocab-new-${crypto.randomUUID()}`,
-      phrase,
+      phrase: trimmed,
       note: note ?? null,
       enabled: true,
       hits: 0,

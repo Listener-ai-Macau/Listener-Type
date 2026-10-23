@@ -9,6 +9,8 @@ import {
   checkMicrophonePermission,
   getHotkeyStatus,
   getWindowsImeStatus,
+  invokeOrMock,
+  isTauri,
   openSystemSettings,
   requestAccessibilityPermission,
   requestMicrophonePermission,
@@ -23,6 +25,7 @@ import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import i18n from '../../i18n';
 import { Btn, Card, Pill } from '../_atoms';
 import { SettingRow } from './shared';
+import { newerNetworkHealth, networkHealthPresentation, type NetworkHealthView } from '../../lib/networkHealth';
 
 export function PermissionsSection() {
   const { t } = useTranslation();
@@ -30,7 +33,26 @@ export function PermissionsSection() {
   const [microphone, setMicrophone] = useState<PermissionStatus | 'loading'>('loading');
   const [hotkey, setHotkey] = useState<HotkeyStatus | null>(null);
   const [windowsIme, setWindowsIme] = useState<WindowsImeStatus | null>(null);
+  const [network, setNetwork] = useState<NetworkHealthView | null>(null);
   const { capability } = useHotkeySettings();
+
+  useEffect(() => {
+    if (!isTauri) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    const apply = (next: NetworkHealthView) => {
+      if (!cancelled) setNetwork(current => newerNetworkHealth(current, next));
+    };
+    void (async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      const handle = await listen<NetworkHealthView>('net-health:changed', event => apply(event.payload));
+      if (cancelled) { handle(); return; }
+      unlisten = handle;
+      const latest = await invokeOrMock<NetworkHealthView | null>('get_network_health_state', undefined, () => null);
+      if (latest) apply(latest);
+    })().catch(() => { /* Keep unknown or last observed state, never invent success. */ });
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
 
   const refreshPermissions = async () => {
     const [a, m] = await Promise.all([
@@ -91,6 +113,7 @@ export function PermissionsSection() {
   const desc = capability?.requiresAccessibilityPermission
     ? t('settings.permissions.descAcc')
     : t('settings.permissions.descNoAcc');
+  const networkPresentation = networkHealthPresentation(network);
 
   return (
     <Card>
@@ -125,7 +148,7 @@ export function PermissionsSection() {
         desc={capability ? t('settings.permissions.hotkeyDescWithAdapter', { adapter: adapterDisplayName(capability.adapter) }) : t('settings.permissions.hotkeyDescPlain')}
       >
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0, justifyContent: 'flex-end', width: '100%' }}>
-          {hotkey?.message && (
+          {hotkey?.message && hotkey.state === 'failed' && (
             <span style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {hotkey.message}
             </span>
@@ -150,7 +173,10 @@ export function PermissionsSection() {
       )}
       <SettingRow label={t('settings.permissions.networkLabel')} desc={t('settings.permissions.networkDesc')}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
-          <Pill tone="ok"><Icon name="check" size={11} />{t('settings.permissions.networkOk')}</Pill>
+          <Pill tone={networkPresentation.tone}>
+            {networkPresentation.tone === 'ok' && <Icon name="check" size={11} />}
+            {t(`networkHealth.${networkPresentation.key}`)}
+          </Pill>
         </div>
       </SettingRow>
     </Card>

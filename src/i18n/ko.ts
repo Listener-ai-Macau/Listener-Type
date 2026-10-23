@@ -12,8 +12,12 @@ import { en } from './en.ts';
 // Korean locale.
 // 구조는 zh-CN.ts 를 따릅니다. 새 key 를 추가할 때 ja.ts / ko.ts 도 동시에
 // 갱신해 주세요(갱신되지 않은 key 는 ...en 으로 영어로 fallback 됩니다).
+import { networkHealthTranslations } from './networkHealth.ts';
+import { settingsFeedbackTranslations } from './settingsFeedback.ts';
 export const ko: typeof zhCN = {
   ...en,
+  settingsFeedback: settingsFeedbackTranslations.ko,
+  networkHealth: networkHealthTranslations.ko,
   politeEdits: politeEditsTranslations.ko,
   conciseDraft: conciseDraftTranslations.ko,
   offlineHelp: offlineHelpTranslations.ko,

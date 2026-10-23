@@ -1280,7 +1280,7 @@ export function RecordingSection({ onSetupListener }: { onSetupListener?: () => 
       </SettingRow>
       {capability.statusHint && (
         <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5 }}>
-          {capability.statusHint}
+          {t(`settingsFeedback.${capability.adapter}`, { defaultValue: capability.statusHint })}
         </div>
       )}
     </Collapsible>

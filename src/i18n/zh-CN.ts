@@ -9,7 +9,11 @@ import { offlineHelpTranslations } from './offlineHelp.ts';
 // 简体中文资源 — 与产品当前文案保持一致。
 // 添加新 key 时，必须同步更新 en.ts，否则首次切换到 English 会回落到中文残留。
 
+import { networkHealthTranslations } from './networkHealth.ts';
+import { settingsFeedbackTranslations } from './settingsFeedback.ts';
 export const zhCN = {
+  settingsFeedback: settingsFeedbackTranslations['zh-CN'],
+  networkHealth: networkHealthTranslations['zh-CN'],
   politeEdits: politeEditsTranslations['zh-CN'],
   conciseDraft: conciseDraftTranslations['zh-CN'],
   offlineHelp: offlineHelpTranslations['zh-CN'],

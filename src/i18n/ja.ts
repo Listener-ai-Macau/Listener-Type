@@ -12,8 +12,12 @@ import { en } from './en.ts';
 // Japanese locale.
 // 構造は zh-CN.ts に追従。新しい key を追加する場合は ja.ts / ko.ts も同時に
 // 更新してください（更新されない key は ...en で英語にフォールバックします）。
+import { networkHealthTranslations } from './networkHealth.ts';
+import { settingsFeedbackTranslations } from './settingsFeedback.ts';
 export const ja: typeof zhCN = {
   ...en,
+  settingsFeedback: settingsFeedbackTranslations.ja,
+  networkHealth: networkHealthTranslations.ja,
   politeEdits: politeEditsTranslations.ja,
   conciseDraft: conciseDraftTranslations.ja,
   offlineHelp: offlineHelpTranslations.ja,

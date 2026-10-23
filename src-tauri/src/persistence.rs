@@ -2332,6 +2332,17 @@ impl DictionaryStore {
     pub fn add(&self, phrase: String, note: Option<String>) -> Result<DictionaryEntry> {
         let _guard = self.lock.lock();
         let mut entries = self.read_locked()?;
+        let phrase = phrase.trim().to_string();
+        if phrase.is_empty() {
+            return Err(anyhow!("dictionary phrase must not be empty"));
+        }
+        // Match the existing hit/preset semantics under the same write lock.
+        // Retrying an add must not duplicate a word or reset its user-owned
+        // note, enabled state, hit count, spelling or creation time.
+        let key = phrase.to_lowercase();
+        if let Some(existing) = entries.iter().find(|entry| entry.phrase.trim().to_lowercase() == key) {
+            return Ok(existing.clone());
+        }
         let entry = DictionaryEntry {
             id: Uuid::new_v4().to_string(),
             phrase,
@@ -2857,6 +2868,43 @@ mod tests {
             path: tmp,
             previous,
         }
+    }
+
+    #[test]
+    fn dictionary_retry_preserves_persisted_word_and_user_settings() {
+        let root = scoped_data_dir();
+        let store = super::DictionaryStore::new().unwrap();
+        let first = store.add("  Listener  ".into(), Some("my original note".into())).unwrap();
+        assert_eq!(first.phrase, "Listener");
+        assert_eq!(store.record_hits("Listener LISTENER").unwrap(), 2);
+        store.set_enabled(&first.id, false).unwrap();
+        let before = fs::read(root.path.join(super::VOCAB_FILE)).unwrap();
+        let retry = store.add(" listener ".into(), Some("must not overwrite".into())).unwrap();
+        assert_eq!(retry.id, first.id);
+        assert_eq!(retry.note, first.note);
+        assert_eq!(retry.created_at, first.created_at);
+        assert_eq!(retry.phrase, "Listener");
+        assert_eq!(retry.hits, 2);
+        assert!(!retry.enabled);
+        assert_eq!(fs::read(root.path.join(super::VOCAB_FILE)).unwrap(), before);
+        assert_eq!(store.list().unwrap().len(), 1);
+        assert!(store.add(" \t\n ".into(), None).is_err());
+        assert_eq!(fs::read(root.path.join(super::VOCAB_FILE)).unwrap(), before);
+    }
+
+    #[test]
+    fn dictionary_concurrent_adds_keep_one_identity_and_distinct_words() {
+        let _root = scoped_data_dir();
+        let store = std::sync::Arc::new(super::DictionaryStore::new().unwrap());
+        let threads: Vec<_> = (0..8).map(|index| {
+            let store = store.clone();
+            std::thread::spawn(move || store.add(if index % 2 == 0 { "Denzic" } else { " denzic " }.into(), None).unwrap().id)
+        }).collect();
+        let ids: Vec<_> = threads.into_iter().map(|thread| thread.join().unwrap()).collect();
+        assert!(ids.iter().all(|id| id == &ids[0]));
+        store.add("Denzic Pro".into(), None).unwrap();
+        store.add("你好".into(), None).unwrap();
+        assert_eq!(store.list().unwrap().len(), 3);
     }
 
     fn make_session(id: &str) -> DictationSession {
