@@ -5087,13 +5087,94 @@ fn recorder_runtime_error_aborts_active_session() {
         state.cancelled = false;
     }
 
-    abort_recording_with_error(&coordinator.inner, "录音中断: stream failed".to_string());
+    let owner = coordinator.inner.state.lock().session_id;
+    abort_recording_with_error(&coordinator.inner, owner, "录音中断: stream failed".to_string());
 
     let state = coordinator.inner.state.lock();
     assert_eq!(state.phase, SessionPhase::Idle);
     assert!(state.cancelled);
     assert!(coordinator.inner.recorder.lock().is_none());
     assert!(coordinator.inner.asr.lock().is_none());
+}
+
+#[test]
+fn recorder_error_registered_after_replacement_preserves_new_session() {
+    for phase in [SessionPhase::Starting, SessionPhase::Listening] {
+        let coordinator = Coordinator::new();
+        let recorder_owner = session_id(710);
+        let replacement = session_id(711);
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = recorder_owner;
+            state.phase = SessionPhase::Starting;
+        }
+        // The channel belongs to the recorder being started. Its synchronous
+        // startup can finish after Cancel and the next recording have run.
+        let (tx, rx) = mpsc::channel();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = replacement;
+            state.phase = phase;
+            state.cancelled = false;
+            state.focus_target = Some(71);
+        }
+        let monitor = dictation::spawn_recorder_error_monitor(&coordinator.inner, recorder_owner, rx)
+            .expect("recorder error monitor thread");
+        tx.send(RecorderError::EngineFailed("old recorder failed".into())).unwrap();
+        monitor.join().unwrap();
+        let state = coordinator.inner.state.lock();
+        assert_eq!(state.session_id, replacement);
+        assert_eq!(state.phase, phase, "late recorder registration, phase={phase:?}");
+        assert!(!state.cancelled);
+        assert_eq!(state.focus_target, Some(71));
+    }
+}
+
+#[test]
+fn recorder_error_abort_cannot_adopt_a_replacement_after_its_precheck() {
+    for phase in [SessionPhase::Starting, SessionPhase::Listening, SessionPhase::Processing] {
+        let coordinator = Coordinator::new();
+        let old = session_id(720);
+        let replacement = session_id(721);
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = replacement;
+            state.phase = phase;
+            state.cancelled = false;
+            state.focus_target = Some(72);
+        }
+        // Even an error that passed an earlier identity check cannot claim
+        // whichever session is current when cleanup starts.
+        abort_recording_with_error(&coordinator.inner, old, "old recorder failed".into());
+        let state = coordinator.inner.state.lock();
+        assert_eq!(state.session_id, replacement);
+        assert_eq!(state.phase, phase);
+        assert!(!state.cancelled);
+        assert_eq!(state.focus_target, Some(72));
+    }
+}
+
+#[test]
+fn recorder_error_monitor_closes_its_own_active_recording() {
+    for phase in [SessionPhase::Starting, SessionPhase::Listening] {
+        let coordinator = Coordinator::new();
+        let owner = session_id(730);
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = owner;
+            state.phase = phase;
+            state.cancelled = false;
+        }
+        let (tx, rx) = mpsc::channel();
+        let monitor = dictation::spawn_recorder_error_monitor(&coordinator.inner, owner, rx)
+            .expect("recorder error monitor thread");
+        tx.send(RecorderError::EngineFailed("current recorder failed".into())).unwrap();
+        monitor.join().unwrap();
+        let state = coordinator.inner.state.lock();
+        assert_eq!(state.session_id, owner);
+        assert_eq!(state.phase, SessionPhase::Idle);
+        assert!(state.cancelled);
+    }
 }
 
 #[test]

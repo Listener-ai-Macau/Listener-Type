@@ -623,7 +623,7 @@ pub(super) async fn start_recorder_for_starting(
                 .audio_archive_active
                 .store(archive_active, std::sync::atomic::Ordering::Relaxed);
             store_recorder_for_session(inner, session_id, rec);
-            spawn_recorder_error_monitor(inner, runtime_errors);
+            spawn_recorder_error_monitor(inner, session_id, runtime_errors);
             // 不在这里 emit Recording capsule。
             // Recorder::start Ok 仅代表 cpal Stream::play 完成，不代表 audio
             // 线程已经在向 consumer 推 PCM —— macOS CoreAudio AudioUnit 启动到
@@ -660,40 +660,50 @@ pub(super) async fn start_recorder_for_starting(
     Ok(())
 }
 
-pub(super) fn spawn_recorder_error_monitor(inner: &Arc<Inner>, rx: mpsc::Receiver<RecorderError>) {
-    // 捕获当前 session_id：err 来时若 id 已经不一致说明是上一 session 的迟到事件，
-    // 不能去 abort 当前 active 的新 session（它录得好好的）。
-    let captured_session_id = inner.state.lock().session_id;
+pub(super) fn spawn_recorder_error_monitor(
+    inner: &Arc<Inner>,
+    recorder_session_id: SessionId,
+    rx: mpsc::Receiver<RecorderError>,
+) -> Option<std::thread::JoinHandle<()>> {
+    // Recorder startup can finish after Cancel and a newer recording. The
+    // channel belongs to its original recorder, not the current coordinator.
     let inner = Arc::clone(inner);
     std::thread::Builder::new()
         .name("listener-type-recorder-error-monitor".into())
         .spawn(move || {
             if let Ok(err) = rx.recv() {
-                let current_session_id = inner.state.lock().session_id;
-                if captured_session_id != current_session_id {
-                    log::warn!(
-                        "[coord] recorder error from stale session {} dropped (current={}, err={})",
-                        captured_session_id,
-                        current_session_id,
-                        err
-                    );
-                    return;
-                }
-                log::error!("[coord] recorder runtime error: {err}");
-                abort_recording_with_error(&inner, format!("录音中断: {err}"));
+                abort_recording_with_error(
+                    &inner,
+                    recorder_session_id,
+                    format!("录音中断: {err}"),
+                );
             }
         })
-        .ok();
+        .ok()
 }
 
-pub(super) fn abort_recording_with_error(inner: &Arc<Inner>, message: String) {
+pub(super) fn abort_recording_with_error(
+    inner: &Arc<Inner>,
+    recorder_session_id: SessionId,
+    message: String,
+) {
     let Some(abort) = ({
         let mut state = inner.state.lock();
+        // Check identity and claim the abort under the same lock. A separate
+        // pre-check would still let the next session race into the abort.
+        if state.session_id != recorder_session_id {
+            log::warn!(
+                "[coord] recorder error from stale session {} dropped (current={}): {}",
+                recorder_session_id, state.session_id, message
+            );
+            return;
+        }
         begin_recording_abort_before_restore(&mut state)
     }) else {
         return;
     };
 
+    log::error!("[coord] recorder runtime error session_id={recorder_session_id}: {message}");
     discard_startup_resources_for_session(inner, abort.session_id);
     restore_prepared_windows_ime_session(inner, abort.session_id);
     {
