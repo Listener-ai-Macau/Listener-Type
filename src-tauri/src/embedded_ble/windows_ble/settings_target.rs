@@ -118,14 +118,21 @@ pub fn list_settings_devices() -> Result<Vec<SettingsDevice>, String> {
 
 struct SelectedUsbSettings {
     port: Box<dyn serialport::SerialPort>,
+    synchronized: bool,
 }
 impl SelectedUsbSettings {
     fn exchange(&mut self, command: &str) -> Result<String, String> {
-        drain_serial_input_until_quiet(
-            &mut *self.port,
-            DEVICE_SETTINGS_SERIAL_DRAIN_MAX_DURATION,
-            DEVICE_SETTINGS_SERIAL_DRAIN_QUIET_DURATION,
-        );
+        if !self.synchronized {
+            drain_serial_input_until_quiet(
+                &mut *self.port,
+                DEVICE_SETTINGS_SERIAL_DRAIN_MAX_DURATION,
+                DEVICE_SETTINGS_SERIAL_DRAIN_QUIET_DURATION,
+            );
+        }
+        // One exclusive COM handle, one outstanding command, one complete ACK.
+        // Only a confirmed exchange lets the next packet reuse synchronization.
+        // Any error requires draining again before a later explicit command.
+        self.synchronized = false;
         self.port
             .write_all(format!("~{command}\n").as_bytes())
             .map_err(|e| e.to_string())?;
@@ -142,11 +149,13 @@ impl SelectedUsbSettings {
                         return Err(line.to_string());
                     }
                     if let Some(line) = complete_device_settings_ok_line(&response) {
+                        self.synchronized = true;
                         return Ok(line);
                     }
                     if command == "DEVICE:APPLY_BLE_NAME"
                         && response.contains("~DEVICE:APPLY_BLE_NAME result=OK")
                     {
+                        self.synchronized = true;
                         return Ok(String::new());
                     }
                     if response.len() > 65536 {
@@ -162,10 +171,9 @@ impl SelectedUsbSettings {
                 Err(e) => return Err(format!("Selected USB disconnected: {e}")),
             }
         }
-        Err(
-            "Selected USB did not acknowledge the settings request; no other device was tried."
-                .into(),
-        )
+        let kind = command.split_ascii_whitespace().take(2).collect::<Vec<_>>().join(" ");
+        log::warn!("[device-settings] USB acknowledgement missing kind={kind} received_bytes={} complete_lines={}", response.len(), response.bytes().filter(|b| *b == b'\n').count());
+        Err(format!("Selected USB did not acknowledge {kind}; no other device was tried."))
     }
 }
 impl SettingsIo for SelectedUsbSettings {
@@ -176,6 +184,7 @@ impl SettingsIo for SelectedUsbSettings {
         if command == "DEVICE:APPLY_BLE_NAME" {
             // The shared USB control dispatcher schedules APPLY without a
             // DEVICE:SETTINGS ACK. Its completion is confirmed by readback.
+            self.synchronized = false;
             self.port
                 .write_all(b"~DEVICE:APPLY_BLE_NAME\n")
                 .map_err(|e| e.to_string())?;
@@ -326,7 +335,7 @@ pub fn with_settings_device<T>(
             let _ = handle.write_request_to_send(false);
             // Keep the same OS handle throughout: COM reuse cannot redirect
             // a later packet to a different board.
-            super::settings_target::bounded(&mut SelectedUsbSettings { port: handle },deadline,task)
+            super::settings_target::bounded(&mut SelectedUsbSettings { port: handle, synchronized: false },deadline,task)
         }
         "ble" => {
             let id = selected
