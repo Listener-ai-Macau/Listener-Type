@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T08:56:27.881322+08:00",
+  "updated_at": "2026-10-23T10:39:34.328601+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -629,7 +629,7 @@
       "humanAccepted": false,
       "baseCommit": "3cb8221b5aa8bb7b2090d93748a14584a802ed63",
       "buildId": "57431b05a4e7d6e9",
-      "installedAt": "2026-10-17T09:17:59.906253+00:00",
+      "installedAt": "2026-10-17T17:17:59.906253+08:00",
       "protects": [
         "Same predecessor physical EOF/TRANSFERRING and Idle-before-transport-ready retain the already qualified original source under the same request.",
         "The ordinary unowned checkpoint age and fixed ENSURE deadline do not increase.",
@@ -693,7 +693,7 @@
       "humanAccepted": false,
       "baseCommit": "376e9749e81361bb7ebb69429ce5f1d354b71554",
       "buildId": "5b5d72adef4bd602",
-      "installedAt": "2026-10-17T10:13:39.406635+00:00",
+      "installedAt": "2026-10-17T18:13:39.406635+08:00",
       "protects": [
         "An admission/retry or post-job real Blocked interval must not be charged again for the same ordinary media quantum.",
         "Credit stays bounded to the existing single early tick; no banking of a long pause, cross-worker/source/link grant or borrowing from exempt preroll.",
@@ -796,7 +796,7 @@
       "humanAccepted": false,
       "baseCommit": "70aabc376015e7116dfd4c9dac37bcc7e3679b82",
       "build": 42,
-      "installedAt": "2026-10-17T20:03:24.1126410+08:00",
+      "installedAt": "2026-10-17T20:03:24.112641+08:00",
       "exeSha256": "ece201e32bd7d13ac258a9a825620e301f0ad2365b45296cc6d7b531da7b9cae",
       "protects": [
         "Released-listener entry acquires both original OTA process/capture guards before target construction, retaining them across ready/start/BEGIN/reboot proof.",
@@ -873,7 +873,7 @@
       "humanAccepted": false,
       "build": 44,
       "candidate": 2,
-      "installedAt": "2026-10-17T21:07:56.8824050+08:00",
+      "installedAt": "2026-10-17T21:07:56.882405+08:00",
       "exeSha256": "d8b5fe8080d4aaeb7a04ebf3bfe0e2d00f1722021b8b18c73ca3f496f43a3806",
       "protects": [
         "Background optional capability uses the existing single async slot and is canceled/closed before urgent ENSURE/STOP.",
@@ -1067,7 +1067,7 @@
       "commit_subject": "fix(tools): bind sniffer readiness to captured fresh target link",
       "validation_kind": "evidence_only",
       "current_peer_capture_recovery": {
-        "at": "2026-10-18T16:20:25.025690+08:00",
+        "at": "2026-10-18T16:20:25.02569+08:00",
         "currentPeer": "F0:51:5B:AF:B8:6A",
         "localAdapter": "68:34:21:92:02:24",
         "source": "exact peer-only read-only Windows registry backup, private offline parsing",
@@ -1099,7 +1099,7 @@
         "parserCorrection": "Same-AA pause/rekey starts a new nonce epoch; saved08 now80MIC/18controls; actual C18/18 using explicitly recorded PHY replay assumption"
       },
       "latestOfflineAdmissionReview": {
-        "at": "2026-10-18T17:42:47.240840+08:00",
+        "at": "2026-10-18T17:42:47.24084+08:00",
         "evidence": "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\triad-receiver116-live10\\physical-link-admission.json",
         "scope": "Actual same-run HCI interval7.5ms; no new image-link connection before bulk observed, later reboot connection captured. FW22 exact source retains a fast existing link. Inference of existing-link reuse, not definitive proof from incomplete HCI or throughput gain. No product change or new RESET/OTA."
       }
@@ -5970,9 +5970,40 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261023-build139\\type-artifact-verification.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261023-build139\\type139-installed.json"
       ]
+    },
+    {
+      "id": "qa140_session_owner_preserves_replacement_and_pending_question",
+      "subject": "QA recording, resources and late completion retain original session ownership",
+      "state": "production_counterexample_fixed_related714_verified_candidate_not_packaged",
+      "repo": "type",
+      "commit": "652bd087d149f844b8c0fd812c05ffd9a1ac1bb3",
+      "commit_subject": "Bind question-answer sessions and resources to their original owner",
+      "baseCommit": "b2c6f33d7ecc83977373ddc8cc33c116e3123751",
+      "humanAccepted": false,
+      "protects": [
+        "Original QA SessionId survives microphone startup, ASR awaits, errors and LLM callbacks.",
+        "QA recorder and ASR slots use SessionResource ownership; stale cleanup cannot take replacement handles.",
+        "Panel close/open rotates identity; delayed answer, message rollback and UI completion must still own the session.",
+        "Claim terminal cleanup under state lock, stop owned recorder outside lock to avoid callback-join deadlock, recheck owner before publishing.",
+        "Current errors still terminate their own recording; processing cancellation drops only its unfinished question."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --lib coordinator::tests::qa_ -- --test-threads=1"
+      ],
+      "limits": [
+        "No live QA microphone cancellation race, interactive global hotkey/selection capture or external editor delivery established by synthetic unit state.",
+        "Not yet MSI-built, installed or published. Daily Type139 and unchanged Firmware33 remain.",
+        "Full pre-sale acceptance still has device write/flash/OTA and interactive scope gaps.",
+        "English factory content and duplicate vocabulary issue remain."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build139\\qa140-source-audit.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-101755-e2806d\\result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-103541-a8a27e\\result.json"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-23T08:56:27.881322+08:00",
+  "feature_routes_updated_at": "2026-10-23T10:39:34.328601+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -7021,6 +7052,33 @@
           "scripts/check-ui-clarity-ui.py",
           "scripts/check-saved-text-drafts-ui.py"
         ]
+      }
+    },
+    {
+      "id": "qa-session-lifecycle",
+      "accepted_scope": "Production controller/resource identity under deterministic isolated-state failures; no live selection/microphone/hotkey or purchase acceptance.",
+      "baseline_state": "candidate_verified_not_packaged_or_human_accepted",
+      "guard_entries": [
+        "qa140_session_owner_preserves_replacement_and_pending_question"
+      ],
+      "paths": {
+        "type": [
+          "src-tauri/src/coordinator.rs",
+          "src-tauri/src/coordinator/qa.rs",
+          "src-tauri/src/coordinator/resources.rs",
+          "src-tauri/src/coordinator_tests.rs"
+        ]
+      },
+      "known_failures": [
+        "Type139 source b2c6f33d7ecc83977373ddc8cc33c116e3123751: an old QA recorder channel registered after replacement ends the new Recording as Idle. Actual production-monitor counterexample failed; preserved in outputs/Listener-售前验收-20261023-build139/qa139-counterexample.rs.txt and accept131-rust-20261023-101755-e2806d/result.json.",
+        "A separate identity precheck is insufficient if cleanup later takes unowned global resources. Keep original session identity through cleanup and final answer/history publication."
+      ],
+      "latest_source_candidate": {
+        "installed": false,
+        "source": "652bd087d149f844b8c0fd812c05ffd9a1ac1bb3",
+        "packaged": false,
+        "relatedChecks": "714 passed, 32 original ignored; live QA and broader physical scopes remain open",
+        "build": 140
       }
     }
   ]
