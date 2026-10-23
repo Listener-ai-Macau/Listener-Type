@@ -36,7 +36,7 @@ Firmware: **ESP32-S3 N16R8**, build `e7bd1f1619b696a1`. Select the same ZIP for 
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device, read its settings, then write changes back to that device. Names, lights, power, keys and knob configuration stay on the board. Use this paired MSI and firmware ZIP.
 
-Type build144 / Firmware33: Fixes History audio blocked by the packaged media policy and releases playback resources when switching records or leaving History. Late file reads do not retain abandoned audio. Includes142 processing notices; firmware ZIP unchanged.
+Type build150 / Firmware37: Device settings now save automatically after an edit is finished, with saving/saved/error feedback and retry. Changes stay with the selected device; reading or switching devices does not write settings. This update also improves USB key-profile acknowledgements, reduces repeated Bluetooth settings discovery, and preserves recording-light animation continuity. Includes the earlier History playback and processing-notice fixes.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

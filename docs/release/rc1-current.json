@@ -1,27 +1,27 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-23T13:18:54.384626+08:00",
+  "updatedAt": "2026-10-23T18:12:33.872583+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 144,
-    "source": "7c7ff16d27b1a2929b2ae610d16823f3c976091a",
-    "sourceTag": "build-source/type144-20261023",
+    "build": 150,
+    "source": "63b9a46ac212cc4ae26203b45e3b5f0f404b11ef",
+    "sourceTag": "build-source/type150-20261023",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "9568c315e267528c21f219fd1f8846aaec981076852a91e9b956aa2065294831",
-    "sizeBytes": 299233280,
-    "exeSha256": "56ac75a3f0bc0eb91345fc2bc28f20595ae3865fa202f5a7d5e9341742ca87bc",
+    "sha256": "8a3f6c1176d3e8c682340761688f02869ec172e0de09987ab26c7560d9cd3397",
+    "sizeBytes": 299184128,
+    "exeSha256": "1b3c6a14836a52fe34424153ff9b202efd7571eda3b406c96ce10b4612400be3",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
-    "build": 33,
-    "source": "149b6d950ebc5f416924c8670cf2b207bdc2b5b7",
-    "sourceTag": "build-source/firmware33-20261020",
-    "runtimeBuild": "e7bd1f1619b696a1",
+    "build": 37,
+    "source": "87ea79ec3d6e34a95d09b73e2a5848207a919f1c",
+    "sourceTag": "build-source/firmware37-20261023",
+    "runtimeBuild": "9d7fbbe67ed0223d",
     "file": "ListenerFirmware_1.0.6-rc1_ESP32S3.zip",
-    "sha256": "306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272",
-    "sizeBytes": 1956905,
-    "appSha256": "98226f01fb30a86789ce230057ec9eb4a114da9dbbfced1a61d4765eef6c4dbe",
+    "sha256": "fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84",
+    "sizeBytes": 1956799,
+    "appSha256": "73d6a6c35cbef8f0bcbbbd344d81f9c7a7a259a4f9503e69d7c005b792859668",
     "hardware": "keyboard-v2-n16r8",
     "url": "https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip"
   },
@@ -342,7 +342,18 @@
     "type144Existing142NativeAudioExportRetained": true,
     "type144RecordingAndBluetoothChanged": false,
     "type144NativeMediaPolicyNoViolationVerified": true,
-    "type143FailedPackageNotDistributed": true
+    "type143FailedPackageNotDistributed": true,
+    "type150InstalledExeAndPreferencesVerified": true,
+    "type149UsbOrdinaryUiAutosaveAndDevicePersistenceVerified": true,
+    "type149UsbCorrelatedKeyAckAndLargeProfileColdReadVerified": true,
+    "type150BleSelectedBackendWriteReadRestoreVerified": true,
+    "type150BleHciDiscoveryReductionObserved": true,
+    "firmware37BuiltInUsbFlashAndOriginalSettingsPreserved": true,
+    "firmware37StablePayloadEqualsFlashedDevelopment37": true,
+    "type150OrdinaryBleUiPhysicalHidOrTwoPhysicalBoardsQualified": false,
+    "type150FullAirFollowQualified": false,
+    "customer149PurchaseQualification": "AI FIRST_USE used real preconfigured text service and copy UI; software useful, $49 hardware purchase deferred. No new purchase or physical qualification.",
+    "type150VerificationScope": "USB ordinary UI and cold-process persistence from149;150 actual selected BLE backend read/write/readback/restore and HCI, not ordinary BLE UI/physical HID/two boards/full air. Firmware37 clean-source stable package reuses byte-identical installed37 app, bootloader and partition BINs. Only publication metadata changed after matching build; historical verification retains its original versions/scope."
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -360,6 +371,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build144-20261023"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build150-20261023"
   }
 }

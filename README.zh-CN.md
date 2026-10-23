@@ -36,7 +36,7 @@
 Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
 设备设置各自独立：选择一台有线／蓝牙设备，读取后修改并写入；名称、灯光、电源、按键和旋钮设置保存在该设备中。请配套使用本页 MSI 与固件 ZIP。
 
-Type build144 / Firmware33：修复安装版安全策略拦截历史录音播放的问题，切换记录或离页时释放音频，迟到读取不再遗留资源；保留142处理提示，固件ZIP未变。
+Type build150 / Firmware37：设备设置改好后自动保存，显示保存中、已保存或失败重试；修改只写选中的设备，读取或切换设备不会触发写入。同时修复USB按键档案回执、减少蓝牙设置重复枚举，并保持录音灯效动画连续；保留此前历史录音播放和处理提示修复。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
