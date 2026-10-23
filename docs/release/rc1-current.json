@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-23T23:34:58.734357+08:00",
+  "updatedAt": "2026-10-24T00:28:16.757161+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 156,
-    "source": "1eda7b285849b1af652bd2a1cd059055672afc35",
-    "sourceTag": "build-source/type156-20261023",
+    "build": 157,
+    "source": "2a64a18d41927f60da8ca40d71453f1053835876",
+    "sourceTag": "build-source/type157-20261024",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "4b9e2bacf2a128bab1310b0682a755a5c67227e1b7358fb96d76f99541762656",
-    "sizeBytes": 299220992,
-    "exeSha256": "a97eab943392c60898718c5cac55848f1a0f03eb0a1a9bbd5c19c287ebe6d585",
+    "sha256": "b4fae3a7a6d401843fceedb3d2ed6e87e3b57a41015d1441727380edfa5bc143",
+    "sizeBytes": 299208704,
+    "exeSha256": "4a810c0d377e541fd1ec2958204606132609e33623690b8d010be55126157982",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -29,7 +29,7 @@
     "newMsiEmbeddedExeEqualsBuiltExe": true,
     "sameVersionMsiUpgradeEnabled": true,
     "npmAuditVulnerabilities": 0,
-    "nativeRegressionEvidenceSource": "a3c89fe512e644feeb5c321f1564468f4732c7d4",
+    "nativeRegressionEvidenceSource": "34fa9fcf6b3c71a94a0b680285fee86c587f3ce5",
     "newPackageInstalledForThisPublication": true,
     "experimentalThroughputFirmwareIncluded": false,
     "firmware33ActualOtaAndExactBuildConfirmed": true,
@@ -383,7 +383,11 @@
     "type156QANativeSavedHistoryAndPrivateCopyPastePassed": true,
     "type156QALiveExternalSelectionCloudAnswerQualified": false,
     "type156PassiveUpdateAudioReadyObserved": true,
-    "fullUserFacingAcceptanceComplete": false
+    "fullUserFacingAcceptanceComplete": false,
+    "type157InstalledExeAndPreferencesVerified": true,
+    "type157QAOTANativeControlledPassed": true,
+    "type157CanonicalQAShortcutActualNativeUIPassed": true,
+    "type157PhysicalQAOTACollisionQualified": false
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -401,6 +405,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build156-20261023"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build157-20261024"
   }
 }
