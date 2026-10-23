@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-23T18:12:33.872583+08:00",
+  "updatedAt": "2026-10-23T18:49:56.561173+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 150,
-    "source": "63b9a46ac212cc4ae26203b45e3b5f0f404b11ef",
-    "sourceTag": "build-source/type150-20261023",
+    "build": 151,
+    "source": "a8aa31d450c701db15db83e91e82dc58c38d09fb",
+    "sourceTag": "build-source/type151-20261023",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "8a3f6c1176d3e8c682340761688f02869ec172e0de09987ab26c7560d9cd3397",
-    "sizeBytes": 299184128,
-    "exeSha256": "1b3c6a14836a52fe34424153ff9b202efd7571eda3b406c96ce10b4612400be3",
+    "sha256": "f41042263fbf139e683b67c0b3c7730fdebd881fb95dd78f6f91e2fdbe968946",
+    "sizeBytes": 299188224,
+    "exeSha256": "0da3d824d6c5565e8e08841c7e57f5463ea82f37b229560a3edbc178ab5e48f1",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -353,7 +353,12 @@
     "type150OrdinaryBleUiPhysicalHidOrTwoPhysicalBoardsQualified": false,
     "type150FullAirFollowQualified": false,
     "customer149PurchaseQualification": "AI FIRST_USE used real preconfigured text service and copy UI; software useful, $49 hardware purchase deferred. No new purchase or physical qualification.",
-    "type150VerificationScope": "USB ordinary UI and cold-process persistence from149;150 actual selected BLE backend read/write/readback/restore and HCI, not ordinary BLE UI/physical HID/two boards/full air. Firmware37 clean-source stable package reuses byte-identical installed37 app, bootloader and partition BINs. Only publication metadata changed after matching build; historical verification retains its original versions/scope."
+    "type150VerificationScope": "USB ordinary UI and cold-process persistence from149;150 actual selected BLE backend read/write/readback/restore and HCI, not ordinary BLE UI/physical HID/two boards/full air. Firmware37 clean-source stable package reuses byte-identical installed37 app, bootloader and partition BINs. Only publication metadata changed after matching build; historical verification retains its original versions/scope.",
+    "type151NewerLayoutSurvivesPendingSaveReactVerified": true,
+    "type151EarlierAndLaterFailureRetainsLatestLayoutForRetry": true,
+    "type151PendingSaveStaysOriginalDeviceAfterUiSwitch": true,
+    "type151InstalledExeAndPreferencesVerified": true,
+    "type151VerificationScope": "Bundled selected-key React save ownership change only. Actual React controlled IPC counterexamples and affected autosave/layout checks pass. Exact151 MSI identity/startup/install/persistence verified;150 native BLE backend and149 ordinary USB/fresh-process device proof reused for unchanged backend/FW37. No new physical HID, ordinary BLE UI, two-PC or fullRF qualification."
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -371,6 +376,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build150-20261023"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build151-20261023"
   }
 }

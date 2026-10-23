@@ -36,7 +36,7 @@
 Type 預設使用 **USB 有線燒寫**，能力已內建；無需另裝 Python、ESP-IDF 或其他燒寫軟體。
 裝置設定各自獨立：選擇一台有線／藍牙裝置，讀取後修改並寫入；名稱、燈光、電源、按鍵與旋鈕設定保存在該裝置。請配套使用本頁 MSI 與韌體 ZIP。
 
-Type build150 / Firmware37：裝置設定編輯完成後自動儲存，顯示儲存中、已儲存或失敗重試；修改只寫入所選裝置，讀取或切換裝置不會觸發寫入。同時修復USB按鍵設定回覆、減少藍牙設定重複列舉，並維持錄音燈效動畫連續；保留先前歷史錄音播放和處理提示修復。
+Type build151 / Firmware37：裝置設定編輯完成後自動儲存，顯示儲存中、已儲存或失敗重試；修改只寫入所選裝置，讀取或切換裝置不會觸發寫入。同時修復USB按鍵設定回覆、減少藍牙設定重複列舉，並維持錄音燈效動畫連續；保留先前歷史錄音播放和處理提示修復。 另修復前次儲存未完成時套用新配置被舊請求清掉的問題，確認最新修改儲存完成後才顯示已儲存。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
