@@ -9,6 +9,12 @@ export class DeviceSettingsDraft {
   has(field: keyof DeviceSettingsUpdateRequest): boolean {
     return Object.prototype.hasOwnProperty.call(this.patch, field);
   }
+  get empty(): boolean { return Object.keys(this.patch).length === 0; }
+  clone(): DeviceSettingsDraft {
+    const result = new DeviceSettingsDraft();
+    result.edit(this.patch);
+    return result;
+  }
   merge(freshDeviceForm: DeviceSettingsUpdateRequest): DeviceSettingsUpdateRequest {
     return { ...freshDeviceForm, ...this.patch };
   }

@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { serializeDeviceSettingsSave } from './deviceSettingsSaveQueue.ts';
+const events: string[] = [];
+let release!: () => void;
+const held = new Promise<void>(resolve => { release=resolve; });
+const first=serializeDeviceSettingsSave(async()=>{events.push('A read');await held;events.push('A failed');throw new Error('transport failed');});
+const second=serializeDeviceSettingsSave(async()=>{events.push('B fresh read');events.push('B write');return 'B saved';});
+await Promise.resolve();assert.deepEqual(events,['A read']);release();await assert.rejects(first,/transport failed/);assert.equal(await second,'B saved');
+assert.deepEqual(events,['A read','A failed','B fresh read','B write']);
+console.log('PASS: whole selected-device save transactions serialize; failure does not poison the next target.');

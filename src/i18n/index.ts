@@ -16,6 +16,7 @@ import { ko } from './ko';
 import { zhCN } from './zh-CN';
 import { zhTW } from './zh-TW';
 import type { UserPreferences } from '../lib/types';
+import { deviceAutosaveTranslations } from './deviceAutosave';
 
 export const SUPPORTED_LOCALES = ['zh-CN', 'zh-TW', 'en', 'ja', 'ko'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
@@ -64,6 +65,11 @@ void i18n.use(initReactI18next).init({
   interpolation: { escapeValue: false },
   react: { useSuspense: false }, // 不悬挂；首次渲染必须能拿到译文（无 backend 时 init 同步完成）
 });
+
+for (const [locale, messages] of Object.entries(deviceAutosaveTranslations)) {
+  const { onboardAutoSave, ...device } = messages;
+  i18n.addResourceBundle(locale, 'translation', { settings: { device, deviceKeys: { onboardAutoSave } } }, true, true);
+}
 
 export default i18n;
 

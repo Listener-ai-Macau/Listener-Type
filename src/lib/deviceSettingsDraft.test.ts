@@ -14,6 +14,9 @@ assert.deepEqual(draft.merge(fresh), { ...fresh, statusLedBrightnessPercent: 75 
 // An explicit rename survives a read/retry. A new selection gets its own draft.
 draft.edit({ bleName: 'My-device' });
 assert.equal(draft.merge(fresh).bleName, 'My-device');
+const queued=draft.clone();draft.edit({bleName:'Later edit'});
+assert.equal(queued.merge(boardA).bleName,'My-device');
+assert.equal(new DeviceSettingsDraft().empty,true);assert.equal(queued.empty,false);
 assert.equal(draft.has('bleName'), true);
 const boardB = { ...fresh, bleName: 'Bob' };
 assert.deepEqual(new DeviceSettingsDraft().merge(boardB), boardB);

@@ -1427,7 +1427,7 @@ export function listSettingsDevices(): Promise<SettingsDevice[]> {
 export function getSelectedDeviceSettings(device: SettingsDevice): Promise<SelectedDeviceSettings> {
   return invokeOrMock('get_selected_device_settings', { device }, () => ({ device, revision: mockSettingsRevision, readToken: `demo:${device.id}:${mockSettingsRevision}`, snapshot: { ...mockDeviceSettings }, keys: null, keysError: null }));
 }
-export function setSelectedDeviceKeyProfile(device: SettingsDevice, revision: number, readToken: string, profileRevision: number, profile: DeviceKeyProfile, knobRotationAction: DeviceKnobRotationAction): Promise<SelectedDeviceSettings> {
+export function setSelectedDeviceKeyProfile(device: SettingsDevice, revision: number, readToken: string, profileRevision: number, profile: DeviceKeyProfile, knobRotationAction: DeviceKnobRotationAction | null = null): Promise<SelectedDeviceSettings> {
   return invokeOrMock('set_selected_device_key_profile', { device, revision, readToken, profileRevision, profile, knobRotationAction }, () => ({device,revision,readToken,snapshot:{...mockDeviceSettings},keys:{deviceUid:device.id,revision:profileRevision+1,profile},keysError:null}));
 }
 export function setSelectedDeviceSettings(device: SettingsDevice, revision: number, readToken: string, request: DeviceSettingsUpdateRequest): Promise<SelectedDeviceSettings> {

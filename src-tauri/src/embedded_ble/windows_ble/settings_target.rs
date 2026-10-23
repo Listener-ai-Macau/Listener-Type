@@ -122,6 +122,20 @@ struct SelectedUsbSettings {
 }
 impl SelectedUsbSettings {
     fn exchange(&mut self, command: &str) -> Result<String, String> {
+        // Only queries and transaction-tokened profile staging are replay-safe.
+        // Firmware accepts identical D chunks and same-token B before any D.
+        // Never retry SET, COMMIT, RESET or a Bluetooth-name application.
+        let replay_safe = command == "DEVICE:SETTINGS"
+            || ["DEVICE:KEY R ", "DEVICE:KEY B ", "DEVICE:KEY D "]
+                .iter().any(|prefix| command.starts_with(prefix));
+        if let Some(line) = self.exchange_once(command)? { return Ok(line); }
+        if replay_safe {
+            if let Some(line) = self.exchange_once(command)? { return Ok(line); }
+        }
+        let kind = command.split_ascii_whitespace().take(2).collect::<Vec<_>>().join(" ");
+        Err(format!("Selected USB did not acknowledge {kind}; no other device was tried."))
+    }
+    fn exchange_once(&mut self, command: &str) -> Result<Option<String>, String> {
         if !self.synchronized {
             drain_serial_input_until_quiet(
                 &mut *self.port,
@@ -150,13 +164,13 @@ impl SelectedUsbSettings {
                     }
                     if let Some(line) = complete_device_settings_ok_line(&response) {
                         self.synchronized = true;
-                        return Ok(line);
+                        return Ok(Some(line));
                     }
                     if command == "DEVICE:APPLY_BLE_NAME"
                         && response.contains("~DEVICE:APPLY_BLE_NAME result=OK")
                     {
                         self.synchronized = true;
-                        return Ok(String::new());
+                        return Ok(Some(String::new()));
                     }
                     if response.len() > 65536 {
                         let mut cut = response.len() - 32768;
@@ -173,7 +187,7 @@ impl SelectedUsbSettings {
         }
         let kind = command.split_ascii_whitespace().take(2).collect::<Vec<_>>().join(" ");
         log::warn!("[device-settings] USB acknowledgement missing kind={kind} received_bytes={} complete_lines={}", response.len(), response.bytes().filter(|b| *b == b'\n').count());
-        Err(format!("Selected USB did not acknowledge {kind}; no other device was tried."))
+        Ok(None)
     }
 }
 impl SettingsIo for SelectedUsbSettings {
