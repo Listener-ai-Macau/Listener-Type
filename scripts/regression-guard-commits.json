@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T14:54:11.253896+08:00",
+  "updated_at": "2026-10-23T15:25:16.115729+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -64,6 +64,10 @@
     {
       "repo": "firmware",
       "guard": "python tools/test_status_led_activity_clock.py"
+    },
+    {
+      "repo": "type",
+      "guard": "python scripts/check-selected-usb-exchange.py"
     }
   ],
   "entries": [
@@ -6270,6 +6274,40 @@
       "pending_human_scope": [
         "Owner normal-speaking observation of ring/edge continuity remains pending. No claim every physical blackout cause is solved."
       ]
+    },
+    {
+      "id": "type146_selected_usb_acknowledged_stream_avoids_per_packet_quiet_wait",
+      "repo": "type",
+      "commit": "17c54eec381fc37dbc3fc78be956f04484ee35f4",
+      "commit_subject": "Reuse acknowledged USB settings exchanges and patch Vite editor escaping",
+      "subject": "Bound large selected USB key writes without removing initial drain, complete ACK, exact target or error synchronization",
+      "state": "source_counterexample_passed_candidate146_not_packaged_installed",
+      "protects": [
+        "One exclusive selected COM handle drains initial stale output once. Only a complete successful ACK permits the next packet to reuse synchronization; all errors and unacknowledged APPLY reset it.",
+        "No automatic mutation retries, source/target fallback, deadline removal or profile-CAS/CRC/readback removal. Missing ACK logs only command kind/byte and line counts; no template/name/payload.",
+        "Patch Vite7.3.7 addresses official GHSA-698v-4r3x-3vcv in development tooling; unchanged major/runtime functionality."
+      ],
+      "guards": [
+        "python scripts/check-selected-usb-exchange.py",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/usb146-before-final.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/usb146-after-final.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual production Rust exchange/drain/parser with split fresh acknowledgements and initial stale ACK: before3 writes3 quiet waits540ms; after300 writes1 quiet wait181ms. This is boundary timing, not real COM throughput.",
+        "Injected transport error and explicit DEVICE error force resynchronization before next explicit command; stale pending ACK cannot satisfy it. No automatic command retry.",
+        "Only1 npm package changed, npm audit0 vulnerabilities and TypeScript/Vite7.3.7 production build pass."
+      ],
+      "known_failures": [
+        "Current145/FW33 ordinary UI changed-key save hit a real missing USB ACK; exact original profile was restored. The repeated quiet waits are a confirmed independent bottleneck; the single missing-ACK event is not yet uniquely attributed.",
+        "Private core UI checks initially assumed wrong success text and tagged busy buttons by changing label; preserved as preparation failures, then actual7field UI write/read/reopen/restore passed."
+      ],
+      "pending_human_scope": [
+        "Exact146 native maximum-size selected board key profile write/reopen/restore still pending.",
+        "No new BLE throughput/name/reconnect qualification."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T13:52:14.159313+08:00",
@@ -6869,7 +6907,8 @@
         "customer102_reviewed_result_key_phrase",
         "customer103_distinguishable_reply_keys_and_style_purpose",
         "customer104_actual_key_targets_and_local_page_use",
-        "customer105_saved_phrase_explicit_clipboard_reuse"
+        "customer105_saved_phrase_explicit_clipboard_reuse",
+        "type146_selected_usb_acknowledged_stream_avoids_per_packet_quiet_wait"
       ],
       "paths": {
         "type": [
@@ -6898,7 +6937,14 @@
         "Historical57 F3 audio-service open returned SharingViolation4/AccessDenied3; DIS read succeeds. 58 later reused the exact active notify service; the old failure remains preserved.",
         "2026-10-20 Type65/FW32 BLE rename saved then read retired capture (e889bb7); fixedf1aa37e, actual66 both routes pass.",
         "2026-10-20 dense keys/knob e11r0 had HCI0x08 after partial commit; FW33 atomic state getter fixes known lock dependency, post-write ATT response and profile/core restoration verified."
-      ]
+      ],
+      "latest_source_candidate": {
+        "source": "17c54eec381fc37dbc3fc78be956f04484ee35f4",
+        "build": 146,
+        "packaged": false,
+        "installed": false,
+        "scope": "USB sync/wait lifecycle only; exact native large profile validation pending"
+      }
     },
     {
       "id": "device-onboard-key-profiles",
@@ -6913,7 +6959,8 @@
         "customer102_reviewed_result_key_phrase",
         "customer103_distinguishable_reply_keys_and_style_purpose",
         "customer104_actual_key_targets_and_local_page_use",
-        "customer105_saved_phrase_explicit_clipboard_reuse"
+        "customer105_saved_phrase_explicit_clipboard_reuse",
+        "type146_selected_usb_acknowledged_stream_avoids_per_packet_quiet_wait"
       ],
       "paths": {
         "type": [
@@ -6948,7 +6995,14 @@
       "known_failures": [
         "Legacy UserPreferences were global, and unrelated save/connect could push prior-board knob settings.",
         "Installed59 e889bb7 persisted keys despite20s IPC timeout. Never restore that redundant-transfer/background-write path."
-      ]
+      ],
+      "latest_source_candidate": {
+        "source": "17c54eec381fc37dbc3fc78be956f04484ee35f4",
+        "build": 146,
+        "packaged": false,
+        "installed": false,
+        "scope": "USB sync/wait lifecycle only; exact native large profile validation pending"
+      }
     },
     {
       "id": "customer-first-use",
