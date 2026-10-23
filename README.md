@@ -36,7 +36,7 @@ Firmware: **ESP32-S3 N16R8**, build `e7bd1f1619b696a1`. Select the same ZIP for 
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device, read its settings, then write changes back to that device. Names, lights, power, keys and knob configuration stay on the board. Use this paired MSI and firmware ZIP.
 
-Type build152 / Firmware37: Connection-readiness timeouts now keep the existing pairing and use automatic reconnect instead of diagnosing cache damage without evidence. Fixed-text key actions have clearer names, and selecting an action reveals its fields without moving keyboard focus. Keeps selected-device auto-save, pending-edit protection and the earlier input/History fixes. Firmware37 is unchanged; this update does not change radio parameters or claim faster Bluetooth.
+Type build153 / Firmware37: Routine diagnostics keep small one-second heartbeats instead of repeating unchanged counters, with regular full baselines and complete changed/lifecycle records. Full diagnostic export remains available. Includes selected-device auto-save, clearer key editing and connection-readiness pairing protection from152. Firmware37 is unchanged.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

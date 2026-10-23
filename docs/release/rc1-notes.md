@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build152 / Firmware37
+# Listener v1.0.6-rc1 · Type build153 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -7,35 +7,27 @@
 
 ## In this update
 
-- A connection-readiness timeout now carries its actual failure type through diagnostics. It keeps the existing pairing and normal reconnect instead of treating an unready connection as evidence of stale services. Genuine cache failures keep their prior recovery path.
-- Fixed-text actions have clearer names in all five UI languages. Choosing an action reveals its required fields within the dialog while keeping keyboard focus; local layout save, practice and reopen remain available.
+Routine audio diagnostics now retain one-second liveness with a small reference to the last complete counter snapshot when facts are unchanged. Changed facts and forced lifecycle/error/end records remain complete, and a complete baseline refreshes every 30 seconds. The full bounded diagnostic export is preserved.
 
-- Fixes a newly applied layout being cleared by an earlier pending save. Acknowledgements confirm only their submitted fields; newer edits continue saving to the original device. Failed writes keep the latest layout for explicit retry. Saved feedback waits for all pending edits.
-- Device settings save automatically after you finish an edit. Switches and choices save immediately; names and numeric inputs save when editing finishes; sliders save when released. Saving, saved and failure/retry feedback replaces the separate Write action.
-- Settings and custom key mappings remain on the selected keyboard. Reading, connecting or switching devices does not write settings. Pending edits keep their original target and failed saves remain available for retry.
-- USB key-profile writes use matching request acknowledgements so delayed replies cannot be mistaken for a successful save. Firmware also protects an upload already receiving data from a repeated start command.
-- Bluetooth settings reuse characteristic discovery only within the current selected-device transaction; actual setting values are still read fresh. This reduces repeated discovery, without changing radio parameters or claiming higher air throughput.
-- Recording animation uses its recording lifecycle instead of restarting on state refresh. Earlier History playback/resource, processing-notice and question-session ownership fixes remain included.
+A fixed-counter Windows Rust comparison produced 3 full records and 58 short heartbeats instead of 61 repeated full records: 228,872 to 18,876 bytes. This measures repeated diagnostic metadata, not recognition latency or Bluetooth throughput. The installed app's new log records and exact baseline references were checked during natural use; that window contained genuine changing activity, so it is not an overall old/new byte benchmark.
+
+The build retains build152's per-device automatic save, pending-layout protection, clearer fixed-text editor and factual connection-readiness classification. Recognition/ending/insertion policies and radio parameters are unchanged. Firmware37 is the same verified binary ZIP.
 
 ## Before using
 
-US$49 is the hardware price. Type is free and open source. Recognition and optional text services require preparation and separate usage charges; this release does not provide a ready-to-use official cloud account or allowance. USB flashing and Bluetooth OTA use the same firmware ZIP.
+US$49 is the hardware price; Type is free and open source. Recognition and optional text services require preparation and separate usage charges. This release does not provide a ready-to-use official cloud account or allowance.
 
-Strong-interference exclusion is incomplete. USB auto-save was checked through the actual app UI; current Bluetooth read/write/readback/restore was checked through the selected-device backend with HCI. Ordinary Bluetooth UI, physical HID on another computer, simultaneous physical boards and complete RF capture are not comprehensively qualified. Firmware37 was flashed through Type's built-in USB path while retaining device settings; this stable ZIP contains those exact binary payloads. No new OTA-throughput claim is made. Some remote marketplace/non-English factory content remains untranslated. Automatic shortening can return nearly unchanged wording; review before use.
-
-Actual React checks cover a held earlier request, failures in either request with retry, and switching devices during the save. This batch changes native error classification and key-editor presentation. Existing USB/Bluetooth settings evidence keeps its original scope; firmware and radio parameters are unchanged. The timeout counterexample and recovery protections were checked in actual Windows Rust; the exact MSI was checked through private ordinary UI for local key editing/save/practice/reopen. A live outage was not forced into the daily device.
+Strong-interference exclusion remains incomplete. Prior USB ordinary UI and Bluetooth selected-device backend/readback evidence keep their original scopes; physical HID across computers/boards and full RF following are not comprehensively qualified. This maintenance batch is not a new hardware, purchase, arbitrary-editor or OTA-speed certification. Some remote marketplace/non-English factory content remains untranslated.
 
 ## File identity
 
-- Type source: `0849525b01c58ac1c728f37c01889d3fad23961e` · `build-source/type152-20261023`
-- MSI: 299180032 bytes · SHA256 `d4af78b9c0de8c98f2f40b5170df8c929ba102c1dc55bbc12f970cf8b9618c68`
-- Firmware37 source: `87ea79ec3d6e34a95d09b73e2a5848207a919f1c` · `build-source/firmware37-20261023` · runtime `9d7fbbe67ed0223d`
-- ZIP: 1956799 bytes · SHA256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`
+- Type source:`fd7aa9d4e764e909998b9aba059f7ac40d0c1b6b` · `build-source/type153-20261023`
+- MSI:299204608 bytes · SHA256 `d0cb6e5773b88eda449afb89fc80d695df1c78796b550bf80e5998837da77c1c`
+- Firmware37 source:`87ea79ec3d6e34a95d09b73e2a5848207a919f1c` · `build-source/firmware37-20261023` · runtime `9d7fbbe67ed0223d`
+- ZIP:1956799 bytes · SHA256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`
 
 ## 中文说明
 
-连接尚未就绪的超时不再凭推测认定缓存损坏：错误源记录明确类型，保留现有配对并正常自动重连，有真实过期证据的恢复路径保留。“粘贴模板”改为“输入固定文字”，选动作后在弹窗内露出要填写的内容，保留键盘焦点；本机保存、练习和重开已用本包验证。固件37未变化，不宣称蓝牙提速或全部断线原因已解决。
+本批修复重复音频诊断计数挤占日志：相同状态只记录带完整快照编号的短心跳，仍保留每秒时间线；每30秒补完整基线，有状态变化、错误、开始/结束及迟到尾段时保留完整记录，完整诊断导出不变。固定计数对照减少约92%的重复元数据字节，不代表识别或蓝牙提速；实际安装版已观察到新格式和有效引用。
 
-修复保存期间应用新布局被旧请求清掉：只确认该请求提交的字段，后来的修改继续保存；失败保留最新布局供重试，全部完成后才显示已保存。设备设置编辑完成后自动保存，不用另点“写入”。开关／选项立即保存，文字与数值结束编辑时保存，滑块松手保存；保存失败保留修改并可重试。只写选中设备，不因读取、重连或切换误写旧值；按键档案保存在设备里。USB回执与请求对应，蓝牙同一次事务减少重复枚举但始终读取新值。录音灯效不再随状态刷新重启动画。保留历史录音播放等已验修复。
-
-USB普通界面与当前蓝牙后台的真实读写、回读及还原分别有证据，未冒充普通蓝牙界面／物理HID／第二台电脑／完整空口均已验收。强干扰排除仍有限，云服务需另行准备与计费。本批没有增加云服务或本地模型。
+保留152的设备自动保存、连续修改不丢布局、固定文字编辑和连接超时分类修复。固件37未改。真实输入、硬件及购买结论继续沿各自原证据，不把本次维护算作整体售前验收完成。

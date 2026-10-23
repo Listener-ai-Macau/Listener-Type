@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T20:39:37.321473+08:00",
+  "updated_at": "2026-10-23T21:11:39.505670+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -6672,7 +6672,7 @@
       "commit": "0f13a3232a79e2054c0116a9407a9d39396c27c6",
       "commit_subject": "Keep pipeline liveness without repeating unchanged diagnostic counters",
       "subject": "Retain1Hz liveness with exact full-snapshot references instead of identical multi-KiB counter dumps",
-      "state": "native_counterexample_and41_observability_cases_passed_candidate153_pending",
+      "state": "Type153_matching_package_installed_native_heartbeat_references_verified_public_promotion_complete",
       "protects": [
         "Only unchanged non-forced capture_poll records compact. Full payload facts compare all fields except reason/sequence/clock; a separate heartbeat prefix leaves legacy full-snapshot parsers intact.",
         "Heartbeat names exact capture generation/full-snapshot sequence;1Hz sequence/clock retained. A new full record refreshes at30s, and changed facts, errors, forced lifecycle and late predecessor finals stay complete.",
@@ -6687,19 +6687,24 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\pipeline152-duplicate-poll-sample.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\pipeline-poll-before.log",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\pipeline-poll-after.log",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-203700-ef8182\\result.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-203700-ef8182\\result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261023-build153\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261023-build153\\type153-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build153\\installed153-pipeline-log-proof.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build153\\installed153-runtime-after.json"
       ],
       "machine_accepted_scope": [
         "Installed152 current11-minute file initial tool sample2561942/2616939 bytes pipeline metadata,627/644 repeated facts. Later aggregate saved under share-delete reader; original early file rotated. No private transcript/PCM exported.",
         "Actual Rust before61 full/0heartbeat fails; candidate3 full/58heartbeat across61 synthetic timestamps,228872→18876 bytes. This is91.75% repeated-metadata reduction, not real CPU/ASR latency throughput. Changed/forced/reorder guards pass.",
-        "7 diagnostic cases and full41 observability module pass. Full detail234001 bytes/256ASR facts remains; oversized export preserves prior file. Daily persistent state unchanged in private test."
+        "7 diagnostic cases and full41 observability module pass. Full detail234001 bytes/256ASR facts remains; oversized export preserves prior file. Daily persistent state unchanged in private test.",
+        "Exact Type153 installed with existing settings preserved. Natural installed-process log window277 full records/1 heartbeat; exact full baseline references verified. This is not a matched native old/new overall byte or ASR-latency comparison. Firmware37 remains unchanged."
       ],
       "known_failures": [
         "131/fd872c30 already bounds forced record size and preserves full export. This is distinct residual identical-poll churn, not a new152 recording regression. Existing byte ceiling and logs preserved.",
         "Native baseline compiler2m02 and after2m25; one expected behavior failure. No product MSI yet in this evidence phase."
       ],
       "pending_human_scope": [
-        "Candidate153 not yet packaged/installed. Real logging cadence/bytes pending actual matching app; no all-feature/RF/hardware/49USD purchase qualification."
+        "No new physical key, multi-device/multi-PC, full RF, voice latency or hardware purchase qualification. Previous actual scopes remain separately recorded."
       ]
     }
   ],
