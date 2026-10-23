@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T18:49:56.561173+08:00",
+  "updated_at": "2026-10-23T19:23:29.884965+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -6580,6 +6580,48 @@
       ],
       "pending_human_scope": [
         "Ordinary BLE UI, physical HID, second physical PC/board and full RF remain unqualified; no new real-device async race injected."
+      ]
+    },
+    {
+      "id": "key_action_parameters_visible_after_explicit_selection",
+      "repo": "type",
+      "commit": "056646f37df5c279a2d1131655106d1746bf50db",
+      "commit_subject": "Reveal selected key action fields and name fixed text plainly",
+      "subject": "Reveal action-specific inputs inside the key-layout dialog without shifting keyboard focus or changing saved data",
+      "state": "source_checkpoint_frontend_passed_not_native_packaged_installed_or_customer_retested",
+      "protects": [
+        "Explicit action selection reveals required inputs above the sticky footer; keeps the Action control focused and scrolls only the dialog.",
+        "Opening, reading or restoring a saved layout must not auto-scroll or execute/write a mapping. Preserve stable name geometry, separate gesture mappings, local library save/retry and selected-device scope.",
+        "Fixed-text action labels describe the input outcome in all five shipped locales. Action enum and persisted format remain unchanged."
+      ],
+      "guards": [
+        "python scripts/check-layout-editor-stability-ui.py --url <owned-vite-url> --report <report>",
+        "python scripts/check-device-layouts-ui.py --url <owned-vite-url> --report <report>",
+        "python scripts/check-result-key-phrase-ui.py --url <owned-vite-url> --report <report>",
+        "python scripts/check-device-autosave-ui.py --url <owned-vite-url> --report <report>",
+        "python scripts/check-device-layout-autosave-ui.py --url <owned-vite-url> --report <report> --failure earlier",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build151\\reply-editor-visibility-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build151\\reply-editor-visibility-after.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build151\\reply-editor-layout-save-check.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build151\\reply-editor-incoming-phrase-check.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build151\\reply-editor-device-autosave-check.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build151\\reply-editor-pending-layout-check.json"
+      ],
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE151-20261023\\experience.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE151-20261023\\operations.txt"
+      ],
+      "machine_accepted_scope": [
+        "Current actual React in headless Edge: at1280x800 old template field768..838 is below footer703. Repair covers1280x800,760x800,500x700 and125% zoom with action focus unchanged; local save/Unicode/delayed read and affected auto-save checks pass."
+      ],
+      "known_failures": [
+        "First incoming-phrase checker still used old Overview Design your keys button. It failed before product editing, was aligned to current Design my key layout entry, then original nine checks passed. Not a new product defect."
+      ],
+      "pending_human_scope": [
+        "Native151/public151 still use exacta8aa31d4; this source checkpoint is not a new installed build, customer run, physical-key or BLE proof. Original151 hardware purchase refusal remains unchanged."
       ]
     }
   ],
