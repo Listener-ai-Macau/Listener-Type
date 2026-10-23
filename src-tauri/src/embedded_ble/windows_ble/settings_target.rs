@@ -265,6 +265,7 @@ impl SettingsIo for SelectedUsbSettings {
 struct SelectedBleSettings {
     target: OpenEmbeddedAudioStatusTarget,
     control: Option<GattCharacteristic>,
+    settings: Option<GattCharacteristic>,
     capture_id: Option<u64>,
 }
 impl SelectedBleSettings {
@@ -280,13 +281,23 @@ impl SelectedBleSettings {
 impl SettingsIo for SelectedBleSettings {
     fn read(&mut self) -> Result<crate::embedded_ble::DeviceSettingsStatus, String> {
         self.ensure_capture_current()?;
-        let characteristic = open_read_characteristic_from_service_with_timeout(
-            &self.target.service,
-            DEVICE_SETTINGS_REVISION_UUID,
-            "selected settings",
-            BluetoothCacheMode::Uncached,
-            Duration::from_secs(3),
-        )?;
+        // One selected service for this bounded transaction. Discover its
+        // characteristic once, but always read its VALUE uncached below.
+        // Re-enumerating the same UUID for every key-profile page adds ATT
+        // discovery traffic without making that page's value any fresher.
+        let characteristic = if let Some(characteristic) = &self.settings {
+            characteristic.clone()
+        } else {
+            let characteristic = open_read_characteristic_from_service_with_timeout(
+                &self.target.service,
+                DEVICE_SETTINGS_REVISION_UUID,
+                "selected settings",
+                BluetoothCacheMode::Uncached,
+                Duration::from_secs(3),
+            )?;
+            self.settings = Some(characteristic.clone());
+            characteristic
+        };
         let bytes = read_characteristic_bytes_with_timeout(
             &characteristic,
             BluetoothCacheMode::Uncached,
@@ -427,6 +438,7 @@ pub fn with_settings_device<T>(
                     return super::settings_target::bounded(&mut SelectedBleSettings {
                         target: OpenEmbeddedAudioStatusTarget { service, device: active.settings_device.clone() },
                         control: active.settings_control.clone(),
+                        settings: None,
                         capture_id: Some(active.capture_id),
                     },deadline,task);
                 }
@@ -452,7 +464,7 @@ pub fn with_settings_device<T>(
             if target.service.Uuid().map_err(|e| e.to_string())? != SERVICE_UUID {
                 return Err("Selected device is not a Listener settings service.".into());
             }
-            super::settings_target::bounded(&mut SelectedBleSettings { target, control: None, capture_id: None },deadline,task)
+            super::settings_target::bounded(&mut SelectedBleSettings { target, control: None, settings: None, capture_id: None },deadline,task)
         }
         _ => Err("Unknown settings transport".into()),
     }
