@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T21:32:41.560801+08:00",
+  "updated_at": "2026-10-23T21:58:04.405986+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -6713,7 +6713,7 @@
       "commit": "e3c4d3d3f475e0b8ecc94740e417626a9256f49c",
       "commit_subject": "Recover onboard key profiles after deferred connection reads",
       "subject": "Connection-owned read-only preload retries after transient errors and recordings longer than30 seconds, with exact-peer/cancellation fences",
-      "state": "actual_Windows_compile_and_private_native9_cases_passed_candidate154_not_packaged",
+      "state": "Type154_matching_package_installed_native_scoped_proof_and_public_asset_verified",
       "protects": [
         "Only the current exact peer/generation gets one synchronization task; duplicate notify-ready does not spawn another read loop.",
         "Continuous recording/pending device actions defer reads without a30-second abandonment. Two idle seconds precede reads; transport queries yield at each protocol boundary when recording starts or the connection changes.",
@@ -6729,18 +6729,23 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\onboard-sync154-after.log",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\compile154-key-sync.log",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-212957-8620be\\result.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-213016-bc77e2\\result.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-213016-bc77e2\\result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261023-build154\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261023-build154\\type154-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build154\\automatic-preload-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener154-preload-20261023-214907\\passive-metadata.json"
       ],
       "machine_accepted_scope": [
         "Original one-shot schedule source through153 comes frome889bb7c. Extracted production driver reproduces3 failing cases; candidate6/6 pass with controlled clock/readiness/read results. This is host policy qualification, not actual RF fault injection.",
-        "Full Windows test compilation3m54s; exact new binary47e22762... in private station passes6 driver and3 existing profile cases,0 ignores/cleanup errors/daily persistent changes. No desktop/clipboard/cloud/hardware input."
+        "Full Windows test compilation3m54s; exact new binary47e22762... in private station passes6 driver and3 existing profile cases,0 ignores/cleanup errors/daily persistent changes. No desktop/clipboard/cloud/hardware input.",
+        "Exact154 Idle-installed with persistent state preserved. Without manual settings/profile read, automatic generation1 preload completed21:49:25.962; audio ready. Actual HCI175 frames include16 matching UID98c377b4e88c/revision25/684-byte/checksum headers. Passive nRF137 READY/STOP plus35660-byte exact-UID firmware UART recorded. Normal startup only; failure/long-recording recovery is controlled private-native proof, not physical fault injection/fullRF/physical key/secondPC."
       ],
       "known_failures": [
         "Previous149 USB/150 BLE explicit R/W and151 edit ACK tests did not cover automatic cold connection preload abandonment. No assertion that these gaps caused every earlier user wake or key issue.",
         "Three current target-extraction local_wake_helper_busy warnings are diagnostic only; original surrounding records rotated before correlation. No new model/threshold change or confirmed wake regression derived from them."
       ],
       "pending_human_scope": [
-        "Candidate154 not packaged/installed; automatic real BLE startup/profile read and recording-yield observation pending. No physical HID/second PC/fullRF/customer buying qualification."
+        "No new physical key, multi-device/multi-PC, full RF, voice latency or hardware purchase qualification. Previous actual scopes remain separately recorded."
       ]
     }
   ],
