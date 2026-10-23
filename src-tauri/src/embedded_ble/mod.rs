@@ -354,16 +354,25 @@ pub(crate) const LISTENER_BLE_FAILURE_HINTS: denzic_ble_windows::failure::BleFai
         device_missing: &["no writable listener ble ota"],
     };
 
+// A producer fact must take precedence over diagnostic wording. Keep this tag
+// stable across wrapping/localization; legacy errors still use shared taxonomy.
+const GATT_READINESS_TIMEOUT_TAG: &str = "[ble.gatt_readiness_timeout]";
+
 pub fn classify_ble_failure(error: &str) -> BleFailureClassification {
     let classification = denzic_ble_windows::failure::classify_ble_failure_with_hints(
         error,
         &LISTENER_BLE_FAILURE_HINTS,
     );
-    let kind = map_platform_ble_failure_kind(classification.kind);
+    let readiness_timeout = error.contains(GATT_READINESS_TIMEOUT_TAG);
+    let kind = if readiness_timeout {
+        BleFailureKind::PairedButDisconnected
+    } else {
+        map_platform_ble_failure_kind(classification.kind)
+    };
     BleFailureClassification {
         kind,
-        retryable: classification.retryable,
-        automatic_recovery: classification.automatic_recovery,
+        retryable: readiness_timeout || classification.retryable,
+        automatic_recovery: readiness_timeout || classification.automatic_recovery,
         user_action: listener_ble_failure_user_action(kind),
         evidence: classification.evidence,
     }

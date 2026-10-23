@@ -3,6 +3,27 @@ use super::*;
 use crate::types::{DictationInputSource, HotkeyMode, HotkeyTrigger};
 use once_cell::sync::Lazy;
 
+#[test]
+fn gatt_readiness_timeout_preserves_pairing_and_retry_guidance() {
+    let error = "[ble.gatt_readiness_timeout] BLE GATT session did not become active after 1800 ms initial=Some(GattSessionStatus(0)) current=Some(GattSessionStatus(0)); GATT connection attempt timed out";
+    let snapshot = EmbeddedBleWakeRecoverySnapshot {
+        notify_subscription_state: EmbeddedBleNotifySubscriptionState::Failed,
+        consecutive_reconnect_failures: 30,
+        reconnect_attempts: 30,
+        usb_powered: Some(true),
+        ..Default::default()
+    };
+    assert!(!is_embedded_ble_background_stale_pairing_cleanup_candidate(error, &snapshot));
+    assert!(!recovery_pairing_advertisement_allows_immediate_stale_cleanup(error));
+    let guidance = embedded_ble_wake_guidance_for_error_with_power(error, None);
+    assert!(guidance.contains("自动重连"));
+    assert!(!guidance.contains("重新配对"));
+    // Real, untagged stale-service failures retain their existing recovery.
+    let stale = "Unknown GATT service from stale cached service table";
+    assert!(is_embedded_ble_background_stale_pairing_cleanup_candidate(stale, &snapshot));
+    assert!(recovery_pairing_advertisement_allows_immediate_stale_cleanup(stale));
+}
+
 macro_rules! include_str {
     ("coordinator.rs") => {
         concat!(

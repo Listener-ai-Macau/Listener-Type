@@ -451,14 +451,23 @@ fn prepare_gatt_session(
         );
         release_gatt_maintain_request(&session, "GATT readiness timeout");
         release_winrt_bluetooth_object(session);
-        return Err(format!(
-            "BLE GATT session did not become active after {} ms initial={:?} current={:?}; stale GATT/cache or paired device disconnected",
-            timeout.as_millis(),
-            initial_status,
-            current_status
-        ));
+        return Err(gatt_readiness_timeout_error(timeout, initial_status, current_status));
     }
     Ok(Some(session))
+}
+
+fn gatt_readiness_timeout_error(
+    timeout: Duration,
+    initial_status: Option<GattSessionStatus>,
+    current_status: Option<GattSessionStatus>,
+) -> String {
+    // Closed/unknown session state proves only that this attempt timed out.
+    // Speculating about stale services here also changes failure classification
+    // and can make an offline peer a candidate for pairing-cache recovery.
+    format!(
+        "{} BLE GATT session did not become active after {} ms initial={:?} current={:?}; GATT connection attempt timed out",
+        super::GATT_READINESS_TIMEOUT_TAG, timeout.as_millis(), initial_status, current_status
+    )
 }
 
 fn release_gatt_maintain_request(session: &GattSession, context: &str) {

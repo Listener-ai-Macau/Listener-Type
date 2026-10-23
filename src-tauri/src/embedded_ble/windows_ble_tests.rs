@@ -3,6 +3,24 @@
 
 use super::*;
 
+#[test]
+fn gatt_readiness_timeout_keeps_pairing_without_claiming_cache_damage() {
+    for status in [Some(GattSessionStatus::Closed), None] {
+        let error = gatt_readiness_timeout_error(Duration::from_millis(1800), status, status);
+        let failure = crate::embedded_ble::classify_ble_failure(&error);
+        assert_eq!(failure.kind, crate::embedded_ble::BleFailureKind::PairedButDisconnected,
+            "Readiness timeout alone does not establish stale services or missing pairing: {error}");
+        assert!(failure.retryable && failure.automatic_recovery);
+        assert!(denzic_ble_windows::failure::is_ble_offline_backoff_error(&error));
+        assert!(!error.contains("stale"));
+        // Wrapping or a speculative diagnostic must not change the producer's
+        // recorded timeout into evidence of a broken pairing/cache.
+        let wrapped = format!("notify target open failed: {error}; prior diagnostic: stale GATT/cache");
+        assert_eq!(crate::embedded_ble::classify_ble_failure(&wrapped).kind,
+            crate::embedded_ble::BleFailureKind::PairedButDisconnected);
+    }
+}
+
 // These fixtures have a control queue but no real WinRT device. Production
 // registration/readiness/cleanup still runs through the shared implementation.
 fn install_test_audio_control(
