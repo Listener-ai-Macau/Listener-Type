@@ -1560,7 +1560,7 @@ fn emit(event: &'static str, envelope: EventEnvelope) {
 // counters deliberately live beside, rather than inside, the audio protocol
 // state machine: a logging failure or a snapshot race must never change packet
 // admission, recovery, endpointing, or delivery behavior.
-#[derive(Clone, Copy, Default, Serialize)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize)]
 struct PipelineCounters {
     raw_notify_count: u64,
     raw_notify_bytes: u64,
@@ -1712,6 +1712,7 @@ pub(crate) struct EmbeddedAudioPipelineObservation {
     capture_generation: u64,
     state: Mutex<PipelineObservationState>,
     snapshot_sink: Mutex<Option<Arc<dyn Fn(String) + Send + Sync>>>,
+    last_logged_production_summary: Mutex<Option<PipelineSummarySnapshot>>,
 }
 
 impl EmbeddedAudioPipelineObservation {
@@ -1755,6 +1756,7 @@ impl EmbeddedAudioPipelineObservation {
                 candidate_ledger: CandidateFactLedger::default(),
             }),
             snapshot_sink: Mutex::new(None),
+            last_logged_production_summary: Mutex::new(None),
         }
     }
 
@@ -2669,12 +2671,7 @@ impl EmbeddedAudioPipelineObservation {
         // detail ledgers onto the capture path or into a 64 KiB log record.
         // Explicit diagnostic exports and test sinks retain full evidence.
         if self.snapshot_sink.lock().is_none() {
-            for summary in self.production_summaries(reason, force) {
-                match serde_json::to_string(&summary) {
-                    Ok(payload) => log::info!("[obs-audio-pipeline] {payload}"),
-                    Err(_) => log::warn!("[obs-audio-pipeline] summary serialization failed"),
-                }
-            }
+            self.log_production_summaries(reason, force);
             return;
         }
         let snapshot = {
@@ -2829,7 +2826,7 @@ impl EmbeddedAudioPipelineObservation {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 struct PipelineSummarySnapshot {
     event: &'static str,
     detail: &'static str,

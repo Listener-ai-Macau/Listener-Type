@@ -23,6 +23,22 @@ pub(super) fn remember_ended(observation: &Arc<EmbeddedAudioPipelineObservation>
 }
 
 impl EmbeddedAudioPipelineObservation {
+    pub(super) fn log_production_summaries(&self, reason: &'static str, force: bool) {
+        let records = self.production_summaries(reason, force);
+        if records.is_empty() {
+            return;
+        }
+        // This lock orders log emission/cache updates, never capture admission.
+        // No detailed ledger is cloned or serialized by the routine log path.
+        let mut previous = self.last_logged_production_summary.lock();
+        for summary in records {
+            match encode_production_summary(summary, force, &mut previous) {
+                Ok((tag, payload)) => log::info!("{tag} {payload}"),
+                Err(_) => log::warn!("[obs-audio-pipeline] summary serialization failed"),
+            }
+        }
+    }
+
     pub(super) fn production_summaries(
         &self,
         reason: &'static str,
@@ -98,6 +114,51 @@ impl EmbeddedAudioPipelineObservation {
             })
             .collect()
     }
+}
+
+#[derive(Serialize)]
+struct PipelineHeartbeat {
+    event: &'static str,
+    capture_generation: u64,
+    snapshot_seq: u64,
+    monotonic_ms: u64,
+    full_snapshot_seq: u64,
+}
+
+fn encode_production_summary(
+    summary: PipelineSummarySnapshot,
+    force: bool,
+    previous: &mut Option<PipelineSummarySnapshot>,
+) -> Result<(&'static str, String), serde_json::Error> {
+    if !force && summary.reason == "capture_poll" {
+        if let Some(base) = previous.as_ref().filter(|base| {
+            summary.snapshot_seq > base.snapshot_seq
+                && summary.monotonic_ms >= base.monotonic_ms
+                && summary.monotonic_ms - base.monotonic_ms < 30_000
+        }) {
+            // Compare every summary fact; only log metadata may differ. This
+            // copies a bounded counter summary, never any detailed fact ledger.
+            let mut facts = summary.clone();
+            facts.reason = base.reason;
+            facts.snapshot_seq = base.snapshot_seq;
+            facts.monotonic_ms = base.monotonic_ms;
+            if facts == *base {
+                let heartbeat = PipelineHeartbeat {
+                    event: "embedded_audio_pipeline_heartbeat",
+                    capture_generation: summary.capture_generation,
+                    snapshot_seq: summary.snapshot_seq,
+                    monotonic_ms: summary.monotonic_ms,
+                    full_snapshot_seq: base.snapshot_seq,
+                };
+                // A separate prefix preserves existing full-snapshot parsers.
+                // The exact base ID also works if other log lines interleave.
+                return Ok(("[obs-audio-pipeline-heartbeat]", serde_json::to_string(&heartbeat)?));
+            }
+        }
+    }
+    let payload = serde_json::to_string(&summary)?;
+    *previous = Some(summary);
+    Ok(("[obs-audio-pipeline]", payload))
 }
 
 struct BoundedJson(Vec<u8>);
@@ -218,6 +279,91 @@ pub(crate) fn export_audio_pipeline_diagnostics() -> Result<serde_json::Value, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unchanged_poll_logs_keep_clock_but_do_not_repeat_all_counters() {
+        let observation = populated_observation();
+        let template = observation.production_summaries("capture_poll", true).remove(0);
+        let mut previous = None;
+        let mut full = 0;
+        let mut heartbeats = 0;
+        let mut bytes = 0;
+        let original_bytes = serde_json::to_vec(&template).unwrap().len() * 61;
+        for second in 0..=60 {
+            let mut summary = template.clone();
+            summary.snapshot_seq = second + 1;
+            summary.monotonic_ms = second * 1000;
+            let (tag, text) = encode_production_summary(summary, false, &mut previous).unwrap();
+            bytes += text.len();
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(value["snapshot_seq"], second + 1);
+            assert_eq!(value["monotonic_ms"], second * 1000);
+            if tag == "[obs-audio-pipeline]" {
+                full += 1;
+                assert_eq!(value["event"], "embedded_audio_pipeline_snapshot");
+                assert!(value["counters"].is_object());
+            } else {
+                heartbeats += 1;
+                assert_eq!(tag, "[obs-audio-pipeline-heartbeat]");
+                assert_eq!(value["event"], "embedded_audio_pipeline_heartbeat");
+                assert!(value["full_snapshot_seq"].as_u64().unwrap() < second + 1);
+                assert!(value.get("counters").is_none());
+            }
+        }
+        assert_eq!((full, heartbeats), (3, 58));
+        assert!(bytes < original_bytes / 4, "duplicate counter bytes were not reduced");
+        println!("unchanged_poll_bytes old={original_bytes} new={bytes} full={full} heartbeats={heartbeats}");
+    }
+
+    #[test]
+    fn changed_facts_and_forced_lifecycle_records_remain_complete() {
+        let observation = populated_observation();
+        let base = observation.production_summaries("capture_poll", true).remove(0);
+        let mut changes = Vec::new();
+        let mut value = base.clone();
+        value.coordinator_session_id = Some("new-recording-owner".into()); changes.push(value);
+        let mut value = base.clone();
+        value.capture_generation += 1; changes.push(value);
+        let mut value = base.clone();
+        value.counters.asr_send_failed_frame_count += 1; changes.push(value);
+        let mut value = base.clone();
+        value.segment_counters.get_mut(&17).unwrap().coordinator_error_count += 1; changes.push(value);
+        let mut value = base.clone();
+        value.collector_pcm_facts_incomplete = !value.collector_pcm_facts_incomplete; changes.push(value);
+        let mut value = base.clone();
+        value.reason = "segment_settled"; changes.push(value);
+        for mut summary in changes {
+            summary.snapshot_seq = base.snapshot_seq + 1;
+            summary.monotonic_ms = base.monotonic_ms + 1000;
+            let (tag, text) = encode_production_summary(summary, false, &mut Some(base.clone())).unwrap();
+            assert_eq!(tag, "[obs-audio-pipeline]");
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert!(value["counters"].is_object());
+        }
+        for reason in ["capture_poll", "capture_error", "capture_stopped", "coordinator_terminal_drained"] {
+            let mut summary = base.clone();
+            summary.reason = reason;
+            summary.snapshot_seq += 1;
+            summary.monotonic_ms += 1000;
+            let (tag, _) = encode_production_summary(summary, true, &mut Some(base.clone())).unwrap();
+            assert_eq!(tag, "[obs-audio-pipeline]");
+        }
+    }
+
+    #[test]
+    fn reordered_or_rewound_poll_cannot_reference_a_newer_full_snapshot() {
+        let observation = populated_observation();
+        let mut base = observation.production_summaries("capture_poll", true).remove(0);
+        base.snapshot_seq = 10;
+        base.monotonic_ms = 2000;
+        for (sequence, clock) in [(9, 3000), (11, 1000)] {
+            let mut summary = base.clone();
+            summary.snapshot_seq = sequence;
+            summary.monotonic_ms = clock;
+            let (tag, _) = encode_production_summary(summary, false, &mut Some(base.clone())).unwrap();
+            assert_eq!(tag, "[obs-audio-pipeline]");
+        }
+    }
 
     fn populated_observation() -> EmbeddedAudioPipelineObservation {
         let observation = EmbeddedAudioPipelineObservation::new(131);
