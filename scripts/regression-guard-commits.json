@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T12:24:37.956915+08:00",
+  "updated_at": "2026-10-23T12:38:45.178183+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -6077,7 +6077,7 @@
       "commit": "c77bc94e8d50f92ccffae5ccd60b5ba6981f3cb5",
       "subject": "Bind text-trial privacy and eligibility to the selected style",
       "commit_subject": "Bind text-trial privacy and eligibility to the selected style [skip ci]",
-      "state": "source_candidate_controlled_render_transition_verified_not_packaged_or_installed",
+      "state": "exact142_MSI_native_policy_labels_and_frontend_transition_verified_installed_public_prepared",
       "protects": [
         "Processing locality notice and submission eligibility belong only to the selected saved style/revision/retry, never the previous React state before useEffect refresh.",
         "Late callbacks remain disposed; drafting stays independent of readiness checking/failure/retry; no new request, activation, credential or provider changes.",
@@ -6091,19 +6091,30 @@
       "machine_evidence": [
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\readiness141-identity-frozen-before.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\readiness142-identity-after.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\readiness142-retained-drafting.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\readiness142-retained-drafting.json",
+        "work\\customer-onboarding-20261020\\isolated-native142-snapshot-20261023-123451\\readiness142-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261023-build142\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261023-build142\\type142-installed.json"
       ],
       "customer_evidence": [
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE141-20261023\\experience.txt",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE141-20261023\\04-draft-light.png"
       ],
       "unverified": [
-        "Screenshot04 shows correct cloud notice before submit, so it does not prove sustained wrong wording. Frozen141 actual React delayed-readiness transition reproduces one committed stale notice plus enabled control, not a visible duration or real unintended cloud request.",
-        "Candidate source checked only. Exact MSI/native validation, installation and customer re-use pending grouped delivery; daily/public141 retained."
-      ]
+        "Customer04 screenshot shows correct cloud notice, so sustained wrong wording or an unauthorized request is not established. Frozen141 React transition reproduces stale notice and enabled control; no visible-duration measurement.",
+        "Delayed and late checks use controlled actual-React frontend fixtures. Native142 verifies actual keyless policy, draft retention and saved-revision labels; it cannot replace frozen IPC methods.",
+        "No new speech/hardware/strong-interference/global shortcut qualification. Original141 customer refusal and earlier limited real140 speech evidence retain their original scope."
+      ],
+      "delivery": {
+        "build": 142,
+        "source": "474a8b5ccfaa1d53611ad8d10e16cdb1ae9cfee9",
+        "installed": true,
+        "publicPrepared": true
+      },
+      "previous_source_only_state": "source_candidate_controlled_render_transition_verified_not_packaged_or_installed"
     }
   ],
-  "feature_routes_updated_at": "2026-10-23T11:57:06.630842+08:00",
+  "feature_routes_updated_at": "2026-10-23T12:38:45.178183+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -7172,10 +7183,11 @@
     },
     {
       "id": "text-workspace-clarity",
-      "accepted_scope": "Text workspace visual hierarchy and content-first saved-draft discovery only; speech/BLE/firmware unchanged.",
+      "accepted_scope": "Text workspace visual hierarchy and content-first saved-draft discovery only; speech/BLE/firmware unchanged. Type142 binds processing notice/eligibility to selected style/revision/retry; exact private MSI verifies actual policy/labels and separate actual-React fixtures cover delays, not a real unauthorized cloud request or visible-duration measurement.",
       "baseline_state": "affected_ui_exact_native_installed_verified_not_customer_or_physical_qualified",
       "guard_entries": [
-        "ui135_text_workspace_focus_and_content_first_saved_drafts"
+        "ui135_text_workspace_focus_and_content_first_saved_drafts",
+        "type142_text_trial_selected_style_readiness_identity"
       ],
       "paths": {
         "type": [
@@ -7185,7 +7197,8 @@
           "src/components/SavedTextDraftsDialog.tsx",
           "src/i18n/textWorkspace.ts",
           "scripts/check-ui-clarity-ui.py",
-          "scripts/check-saved-text-drafts-ui.py"
+          "scripts/check-saved-text-drafts-ui.py",
+          "src/components/StyleTrialAvailability.tsx"
         ]
       }
     },

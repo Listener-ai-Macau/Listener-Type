@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-23T11:57:06.630842+08:00",
+  "updatedAt": "2026-10-23T12:38:45.178183+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 141,
-    "source": "bc5a4eeebde923d840568a6b5f24f51dabe4fb52",
-    "sourceTag": "build-source/type141-20261023",
+    "build": 142,
+    "source": "474a8b5ccfaa1d53611ad8d10e16cdb1ae9cfee9",
+    "sourceTag": "build-source/type142-20261023",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "ba2a421a179d916109ed19b27300358ca2b1ad7a4e44fa997e8239d53b6091b4",
-    "sizeBytes": 299220992,
-    "exeSha256": "cc6f5c01f6b234600826337f2f54ee258336242cec91634ed9720ea289397eea",
+    "sha256": "81c5a918e2348a842620be3031649d52d8e60c3d3961fc2fa8d298d84948a5a5",
+    "sizeBytes": 299208704,
+    "exeSha256": "c8520953d487b96c1ef1f1c3e3f5ff1fdc5156824884f940ee7c42c34d7459e4",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -327,7 +327,15 @@
     "type141OwnerNetworkActuallyInterrupted": false,
     "type141NarrowEnglishHelpersVerified": true,
     "type141FreshPhysicalFlashOtaQualified": false,
-    "customer141PurchaseQualification": false
+    "customer141PurchaseQualification": false,
+    "type142SelectedStyleFirstRenderPrivacyAndEligibilityVerified": true,
+    "type142LateDifferentStyleReadinessIgnored": true,
+    "type142SavedRevisionAvailabilityIdentityVerified": true,
+    "type142NativeEvidenceUsesControlledReadinessDelay": false,
+    "type142ActualUnauthorizedCloudRequestObserved": false,
+    "type142RecordingOrBluetoothChanged": false,
+    "type142NativePolicyAndLabelsVerified": true,
+    "type142HeadlessReactDelayedReadinessFixtureVerified": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -337,13 +345,14 @@
     "Firmware33 prior settings/OTA evidence remains under its original app scope; no new141 full flash/OTA acceptance.",
     "No160KB/s, dual-microphone, independent hardware buying or real payment qualification.",
     "Optional local inference and some remote/nonEnglish factory content remain unqualified.",
-    "Updates use official MSI downloads; no stable signed automatic-updater feed."
+    "Updates use official MSI downloads; no stable signed automatic-updater feed.",
+    "Automatic shortening may return near-identical wording; no language-quality guarantee."
   ],
   "maintenance": {
     "remoteBranch": "master",
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build141-20261023"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build142-20261023"
   }
 }
