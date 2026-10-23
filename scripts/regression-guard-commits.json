@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T23:37:42.586449+08:00",
+  "updated_at": "2026-10-23T23:45:59.210081+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -6754,7 +6754,7 @@
       "commit": "ab28286eaaaddc250583cee9f9ca6f44b91202c8",
       "commit_subject": "Route device translation through selected recording source and lifecycle",
       "subject": "Device Translation uses selected input and symmetric stop; mode belongs to session creation, OTA denies at both boundaries",
-      "state": "Type155_matching_candidate_MSI_verified_not_installed_or_published",
+      "state": "Type156_combined_installed_public_delivery_inherits155_controlled_source_proof_physical_translation_pending",
       "protects": [
         "Translation uses shared selected-source start and stop, independent of desktop Hold/Toggle.",
         "Mode is bound synchronously when session is created, retained during same-session BLE attachment, and reset only for a new ordinary recording.",
@@ -6770,11 +6770,16 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-224132-9bec8b\\result.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\translation155-before.exe",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\translation154-before.rs.txt",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261023-build155\\type-artifact-verification.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261023-build155\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261023-build156\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261023-build156\\type156-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261023-build156\\published.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build156\\post-update-native.json"
       ],
       "machine_accepted_scope": [
         "Two actual old coordinator counterexamples fail: BLE source enters microphone dry-run Listening; OTA still starts recording. Private station; no physical audio/input.",
-        "13 translation-related plus196 coordinator cases pass (overlapping filters; not209 distinct). Includes6 new production-path cases;0ignored/private cleanup errors/daily persistent changes."
+        "13 translation-related plus196 coordinator cases pass (overlapping filters; not209 distinct). Includes6 new production-path cases;0ignored/private cleanup errors/daily persistent changes.",
+        "The155 MSI remained an uninstalled candidate. Its unchanged selected-source/start-stop repair is included in installed/public156 source1eda7b28. Earlier6 controlled translation cases are inherited; installed identity/data retention/normal audio readiness are verified156. Physical Translation key/speech/cloud result remains pending."
       ],
       "known_failures": [
         "Legacy4711ae2b2 route predates current154. Persistence/UI tests did not exercise Translation action; not attribution for every historic voice defect."
@@ -6782,7 +6787,8 @@
       "pending_human_scope": [
         "No physical Translation key press, actual microphone/BLE speech-to-translation, external target insertion, full RF or purchase qualification.",
         "Prior140 voice,149/150 settings and154 automatic preload evidence retain their actual scopes."
-      ]
+      ],
+      "humanAccepted": false
     },
     {
       "id": "qa_followup_selection_and_honest_saved_answer_history",
