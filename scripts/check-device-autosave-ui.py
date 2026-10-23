@@ -21,7 +21,7 @@ window.__fixture=async(cmd,args,mock)=>{
  if(cmd==='list_installed_applications')return [{name:'Fixture App',path:'C:\\Fixture\\app.exe'}];
  if(!['get_selected_device_settings','set_selected_device_settings','set_selected_device_key_profile'].includes(cmd))return mock();
  const id=args.device.id,uid=id.split(':')[1];let b=window.__boards[uid];
- if(!b){const s=mock().snapshot;b=window.__boards[uid]={revision:10,keysRevision:4,lease:0,snapshot:{...s,source:'firmware',connected:true,writeSupported:true,bleName:uid==='A'?'Alpha':'Bravo',statusLedBrightnessPercent:uid==='A'?21:73,keyLedBrightnessPercent:37,knobLedBrightnessPercent:49,edgeLedBrightnessPercent:56,pluggedLowPowerIdleMinutes:5,batteryLowPowerIdleMinutes:7,pluggedLowPowerEnabled:true,voiceAutoStartEnabled:true,voiceAutoStopEnabled:true,pluggedAutoShutdownMs:0,batteryAutoShutdownMs:19*60000,knobRotationAction:'system_volume'},profile:{schema:1,deviceCustomKeys:group(),deviceCustomKeyDoubleClicks:group(),deviceCustomKeyLongPresses:group(),hid:Array.from({length:15},()=>[1,0,0])}};}
+ if(!b){const s=mock().snapshot;b=window.__boards[uid]={revision:10,keysRevision:4,lease:0,snapshot:{...s,source:'firmware',connected:true,writeSupported:true,bleName:uid==='A'?'Alpha':'Bravo',statusLedBrightnessPercent:uid==='A'?21:73,keyLedBrightnessPercent:37,knobLedBrightnessPercent:49,edgeLedBrightnessPercent:56,pluggedLowPowerIdleMinutes:5,batteryLowPowerIdleMinutes:7,pluggedLowPowerEnabled:true,voiceAutoStartEnabled:true,voiceAutoStopEnabled:true,pluggedAutoShutdownMs:0,batteryAutoShutdownMs:19*60000,knobRotationAction:'system_volume'},profile:{schema:1,deviceCustomKeys:group(),deviceCustomKeyDoubleClicks:{...group(),key4:{...mapping(),pasteTemplate:uid==='B'?'Retained Bravo note':''}},deviceCustomKeyLongPresses:group(),hid:Array.from({length:15},()=>[1,0,0])}};}
  if(cmd==='get_selected_device_settings'){
   if(window.__holdRead===id)await new Promise(resolve=>window.__held.push(resolve));
   b.lease++;
@@ -44,8 +44,15 @@ window.__fixture=async(cmd,args,mock)=>{
    response=route.fetch();source=response.text();old='if (!isTauri) {\n    return mock();\n  }';assert source.count(old)==1
    route.fulfill(response=response,body=source.replace(old,'if (!isTauri) {\n    return window.__fixture(cmd,args,mock);\n  }',1))
   page.route(re.compile(r'/src/lib/ipc\.ts(?:\?.*)?$'),fixture)
-  page.goto(a.url,wait_until='networkidle');page.locator('button[title]').first.click();page.locator('.ol-settings-nav button').first.click()
+  page.goto(a.url,wait_until='networkidle');page.evaluate('window.__holdRead="usb:A"');page.locator('button[title]').first.click();page.locator('.ol-settings-nav button').first.click()
   core=page.locator('.ol-device-settings-card');keys=page.locator('fieldset').filter(has=page.get_by_role('combobox',name='选择设备键动作').first)
+  page.wait_for_function('window.__held.length===1')
+  pending_number=core.locator('input[type=number]').nth(3);pending_number.fill('42');pending_number.press('Tab')
+  page.wait_for_function('window.__held.length===2')
+  assert page.evaluate('window.__calls.filter(x=>x.cmd.startsWith("set_selected_device")).length')==0
+  page.evaluate('window.__holdRead=null;window.__held.splice(0).forEach(r=>r())');expect(core).to_contain_text('已保存到设备')
+  assert page.evaluate('window.__boards.A.snapshot.bleName')=='Alpha';assert page.evaluate('window.__boards.A.snapshot.statusLedBrightnessPercent')==42
+  pending_number.fill('21');pending_number.press('Tab');expect(core).to_contain_text('已保存到设备');page.evaluate('window.__calls=[]');r['explicitEditBeforeInitialReadCompletesStillAutosaves']=True
   expect(core.locator('input[placeholder=listener]')).to_have_value('Alpha')
   expect(keys.get_by_role('combobox',name='选择设备键动作')).to_have_count(13)
   writes=lambda:page.evaluate('window.__calls.filter(x=>x.cmd.startsWith("set_selected_device"))')
@@ -67,7 +74,10 @@ window.__fixture=async(cmd,args,mock)=>{
   r['keyActionAutosavesOverSelectedBluetooth']=True
   page.evaluate('window.__failNext="set_selected_device_key_profile"');choose(k,'粘贴 Ctrl+V');expect(keys).to_contain_text('保存失败，修改已保留');expect(k).to_contain_text('粘贴 Ctrl+V');n=len(writes());quiet();assert len(writes())==n
   keys.get_by_role('button',name='重试保存',exact=True).click();expect(keys).to_contain_text('已保存到设备');assert page.evaluate('window.__boards.A.profile.deviceCustomKeyDoubleClicks.key4.action')=='pasteShortcut';r['failureRetainsEditAndExplicitRetryRecovers']=True
-  choose(core.get_by_role('combobox',name='连接方式'),'USB 有线');expect(core.locator('input[placeholder=listener]')).to_have_value('Alpha');quiet();n=len(writes());choose(core.get_by_role('combobox',name='设置设备'),'USB B');expect(core.locator('input[placeholder=listener]')).to_have_value('Bravo');expect(status).to_have_value('73');quiet();assert len(writes())==n
+  choose(core.get_by_role('combobox',name='连接方式'),'USB 有线');expect(core.locator('input[placeholder=listener]')).to_have_value('Alpha');quiet();n=len(writes());page.evaluate('window.__holdRead="usb:B"');choose(core.get_by_role('combobox',name='设置设备'),'USB B');page.wait_for_function('window.__held.length===1');assert len(writes())==n
+  choose(k,'复制 Ctrl+C');page.wait_for_function('window.__held.length===2');page.evaluate('window.__holdRead=null;window.__held.splice(0).forEach(r=>r())');expect(keys).to_contain_text('已保存到设备')
+  assert page.evaluate('window.__boards.B.profile.deviceCustomKeyDoubleClicks.key4.pasteTemplate')=='Retained Bravo note';r['keyActionBeforeReadPreservesUneditedStoredFields']=True
+  choose(k,'无');expect(keys).to_contain_text('已保存到设备');n=len(writes());expect(core.locator('input[placeholder=listener]')).to_have_value('Bravo');expect(status).to_have_value('73');quiet();assert len(writes())==n
   assert page.evaluate('window.__boards.A.snapshot.bleName')=='Alpha';r['deviceSwitchNeverPushesPreviousNameOrDefaults']=True
   name=core.locator('input[placeholder=listener]');name.fill('Bravo-Renamed');quiet();assert len(writes())==n;name.press('Tab');expect(core).to_contain_text('已保存到设备');assert writes()[-1]['args']['device']['id']=='usb:B';assert page.evaluate('window.__boards.A.snapshot.bleName')=='Alpha'
   r['nameCommitsOnceAfterEditingToExactUsbBoard']=True

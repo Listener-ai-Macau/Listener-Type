@@ -64,6 +64,17 @@ type DeviceKeyMapKey =
   | 'deviceCustomKeys'
   | 'deviceCustomKeyDoubleClicks'
   | 'deviceCustomKeyLongPresses';
+type DeviceKeyEdits = Partial<Record<DeviceKeyMapKey,Partial<Record<DeviceCustomKeyId,Partial<DeviceCustomKeyMapping>>>>>;
+
+function mergeDeviceKeyEdits(base:DeviceKeyProfile, edits:DeviceKeyEdits):DeviceKeyProfile {
+  const merged=structuredClone(base);
+  for(const map of Object.keys(edits) as DeviceKeyMapKey[]) {
+    for(const id of Object.keys(edits[map] ?? {}) as DeviceCustomKeyId[]) {
+      merged[map][id]={...base[map][id],...edits[map]?.[id]};
+    }
+  }
+  return merged;
+}
 
 const DEVICE_GESTURES: Array<{
   id: DeviceCustomKeyGesture;
@@ -173,7 +184,7 @@ function SelectedDeviceKeysCard({device,value,onRead}:{device:SettingsDevice|nul
   const [installedApps,setInstalledApps]=useState<InstalledApplication[]>([]);
   const [installedAppsLoading,setInstalledAppsLoading]=useState(false);
   const autoOpenDeviceKeyActionMenu=import.meta.env.DEV && new URLSearchParams(window.location.search).get('openDeviceKeyActionMenu')==='1';
-  const changes=useRef<Partial<Record<DeviceKeyMapKey,Partial<DeviceCustomKeys>>>>({});
+  const changes=useRef<DeviceKeyEdits>({});
   const knobChanged=useRef(false);
   const generation=useRef(0);
   const mounted=useRef(true);
@@ -181,17 +192,20 @@ function SelectedDeviceKeysCard({device,value,onRead}:{device:SettingsDevice|nul
   const saveLatest=useRef<() => Promise<void>>(async()=>{});
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;if(autosaveTimer.current!==null){clearTimeout(autosaveTimer.current);autosaveTimer.current=null;void saveLatest.current();}++generation.current;};},[]);
   useEffect(()=>{let cancelled=false;setInstalledAppsLoading(true);listInstalledApplications().then(v=>{if(!cancelled)setInstalledApps(v);}).catch(()=>{}).finally(()=>{if(!cancelled)setInstalledAppsLoading(false);});return()=>{cancelled=true;};},[]);
-  const merge=(base:DeviceKeyProfile):DeviceKeyProfile=>({...base,...Object.fromEntries(DEVICE_GESTURES.map(g=>[g.mapKey,{...base[g.mapKey],...changes.current[g.mapKey]}]))});
+  const merge=(base:DeviceKeyProfile):DeviceKeyProfile=>mergeDeviceKeyEdits(base,changes.current);
   useEffect(()=>{if(value?.device.id!==device?.id)return;if(value?.keys)setProfile(merge(value.keys.profile));if(!knobChanged.current)setKnob(snapshotKnob(value));},[value]);
-  const editKey=(map:DeviceKeyMapKey,id:DeviceCustomKeyId,mapping:DeviceCustomKeyMapping,commit=true)=>{
-    changes.current={...changes.current,[map]:{...changes.current[map],[id]:mapping}};
+  const editKey=(map:DeviceKeyMapKey,id:DeviceCustomKeyId,mapping:DeviceCustomKeyMapping,commit=true,replace=false)=>{
+    const previous=profile[map][id];
+    const patch=replace ? mapping : Object.fromEntries(Object.entries(mapping).filter(([k,v])=>JSON.stringify(v)!==JSON.stringify(previous[k as keyof DeviceCustomKeyMapping])));
+    if(Object.keys(patch).length===0)return;
+    changes.current={...changes.current,[map]:{...changes.current[map],[id]:{...changes.current[map]?.[id],...patch}}};
     setProfile(p=>({...p,[map]:{...p[map],[id]:mapping}}));setDirty(true);
     setSaveFailed(false);
     setMessage(t('settings.device.autoSavePending','编辑完成后自动保存到设备'));
     if(commit)scheduleSave();
   };
   const updateKnobRotationAction=async(value:string)=>{knobChanged.current=true;setKnob(value as DeviceKnobRotationAction);setDirty(true);scheduleSave();};
-  const restoreDefaultDeviceKeyboardOutput=()=>{const keys=emptyDeviceKeyProfile().deviceCustomKeys;for(const id of ['key1','key2','key3','key4','knob'] as const)editKey('deviceCustomKeys',id,keys[id]);};
+  const restoreDefaultDeviceKeyboardOutput=()=>{const keys=emptyDeviceKeyProfile().deviceCustomKeys;for(const id of ['key1','key2','key3','key4','knob'] as const)editKey('deviceCustomKeys',id,keys[id],true,true);};
   const read=async()=>{
     if(!device || busy)return;const current=++generation.current;setBusy(true);setMessage('');
     try {const result=await getSelectedDeviceSettings(device);if(current!==generation.current)return;onRead(result);setMessage(result.keysError ?? (result.keys ? '' : t('settings.deviceKeys.firmwareRequired','这台设备的固件尚不支持独立保存按键，请先更新固件。')));}
@@ -201,9 +215,9 @@ function SelectedDeviceKeysCard({device,value,onRead}:{device:SettingsDevice|nul
   const save=async()=>{
     if(!device || busy)return;const current=++generation.current;
     if(mounted.current){setBusy(true);setSaving(true);setSaveFailed(false);setMessage('');}
-    const pending=changes.current;const pendingKnob=knobChanged.current;const knobValue=knobRotationAction;
+    const pending=structuredClone(changes.current);const pendingKnob=knobChanged.current;const knobValue=knobRotationAction;
     if(!pendingKnob && Object.keys(pending).length===0){setBusy(false);setSaving(false);return;}
-    const mergePending=(base:DeviceKeyProfile):DeviceKeyProfile=>({...base,...Object.fromEntries(DEVICE_GESTURES.map(g=>[g.mapKey,{...base[g.mapKey],...pending[g.mapKey]}]))});
+    const mergePending=(base:DeviceKeyProfile):DeviceKeyProfile=>mergeDeviceKeyEdits(base,pending);
     try {
       const saved=await serializeDeviceSettingsSave(async()=>{
         const baseline=await getSelectedDeviceSettings(device);
@@ -221,7 +235,10 @@ function SelectedDeviceKeysCard({device,value,onRead}:{device:SettingsDevice|nul
   function scheduleSave(){
     if(autosaveTimer.current!==null)clearTimeout(autosaveTimer.current);
     // Empty templates/paths are unfinished edits, never a request to save an invalid action.
-    const incomplete=Object.values(changes.current).some(keys=>Object.values(keys ?? {}).some(m=>m && ((m.action==='pasteTemplate'&&!m.pasteTemplate.trim()) || (m.action==='openExternalApp'&&!m.externalAppPath.trim()))));
+    const staged=merge(profile);
+    const incomplete=(Object.keys(changes.current) as DeviceKeyMapKey[]).some(map=>(Object.keys(changes.current[map] ?? {}) as DeviceCustomKeyId[]).some(id=>{
+      const m=staged[map][id];return (m.action==='pasteTemplate'&&!m.pasteTemplate.trim()) || (m.action==='openExternalApp'&&!m.externalAppPath.trim());
+    }));
     if(incomplete){autosaveTimer.current=null;return;}
     autosaveTimer.current=setTimeout(()=>{autosaveTimer.current=null;void saveLatest.current();},120);
   }
@@ -282,7 +299,7 @@ function SelectedDeviceKeysCard({device,value,onRead}:{device:SettingsDevice|nul
           onClose={() => setLayoutsOpen(false)}
           onUseLayout={device ? layout => {
             for (const gesture of DEVICE_GESTURES) {
-              for (const id of ['key1','key2','key3','key4','knob'] as const) editKey(gesture.mapKey,id,layout.profile[gesture.mapKey][id]);
+              for (const id of ['key1','key2','key3','key4','knob'] as const) editKey(gesture.mapKey,id,layout.profile[gesture.mapKey][id],true,true);
             }
             void updateKnobRotationAction(layout.knobRotationAction);
             setMessage(t('deviceLayouts.loadedDraft'));
@@ -326,6 +343,7 @@ function DeviceFirmwareSettingsCard({onSelectedChange,onRead}:{onSelectedChange:
   const [status, setStatus] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('loading');
   const [message, setMessage] = useState('');
   const settingsMounted=useRef(true);
+  const settingsSaveInFlight=useRef(false);
   useEffect(()=>{settingsMounted.current=true;return()=>{settingsMounted.current=false;};},[]);
   const [voiceprint, setVoiceprint] = useState<VoiceprintStatus | null>(null);
   const [voiceprintBusy, setVoiceprintBusy] = useState(false);
@@ -524,7 +542,11 @@ function DeviceFirmwareSettingsCard({onSelectedChange,onRead}:{onSelectedChange:
       : '';
 
   const persistForm = async () => {
-    if (writeDisabled || !selectedDevice || draft.current.empty) return;
+    // Explicit editing may finish before the initial device read. Do not drop
+    // that intent because the display is still loading: this save obtains its
+    // own fresh baseline and invalidates the earlier display-only read.
+    if (!selectedDevice || settingsSaveInFlight.current || draft.current.empty) return;
+    settingsSaveInFlight.current=true;
     const device = selectedDevice;
     const generation = ++requestGeneration.current;
     const pendingDraft = draft.current.clone();
@@ -558,6 +580,8 @@ function DeviceFirmwareSettingsCard({onSelectedChange,onRead}:{onSelectedChange:
       if (!settingsMounted.current || generation !== requestGeneration.current) return;
       setStatus('error');
       setMessage(t('settings.device.autoSaveFailed','保存失败，修改已保留：')+' '+(error instanceof Error ? error.message : String(error)));
+    } finally {
+      settingsSaveInFlight.current=false;
     }
   };
   const save = async () => persistForm();
