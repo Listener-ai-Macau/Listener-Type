@@ -17,7 +17,7 @@ prefix=r'''
 use std::{io::{self,Read,Write},time::{Duration,Instant},sync::{Arc,Mutex},collections::VecDeque};
 mod log { macro_rules! fixture_log {($($t:tt)*)=>{}} pub(crate) use fixture_log as debug; pub(crate) use fixture_log as warn; }
 mod serialport { pub trait SerialPort:std::io::Read+std::io::Write+Send {} impl<T:std::io::Read+std::io::Write+Send> SerialPort for T {} }
-#[derive(Default)] struct Facts {quiet_reads:usize,writes:usize,fail_on_write:Option<usize>,drop_ack_on_write:Option<usize>}
+#[derive(Default)] struct Facts {quiet_reads:usize,writes:usize,fail_on_write:Option<usize>,drop_ack_on_write:Option<usize>,key_error:bool,ids:Vec<String>}
 struct Port {facts:Arc<Mutex<Facts>>,pending:VecDeque<Vec<u8>>,fail_next:bool}
 impl Read for Port {fn read(&mut self,b:&mut[u8])->io::Result<usize>{
  let mut f=self.facts.lock().unwrap();if f.fail_on_write==Some(f.writes){f.fail_on_write=None;return Err(io::Error::new(io::ErrorKind::BrokenPipe,"injected disconnect"))}drop(f);
@@ -25,13 +25,29 @@ impl Read for Port {fn read(&mut self,b:&mut[u8])->io::Result<usize>{
  self.facts.lock().unwrap().quiet_reads+=1;std::thread::sleep(Duration::from_millis(180));Err(io::Error::new(io::ErrorKind::TimedOut,"quiet boundary"))
 }}
 impl Write for Port {fn write(&mut self,b:&[u8])->io::Result<usize>{
- let mut f=self.facts.lock().unwrap();f.writes+=1;let n=f.writes;let suppress_ack=f.drop_ack_on_write==Some(n);drop(f);
+ let mut f=self.facts.lock().unwrap();f.writes+=1;let n=f.writes;let suppress_ack=f.drop_ack_on_write==Some(n);let key_error=f.key_error;
+ let command=String::from_utf8_lossy(b);let key_id=if command.starts_with("~DEVICE:KEY2 "){command.split_ascii_whitespace().nth(1).map(str::to_string)}else{None};if let Some(id)=&key_id {f.ids.push(id.clone());}drop(f);
  if suppress_ack{return Ok(b.len())}
+ if let Some(id)=key_id {
+  self.pending.push_back(b"~DEVICE:SETTINGS result=OK proof=stale\n~DEVICE:ERROR key=KEY reason=old\n~DEVICE:KEY_ACK id=ffffffff result=ERROR reason=stale\n".to_vec());
+  self.pending.push_back(format!("~DEVICE:KEY_ACK id={id} result=").into_bytes());
+  self.pending.push_back(if key_error {b"ERROR reason=ESP_FAIL\n".to_vec()} else {b"OK reason=ESP_OK\n".to_vec()});return Ok(b.len());
+ }
  // Split the actual acknowledgement across transport reads.
  if b.starts_with(b"~DEVICE:BAD"){self.pending.push_back(b"~DEVICE:ERROR key=TEST reason=ESP_FAIL\n".to_vec())}
  else {self.pending.push_back(b"ambient log\n~DEVICE:SETT".to_vec());self.pending.push_back(format!("INGS result=OK proof={n}\n").into_bytes())}Ok(b.len())
 }fn flush(&mut self)->io::Result<()>{Ok(())}}
 fn main(){
+ if std::env::args().any(|v|v=="--correlated") {
+  for (command,safe) in [("DEVICE:KEY R 0000",true),("DEVICE:KEY B 00000001 0001 00000000 00000001",true),("DEVICE:KEY D 00000001 0000 00",true),("DEVICE:KEY C 00000001",false)] {
+   let facts=Arc::new(Mutex::new(Facts{drop_ack_on_write:Some(1),..Facts::default()}));let port=Port{facts:Arc::clone(&facts),pending:VecDeque::new(),fail_next:false};
+   let mut io=SelectedUsbSettings{port:Box::new(port),FIELDS};io.key_ack_supported=true;
+   let result=io.exchange(command);let f=facts.lock().unwrap();assert_eq!(result.is_ok(),safe);assert_eq!(f.writes,if safe{2}else{1});if safe{assert_eq!(f.ids[0],f.ids[1]);assert!(result.unwrap().starts_with("~DEVICE:KEY_ACK id=00000002 result=OK"));}
+  }
+  let facts=Arc::new(Mutex::new(Facts{key_error:true,..Facts::default()}));let port=Port{facts:Arc::clone(&facts),pending:VecDeque::new(),fail_next:false};let mut io=SelectedUsbSettings{port:Box::new(port),FIELDS};io.key_ack_supported=true;
+  assert!(io.exchange("DEVICE:KEY D 00000001 0000 00").unwrap_err().contains("reason=ESP_FAIL"));assert_eq!(facts.lock().unwrap().writes,1);
+  println!("{{\"wrongAndLegacyRepliesIgnored\":true,\"splitMatchingReplyRequired\":true,\"safeRetryKeepsRequestId\":true,\"commitNeverReplayed\":true,\"explicitFailureNeverReplayed\":true,\"passed\":true}}");return;
+ }
  if std::env::args().any(|v|v=="--lost-ack") {
   let mut records=Vec::new();
   for (command,safe) in [("DEVICE:SETTINGS",true),("DEVICE:KEY R 0000",true),("DEVICE:KEY B 00000001 0001 00000000 00000001",true),("DEVICE:KEY D 00000001 0000 00",true),("DEVICE:SET ls=42 rev=3",false),("DEVICE:KEY C 00000001",false)] {
@@ -61,6 +77,7 @@ fn main(){
 }
 '''
 fields='synchronized:false,' if 'synchronized:' in actual else ''
+if 'key_ack_supported:' in actual:fields+='key_ack_supported:false,next_key_request:1,'
 fixture=prefix[:prefix.index('fn main()')]+constants+'\n'+function('drain_serial_input_until_quiet')+function('complete_device_settings_ok_line')+actual+prefix[prefix.index('fn main()'):]
 fixture=fixture.replace('FIELDS',fields).replace('COUNT','3' if a.expect_old_drain else '300')
 build=Path(tempfile.mkdtemp(prefix='listener-usb-exchange-'));(build/'actual.rs').write_text(fixture,encoding='utf-8')
@@ -70,5 +87,8 @@ observed=json.loads(out.stdout);r={'source':str(a.source),'actualMethods':'Selec
 if not a.expect_old_drain:
  lost=subprocess.run([str(build/'actual.exe'),'--lost-ack'],capture_output=True,text=True,timeout=45);assert lost.returncode==0,lost.stderr
  r['lostAcknowledgementReplayClasses']=json.loads(lost.stdout);r['passed']=r['passed'] and r['lostAcknowledgementReplayClasses']['passed']
+ if 'key_ack_supported:' in actual:
+  correlated=subprocess.run([str(build/'actual.exe'),'--correlated'],capture_output=True,text=True,timeout=30);assert correlated.returncode==0,correlated.stderr
+  r['correlatedKeyReplies']=json.loads(correlated.stdout);r['passed']=r['passed'] and r['correlatedKeyReplies']['passed']
 if a.output:a.output.write_text(json.dumps(r,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 print(json.dumps(r,ensure_ascii=False,indent=2));raise SystemExit(0 if r['passed'] else 1)

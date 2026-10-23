@@ -119,9 +119,14 @@ pub fn list_settings_devices() -> Result<Vec<SettingsDevice>, String> {
 struct SelectedUsbSettings {
     port: Box<dyn serialport::SerialPort>,
     synchronized: bool,
+    key_ack_supported: bool,
+    next_key_request: u32,
 }
 impl SelectedUsbSettings {
     fn exchange(&mut self, command: &str) -> Result<String, String> {
+        if self.key_ack_supported && command.starts_with("DEVICE:KEY ") {
+            return self.exchange_key(command);
+        }
         // Only queries and transaction-tokened profile staging are replay-safe.
         // Firmware accepts identical D chunks and same-token B before any D.
         // Never retry SET, COMMIT, RESET or a Bluetooth-name application.
@@ -134,6 +139,54 @@ impl SelectedUsbSettings {
         }
         let kind = command.split_ascii_whitespace().take(2).collect::<Vec<_>>().join(" ");
         Err(format!("Selected USB did not acknowledge {kind}; no other device was tried."))
+    }
+    fn exchange_key(&mut self, command: &str) -> Result<String, String> {
+        self.next_key_request = self.next_key_request.wrapping_add(1).max(1);
+        let request = self.next_key_request;
+        let payload = command.strip_prefix("DEVICE:KEY ").ok_or("Invalid key command")?;
+        let wire = format!("~DEVICE:KEY2 {request:08x} {payload}\n");
+        // One identifier survives the sole safe retry. Never replay COMMIT.
+        let attempts = if ["R ", "B ", "D "].iter().any(|p| payload.starts_with(p)) { 2 } else { 1 };
+        for _ in 0..attempts {
+            if !self.synchronized {
+                drain_serial_input_until_quiet(&mut *self.port,
+                    DEVICE_SETTINGS_SERIAL_DRAIN_MAX_DURATION,
+                    DEVICE_SETTINGS_SERIAL_DRAIN_QUIET_DURATION);
+            }
+            self.synchronized = false;
+            self.port.write_all(wire.as_bytes()).map_err(|e| e.to_string())?;
+            self.port.flush().map_err(|e| e.to_string())?;
+            let deadline = Instant::now() + Duration::from_secs(4);
+            let mut response = String::new();
+            let mut buffer = [0u8; 1024];
+            while Instant::now() < deadline {
+                match self.port.read(&mut buffer) {
+                    Ok(n) if n > 0 => {
+                        response.push_str(&String::from_utf8_lossy(&buffer[..n]));
+                        for line in response.split_inclusive('\n').filter(|l| l.ends_with('\n')) {
+                            let Some(reply) = line.trim().strip_prefix("~DEVICE:KEY_ACK ") else { continue; };
+                            let fields: Vec<&str> = reply.split_ascii_whitespace().collect();
+                            let expected_id = format!("id={request:08x}");
+                            if !fields.contains(&expected_id.as_str()) { continue; }
+                            if fields.contains(&"result=OK") {
+                                self.synchronized = true;
+                                return Ok(line.trim().to_string());
+                            }
+                            return Err(format!("Selected USB key command failed: {}", line.trim()));
+                        }
+                        if response.len() > 65536 {
+                            let mut cut = response.len() - 32768;
+                            while !response.is_char_boundary(cut) { cut += 1; }
+                            response.drain(..cut);
+                        }
+                    }
+                    Ok(_) => {},
+                    Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {},
+                    Err(e) => return Err(format!("Selected USB disconnected: {e}")),
+                }
+            }
+        }
+        Err("Selected USB did not acknowledge this key request; read this device before retrying. No other device was tried.".into())
     }
     fn exchange_once(&mut self, command: &str) -> Result<Option<String>, String> {
         if !self.synchronized {
@@ -163,6 +216,7 @@ impl SelectedUsbSettings {
                         return Err(line.to_string());
                     }
                     if let Some(line) = complete_device_settings_ok_line(&response) {
+                        self.key_ack_supported = line.split_ascii_whitespace().any(|f| f == "usb_key_ack=1");
                         self.synchronized = true;
                         return Ok(Some(line));
                     }
@@ -349,7 +403,7 @@ pub fn with_settings_device<T>(
             let _ = handle.write_request_to_send(false);
             // Keep the same OS handle throughout: COM reuse cannot redirect
             // a later packet to a different board.
-            super::settings_target::bounded(&mut SelectedUsbSettings { port: handle, synchronized: false },deadline,task)
+            super::settings_target::bounded(&mut SelectedUsbSettings { port: handle, synchronized: false, key_ack_supported: false, next_key_request: uuid::Uuid::new_v4().as_u128() as u32 },deadline,task)
         }
         "ble" => {
             let id = selected
