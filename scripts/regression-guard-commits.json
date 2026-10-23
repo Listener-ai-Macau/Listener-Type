@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T01:52:12.051270+08:00",
+  "updated_at": "2026-10-24T02:16:30.552795+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -6968,7 +6968,7 @@
       "commit": "772f9ad18a6dec007e8d6a90570980cdc1580c5e",
       "commit_subject": "Fence ASR startup ownership and interrupt cancelled provider connections",
       "subject": "ASR resource startup and cancellation retain the original owner through network awaits and finalization",
-      "state": "Type159_native_controlled_family_passed_matching_package_pending",
+      "state": "Type159_matching_package_installed_native_scoped_proof_and_public_asset_verified",
       "protects": [
         "ASR and recorder share startup ownership/phase/cancel/OTA admission. Rejected distinct clients cancel outside locks; repeated aliases preserve the live client, duplicate initializers cannot replace the first valid current resource.",
         "Every microphone/BLE provider store checks acceptance before opening/attaching audio. A retired embedded startup is an explicit ignored result, not a provider failure; existing finalization retains its provider.",
@@ -6987,10 +6987,18 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\asr159-completion-before.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-014512-aed356\\result.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-014512-7a866b\\result.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-014240-ba0a7c\\result.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-014240-ba0a7c\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build159\\post-update-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native159-snapshot-20261024-020343\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build159\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build159\\type159-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build159\\post-update-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener159-update-20261024-020410\\qualification.json"
       ],
       "machine_accepted_scope": [
-        "Windows native780 coordinator pass/32existing ignored;6Bailian pass incl2local cancellation.3actual factory/Coordinator integration cases pass, no daily persistent changes/private cleanup errors. No paid provider/device/editor/purchase claim."
+        "Windows native780 coordinator pass/32existing ignored;6Bailian pass incl2local cancellation.3actual factory/Coordinator integration cases pass, no daily persistent changes/private cleanup errors. No paid provider/device/editor/purchase claim.",
+        "Current-session ASR startup storage/cancel/completion family: original resource5fail/3pass, loopback provider2fail and old completion predicate failure retained. Matching native coordinator780pass/32existing ignored, Bailian6pass and embedded-startup3 local integration cases pass. Exact159 startup/Idle installation preserves all four stores and returns audio readiness. Not physical speech, remote provider recognition, BLE cancellation, global keys or full acceptance.",
+        "Current-session ASR startup storage/cancel/completion family: original resource5fail/3pass, loopback provider2fail and old completion predicate failure retained. Matching native coordinator780pass/32existing ignored, Bailian6pass and embedded-startup3 local integration cases pass. Exact159 startup/Idle installation preserves all four stores and returns audio readiness. Not physical speech, remote provider recognition, BLE cancellation, global keys or full acceptance. Exact installed159 preserves all four stores and normal BLE audio readiness. This is not physical BLE cancellation, provider speech, global-key or purchase qualification."
       ],
       "known_failures": [
         "Original slot assignment and Bailian cancellation already exist in earliest732a; previous cleanup-only guards did not cover resource admission or pending connection cancellation."

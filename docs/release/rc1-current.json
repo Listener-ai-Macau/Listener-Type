@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-24T01:01:23.636471+08:00",
+  "updatedAt": "2026-10-24T02:14:40.650792+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 158,
-    "source": "7d17b85933c4f30268097f4363c9d7bdd2c9a2a3",
-    "sourceTag": "build-source/type158-20261024",
+    "build": 159,
+    "source": "2e90f66ef22fcecee2f62b436cb9ca8cc1273ce6",
+    "sourceTag": "build-source/type159-20261024",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "b6ba21fee944393cfc7981b6ae52e38bc2d4ea3ed15fd371c5309bd627f429e8",
-    "sizeBytes": 299212800,
-    "exeSha256": "e108747ddb1c4f46eaec9ce38c20811b4ce86811bde76f8b070787bc9394e31e",
+    "sha256": "3ea2c950bb9f3ff060650dc33708ec7a9b48c5c752656c27cc03f3a9b28dc442",
+    "sizeBytes": 299216896,
+    "exeSha256": "bea07cb8a7b264fd14ce296284d72a415b0ed1d525791397e7daa75609afd995",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -29,7 +29,7 @@
     "newMsiEmbeddedExeEqualsBuiltExe": true,
     "sameVersionMsiUpgradeEnabled": true,
     "npmAuditVulnerabilities": 0,
-    "nativeRegressionEvidenceSource": "e1fd5e72312e78522a431875e05c3ce0ef28b4cd",
+    "nativeRegressionEvidenceSource": "772f9ad18a6dec007e8d6a90570980cdc1580c5e",
     "newPackageInstalledForThisPublication": true,
     "experimentalThroughputFirmwareIncluded": false,
     "firmware33ActualOtaAndExactBuildConfirmed": true,
@@ -392,7 +392,10 @@
     "type158CaptureLifetimeNativeControlledPassed": true,
     "type158PhysicalMicrophoneStallQualified": false,
     "sharedHostCaptureSource": "39bae009668ab1bd8b5257dc6ce187b14e09a675",
-    "sharedHostCaptureTag": "build-source/host-audio158-20261024"
+    "sharedHostCaptureTag": "build-source/host-audio158-20261024",
+    "type159InstalledExeAndPreferencesVerified": true,
+    "type159AsrOwnershipAndLoopbackCancellationPassed": true,
+    "type159PhysicalSpeechOrBleCancellationQualified": false
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -410,6 +413,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build158-20261024"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build159-20261024"
   }
 }
