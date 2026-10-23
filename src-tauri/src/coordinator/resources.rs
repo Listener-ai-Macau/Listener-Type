@@ -101,8 +101,43 @@ pub(super) fn store_recorder_for_session(
     inner: &Arc<Inner>,
     session_id: SessionId,
     recorder: Recorder,
-) {
-    *inner.recorder.lock() = Some(SessionResource::new(session_id, recorder));
+    archive_active: bool,
+) -> bool {
+    let handoff = {
+        let state = inner.state.lock();
+        if state.session_id != session_id
+            || state.cancelled
+            || !matches!(state.phase, SessionPhase::Starting | SessionPhase::Listening)
+            || !super::recording_gate::try_admit_arc(
+                inner,
+                super::recording_gate::RecordIntent::HotkeyPress,
+                "microphone recorder handoff",
+            )
+        {
+            Err(recorder)
+        } else {
+            let replaced = inner.recorder.lock()
+                .replace(SessionResource::new(session_id, recorder));
+            // This flag belongs to the accepted owner, just like the handle.
+            inner.audio_archive_active.store(archive_active, std::sync::atomic::Ordering::Relaxed);
+            Ok(replaced)
+        }
+    };
+    // Stopping joins the audio thread, whose callbacks inspect SessionState.
+    // Neither state nor recorder-slot lock may be held across that join.
+    match handoff {
+        Ok(replaced) => {
+            if let Some(replaced) = replaced {
+                replaced.into_inner().stop();
+                release_recording_mute(inner, "dictation");
+            }
+            true
+        }
+        Err(rejected) => {
+            rejected.stop();
+            false
+        }
+    }
 }
 
 pub(super) fn selected_microphone_device_name(inner: &Arc<Inner>) -> Option<String> {

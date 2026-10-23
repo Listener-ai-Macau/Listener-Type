@@ -382,7 +382,9 @@ pub(super) async fn begin_session_with_translation(
             current_session_id,
             ActiveAsr::Bailian(Arc::clone(&asr)),
         );
-        start_recorder_for_starting(inner, current_session_id, &active_asr, consumer).await?;
+        if !start_recorder_for_starting(inner, current_session_id, &active_asr, consumer).await? {
+            return Ok(());
+        }
 
         if let Err(e) = asr.open_session().await {
             log::error!("[coord] open Bailian ASR session failed: {e}");
@@ -480,7 +482,9 @@ pub(super) async fn begin_session_with_translation(
             current_session_id,
             ActiveAsr::Volcengine(Arc::clone(&asr)),
         );
-        start_recorder_for_starting(inner, current_session_id, &active_asr, consumer).await?;
+        if !start_recorder_for_starting(inner, current_session_id, &active_asr, consumer).await? {
+            return Ok(());
+        }
 
         if let Err(e) = open_volcengine_asr(&asr).await {
             match startup_race_status_for_starting(inner, current_session_id) {
@@ -559,7 +563,7 @@ pub(super) async fn start_recorder_for_starting(
     session_id: SessionId,
     active_asr: &str,
     consumer: Arc<dyn crate::recorder::AudioConsumer>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let inner_for_level = Arc::clone(inner);
     let session_id_for_level = session_id;
     let asr_quality_warning = Arc::new(dictation_asr_quality_warning(active_asr));
@@ -628,10 +632,10 @@ pub(super) async fn start_recorder_for_starting(
         Ok((rec, runtime_errors, archive_active)) => {
             // 把 archive 实际创建状态存到 Inner，让 history 写入路径（含 empty-transcript
             // 失败分支）读真实情况，而不是 prefs 开关。修 pr_agent "Wrong Flag" 反馈。
-            inner
-                .audio_archive_active
-                .store(archive_active, std::sync::atomic::Ordering::Relaxed);
-            store_recorder_for_session(inner, session_id, rec);
+            if !store_recorder_for_session(inner, session_id, rec, archive_active) {
+                release_recording_mute(inner, "dictation");
+                return Ok(false);
+            }
             spawn_recorder_error_monitor(inner, session_id, runtime_errors);
             // 不在这里 emit Recording capsule。
             // Recorder::start Ok 仅代表 cpal Stream::play 完成，不代表 audio
@@ -666,7 +670,7 @@ pub(super) async fn start_recorder_for_starting(
         }
     }
 
-    Ok(())
+    Ok(true)
 }
 
 pub(super) fn spawn_recorder_error_monitor(
@@ -738,7 +742,9 @@ pub(super) async fn start_recorder_and_enter_listening(
     active_asr: &str,
     consumer: Arc<dyn crate::recorder::AudioConsumer>,
 ) -> Result<(), String> {
-    start_recorder_for_starting(inner, session_id, active_asr, consumer).await?;
+    if !start_recorder_for_starting(inner, session_id, active_asr, consumer).await? {
+        return Ok(());
+    }
     finish_starting_session(inner, session_id).await;
     Ok(())
 }

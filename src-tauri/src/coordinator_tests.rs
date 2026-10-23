@@ -6078,6 +6078,73 @@ async fn device_translation_respects_ota_recording_gate() {
     assert!(!coordinator.inner.translation_modifier_seen.load(Ordering::SeqCst));
 }
 
+#[test]
+fn recorder_startup_late_store_cannot_replace_current_owner() {
+    let coordinator = Coordinator::new();
+    let old = session_id(15801);
+    let current = session_id(15802);
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = current;
+        state.phase = SessionPhase::Listening;
+    }
+    *coordinator.inner.recorder.lock() = Some(SessionResource::new(current, Recorder::without_device_for_test()));
+    assert!(!resources::store_recorder_for_session(&coordinator.inner, old, Recorder::without_device_for_test(), true));
+    let slot = coordinator.inner.recorder.lock();
+    assert_eq!(slot.as_ref().unwrap().session_id, current,
+        "late startup must not overwrite the replacement recorder handle");
+    assert!(!coordinator.inner.audio_archive_active.load(Ordering::Relaxed));
+}
+
+#[test]
+fn recorder_startup_late_store_cannot_revive_a_cancelled_or_finished_session() {
+    for (phase, cancelled) in [(SessionPhase::Idle, false), (SessionPhase::Processing, false),
+        (SessionPhase::Inserting, false), (SessionPhase::Starting, true), (SessionPhase::Listening, true)] {
+        let coordinator = Coordinator::new();
+        let owner = session_id(15803);
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = owner;
+            state.phase = phase;
+            state.cancelled = cancelled;
+        }
+        assert!(!resources::store_recorder_for_session(&coordinator.inner, owner, Recorder::without_device_for_test(), true));
+        assert!(coordinator.inner.recorder.lock().is_none(),
+            "late device startup after {phase:?} cannot create an orphaned active handle");
+    }
+}
+
+#[test]
+fn recorder_startup_current_owner_accepts_handle_and_archive_together() {
+    for phase in [SessionPhase::Starting, SessionPhase::Listening] {
+        let coordinator = Coordinator::new();
+        let owner = session_id(15804);
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = owner;
+            state.phase = phase;
+        }
+        assert!(resources::store_recorder_for_session(&coordinator.inner, owner, Recorder::without_device_for_test(), true));
+        assert_eq!(coordinator.inner.recorder.lock().as_ref().unwrap().session_id, owner);
+        assert!(coordinator.inner.audio_archive_active.load(Ordering::Relaxed));
+    }
+}
+
+#[test]
+fn recorder_startup_handoff_rechecks_ota_after_driver_returns() {
+    let coordinator = Coordinator::new();
+    let owner = session_id(15805);
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = owner;
+        state.phase = SessionPhase::Starting;
+    }
+    coordinator.inner.embedded_ble_ota_active.store(true, Ordering::SeqCst);
+    assert!(!resources::store_recorder_for_session(&coordinator.inner, owner, Recorder::without_device_for_test(), true));
+    assert!(coordinator.inner.recorder.lock().is_none());
+    assert!(!coordinator.inner.audio_archive_active.load(Ordering::Relaxed));
+}
+
 #[tokio::test]
 async fn qa_ota_gate_rejects_start_before_selection_or_session_claim() {
     let coordinator = Coordinator::new();

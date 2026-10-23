@@ -74,12 +74,17 @@ pub enum RecorderError {
     EngineFailed(String),
 }
 
-/// 采集器句柄。Drop 时不会自动停止——必须显式调用 `stop`。
+/// 采集器句柄。Drop 请求平台取消；显式 `stop` 还会等待采集线程退出。
 pub struct Recorder {
     session: Mutex<Option<CaptureSession>>,
 }
 
 impl Recorder {
+    #[cfg(test)]
+    pub(crate) fn without_device_for_test() -> Self {
+        Self { session: Mutex::new(None) }
+    }
+
     /// 启动采集。`consumer` 收到 16 kHz/Mono/Int16-LE 的 PCM；
     /// `level_handler` 收到 0..1 的 RMS 电平。
     /// `audio_archive_path` 不为 None 时，同样的 16 kHz/Mono/Int16-LE 旁路写入 WAV 文件，
