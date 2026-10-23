@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T13:52:14.159313+08:00",
+  "updated_at": "2026-10-23T14:54:11.253896+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -60,6 +60,10 @@
     {
       "repo": "firmware",
       "guard": "python tools/test_recovery_execution_result.py"
+    },
+    {
+      "repo": "firmware",
+      "guard": "python tools/test_status_led_activity_clock.py"
     }
   ],
   "entries": [
@@ -6231,6 +6235,41 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build145\\qa145-counterexample.rs.txt",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build145\\source-audit.json"
       ]
+    },
+    {
+      "id": "firmware34_recording_animation_has_activity_owned_clock",
+      "repo": "firmware",
+      "commit": "9f592dd251dcdfb771836d90553c55d34c33d33d",
+      "subject": "Recording ring/edge animation must not replay entry on processing keepalives or unrelated state changes",
+      "commit_subject": "Keep recording light animation anchored to its activity lifecycle",
+      "state": "actual34_builtin_wired_flash_and_persistence_readback_passed_physical_animation_observation_pending",
+      "protects": [
+        "Recording chase and900ms entry use the recording lifecycle clock, not global last_transition_ms. Real next recording still enters from zero.",
+        "Processing animation entry time is separate from keepalive time; repeated processing=true retains the existing5000ms stale cleanup semantics.",
+        "OTA retains its own effect clock; unsigned elapsed survives the32-bit millisecond wrap."
+      ],
+      "guards": [
+        "python tools/test_status_led_activity_clock.py",
+        "python tools/verify_status_led_static.py"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/led145-clock-before.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/led145-clock-after-final.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/isolated-native145-snapshot-20261023-144758/firmware34-wired-flash-result.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/isolated-native145-snapshot-20261023-144758/firmware34-post-verification.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/owner-led34-post-flash.log"
+      ],
+      "machine_accepted_scope": [
+        "Actual C functions with controlled RTOS/time boundary reproduce old ramp/phase reset and pass15 corrected cases; full ESP-IDF build succeeds. This is not physical emitted-light or full frame rendering proof.",
+        "Actual built-in Type145 USB flash on exact COM16/98:C3:77:B4:E8:8C; runtime build5f7a8a566c7d2381 matches image ELF digest; complete pre/post key profile and all selected core fields unchanged; daily Type remains open."
+      ],
+      "known_failures": [
+        "Type145 selected USB changed-key UI chain reached a real settings ACK error; original exact board mapping restored. Do not count all-settings UI acceptance as passed.",
+        "Current passive RF/HCI outer collection timed out; receiver job subsequently completed/cancelled. Not full encrypted OTA qualification; no BLE protocol/throughput modification in34."
+      ],
+      "pending_human_scope": [
+        "Owner normal-speaking observation of ring/edge continuity remains pending. No claim every physical blackout cause is solved."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T13:52:14.159313+08:00",
@@ -7353,6 +7392,23 @@
         "relatedChecks": "8 QA checks passed in private Windows station; includes original emission conflict, idle feedback and both timer owners",
         "evidence": "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build145\\source-audit.json"
       }
+    },
+    {
+      "id": "recording-light-animation",
+      "accepted_scope": "Actual C lifecycle clock counterexample and installed34 identity/settings persistence; physical animation continuity pending.",
+      "baseline_state": "actual34_builtin_wired_flash_and_persistence_readback_passed_physical_animation_observation_pending",
+      "guard_entries": [
+        "firmware34_recording_animation_has_activity_owned_clock"
+      ],
+      "paths": {
+        "firmware": [
+          "components/status_led/status_led.c",
+          "tools/test_status_led_activity_clock.py"
+        ]
+      },
+      "known_failures": [
+        "Shared generic last_transition_ms fromc41ee3d8 plus unconditional processing reset froma563be59 restarts the900ms recording entry at black; active capture need not restart."
+      ]
     }
   ]
 }
