@@ -1693,7 +1693,8 @@ fn now_rfc3339() -> String {
 }
 
 fn mark_translation_modifier_seen(inner: &Arc<Inner>) {
-    let phase = inner.state.lock().phase;
+    let state = inner.state.lock();
+    let phase = state.phase;
     if matches!(phase, SessionPhase::Starting | SessionPhase::Listening) {
         inner
             .translation_modifier_seen

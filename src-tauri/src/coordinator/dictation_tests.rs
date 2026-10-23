@@ -3846,6 +3846,30 @@ fn embedded_audio_session_attaches_to_host_starting_session() {
     assert_eq!(state.phase, SessionPhase::Starting);
 }
 
+#[test]
+fn device_translation_ble_attachment_keeps_mode_and_next_session_clears_it() {
+    let coordinator = Coordinator::new();
+    let mut prefs = coordinator.inner.prefs.get();
+    prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
+    coordinator.inner.prefs.replace_for_tests(prefs);
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    register_embedded_ble_cancel_flag(&coordinator.inner, &cancel_flag);
+    let owner = new_session_id();
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.phase = SessionPhase::Starting;
+        state.session_id = owner;
+        coordinator.inner.translation_modifier_seen.store(true, Ordering::SeqCst);
+    }
+    assert_eq!(begin_embedded_audio_dictation_session_id(&coordinator.inner).unwrap(), owner);
+    assert!(coordinator.inner.translation_modifier_seen.load(Ordering::SeqCst));
+    coordinator.inner.state.lock().phase = SessionPhase::Idle;
+    let next = begin_embedded_audio_dictation_session_id(&coordinator.inner).unwrap();
+    assert_ne!(next, owner);
+    assert!(!coordinator.inner.translation_modifier_seen.load(Ordering::SeqCst),
+        "a new voice/device session cannot inherit translation from the previous recording");
+}
+
 #[tokio::test]
 async fn target_speaker_endpoint_host_stop_transaction_routes_without_capture_flag() {
     let coordinator = Coordinator::new();

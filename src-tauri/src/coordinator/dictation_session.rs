@@ -239,6 +239,16 @@ pub(super) fn request_stop_during_starting(inner: &Arc<Inner>, reason: &str) {
 }
 
 pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
+    begin_session_with_translation(inner, false).await
+}
+
+pub(super) async fn begin_session_with_translation(
+    inner: &Arc<Inner>,
+    translation: bool,
+) -> Result<(), String> {
+    if !recording_gate::try_admit_arc(inner, RecordIntent::HotkeyPress, "microphone recording start") {
+        return Err("Recording is unavailable during firmware OTA".to_string());
+    }
     let current_session_id = {
         let mut state = inner.state.lock();
         // r23：HWND 与标题原子成对抓取，自愈路径靠标题识别真实窗口。
@@ -249,6 +259,10 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
             return Ok(());
         };
         state.focus_target_title = focus_title;
+        // Bind the output mode while creating this exact session, before any
+        // microphone/ASR await or preview. A delayed startup must not mark a
+        // replacement recording as translation after returning.
+        inner.translation_modifier_seen.store(translation, Ordering::SeqCst);
         if let Some(label) = state.front_app.as_deref() {
             log::info!("[coord] front_app captured: {label}");
         }
@@ -263,11 +277,6 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         let mut slots = inner.prepared_windows_ime_session.lock();
         store_prepared_windows_ime_session(&mut slots, current_session_id, prepared);
     }
-    // 翻译模式标志重置；hotkey 监听器在 Shift down 时再 set true。
-    inner
-        .translation_modifier_seen
-        .store(false, Ordering::SeqCst);
-
     #[cfg(any(debug_assertions, test))]
     if hotkey_injection_dry_run_enabled() {
         apply_and_publish_dictation_event(

@@ -1759,6 +1759,23 @@ async fn request_embedded_ble_recording_start_from_host(
     inner: &Arc<Inner>,
     reason: &'static str,
 ) -> Result<SessionId, String> {
+    request_embedded_ble_recording_start_with_translation(inner, reason, false).await
+}
+
+async fn request_embedded_ble_recording_start_with_translation(
+    inner: &Arc<Inner>,
+    reason: &'static str,
+    translation: bool,
+) -> Result<SessionId, String> {
+    // Readiness recovery can await while OTA claims exclusive ownership.
+    // Recheck at the actual session/transport boundary, not only at the key.
+    if !recording_gate::try_admit_arc(
+        inner,
+        recording_gate::RecordIntent::DeviceKeyDictation,
+        "host BLE recording start",
+    ) {
+        return Err("Listener recording is unavailable during firmware OTA".to_string());
+    }
     if !embedded_ble_listener_capture_ready(inner) {
         return Err("Listener BLE audio channel is not ready".to_string());
     }
@@ -1782,6 +1799,7 @@ async fn request_embedded_ble_recording_start_from_host(
                 )
                 .ok_or_else(|| "Listener BLE recording start ignored while idle".to_string())?;
                 state.focus_target_title = focus_title;
+                inner.translation_modifier_seen.store(translation, Ordering::SeqCst);
                 started
             }
             SessionPhase::Starting | SessionPhase::Listening => state.session_id,
@@ -1883,14 +1901,29 @@ async fn request_embedded_ble_recording_start_from_host(
 }
 
 async fn handle_device_translation_action(inner: Arc<Inner>) {
-    let phase = inner.state.lock().phase;
-    if matches!(phase, SessionPhase::Idle) {
-        let _ = begin_session(&inner).await;
-        mark_translation_modifier_seen(&inner);
+    if !recording_gate::try_admit_arc(
+        &inner,
+        recording_gate::RecordIntent::DeviceKeyDictation,
+        "device-key translation",
+    ) {
         return;
     }
-    mark_translation_modifier_seen(&inner);
-    handle_pressed(&inner).await;
+    let phase = inner.state.lock().phase;
+    let coordinator = Coordinator { inner };
+    let result = match phase {
+        SessionPhase::Idle => coordinator.start_dictation_with_translation(true).await,
+        SessionPhase::Starting | SessionPhase::Listening => {
+            mark_translation_modifier_seen(&coordinator.inner);
+            // Device actions toggle independently of the desktop Hold/Toggle
+            // shortcut. This also sends the actual BLE stop when Listener is
+            // the selected source, instead of the microphone-only hotkey path.
+            coordinator.stop_dictation().await
+        }
+        _ => return,
+    };
+    if let Err(error) = result {
+        log::warn!("[device-key] translation recording control failed: {error}");
+    }
 }
 
 fn switch_to_previous_style(inner: &Arc<Inner>) {

@@ -1895,9 +1895,6 @@ async fn begin_embedded_audio_dictation_session(
     // default is confirmed segment delivery while the capsule keeps listening.
     begin_streaming_composition_session(inner, current_session_id).await;
     inner
-        .translation_modifier_seen
-        .store(false, Ordering::SeqCst);
-    inner
         .audio_archive_active
         .store(false, std::sync::atomic::Ordering::Relaxed);
     let active_asr = active_asr_provider_from_preferences(inner);
@@ -1997,6 +1994,9 @@ fn begin_embedded_audio_dictation_session_id(inner: &Arc<Inner>) -> Result<Sessi
         begin_session_state(&mut state, focus_target, capture_frontmost_app())
             .ok_or_else(|| "当前已有听写会话在运行，暂不能提交嵌入式音频".to_string())?;
     state.focus_target_title = focus_title;
+    // A host-started session already owns its selected output mode. Only a
+    // genuinely new device/voice session starts with ordinary dictation.
+    inner.translation_modifier_seen.store(false, Ordering::SeqCst);
     Ok(started)
 }
 

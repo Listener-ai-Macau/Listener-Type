@@ -6061,3 +6061,93 @@ async fn qa_capsule_error_timer_is_bound_to_both_original_owners() {
         assert_eq!(timer.await.unwrap(), change == "unchanged", "{change}");
     }
 }
+
+#[tokio::test]
+async fn device_translation_respects_ota_recording_gate() {
+    let _guard = ENV_LOCK.lock().await;
+    std::env::set_var("LISTENER_TYPE_HOTKEY_INJECTION_DRY_RUN", "1");
+    let coordinator = Coordinator::new();
+    force_microphone_input_for_test(&coordinator);
+    coordinator.inner.embedded_ble_ota_active.store(true, Ordering::SeqCst);
+    let before = coordinator.inner.state.lock().session_id;
+    handle_device_translation_action(Arc::clone(&coordinator.inner)).await;
+    std::env::remove_var("LISTENER_TYPE_HOTKEY_INJECTION_DRY_RUN");
+    let state = coordinator.inner.state.lock();
+    assert_eq!(state.phase, SessionPhase::Idle, "translation cannot open a microphone while OTA owns recording");
+    assert_eq!(state.session_id, before);
+    assert!(!coordinator.inner.translation_modifier_seen.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn device_translation_starts_selected_ble_without_microphone() {
+    let _guard = ENV_LOCK.lock().await;
+    std::env::set_var("LISTENER_TYPE_HOTKEY_INJECTION_DRY_RUN", "1");
+    let coordinator = Coordinator::new();
+    force_embedded_ble_input_for_test(&coordinator);
+    let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+    mark_embedded_ble_listener_ready(&coordinator.inner, &active);
+    handle_device_translation_action(Arc::clone(&coordinator.inner)).await;
+    std::env::remove_var("LISTENER_TYPE_HOTKEY_INJECTION_DRY_RUN");
+    let state = coordinator.inner.state.lock();
+    assert_eq!(state.phase, SessionPhase::Starting,
+        "selected Listener must wait for its BLE audio; the computer-microphone dry-run enters Listening immediately");
+    assert!(coordinator.inner.translation_modifier_seen.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn device_translation_stops_selected_ble_independent_of_desktop_hold() {
+    let coordinator = Coordinator::new();
+    force_embedded_ble_input_for_test(&coordinator);
+    let mut prefs = coordinator.inner.prefs.get();
+    prefs.hotkey.mode = crate::types::HotkeyMode::Hold;
+    coordinator.inner.prefs.replace_for_tests(prefs);
+    let owner = session_id(15501);
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = owner;
+        state.phase = SessionPhase::Starting;
+    }
+    assert!(coordinator.inner.recording_lifecycle.lock().begin_manual_owner(15501, owner));
+    handle_device_translation_action(Arc::clone(&coordinator.inner)).await;
+    let history = embedded_ble_session_actor_history(&coordinator.inner);
+    assert_eq!(history.iter().filter(|record|
+        record.command == EmbeddedBleSessionActorCommand::StopCommand
+            && record.session_id == Some(owner)).count(), 1);
+    assert!(coordinator.inner.translation_modifier_seen.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn device_translation_mode_is_bound_at_microphone_start_not_after_await() {
+    let _guard = ENV_LOCK.lock().await;
+    std::env::set_var("LISTENER_TYPE_HOTKEY_INJECTION_DRY_RUN", "1");
+    let coordinator = Coordinator::new();
+    force_microphone_input_for_test(&coordinator);
+    let started = coordinator.start_dictation_with_translation(true).await;
+    std::env::remove_var("LISTENER_TYPE_HOTKEY_INJECTION_DRY_RUN");
+    started.unwrap();
+    assert_eq!(coordinator.inner.state.lock().phase, SessionPhase::Listening);
+    assert!(coordinator.inner.translation_modifier_seen.load(Ordering::SeqCst));
+    // A repeated start while processing cannot overwrite the existing owner.
+    coordinator.inner.state.lock().phase = SessionPhase::Processing;
+    dictation::begin_session_with_translation(&coordinator.inner, false).await.unwrap();
+    assert!(coordinator.inner.translation_modifier_seen.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn device_translation_rechecks_admission_at_both_source_boundaries() {
+    let coordinator = Coordinator::new();
+    force_embedded_ble_input_for_test(&coordinator);
+    let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+    mark_embedded_ble_listener_ready(&coordinator.inner, &active);
+    coordinator.inner.embedded_ble_ota_active.store(true, Ordering::SeqCst);
+    let owner = coordinator.inner.state.lock().session_id;
+    let actor_events = embedded_ble_session_actor_history(&coordinator.inner).len();
+    assert!(request_embedded_ble_recording_start_with_translation(
+        &coordinator.inner, "test_ota_claimed_during_recovery", true).await.is_err());
+    assert!(dictation::begin_session_with_translation(&coordinator.inner, true).await.is_err());
+    assert_eq!(coordinator.inner.state.lock().session_id, owner);
+    assert_eq!(coordinator.inner.state.lock().phase, SessionPhase::Idle);
+    assert!(!coordinator.inner.translation_modifier_seen.load(Ordering::SeqCst));
+    assert_eq!(embedded_ble_session_actor_history(&coordinator.inner).len(), actor_events,
+        "admission denial must not append a transport start after the existing readiness event");
+}

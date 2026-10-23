@@ -2021,12 +2021,17 @@ impl Coordinator {
     }
 
     pub async fn start_dictation(&self) -> Result<(), String> {
+        self.start_dictation_with_translation(false).await
+    }
+
+    async fn start_dictation_with_translation(&self, translation: bool) -> Result<(), String> {
         if self.inner.prefs.get().dictation_input_source == DictationInputSource::EmbeddedBle {
             if embedded_ble_listener_capture_ready(&self.inner) {
                 record_embedded_ble_notify_ready(&self.inner);
-                request_embedded_ble_recording_start_from_host(
+                request_embedded_ble_recording_start_with_translation(
                     &self.inner,
                     "host_start_ready_listener",
+                    translation,
                 )
                 .await?;
                 log::info!("[coord] start_dictation started Listener BLE recording via ready background listener");
@@ -2050,9 +2055,10 @@ impl Coordinator {
             {
                 Ok(()) => {
                     record_embedded_ble_notify_ready(&self.inner);
-                    request_embedded_ble_recording_start_from_host(
+                    request_embedded_ble_recording_start_with_translation(
                         &self.inner,
                         "host_start_after_recovery",
+                        translation,
                     )
                     .await?;
                 }
@@ -2075,7 +2081,7 @@ impl Coordinator {
             log::info!("[coord] start_dictation routed to Listener BLE background listener");
             return Ok(());
         }
-        begin_session(&self.inner).await
+        dictation::begin_session_with_translation(&self.inner, translation).await
     }
 
     pub async fn stop_dictation(&self) -> Result<(), String> {
