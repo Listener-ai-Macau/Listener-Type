@@ -8,20 +8,24 @@ import { Btn } from '../pages/_atoms';
 /** Uses the same saved-style policy as the trial, including customized Raw packs. */
 export function StyleTrialAvailability({ packId, revision }: { packId: string; revision?: string | null }) {
   const { t } = useTranslation();
-  const [readiness, setReadiness] = useState<StyleTextTrialReadiness | null>(null);
-  const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const queryKey = JSON.stringify([packId, revision, attempt]);
+  const [response, setResponse] = useState<{
+    key: string; value: StyleTextTrialReadiness | null; failed: boolean;
+  } | null>(null);
+  const current = response?.key === queryKey ? response : null;
+  const readiness = current?.value ?? null;
+  const failed = current?.failed ?? false;
   useEffect(() => {
     let disposed = false;
     let latest = 0;
     const refresh = () => {
       const request = ++latest;
-      setReadiness(null);
-      setFailed(false);
+      setResponse(null);
       void getStyleTextTrialReadiness(packId).then(value => {
-        if (!disposed && request === latest) setReadiness(value);
+        if (!disposed && request === latest) setResponse({ key: queryKey, value, failed: false });
       }).catch(() => {
-        if (!disposed && request === latest) setFailed(true);
+        if (!disposed && request === latest) setResponse({ key: queryKey, value: null, failed: true });
       });
     };
     const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
@@ -35,7 +39,7 @@ export function StyleTrialAvailability({ packId, revision }: { packId: string; r
       window.removeEventListener('focus', onVisible);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [packId, revision, attempt]);
+  }, [packId, queryKey]);
   const key = failed ? 'serviceUnknown'
     : !readiness ? 'checking'
       : !readiness.available ? 'previewOnly'

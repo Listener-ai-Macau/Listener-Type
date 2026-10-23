@@ -64,9 +64,16 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   const [copiedResult, setCopiedResult] = useState<StyleTextTrialResult | null>(null);
   const [copyError, setCopyError] = useState(false);
   const [error, setError] = useState('');
-  const [readiness, setReadiness] = useState<StyleTextTrialReadiness | null>(null);
-  const [readinessError, setReadinessError] = useState(false);
   const [readinessAttempt, setReadinessAttempt] = useState(0);
+  const readinessKey = JSON.stringify([pack.id, pack.baseMode, pack.prompt, readinessAttempt]);
+  const [readinessResponse, setReadinessResponse] = useState<{
+    key: string; value: StyleTextTrialReadiness | null; failed: boolean;
+  } | null>(null);
+  // A new selection renders before its effect resets state. Neither its privacy
+  // notice nor submission permission may borrow the previous style's response.
+  const currentReadiness = readinessResponse?.key === readinessKey ? readinessResponse : null;
+  const readiness = currentReadiness?.value ?? null;
+  const readinessError = currentReadiness?.failed ?? false;
   // All entry points keep this workspace mounted during service setup. A host
   // navigation callback must not discard paid results, edits, or pending work.
   const [providersOpen, setProvidersOpen] = useState(false);
@@ -106,15 +113,14 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
 
   useEffect(() => {
     let current = true;
-    setReadiness(null);
-    setReadinessError(false);
+    setReadinessResponse(null);
     void getStyleTextTrialReadiness(pack.id).then(value => {
-      if (current) setReadiness(value);
+      if (current) setReadinessResponse({ key: readinessKey, value, failed: false });
     }).catch(() => {
-      if (current) setReadinessError(true);
+      if (current) setReadinessResponse({ key: readinessKey, value: null, failed: true });
     });
     return () => { current = false; };
-  }, [pack.id, readinessAttempt]);
+  }, [pack.id, readinessKey]);
 
   useEffect(() => {
     const element = dialog.current;
