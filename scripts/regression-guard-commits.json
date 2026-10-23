@@ -6028,14 +6028,15 @@
       ],
       "guards": [
         "Historical live evidence: retain exact session archives and original popup results; rerun only after affected changes or new failure."
-      ]
+      ],
+      "commit_subject": "Record QA ownership failure and verified candidate boundary"
     },
     {
       "id": "type141_dictionary_identity_and_network_settings_state",
       "subject": "Idempotent saved vocabulary and truthful ordered settings reachability",
       "repo": "type",
       "commit": "9ab66ba968619616c18ab05edf4429d76f790308",
-      "state": "source_build_and_affected_tests_passed_not_packaged_or_field_accepted",
+      "state": "exact141_installed_private_native_display_and_dictionary_UI_verified_field_scope_unchanged",
       "humanAccepted": false,
       "protects": [
         "Equivalent trimmed case-insensitive additions share one persisted identity under the store lock, preserving note/enabled/hits/created time; empty input rejected, distinct words remain distinct.",
@@ -6044,8 +6045,9 @@
       ],
       "limits": [
         "No silent cleanup of legacy duplicate rows.",
-        "Native UI/rendering not yet checked for this batch; Japanese/Korean style page and remote marketplace still have legacy untranslated content.",
-        "No new cloud/quota accounting, BLE, recording lifecycle, firmware, physical input or purchase acceptance from this batch."
+        "Network errors are explicit private native-event fixtures, not actual owner network disruption; no new provider or quota accounting behavior.",
+        "Japanese/Korean style page and remote marketplace still have legacy untranslated content.",
+        "No new BLE, recording lifecycle, firmware, physical input or purchase acceptance from this batch."
       ],
       "guards": [
         "cargo test --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --lib persistence::tests::dictionary_ -- --test-threads=1",
@@ -6053,8 +6055,12 @@
       ],
       "machine_evidence": [
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build141\\source-audit.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-113111-90068d\\result.json"
-      ]
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-113111-90068d\\result.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/isolated-native141-snapshot-20261023-113856/accept141-changed-native-result.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/outputs/release-rc1-20261023-build141/type-artifact-verification.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/outputs/release-rc1-20261023-build141/type141-installed.json"
+      ],
+      "commit_subject": "Keep word additions idempotent and settings availability truthful [skip ci]"
     }
   ],
   "feature_routes_updated_at": "2026-10-23T11:32:54.298838+08:00",
@@ -6335,9 +6341,10 @@
       "latest_source_candidate": {
         "build": 141,
         "source": "9ab66ba968619616c18ab05edf4429d76f790308",
-        "installed": false,
-        "packaged": false,
-        "evidence": "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build141\\source-audit.json"
+        "installed": true,
+        "packaged": true,
+        "evidence": "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build141\\source-audit.json",
+        "artifact_source": "bc5a4eeebde923d840568a6b5f24f51dabe4fb52"
       }
     },
     {
@@ -6969,9 +6976,10 @@
       "latest_source_candidate": {
         "build": 141,
         "source": "9ab66ba968619616c18ab05edf4429d76f790308",
-        "installed": false,
-        "packaged": false,
-        "evidence": "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build141\\source-audit.json"
+        "installed": true,
+        "packaged": true,
+        "evidence": "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build141\\source-audit.json",
+        "artifact_source": "bc5a4eeebde923d840568a6b5f24f51dabe4fb52"
       }
     },
     {
