@@ -38,6 +38,75 @@ use super::{
 use crate::coordinator::Coordinator;
 use crate::coordinator::{PolishPrefetch, PolishPrefetchBuf};
 
+#[tokio::test]
+async fn asr_handoff_embedded_factory_ignores_a_retired_owner_without_provider_io() {
+    let coordinator=Coordinator::new();let owner=new_session_id();let retired=new_session_id();
+    { let mut state=coordinator.inner.state.lock();state.session_id=owner;state.phase=super::SessionPhase::Listening; }
+    let live=std::sync::Arc::new(crate::asr::volcengine::VolcengineStreamingASR::new(
+        crate::asr::volcengine::VolcengineCredentials{app_id:String::new(),access_token:String::new(),resource_id:"no-network".into()},Vec::new()));
+    *coordinator.inner.asr.lock()=Some(super::SessionResource::new(owner,super::ActiveAsr::Volcengine(std::sync::Arc::clone(&live))));
+    let result=super::build_embedded_audio_asr_consumer(&coordinator.inner,retired,"bailian").await;
+    assert!(matches!(result,Ok(None)),"retired startup is an ignored result, not a provider error");
+    let retained=crate::coordinator::resources::clone_volcengine_asr_for_session(&coordinator.inner,owner).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&retained,&live));assert!(!live.cancelled_for_test());
+}
+
+#[tokio::test]
+async fn asr_handoff_embedded_factory_preserves_a_provider_owned_by_finalization() {
+    let coordinator=Coordinator::new();let owner=new_session_id();
+    { let mut state=coordinator.inner.state.lock();state.session_id=owner;state.phase=super::SessionPhase::Processing; }
+    let live=std::sync::Arc::new(crate::asr::volcengine::VolcengineStreamingASR::new(
+        crate::asr::volcengine::VolcengineCredentials{app_id:String::new(),access_token:String::new(),resource_id:"no-network".into()},Vec::new()));
+    *coordinator.inner.asr.lock()=Some(super::SessionResource::new(owner,super::ActiveAsr::Volcengine(std::sync::Arc::clone(&live))));
+    assert!(matches!(super::build_embedded_audio_asr_consumer(&coordinator.inner,owner,"bailian").await,Ok(None)));
+    assert!(!live.cancelled_for_test());
+    assert!(crate::coordinator::resources::take_asr_for_session(&coordinator.inner,owner).is_some());
+}
+
+#[tokio::test]
+async fn asr_handoff_embedded_startup_cancel_reaches_a_pending_provider_connection() {
+    use crate::persistence::{CredentialAccount,CredentialsVault};
+    use tokio::io::AsyncReadExt;
+    struct RestoreCredentials { active:String, values:Vec<(CredentialAccount,Option<String>)> }
+    impl Drop for RestoreCredentials {
+        fn drop(&mut self) {
+            for (key,value) in &self.values {
+                match value { Some(value)=>CredentialsVault::set(*key,value).unwrap(),None=>CredentialsVault::remove(*key).unwrap() }
+            }
+            CredentialsVault::set_active_asr_provider(&self.active).unwrap();
+        }
+    }
+    let previous_active=CredentialsVault::get_active_asr();
+    CredentialsVault::set_active_asr_provider("bailian").unwrap();
+    let keys=[CredentialAccount::AsrApiKey,CredentialAccount::AsrEndpoint,CredentialAccount::AsrModel,CredentialAccount::AsrVocabularyId];
+    let _restore=RestoreCredentials{active:previous_active,values:keys.into_iter().map(|key|(key,CredentialsVault::get(key).unwrap())).collect()};
+    let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    CredentialsVault::set(CredentialAccount::AsrApiKey,"local-controlled-test-only").unwrap();
+    CredentialsVault::set(CredentialAccount::AsrEndpoint,&format!("ws://{}",listener.local_addr().unwrap())).unwrap();
+    CredentialsVault::set(CredentialAccount::AsrModel,crate::asr::bailian::DEFAULT_MODEL).unwrap();
+    CredentialsVault::remove(CredentialAccount::AsrVocabularyId).unwrap();
+    let coordinator=Coordinator::new();let mut prefs=coordinator.inner.prefs.get();
+    prefs.active_asr_provider="bailian".into();prefs.dictation_input_source=crate::types::DictationInputSource::Microphone;
+    prefs.dictation_input_source_user_overridden=true;prefs.cloud_model_route=crate::asr::cloud_gateway::CloudModelRoute::Byok;
+    coordinator.inner.prefs.replace_for_tests(prefs);
+    let inner=std::sync::Arc::clone(&coordinator.inner);
+    let mut opening=tokio::spawn(async move { super::begin_embedded_audio_dictation_session(&inner).await.map(|session|session.is_some()) });
+    let (mut socket,_)=tokio::time::timeout(std::time::Duration::from_secs(3),listener.accept()).await.unwrap().unwrap();
+    let mut request=[0u8;2048];assert!(tokio::time::timeout(std::time::Duration::from_secs(2),socket.read(&mut request)).await.unwrap().unwrap()>0);
+    let registered=coordinator.inner.asr.lock().is_some();
+    coordinator.cancel_dictation();
+    let result=tokio::time::timeout(std::time::Duration::from_secs(1),&mut opening).await;
+    let promptly_finished=result.is_ok();
+    let ignored=matches!(result,Ok(Ok(Ok(false))));
+    drop(socket);
+    if !promptly_finished { opening.abort();let _=opening.await; }
+    assert!(registered,"provider must be owned before its first network await");
+    assert!(promptly_finished,"cancel must not wait for the peer");
+    assert!(ignored,"retired startup must return quietly rather than publish a provider error");
+    assert_eq!(coordinator.inner.state.lock().phase,super::SessionPhase::Idle);
+    assert!(coordinator.inner.asr.lock().is_none());
+}
+
 #[test]
 fn device_processing_hint_rejects_retired_producers_and_reordered_workers() {
     let coordinator = Coordinator::new();

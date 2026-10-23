@@ -6079,6 +6079,137 @@ async fn device_translation_respects_ota_recording_gate() {
 }
 
 #[test]
+fn asr_handoff_late_result_cannot_replace_current_connection() {
+    let coordinator = Coordinator::new();
+    let old = session_id(15901); let current = session_id(15902);
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = current; state.phase = SessionPhase::Listening;
+    }
+    let live = qa_test_asr(); let late = qa_test_asr();
+    *coordinator.inner.asr.lock() = Some(SessionResource::new(current, ActiveAsr::Volcengine(Arc::clone(&live))));
+    let _ = resources::store_asr_for_session(&coordinator.inner, old, ActiveAsr::Volcengine(Arc::clone(&late)));
+    let actual = resources::clone_volcengine_asr_for_session(&coordinator.inner, current);
+    assert!(actual.as_ref().is_some_and(|value| Arc::ptr_eq(value, &live)), "late startup cannot replace the live owner");
+    assert!(!live.cancelled_for_test());
+    assert!(late.cancelled_for_test(), "an unowned independent connection must be cancelled");
+}
+
+#[test]
+fn asr_handoff_finished_or_cancelled_owner_cannot_regain_a_connection() {
+    for (phase, cancelled) in [(SessionPhase::Idle,false),(SessionPhase::Processing,false),
+        (SessionPhase::Inserting,false),(SessionPhase::Starting,true),(SessionPhase::Listening,true)] {
+        let coordinator = Coordinator::new(); let owner = session_id(15903);
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = owner; state.phase = phase; state.cancelled = cancelled;
+        }
+        let late = qa_test_asr();
+        let _ = resources::store_asr_for_session(&coordinator.inner, owner, ActiveAsr::Volcengine(Arc::clone(&late)));
+        assert!(coordinator.inner.asr.lock().is_none(), "{phase:?}, cancelled={cancelled}");
+        assert!(late.cancelled_for_test());
+    }
+}
+
+#[test]
+fn asr_handoff_replacement_cancels_only_the_displaced_connection() {
+    let coordinator = Coordinator::new(); let old = session_id(15904); let owner = session_id(15905);
+    { let mut state = coordinator.inner.state.lock(); state.session_id=owner; state.phase=SessionPhase::Starting; }
+    let displaced = qa_test_asr(); let accepted = qa_test_asr();
+    *coordinator.inner.asr.lock() = Some(SessionResource::new(old, ActiveAsr::Volcengine(Arc::clone(&displaced))));
+    let _ = resources::store_asr_for_session(&coordinator.inner, owner, ActiveAsr::Volcengine(Arc::clone(&accepted)));
+    assert!(displaced.cancelled_for_test(), "a callback retaining the old Arc must not keep its connection alive");
+    assert!(!accepted.cancelled_for_test());
+    assert!(Arc::ptr_eq(&resources::clone_volcengine_asr_for_session(&coordinator.inner,owner).unwrap(),&accepted));
+}
+
+#[test]
+fn asr_handoff_repeated_alias_preserves_the_live_connection() {
+    let coordinator=Coordinator::new(); let owner=session_id(15906);
+    { let mut state=coordinator.inner.state.lock(); state.session_id=owner; state.phase=SessionPhase::Listening; }
+    let live=qa_test_asr();
+    *coordinator.inner.asr.lock()=Some(SessionResource::new(owner,ActiveAsr::Volcengine(Arc::clone(&live))));
+    let _ = resources::store_asr_for_session(&coordinator.inner,owner,ActiveAsr::Volcengine(Arc::clone(&live)));
+    assert!(!live.cancelled_for_test(), "replacing an Arc by its alias is not a displaced connection");
+}
+
+#[test]
+fn asr_handoff_rejected_alias_cannot_cancel_the_new_owner() {
+    let coordinator=Coordinator::new(); let old=session_id(15907); let owner=session_id(15908);
+    { let mut state=coordinator.inner.state.lock(); state.session_id=owner; state.phase=SessionPhase::Listening; }
+    let live=qa_test_asr();
+    *coordinator.inner.asr.lock()=Some(SessionResource::new(owner,ActiveAsr::Volcengine(Arc::clone(&live))));
+    let _ = resources::store_asr_for_session(&coordinator.inner,old,ActiveAsr::Volcengine(Arc::clone(&live)));
+    assert!(!live.cancelled_for_test());
+    assert!(resources::clone_volcengine_asr_for_session(&coordinator.inner,owner).is_some());
+}
+
+#[test]
+fn asr_handoff_ota_rejects_the_connection_after_an_await() {
+    let coordinator=Coordinator::new(); let owner=session_id(15909);
+    { let mut state=coordinator.inner.state.lock(); state.session_id=owner; state.phase=SessionPhase::Starting; }
+    coordinator.inner.embedded_ble_ota_active.store(true,Ordering::SeqCst);
+    let late=qa_test_asr();
+    let _ = resources::store_asr_for_session(&coordinator.inner,owner,ActiveAsr::Volcengine(Arc::clone(&late)));
+    assert!(coordinator.inner.asr.lock().is_none());
+    assert!(late.cancelled_for_test());
+}
+
+#[test]
+fn asr_handoff_finalization_take_remains_available_after_recording() {
+    let coordinator=Coordinator::new(); let owner=session_id(15910);
+    { let mut state=coordinator.inner.state.lock(); state.session_id=owner; state.phase=SessionPhase::Listening; }
+    let live=qa_test_asr();
+    let _ = resources::store_asr_for_session(&coordinator.inner,owner,ActiveAsr::Volcengine(Arc::clone(&live)));
+    coordinator.inner.state.lock().phase=SessionPhase::Processing;
+    assert!(matches!(resources::take_asr_for_session(&coordinator.inner,owner),Some(ActiveAsr::Volcengine(value)) if Arc::ptr_eq(&value,&live)));
+    assert!(!live.cancelled_for_test(), "finalization still owns the retained provider");
+}
+
+#[test]
+fn asr_handoff_old_cancel_cannot_take_the_current_connection() {
+    let coordinator=Coordinator::new(); let old=session_id(15911); let owner=session_id(15912);
+    { let mut state=coordinator.inner.state.lock(); state.session_id=owner; state.phase=SessionPhase::Listening; }
+    let live=qa_test_asr();
+    *coordinator.inner.asr.lock()=Some(SessionResource::new(owner,ActiveAsr::Volcengine(Arc::clone(&live))));
+    resources::cancel_asr_for_session(&coordinator.inner,old);
+    assert!(resources::clone_volcengine_asr_for_session(&coordinator.inner,owner).is_some());
+    assert!(!live.cancelled_for_test());
+}
+
+#[test]
+fn asr_handoff_duplicate_initializer_preserves_the_first_current_connection() {
+    let coordinator=Coordinator::new(); let owner=session_id(15913);
+    { let mut state=coordinator.inner.state.lock(); state.session_id=owner; state.phase=SessionPhase::Starting; }
+    let first=qa_test_asr();let duplicate=qa_test_asr();
+    assert!(resources::store_asr_for_session(&coordinator.inner,owner,ActiveAsr::Volcengine(Arc::clone(&first))));
+    assert!(!resources::store_asr_for_session(&coordinator.inner,owner,ActiveAsr::Volcengine(Arc::clone(&duplicate))));
+    assert!(!first.cancelled_for_test());assert!(duplicate.cancelled_for_test());
+    assert!(Arc::ptr_eq(&resources::clone_volcengine_asr_for_session(&coordinator.inner,owner).unwrap(),&first));
+}
+
+#[test]
+fn asr_handoff_startup_completion_keeps_finalization_but_rejects_finished_output() {
+    for (phase,allowed) in [(SessionPhase::Idle,false),(SessionPhase::Starting,true),(SessionPhase::Listening,true),
+        (SessionPhase::Processing,true),(SessionPhase::Inserting,false)] {
+        let coordinator=Coordinator::new();let owner=session_id(15914);
+        { let mut state=coordinator.inner.state.lock();state.session_id=owner;state.phase=phase; }
+        assert_eq!(resources::asr_startup_completion_allowed(&coordinator.inner,owner),allowed,"{phase:?}");
+        coordinator.inner.state.lock().cancelled=true;
+        assert!(!resources::asr_startup_completion_allowed(&coordinator.inner,owner));
+    }
+}
+
+#[test]
+fn recorder_startup_duplicate_initializer_preserves_the_first_handle_and_archive() {
+    let coordinator=Coordinator::new();let owner=session_id(15915);
+    { let mut state=coordinator.inner.state.lock();state.session_id=owner;state.phase=SessionPhase::Starting; }
+    assert!(resources::store_recorder_for_session(&coordinator.inner,owner,Recorder::without_device_for_test(),true));
+    assert!(!resources::store_recorder_for_session(&coordinator.inner,owner,Recorder::without_device_for_test(),false));
+    assert!(coordinator.inner.audio_archive_active.load(Ordering::Relaxed));
+}
+
+#[test]
 fn recorder_startup_late_store_cannot_replace_current_owner() {
     let coordinator = Coordinator::new();
     let old = session_id(15801);

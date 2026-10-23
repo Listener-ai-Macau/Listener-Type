@@ -380,7 +380,10 @@ impl EmbeddedStreamingDictation {
         // User-origin full session: do not auto-promote a later unrelated VA candidate.
         clear_device_key_dictation_takeover_pending(inner);
         self.embedded_session_id = Some(embedded_session_id);
-        let mut session = begin_embedded_audio_dictation_session(inner).await?;
+        let Some(mut session) = begin_embedded_audio_dictation_session(inner).await? else {
+            self.embedded_session_id = None;
+            return Ok(());
+        };
         session.attach_pipeline_observation(self.pipeline_observation.clone());
         let terminal_wake_continuation =
             take_terminal_wake_continuation(inner, session.session_id);

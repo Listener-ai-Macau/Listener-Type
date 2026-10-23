@@ -2541,7 +2541,16 @@ impl EmbeddedStreamingDictation {
         }
 
         let mut session = match begin_embedded_audio_dictation_session(inner).await {
-            Ok(session) => session,
+            Ok(Some(session)) => session,
+            Ok(None) => {
+                candidate.record_outcome_fact(
+                    self.pipeline_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Closed,
+                    "coordinator_owner_retired_during_startup", 0,
+                );
+                self.preserve_candidate_fact_ledger(&mut candidate);
+                return Ok(false);
+            }
             Err(err) => {
                 candidate.record_outcome_fact(
                     self.pipeline_observation.as_ref(),
@@ -2876,7 +2885,16 @@ impl EmbeddedStreamingDictation {
         );
         discard_pre_press_candidate_pcm(&mut candidate.pcm);
         let mut session = match begin_embedded_audio_dictation_session(inner).await {
-            Ok(session) => session,
+            Ok(Some(session)) => session,
+            Ok(None) => {
+                candidate.record_outcome_fact(
+                    candidate_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Closed,
+                    "coordinator_owner_retired_during_startup", 0,
+                );
+                self.preserve_candidate_fact_ledger(&mut candidate);
+                return Ok(false);
+            }
             Err(err) => {
                 candidate.record_outcome_fact(
                     candidate_observation.as_ref(),
@@ -4200,7 +4218,16 @@ impl EmbeddedStreamingDictation {
             },
         );
         let mut session = match begin_embedded_audio_dictation_session(inner).await {
-            Ok(session) => session,
+            Ok(Some(session)) => session,
+            Ok(None) => {
+                candidate.record_outcome_fact(
+                    candidate_observation.as_ref(),
+                    crate::observability::CandidateFactKind::Closed,
+                    "coordinator_owner_retired_during_startup", 0,
+                );
+                self.preserve_candidate_fact_ledger(&mut candidate);
+                return Ok(false);
+            }
             Err(err) => {
                 candidate.record_outcome_fact(
                     candidate_observation.as_ref(),

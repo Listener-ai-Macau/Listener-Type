@@ -1872,7 +1872,7 @@ fn submission_result_from_stats(
 
 async fn begin_embedded_audio_dictation_session(
     inner: &Arc<Inner>,
-) -> Result<EmbeddedAudioDictationSession, String> {
+) -> Result<Option<EmbeddedAudioDictationSession>, String> {
     let current_session_id = begin_embedded_audio_dictation_session_id(inner)?;
     clear_embedded_audio_stats(inner);
     begin_embedded_audio_preview_session(inner, current_session_id);
@@ -1918,8 +1918,12 @@ async fn begin_embedded_audio_dictation_session(
     }
     let (consumer, volcengine_asr) =
         match build_embedded_audio_asr_consumer(inner, current_session_id, &active_asr).await {
-            Ok(consumer) => consumer,
+            Ok(Some(consumer)) => consumer,
+            Ok(None) => return Ok(None),
             Err(message) => {
+                if !super::resources::recording_resource_start_allowed(inner, current_session_id) {
+                    return Ok(None);
+                }
                 log::warn!("[coord] embedded audio ASR setup failed: {message}");
                 publish_dictation_pipeline_error(inner, current_session_id, message.clone());
                 restore_prepared_windows_ime_session(inner, current_session_id);
@@ -1928,6 +1932,10 @@ async fn begin_embedded_audio_dictation_session(
                 return Err(message);
             }
         };
+
+    if !super::resources::recording_resource_start_allowed(inner, current_session_id) {
+        return Ok(None);
+    }
 
     let archive_pcm = record_embedded_audio_for_debug_enabled(inner).then(Vec::new);
     let local_speech_activity = volcengine_asr
@@ -1945,7 +1953,7 @@ async fn begin_embedded_audio_dictation_session(
             }
         })
         .unwrap_or_else(LocalSpeechActivity::disabled);
-    Ok(EmbeddedAudioDictationSession {
+    Ok(Some(EmbeddedAudioDictationSession {
         session_id: current_session_id,
         candidate_id: None,
         source_stream_id: next_embedded_coordinator_source_stream_id(),
@@ -1977,7 +1985,7 @@ async fn begin_embedded_audio_dictation_session(
         proactive_stop_body_started: false,
         proactive_stop_silence_ms: 0,
         proactive_stop_dispatched: false,
-    })
+    }))
 }
 
 fn begin_embedded_audio_dictation_session_id(inner: &Arc<Inner>) -> Result<SessionId, String> {
@@ -2042,7 +2050,9 @@ async fn submit_embedded_pcm_for_dictation_with_stats(
     pcm: &[u8],
     stats: Option<crate::embedded_audio::SessionStats>,
 ) -> Result<(), String> {
-    let session = begin_embedded_audio_dictation_session(inner).await?;
+    let Some(session) = begin_embedded_audio_dictation_session(inner).await? else {
+        return Ok(());
+    };
     let current_session_id = session.session_id;
     let active_asr = session.active_asr.clone();
     let consumer = Arc::clone(&session.consumer);
@@ -2301,12 +2311,15 @@ async fn build_embedded_audio_asr_consumer(
     session_id: SessionId,
     active_asr: &str,
 ) -> Result<
-    (
+    Option<(
         Arc<dyn crate::recorder::AudioConsumer>,
         Option<Arc<VolcengineStreamingASR>>,
-    ),
+    )>,
     String,
 > {
+    if !super::resources::recording_resource_start_allowed(inner, session_id) {
+        return Ok(None);
+    }
     #[cfg(target_os = "windows")]
     if foundry::is_foundry_local_whisper(active_asr) {
         let prefs = inner.prefs.get();
@@ -2327,13 +2340,13 @@ async fn build_embedded_audio_asr_consumer(
             prefs.foundry_local_runtime_source.clone(),
             language_hint.hint,
         ));
-        store_asr_for_session(
+        if !store_asr_for_session(
             inner,
             session_id,
             ActiveAsr::FoundryLocalWhisper(Arc::clone(&local)),
-        );
+        ) { return Ok(None); }
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = local;
-        return Ok((consumer, None));
+        return Ok(Some((consumer, None)));
     }
 
     if is_whisper_compatible_provider(active_asr) {
@@ -2351,43 +2364,47 @@ async fn build_embedded_audio_asr_consumer(
             whisper_prompt,
             client,
         ));
-        store_asr_for_session(inner, session_id, ActiveAsr::Whisper(Arc::clone(&whisper)));
+        if !store_asr_for_session(inner, session_id, ActiveAsr::Whisper(Arc::clone(&whisper))) {
+            return Ok(None);
+        }
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = whisper;
-        return Ok((consumer, None));
+        return Ok(Some((consumer, None)));
     }
 
     if is_bailian_provider(active_asr) {
         let asr = Arc::new(BailianRealtimeASR::new(read_bailian_credentials()));
+        // Publish ownership before awaiting the network, so cancellation can
+        // reach an in-flight connection rather than waiting for it to return.
+        if !store_asr_for_session(inner, session_id, ActiveAsr::Bailian(Arc::clone(&asr))) {
+            return Ok(None);
+        }
         asr.open_session()
             .await
             .map_err(|err| format!("打开 Bailian ASR 连接失败: {err}"))?;
-        store_asr_for_session(inner, session_id, ActiveAsr::Bailian(Arc::clone(&asr)));
+        if !super::resources::recording_resource_start_allowed(inner, session_id) {
+            return Ok(None);
+        }
         let bridge = Arc::new(DeferredAsrBridge::new());
         let target: Arc<dyn crate::asr::AudioConsumer> = asr;
         bridge.attach(target);
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge;
-        return Ok((consumer, None));
+        return Ok(Some((consumer, None)));
     }
 
     let final_asr = build_volcengine_asr(inner, session_id);
     let bridge = Arc::new(DeferredAsrBridge::new());
     let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge.clone();
-    store_asr_for_session(
+    if !store_asr_for_session(
         inner,
         session_id,
         ActiveAsr::Volcengine(Arc::clone(&final_asr)),
-    );
+    ) { return Ok(None); }
     let inner_for_open = Arc::clone(inner);
     let final_asr_for_open = Arc::clone(&final_asr);
     tauri::async_runtime::spawn(async move {
         match open_volcengine_asr(&final_asr_for_open).await {
             Ok(()) => {
-                let still_current = {
-                    let state = inner_for_open.state.lock();
-                    state.session_id == session_id
-                        && !state.cancelled
-                        && state.phase != SessionPhase::Idle
-                };
+                let still_current = super::resources::asr_startup_completion_allowed(&inner_for_open, session_id);
                 if !still_current {
                     final_asr_for_open.cancel();
                     log::info!(
@@ -2403,12 +2420,7 @@ async fn build_embedded_audio_asr_consumer(
                 );
             }
             Err(err) => {
-                let still_current = {
-                    let state = inner_for_open.state.lock();
-                    state.session_id == session_id
-                        && !state.cancelled
-                        && state.phase != SessionPhase::Idle
-                };
+                let still_current = super::resources::asr_startup_completion_allowed(&inner_for_open, session_id);
                 if still_current {
                     let target: Arc<dyn crate::asr::AudioConsumer> = final_asr_for_open.clone();
                     let retained_bytes = bridge.attach(target);
@@ -2422,7 +2434,7 @@ async fn build_embedded_audio_asr_consumer(
             }
         }
     });
-    Ok((consumer, Some(final_asr)))
+    Ok(Some((consumer, Some(final_asr))))
 }
 
 fn archive_embedded_audio_if_enabled(

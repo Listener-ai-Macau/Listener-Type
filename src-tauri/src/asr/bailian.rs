@@ -5,7 +5,7 @@
 //! matches Listener Type' recorder output directly. The Qwen OpenAI Realtime line is
 //! a different protocol and is intentionally left for a follow-up provider.
 
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
@@ -63,6 +63,8 @@ impl BailianCredentials {
 
 #[derive(Debug, thiserror::Error)]
 pub enum BailianASRError {
+    #[error("recognition cancelled")]
+    Cancelled,
     #[error("credentials missing")]
     CredentialsMissing,
     #[error("connection failed: {0}")]
@@ -104,6 +106,8 @@ pub struct BailianRealtimeASR {
     writer: SharedWriter,
     final_rx: ParkingMutex<Option<oneshot::Receiver<Result<RawTranscript, BailianASRError>>>>,
     task_started: Arc<Notify>,
+    cancelled: AtomicBool,
+    cancel_signal: Notify,
 }
 
 impl BailianRealtimeASR {
@@ -114,10 +118,36 @@ impl BailianRealtimeASR {
             writer: Arc::new(AsyncMutex::new(None)),
             final_rx: ParkingMutex::new(None),
             task_started: Arc::new(Notify::new()),
+            cancelled: AtomicBool::new(false),
+            cancel_signal: Notify::new(),
         }
     }
 
     pub async fn open_session(self: &Arc<Self>) -> Result<(), BailianASRError> {
+        // Register before reading the flag; cancellation cannot be lost between
+        // the precheck and a pending connect/handshake/task-start await.
+        let cancelled = self.cancel_signal.notified();
+        tokio::pin!(cancelled);
+        cancelled.as_mut().enable();
+        if self.cancelled.load(Ordering::SeqCst) {
+            return Err(BailianASRError::Cancelled);
+        }
+        tokio::select! {
+            biased;
+            _ = &mut cancelled => {
+                self.cancel();
+                Err(BailianASRError::Cancelled)
+            }
+            result = self.open_session_inner() => {
+                if self.cancelled.load(Ordering::SeqCst) {
+                    self.cancel();
+                    Err(BailianASRError::Cancelled)
+                } else { result }
+            }
+        }
+    }
+
+    async fn open_session_inner(self: &Arc<Self>) -> Result<(), BailianASRError> {
         if self.credentials.api_key.trim().is_empty() {
             return Err(BailianASRError::CredentialsMissing);
         }
@@ -269,6 +299,8 @@ impl BailianRealtimeASR {
     }
 
     pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+        self.cancel_signal.notify_waiters();
         let mut st = self.state.lock();
         st.pending_audio.clear();
         st.audio_scratch.clear();
@@ -548,6 +580,46 @@ async fn close_writer(writer: &SharedWriter) -> Result<(), BailianASRError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancel_interrupts_inflight_connection_without_a_server_response() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let asr = Arc::new(BailianRealtimeASR::new(BailianCredentials {
+            api_key: "local-controlled-test-only".into(),
+            endpoint: format!("ws://{}", listener.local_addr().unwrap()),
+            model: DEFAULT_MODEL.into(), vocabulary_id: None,
+        }));
+        let client = Arc::clone(&asr);
+        let mut opening = tokio::spawn(async move { client.open_session().await });
+        let (mut socket, _) = tokio::time::timeout(Duration::from_secs(2), listener.accept()).await.unwrap().unwrap();
+        let mut request = [0u8; 2048];
+        assert!(tokio::time::timeout(Duration::from_secs(2), socket.read(&mut request)).await.unwrap().unwrap() > 0);
+        // The local peer deliberately never answers the WebSocket handshake.
+        asr.cancel();
+        let result = tokio::time::timeout(Duration::from_secs(1), &mut opening).await;
+        let promptly_interrupted = result.is_ok();
+        let error = match result { Ok(Ok(Err(error))) => error.to_string(), _ => String::new() };
+        drop(socket);
+        if !promptly_interrupted { opening.abort(); let _ = opening.await; }
+        assert!(promptly_interrupted, "cancel must interrupt startup without waiting for the provider");
+        assert!(error.contains("cancel"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn cancelled_instance_does_not_start_another_connection() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let asr = Arc::new(BailianRealtimeASR::new(BailianCredentials {
+            api_key: "local-controlled-test-only".into(),
+            endpoint: format!("ws://{}", listener.local_addr().unwrap()),
+            model: DEFAULT_MODEL.into(), vocabulary_id: None,
+        }));
+        asr.cancel();
+        let result = tokio::time::timeout(Duration::from_millis(100), asr.open_session()).await;
+        let opened = tokio::time::timeout(Duration::from_millis(30), listener.accept()).await.is_ok();
+        assert!(!opened, "an already-cancelled instance cannot contact the peer");
+        assert!(matches!(result, Ok(Err(error)) if error.to_string().contains("cancel")));
+    }
 
     #[test]
     fn credentials_apply_default_endpoint_and_model() {

@@ -335,11 +335,11 @@ pub(super) async fn begin_session_with_translation(
             prefs.foundry_local_runtime_source.clone(),
             language_hint.hint,
         ));
-        store_asr_for_session(
+        if !store_asr_for_session(
             inner,
             current_session_id,
             ActiveAsr::FoundryLocalWhisper(Arc::clone(&local)),
-        );
+        ) { return Ok(()); }
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = local;
         start_recorder_and_enter_listening(inner, current_session_id, &active_asr, consumer)
             .await?;
@@ -362,11 +362,11 @@ pub(super) async fn begin_session_with_translation(
                 return Err(format!("local ASR init failed: {e}"));
             }
         };
-        store_asr_for_session(
+        if !store_asr_for_session(
             inner,
             current_session_id,
             ActiveAsr::Local(Arc::clone(&local)),
-        );
+        ) { return Ok(()); }
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = local;
         start_recorder_and_enter_listening(inner, current_session_id, &active_asr, consumer)
             .await?;
@@ -377,11 +377,11 @@ pub(super) async fn begin_session_with_translation(
         let asr = Arc::new(BailianRealtimeASR::new(read_bailian_credentials()));
         let bridge = Arc::new(DeferredAsrBridge::new());
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge.clone();
-        store_asr_for_session(
+        if !store_asr_for_session(
             inner,
             current_session_id,
             ActiveAsr::Bailian(Arc::clone(&asr)),
-        );
+        ) { return Ok(()); }
         if !start_recorder_for_starting(inner, current_session_id, &active_asr, consumer).await? {
             return Ok(());
         }
@@ -465,11 +465,11 @@ pub(super) async fn begin_session_with_translation(
             whisper_prompt,
             client,
         ));
-        store_asr_for_session(
+        if !store_asr_for_session(
             inner,
             current_session_id,
             ActiveAsr::Whisper(Arc::clone(&whisper)),
-        );
+        ) { return Ok(()); }
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = whisper;
         start_recorder_and_enter_listening(inner, current_session_id, &active_asr, consumer)
             .await?;
@@ -477,11 +477,11 @@ pub(super) async fn begin_session_with_translation(
         let asr = build_volcengine_asr(inner, current_session_id);
         let bridge = Arc::new(DeferredAsrBridge::new());
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge.clone();
-        store_asr_for_session(
+        if !store_asr_for_session(
             inner,
             current_session_id,
             ActiveAsr::Volcengine(Arc::clone(&asr)),
-        );
+        ) { return Ok(()); }
         if !start_recorder_for_starting(inner, current_session_id, &active_asr, consumer).await? {
             return Ok(());
         }
@@ -610,6 +610,10 @@ pub(super) async fn start_recorder_for_starting(
     let microphone_device_name = selected_microphone_device_name(inner);
     stop_microphone_preview_monitor(inner, "dictation recorder");
     acquire_recording_mute(inner, "dictation").await;
+    if !super::resources::recording_resource_start_allowed(inner, session_id) {
+        release_recording_mute(inner, "dictation");
+        return Ok(false);
+    }
     let audio_archive_path = if inner.prefs.get().record_audio_for_debug {
         // 用 coordinator 的 SessionId 作为文件名，跟 history 那条记录 id 对齐（见
         // 下游 polish 收尾时 `history_session_id = current_session_id.to_string()`）。

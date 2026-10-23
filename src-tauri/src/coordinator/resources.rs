@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::coordinator_state::{SessionId, SessionPhase};
+use crate::coordinator_state::{SessionId, SessionPhase, SessionState};
 use crate::recorder::Recorder;
 use tauri::Manager;
 
@@ -55,8 +55,64 @@ pub(super) fn take_session_resource<T>(
     }
 }
 
-pub(super) fn store_asr_for_session(inner: &Arc<Inner>, session_id: SessionId, asr: ActiveAsr) {
-    *inner.asr.lock() = Some(SessionResource::new(session_id, asr));
+fn accepts_startup_resource(inner: &Arc<Inner>, state: &SessionState, session_id: SessionId) -> bool {
+    state.session_id == session_id
+        && !state.cancelled
+        && matches!(state.phase, SessionPhase::Starting | SessionPhase::Listening)
+        && super::recording_gate::try_admit_arc(
+            inner, super::recording_gate::RecordIntent::HotkeyPress, "recording resource handoff",
+        )
+}
+
+pub(super) fn recording_resource_start_allowed(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    accepts_startup_resource(inner, &inner.state.lock(), session_id)
+}
+
+pub(super) fn asr_startup_completion_allowed(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    let state = inner.state.lock();
+    // Finalization may still be waiting for the provider. Inserting already
+    // has its final text and must not revive a late connection or callback.
+    state.session_id == session_id && !state.cancelled
+        && matches!(state.phase, SessionPhase::Starting | SessionPhase::Listening | SessionPhase::Processing)
+        && super::recording_gate::try_admit_arc(
+            inner, super::recording_gate::RecordIntent::HotkeyPress, "ASR startup completion",
+        )
+}
+
+fn same_asr_connection(first: &ActiveAsr, second: &ActiveAsr) -> bool {
+    match (first, second) {
+        (ActiveAsr::Volcengine(a), ActiveAsr::Volcengine(b)) => Arc::ptr_eq(a, b),
+        (ActiveAsr::Whisper(a), ActiveAsr::Whisper(b)) => Arc::ptr_eq(a, b),
+        (ActiveAsr::Bailian(a), ActiveAsr::Bailian(b)) => Arc::ptr_eq(a, b),
+        #[cfg(target_os = "windows")]
+        (ActiveAsr::FoundryLocalWhisper(a), ActiveAsr::FoundryLocalWhisper(b)) => Arc::ptr_eq(a, b),
+        #[cfg(target_os = "macos")]
+        (ActiveAsr::Local(a), ActiveAsr::Local(b)) => Arc::ptr_eq(a, b),
+        _ => false,
+    }
+}
+
+#[must_use = "abandoned ASR setup must not continue opening or attaching audio"]
+pub(super) fn store_asr_for_session(inner: &Arc<Inner>, session_id: SessionId, asr: ActiveAsr) -> bool {
+    let (accepted, retired) = {
+        let state = inner.state.lock();
+        let mut slot = inner.asr.lock();
+        let aliases_current = slot.as_ref()
+            .is_some_and(|current| same_asr_connection(&current.resource, &asr));
+        let already_registered = slot.as_ref().is_some_and(|current| current.session_id == session_id);
+        if !accepts_startup_resource(inner, &state, session_id)
+            || (already_registered && !aliases_current)
+        {
+            // A stale clone cannot cancel a connection still owned by the slot.
+            (false, if aliases_current { None } else { Some(asr) })
+        } else {
+            let previous = slot.replace(SessionResource::new(session_id, asr));
+            (true, if aliases_current { None } else { previous.map(SessionResource::into_inner) })
+        }
+    };
+    // Provider cleanup can wake callbacks. Never cancel under either lock.
+    if let Some(retired) = retired { cancel_active_asr(retired); }
+    accepted
 }
 
 pub(super) fn take_asr_for_session(inner: &Arc<Inner>, session_id: SessionId) -> Option<ActiveAsr> {
@@ -97,6 +153,7 @@ pub(super) fn cancel_asr_for_session(inner: &Arc<Inner>, session_id: SessionId) 
     }
 }
 
+#[must_use = "abandoned recorder setup must not continue startup"]
 pub(super) fn store_recorder_for_session(
     inner: &Arc<Inner>,
     session_id: SessionId,
@@ -105,19 +162,13 @@ pub(super) fn store_recorder_for_session(
 ) -> bool {
     let handoff = {
         let state = inner.state.lock();
-        if state.session_id != session_id
-            || state.cancelled
-            || !matches!(state.phase, SessionPhase::Starting | SessionPhase::Listening)
-            || !super::recording_gate::try_admit_arc(
-                inner,
-                super::recording_gate::RecordIntent::HotkeyPress,
-                "microphone recorder handoff",
-            )
+        let mut slot = inner.recorder.lock();
+        if !accepts_startup_resource(inner, &state, session_id)
+            || slot.as_ref().is_some_and(|current| current.session_id == session_id)
         {
             Err(recorder)
         } else {
-            let replaced = inner.recorder.lock()
-                .replace(SessionResource::new(session_id, recorder));
+            let replaced = slot.replace(SessionResource::new(session_id, recorder));
             // This flag belongs to the accepted owner, just like the handle.
             inner.audio_archive_active.store(archive_active, std::sync::atomic::Ordering::Relaxed);
             Ok(replaced)
