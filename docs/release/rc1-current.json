@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-24T00:28:16.757161+08:00",
+  "updatedAt": "2026-10-24T01:01:23.636471+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 157,
-    "source": "2a64a18d41927f60da8ca40d71453f1053835876",
-    "sourceTag": "build-source/type157-20261024",
+    "build": 158,
+    "source": "7d17b85933c4f30268097f4363c9d7bdd2c9a2a3",
+    "sourceTag": "build-source/type158-20261024",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "b4fae3a7a6d401843fceedb3d2ed6e87e3b57a41015d1441727380edfa5bc143",
-    "sizeBytes": 299208704,
-    "exeSha256": "4a810c0d377e541fd1ec2958204606132609e33623690b8d010be55126157982",
+    "sha256": "b6ba21fee944393cfc7981b6ae52e38bc2d4ea3ed15fd371c5309bd627f429e8",
+    "sizeBytes": 299212800,
+    "exeSha256": "e108747ddb1c4f46eaec9ce38c20811b4ce86811bde76f8b070787bc9394e31e",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -29,7 +29,7 @@
     "newMsiEmbeddedExeEqualsBuiltExe": true,
     "sameVersionMsiUpgradeEnabled": true,
     "npmAuditVulnerabilities": 0,
-    "nativeRegressionEvidenceSource": "34fa9fcf6b3c71a94a0b680285fee86c587f3ce5",
+    "nativeRegressionEvidenceSource": "e1fd5e72312e78522a431875e05c3ce0ef28b4cd",
     "newPackageInstalledForThisPublication": true,
     "experimentalThroughputFirmwareIncluded": false,
     "firmware33ActualOtaAndExactBuildConfirmed": true,
@@ -387,7 +387,12 @@
     "type157InstalledExeAndPreferencesVerified": true,
     "type157QAOTANativeControlledPassed": true,
     "type157CanonicalQAShortcutActualNativeUIPassed": true,
-    "type157PhysicalQAOTACollisionQualified": false
+    "type157PhysicalQAOTACollisionQualified": false,
+    "type158InstalledExeAndPreferencesVerified": true,
+    "type158CaptureLifetimeNativeControlledPassed": true,
+    "type158PhysicalMicrophoneStallQualified": false,
+    "sharedHostCaptureSource": "39bae009668ab1bd8b5257dc6ce187b14e09a675",
+    "sharedHostCaptureTag": "build-source/host-audio158-20261024"
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -405,6 +410,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build157-20261024"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build158-20261024"
   }
 }
