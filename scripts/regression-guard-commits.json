@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T21:58:04.405986+08:00",
+  "updated_at": "2026-10-23T22:42:50.293191+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -76,7 +76,8 @@
     {
       "repo": "firmware",
       "guard": "python tools/test_usb_settings_dispatch.py"
-    }
+    },
+    "device_translation_selected_source_session_mode_and_ota_admission"
   ],
   "entries": [
     {
@@ -6746,6 +6747,41 @@
       ],
       "pending_human_scope": [
         "No new physical key, multi-device/multi-PC, full RF, voice latency or hardware purchase qualification. Previous actual scopes remain separately recorded."
+      ]
+    },
+    {
+      "id": "device_translation_selected_source_session_mode_and_ota_admission",
+      "repo": "type",
+      "commit": "ab28286eaaaddc250583cee9f9ca6f44b91202c8",
+      "commit_subject": "Route device translation through selected recording source and lifecycle",
+      "subject": "Device Translation uses selected input and symmetric stop; mode belongs to session creation, OTA denies at both boundaries",
+      "state": "candidate_native_scoped_passed_not_yet_packaged",
+      "protects": [
+        "Translation uses shared selected-source start and stop, independent of desktop Hold/Toggle.",
+        "Mode is bound synchronously when session is created, retained during same-session BLE attachment, and reset only for a new ordinary recording.",
+        "Recording admission is checked at action and actual microphone/BLE startup boundaries after recovery waits."
+      ],
+      "guards": [
+        "Actual private Windows coordinator tests: device_translation_ / translation and coordinator::tests::; retain old failing binary and original receipts."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build155\\source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-222606-bdc6cc\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-224130-0ad2ff\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-224132-9bec8b\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\translation155-before.exe",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\translation154-before.rs.txt"
+      ],
+      "machine_accepted_scope": [
+        "Two actual old coordinator counterexamples fail: BLE source enters microphone dry-run Listening; OTA still starts recording. Private station; no physical audio/input.",
+        "13 translation-related plus196 coordinator cases pass (overlapping filters; not209 distinct). Includes6 new production-path cases;0ignored/private cleanup errors/daily persistent changes."
+      ],
+      "known_failures": [
+        "Legacy4711ae2b2 route predates current154. Persistence/UI tests did not exercise Translation action; not attribution for every historic voice defect."
+      ],
+      "pending_human_scope": [
+        "No physical Translation key press, actual microphone/BLE speech-to-translation, external target insertion, full RF or purchase qualification.",
+        "Prior140 voice,149/150 settings and154 automatic preload evidence retain their actual scopes."
       ]
     }
   ],
