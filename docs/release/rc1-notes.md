@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build142 / Firmware33
+# Listener v1.0.6-rc1 · Type build144 / Firmware33
 
 | Download | File |
 | --- | --- |
@@ -7,9 +7,9 @@
 
 ## In this app update
 
-When switching a text-trial style, the processing-location notice and submit permission now belong to that exact selection and saved revision from its first render. The previous style cannot briefly supply a local-processing label or permission while the new check is pending. Late checks cannot override a newer selection. Draft editing and failure/retry recovery are retained.
+Fixes History recording playback being rejected by the packaged media policy. Local blob audio is now explicitly permitted while other source policies retain their restrictions. Also fixes retained audio resources when switching History records or leaving the page before a recording finishes loading. A late file read checks its original player before allocating audio or reporting errors.
 
-Checked with a frozen141 source counterexample and the exact142 MSI using actual native keyless-readiness policies and saved-revision labels in a private instance. Delayed/late-response checks use a separate controlled actual-React frontend fixture. This confirms the state-ownership correction, not an observed unauthorized cloud submission or a measured visible flicker duration. Prior141 recording, vocabulary and settings fixes are retained.
+The exact144 MSI decoded a generated retained WAV and released its resources on record changes and page exit, with no media-src violation. Controlled actual-React tests cover late reads. The failed143 package and its observed policy error are retained in engineering history;143 was not installed or published. This is a specific playback/resource correction, not a measured claim about total application memory. Prior142 notice and recording fixes are retained.
 
 ## Before using
 
@@ -19,11 +19,11 @@ Strong-interference exclusion is incomplete. Firmware33 and its USB/OTA ZIP are 
 
 ## File identity
 
-- Type source: `474a8b5ccfaa1d53611ad8d10e16cdb1ae9cfee9` · `build-source/type142-20261023`
-- MSI: 299208704 bytes · SHA256 `81c5a918e2348a842620be3031649d52d8e60c3d3961fc2fa8d298d84948a5a5`
+- Type source: `7c7ff16d27b1a2929b2ae610d16823f3c976091a` · `build-source/type144-20261023`
+- MSI: 299233280 bytes · SHA256 `9568c315e267528c21f219fd1f8846aaec981076852a91e9b956aa2065294831`
 - Firmware33 source: `149b6d950ebc5f416924c8670cf2b207bdc2b5b7` · runtime `e7bd1f1619b696a1`
 - ZIP: 1956905 bytes · SHA256 `306fbf8bb012f46ec911c074be8ee7f3633a1ac27f6e55273515cca6de25f272`
 
 ## 中文说明
 
-修复文字试用切换风格时短暂沿用旧风格处理提示与提交权限的问题；状态绑定当前所选风格／保存版本／重试，迟到检查不能覆盖新选择。草稿检查失败与重试期间仍可编辑。精确包隔离检查核对实际native策略与保存版本标签；延迟／迟到检查在独立React夹具验证，不冒充真实未授权云请求或所有场景验收。保留141既有录音和持久化修复，固件仍33。自动缩短可能几乎不变，使用前需自行核对。49美元为纯硬件，识别／文字服务另行准备计费，官方账号赠送计划未随本版交付。
+修复安装版历史录音被媒体来源策略拦截，显式允许同源与本机blob音频；同时修复切换记录／离页后的迟到读取资源泄漏。以精确144包和自制静音核对解码及释放，无media-src违规；迟到场景另有实际React对照。143因原生播放失败未安装／发布，原失败包与根因留存，不覆盖为成功。未声称整机RSS长期降低。保留142既有录音／处理提示，固件仍33，识别与文字服务另行准备计费。
