@@ -70,6 +70,8 @@ pub(crate) fn run_recorded_content_probe() -> i32 { dictation::run_recorded_cont
 mod qa;
 mod recording_gate;
 mod resources;
+#[cfg(target_os = "windows")]
+mod onboard_key_sync;
 mod source_integrity;
 mod support;
 

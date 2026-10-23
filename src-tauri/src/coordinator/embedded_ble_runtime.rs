@@ -3706,9 +3706,9 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
         .is_some_and(|active| Arc::ptr_eq(active, cancel))
         && !cancel.load(Ordering::SeqCst)
     {
-        inner
+        let first_notify_ready = !inner
             .embedded_ble_listener_ready
-            .store(true, Ordering::SeqCst);
+            .swap(true, Ordering::SeqCst);
         inner
             .embedded_ble_listener_ready_notification
             .notify_waiters();
@@ -3754,7 +3754,9 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
         flush_pending_device_key_ble_action(inner, "notify_ready");
         log::info!("[embedded-ble] background listener notify ready");
         schedule_embedded_ble_runtime_identity_probe(inner, generation);
-        schedule_onboard_key_read(inner, generation);
+        if first_notify_ready {
+            schedule_onboard_key_read(inner, generation);
+        }
         // Notify readiness proves this link only. Other Listener addresses may
         // belong to real boards, even when their names match or they are offline.
         // Retire only exact identities owned by an explicit recovery transaction.
@@ -3762,29 +3764,82 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
     }
 }
 
-#[cfg(target_os="windows")]
-fn schedule_onboard_key_read(inner:&Arc<Inner>,generation:u64) {
-    let inner=Arc::clone(inner);
+#[cfg(target_os = "windows")]
+fn onboard_key_readiness(inner: &Inner, generation: u64, address: u64) -> onboard_key_sync::Readiness {
+    use onboard_key_sync::Readiness;
+    if inner.shutdown.load(Ordering::SeqCst)
+        || !inner.embedded_ble_listener_ready.load(Ordering::SeqCst)
+        || inner.embedded_ble_listener_generation.load(Ordering::SeqCst) != generation
+        || crate::embedded_ble::current_notify_keep_address() != Some(address)
+    {
+        return Readiness::Cancelled;
+    }
+    let idle = inner.state.lock().phase == SessionPhase::Idle;
+    let no_pending_action = inner.device_key_pending_ble_action.lock().is_none();
+    if idle && no_pending_action { Readiness::Idle } else { Readiness::Busy }
+}
+
+#[cfg(target_os = "windows")]
+fn schedule_onboard_key_read(inner: &Arc<Inner>, generation: u64) {
+    // Pin the exact connected peer before yielding. Never read another board
+    // because its address became current while the old worker was waiting.
+    let Some(address) = crate::embedded_ble::current_notify_keep_address() else { return; };
+    let inner = Arc::clone(inner);
     async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        if inner.shutdown.load(Ordering::SeqCst) || !inner.embedded_ble_listener_ready.load(Ordering::SeqCst)
-            || inner.embedded_ble_listener_generation.load(Ordering::SeqCst)!=generation {return;}
-        let deadline=Instant::now()+Duration::from_secs(30);
-        while inner.state.lock().phase!=SessionPhase::Idle {
-            if Instant::now()>=deadline || inner.shutdown.load(Ordering::SeqCst) || inner.embedded_ble_listener_generation.load(Ordering::SeqCst)!=generation {return;}
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
-        let Some(address)=crate::embedded_ble::current_notify_keep_address() else{return;};
-        let result=async_runtime::spawn_blocking(move || {
-            let devices=crate::embedded_ble::settings_target::list()?;
-            let expected=format!("ble:{address:012X}");
-            let device=devices.into_iter().find(|d|crate::embedded_ble::settings_target::peer_key(d)==expected).ok_or("Current Listener settings identity missing")?;
-            crate::embedded_ble::settings_target::with_device(&device,|io| {
-                if let Some(keys)=crate::device_key_profile::read(io)? {crate::device_key_profile::remember(&device,&keys);}
-                Ok::<_,String>(())
-            })
-        }).await;
-        match result {Ok(Ok(()))=>log::info!("[device-keys] current board profile read; no preferences pushed"),other=>log::warn!("[device-keys] board read deferred: {other:?}")}
+        onboard_key_sync::synchronize(
+            Instant::now,
+            tokio::time::sleep,
+            || onboard_key_readiness(&inner, generation, address),
+            || {
+                let inner = Arc::clone(&inner);
+                async move {
+                    async_runtime::spawn_blocking(move || {
+                        use crate::embedded_ble::settings_target::{self, SettingsIo};
+                        struct IdleRead<'a> {
+                            io: &'a mut dyn SettingsIo,
+                            inner: &'a Inner,
+                            generation: u64,
+                            address: u64,
+                        }
+                        impl IdleRead<'_> {
+                            fn check(&self) -> Result<(), String> {
+                                (onboard_key_readiness(self.inner, self.generation, self.address)
+                                    == onboard_key_sync::Readiness::Idle)
+                                    .then_some(())
+                                    .ok_or_else(|| "Board profile read yielded to recording or connection change".into())
+                            }
+                        }
+                        impl SettingsIo for IdleRead<'_> {
+                            fn read(&mut self) -> Result<crate::embedded_ble::DeviceSettingsStatus, String> {
+                                self.check()?;
+                                self.io.read()
+                            }
+                            fn write(&mut self, command: &str) -> Result<(), String> {
+                                self.check()?;
+                                self.io.write(command)
+                            }
+                        }
+                        if onboard_key_readiness(&inner, generation, address) != onboard_key_sync::Readiness::Idle {
+                            return Err("Board profile read yielded before I/O".to_string());
+                        }
+                        let expected = format!("ble:{address:012X}");
+                        let device = settings_target::list()?.into_iter()
+                            .find(|d| settings_target::peer_key(d) == expected)
+                            .ok_or("Current Listener settings identity missing")?;
+                        let keys = settings_target::with_device(&device, |io| {
+                            let mut guarded = IdleRead { io, inner: &inner, generation, address };
+                            crate::device_key_profile::read(&mut guarded)
+                        })?;
+                        Ok((device, keys))
+                    }).await.map_err(|error| format!("Board profile read task failed: {error}"))?
+                }
+            },
+            |(device, keys)| {
+                if let Some(keys) = keys { crate::device_key_profile::remember(&device, &keys); }
+                log::info!("[device-keys] current board profile read; no preferences pushed generation={generation}");
+            },
+            |error, delay| log::warn!("[device-keys] board read deferred; retry_ms={} generation={generation}: {error}", delay.as_millis()),
+        ).await;
     });
 }
 #[cfg(not(target_os="windows"))]
