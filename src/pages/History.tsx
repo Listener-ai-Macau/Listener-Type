@@ -34,6 +34,12 @@ function useModeLabel(): Record<PolishMode, string> {
   };
 }
 
+// Legacy QA records use this marker in the existing history schema. They
+// contain a saved answer, not a dictation insertion/clipboard receipt.
+function isQaSession(session: DictationSession): boolean {
+  return session.errorCode === 'qaSession';
+}
+
 export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void }) {
   const { t } = useTranslation();
   const os = detectOS();
@@ -137,7 +143,7 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
     setSelectedId(session.id);
   };
   const justCopied = !!item && copiedEntry?.id === item.id && copiedEntry.text === item.finalText;
-  const showRawComparison = !!item && item.rawTranscript !== item.finalText;
+  const showRawComparison = !!item && (isQaSession(item) || item.rawTranscript !== item.finalText);
 
   const onClear = async () => {
     if (items.length === 0) return;
@@ -383,7 +389,7 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
                 <div style={{ fontSize: 12, color: 'var(--ol-ink-2)', lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                   {s.finalText.split('\n')[0] || (s.errorCode === 'asrUnavailable' ? t('history.asrUnavailable') : s.errorCode === 'asrTimeout' ? t('history.asrTimeout') : t('history.rawEmpty'))}
                 </div>
-                <div><Pill size="sm" tone={s.mode === 'raw' ? 'outline' : 'default'}>{MODE_LABEL[s.mode]}</Pill></div>
+                <div><Pill size="sm" tone={s.mode === 'raw' ? 'outline' : 'default'}>{isQaSession(s) ? t('history.qaLabel') : MODE_LABEL[s.mode]}</Pill></div>
               </button>
             ))}
           </div>
@@ -395,7 +401,7 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 13, fontFamily: 'var(--ol-font-mono)', color: 'var(--ol-ink-3)' }}>{formatTime(item.createdAt)}</span>
-                  <Pill size="sm" tone="default">{MODE_LABEL[item.mode]}</Pill>
+                  <Pill size="sm" tone="default">{isQaSession(item) ? t('history.qaLabel') : MODE_LABEL[item.mode]}</Pill>
                   <span style={{ fontSize: 11, color: 'var(--ol-ink-4)' }}>{formatDuration(item.durationMs, t)}</span>
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -415,20 +421,20 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
               )}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, minWidth: 0 }}>
                 {showRawComparison && <div style={{ padding: 14, border: '0.5px solid var(--ol-line)', borderRadius: 10, background: 'var(--ol-surface-2)', minWidth: 0, overflow: 'hidden' }}>
-                  <Pill size="sm" tone="outline" style={{ marginBottom: 10 }}>{t('history.rawLabel')}</Pill>
+                  <Pill size="sm" tone="outline" style={{ marginBottom: 10 }}>{t(isQaSession(item) ? 'history.questionLabel' : 'history.rawLabel')}</Pill>
                   <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: 'var(--ol-ink-2)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                     {item.rawTranscript || t('history.rawEmpty')}
                   </p>
                 </div>}
                 <div style={{ padding: 14, border: '0.5px solid var(--ol-blue)', borderRadius: 10, background: 'var(--ol-blue-soft)', minWidth: 0, overflow: 'hidden' }}>
-                  <Pill size="sm" tone="blue" style={{ marginBottom: 10 }}>{MODE_LABEL[item.mode]}</Pill>
+                  <Pill size="sm" tone="blue" style={{ marginBottom: 10 }}>{isQaSession(item) ? t('history.answerLabel') : MODE_LABEL[item.mode]}</Pill>
                   <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: 'var(--ol-ink)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                     {item.finalText || (item.errorCode === 'asrUnavailable' ? t('history.asrUnavailable') : item.errorCode === 'asrTimeout' ? t('history.asrTimeout') : t('history.rawEmpty'))}
                   </p>
                 </div>
               </div>
               <div style={{ marginTop: 18, paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)', display: 'flex', gap: 18, fontSize: 11, color: 'var(--ol-ink-4)', flexWrap: 'wrap' }}>
-                {item.appName && <span>{t('history.insertedTo')} <b style={{ color: 'var(--ol-ink-2)' }}>{item.appName}</b></span>}
+                {item.appName && <span>{t(isQaSession(item) ? 'history.qaSource' : 'history.insertedTo')} <b style={{ color: 'var(--ol-ink-2)' }}>{item.appName}</b></span>}
                 <span>{t('history.chars', { count: item.finalText.length })}</span>
                 {item.dictionaryEntryCount != null && item.dictionaryEntryCount > 0 && (
                   <span>{t('history.vocabHits', { count: item.dictionaryEntryCount })}</span>
@@ -436,6 +442,8 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
                 <span>{
                   !isTauri
                     ? t('history.illustrationStatus')
+                  : isQaSession(item)
+                    ? t('history.qaSaved')
                   : item.insertStatus === 'inserted'
                     ? t('history.inserted')
                     : item.insertStatus === 'pasteSent'
@@ -525,7 +533,7 @@ function RecentRow({
         <span style={{ fontSize: 11, fontFamily: 'var(--ol-font-mono)', color: 'var(--ol-ink-3)', whiteSpace: 'nowrap' }}>
           {formatRecentTime(session.createdAt)}
         </span>
-        <Pill size="sm" tone="default">{modeLabel[session.mode]}</Pill>
+        <Pill size="sm" tone="default">{isQaSession(session) ? t('history.qaLabel') : modeLabel[session.mode]}</Pill>
       </div>
       <div style={{ minWidth: 0, fontSize: 12.5, color: 'var(--ol-ink-2)', whiteSpace: 'pre-line', lineHeight: 1.55, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflowWrap: 'anywhere' }}>
         {session.finalText.split('\n')[0] || (session.errorCode === 'asrUnavailable' ? t('history.asrUnavailable') : session.errorCode === 'asrTimeout' ? t('history.asrTimeout') : t('history.rawEmpty'))}

@@ -68,6 +68,7 @@ mod dictation;
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 pub(crate) fn run_recorded_content_probe() -> i32 { dictation::run_recorded_content_probe() }
 mod qa;
+mod qa_question_context;
 mod recording_gate;
 mod resources;
 #[cfg(target_os = "windows")]
@@ -4361,32 +4362,14 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         return Ok(());
     }
 
-    // 拼这一轮的 user 消息：第一轮（messages 还空）把选区原文嵌进去；
-    // 之后的轮次只送提问，让 LLM 顺着上下文回答。详见 issue #118 v2。
+    // Bind each question to the current selection. An unchanged reference can
+    // reuse chat context, but a later selection must accompany its question.
     let context = {
         let mut st = inner.qa_state.lock();
         if st.session_id != session_id || st.cancelled || st.phase != QaPhase::Processing {
             None
         } else {
-            let is_first_turn = st.messages.is_empty();
-            let sel_text = st
-                .selection
-                .as_ref()
-                .map(|s| s.text.clone())
-                .unwrap_or_default();
-            let user_content = if is_first_turn && !sel_text.trim().is_empty() {
-                format!(
-                    "# 选区原文\n{}\n\n# 我的问题\n{}",
-                    sel_text.trim(),
-                    question
-                )
-            } else {
-                question.clone()
-            };
-            st.messages.push(crate::types::QaChatMessage {
-                role: "user".to_string(),
-                content: user_content,
-            });
+            st.append_question(&question);
 
             if let Some(app) = inner.app.lock().clone() {
                 let messages = st.messages.clone();
@@ -4492,10 +4475,7 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         return Ok(());
     }
 
-    state.messages.push(crate::types::QaChatMessage {
-        role: "assistant".to_string(),
-        content: answer.clone(),
-    });
+    state.append_answer(&answer);
 
     if let Some(app) = inner.app.lock().clone() {
         let messages = state.messages.clone();

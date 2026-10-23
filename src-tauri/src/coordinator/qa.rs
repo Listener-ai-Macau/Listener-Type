@@ -80,6 +80,9 @@ pub(super) struct QaSessionState {
     pub(super) panel_visible: bool,
     /// 多轮对话累积。每轮 user→assistant 加两条；关浮窗清空。
     pub(super) messages: Vec<crate::types::QaChatMessage>,
+    /// Last selection belonging to a successfully answered question. Failed
+    /// requests do not advance this baseline, so retry includes the new text.
+    pub(super) last_answered_selection: Option<String>,
 }
 
 impl Default for QaSessionState {
@@ -93,7 +96,33 @@ impl Default for QaSessionState {
             pinned: false,
             panel_visible: false,
             messages: Vec::new(),
+            last_answered_selection: None,
         }
+    }
+}
+
+impl QaSessionState {
+    pub(super) fn append_question(&mut self, question: &str) {
+        let content = super::qa_question_context::question_user_content(
+            self.messages.is_empty(),
+            self.last_answered_selection.as_deref(),
+            self.selection.as_ref().map(|selection| selection.text.as_str()),
+            question,
+        );
+        self.messages.push(crate::types::QaChatMessage { role: "user".into(), content });
+    }
+
+    pub(super) fn append_answer(&mut self, answer: &str) {
+        // Advance only after this answer succeeds. Cancellation/error removes
+        // the pending user message and must leave the previous baseline intact.
+        if let Some(selected) = self.selection.as_ref().map(|selection| selection.text.trim()) {
+            if !selected.is_empty() {
+                self.last_answered_selection = Some(selected.to_string());
+            }
+        }
+        self.messages.push(crate::types::QaChatMessage {
+            role: "assistant".into(), content: answer.to_string(),
+        });
     }
 }
 
@@ -132,6 +161,7 @@ pub(super) fn open_qa_panel(inner: &Arc<Inner>) {
         state.phase = QaPhase::Idle;
         state.cancelled = false;
         state.messages.clear();
+        state.last_answered_selection = None;
         state.selection = None;
         state.front_app = capture_frontmost_app();
     }
@@ -164,6 +194,7 @@ pub(super) fn close_qa_panel(inner: &Arc<Inner>) {
         state.panel_visible = false;
         state.pinned = false;
         state.messages.clear();
+        state.last_answered_selection = None;
         state.selection = None;
         state.front_app = None;
         state.phase = QaPhase::Idle;
@@ -175,4 +206,70 @@ pub(super) fn close_qa_panel(inner: &Arc<Inner>) {
     // 胶囊一同收掉，避免浮窗关了胶囊还在显示。
     emit_qa_capsule(inner, CapsuleState::Idle, 0.0, None);
     log::info!("[coord] QA panel closed, history cleared");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinator::Coordinator;
+
+    fn selected(text: &str) -> Option<SelectionContext> {
+        Some(SelectionContext { text: text.into(), source_app: None })
+    }
+
+    #[test]
+    fn qa_changed_selection_survives_failed_answer_and_retry() {
+        let coordinator = Coordinator::new();
+        let owner = new_session_id();
+        {
+            let mut state = coordinator.inner.qa_state.lock();
+            state.panel_visible = true;
+            state.session_id = owner;
+            state.selection = selected("原来的条款");
+            state.append_question("解释这一条");
+            state.append_answer("第一条回答");
+            state.selection = selected("新的合同条款");
+            state.phase = QaPhase::Processing;
+            state.append_question("这一条呢？");
+            assert!(state.messages.last().unwrap().content.contains("新的合同条款"));
+            assert_eq!(state.last_answered_selection.as_deref(), Some("原来的条款"));
+        }
+        assert!(super::super::finish_qa_for_session(&coordinator.inner, owner, Some("test failure".into())));
+        let mut state = coordinator.inner.qa_state.lock();
+        assert_eq!(state.messages.len(), 2, "real error closeout removes only the unanswered question");
+        assert_eq!(state.last_answered_selection.as_deref(), Some("原来的条款"));
+        state.selection = selected("新的合同条款");
+        state.append_question("这一条呢？");
+        assert!(state.messages.last().unwrap().content.contains("新的合同条款"));
+        state.append_answer("第二条回答");
+        assert_eq!(state.last_answered_selection.as_deref(), Some("新的合同条款"));
+    }
+
+    #[test]
+    fn qa_unselected_followup_preserves_answered_selection() {
+        let mut state = QaSessionState::default();
+        state.selection = selected("参考正文");
+        state.append_question("概括");
+        state.append_answer("概括结果");
+        state.selection = None;
+        state.append_question("再简短一点");
+        assert_eq!(state.messages.last().unwrap().content, "再简短一点");
+        state.append_answer("更短的结果");
+        assert_eq!(state.last_answered_selection.as_deref(), Some("参考正文"));
+        state.selection = selected(" 参考正文\n");
+        state.append_question("举例");
+        assert_eq!(state.messages.last().unwrap().content, "举例");
+    }
+
+    #[test]
+    fn qa_selection_baseline_is_cleared_when_panel_is_closed_or_reopened() {
+        let coordinator = Coordinator::new();
+        coordinator.inner.qa_state.lock().last_answered_selection = Some("旧窗口选区".into());
+        close_qa_panel(&coordinator.inner);
+        assert!(coordinator.inner.qa_state.lock().last_answered_selection.is_none());
+        coordinator.inner.qa_state.lock().last_answered_selection = Some("旧窗口选区".into());
+        open_qa_panel(&coordinator.inner);
+        assert!(coordinator.inner.qa_state.lock().last_answered_selection.is_none());
+        assert!(coordinator.inner.qa_state.lock().messages.is_empty());
+    }
 }
