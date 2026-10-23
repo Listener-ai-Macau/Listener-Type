@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T15:25:16.115729+08:00",
+  "updated_at": "2026-10-23T16:14:06.366769+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -68,6 +68,14 @@
     {
       "repo": "type",
       "guard": "python scripts/check-selected-usb-exchange.py"
+    },
+    {
+      "repo": "type",
+      "guard": "node --experimental-strip-types src/lib/deviceSettingsSaveQueue.test.ts"
+    },
+    {
+      "repo": "firmware",
+      "guard": "python tools/test_usb_settings_dispatch.py"
     }
   ],
   "entries": [
@@ -6281,7 +6289,7 @@
       "commit": "17c54eec381fc37dbc3fc78be956f04484ee35f4",
       "commit_subject": "Reuse acknowledged USB settings exchanges and patch Vite editor escaping",
       "subject": "Bound large selected USB key writes without removing initial drain, complete ACK, exact target or error synchronization",
-      "state": "source_counterexample_passed_candidate146_not_packaged_installed",
+      "state": "packaged146_not_installed_real_key_read_write_missing_ack_preserved",
       "protects": [
         "One exclusive selected COM handle drains initial stale output once. Only a complete successful ACK permits the next packet to reuse synchronization; all errors and unacknowledged APPLY reset it.",
         "No automatic mutation retries, source/target fallback, deadline removal or profile-CAS/CRC/readback removal. Missing ACK logs only command kind/byte and line counts; no template/name/payload.",
@@ -6302,15 +6310,105 @@
       ],
       "known_failures": [
         "Current145/FW33 ordinary UI changed-key save hit a real missing USB ACK; exact original profile was restored. The repeated quiet waits are a confirmed independent bottleneck; the single missing-ACK event is not yet uniquely attributed.",
-        "Private core UI checks initially assumed wrong success text and tagged busy buttons by changing label; preserved as preparation failures, then actual7field UI write/read/reopen/restore passed."
+        "Private core UI checks initially assumed wrong success text and tagged busy buttons by changing label; preserved as preparation failures, then actual7field UI write/read/reopen/restore passed.",
+        "Exact146/FW34: cold KEY R zero-byte missing ACK; 3999B ordinary UI KEY D save timed out with32980B/313lines; exact original profile restored. FW35 alone still had one SETTINGS missing ACK. This guard fixes quiet waits, not all transport delivery."
       ],
       "pending_human_scope": [
         "Exact146 native maximum-size selected board key profile write/reopen/restore still pending.",
         "No new BLE throughput/name/reconnect qualification."
       ]
+    },
+    {
+      "id": "type147_explicit_device_autosave_keeps_board_authority",
+      "repo": "type",
+      "commit": "e09a1155bcd62e6cbf9e390f170568e367a23e12",
+      "commit_subject": "Autosave explicit device edits and recover replay-safe USB acknowledgements",
+      "subject": "Autosave completed explicit edits to the selected board without writing defaults on read or target changes",
+      "state": "source_react_boundary_passed_native147_pending",
+      "protects": [
+        "Only actual edit events schedule writes; initial read, late snapshot, transport/board changes do not save. Text/number blur and completed choices save; incomplete paths/templates wait.",
+        "Immutable explicit patch merges against fresh selected-board state. Whole read/write transactions serialize, target ID/read lease/core revision/key revision and readback remain authoritative.",
+        "Per-card save failures retain edits and show retry; no normal Write button required. Unchanged knob is null and does not rewrite its core setting."
+      ],
+      "guards": [
+        "node --experimental-strip-types src/lib/deviceSettingsDraft.test.ts",
+        "node --experimental-strip-types src/lib/deviceSettingsSaveQueue.test.ts",
+        "python scripts/check-device-autosave-ui.py --url <owned-vite-url> --report <output>",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/autosave147-react-final.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual React ordinary headless UI with explicit synthetic USB A/B and BLE A IPC boundary: no initial writes, completed numeric/name/key autosaves, target separation, same-board transport read, failed write retained/retry, delayed original-target write, unfinished template and installed-app choice. Not physical USB/BLE qualification."
+      ],
+      "known_failures": [
+        "Original numeric capture handler ran before leaf blur committed its draft; reproduced and changed to bubbling blur. Driver dropdown movement/app label/hover assumptions retained separately; no customer/daily changes from those attempts."
+      ],
+      "pending_human_scope": [
+        "Exact147 native same-board UI read/write and fresh process cold read pending; two physical computers/boards and actual HID presses unclaimed."
+      ]
+    },
+    {
+      "id": "type147_usb_replay_only_idempotent_queries_and_tokened_staging",
+      "repo": "type",
+      "commit": "e09a1155bcd62e6cbf9e390f170568e367a23e12",
+      "commit_subject": "Autosave explicit device edits and recover replay-safe USB acknowledgements",
+      "subject": "Recover one lost ACK only for replay-safe reads and profile B/D/R, preserve mutator failures",
+      "state": "actual_rust_boundary_passed_native147_pending",
+      "protects": [
+        "Only missing ACK triggers at most one same-handle replay of SETTINGS or tokened KEY B/D/R; initial/resync drain and complete ACK retained.",
+        "Broken transport or explicit DEVICE:ERROR is not retried. SET, COMMIT, RESET and name application are never replayed; no other board fallback."
+      ],
+      "guards": [
+        "python scripts/check-selected-usb-exchange.py"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/usb147-safe-recovery-guard.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual Rust exchange/drain/parser:300 fresh split ACKs and initial stale/error protection, plus six real4s lost-ACK boundary cases. Safe classes write2; SET/C write1 and remain errors. Not COM throughput or all hardware acceptance."
+      ],
+      "known_failures": [
+        "Physical146 exact missing ACK evidence remains; successful boundary recovery is not proof the underlying radio/CPU/USB stall has been uniquely identified."
+      ],
+      "pending_human_scope": [
+        "Real maximum-profile and fresh-process read/write under147 pending."
+      ]
+    },
+    {
+      "id": "firmware35_usb_key_compact_execution_ack_and_query_no_led_feedback",
+      "repo": "firmware",
+      "commit": "c281e8f34885d9207ebcd547b694ca3c9ec2815c",
+      "commit_subject": "Keep USB profile acknowledgements compact and queries free of LED side effects",
+      "subject": "Avoid complete settings/power dumps and LED re-entry for every profile chunk/query",
+      "state": "built_in_wired_installed35_original_nvs_preserved_ack_reliability_not_complete",
+      "protects": [
+        "Profile command execution ACK retains identity/revision/size/CRC/page fields; authoritative SETTINGS remains full, persistent commit checks unchanged.",
+        "Only USB SET/RESET or explicit name application requests LED settings feedback; SETTINGS/STATUS/KEY/HELP do not re-enter it."
+      ],
+      "guards": [
+        "python tools/test_usb_settings_dispatch.py",
+        "python tools/test_device_key_profile.py"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/usb35-dispatch-before.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/usb35-dispatch-after.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/isolated-native146-snapshot-20261023-160631/firmware35-wired-flash-result.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual C dispatcher before8query/staging cases each reapplied LEDs; after0, SET/RESET/APPLY still1. Compact ACK fixture128bytes. Actual Type146 built-in factory flash35 onCOM16 succeeded and complete core/keys/revision retained."
+      ],
+      "known_failures": [
+        "Firmware35 alone still experienced a SETTINGS timeout on Type146. Do not claim compact ACK or skipped LED work alone eliminates missing responses.",
+        "Preexisting verify_device_settings_static.ps1 still demands removed revision-only BLE formatter; baseline9f lacks that call too. Static guard repair separate; not a new product regression."
+      ],
+      "pending_human_scope": [
+        "Full RF/BLE settings, physical light continuity and new large profile acceptance remain scoped/pending."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-23T13:52:14.159313+08:00",
+  "feature_routes_updated_at": "2026-10-23T16:14:06.366769+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -6908,7 +7006,10 @@
         "customer103_distinguishable_reply_keys_and_style_purpose",
         "customer104_actual_key_targets_and_local_page_use",
         "customer105_saved_phrase_explicit_clipboard_reuse",
-        "type146_selected_usb_acknowledged_stream_avoids_per_packet_quiet_wait"
+        "type146_selected_usb_acknowledged_stream_avoids_per_packet_quiet_wait",
+        "type147_explicit_device_autosave_keeps_board_authority",
+        "type147_usb_replay_only_idempotent_queries_and_tokened_staging",
+        "firmware35_usb_key_compact_execution_ack_and_query_no_led_feedback"
       ],
       "paths": {
         "type": [
@@ -6939,11 +7040,11 @@
         "2026-10-20 dense keys/knob e11r0 had HCI0x08 after partial commit; FW33 atomic state getter fixes known lock dependency, post-write ATT response and profile/core restoration verified."
       ],
       "latest_source_candidate": {
-        "source": "17c54eec381fc37dbc3fc78be956f04484ee35f4",
-        "build": 146,
+        "source": "e09a1155bcd62e6cbf9e390f170568e367a23e12",
+        "build": 147,
         "packaged": false,
         "installed": false,
-        "scope": "USB sync/wait lifecycle only; exact native large profile validation pending"
+        "scope": "Explicit edit autosave plus replay-safe missing-ACK recovery; actual147 native and USB/BLE remaining."
       }
     },
     {
@@ -6960,7 +7061,10 @@
         "customer103_distinguishable_reply_keys_and_style_purpose",
         "customer104_actual_key_targets_and_local_page_use",
         "customer105_saved_phrase_explicit_clipboard_reuse",
-        "type146_selected_usb_acknowledged_stream_avoids_per_packet_quiet_wait"
+        "type146_selected_usb_acknowledged_stream_avoids_per_packet_quiet_wait",
+        "type147_explicit_device_autosave_keeps_board_authority",
+        "type147_usb_replay_only_idempotent_queries_and_tokened_staging",
+        "firmware35_usb_key_compact_execution_ack_and_query_no_led_feedback"
       ],
       "paths": {
         "type": [
@@ -6997,11 +7101,11 @@
         "Installed59 e889bb7 persisted keys despite20s IPC timeout. Never restore that redundant-transfer/background-write path."
       ],
       "latest_source_candidate": {
-        "source": "17c54eec381fc37dbc3fc78be956f04484ee35f4",
-        "build": 146,
+        "source": "e09a1155bcd62e6cbf9e390f170568e367a23e12",
+        "build": 147,
         "packaged": false,
         "installed": false,
-        "scope": "USB sync/wait lifecycle only; exact native large profile validation pending"
+        "scope": "Explicit edit autosave plus replay-safe missing-ACK recovery; actual147 native and USB/BLE remaining."
       }
     },
     {

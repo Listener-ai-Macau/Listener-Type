@@ -67,8 +67,8 @@ void i18n.use(initReactI18next).init({
 });
 
 for (const [locale, messages] of Object.entries(deviceAutosaveTranslations)) {
-  const { onboardAutoSave, ...device } = messages;
-  i18n.addResourceBundle(locale, 'translation', { settings: { device, deviceKeys: { onboardAutoSave } } }, true, true);
+  const { onboardAutoSave, layoutDescription, loadIntoSettings, loadedDraft, ...device } = messages;
+  i18n.addResourceBundle(locale, 'translation', { settings: { device: {...device,writeHint:device.autoSavePending}, deviceKeys: { onboardAutoSave } },deviceLayouts:{description:layoutDescription,loadIntoSettings,loadedDraft} }, true, true);
 }
 
 export default i18n;
