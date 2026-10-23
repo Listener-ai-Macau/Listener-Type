@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T11:57:06.630842+08:00",
+  "updated_at": "2026-10-23T12:24:37.956915+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -6070,6 +6070,37 @@
         "installed": true,
         "publicPrepared": true
       }
+    },
+    {
+      "id": "type142_text_trial_selected_style_readiness_identity",
+      "repo": "type",
+      "commit": "c77bc94e8d50f92ccffae5ccd60b5ba6981f3cb5",
+      "subject": "Bind text-trial privacy and eligibility to the selected style",
+      "commit_subject": "Bind text-trial privacy and eligibility to the selected style [skip ci]",
+      "state": "source_candidate_controlled_render_transition_verified_not_packaged_or_installed",
+      "protects": [
+        "Processing locality notice and submission eligibility belong only to the selected saved style/revision/retry, never the previous React state before useEffect refresh.",
+        "Late callbacks remain disposed; drafting stays independent of readiness checking/failure/retry; no new request, activation, credential or provider changes.",
+        "Availability labels use the same request identity when pack id or revision changes."
+      ],
+      "guards": [
+        "python scripts/check-style-trial-readiness-identity-ui.py --url <owned-vite-url> --report <owned-report>",
+        "python scripts/check-style-draft-readiness-ui.py --url <owned-vite-url> --report <owned-report>",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\readiness141-identity-frozen-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\readiness142-identity-after.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\readiness142-retained-drafting.json"
+      ],
+      "customer_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE141-20261023\\experience.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE141-20261023\\04-draft-light.png"
+      ],
+      "unverified": [
+        "Screenshot04 shows correct cloud notice before submit, so it does not prove sustained wrong wording. Frozen141 actual React delayed-readiness transition reproduces one committed stale notice plus enabled control, not a visible duration or real unintended cloud request.",
+        "Candidate source checked only. Exact MSI/native validation, installation and customer re-use pending grouped delivery; daily/public141 retained."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T11:57:06.630842+08:00",
