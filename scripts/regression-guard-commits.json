@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T11:17:36.146622+08:00",
+  "updated_at": "2026-10-23T11:32:54.298838+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -6029,9 +6029,35 @@
       "guards": [
         "Historical live evidence: retain exact session archives and original popup results; rerun only after affected changes or new failure."
       ]
+    },
+    {
+      "id": "type141_dictionary_identity_and_network_settings_state",
+      "subject": "Idempotent saved vocabulary and truthful ordered settings reachability",
+      "repo": "type",
+      "commit": "9ab66ba968619616c18ab05edf4429d76f790308",
+      "state": "source_build_and_affected_tests_passed_not_packaged_or_field_accepted",
+      "humanAccepted": false,
+      "protects": [
+        "Equivalent trimmed case-insensitive additions share one persisted identity under the store lock, preserving note/enabled/hits/created time; empty input rejected, distinct words remain distinct.",
+        "Settings Network subscribes before native snapshot and ignores older revisions; unknown is not success, failed control site is not ASR failure, provider allowance is separate.",
+        "Known recording helper/Esc/publisher entry labels respect UI locale; English blank style starts with English instructions; existing custom packs remain unchanged."
+      ],
+      "limits": [
+        "No silent cleanup of legacy duplicate rows.",
+        "Native UI/rendering not yet checked for this batch; Japanese/Korean style page and remote marketplace still have legacy untranslated content.",
+        "No new cloud/quota accounting, BLE, recording lifecycle, firmware, physical input or purchase acceptance from this batch."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --lib persistence::tests::dictionary_ -- --test-threads=1",
+        "node --experimental-strip-types src/lib/networkHealth.test.ts"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build141\\source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-113111-90068d\\result.json"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-23T11:17:36.146622+08:00",
+  "feature_routes_updated_at": "2026-10-23T11:32:54.298838+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -6281,7 +6307,8 @@
       "baseline_state": "production_race_checks_passed_installed_startup_observed",
       "accepted_scope": "Saved production publisher/race failures and actual installed startup only; live recovery transition field pending.",
       "guard_entries": [
-        "type_network_health_response_freshness"
+        "type_network_health_response_freshness",
+        "type141_dictionary_identity_and_network_settings_state"
       ],
       "paths": {
         "type": [
@@ -6289,18 +6316,28 @@
           "src-tauri/src/network_health_state.rs",
           "src-tauri/src/asr/volcengine.rs",
           "src-tauri/src/lib.rs",
-          "src/components/Capsule.tsx"
+          "src/components/Capsule.tsx",
+          "src/pages/settings/PermissionsSection.tsx",
+          "src/lib/networkHealth.ts"
         ]
       },
       "known_failures": [
         "The independent60-second probe path did not consume real provider success; late probes and stale frontend views could retain or restore an old no-network warning.",
-        "Type39 repaired geometry only; keep that layout while fixing status freshness."
+        "Type39 repaired geometry only; keep that layout while fixing status freshness.",
+        "AUD141-NETWORK-SETTINGS: Settings Permissions always displays Available without observing reachability. Same static output present732a8631; native capsule ordered-state repair did not update this independent settings consumer."
       ],
       "latest_installed_candidate": {
         "build": 40,
         "source": "70aabc376015e7116dfd4c9dac37bcc7e3679b82",
         "exe_sha256": "57f4135cc429691f59f6db673774a8219e5b9ce67e1e00f2d8ff347c0246ed36",
         "installed_at": "2026-10-17T19:13:13.2799449+08:00"
+      },
+      "latest_source_candidate": {
+        "build": 141,
+        "source": "9ab66ba968619616c18ab05edf4429d76f790308",
+        "installed": false,
+        "packaged": false,
+        "evidence": "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build141\\source-audit.json"
       }
     },
     {
@@ -6913,19 +6950,29 @@
       "baseline_state": "installed72_affected_mock_ui_and_exact_package_verified_customer_review_separate",
       "accepted_scope": "Vocabulary acknowledgement/failure ordering and cancellation of page transitions; browser sample state is not native storage or ASR qualification.",
       "guard_entries": [
-        "customer72_vocabulary_acknowledgements_and_cancelled_navigation"
+        "customer72_vocabulary_acknowledgements_and_cancelled_navigation",
+        "type141_dictionary_identity_and_network_settings_state"
       ],
       "paths": {
         "type": [
           "src/pages/Vocab.tsx",
           "src/components/FloatingShell.tsx",
           "src/lib/ipc.ts",
-          "scripts/check-vocabulary-ui.py"
+          "scripts/check-vocabulary-ui.py",
+          "src-tauri/src/persistence.rs"
         ]
       },
       "known_failures": [
-        "Frozen71 SDK disappears and page cancellation leaves opacity0; both pre-fix samples are preserved."
-      ]
+        "Frozen71 SDK disappears and page cancellation leaves opacity0; both pre-fix samples are preserved.",
+        "AUD139-VOCAB-DUP: repeated native add produces duplicate dictionary rows; UI add-button guard cannot protect other clients or concurrent retries. Preserve legacy rows and existing user settings."
+      ],
+      "latest_source_candidate": {
+        "build": 141,
+        "source": "9ab66ba968619616c18ab05edf4429d76f790308",
+        "installed": false,
+        "packaged": false,
+        "evidence": "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build141\\source-audit.json"
+      }
     },
     {
       "id": "reviewed-text-handoff",
