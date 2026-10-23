@@ -1239,7 +1239,7 @@ export const ja: typeof zhCN = {
         switchStyle: '前の有効なスタイル',
         translation: '翻訳ディクテーション',
         selectionAsk: '選択質問',
-        pasteTemplate: 'テンプレート貼付',
+        pasteTemplate: '定型文を入力',
         sendShortcut: 'キー / ショートカット送信',
       },
     },

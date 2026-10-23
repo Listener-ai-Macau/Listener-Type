@@ -1284,7 +1284,7 @@ export const en: typeof zhCN = {
           switchStyle: 'Previous enabled style',
           translation: 'Translation dictation',
           selectionAsk: 'Selection Ask',
-        pasteTemplate: 'Paste template',
+        pasteTemplate: 'Insert fixed text',
         sendShortcut: 'Send key / shortcut',
       },
     },

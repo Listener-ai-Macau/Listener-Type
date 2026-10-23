@@ -1239,7 +1239,7 @@ export const ko: typeof zhCN = {
         switchStyle: '이전 활성 스타일',
         translation: '번역 받아쓰기',
         selectionAsk: '선택 질문',
-        pasteTemplate: '템플릿 붙여넣기',
+        pasteTemplate: '저장한 문구 입력',
         sendShortcut: '키 / 단축키 보내기',
       },
     },

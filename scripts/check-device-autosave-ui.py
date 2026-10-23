@@ -86,7 +86,7 @@ window.__fixture=async(cmd,args,mock)=>{
   choose(k,'撤销 Ctrl+Z');page.wait_for_function('window.__held.length===1');choose(core.get_by_role('combobox',name='设置设备'),'USB B');expect(name).to_have_value('Bravo-Renamed')
   page.evaluate('window.__holdRead=null;window.__held.splice(0).forEach(r=>r())');page.wait_for_function('window.__boards.A.profile.deviceCustomKeyDoubleClicks.key4.action==="undoShortcut"')
   assert page.evaluate('window.__boards.B.profile.deviceCustomKeyDoubleClicks.key4.action')=='disabled';r['inFlightSaveCannotRetargetToAnotherDevice']=True
-  n=len(writes());long_key=keys.get_by_role('combobox',name='选择设备键动作').nth(11);choose(long_key,'粘贴模板');quiet();assert len(writes())==n
+  n=len(writes());long_key=keys.get_by_role('combobox',name='选择设备键动作').nth(11);choose(long_key,'输入固定文字');quiet();assert len(writes())==n
   stack=long_key.locator('xpath=ancestor::div[contains(@class,"ol-device-key-control-stack")]');template=stack.locator('input');template.fill('Customer saved template');quiet();assert len(writes())==n
   template.press('Tab');expect(keys).to_contain_text('已保存到设备');assert page.evaluate('window.__boards.B.profile.deviceCustomKeyLongPresses.key4.pasteTemplate')=='Customer saved template';r['incompleteTemplateWaitsAndTextBlurAutosaves']=True
   n=len(writes());app_key=keys.get_by_role('combobox',name='选择设备键动作').nth(10);choose(app_key,'打开指定应用');quiet()

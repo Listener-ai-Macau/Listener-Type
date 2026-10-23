@@ -46,7 +46,7 @@ with sync_playwright() as pw:
    target.press('Enter');expect(core.locator('input[placeholder=listener]')).to_have_value('Bravo')
   page.evaluate('window.__holdRead=null;window.__held.splice(0).forEach(r=>r())')
   if a.failure!='none':
-   expect(keys).to_contain_text('保存失败，修改已保留');expect(keys.get_by_role('combobox',name='选择设备键动作').first).to_contain_text('粘贴模板');r['failedSaveRetainedLatestLayoutInUi']=True
+   expect(keys).to_contain_text('保存失败，修改已保留');expect(keys.get_by_role('combobox',name='选择设备键动作').first).to_contain_text('输入固定文字');r['failedSaveRetainedLatestLayoutInUi']=True
    keys.get_by_role('button',name='重试保存',exact=True).click();expect(keys).to_contain_text('已保存到设备')
   page.wait_for_function('window.__calls.some(x=>x.cmd==="set_selected_device_key_profile")');page.wait_for_timeout(500)
   r['actualProfile']=page.evaluate('window.__boards.A.profile');r['latestLayoutPreserved']=r['actualProfile']['deviceCustomKeys']['key1']['pasteTemplate']=='Latest layout must survive'

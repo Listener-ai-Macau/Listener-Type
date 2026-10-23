@@ -1281,7 +1281,7 @@ export const zhTW: typeof zhCN = {
         switchStyle: '上一個已啟用風格',
         translation: '翻譯聽寫',
         selectionAsk: '劃詞問答',
-        pasteTemplate: '貼上模板',
+        pasteTemplate: '輸入固定文字',
         sendShortcut: '發送按鍵 / 快捷鍵',
       },
     },

@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { deleteLocalDeviceLayout, listLocalDeviceLayouts, nativeDeviceLayoutsAvailable, saveLocalDeviceLayout } from '../lib/ipc';
 import { defaultDeviceKeyProfile, layoutActions, layoutAppPages, layoutGestures, writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
@@ -28,6 +28,8 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
   const { t } = useTranslation();
   const openPage = useContext(DevicePageNavigationContext);
   const dialog = useRef<HTMLDialogElement>(null);
+  const actionDetails = useRef<HTMLDivElement>(null);
+  const revealActionDetails = useRef(false);
   const alive = useRef(true);
   const initialRestore = useRef(true);
   const touched = useRef(false);
@@ -52,6 +54,26 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
   useEffect(() => { if (confirmation) dialog.current?.querySelector('.ol-device-layout-confirm')?.scrollIntoView({block:'nearest'}); }, [confirmation]);
   const actionGroup = key === 'knob' ? 'deviceCustomKeys' : group;
   const mapping = profile[actionGroup][key];
+  useLayoutEffect(() => {
+    if (!revealActionDetails.current) return;
+    revealActionDetails.current = false;
+    const container = dialog.current;
+    const details = actionDetails.current;
+    if (!container || !details || !details.offsetHeight) return;
+    // Reveal parameters only after an explicit action selection. Scrolling the
+    // dialog itself keeps keyboard focus and the rest of the page unchanged.
+    const bounds = container.getBoundingClientRect();
+    const scale = bounds.height / container.offsetHeight || 1;
+    const header = container.querySelector('.ol-device-layout-nav')?.getBoundingClientRect();
+    const footer = container.querySelector('.ol-device-layout-footer')?.getBoundingClientRect();
+    const top = Math.max(bounds.top, header?.bottom ?? bounds.top) + 12 * scale;
+    const bottom = Math.min(bounds.bottom, footer?.top ?? bounds.bottom) - 12 * scale;
+    const field = details.getBoundingClientRect();
+    if (bottom <= top) return;
+    const delta = field.height > bottom - top || field.top < top ? field.top - top
+      : field.bottom > bottom ? field.bottom - bottom : 0;
+    container.scrollTop += delta / scale;
+  }, [mapping.action]);
   const gestureSelect = key !== 'knob' && <label>{t('deviceLayouts.gesture')}<select aria-label={t('deviceLayouts.gesture')} value={group} onChange={event => setGroup(event.target.value as Group)}>
     {layoutGestures.map((value, i) => <option key={value} value={value}>{t(`settings.deviceKeys.gestures.${['singleClick','doubleClick','longPress'][i]}`)}</option>)}
   </select></label>;
@@ -183,10 +205,12 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
         {incomingText === undefined && gestureSelect}
         <label>{t('deviceLayouts.action')}<select aria-label={t('deviceLayouts.action')} value={mapping.action} onChange={event => {
           const action = event.target.value as DeviceCustomKeyMapping['action'];
+          revealActionDetails.current = true;
           edit({ ...mapping, action, shortcut: action === 'sendShortcut' ? mapping.shortcut ?? {primary:'F1',modifiers:[]} : mapping.shortcut });
         }}>
           {layoutActions.map(action => <option key={action} value={action}>{t(`settings.deviceKeys.actions.${action}`)}</option>)}
         </select></label>
+        <div ref={actionDetails} className="ol-device-layout-action-details">
         {mapping.action === 'switchStyle' && <p role="note" className="ol-device-layout-hint">{t('keyActionHelp.switchStyle')}</p>}
         {mapping.action === 'pasteTemplate' && <label>{t('deviceLayouts.template')}<textarea rows={3} maxLength={2000} aria-label={t('deviceLayouts.template')} value={mapping.pasteTemplate} onChange={event => edit({...mapping,pasteTemplate:event.target.value})} /></label>}
         {mapping.action === 'openApp' && <label>{t('deviceLayouts.page')}<select aria-label={t('deviceLayouts.page')} value={mapping.appPage} onChange={event => edit({...mapping,appPage:event.target.value as DeviceCustomKeyMapping['appPage']})}>
@@ -205,6 +229,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
           </select></label>
           <p className="ol-device-layout-hint">{t('deviceLayouts.fixedKnob')}</p>
         </>}
+        </div>
       </div>
       </details>
       </DeviceLayoutMap>

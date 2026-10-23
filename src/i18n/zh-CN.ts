@@ -1279,7 +1279,7 @@ export const zhCN = {
           switchStyle: '上一个已启用风格',
           translation: '翻译听写',
           selectionAsk: '划词问答',
-        pasteTemplate: '粘贴模板',
+        pasteTemplate: '输入固定文字',
         sendShortcut: '发送按键 / 快捷键',
       },
     },
