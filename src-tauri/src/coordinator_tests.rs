@@ -6079,6 +6079,62 @@ async fn device_translation_respects_ota_recording_gate() {
 }
 
 #[tokio::test]
+async fn qa_ota_gate_rejects_start_before_selection_or_session_claim() {
+    let coordinator = Coordinator::new();
+    // The private test vault is empty: an admitted legacy start stops at the
+    // credential check, so this counterexample cannot open a microphone/cloud.
+    assert!(ensure_qa_volcengine_credentials().is_err());
+    coordinator.inner.qa_state.lock().panel_visible = true;
+    let owner = coordinator.inner.qa_state.lock().session_id;
+    coordinator.inner.embedded_ble_ota_active.store(true, Ordering::SeqCst);
+    let result = begin_qa_session(&coordinator.inner).await;
+    let state = coordinator.inner.qa_state.lock();
+    assert_eq!(state.session_id, owner, "OTA denial must not claim a new question or capture selection");
+    assert_eq!(state.phase, QaPhase::Idle);
+    assert!(result.is_ok(), "An ignored hotkey is not a missing-credentials failure");
+}
+
+#[test]
+fn qa_ota_gate_releases_an_existing_recording_but_keeps_panel_history() {
+    let coordinator = Coordinator::new();
+    let owner = session_id(15701);
+    {
+        let mut state = coordinator.inner.qa_state.lock();
+        state.panel_visible = true;
+        state.session_id = owner;
+        state.phase = QaPhase::Recording;
+        state.messages.push(crate::types::QaChatMessage {
+            role: "assistant".into(), content: "Earlier saved answer".into(),
+        });
+    }
+    *coordinator.inner.qa_asr.lock() = Some(SessionResource::new(owner, qa_test_asr()));
+    assert!(coordinator.try_begin_firmware_ota_transfer());
+    let state = coordinator.inner.qa_state.lock();
+    assert_eq!(state.phase, QaPhase::Idle, "OTA must stop QA capture as well as dictation");
+    assert!(state.panel_visible);
+    assert_eq!(state.messages.len(), 1);
+    assert_eq!(state.messages[0].content, "Earlier saved answer");
+    assert!(coordinator.inner.qa_asr.lock().is_none());
+}
+
+#[test]
+fn qa_ota_gate_keeps_an_answer_already_processing() {
+    let coordinator = Coordinator::new();
+    let owner = session_id(15702);
+    {
+        let mut state = coordinator.inner.qa_state.lock();
+        state.panel_visible = true;
+        state.session_id = owner;
+        state.phase = QaPhase::Processing;
+    }
+    assert!(coordinator.try_begin_firmware_ota_transfer());
+    let state = coordinator.inner.qa_state.lock();
+    assert_eq!(state.session_id, owner);
+    assert_eq!(state.phase, QaPhase::Processing);
+    assert!(!state.cancelled, "An answer with capture already stopped need not be discarded");
+}
+
+#[tokio::test]
 async fn device_translation_starts_selected_ble_without_microphone() {
     let _guard = ENV_LOCK.lock().await;
     std::env::set_var("LISTENER_TYPE_HOTKEY_INJECTION_DRY_RUN", "1");

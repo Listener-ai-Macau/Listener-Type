@@ -4104,6 +4104,13 @@ fn append_extra_asr_hotwords(hotwords: &mut Vec<DictionaryHotword>) {
 async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
     let session_id = {
         let mut state = inner.qa_state.lock();
+        // Check while claiming QA state. OTA sets its exclusive flag before
+        // taking this same state for cleanup, so it cannot miss a new capture.
+        if !recording_gate::try_admit_arc(
+            inner, recording_gate::RecordIntent::QaRecording, "QA recording start",
+        ) {
+            return Ok(());
+        }
         if !state.panel_visible {
             // 防御：浮窗没开就被叫到这里说明路由错了，直接退出。
             return Ok(());
@@ -4219,6 +4226,13 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
     let microphone_device_name = selected_microphone_device_name(inner);
     stop_microphone_preview_monitor(inner, "QA recorder");
     acquire_recording_mute(inner, "qa").await;
+    if !recording_gate::try_admit_arc(
+        inner, recording_gate::RecordIntent::QaRecording, "QA microphone start after mute",
+    ) {
+        release_recording_mute(inner, "qa");
+        finish_qa_idle_silently(inner, session_id);
+        return Ok(());
+    }
     if !qa_recording_matches(inner, session_id) {
         release_recording_mute(inner, "qa");
         asr.cancel();
@@ -4556,9 +4570,21 @@ fn finish_qa_for_session(
     session_id: SessionId,
     message: Option<String>,
 ) -> bool {
+    finish_qa_for_session_in_phase(inner, session_id, message, None)
+}
+
+fn finish_qa_for_session_in_phase(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    message: Option<String>,
+    required_phase: Option<QaPhase>,
+) -> bool {
     let quiet = {
         let mut state = inner.qa_state.lock();
-        if state.session_id != session_id || state.phase == QaPhase::Idle {
+        if state.session_id != session_id
+            || state.phase == QaPhase::Idle
+            || required_phase.is_some_and(|phase| state.phase != phase)
+        {
             return false;
         }
         let quiet = state.cancelled || message.is_none();
@@ -4614,6 +4640,13 @@ fn finish_qa_with_error(inner: &Arc<Inner>, session_id: SessionId, message: Stri
 /// Esc/X 或再按 QA hotkey 时才关）；多轮对话历史保留。胶囊也即刻收掉。
 fn finish_qa_idle_silently(inner: &Arc<Inner>, session_id: SessionId) {
     finish_qa_for_session(inner, session_id, None);
+}
+
+fn stop_qa_recording_for_firmware_ota(inner: &Arc<Inner>) {
+    let session_id = inner.qa_state.lock().session_id;
+    // Capture and cleanup are claimed together. An answer that has already
+    // entered Processing no longer owns the microphone and stays available.
+    finish_qa_for_session_in_phase(inner, session_id, None, Some(QaPhase::Recording));
 }
 
 fn cancel_qa_session(inner: &Arc<Inner>) {

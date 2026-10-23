@@ -26,6 +26,8 @@ pub(crate) enum RecordIntent {
     HotkeyPress,
     /// Device custom-key dictation start/stop control.
     DeviceKeyDictation,
+    /// Selection-QA microphone capture, including its post-await start boundary.
+    QaRecording,
     /// BLE `StreamingSessionEvent::Started` (device/voice wake start).
     BleSessionStart,
     /// BLE PCM ingest for an in-flight or candidate session.
@@ -181,6 +183,7 @@ mod tests {
         for intent in [
             RecordIntent::HotkeyPress,
             RecordIntent::DeviceKeyDictation,
+            RecordIntent::QaRecording,
             RecordIntent::BleSessionStart,
             RecordIntent::BlePcmIngest,
             RecordIntent::BleBeginCandidateOrSession,
@@ -221,6 +224,7 @@ mod tests {
         for intent in [
             RecordIntent::HotkeyPress,
             RecordIntent::DeviceKeyDictation,
+            RecordIntent::QaRecording,
             RecordIntent::BleSessionStart,
             RecordIntent::BlePcmIngest,
             RecordIntent::BleBeginCandidateOrSession,

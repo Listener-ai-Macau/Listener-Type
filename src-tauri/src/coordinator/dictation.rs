@@ -4956,6 +4956,7 @@ pub(super) fn cancel_session(inner: &Arc<Inner>) {
 pub(super) fn suppress_dictation_pipeline_for_firmware_ota(inner: &Arc<Inner>) {
     log::info!("[firmware-ota] suppressing dictation/capsule pipeline for exclusive OTA transfer");
     cancel_session(inner);
+    stop_qa_recording_for_firmware_ota(inner);
     // Force hide even when cancel is a no-op (Idle with no capture flag).
     emit_capsule(inner, CapsuleState::Idle, 0.0, 0, None, None);
 }
