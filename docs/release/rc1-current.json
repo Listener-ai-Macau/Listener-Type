@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-23T18:49:56.561173+08:00",
+  "updatedAt": "2026-10-23T20:02:26.810570+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 151,
-    "source": "a8aa31d450c701db15db83e91e82dc58c38d09fb",
-    "sourceTag": "build-source/type151-20261023",
+    "build": 152,
+    "source": "0849525b01c58ac1c728f37c01889d3fad23961e",
+    "sourceTag": "build-source/type152-20261023",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "f41042263fbf139e683b67c0b3c7730fdebd881fb95dd78f6f91e2fdbe968946",
-    "sizeBytes": 299188224,
-    "exeSha256": "0da3d824d6c5565e8e08841c7e57f5463ea82f37b229560a3edbc178ab5e48f1",
+    "sha256": "d4af78b9c0de8c98f2f40b5170df8c929ba102c1dc55bbc12f970cf8b9618c68",
+    "sizeBytes": 299180032,
+    "exeSha256": "13ffe888efbdd6dcb16314985abb51883192d6df4651be10579b55020ca2df0b",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -358,7 +358,13 @@
     "type151EarlierAndLaterFailureRetainsLatestLayoutForRetry": true,
     "type151PendingSaveStaysOriginalDeviceAfterUiSwitch": true,
     "type151InstalledExeAndPreferencesVerified": true,
-    "type151VerificationScope": "Bundled selected-key React save ownership change only. Actual React controlled IPC counterexamples and affected autosave/layout checks pass. Exact151 MSI identity/startup/install/persistence verified;150 native BLE backend and149 ordinary USB/fresh-process device proof reused for unchanged backend/FW37. No new physical HID, ordinary BLE UI, two-PC or fullRF qualification."
+    "type151VerificationScope": "Bundled selected-key React save ownership change only. Actual React controlled IPC counterexamples and affected autosave/layout checks pass. Exact151 MSI identity/startup/install/persistence verified;150 native BLE backend and149 ordinary USB/fresh-process device proof reused for unchanged backend/FW37. No new physical HID, ordinary BLE UI, two-PC or fullRF qualification.",
+    "type152ReadinessTimeoutFactAndPairingProtectionNativeVerified": true,
+    "type152NativeEditorLocalSavePracticeReopenVerified": true,
+    "type152InstalledExeAndPreferencesVerified": true,
+    "type152FullAirFollowQualified": false,
+    "customer151PurchaseQualification": false,
+    "type152VerificationScope": "Actual Windows Rust timeout-producer/classifier and coordinator guard, related175 BLE cases and old stale guard; exact private MSI UI local reply save/practice/reopen. No new physical offline fault, HID/two-PC/full RF or purchase qualification."
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",

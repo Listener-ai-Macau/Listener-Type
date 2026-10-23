@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T19:45:09.402515+08:00",
+  "updated_at": "2026-10-23T20:05:53.972157+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -6588,7 +6588,7 @@
       "commit": "056646f37df5c279a2d1131655106d1746bf50db",
       "commit_subject": "Reveal selected key action fields and name fixed text plainly",
       "subject": "Reveal action-specific inputs inside the key-layout dialog without shifting keyboard focus or changing saved data",
-      "state": "source_checkpoint_frontend_passed_not_native_packaged_installed_or_customer_retested",
+      "state": "exact152_native_editor_save_practice_reopen_verified_and_installed",
       "protects": [
         "Explicit action selection reveals required inputs above the sticky footer; keeps the Action control focused and scrolls only the dialog.",
         "Opening, reading or restoring a saved layout must not auto-scroll or execute/write a mapping. Preserve stable name geometry, separate gesture mappings, local library save/retry and selected-device scope.",
@@ -6608,7 +6608,11 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build151\\reply-editor-layout-save-check.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build151\\reply-editor-incoming-phrase-check.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build151\\reply-editor-device-autosave-check.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build151\\reply-editor-pending-layout-check.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build151\\reply-editor-pending-layout-check.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native152-snapshot-20261023-195509\\key-editor152-native-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native152-snapshot-20261023-195509\\setup-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261023-build152\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261023-build152\\type152-installed.json"
       ],
       "customer_evidence": [
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE151-20261023\\experience.txt",
@@ -6621,7 +6625,7 @@
         "First incoming-phrase checker still used old Overview Design your keys button. It failed before product editing, was aligned to current Design my key layout entry, then original nine checks passed. Not a new product defect."
       ],
       "pending_human_scope": [
-        "Native151/public151 still use exacta8aa31d4; this source checkpoint is not a new installed build, customer run, physical-key or BLE proof. Original151 hardware purchase refusal remains unchanged."
+        "No new customer re-evaluation, physical HID, second PC or BLE UI/device application from the local native editing check. Original151 refusal retained."
       ]
     },
     {
@@ -6630,7 +6634,7 @@
       "commit": "38628f1588f0b4d23653d9285be648284ed48a1d",
       "commit_subject": "Keep GATT readiness timeouts out of pairing cache recovery",
       "subject": "Classify a measured readiness timeout by its producer fact instead of speculative cache wording",
-      "state": "native_Rust_counterexample_fixed_related_module_passed_candidate152_not_yet_packaged",
+      "state": "exact152_installed_native_counterexample_and_recovery_guards_passed",
       "protects": [
         "Closed/unknown GATT readiness alone is not evidence of missing pairing or stale services. Stable producer tag survives wrapping/diagnostic wording and requests normal automatic reconnect.",
         "A tagged readiness timeout cannot become an immediate/stale-cache cleanup candidate even after repeated attempts. Genuine untagged stale-service and missing-pairing classification remains unchanged.",
@@ -6645,7 +6649,10 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\gatt-readiness-after.log",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-194147-ca0d5e\\result.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-194147-44fbdc\\result.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener151-readiness-20261023-193420\\passive-metadata.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener151-readiness-20261023-193420\\passive-metadata.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261023-build152\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261023-build152\\type152-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build152\\installed152-runtime-after.json"
       ],
       "machine_accepted_scope": [
         "Actual Windows Rust producer/classifier failed before as StaleGattService, passes after for Closed and unavailable status, including wrapped stale-word diagnostic. Coordinator guidance/cleanup assertions pass;175 module cases pass with5 ignored, plus separate stale-cleanup scope.",
@@ -6656,7 +6663,7 @@
         "Before test failed1/1 with actual generated message; preserve exact log and installed151 rollback. Debug test build3m19, second1m26; these are verification builds, not user-visible feature deliveries."
       ],
       "pending_human_scope": [
-        "Candidate not yet MSI-built/installed. No live forced outage or cache failure injected into Owner hardware; no claim to fix actual RF latency or all recovery failures. Original151 purchase deferral retained."
+        "No physical forced-offline/cache fault injected. Current installed152 ordinary reconnect is ready, not full RF/throughput or universal recovery qualification. Original151 customer refusal retained."
       ]
     }
   ],
