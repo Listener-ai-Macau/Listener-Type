@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T01:04:43.739902+08:00",
+  "updated_at": "2026-10-24T01:52:12.051270+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -6961,6 +6961,46 @@
         "Original full-function acceptance and151 deferred hardware purchase remain incomplete; no new paid services/models or Companion pin changes."
       ],
       "humanAccepted": false
+    },
+    {
+      "id": "asr_startup_ownership_cancellation_and_retained_finalization",
+      "repo": "type",
+      "commit": "772f9ad18a6dec007e8d6a90570980cdc1580c5e",
+      "commit_subject": "Fence ASR startup ownership and interrupt cancelled provider connections",
+      "subject": "ASR resource startup and cancellation retain the original owner through network awaits and finalization",
+      "state": "Type159_native_controlled_family_passed_matching_package_pending",
+      "protects": [
+        "ASR and recorder share startup ownership/phase/cancel/OTA admission. Rejected distinct clients cancel outside locks; repeated aliases preserve the live client, duplicate initializers cannot replace the first valid current resource.",
+        "Every microphone/BLE provider store checks acceptance before opening/attaching audio. A retired embedded startup is an explicit ignored result, not a provider failure; existing finalization retains its provider.",
+        "Bailian is registered before its first network await; terminal cancel interrupts connect/handshake/task-start and prevents restart. Local loopback tests use fake credentials and no provider service.",
+        "Volcengine startup completion allows current Processing for tail finalization, rejects Inserting/Idle/cancel/replacement/OTA, and both real callbacks use the common completion policy."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib --target x86_64-pc-windows-msvc coordinator -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib --target x86_64-pc-windows-msvc asr::bailian::tests -- --test-threads=1",
+        "Preserve original5/8 resource failures,2 local cancel failures and exact two-callback predicate counterexample."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build159\\source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-011551-a7d964\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-012119-fe3f30\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\asr159-completion-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-014512-aed356\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-014512-7a866b\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-014240-ba0a7c\\result.json"
+      ],
+      "machine_accepted_scope": [
+        "Windows native780 coordinator pass/32existing ignored;6Bailian pass incl2local cancellation.3actual factory/Coordinator integration cases pass, no daily persistent changes/private cleanup errors. No paid provider/device/editor/purchase claim."
+      ],
+      "known_failures": [
+        "Original slot assignment and Bailian cancellation already exist in earliest732a; previous cleanup-only guards did not cover resource admission or pending connection cancellation."
+      ],
+      "pending_human_scope": [
+        "Controlled local state/loopback protocol only: no real provider speech/accuracy, physical BLE cancel, target editor, healthy remote Bailian stream, all apps or hardware purchase qualification.",
+        "32 existing coordinator ignored cases remain ignored; no optional model or added paid cloud service was used.",
+        "Original151 useful-software/deferred49 hardware purchase and full-function physical gaps remain; no unchanged customer resampling."
+      ],
+      "humanAccepted": false
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -8144,11 +8184,12 @@
     },
     {
       "id": "microphone-startup-lifecycle",
-      "accepted_scope": "Type158 consumed shared capture worker ownership and product handoff, native controlled scope only",
+      "accepted_scope": "Capture and provider startup ownership/admission plus retained finalization, controlled Windows and local loopback scope; physical/cloud speech remains separate.",
       "baseline_state": "source_controlled_passed_matching_package_pending",
       "guard_entries": [
         "host_capture_owner_cancels_timeout_drop_and_late_worker",
-        "recorder_startup_handoff_preserves_current_owner_and_archive"
+        "recorder_startup_handoff_preserves_current_owner_and_archive",
+        "asr_startup_ownership_cancellation_and_retained_finalization"
       ],
       "paths": {
         "platform": [
@@ -8158,7 +8199,12 @@
           "src-tauri/src/recorder.rs",
           "src-tauri/src/coordinator/resources.rs",
           "src-tauri/src/coordinator/dictation_session.rs",
-          "src-tauri/src/coordinator_tests.rs"
+          "src-tauri/src/coordinator_tests.rs",
+          "src-tauri/src/asr/bailian.rs",
+          "src-tauri/src/coordinator/dictation.rs",
+          "src-tauri/src/coordinator/dictation_embedded_stream.rs",
+          "src-tauri/src/coordinator/dictation_embedded_stream_session.rs",
+          "src-tauri/src/coordinator/dictation_tests.rs"
         ]
       }
     }
