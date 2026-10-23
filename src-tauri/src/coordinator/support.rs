@@ -665,6 +665,11 @@ pub(super) fn retain_current_capsule_payload(inner: &Arc<Inner>, payload: &Capsu
     true
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static CAPSULE_TEST_EMISSIONS: std::cell::RefCell<Vec<(Option<SessionId>, CapsuleState)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 pub(super) fn emit_capsule_with_session(
     inner: &Arc<Inner>,
     event_session_id: Option<SessionId>,
@@ -674,6 +679,8 @@ pub(super) fn emit_capsule_with_session(
     message: Option<String>,
     inserted_chars: Option<u32>,
 ) {
+    #[cfg(test)]
+    CAPSULE_TEST_EMISSIONS.with(|events| events.borrow_mut().push((event_session_id, state)));
     // Single door: recording-related capsules during OTA (and future policies).
     if !recording_gate::try_admit_arc(
         inner,

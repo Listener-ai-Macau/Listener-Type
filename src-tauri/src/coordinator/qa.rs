@@ -7,8 +7,56 @@ use crate::selection::SelectionContext;
 use crate::types::CapsuleState;
 
 use super::{
-    begin_qa_session, cancel_qa_session, capture_frontmost_app, emit_capsule, end_qa_session, Inner,
+    begin_qa_session, cancel_qa_session, capture_frontmost_app, emit_capsule_for_session,
+    end_qa_session, Inner,
 };
+
+// QA and dictation share the capsule, but have independent recording lifecycles.
+// A QA close/error/level event must never take display ownership from dictation.
+// Bind every admitted QA request to the observed idle dictation generation so
+// the presentation cache can also reject a recording started after this check.
+pub(super) fn emit_qa_capsule(
+    inner: &Arc<Inner>,
+    state: CapsuleState,
+    level: f32,
+    message: Option<String>,
+) -> Option<SessionId> {
+    let owner = {
+        let dictation = inner.state.lock();
+        if dictation.phase != SessionPhase::Idle {
+            return None;
+        }
+        dictation.session_id
+    };
+    emit_capsule_for_session(inner, owner, state, level, 0, message, None);
+    Some(owner)
+}
+
+pub(super) fn schedule_qa_capsule_idle(
+    inner: &Arc<Inner>,
+    delay_ms: u64,
+    qa_owner: SessionId,
+    dictation_owner: SessionId,
+) -> tauri::async_runtime::JoinHandle<bool> {
+    let inner = Arc::clone(inner);
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+        let qa = inner.qa_state.lock();
+        if qa.session_id != qa_owner || qa.phase != QaPhase::Idle {
+            return false;
+        }
+        {
+            let dictation = inner.state.lock();
+            if dictation.session_id != dictation_owner || dictation.phase != SessionPhase::Idle {
+                return false;
+            }
+        }
+        emit_capsule_for_session(
+            &inner, dictation_owner, CapsuleState::Idle, 0.0, 0, None, None,
+        );
+        true
+    })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum QaPhase {
@@ -93,10 +141,7 @@ pub(super) fn open_qa_panel(inner: &Arc<Inner>) {
     // 显示）。但如果 dictation 当前正处于 Recording / Polishing / Inserting / Done toast
     // 显示中，强行 emit Idle 会把用户没看完的反馈抹掉、或者把 Polishing 中的进度条
     // 卡死。审计 3.3.4。
-    let dictation_idle = matches!(inner.state.lock().phase, SessionPhase::Idle);
-    if dictation_idle {
-        emit_capsule(inner, CapsuleState::Idle, 0.0, 0, None, None);
-    }
+    emit_qa_capsule(inner, CapsuleState::Idle, 0.0, None);
     if let Some(app) = inner.app.lock().clone() {
         crate::show_qa_window(&app, "idle");
         let _ = app.emit_to(
@@ -128,6 +173,6 @@ pub(super) fn close_qa_panel(inner: &Arc<Inner>) {
         crate::hide_qa_window(&app);
     }
     // 胶囊一同收掉，避免浮窗关了胶囊还在显示。
-    emit_capsule(inner, CapsuleState::Idle, 0.0, 0, None, None);
+    emit_qa_capsule(inner, CapsuleState::Idle, 0.0, None);
     log::info!("[coord] QA panel closed, history cleared");
 }

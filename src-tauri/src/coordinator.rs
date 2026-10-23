@@ -4199,12 +4199,10 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
             let _ = app.emit_to("qa", "qa:level", serde_json::json!({ "level": level }));
         }
         // 同步把电平推给底部胶囊，让 QA 录音也有跟主听写一致的可视反馈。
-        emit_capsule(
+        qa::emit_qa_capsule(
             &inner_for_level,
             CapsuleState::Recording,
             level,
-            0,
-            None,
             None,
         );
     });
@@ -4277,7 +4275,7 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
     // 的视觉反馈跟主听写完全一致。
     let state = inner.qa_state.lock();
     if state.session_id == session_id && state.phase == QaPhase::Recording && !state.cancelled {
-        emit_capsule(inner, CapsuleState::Recording, 0.0, 0, None, None);
+        qa::emit_qa_capsule(inner, CapsuleState::Recording, 0.0, None);
     }
 
     Ok(())
@@ -4298,7 +4296,7 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         if state.session_id != session_id || state.phase != QaPhase::Processing {
             return Ok(());
         }
-        emit_capsule(inner, CapsuleState::Transcribing, 0.0, 0, None, None);
+        qa::emit_qa_capsule(inner, CapsuleState::Transcribing, 0.0, None);
         if let Some(app) = inner.app.lock().clone() {
             let _ = app.emit_to("qa", "qa:state", serde_json::json!({ "kind": "loading" }));
         }
@@ -4395,7 +4393,7 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
             }
 
             // 胶囊：思考阶段（复用 dictation 的 Polishing 状态——视觉上是"润色中"，QA 借用一下）。
-            emit_capsule(inner, CapsuleState::Polishing, 0.0, 0, None, None);
+            qa::emit_qa_capsule(inner, CapsuleState::Polishing, 0.0, None);
             Some((st.messages.clone(), st.front_app.clone()))
         }
     };
@@ -4505,7 +4503,7 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
 
     // 胶囊直接收掉。QA 不走 insertion，没"已粘贴 N 字"语义；浮窗里答案就是用户的反馈。
     // （之前用 Done 状态会被 capsule UI 错误地渲染上一次 dictation 残留的 message/insertedChars。）
-    emit_capsule(inner, CapsuleState::Idle, 0.0, 0, None, None);
+    qa::emit_qa_capsule(inner, CapsuleState::Idle, 0.0, None);
 
     // 可选：写一条 history（QA 类型）。当前 DictationSession schema 不能直接表达
     // "QuestionAnswer" 类型，因此简单做法：勾选 qa_save_history 时写一条
@@ -4611,10 +4609,11 @@ fn finish_qa_for_session(
         );
     }
     if quiet {
-        emit_capsule(inner, CapsuleState::Idle, 0.0, 0, None, None);
-    } else {
-        emit_capsule(inner, CapsuleState::Error, 0.0, 0, message, None);
-        schedule_capsule_idle(inner, 1500, None);
+        qa::emit_qa_capsule(inner, CapsuleState::Idle, 0.0, None);
+    } else if let Some(dictation_owner) =
+        qa::emit_qa_capsule(inner, CapsuleState::Error, 0.0, message)
+    {
+        let _ = qa::schedule_qa_capsule_idle(inner, 1500, session_id, dictation_owner);
     }
     true
 }

@@ -5956,3 +5956,87 @@ fn dictation_delivery_never_activates_the_session_start_window() {
     assert!(preview.contains("current_delivery_target()"));
     assert!(finalization.contains("capture_ime_submit_target_for_window(delivery_window)"));
 }
+
+
+#[tokio::test]
+async fn qa_capsule_notifications_do_not_override_active_dictation() {
+    let mut violations = Vec::new();
+    for phase in [SessionPhase::Starting, SessionPhase::Listening, SessionPhase::Processing, SessionPhase::Inserting] {
+        for ending in ["close_idle_panel", "finish_error"] {
+            let coordinator = Coordinator::new();
+            let owner = session_id(14501);
+            {
+                let mut state = coordinator.inner.state.lock();
+                state.session_id = owner;
+                state.phase = phase;
+            }
+            {
+                let mut state = coordinator.inner.qa_state.lock();
+                state.panel_visible = true;
+                state.session_id = session_id(14502);
+                state.phase = if ending == "finish_error" { QaPhase::Processing } else { QaPhase::Idle };
+            }
+            support::CAPSULE_TEST_EMISSIONS.with(|events| events.borrow_mut().clear());
+            if ending == "finish_error" {
+                finish_qa_with_error(&coordinator.inner, session_id(14502), "private synthetic QA failure".into());
+            } else {
+                qa::close_qa_panel(&coordinator.inner);
+            }
+            let events = support::CAPSULE_TEST_EMISSIONS.with(|events| events.borrow().clone());
+            if !events.is_empty() { violations.push(format!("{phase:?}/{ending}: {events:?}")); }
+            let state = coordinator.inner.state.lock();
+            assert_eq!(state.session_id, owner);
+            assert_eq!(state.phase, phase, "QA may not stop active dictation");
+        }
+    }
+    assert!(violations.is_empty(), "QA overwrites a different active dictation capsule: {violations:?}");
+}
+
+#[test]
+fn qa_capsule_idle_owner_keeps_normal_feedback_and_rejects_replaced_generation() {
+    let coordinator = Coordinator::new();
+    let idle_owner = session_id(14511);
+    coordinator.inner.state.lock().session_id = idle_owner;
+    support::CAPSULE_TEST_EMISSIONS.with(|events| events.borrow_mut().clear());
+    for state in [CapsuleState::Recording, CapsuleState::Transcribing, CapsuleState::Polishing, CapsuleState::Error, CapsuleState::Idle] {
+        assert_eq!(qa::emit_qa_capsule(&coordinator.inner, state, 0.1, None), Some(idle_owner));
+    }
+    let events = support::CAPSULE_TEST_EMISSIONS.with(|events| events.borrow().clone());
+    assert_eq!(events.len(), 5);
+    assert!(events.iter().all(|(owner, _)| *owner == Some(idle_owner)));
+    // Exercise the real final presentation-cache check after a recording starts
+    // between QA's idle snapshot and capsule publication.
+    let replacement = session_id(14512);
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = replacement;
+        state.phase = SessionPhase::Listening;
+    }
+    let payload = crate::types::CapsulePayload {
+        seq: 1, session_id: Some(idle_owner.to_string()), state: CapsuleState::Idle,
+        level: 0.0, elapsed_ms: 0, message: None, inserted_chars: None, translation: false,
+    };
+    assert!(!support::retain_current_capsule_payload(&coordinator.inner, &payload));
+    assert!(coordinator.inner.capsule_latest_payload.lock().is_none());
+}
+
+#[tokio::test]
+async fn qa_capsule_error_timer_is_bound_to_both_original_owners() {
+    for change in ["unchanged", "new_question", "new_recording_finished", "recording_active"] {
+        let coordinator = Coordinator::new();
+        let qa_owner = session_id(14521);
+        let dictation_owner = session_id(14522);
+        coordinator.inner.qa_state.lock().session_id = qa_owner;
+        coordinator.inner.state.lock().session_id = dictation_owner;
+        // Carry the original owners into the actual delayed callback after the
+        // replacement. Join it without relying on thread scheduling or sleeps.
+        match change {
+            "new_question" => coordinator.inner.qa_state.lock().session_id = session_id(14523),
+            "new_recording_finished" => coordinator.inner.state.lock().session_id = session_id(14524),
+            "recording_active" => coordinator.inner.state.lock().phase = SessionPhase::Listening,
+            _ => {},
+        }
+        let timer = qa::schedule_qa_capsule_idle(&coordinator.inner, 0, qa_owner, dictation_owner);
+        assert_eq!(timer.await.unwrap(), change == "unchanged", "{change}");
+    }
+}
