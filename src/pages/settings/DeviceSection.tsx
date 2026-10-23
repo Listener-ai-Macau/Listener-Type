@@ -76,6 +76,24 @@ function mergeDeviceKeyEdits(base:DeviceKeyProfile, edits:DeviceKeyEdits):Device
   return merged;
 }
 
+// A completed request acknowledges only the fields it actually submitted.
+// Layout application can add newer edits while a slow device save is pending.
+function acknowledgeDeviceKeyEdits(current:DeviceKeyEdits, submitted:DeviceKeyEdits):DeviceKeyEdits {
+  const remaining=structuredClone(current);
+  for(const map of Object.keys(submitted) as DeviceKeyMapKey[]) {
+    for(const id of Object.keys(submitted[map] ?? {}) as DeviceCustomKeyId[]) {
+      const fields=remaining[map]?.[id];
+      if(!fields)continue;
+      for(const field of Object.keys(submitted[map]?.[id] ?? {}) as (keyof DeviceCustomKeyMapping)[]) {
+        if(JSON.stringify(fields[field])===JSON.stringify(submitted[map]?.[id]?.[field]))delete fields[field];
+      }
+      if(Object.keys(fields).length===0)delete remaining[map]?.[id];
+    }
+    if(Object.keys(remaining[map] ?? {}).length===0)delete remaining[map];
+  }
+  return remaining;
+}
+
 const DEVICE_GESTURES: Array<{
   id: DeviceCustomKeyGesture;
   mapKey: DeviceKeyMapKey;
@@ -186,6 +204,8 @@ function SelectedDeviceKeysCard({device,value,onRead}:{device:SettingsDevice|nul
   const autoOpenDeviceKeyActionMenu=import.meta.env.DEV && new URLSearchParams(window.location.search).get('openDeviceKeyActionMenu')==='1';
   const changes=useRef<DeviceKeyEdits>({});
   const knobChanged=useRef(false);
+  const knobDraft=useRef(knobRotationAction);
+  const saveInFlight=useRef(false);
   const generation=useRef(0);
   const mounted=useRef(true);
   const autosaveTimer=useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -204,7 +224,7 @@ function SelectedDeviceKeysCard({device,value,onRead}:{device:SettingsDevice|nul
     setMessage(t('settings.device.autoSavePending','编辑完成后自动保存到设备'));
     if(commit)scheduleSave();
   };
-  const updateKnobRotationAction=async(value:string)=>{knobChanged.current=true;setKnob(value as DeviceKnobRotationAction);setDirty(true);scheduleSave();};
+  const updateKnobRotationAction=async(value:string)=>{knobChanged.current=true;knobDraft.current=value as DeviceKnobRotationAction;setKnob(knobDraft.current);setDirty(true);scheduleSave();};
   const restoreDefaultDeviceKeyboardOutput=()=>{const keys=emptyDeviceKeyProfile().deviceCustomKeys;for(const id of ['key1','key2','key3','key4','knob'] as const)editKey('deviceCustomKeys',id,keys[id],true,true);};
   const read=async()=>{
     if(!device || busy)return;const current=++generation.current;setBusy(true);setMessage('');
@@ -213,23 +233,33 @@ function SelectedDeviceKeysCard({device,value,onRead}:{device:SettingsDevice|nul
     finally{if(current===generation.current)setBusy(false);}
   };
   const save=async()=>{
-    if(!device || busy)return;const current=++generation.current;
+    if(!device || saveInFlight.current)return;
+    if(!knobChanged.current && Object.keys(changes.current).length===0)return;
+    saveInFlight.current=true;const current=++generation.current;
     if(mounted.current){setBusy(true);setSaving(true);setSaveFailed(false);setMessage('');}
-    const pending=structuredClone(changes.current);const pendingKnob=knobChanged.current;const knobValue=knobRotationAction;
-    if(!pendingKnob && Object.keys(pending).length===0){setBusy(false);setSaving(false);return;}
-    const mergePending=(base:DeviceKeyProfile):DeviceKeyProfile=>mergeDeviceKeyEdits(base,pending);
     try {
-      const saved=await serializeDeviceSettingsSave(async()=>{
-        const baseline=await getSelectedDeviceSettings(device);
-        if(baseline.device.id!==device.id)throw new Error('Selected device identity changed; no settings written.');
-        if(!baseline.keys)throw new Error(baseline.keysError ?? t('settings.deviceKeys.firmwareRequired','这台设备的固件尚不支持独立保存按键，请先更新固件。'));
-        return setSelectedDeviceKeyProfile(device,baseline.revision,baseline.readToken,baseline.keys.revision,mergePending(baseline.keys.profile),pendingKnob ? knobValue : null);
-      });
-      if(!mounted.current || current!==generation.current)return;
-      changes.current={};knobChanged.current=false;setDirty(false);onRead(saved);
-      if(saved.keys)setProfile(saved.keys.profile);setKnob(snapshotKnob(saved));setMessage(t('settings.device.autoSaved','已保存到设备'));
+      // Keep draining this component's original device even if it is unmounted
+      // during the write. Newer layout edits must not be cleared by an old ACK
+      // or silently abandoned when its timer fires while the request is busy.
+      while(knobChanged.current || Object.keys(changes.current).length>0) {
+        const pending=structuredClone(changes.current);const pendingKnob=knobChanged.current;const knobValue=knobDraft.current;
+        const saved=await serializeDeviceSettingsSave(async()=>{
+          const baseline=await getSelectedDeviceSettings(device);
+          if(baseline.device.id!==device.id)throw new Error('Selected device identity changed; no settings written.');
+          if(!baseline.keys)throw new Error(baseline.keysError ?? t('settings.deviceKeys.firmwareRequired','这台设备的固件尚不支持独立保存按键，请先更新固件。'));
+          return setSelectedDeviceKeyProfile(device,baseline.revision,baseline.readToken,baseline.keys.revision,mergeDeviceKeyEdits(baseline.keys.profile,pending),pendingKnob ? knobValue : null);
+        });
+        changes.current=acknowledgeDeviceKeyEdits(changes.current,pending);
+        if(pendingKnob && knobDraft.current===knobValue)knobChanged.current=false;
+        if(mounted.current && current===generation.current) {
+          onRead(saved);
+          if(saved.keys)setProfile(mergeDeviceKeyEdits(saved.keys.profile,changes.current));
+          setKnob(knobChanged.current ? knobDraft.current : snapshotKnob(saved));
+        }
+      }
+      if(mounted.current && current===generation.current){setDirty(false);setMessage(t('settings.device.autoSaved','已保存到设备'));}
     }catch(e){if(mounted.current && current===generation.current){setSaveFailed(true);setMessage(t('settings.device.autoSaveFailed','保存失败，修改已保留：')+' '+String(e));}}
-    finally{if(mounted.current && current===generation.current){setBusy(false);setSaving(false);}}
+    finally{saveInFlight.current=false;if(mounted.current && current===generation.current){setBusy(false);setSaving(false);}}
   };
   saveLatest.current=save;
   function scheduleSave(){
