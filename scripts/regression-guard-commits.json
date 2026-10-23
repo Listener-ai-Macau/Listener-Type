@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T10:39:34.328601+08:00",
+  "updated_at": "2026-10-23T11:17:36.146622+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5974,7 +5974,7 @@
     {
       "id": "qa140_session_owner_preserves_replacement_and_pending_question",
       "subject": "QA recording, resources and late completion retain original session ownership",
-      "state": "production_counterexample_fixed_related714_verified_candidate_not_packaged",
+      "state": "exact140_packaged_installed_CI_related714_verified_live_QA_not_accepted",
       "repo": "type",
       "commit": "652bd087d149f844b8c0fd812c05ffd9a1ac1bb3",
       "commit_subject": "Bind question-answer sessions and resources to their original owner",
@@ -5991,19 +5991,47 @@
         "cargo test --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --lib coordinator::tests::qa_ -- --test-threads=1"
       ],
       "limits": [
-        "No live QA microphone cancellation race, interactive global hotkey/selection capture or external editor delivery established by synthetic unit state.",
-        "Not yet MSI-built, installed or published. Daily Type139 and unchanged Firmware33 remain.",
-        "Full pre-sale acceptance still has device write/flash/OTA and interactive scope gaps.",
-        "English factory content and duplicate vocabulary issue remain."
+        "Live QA cancellation race / selection and translation global hotkeys not physically exercised.",
+        "Current round has no new wired flash, complete OTA, multi-board A/B or disconnect/reconnect qualification; reuse prior evidence only within its original version/scope.",
+        "Online marketplace publication and optional local-model execution not exercised; no model download or extra service was authorized.",
+        "English helper/factory content retains Chinese; direct duplicate vocabulary adds remain a polish issue.",
+        "No strong-interference exclusion or arbitrary target/application guarantee from these quiet popup cases."
       ],
       "machine_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build139\\qa140-source-audit.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-101755-e2806d\\result.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-103541-a8a27e\\result.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-103541-a8a27e\\result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build139\\type140-acceptance-summary.json"
+      ]
+    },
+    {
+      "id": "type140_original_popup_auto_and_manual_end_exact_history_clipboard",
+      "subject": "Type140 quiet original-popup automatic and manual ending delivery",
+      "repo": "type",
+      "commit": "5c237420089506156fda8ba4b06eb7e668e27e04",
+      "humanAccepted": true,
+      "state": "three_owner_passes_with_exact_input_history_and_manual_final_clipboard_single_board_scope",
+      "protects": [
+        "Two voice-activated sessions continued, submitted real recognized text, and automatically stopped3053/3034ms after last confirmed body.",
+        "One manual User STOP preserved a21-character tail and all32 final characters in actual popup, history and final clipboard; stop-to-done538ms."
+      ],
+      "limits": [
+        "Live QA cancellation race / selection and translation global hotkeys not physically exercised.",
+        "Current round has no new wired flash, complete OTA, multi-board A/B or disconnect/reconnect qualification; reuse prior evidence only within its original version/scope.",
+        "Online marketplace publication and optional local-model execution not exercised; no model download or extra service was authorized.",
+        "English helper/factory content retains Chinese; direct duplicate vocabulary adds remain a polish issue.",
+        "No strong-interference exclusion or arbitrary target/application guarantee from these quiet popup cases.",
+        "Physical key identity at start not independently established; not an all-input-app or word-perfect ASR promise."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build139\\type140-acceptance-summary.json"
+      ],
+      "guards": [
+        "Historical live evidence: retain exact session archives and original popup results; rerun only after affected changes or new failure."
       ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-23T10:39:34.328601+08:00",
+  "feature_routes_updated_at": "2026-10-23T11:17:36.146622+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -6119,8 +6147,8 @@
     },
     {
       "id": "recording-end-clipboard",
-      "baseline_state": "historical_human_accepted_scope_only",
-      "accepted_scope": "Historical recording latency/preview guards are anchors, not proof of all later clipboard and endpoint combinations. 2026-10-23 OWNER138-CHAT-01: Owner confirms one natural Listener BLE Raw73-char recording was automatically entered into this Codex chat and directly sent without manual paste/edit; original/final matches the visible Owner request. Type138 source4065fe1a9aef1aab28fbd7eb874a5ffbdc5a7816. Metadata: work/customer-onboarding-20261020/post138-owner-use-metadata.json. This does not accept clipboard-recovery combinations, automatic ending, arbitrary targets, device-key convenience or the unowned-error counterexample as field-qualified. Type139: computer microphone errors retain original recorder identity at registration and atomic abort; stale errors preserve replacement recordings, while current errors close normally. Production monitor counterexample and exact package verified, not physical attribution or clipboard/target scope completion.",
+      "baseline_state": "human_verified140_quiet_popup_scope_preserving_historical_guards",
+      "accepted_scope": "Historical recording latency/preview guards are anchors, not proof of all later clipboard and endpoint combinations. 2026-10-23 OWNER138-CHAT-01: Owner confirms one natural Listener BLE Raw73-char recording was automatically entered into this Codex chat and directly sent without manual paste/edit; original/final matches the visible Owner request. Type138 source4065fe1a9aef1aab28fbd7eb874a5ffbdc5a7816. Metadata: work/customer-onboarding-20261020/post138-owner-use-metadata.json. This does not accept clipboard-recovery combinations, automatic ending, arbitrary targets, device-key convenience or the unowned-error counterexample as field-qualified. Type139: computer microphone errors retain original recorder identity at registration and atomic abort; stale errors preserve replacement recordings, while current errors close normally. Production monitor counterexample and exact package verified, not physical attribution or clipboard/target scope completion. Type140 source5c237420: three original-popup live cases match actual field/history/submission; two automatic STOPs at3053/3034ms after last confirmed body and one user manual STOP preserves32 chars including21-char pending tail. Last two final clipboard snapshots exact; first Stored receipt only. No strong interference/all editors/physical start identity promise. See type140_original_popup_auto_and_manual_end_exact_history_clipboard.",
       "guard_entries": [
         "type_recording_latency_and_ble_audio_control",
         "type_recording_preview_text_stability",
@@ -6128,7 +6156,8 @@
         "type_recording_origin_clipboard_retention",
         "type79_recorded_audio_to_original_popup",
         "type92_recorded_audio_to_original_popup",
-        "type139_microphone_error_preserves_newer_recording"
+        "type139_microphone_error_preserves_newer_recording",
+        "type140_original_popup_auto_and_manual_end_exact_history_clipboard"
       ],
       "paths": {
         "type": [
@@ -6148,11 +6177,11 @@
         "Restore clipboard from this same session History.final_text; do not substitute submitted prefixes or a later latest-history row. Preserve new user clipboard ownership."
       ],
       "latest_installed_candidate": {
-        "build": 38,
-        "source": "4cdcd5044e3e0422093431ed763e303433e54f86",
-        "exe_sha256": "F6B0DCAF8CCE58B28DC693408B79ACF52676A47F40119F41F893187EA335444B",
-        "installed_at": "2026-10-17T16:37:20.3284227+08:00",
-        "scope": "Natural build37 histories match archived intended final text; no complete same-recording clipboard recovery field certificate yet."
+        "build": 140,
+        "source": "5c237420089506156fda8ba4b06eb7e668e27e04",
+        "exe_sha256": "ece9f975b78f8132bf2074374ed47c773175b4b70f246d059e2499d72b30ca26",
+        "installed_at": "2026-10-23T10:53:18.139498+08:00",
+        "evidence": "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build139\\type140-acceptance-summary.json"
       },
       "latest_observed_single_field_proof": {
         "build": 138,
@@ -6162,6 +6191,17 @@
         "scope": "Owner confirms automatic Type entry directly sent without manual paste/edit for the questionnaire request. Exact original/final73-char natural BLE record matches the visible request. This is one actual input case in this Codex chat, not all targets, clipboard recovery, automatic ending, physical-key convenience or buying qualification.",
         "preserved_prior_entry": "type92_recorded_audio_to_original_popup",
         "preserved_prior_scope": "One prerecorded sample in a real ordinary WinForms input; historical38 candidate scope preserved separately."
+      },
+      "prior_installed_candidate_before140": {
+        "build": 38,
+        "source": "4cdcd5044e3e0422093431ed763e303433e54f86",
+        "exe_sha256": "F6B0DCAF8CCE58B28DC693408B79ACF52676A47F40119F41F893187EA335444B",
+        "installed_at": "2026-10-17T16:37:20.3284227+08:00",
+        "scope": "Natural build37 histories match archived intended final text; no complete same-recording clipboard recovery field certificate yet."
+      },
+      "latest_live_scope": {
+        "guard": "type140_original_popup_auto_and_manual_end_exact_history_clipboard",
+        "scope": "Quiet original WinForms popup only:2automatic+1manual endings,3exact actual inputs/history/submissions; last two final clipboard snapshots exact. Preserve prior Codex natural-use138 proof separately."
       }
     },
     {
@@ -7057,7 +7097,7 @@
     {
       "id": "qa-session-lifecycle",
       "accepted_scope": "Production controller/resource identity under deterministic isolated-state failures; no live selection/microphone/hotkey or purchase acceptance.",
-      "baseline_state": "candidate_verified_not_packaged_or_human_accepted",
+      "baseline_state": "installed140_source_verified_QA_live_unknown",
       "guard_entries": [
         "qa140_session_owner_preserves_replacement_and_pending_question"
       ],
@@ -7074,11 +7114,13 @@
         "A separate identity precheck is insufficient if cleanup later takes unowned global resources. Keep original session identity through cleanup and final answer/history publication."
       ],
       "latest_source_candidate": {
-        "installed": false,
+        "installed": true,
         "source": "652bd087d149f844b8c0fd812c05ffd9a1ac1bb3",
-        "packaged": false,
+        "packaged": true,
         "relatedChecks": "714 passed, 32 original ignored; live QA and broader physical scopes remain open",
-        "build": 140
+        "build": 140,
+        "artifact_source": "5c237420089506156fda8ba4b06eb7e668e27e04",
+        "evidence": "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build139\\type140-acceptance-summary.json"
       }
     }
   ]
