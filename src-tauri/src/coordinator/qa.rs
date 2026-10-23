@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tauri::Emitter;
 
-use crate::coordinator_state::{initial_session_id, SessionId, SessionPhase};
+use crate::coordinator_state::{initial_session_id, new_session_id, SessionId, SessionPhase};
 use crate::selection::SelectionContext;
 use crate::types::CapsuleState;
 
@@ -79,6 +79,7 @@ pub(super) async fn handle_qa_option_edge(inner: &Arc<Inner>) {
 pub(super) fn open_qa_panel(inner: &Arc<Inner>) {
     {
         let mut state = inner.qa_state.lock();
+        state.session_id = new_session_id();
         state.panel_visible = true;
         state.phase = QaPhase::Idle;
         state.cancelled = false;
@@ -114,6 +115,7 @@ pub(super) fn close_qa_panel(inner: &Arc<Inner>) {
     cancel_qa_session(inner);
     {
         let mut state = inner.qa_state.lock();
+        state.session_id = new_session_id();
         state.panel_visible = false;
         state.pinned = false;
         state.messages.clear();

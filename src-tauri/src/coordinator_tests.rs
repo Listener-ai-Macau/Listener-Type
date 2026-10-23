@@ -5177,6 +5177,160 @@ fn recorder_error_monitor_closes_its_own_active_recording() {
     }
 }
 
+fn qa_test_asr() -> Arc<VolcengineStreamingASR> {
+    Arc::new(VolcengineStreamingASR::new(
+        crate::asr::volcengine::VolcengineCredentials {
+            app_id: String::new(),
+            access_token: String::new(),
+            resource_id: "test-no-network".into(),
+        },
+        Vec::new(),
+    ))
+}
+
+#[test]
+fn qa_recorder_error_registered_after_replacement_preserves_new_session() {
+    for phase in [QaPhase::Recording, QaPhase::Processing] {
+        let coordinator = Coordinator::new();
+        let old = session_id(13901);
+        let replacement = session_id(13902);
+        let (tx, rx) = mpsc::channel();
+        let replacement_asr = qa_test_asr();
+        {
+            let mut state = coordinator.inner.qa_state.lock();
+            state.session_id = replacement;
+            state.phase = phase;
+            state.cancelled = false;
+            state.panel_visible = true;
+            *coordinator.inner.qa_asr.lock() = Some(SessionResource::new(
+                replacement,
+                Arc::clone(&replacement_asr),
+            ));
+        }
+        let monitor = spawn_qa_recorder_error_monitor(&coordinator.inner, old, rx).unwrap();
+        tx.send(RecorderError::EngineFailed("old QA recorder failed".into()))
+            .unwrap();
+        monitor.join().unwrap();
+        let state = coordinator.inner.qa_state.lock();
+        assert_eq!(state.session_id, replacement);
+        assert_eq!(state.phase, phase);
+        assert!(!state.cancelled);
+        assert!(!coordinator.inner.qa_stream_cancelled.load(Ordering::SeqCst));
+        assert!(coordinator.inner.qa_asr.lock().is_some());
+    }
+}
+
+#[test]
+fn qa_stale_completion_and_resource_cleanup_preserve_replacement() {
+    let coordinator = Coordinator::new();
+    let old = session_id(13911);
+    let replacement = session_id(13912);
+    {
+        let mut state = coordinator.inner.qa_state.lock();
+        state.session_id = replacement;
+        state.phase = QaPhase::Processing;
+        state.messages.push(crate::types::QaChatMessage {
+            role: "user".into(),
+            content: "new question".into(),
+        });
+    }
+    let current_asr = qa_test_asr();
+    *coordinator.inner.qa_asr.lock() =
+        Some(SessionResource::new(replacement, Arc::clone(&current_asr)));
+    discard_qa_resources(&coordinator.inner, old);
+    assert!(!finish_qa_for_session(
+        &coordinator.inner,
+        old,
+        Some("old failure".into())
+    ));
+    finish_qa_idle_silently(&coordinator.inner, old);
+    let actual =
+        resources::take_session_resource(&mut coordinator.inner.qa_asr.lock(), replacement)
+            .unwrap();
+    assert!(Arc::ptr_eq(&actual, &current_asr));
+    let state = coordinator.inner.qa_state.lock();
+    assert_eq!(state.phase, QaPhase::Processing);
+    assert_eq!(state.messages[0].content, "new question");
+    assert!(!state.cancelled);
+}
+
+#[test]
+fn qa_current_recorder_error_cleans_only_its_own_resources() {
+    for phase in [QaPhase::Recording, QaPhase::Processing] {
+        let coordinator = Coordinator::new();
+        let owner = session_id(13921);
+        {
+            let mut state = coordinator.inner.qa_state.lock();
+            state.session_id = owner;
+            state.phase = phase;
+            state.panel_visible = true;
+            if phase == QaPhase::Processing {
+                state.messages.push(crate::types::QaChatMessage {
+                    role: "user".into(),
+                    content: "unfinished question".into(),
+                });
+            }
+        }
+        *coordinator.inner.qa_asr.lock() = Some(SessionResource::new(owner, qa_test_asr()));
+        let (tx, rx) = mpsc::channel();
+        let monitor = spawn_qa_recorder_error_monitor(&coordinator.inner, owner, rx).unwrap();
+        tx.send(RecorderError::EngineFailed("current QA failure".into()))
+            .unwrap();
+        monitor.join().unwrap();
+        let state = coordinator.inner.qa_state.lock();
+        assert_eq!(state.phase, QaPhase::Idle);
+        assert!(state.panel_visible);
+        assert!(!state.cancelled);
+        assert!(coordinator.inner.qa_asr.lock().is_none());
+        assert!(state.messages.is_empty());
+    }
+}
+
+#[test]
+fn qa_panel_close_and_reopen_invalidate_previous_callbacks() {
+    let coordinator = Coordinator::new();
+    qa::open_qa_panel(&coordinator.inner);
+    let first = coordinator.inner.qa_state.lock().session_id;
+    coordinator.inner.qa_state.lock().phase = QaPhase::Processing;
+    qa::close_qa_panel(&coordinator.inner);
+    let closed = coordinator.inner.qa_state.lock().session_id;
+    assert_ne!(first, closed);
+    assert!(!qa_processing_matches(&coordinator.inner, first));
+    qa::open_qa_panel(&coordinator.inner);
+    let reopened = coordinator.inner.qa_state.lock().session_id;
+    assert_ne!(closed, reopened);
+    finish_qa_with_error(&coordinator.inner, first, "late failure".into());
+    let state = coordinator.inner.qa_state.lock();
+    assert_eq!(state.session_id, reopened);
+    assert!(state.panel_visible);
+    assert_eq!(state.phase, QaPhase::Idle);
+}
+
+#[test]
+fn qa_cancel_keeps_processing_owned_until_its_completion() {
+    let coordinator = Coordinator::new();
+    let owner = session_id(13931);
+    {
+        let mut state = coordinator.inner.qa_state.lock();
+        state.session_id = owner;
+        state.phase = QaPhase::Processing;
+        state.messages.push(crate::types::QaChatMessage {
+            role: "user".into(),
+            content: "cancelled question".into(),
+        });
+    }
+    *coordinator.inner.qa_asr.lock() = Some(SessionResource::new(owner, qa_test_asr()));
+    cancel_qa_session(&coordinator.inner);
+    assert_eq!(coordinator.inner.qa_state.lock().phase, QaPhase::Processing);
+    assert!(coordinator.inner.qa_state.lock().cancelled);
+    assert!(!qa_processing_matches(&coordinator.inner, owner));
+    assert!(coordinator.inner.qa_asr.lock().is_none());
+    finish_qa_idle_silently(&coordinator.inner, owner);
+    let state = coordinator.inner.qa_state.lock();
+    assert_eq!(state.phase, QaPhase::Idle);
+    assert!(state.messages.is_empty());
+}
+
 #[test]
 fn abort_recording_keeps_session_non_idle_until_restore_can_run() {
     let mut state = SessionState::default();

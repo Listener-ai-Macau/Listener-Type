@@ -204,8 +204,9 @@ pub(super) fn release_recording_mute(inner: &Arc<Inner>, owner: &'static str) {
     }
 }
 
-pub(super) fn stop_qa_recorder(inner: &Arc<Inner>) {
-    if let Some(rec) = inner.qa_recorder.lock().take() {
+pub(super) fn stop_qa_recorder(inner: &Arc<Inner>, session_id: SessionId) {
+    let recorder = take_session_resource(&mut inner.qa_recorder.lock(), session_id);
+    if let Some(rec) = recorder {
         rec.stop();
         release_recording_mute(inner, "qa");
     }
