@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-23T13:18:54.384626+08:00",
+  "updated_at": "2026-10-23T13:52:14.159313+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -6201,9 +6201,39 @@
         "publicPrepared": true
       },
       "previous_uninstalled_state": "source_candidate_native143_CSP_failure_proven_new144_package_required"
+    },
+    {
+      "id": "type145_qa_capsule_cannot_hide_or_replace_active_dictation",
+      "subject": "Question panel capsule operations preserve active dictation and original display generations",
+      "state": "source_verified_eight_related_checks_not_packaged_or_installed",
+      "repo": "type",
+      "commit": "2c953a8386e45f9e19b64588946ccc88fc6d9e75",
+      "commit_subject": "Keep question panel feedback from replacing active dictation capsules [skip ci]",
+      "baseCommit": "7c7ff16d27b1a2929b2ae610d16823f3c976091a",
+      "humanAccepted": false,
+      "protects": [
+        "Actual close/error paths do not emit Idle/Error over Starting, Listening, Processing or Inserting dictation.",
+        "Every QA capsule request, including level/transcription/processing/answer, requires idle dictation and carries that generation.",
+        "Final presentation cache rejects a recording that replaced the captured idle generation.",
+        "Delayed error hide is bound to original QA and dictation owners, preserves a new question/recording and normal idle feedback."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --lib coordinator::tests::qa_ -- --test-threads=1"
+      ],
+      "limits": [
+        "Test-only observation captures actual production capsule emission requests; no native app/window/hardware is claimed from it.",
+        "Earliest preserved732a already contains unowned QA close; not proved as cause of prior Owner premature stop cases.",
+        "Live selection, microphone, global QA/translation hotkeys and arbitrary target editors remain unqualified."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-134518-8676ba\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261023-135113-1b1e4f\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build145\\qa145-counterexample.rs.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build145\\source-audit.json"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-23T13:18:54.384626+08:00",
+  "feature_routes_updated_at": "2026-10-23T13:52:14.159313+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -7298,28 +7328,30 @@
       "accepted_scope": "Production controller/resource identity under deterministic isolated-state failures; no live selection/microphone/hotkey or purchase acceptance.",
       "baseline_state": "installed140_source_verified_QA_live_unknown",
       "guard_entries": [
-        "qa140_session_owner_preserves_replacement_and_pending_question"
+        "qa140_session_owner_preserves_replacement_and_pending_question",
+        "type145_qa_capsule_cannot_hide_or_replace_active_dictation"
       ],
       "paths": {
         "type": [
           "src-tauri/src/coordinator.rs",
           "src-tauri/src/coordinator/qa.rs",
           "src-tauri/src/coordinator/resources.rs",
-          "src-tauri/src/coordinator_tests.rs"
+          "src-tauri/src/coordinator_tests.rs",
+          "src-tauri/src/coordinator/support.rs"
         ]
       },
       "known_failures": [
         "Type139 source b2c6f33d7ecc83977373ddc8cc33c116e3123751: an old QA recorder channel registered after replacement ends the new Recording as Idle. Actual production-monitor counterexample failed; preserved in outputs/Listener-售前验收-20261023-build139/qa139-counterexample.rs.txt and accept131-rust-20261023-101755-e2806d/result.json.",
-        "A separate identity precheck is insufficient if cleanup later takes unowned global resources. Keep original session identity through cleanup and final answer/history publication."
+        "A separate identity precheck is insufficient if cleanup later takes unowned global resources. Keep original session identity through cleanup and final answer/history publication.",
+        "144 and earliest732a: actual QA close/error emits unowned Idle/Error while dictation Starting/Listening/Processing/Inserting. Test-only observer captures8 conflicting requests; QA does not itself stop the active dictation in this counterexample."
       ],
       "latest_source_candidate": {
-        "installed": true,
-        "source": "652bd087d149f844b8c0fd812c05ffd9a1ac1bb3",
-        "packaged": true,
-        "relatedChecks": "714 passed, 32 original ignored; live QA and broader physical scopes remain open",
-        "build": 140,
-        "artifact_source": "5c237420089506156fda8ba4b06eb7e668e27e04",
-        "evidence": "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build139\\type140-acceptance-summary.json"
+        "source": "2c953a8386e45f9e19b64588946ccc88fc6d9e75",
+        "build": 145,
+        "packaged": false,
+        "installed": false,
+        "relatedChecks": "8 QA checks passed in private Windows station; includes original emission conflict, idle feedback and both timer owners",
+        "evidence": "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261023-build145\\source-audit.json"
       }
     }
   ]
