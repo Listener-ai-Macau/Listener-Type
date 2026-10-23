@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-23T08:56:27.881322+08:00",
+  "updatedAt": "2026-10-23T11:57:06.630842+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 139,
-    "source": "b2c6f33d7ecc83977373ddc8cc33c116e3123751",
-    "sourceTag": "build-source/type139-20261023",
+    "build": 141,
+    "source": "bc5a4eeebde923d840568a6b5f24f51dabe4fb52",
+    "sourceTag": "build-source/type141-20261023",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "8aef71d6734499fdb6d93e98304c527d8f3d26e8dd2ce26d7290dcf0c93a463d",
-    "sizeBytes": 299192320,
-    "exeSha256": "e01fe9e8fef0f954766229972f10c0a56a2c964cb0039ae9fda0b1e1d4236d2c",
+    "sha256": "ba2a421a179d916109ed19b27300358ca2b1ad7a4e44fa997e8239d53b6091b4",
+    "sizeBytes": 299220992,
+    "exeSha256": "cc6f5c01f6b234600826337f2f54ee258336242cec91634ed9720ea289397eea",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -317,23 +317,33 @@
     "type139RecorderErrorOwnerCounterexampleVerified": true,
     "type139ExactPackageStartupVerified": true,
     "type139PhysicalFieldAttributionQualified": false,
-    "customer139PurchaseQualification": false
+    "customer139PurchaseQualification": false,
+    "type140QAOwnerAndResourceCounterexamplesVerified": true,
+    "type140QuietOriginalPopupThreeCasesVerified": true,
+    "type140LiveScopeRetained": "2 auto endings3053/3034ms after confirmed body,1manual user stop; popup/history/submission exact, last clipboard exact. One board; physical start identity not established. Recording code unchanged in141.",
+    "type141InstalledExeAndPreferencesVerified": true,
+    "type141IdempotentVocabularyNativeUiAndConcurrencyVerified": true,
+    "type141NetworkNativeEventFixturesVerified": true,
+    "type141OwnerNetworkActuallyInterrupted": false,
+    "type141NarrowEnglishHelpersVerified": true,
+    "type141FreshPhysicalFlashOtaQualified": false,
+    "customer141PurchaseQualification": false
   },
   "remainingLimits": [
-    "Strong-interference speaker isolation is incomplete.",
-    "Intermittent wake/adoption/early-close cases do not yet have complete current field acceptance.",
-    "Same-session History/clipboard restoration still has limited real editor field coverage.",
-    "Two physical boards simultaneously configured and physical HID presses were not qualified in this release check.",
-    "No stable 160 KB/s or real dual-microphone enhancement qualification is claimed.",
-    "First-use UI has isolated native/browser evidence, and one recorded WAV reached the original editor under source79. These checks do not qualify live speech, independent ordinary use, physical value or purchase conversion.",
-    "Local runtime/model first download and no-key real inference remain to be qualified. Backend-generated diagnostics may still need localization.",
-    "RC1 uses official MSI downloads for updates; it has no stable signed automatic-updater feed."
+    "Strong-interference isolation remains incomplete.",
+    "Intermittent wake/early-close cases lack universal field acceptance; retain bounded quiet140 passes.",
+    "Owner138 natural Codex and140 original-popup inputs are limited field evidence, not all editors/clipboard ownership combinations.",
+    "Two physical boards and physical start-key identity were not qualified in this batch.",
+    "Firmware33 prior settings/OTA evidence remains under its original app scope; no new141 full flash/OTA acceptance.",
+    "No160KB/s, dual-microphone, independent hardware buying or real payment qualification.",
+    "Optional local inference and some remote/nonEnglish factory content remain unqualified.",
+    "Updates use official MSI downloads; no stable signed automatic-updater feed."
   ],
   "maintenance": {
     "remoteBranch": "master",
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build139-20261023"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build141-20261023"
   }
 }
