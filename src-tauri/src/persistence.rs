@@ -231,6 +231,12 @@ pub(crate) fn content_recovery_model_root() -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// Offline translation is opt-in user data. Merely querying readiness creates
+/// no directory, downloads no files, and changes no recording/provider settings.
+pub(crate) fn offline_translation_root() -> Result<PathBuf> {
+    Ok(data_dir()?.join("models/offline-translation"))
+}
+
 /// 录音归档目录：`<data_dir>/recordings/`。
 /// 仅当用户开 `prefs.record_audio_for_debug` 时才会有内容（每次会话一个 `<session_id>.wav`）。
 /// 同样受 `history_retention_days` 清理（写入新文件时顺手裁旧的）。

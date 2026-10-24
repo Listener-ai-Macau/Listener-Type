@@ -34,6 +34,7 @@ mod global_hotkey_runtime;
 mod hotkey;
 mod history_metadata;
 mod insertion;
+mod local_translation;
 mod llm_gemini;
 mod marketplace_backend;
 mod net_health;
@@ -1032,6 +1033,10 @@ pub fn run() {
             commands::preview_style_pack_runtime,
             commands::try_style_pack_text,
             commands::try_translation_text,
+            commands::get_local_translation_status,
+            commands::prepare_local_translation,
+            commands::cancel_local_translation_preparation,
+            commands::try_local_translation_text,
             commands::suggest_polite_text_edits,
             commands::transcribe_audio_file_trial,
             commands::cancel_audio_file_trial,

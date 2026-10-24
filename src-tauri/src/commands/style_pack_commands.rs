@@ -95,6 +95,37 @@ pub async fn try_translation_text(
 }
 
 #[tauri::command]
+pub fn get_local_translation_status() -> Result<crate::local_translation::Status, String> {
+    crate::local_translation::status()
+}
+
+/// Preparation is a separate explicit action, never a side effect of selecting
+/// a language, opening a dialog, recording, or requesting a translation.
+#[tauri::command]
+pub async fn prepare_local_translation(source_language: String, target_language: String) -> Result<crate::local_translation::Status, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::local_translation::prepare(&source_language, &target_language))
+        .await.map_err(|_| "local_translation_runtime_failed".to_owned())?
+}
+
+#[tauri::command]
+pub fn cancel_local_translation_preparation() {
+    crate::local_translation::cancel_preparation();
+}
+
+#[tauri::command]
+pub async fn try_local_translation_text(source_language: String, target_language: String, raw_text: String) -> Result<crate::types::StyleTextTrialResult, String> {
+    let started = std::time::Instant::now();
+    let pack_id = format!("local_translation:{source_language}:{target_language}");
+    let pack_name = format!("{source_language} → {target_language}");
+    let output_text = tauri::async_runtime::spawn_blocking(move || crate::local_translation::translate(&source_language, &target_language, &raw_text))
+        .await.map_err(|_| "local_translation_runtime_failed".to_owned())??;
+    Ok(crate::types::StyleTextTrialResult {
+        pack_id, pack_name, output_text, used_text_service: false,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+    })
+}
+
+#[tauri::command]
 pub async fn copy_style_trial_result(text: String) -> Result<(), String> {
     if text.is_empty() || text.chars().count() > 100_000 {
         return Err("style_trial_clipboard_unavailable".into());

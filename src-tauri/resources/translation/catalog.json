@@ -1,0 +1,52 @@
+{
+  "runtime": [
+    {
+      "url": "https://www.python.org/ftp/python/3.13.17/python-3.13.17-embeddable-amd64.zip",
+      "sha256": "0ba1ee4bfcbdc3a559d27e2e9ce76d04a7839947a23f46375872c755c0d463b8",
+      "bytes": 11441932,
+      "id": "python"
+    },
+    {
+      "url": "https://files.pythonhosted.org/packages/cb/e7/37da1a7500b57496a5269318c4f57962ea0c26dcac06b85222d7831acf00/ctranslate2-4.8.1-cp313-cp313-win_amd64.whl",
+      "sha256": "d52499f05a60a791aeadee28d609efa130142f376d1ea76b2b1c593bb01f8827",
+      "bytes": 19220784,
+      "id": "ctranslate2"
+    },
+    {
+      "url": "https://files.pythonhosted.org/packages/dd/e9/932b9eae6fd7019548321eee1ab8d5e3b3d1294df9d9a0c9ac517c7b636d/sentencepiece-0.2.1-cp313-cp313-win_amd64.whl",
+      "sha256": "10ed3dab2044c47f7a2e7b4969b0c430420cdd45735d78c8f853191fa0e3148b",
+      "bytes": 1054669,
+      "id": "sentencepiece"
+    },
+    {
+      "id": "vclibs",
+      "url": "https://download.microsoft.com/download/4/7/c/47c6134b-d61f-4024-83bd-b9c9ea951c25/Microsoft.VCLibs.x64.14.00.Desktop.appx",
+      "bytes": 6764349,
+      "sha256": "b56a9101f706f9d95f815f5b7fa6efbac972e86573d378b96a07cff5540c5961"
+    }
+  ],
+  "pairs": [
+    {
+      "source": "zh",
+      "target": "en",
+      "version": "1.9",
+      "asset": {
+        "id": "argos-zh-en-1.9",
+        "url": "https://argos-net.com/v1/translate-zh_en-1_9.argosmodel",
+        "bytes": 74481402,
+        "sha256": "62e7af5a3a48b530e47b7b3e5c78c2de79073ecd815750d2bf3ab35b4a67da2d"
+      }
+    },
+    {
+      "source": "en",
+      "target": "zh",
+      "version": "1.9",
+      "asset": {
+        "id": "argos-en-zh-1.9",
+        "url": "https://argos-net.com/v1/translate-en_zh-1_9.argosmodel",
+        "bytes": 70743021,
+        "sha256": "433e7c4f034d87fbe2353161e05f18646d7999452f801a4e1f0378522b9850ab"
+      }
+    }
+  ]
+}

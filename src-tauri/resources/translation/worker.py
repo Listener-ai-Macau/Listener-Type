@@ -1,0 +1,90 @@
+"""Listener offline text translation worker (one request, then exit).
+
+The host supplies a verified private embedded runtime and data-only model paths.
+No provider, network, user site-packages, microphone or clipboard is accessed.
+"""
+import json
+import os
+from pathlib import Path
+import re
+import sys
+sys.dont_write_bytecode = True
+
+
+def translate(request):
+    # Windows' extension discovery can otherwise omit a .pyd at MAX_PATH,
+    # reporting a misleading circular import. The customer profile/cache may
+    # legitimately be deep or contain non-ASCII names; keep this local to the
+    # worker instead of changing machine-wide long-path settings.
+    if os.name == 'nt':
+        def extended(path):
+            path = os.path.abspath(path)
+            if path.startswith('\\\\?\\'):
+                return path
+            return '\\\\?\\UNC\\' + path[2:] if path.startswith('\\\\') else '\\\\?\\' + path
+        sys.path[:] = [extended(path) for path in sys.path]
+    import ctranslate2
+    import sentencepiece
+
+    text = request['text']
+    if not isinstance(text, str) or not text.strip() or len(text) > 4000:
+        raise ValueError('local_translation_invalid_text')
+    model = Path(request['model'])
+    # Native model readers receive short relative paths. Python's wide-char
+    # filesystem bridge owns the customer-specific absolute directory.
+    os.chdir(model.parent)
+    tokenizer = sentencepiece.SentencePieceProcessor(model_file=Path(request['tokenizer']).name)
+    engine = ctranslate2.Translator(model.name, device='cpu', compute_type='int8', inter_threads=1, intra_threads=2)
+
+    def paragraph(value):
+        # Do not let the engine's default source limit silently discard a long
+        # paragraph. Segment on sentence boundaries, then bound token chunks.
+        if not value.strip():
+            return value
+        # Keep short paragraph context: translating “Save the draft only.”
+        # alone is less reliable than its preceding no-send instruction.
+        encoded = tokenizer.encode(value, out_type=str)
+        sentences = [value] if len(encoded) <= 96 else re.split(r'(?<=[。！？])|(?<=[.!?])(?=\s)', value)
+        chunks = []
+        for sentence in sentences:
+            tokens = tokenizer.encode(sentence, out_type=str)
+            if not tokens:
+                continue
+            while len(tokens) > 320:
+                chunks.append(tokens[:320])
+                tokens = tokens[320:]
+            if tokens:
+                # Translate complete sentences individually. Combining many
+                # repetitive sentences lets a small model collapse repetitions
+                # and omit a distinct last instruction, despite no token limit.
+                chunks.append(tokens)
+        output = []
+        for chunk in chunks:
+            item = engine.translate_batch([chunk], beam_size=2, max_input_length=0,
+                                          max_decoding_length=1024, return_scores=False)[0].hypotheses[0]
+            if len(item) >= 1024:
+                raise ValueError('local_translation_output_limit')
+            decoded = tokenizer.decode(item).replace('\u2581', ' ').strip()
+            if not decoded:
+                raise ValueError('local_translation_empty_output')
+            output.append(decoded)
+        return ' '.join(output)
+
+    # Preserve paragraph boundaries, including empty lines, without uploading
+    # any draft or recording. Ordinary ASCII underscores are left intact.
+    return ''.join(value if re.fullmatch(r'\r\n|\r|\n', value) else paragraph(value)
+                   for value in re.split(r'(\r\n|\r|\n)', text))
+
+
+if __name__ == '__main__':
+    try:
+        raw = sys.stdin.buffer.read(24_001)
+        if len(raw) > 24_000:
+            raise ValueError('local_translation_invalid_text')
+        result = translate(json.loads(raw.decode('utf8')))
+        sys.stdout.buffer.write(json.dumps({'text': result}, ensure_ascii=False).encode('utf8'))
+        sys.stdout.buffer.flush()
+    except Exception as error:
+        # No request text or model contents are printed in failure diagnostics.
+        sys.stderr.write(type(error).__name__ + ': ' + str(error)[:600])
+        sys.exit(1)
