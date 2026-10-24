@@ -7,8 +7,9 @@ import { Btn } from '../pages/_atoms';
 type SuggestionFailure = 'native' | 'requestFailed' | 'unusableReply' | 'applyFailed';
 type AppliedWording = { before: string; after: string; label: 'courteous' | 'softer' | 'chosenEdits' };
 
-export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured = true, localOnly = false }: {
+export function PoliteEditSuggestions({ text, originalText, disabled, onApply, cloudConfigured = true, localOnly = false }: {
   text: string; disabled: boolean; onApply: (text: string) => void;
+  originalText?: string;
   cloudConfigured?: boolean;
   localOnly?: boolean;
 }) {
@@ -72,6 +73,11 @@ export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured
   return <>
     <Btn size="sm" variant="ghost" disabled={disabled || !text.trim()} onClick={() => setOpen(value => !value)}>{t('politeEdits.open')}</Btn>
     {open && <section ref={panel} aria-label={t('politeEdits.title')} className="ol-style-trial-comparisons" style={{ flexBasis: '100%', minWidth: 0, margin: '4px 0' }}>
+    {originalText !== undefined && <div className="ol-wording-context" data-wording-context>
+      <div><h4>{t('style.trial.input')}</h4><p className="ol-wording-context-text ol-thinscroll" data-wording-original>{originalText}</p></div>
+      <div><h4>{t('style.trial.output')}</h4><p className="ol-wording-context-text ol-thinscroll" data-wording-current>{text}</p></div>
+    </div>}
+    <div className="ol-wording-choices ol-thinscroll" data-wording-choices>
     <p className="ol-style-trial-hint">{t(localOnly ? 'politeEdits.localOnlyHint' : 'politeEdits.localHint')}</p>
     {currentApplied && <div role="status" data-wording-applied style={{ margin: '10px 0' }}>
       <strong>{t('politeEdits.appliedChoice', { choice: t(`politeEdits.${currentApplied.label}`) })}</strong>{' '}
@@ -106,6 +112,7 @@ export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured
     </>}
     {!localOnly && reply && !current && <p role="status" className="ol-style-trial-hint">{t('politeEdits.stale')}</p>}
     {error?.source === text && (!localOnly || error.kind === 'applyFailed') && <p role="alert" className="ol-style-trial-hint">{t(`politeEdits.${error.kind}`)}</p>}
+    </div>
   </section>}
   </>;
 }

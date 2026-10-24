@@ -9,6 +9,7 @@ p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--url',required=True);p.add_argument('--report',type=Path,required=True)
 p.add_argument('--expected-build');p.add_argument('--capture-before',action='store_true')
 p.add_argument('--check-undo',action='store_true')
+p.add_argument('--check-context',action='store_true')
 a=p.parse_args();checks=[]
 source='抱歉，我今天下午临时有事，能把会议改到明天上午十点吗？如果不方便，周五也可以。'
 machine="I'm sorry. I have a temporary appointment this afternoon. Can I move the meeting to 10:00 tomorrow morning? If it's not convenient, Friday's fine."
@@ -51,9 +52,24 @@ with sync_playwright() as pw:
    expect(panel).to_contain_text('stays local')
    expect(output).to_have_value(machine)
    checks.append({'name':'Local suggestions are opt-in and keep cloud controls absent even when a cloud account is configured','passed':True})
+   if a.check_context:
+    context=panel.locator('[data-wording-context]')
+    expect(context.locator('[data-wording-original]')).to_have_text(source)
+    expect(context.locator('[data-wording-current]')).to_have_text(machine)
+    for width,height in [(1280,960),(700,760),(520,760)]:
+     page.set_viewport_size({'width':width,'height':height})
+     wording.click();wording.click();page.wait_for_timeout(120)
+     choices=panel.locator('[data-wording-choices]')
+     choices.evaluate('(element)=>element.scrollTop=element.scrollHeight')
+     box=context.bounding_box();assert box and box['y']>=0 and box['y']+box['height']<=height,(width,box)
+     expect(context.locator('[data-wording-current]')).to_have_text(machine)
+     page.screenshot(path=str(a.report.with_name(a.report.stem+f'-{width}.png')))
+    page.set_viewport_size({'width':1280,'height':960})
+    checks.append({'name':'Original and complete current result stay available above independently scrolling wording choices at desktop, narrow and phone-width views','passed':True})
    panel.get_by_role('button',name='Use this wording',exact=True).first.click()
    expect(output).to_have_value(revised)
    expect(page.locator('#style-trial-input')).to_have_value(source)
+   if a.check_context:expect(panel.locator('[data-wording-current]')).to_have_text(revised)
    expect(page.locator('[data-style-trial-retention]')).to_contain_text('Not saved')
    checks.append({'name':'Choosing a local request prefix preserves subject, request body, dates, condition and untouched literal model wording','passed':True})
    page.get_by_role('button',name='Save draft',exact=True).click()
@@ -71,6 +87,7 @@ with sync_playwright() as pw:
     checks.append({'name':'Adopting a softer question shows a named receipt and explicit Undo instead of a misleading no-options state','passed':can_undo and panel.get_by_text('Applied: Softer question',exact=True).count()==1 and panel.get_by_text('No matching local request option.',exact=False).count()==0})
     if can_undo:
      undo.click();expect(output).to_have_value(revised)
+     if a.check_context:expect(panel.locator('[data-wording-current]')).to_have_text(revised)
      expect(page.locator('#style-trial-input')).to_have_value(source)
      expect(page.locator('[data-style-trial-retention]')).to_contain_text('Saved only in this browser session')
      checks.append({'name':'Undo restores only the immediately preceding workspace text and its existing saved acknowledgement, without changing the original or saved record','passed':True})
@@ -85,6 +102,7 @@ with sync_playwright() as pw:
      panel.get_by_role('button',name='Use this wording',exact=True).first.click()
      expect(output).to_have_value(revised)
      manual=revised+' Review this manually.';output.fill(manual)
+     if a.check_context:expect(panel.locator('[data-wording-current]')).to_have_text(manual)
      expect(page.get_by_role('button',name='Undo wording change',exact=True)).to_have_count(0)
      expect(output).to_have_value(manual)
      checks.append({'name':'Manual editing invalidates the stale undo action without overwriting the newer text','passed':True})
@@ -95,6 +113,12 @@ with sync_playwright() as pw:
    saves=page.evaluate("window.__wordingCalls.filter(x=>x.cmd==='save_text_draft').map(x=>x.args)")
    assert saves[-1]['original']==source and saves[-1]['text']==revised
   checks.append({'name':'No cloud request, new preparation, credential, clipboard or external insertion is triggered','passed':True})
+  if a.check_context:
+   # Change only this isolated fixture's UI locale. Reload would run the
+   # original English init script again and invalidate the controller premise.
+   page.evaluate("async()=>{const {default:i18n}=await import('/src/i18n/index.ts');await i18n.changeLanguage('zh-CN')}")
+   expect(page.locator('#style-trial-title')).to_have_text('翻译成英语')
+   checks.append({'name':'Chinese translation heading localizes the target without changing its stored/native language value','passed':True})
  finally:b.close()
 r={'at':datetime.datetime.now().astimezone().isoformat(),'scope':__doc__,'passed':all(x['passed'] for x in checks),'checks':checks,'originalMachineText':machine,'expectedExplicitEdit':revised}
 a.report.parent.mkdir(parents=True,exist_ok=True);a.report.write_text(json.dumps(r,ensure_ascii=False,indent=2)+'\n',encoding='utf-8');print(json.dumps(r,ensure_ascii=False))

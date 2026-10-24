@@ -1,5 +1,18 @@
 export type TranslationEngine = 'local' | 'cloud';
 
+// Stored/native values remain unchanged; only presentation follows the UI locale.
+export function translationLanguageLabel(language: string, locale: string): string {
+  const codes: Record<string, string> = {
+    '简体中文': 'zh-Hans', '繁体中文': 'zh-Hant', English: 'en', '日本語': 'ja', '한국어': 'ko',
+    Français: 'fr', Deutsch: 'de', Español: 'es', Italiano: 'it', Português: 'pt',
+    Русский: 'ru', 'العربية': 'ar', 'Tiếng Việt': 'vi', 'ไทย': 'th', 'हिन्दी': 'hi',
+  };
+  const code = codes[language];
+  if (!code) return language;
+  try { return new Intl.DisplayNames([locale], { type: 'language' }).of(code) ?? language; }
+  catch { return language; }
+}
+
 export function localTargetCode(language: string): string {
   if (language === 'English' || language === 'en') return 'en';
   if (['简体中文', '繁体中文', 'zh'].includes(language)) return 'zh';

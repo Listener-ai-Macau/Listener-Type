@@ -60,7 +60,10 @@ def translate(request):
                 chunks.append(tokens)
         output = []
         for chunk in chunks:
-            item = engine.translate_batch([chunk], beam_size=5, max_input_length=0,
+            # Keep several complete hypotheses in the search. The narrower
+            # search can omit an event and its daypart in an ordinary request.
+            # This does not certify semantic accuracy; the result remains editable.
+            item = engine.translate_batch([chunk], beam_size=8, max_input_length=0,
                                           max_decoding_length=1024, return_scores=False)[0].hypotheses[0]
             if len(item) >= 1024:
                 raise ValueError('local_translation_output_limit')

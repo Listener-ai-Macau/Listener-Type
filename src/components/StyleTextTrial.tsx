@@ -13,7 +13,7 @@ import { PoliteEditSuggestions } from './PoliteEditSuggestions';
 import { ProviderSettingsDialog } from './ProviderSettingsDialog';
 import { SUPPORTED_LANGUAGES } from '../lib/types';
 import { LocalTranslationSetup } from './LocalTranslationSetup';
-import { localTranslationErrorKey, localTranslationKey } from '../lib/localTranslation';
+import { localTranslationErrorKey, localTranslationKey, translationLanguageLabel } from '../lib/localTranslation';
 import type { TranslationEngine, LocalTranslationReadiness } from '../lib/localTranslation';
 
 export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, prepareShorter, translationTarget, onTranslationTargetChange, initialTranslationEngine, initialTranslationSource, draft, onDraftChange, onClose }: {
@@ -30,7 +30,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   onDraftChange: (text: string) => void;
   onClose: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [translationEngine, setTranslationEngine] = useState<TranslationEngine>(initialTranslationEngine ?? 'local');
   const [translationSource, setTranslationSource] = useState(initialTranslationSource ?? '');
   const [translationPreparing, setTranslationPreparing] = useState(false);
@@ -287,7 +287,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       onCancel={event => { event.preventDefault(); if (!draftSaving) onClose(); }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-        <h2 id="style-trial-title" style={{ margin: 0, fontSize: 21 }}>{translationTarget ? t('offlineTranslation.title', { language: translationTarget }) : t('style.trial.title', { name: presentation.name })}</h2>
+        <h2 id="style-trial-title" style={{ margin: 0, fontSize: 21 }}>{translationTarget ? t('offlineTranslation.title', { language: translationLanguageLabel(translationTarget, i18n.resolvedLanguage ?? i18n.language) }) : t('style.trial.title', { name: presentation.name })}</h2>
         <Btn size="sm" variant="ghost" disabled={draftSaving} onClick={() => { if (!draftSaving) onClose(); }}>{t('common.close')}</Btn>
       </div>
       <p id="style-trial-description" className="ol-style-trial-hint" data-style-trial-service-notice>{t(offline ? 'offlineTranslation.localNotice' : readiness?.requiresTextService === false ? prepareShorter ? 'textWorkspace.localWithShorterNotice' : 'textWorkspace.localNotice' : 'textWorkspace.cloudNotice')}</p>
@@ -384,7 +384,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
             <SaveTextDraft compact name={presentation.name} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving}
               onUnsaved={() => setSavedDraftSignature('')}
               onSaved={text => setSavedDraftSignature(JSON.stringify([presentation.name, draft, text]))} />
-            {(!offline || translationTarget === 'English') && <PoliteEditSuggestions key={`${generation.current}:${result?.packId ?? ''}`} text={resultOutput} localOnly={offline} cloudConfigured={!offline && readiness?.textServiceConfigured === true}
+            {(!offline || translationTarget === 'English') && <PoliteEditSuggestions key={`${generation.current}:${result?.packId ?? ''}`} text={resultOutput} originalText={draft} localOnly={offline} cloudConfigured={!offline && readiness?.textServiceConfigured === true}
               disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />}
           </div>
           <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t(savedCurrentDraft ? isTauri ? 'textWorkspace.saved' : 'textDraft.browserSaved' : isTauri ? 'textWorkspace.unsaved' : 'textWorkspace.browserUnsaved')}</p>
