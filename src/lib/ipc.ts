@@ -1288,7 +1288,33 @@ export function repairEmbeddedBleConnection(timeoutMs?: number): Promise<Embedde
   );
 }
 
-export function recoverEmbeddedBleDevice(timeoutMs?: number): Promise<EmbeddedBleRepairResult> {
+// A recovery may outlive the page that started it. All ordinary UI entries
+// join that same operation instead of restarting the listener or pairing work.
+let pendingBleRecovery: Promise<EmbeddedBleRepairResult> | null = null;
+
+export function getPendingEmbeddedBleRecovery(): Promise<EmbeddedBleRepairResult> | null {
+  return pendingBleRecovery;
+}
+
+export function recoverEmbeddedBleDevice(timeoutMs?: number, cancelActiveDictation = false): Promise<EmbeddedBleRepairResult> {
+  if (pendingBleRecovery) return pendingBleRecovery;
+  // Publish ownership before awaiting cancellation or invoking native work.
+  const request = Promise.resolve().then(async () => {
+    if (cancelActiveDictation) {
+      try { await cancelDictation(); }
+      catch (cause) { console.warn('[ble-recovery] cancel active session before recovery failed', cause); }
+    }
+    return invokeEmbeddedBleRecovery(timeoutMs);
+  });
+  pendingBleRecovery = request;
+  const release = () => {
+    if (pendingBleRecovery === request) pendingBleRecovery = null;
+  };
+  void request.then(release, release);
+  return request;
+}
+
+function invokeEmbeddedBleRecovery(timeoutMs?: number): Promise<EmbeddedBleRepairResult> {
   return invokeOrMock(
     'recover_embedded_ble_device',
     { timeoutMs: timeoutMs ?? null },

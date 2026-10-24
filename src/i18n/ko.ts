@@ -1429,6 +1429,7 @@ export const ko: typeof zhCN = {
       deviceRecovery: '장치 복구',
       deviceRecoveryDesc: '터미널이나 SDK 가 필요 없습니다. Type 이 먼저 재연결하고, 필요하면 오래된 페어링을 지운 뒤 Windows Bluetooth 를 엽니다. 다시 페어링하면 자동으로 복구됩니다.',
       openBluetoothSettings: '원클릭 복구',
+      bluetoothSettingsOpenFailed: 'Bluetooth 설정을 열 수 없습니다. 시스템의 Bluetooth 설정을 직접 열어 주세요.',
       exporting: '내보내는 중…',
       exportProgress: '데스크톱, BLE, 펌웨어, 오디오 메타데이터 수집 중…',
       exportSuccess: '저장됨',

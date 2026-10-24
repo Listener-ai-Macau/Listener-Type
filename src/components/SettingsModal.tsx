@@ -8,6 +8,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { useTranslation } from 'react-i18next';
 import { Icon } from './Icon';
 import { HelpCenter } from './HelpCenter';
+import { DeviceRecoveryControl } from './DeviceRecoveryControl';
 import { AboutUpdateControl, Settings as SettingsContent, type SettingsSectionId } from '../pages/Settings';
 import { Row } from './ui/Row';
 import { SavedToast } from './SavedToast';
@@ -15,11 +16,8 @@ import { useSavedToastListener } from '../lib/savedEvent';
 import { readFontScale, setFontScale, type FontScaleId } from '../lib/fontScale';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import {
-  cancelDictation,
   exportDiagnosticPackage,
   openExternal,
-  openSystemSettings,
-  recoverEmbeddedBleDevice,
 } from '../lib/ipc';
 import type { OS } from './WindowChrome';
 
@@ -449,33 +447,7 @@ function AboutMini({ onOpenHelp }: { onOpenHelp: () => void }) {
         </div>
       </Row>
       <Row label={t('modal.about.deviceRecovery')} desc={t('modal.about.deviceRecoveryDesc')}>
-        <button
-          style={btnGhost}
-          onClick={() => {
-            void (async () => {
-              try {
-                await cancelDictation();
-              } catch (err) {
-                console.warn('[about] cancel active session before recovery failed', err);
-              }
-              try {
-                const result = await recoverEmbeddedBleDevice(15_000);
-                if (result.openBluetoothSettings) {
-                  await openSystemSettings('bluetooth');
-                }
-              } catch (err) {
-                console.warn('[about] one-click device recovery failed', err);
-                try {
-                  await openSystemSettings('bluetooth');
-                } catch (settingsErr) {
-                  console.warn('[about] open bluetooth settings failed', settingsErr);
-                }
-              }
-            })();
-          }}
-        >
-          {t('modal.about.openBluetoothSettings')}
-        </button>
+        <DeviceRecoveryControl />
       </Row>
       <Row label={t('modal.about.privacy')} desc={t('modal.about.privacyDesc')}>
         <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 999, background: 'var(--ol-blue-soft)', color: 'var(--ol-blue)', fontWeight: 500 }}>{t('modal.about.localFirst')}</span>

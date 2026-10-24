@@ -1429,6 +1429,7 @@ export const ja: typeof zhCN = {
       deviceRecovery: 'デバイス復旧',
       deviceRecoveryDesc: 'ターミナルや SDK は不要です。Type が先に再接続し、必要に応じて古いペアリングを消去して Windows Bluetooth を開きます。再ペアリング後は自動的に復旧します。',
       openBluetoothSettings: 'ワンクリック修復',
+      bluetoothSettingsOpenFailed: 'Bluetooth設定を開けませんでした。システムのBluetooth設定を手動で開いてください。',
       exporting: 'エクスポート中…',
       exportProgress: 'デスクトップ、BLE、ファームウェア、音声メタデータを収集中…',
       exportSuccess: '保存しました',

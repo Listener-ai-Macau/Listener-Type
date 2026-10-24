@@ -1471,6 +1471,7 @@ export const zhTW: typeof zhCN = {
       deviceRecovery: '裝置恢復',
       deviceRecoveryDesc: '不需要終端或 SDK：Type 會先自動重連，必要時清理舊配對並打開 Windows 藍牙。重新配對後會自動恢復。',
       openBluetoothSettings: '一鍵修復',
+      bluetoothSettingsOpenFailed: '無法開啟藍牙設定，請手動開啟系統的藍牙設定。',
       exporting: '匯出中…',
       exportProgress: '正在收集桌面、BLE、韌體和音訊元資料…',
       exportSuccess: '已儲存',

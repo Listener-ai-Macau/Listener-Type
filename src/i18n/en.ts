@@ -1474,6 +1474,7 @@ export const en: typeof zhCN = {
       deviceRecovery: 'Device recovery',
       deviceRecoveryDesc: 'No terminal or SDK required: Type reconnects first, clears stale pairing when needed, and opens Windows Bluetooth. It recovers automatically after pairing.',
       openBluetoothSettings: 'One-click repair',
+      bluetoothSettingsOpenFailed: 'Could not open Bluetooth settings. Open your system’s Bluetooth settings manually.',
       exporting: 'Exporting…',
       exportProgress: 'Collecting desktop, BLE, firmware, and audio metadata…',
       exportSuccess: 'Saved',
