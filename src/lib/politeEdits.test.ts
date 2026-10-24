@@ -50,6 +50,24 @@ assert.equal(applyLocalPoliteOption(conditionalRequest, localPoliteOptions(condi
 assert.deepEqual(localPoliteOptions('Hi, you must send the draft by Friday.'), []);
 assert.deepEqual(localPoliteOptions('He will send the draft by Friday.'), []);
 
+// Actual168: the follow-on promise must not become part of a request question.
+// This is a shared simple-grammar boundary, not a replacement for this sentence.
+const customer168 = "I've sent the modified file to your mailbox. If you can't open the attachment, tell me, I'll send it again.";
+assert.deepEqual(localPoliteOptions(customer168), []);
+assert.throws(() => applyLocalPoliteOption(customer168, { old: "tell me, I'll send it again.", new: "could you please tell me, I'll send it again?" }));
+for (const compound of [
+  'If the file is missing, send me a message; I will upload it.',
+  "Please share the notes and I'll reply by Friday.",
+  'Send me the invoice or we cannot pay.',
+  'Tell me the date then I can book the room.',
+  'Send the red, blue and green samples.',
+  'Please check it — I will be waiting.',
+]) assert.deepEqual(localPoliteOptions(compound), [], compound);
+const simpleConditional = 'If the attachment is missing, tell me which file you need.';
+assert.equal(applyLocalPoliteOption(simpleConditional, localPoliteOptions(simpleConditional)[0]), simpleConditional.replace('tell me which file you need.', 'could you please tell me which file you need?'));
+const coordinatedQuestion = 'Can you send the report and confirm the date?';
+assert.equal(applyLocalPoliteOption(coordinatedQuestion, localPoliteOptions(coordinatedQuestion)[0]), coordinatedQuestion.replace('Can you send', 'Could you please send'));
+
 const source = "Tomorrow's design review at 3 won't work for me. Could we move it to 4? If not, send me your notes and I'll reply by Friday. Thanks!";
 const edits = [{ old: 'Could we move it to 4?', new: 'Could we please move it to 4?' }, { old: 'send me your notes', new: 'please send me your notes' }];
 const result = reviewPoliteEdits(source, JSON.stringify({ edits }));

@@ -25,6 +25,14 @@ export function localPoliteOptions(source: string): LocalPoliteOption[] {
     const subject = question?.[1].toLowerCase() === 'i' ? 'I' : question?.[1].toLowerCase() ?? 'you';
     const verb = question?.[2] ?? imperative![2];
     const object = question?.[3] ?? imperative![3];
+    // Turning an imperative into a question is safe only within this narrow
+    // simple-request grammar. A comma or coordination can start a promise,
+    // condition or another speaker's clause; copying it byte-for-byte and
+    // changing the final punctuation still changes its grammatical role.
+    // Decline ambiguous compounds rather than pretending this is a parser.
+    // Existing questions keep their original question scope.
+    if (!question && (/[,;—–]|:(?!\d{2}\b)/u.test(object)
+      || /\b(?:and|or|but|so|yet|then)[ \t]+(?:I|you|we|he|she|it|they|there)\b/iu.test(object))) continue;
     if (/\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|etc|[A-Z])\.$/u.test(old)) continue;
     if (source.indexOf(old) !== source.lastIndexOf(old)) continue;
     const body = `${verb.toLowerCase()} ${object}`;

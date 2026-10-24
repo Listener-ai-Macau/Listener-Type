@@ -10,6 +10,7 @@ p.add_argument('--url',required=True);p.add_argument('--report',type=Path,requir
 p.add_argument('--expected-build');p.add_argument('--capture-before',action='store_true')
 p.add_argument('--check-undo',action='store_true')
 p.add_argument('--check-context',action='store_true')
+p.add_argument('--check-boundaries',action='store_true')
 a=p.parse_args();checks=[]
 source='抱歉，我今天下午临时有事，能把会议改到明天上午十点吗？如果不方便，周五也可以。'
 machine="I'm sorry. I have a temporary appointment this afternoon. Can I move the meeting to 10:00 tomorrow morning? If it's not convenient, Friday's fine."
@@ -70,6 +71,8 @@ with sync_playwright() as pw:
    expect(output).to_have_value(revised)
    expect(page.locator('#style-trial-input')).to_have_value(source)
    if a.check_context:expect(panel.locator('[data-wording-current]')).to_have_text(revised)
+   if a.check_boundaries:
+    expect(panel.locator('[data-wording-preview]').first).to_have_text(machine.replace('Can I move','Would I be able to move'))
    expect(page.locator('[data-style-trial-retention]')).to_contain_text('Not saved')
    checks.append({'name':'Choosing a local request prefix preserves subject, request body, dates, condition and untouched literal model wording','passed':True})
    page.get_by_role('button',name='Save draft',exact=True).click()
@@ -106,6 +109,20 @@ with sync_playwright() as pw:
      expect(page.get_by_role('button',name='Undo wording change',exact=True)).to_have_count(0)
      expect(output).to_have_value(manual)
      checks.append({'name':'Manual editing invalidates the stale undo action without overwriting the newer text','passed':True})
+   if a.check_boundaries:
+    compound="I've sent the modified file to your mailbox. If you can't open the attachment, tell me, I'll send it again."
+    output.fill(compound)
+    expect(panel.get_by_role('button',name='Use this wording',exact=True)).to_have_count(0)
+    expect(panel.locator('[data-wording-preview]')).to_have_count(0)
+    expect(panel.locator('[data-wording-current]')).to_have_text(compound)
+    expect(output).to_have_value(compound)
+    checks.append({'name':'Actual168 compound imperative is retained verbatim but no longer offered as two malformed questions','passed':True})
+    complete='Could you send the revised file? I will send the link again.'
+    output.fill(complete)
+    expect(panel.locator('[data-wording-preview]').first).to_have_text(complete.replace('Could you send','Could you please send'))
+    expect(panel.locator('[data-wording-preview]').last).to_have_text(complete.replace('Could you send','Would you be able to send'))
+    expect(output).to_have_value(complete)
+    checks.append({'name':'Supported request choices preview the entire proposed message with its unchanged following sentence before explicit adoption','passed':True})
   calls=page.evaluate('window.__wordingCalls.map(x=>x.cmd)')
   forbidden=[c for c in calls if c in ['suggest_polite_text_edits','try_translation_text','prepare_local_translation','set_credential'] or re.match(r'^(copy_|insert_)',c)]
   assert not forbidden,forbidden

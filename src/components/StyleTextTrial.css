@@ -25,6 +25,7 @@
 .ol-wording-context > div { min-width: 0; }
 .ol-wording-context-text { margin: 6px 0 10px; padding: 10px; max-height: clamp(90px, 18vh, 170px); overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--ol-surface-2); border-radius: 8px; font-size: 12px; line-height: 1.65; user-select: text; }
 .ol-wording-choices { max-height: min(32vh, 300px); overflow-y: auto; overscroll-behavior: contain; padding-right: 6px; }
+.ol-wording-candidate { margin: 6px 0; padding: 10px; max-height: 180px; overflow-y: auto; white-space: pre-wrap; background: var(--ol-surface-2); border-radius: 8px; user-select: text; }
 @media (max-width: 600px) {
   .ol-wording-context { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .ol-wording-context-text { max-height: 14vh; }

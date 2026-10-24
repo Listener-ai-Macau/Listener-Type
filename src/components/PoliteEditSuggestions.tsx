@@ -87,7 +87,9 @@ export function PoliteEditSuggestions({ text, originalText, disabled, onApply, c
     {localOptions.length === 0 && !currentApplied && <p className="ol-style-trial-hint">{t(localOnly ? 'politeEdits.localOnlyNone' : 'politeEdits.localNone')}</p>}
     {localOptions.map(edit => <div key={edit.old + '\0' + edit.new} style={{ margin: '10px 0', lineHeight: 1.6, overflowWrap: 'anywhere' }}>
       <strong>{t(`politeEdits.${edit.tone}`)}</strong>
-      <p style={{ margin: '4px 0' }}><del>{edit.old}</del>{' → '}<ins>{edit.new}</ins></p>
+      <p className="ol-wording-candidate ol-thinscroll" data-wording-preview>
+        {text.slice(0, text.indexOf(edit.old))}<ins>{edit.new}</ins>{text.slice(text.indexOf(edit.old) + edit.old.length)}
+      </p>
       <Btn size="sm" disabled={disabled || pending} onClick={() => {
         try {
           const updated = applyLocalPoliteOption(text, edit);
