@@ -41,10 +41,10 @@ def translate(request):
         # paragraph. Segment on sentence boundaries, then bound token chunks.
         if not value.strip():
             return value
-        # Keep short paragraph context: translating “Save the draft only.”
-        # alone is less reliable than its preceding no-send instruction.
-        encoded = tokenizer.encode(value, out_type=str)
-        sentences = [value] if len(encoded) <= 96 else re.split(r'(?<=[。！？])|(?<=[.!?])(?=\s)', value)
+        # These are sentence translation models, not paragraph/chat models.
+        # Even a short two-sentence source can collapse to its last sentence.
+        # Keep every sentence as a separate unit regardless of token count.
+        sentences = re.split(r'(?<=[。！？])|(?<=[!?])|(?<=[.])(?=\s)', value)
         chunks = []
         for sentence in sentences:
             tokens = tokenizer.encode(sentence, out_type=str)
@@ -60,7 +60,7 @@ def translate(request):
                 chunks.append(tokens)
         output = []
         for chunk in chunks:
-            item = engine.translate_batch([chunk], beam_size=2, max_input_length=0,
+            item = engine.translate_batch([chunk], beam_size=5, max_input_length=0,
                                           max_decoding_length=1024, return_scores=False)[0].hypotheses[0]
             if len(item) >= 1024:
                 raise ValueError('local_translation_output_limit')
