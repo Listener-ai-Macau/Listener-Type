@@ -5,9 +5,9 @@ import { detectOS } from './WindowChrome';
 import { Btn } from '../pages/_atoms';
 import './DeviceLayoutsDialog.css';
 
-export function SavedTextDraftsDialog({onClose}:{onClose:()=>void}) {
+export function SavedTextDraftsDialog({onClose,initialDraftId}:{onClose:()=>void;initialDraftId?:string}) {
   const {t,i18n}=useTranslation();const dialog=useRef<HTMLDialogElement>(null),alive=useRef(true),running=useRef(false);
-  const [items,setItems]=useState<SavedTextDraft[]>([]),[selectedId,setSelected]=useState('');
+  const [items,setItems]=useState<SavedTextDraft[]>([]),[selectedId,setSelected]=useState(initialDraftId??'');
   const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[loadError,setLoadError]=useState(false),[error,setError]=useState(''),[copied,setCopied]=useState(''),[confirm,setConfirm]=useState(false);
   const selected=items.find(d=>d.id===selectedId);
   const draftLabel=(draft:SavedTextDraft)=>{

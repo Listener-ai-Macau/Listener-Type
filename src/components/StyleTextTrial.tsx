@@ -313,6 +313,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         {offline && <LocalTranslationSetup source={translationSource} target={translationTarget}
           onSourceChange={setTranslationSource} disabled={pending || copying || delivering || draftSaving}
           onReadiness={setOfflineReadiness} onBusy={setTranslationPreparing} showNotice={false} />}
+        <p className="ol-style-trial-hint" data-translation-trial-scope>{t('offlineTranslation.trialOnly')}</p>
       </>}
       {packs && onSelectPack && <label className="ol-style-trial-picker">
         <span>{t('style.trial.styleLabel')}</span>
@@ -353,7 +354,9 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         {!offline && readiness?.available && <Btn variant="ghost" disabled={draftSaving} onClick={() => setProvidersOpen(true)}>{t('style.trial.providers')}</Btn>}
         {readiness?.available === false && <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1" target="_blank" rel="noreferrer noopener" style={{ color: 'var(--ol-blue)', fontSize: 13 }}>{t('style.trial.download')}</a>}
       </div>
-      {pending && <p role="status" className="ol-style-trial-hint">{t('style.trial.pending')}</p>}
+      {pending && <p role="status" className="ol-style-trial-hint" data-style-trial-pending>
+        {t(offline ? 'offlineTranslation.pending' : !shortening && readiness?.requiresTextService === false ? 'textWorkspace.pendingLocal' : 'style.trial.pending')}
+      </p>}
       {error && <p role="alert" style={{ color: 'var(--ol-err)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.6 }}>{error}</p>}
       </div>
       <div className="ol-style-trial-outputs">

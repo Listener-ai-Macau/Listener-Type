@@ -1,4 +1,5 @@
 const en = {
+  pending: "Translating on this computer. This task does not request cloud translation or incur translation API fees.", trialOnly: "These choices apply only to this text trial. They do not change your voice translation settings.",
   title: 'Translate to {{language}}', engine: 'Translation method', local: 'On this computer · no translation API fee', cloud: 'Existing cloud service · provider charges apply',
   source: 'Original language', chooseSource: 'Choose the language you will write or speak',
   localNotice: 'Text is translated on this computer. Voice recognition still uses your selected speech service and its fees. Download only the language components you need.',
@@ -21,6 +22,7 @@ const en = {
 };
 type Copy = { [K in keyof typeof en]: string };
 const zhCN: Copy = {
+  pending: "正在本机翻译。本次任务不请求云端翻译，不产生翻译 API 费用。", trialOnly: "本次文字试用的选择不会改变录音翻译设置。",
   title:'翻译成{{language}}',engine:'翻译方式',local:'本机翻译 · 无翻译 API 费用',cloud:'现有云端服务 · 按服务商计费',source:'原文／说话语言',chooseSource:'请选择将要输入或说出的语言',
   localNotice:'文字在本机翻译。语音识别仍使用你选择的语音服务，并按原服务计费。只需下载用到的语言组件。',
   platform:'离线翻译当前支持 64 位 Windows，尚未下载任何文件。',
@@ -34,6 +36,7 @@ const zhCN: Copy = {
   result:'本机翻译 · {{seconds}} 秒',run:'翻译',voiceHint:'这些选择也用于你明确启动的语音翻译。普通录音仍保留原语言。',
 };
 const zhTW: Copy = {
+  pending: "正在本機翻譯。本次任務不請求雲端翻譯，不產生翻譯 API 費用。", trialOnly: "本次文字試用的選擇不會變更錄音翻譯設定。",
   title:'翻譯成{{language}}',engine:'翻譯方式',local:'本機翻譯 · 無翻譯 API 費用',cloud:'現有雲端服務 · 按服務商計費',source:'原文／說話語言',chooseSource:'請選擇將要輸入或說出的語言',
   localNotice:'文字在本機翻譯。語音辨識仍使用你選擇的語音服務，並按原服務計費。只需下載用到的語言元件。',platform:'離線翻譯目前支援 64 位元 Windows，尚未下載任何檔案。',
   unsupported:'目前離線包支援中英互譯，請選擇不同的中英文來源和目標。其它語言只有在你主動選擇雲端服務後才會使用雲端。',
@@ -44,6 +47,7 @@ const zhTW: Copy = {
   result:'本機翻譯 · {{seconds}} 秒',run:'翻譯',voiceHint:'這些選擇也用於你明確啟動的語音翻譯。普通錄音仍保留原語言。',
 };
 const ja: Copy = {
+  pending: "このPCで翻訳中です。この処理はクラウド翻訳を依頼せず、翻訳API料金もかかりません。", trialOnly: "ここでの選択は文章の試用のみです。音声翻訳の設定は変わりません。",
   title:'{{language}}に翻訳',engine:'翻訳方法',local:'このPCで翻訳 · 翻訳API料金なし',cloud:'既存のクラウドサービス · 利用料金がかかります',source:'原文／話す言語',chooseSource:'入力または話す言語を選択',
   localNotice:'文章はこのPCで翻訳します。音声認識には選択した音声サービスとその料金が引き続き適用されます。必要な言語の構成要素だけをダウンロードします。',platform:'オフライン翻訳は現在64ビットWindowsに対応しています。ファイルは未ダウンロードです。',
   unsupported:'現在のオフラインパッケージは中国語と英語の相互翻訳です。異なる入力・出力言語を選んでください。他の言語でクラウドを使うには明示的な選択が必要です。',
@@ -53,6 +57,7 @@ const ja: Copy = {
   invalidText:'4,000文字以内で入力してください。翻訳も送信もしていません。',failed:'ローカル翻訳を完了できませんでした。原文は残っています。構成要素を確認／修復して再試行できます。',statusFailed:'構成要素の状態を読めませんでした。ダウンロードも翻訳もしていません。',result:'ローカル翻訳 · {{seconds}}秒',run:'翻訳',voiceHint:'明示的に音声翻訳を開始した場合にも、この設定を使います。通常の録音は元の言語を保ちます。',
 };
 const ko: Copy = {
+  pending: "이 컴퓨터에서 번역 중입니다. 이 작업은 클라우드 번역을 요청하지 않으며 번역 API 요금이 없습니다.", trialOnly: "이 선택은 이번 텍스트 시험에만 적용되며 음성 번역 설정을 바꾸지 않습니다.",
   title:'{{language}}로 번역',engine:'번역 방식',local:'이 컴퓨터에서 번역 · 번역 API 요금 없음',cloud:'기존 클라우드 서비스 · 제공자 요금 적용',source:'원문 / 말하는 언어',chooseSource:'입력하거나 말할 언어 선택',
   localNotice:'텍스트는 이 컴퓨터에서 번역합니다. 음성 인식에는 선택한 음성 서비스와 해당 요금이 계속 적용됩니다. 필요한 언어 구성 요소만 다운로드하세요.',platform:'오프라인 번역은 현재 64비트 Windows를 지원합니다. 아직 다운로드하지 않았습니다.',
   unsupported:'현재 오프라인 패키지는 중국어 ↔ 영어 번역을 지원합니다. 서로 다른 원문과 목표 언어를 선택하세요. 다른 언어의 클라우드 사용은 직접 선택해야 합니다.',

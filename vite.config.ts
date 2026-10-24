@@ -6,16 +6,23 @@ const host = process.env.TAURI_DEV_HOST;
 const sourceRevision = (() => {
   try {
     const revision = execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { encoding: 'utf8' }).trim();
-    const modified = execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], { encoding: 'utf8' }).trim();
+    // The local engineering instructions are not a bundled product input.
+    // Keep every other tracked/untracked product change visible in the label.
+    const modified = execFileSync('git', ['status', '--porcelain', '--untracked-files=normal', '--', '.', ':(exclude)AGENTS.md'], { encoding: 'utf8' }).trim();
     return `${revision}${modified ? '+modified' : ''}`;
   } catch {
     return 'unavailable';
   }
 })();
+const releaseBuild = process.env.VITE_APP_BUILD_NUMBER ?? '';
+if (releaseBuild && !/^[1-9]\d*$/.test(releaseBuild)) throw new Error('Invalid release build number');
 
 export default defineConfig(async () => ({
   plugins: [react()],
-  define: { 'import.meta.env.VITE_APP_SOURCE_REVISION': JSON.stringify(sourceRevision) },
+  define: {
+    'import.meta.env.VITE_APP_SOURCE_REVISION': JSON.stringify(sourceRevision),
+    'import.meta.env.VITE_APP_BUILD_NUMBER': JSON.stringify(releaseBuild),
+  },
   base: "./",
   clearScreen: false,
   server: {

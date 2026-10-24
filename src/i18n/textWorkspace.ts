@@ -1,4 +1,5 @@
 const en = {
+    pendingLocal: "Processing text on this computer. This task makes no cloud text-service request.",
   cloudNotice: 'Submitting sends text to your configured service; service charges may apply.',
   localNotice: 'Text only. This style makes no service request.',
   localWithShorterNotice: 'This style stays local. Make shorter sends text to your service and may incur charges.',
@@ -16,6 +17,7 @@ const en = {
 export const textWorkspaceTranslations = {
   en,
   'zh-CN': {
+    pendingLocal: "正在本机处理文字，本次任务不请求云端文本服务。",
     cloudNotice: '提交后，文字会发送至你配置的文本服务，可能产生服务费用。',
     localNotice: '仅处理文字；此风格不请求文本服务。',
     localWithShorterNotice: '此风格在本机处理；「缩短这段文字」会发送至文本服务，可能产生费用。',
@@ -26,6 +28,7 @@ export const textWorkspaceTranslations = {
     draftsIntro: '成稿保存在本机，与录音分别存放。', draftsDetails: '成稿保存说明',
   },
   'zh-TW': {
+    pendingLocal: "正在本機處理文字，本次任務不請求雲端文字服務。",
     cloudNotice: '提交後，文字會傳送至你設定的文字服務，可能產生服務費用。',
     localNotice: '僅處理文字；此風格不請求文字服務。',
     localWithShorterNotice: '此風格在本機處理；「縮短這段文字」會傳送至文字服務，可能產生費用。',
@@ -36,6 +39,7 @@ export const textWorkspaceTranslations = {
     draftsIntro: '成稿儲存在本機，與錄音分開存放。', draftsDetails: '成稿儲存說明',
   },
   ja: {
+    pendingLocal: "このPCで文章を処理中です。この処理はクラウドのテキストサービスを利用しません。",
     cloudNotice: '送信すると設定したテキストサービスに文章を送ります。利用料が発生する場合があります。',
     localNotice: '文章のみの処理です。このスタイルはサービスに送信しません。',
     localWithShorterNotice: 'このスタイルは端末で処理します。「短くする」はサービスへ文章を送り、料金が発生する場合があります。',
@@ -46,6 +50,7 @@ export const textWorkspaceTranslations = {
     draftsIntro: 'このPCに保存した文章です。録音とは別に保管されます。', draftsDetails: '下書きの保存について',
   },
   ko: {
+    pendingLocal: "이 컴퓨터에서 텍스트를 처리 중입니다. 이 작업은 클라우드 텍스트 서비스를 요청하지 않습니다.",
     cloudNotice: '제출하면 설정한 텍스트 서비스로 글을 보냅니다. 서비스 요금이 발생할 수 있습니다.',
     localNotice: '텍스트만 처리합니다. 이 스타일은 서비스 요청을 보내지 않습니다.',
     localWithShorterNotice: '이 스타일은 기기에서 처리합니다. 더 짧게는 서비스로 글을 보내며 요금이 발생할 수 있습니다.',

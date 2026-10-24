@@ -4,7 +4,7 @@ No native inference, download, cloud, hardware or owner desktop is exercised.
 import argparse,datetime,json,re
 from pathlib import Path
 from playwright.sync_api import sync_playwright,expect
-p=argparse.ArgumentParser(description=__doc__);p.add_argument('--url',required=True);p.add_argument('--report',type=Path,required=True);p.add_argument('--screenshot',type=Path);a=p.parse_args();checks=[]
+p=argparse.ArgumentParser(description=__doc__);p.add_argument('--url',required=True);p.add_argument('--report',type=Path,required=True);p.add_argument('--screenshot',type=Path);p.add_argument('--expected-build');a=p.parse_args();checks=[]
 with sync_playwright() as pw:
  browser=pw.chromium.launch(headless=True,channel='msedge')
  try:
@@ -18,6 +18,7 @@ with sync_playwright() as pw:
    window.__offlineFixture=(cmd,args,mock)=>{
     window.__offlineCalls.push({cmd,args});
     if(cmd==='get_local_translation_status')return structuredClone(window.__offlineStatus);
+    if(cmd==='list_saved_text_drafts')return [{id:'older-fixture',createdAt:'2020-01-01T00:00:00Z',name:'Earlier draft',original:'Earlier source',text:'An older saved draft'},...mock()];
     if(cmd==='get_style_text_trial_readiness')return {available:true,requiresTextService:args.stylePackId!=='builtin.raw',textServiceConfigured:true};
     if(cmd==='prepare_local_translation'){
       window.__offlineStatus.preparing=true;
@@ -39,6 +40,9 @@ with sync_playwright() as pw:
    route.fulfill(response=response,body=text.replace(old,'if (!isTauri) {\n    return window.__offlineFixture(cmd,args,mock);\n  }',1))
   page.route(re.compile(r'/src/lib/ipc\.ts(?:\?.*)?$'),route_ipc)
   page.goto(a.url,wait_until='networkidle')
+  if a.expected_build:
+   expect(page.locator('[data-app-build]')).to_have_attribute('data-app-build',a.expected_build)
+   expect(page.locator('[data-app-build]')).to_contain_text('build'+a.expected_build)
   # Locale/first-use settings synchronization belongs to app startup, not this
   # workspace. Keep its calls, then measure actual user actions from this point.
   baseline=page.evaluate('window.__offlineCalls.length')
@@ -50,6 +54,7 @@ with sync_playwright() as pw:
   page.get_by_role('combobox',name='Translate output to',exact=True).select_option('English')
   engine=page.get_by_role('combobox',name='Translation method',exact=True)
   expect(engine).to_have_value('local')
+  expect(page.locator('[data-translation-trial-scope]')).to_contain_text('do not change your voice translation settings')
   expect(page.get_by_role('button',name='Translate',exact=True)).to_be_disabled()
   page.get_by_role('combobox',name='Original language',exact=True).select_option('zh')
   expect(page.get_by_role('button',name='Translate',exact=True)).to_be_disabled()
@@ -69,6 +74,8 @@ with sync_playwright() as pw:
   page.evaluate("window.__offlineStatus.preparing=false;window.__offlineStatus.runtimeReady=true;window.__offlineStatus.pairs[0].ready=true;window.__preparePending.resolve(structuredClone(window.__offlineStatus));window.__preparePending=null")
   run=page.get_by_role('button',name='Translate',exact=True);expect(run).to_be_enabled()
   run.click();page.wait_for_function('window.__offlinePending.length===1')
+  expect(page.locator('[data-style-trial-pending]')).to_contain_text('does not request cloud translation')
+  expect(page.locator('[data-style-trial-pending]')).not_to_contain_text('may still be charged')
   assert calls('try_local_translation_text')[0]['args']=={'rawText':source,'sourceLanguage':'zh','targetLanguage':'English'}
   page.evaluate('window.__offlinePending.shift()()')
   output=page.locator('.ol-style-trial-result-editor');expect(output).to_have_value('Do not send the email; save the draft only.')
@@ -83,6 +90,14 @@ with sync_playwright() as pw:
   writes=page.evaluate("(start)=>window.__offlineCalls.slice(start).filter(x=>/^(save_|set_|update_settings|copy_style_trial|insert_style_trial)/.test(x.cmd)).map(x=>({cmd:x.cmd,translationEngine:x.args?.prefs?.translationEngine,translationSource:x.args?.prefs?.translationSourceLanguage,translationTarget:x.args?.prefs?.translationTargetLanguage}))",baseline)
   assert not writes,writes
   checks.append('No automatic saving, copying, insertion, style activation, preferences or device writes')
+  page.get_by_role('button',name='Save draft',exact=True).click()
+  page.get_by_role('button',name='Open this saved draft',exact=True).click()
+  saved=page.get_by_role('dialog',name='Saved drafts',exact=True)
+  expect(saved.get_by_role('textbox',name='Saved text',exact=True)).to_have_value('Do not send the email. Keep the draft for review.')
+  expect(saved.get_by_role('combobox',name='Choose a saved draft',exact=True)).not_to_have_value('older-fixture')
+  saved.get_by_role('button',name='Close',exact=True).click()
+  expect(output).to_have_value('Do not send the email. Keep the draft for review.')
+  checks.append('Explicit save opens the returned draft directly even when the list starts with an older record; closing keeps the edited workspace')
   page.get_by_role('combobox',name='Original language',exact=True).select_option('en')
   expect(run).to_be_disabled();expect(output).to_have_count(0)
   page.get_by_role('combobox',name='Original language',exact=True).select_option('zh')
@@ -96,6 +111,7 @@ with sync_playwright() as pw:
   expect(engine).to_have_value('local');assert calls('try_translation_text')==[]
   checks.append('Unavailable language stays visibly unsupported and never silently changes engine')
   engine.select_option('cloud');expect(run).to_be_enabled();run.click();page.wait_for_function('window.__cloudPending.length===1')
+  expect(page.locator('[data-style-trial-pending]')).to_contain_text('may still be charged')
   assert len(calls('try_translation_text'))==1
   close_trial();open_trial();page.evaluate('window.__cloudPending.shift()()')
   expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)

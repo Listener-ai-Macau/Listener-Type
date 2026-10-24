@@ -3,7 +3,7 @@
 
 import { useTranslation } from 'react-i18next';
 import { isDialogStatus, UpdateDialog, useAutoUpdate } from '../../components/AutoUpdate';
-import { APP_SOURCE_REVISION, APP_VERSION_LABEL } from '../../lib/appVersion';
+import { APP_SOURCE_REVISION, APP_VERSION_LABEL, APP_DISPLAY_VERSION_LABEL } from '../../lib/appVersion';
 import { Btn } from '../_atoms';
 import { openExternal } from '../../lib/ipc';
 
@@ -15,7 +15,7 @@ export function AboutUpdateControl({ tagline }: { tagline: string }) {
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
-        <span style={{ fontSize: 12, color: 'var(--ol-ink-3)' }}>{tagline} · {APP_VERSION_LABEL}</span>
+        <span style={{ fontSize: 12, color: 'var(--ol-ink-3)' }}>{tagline} · {APP_DISPLAY_VERSION_LABEL}</span>
         <Btn variant="ghost" size="sm" onClick={previewRelease ? openDownloads : u.checkForUpdates} disabled={u.checking || u.busy}>
           {previewRelease ? t('settings.about.openDownloads') : u.checking ? t('settings.about.checkingUpdate') : t('settings.about.checkUpdateBtn')}
         </Btn>

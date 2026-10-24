@@ -2,6 +2,8 @@ param(
   [string]$ArtifactsRoot = "",
   [ValidateRange(0, 64)]
   [int]$CargoBuildJobs = 0,
+  [ValidateRange(0, 2147483647)]
+  [int]$ReleaseBuildNumber = 0,
   [switch]$SkipRustInstall,
   [switch]$SkipNpmCi,
   [switch]$IncludePortable,
@@ -844,7 +846,21 @@ function Update-DesktopShortcut {
 }
 
 Push-Location $appRoot
+$previousReleaseBuild = $env:VITE_APP_BUILD_NUMBER
 try {
+  if ((Split-Path -Leaf $ArtifactsRoot) -match '-build([1-9][0-9]*)$') {
+    $artifactBuild = [int]$Matches[1]
+    if ($ReleaseBuildNumber -ne 0 -and $ReleaseBuildNumber -ne $artifactBuild) {
+      throw "Release build number does not match artifact directory."
+    }
+    $ReleaseBuildNumber = $artifactBuild
+  }
+  if ($ReleaseBuildNumber -gt 0) {
+    $env:VITE_APP_BUILD_NUMBER = [string]$ReleaseBuildNumber
+    Write-Host "[info] User-facing release identity: build$ReleaseBuildNumber"
+  } else {
+    Remove-Item Env:VITE_APP_BUILD_NUMBER -ErrorAction SilentlyContinue
+  }
   Write-Host "[info] App root: $appRoot"
   if ($ExportOnly.IsPresent) {
     Copy-WindowsArtifacts
@@ -894,5 +910,10 @@ try {
   Update-DesktopShortcut
   Start-InstalledListenerType
 } finally {
+  if ($null -eq $previousReleaseBuild) {
+    Remove-Item Env:VITE_APP_BUILD_NUMBER -ErrorAction SilentlyContinue
+  } else {
+    $env:VITE_APP_BUILD_NUMBER = $previousReleaseBuild
+  }
   Pop-Location
 }
