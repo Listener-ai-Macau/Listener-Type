@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T23:58:34.603543+08:00",
+  "updated_at": "2026-10-25T00:32:12.792005+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7824,6 +7824,62 @@
         "No new model, cloud service, provider/key/default, firmware or BLE protocol change. Matching native receipt proves package launch/source only."
       ],
       "commit_subject": "Keep credentials and provider payloads out of diagnostic archives"
+    },
+    {
+      "id": "current176_type_firmware37_native_ota_notify_restore",
+      "subject": "Paired current176/Firmware37 actual native OTA and notify recovery baseline",
+      "repo": "type",
+      "commit": "1da31df3c201e6a321dc95877daece4ee4e82c83",
+      "state": "actual_one_board_native_ota_and_post_reboot_runtime_audio_restore_verified_OS_UI_and_fullRF_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Pinned current public software/firmware source and bytes; no experimental image, manifest or protocol relaxation.",
+        "Actual hardware/power admission, same-image transfer and existing owner restoration without restart or preference push."
+      ],
+      "guards": [
+        "python C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/qualify154_preload.py --build 176 --same-image-ota"
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build176\\same-image-ota-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build176\\same-image-ota-identity-review.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener176-ota-20261025-002720\\qualification.json"
+      ],
+      "machine_accepted_scope": [
+        "One actual installed Type176 native same-image public Firmware37 OTA on UID98c377b4e88c: hardware/power preflight,1735856 bytes, version confirmation, UART reboot/runtime9d7fbbe67ed0223d and notify/audio restoration; original Type processes and four stores unchanged. Receiver/HCI/UART captured, but RF was radio-check only and not full encrypted throughput. No actual file-picker/UI workflow, live recording/QA collision or multi-board qualification."
+      ],
+      "pending_human_scope": [
+        "Actual OS file selection to firmware UI completion is still unverified.",
+        "No real recording/QA collision injection, whole encrypted RF, speed gain, alternate boards or long-term qualification."
+      ],
+      "commit_subject": "Keep credentials and provider payloads out of diagnostic archives"
+    },
+    {
+      "id": "current176_firmware_firmware37_native_ota_notify_restore",
+      "subject": "Paired current176/Firmware37 actual native OTA and notify recovery baseline",
+      "repo": "firmware",
+      "commit": "87ea79ec3d6e34a95d09b73e2a5848207a919f1c",
+      "state": "actual_one_board_native_ota_and_post_reboot_runtime_audio_restore_verified_OS_UI_and_fullRF_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Pinned current public software/firmware source and bytes; no experimental image, manifest or protocol relaxation.",
+        "Actual hardware/power admission, same-image transfer and existing owner restoration without restart or preference push."
+      ],
+      "guards": [
+        "python C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/qualify154_preload.py --build 176 --same-image-ota"
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build176\\same-image-ota-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build176\\same-image-ota-identity-review.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener176-ota-20261025-002720\\qualification.json"
+      ],
+      "machine_accepted_scope": [
+        "One actual installed Type176 native same-image public Firmware37 OTA on UID98c377b4e88c: hardware/power preflight,1735856 bytes, version confirmation, UART reboot/runtime9d7fbbe67ed0223d and notify/audio restoration; original Type processes and four stores unchanged. Receiver/HCI/UART captured, but RF was radio-check only and not full encrypted throughput. No actual file-picker/UI workflow, live recording/QA collision or multi-board qualification."
+      ],
+      "pending_human_scope": [
+        "Actual OS file selection to firmware UI completion is still unverified.",
+        "No real recording/QA collision injection, whole encrypted RF, speed gain, alternate boards or long-term qualification."
+      ],
+      "commit_subject": "Add USB request-tagged key replies and prevent staging restart after chunks"
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -9148,6 +9204,31 @@
           "src-tauri/src/commands_tests.rs"
         ]
       }
+    },
+    {
+      "id": "ble-firmware-ota-current",
+      "accepted_scope": "One actual installed Type176 native same-image public Firmware37 OTA on UID98c377b4e88c: hardware/power preflight,1735856 bytes, version confirmation, UART reboot/runtime9d7fbbe67ed0223d and notify/audio restoration; original Type processes and four stores unchanged. Receiver/HCI/UART captured, but RF was radio-check only and not full encrypted throughput. No actual file-picker/UI workflow, live recording/QA collision or multi-board qualification.",
+      "baseline_state": "actual_paired176_37_native_OTA_one_board",
+      "guard_entries": [
+        "current176_type_firmware37_native_ota_notify_restore",
+        "current176_firmware_firmware37_native_ota_notify_restore"
+      ],
+      "paths": {
+        "type": [
+          "src-tauri/src/commands/device/firmware.rs",
+          "src-tauri/src/coordinator.rs",
+          "src-tauri/src/coordinator"
+        ],
+        "firmware": [
+          "main",
+          "components",
+          "protocols"
+        ]
+      },
+      "known_failures": [
+        "Legacy speed controller pins FW22/31/33 and old host binaries; never use it for current Firmware37 or relax its guards.",
+        "Radio-check receiver collection is not complete encrypted RF or an air-throughput measurement."
+      ]
     }
   ]
 }
