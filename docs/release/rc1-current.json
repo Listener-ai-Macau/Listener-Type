@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-24T14:11:36.186790+08:00",
+  "updatedAt": "2026-10-24T14:43:07.985875+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 166,
-    "source": "bb492bb78f75dedd2b5bca807e57d38a9d8e2603",
-    "sourceTag": "build-source/type166-20261024",
+    "build": 167,
+    "source": "739ee3af38600b3e5ec93b64baf672ead0ef4432",
+    "sourceTag": "build-source/type167-20261024",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "7abc0624ffe733322be899fc6d0d49e592f25b178487d4963a14d3f4668f4a2f",
-    "sizeBytes": 299360256,
-    "exeSha256": "930d14a963fced66807db1ee5ff16efb94908f3c056346962160bb5f38d1efa5",
+    "sha256": "e72a664ce7bbf89e4bf6ad7ac226d415183f2aafc6875f0264a6080b45bf014e",
+    "sizeBytes": 299364352,
+    "exeSha256": "53c60fc95efe81e76774e6dc4c92e8dc3b073951498f9edc186fc0ad6de89672",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -424,7 +424,14 @@
     "type166LocalOnlyOptionalWordingAndSavedRevisionNativeVerified": true,
     "type166ConfiguredCloudIsolationControlledVerified": true,
     "type166CustomerReviewed": false,
-    "type166PurchaseQualification": false
+    "type166PurchaseQualification": false,
+    "type167NamedAppliedChoiceAndWorkspaceUndoNativeVerified": true,
+    "type167SavedOriginalRevisionRemainAfterUndoNativeVerified": true,
+    "type167ManualEditInvalidationNativeVerified": true,
+    "type167EqualTextNewResultFenceControlledVerified": true,
+    "type167CloudUndoAfterFailureControlledVerified": true,
+    "type167CustomerReviewed": false,
+    "type167PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -442,6 +449,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build166-20261024"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build167-20261024"
   }
 }

@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build166 / Firmware37
+# Listener v1.0.6-rc1 · Type build167 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -7,10 +7,10 @@
 
 ## In this app update
 
-- The text entry now explains local Chinese ↔ English translation on Windows, its one-time component download and absence of a translation API key or per-translation fee.
-- English results from local translation now offer optional Wording options generated on this computer. Compare a courteous or softer request and explicitly choose it. This changes only a request prefix; the subject, body, dates and other text stay unchanged. Cloud suggestion controls are not available in this local review.
-- The automatic translation remains intact until you choose or manually edit it. You can save the original and revised result, then open the exact saved draft. This is a limited English wording aid, not a full grammar or translation-quality repair; review the complete translation before using it.
-- Translation models, providers, normal recording, Bluetooth and Firmware37 are unchanged. Existing cloud wording controls remain available only in their separate non-offline context with the stated service charges.
+- After choosing wording, the review panel names the adopted tone instead of saying that no matching local option remains.
+- Undo wording change restores the text from just before that choice. It changes the current workspace only: original text and previously saved drafts remain unchanged. Review the result before copying or saving.
+- A manual edit retires the old undo action. A new translation result cannot inherit an older result's undo receipt, even when its wording is identical. Existing local-only review remains free of cloud suggestion requests; cloud alternatives retain their separate explicit action and fee notice.
+- Translation models, local language coverage, providers, normal recording, Bluetooth and Firmware37 are unchanged. This is a one-step wording undo, not a general edit history or a full translation-quality repair.
 
 ## Before using
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T14:32:27.851152+08:00",
+  "updated_at": "2026-10-24T14:58:21.387075+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7419,7 +7419,7 @@
       "repo": "type",
       "commit": "22090f34abb5e6b6d269febdb48ebee2982ebbb3",
       "commit_subject": "Name applied wording and allow result-owned undo without changing saved drafts",
-      "state": "source_actual_react_before_after_passed_matching_native_pending",
+      "state": "Type167_matching_package_installed_native_scoped_proof_and_public_asset_verified",
       "humanAccepted": false,
       "protects": [
         "Named local tone replaces misleading no-options state after adoption.",
@@ -7435,13 +7435,24 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wording-undo167-before.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wording-undo167-after.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wording-undo167-cloud-compatibility.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wording-undo167-before-browser-label-fix.log"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wording-undo167-before-browser-label-fix.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build167\\source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native167-snapshot-20261024-144103\\local-wording167-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build167\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build167\\type167-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build167\\post-update-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native167-snapshot-20261024-144103\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener167-update-20261024-144141\\qualification.json"
       ],
       "machine_accepted_scope": [
-        "Actual React local/customer-softer receipt, undo to saved prior wording, new equal-text result and manual-edit fences; original cloud paths plus undo after failure. Browser persistence label was a controller correction, not a product bug."
+        "Actual React local/customer-softer receipt, undo to saved prior wording, new equal-text result and manual-edit fences; original cloud paths plus undo after failure. Browser persistence label was a controller correction, not a product bug.",
+        "Named adopted wording receipt and explicit one-step workspace Undo. Original text and saved revisions stay unchanged; returning to acknowledged saved text recovers saved state. Manual edits invalidate receipt; new result generation/remount fences equal-text stale undo. Existing local-only/cloud paths retained without new service/storage calls.",
+        "Named adopted wording receipt and explicit one-step workspace Undo. Original text and saved revisions stay unchanged; returning to acknowledged saved text recovers saved state. Manual edits invalidate receipt; new result generation/remount fences equal-text stale undo. Existing local-only/cloud paths retained without new service/storage calls. Exact native167 actual customer166 quote translation, named softer choice, exact saved original/revision, Undo to machine workspace without changing stored revision and manual-edit invalidation. New equal-text result ownership and cloud failure remain controlled React; no physical/purchase proof."
       ],
       "pending_human_scope": [
-        "Matching native package and independent use pending; no model or physical/hardware-buying claim."
+        "One-step undo of chosen wording only; not arbitrary edit history or saved-record deletion.",
+        "Controlled React until matching native evidence; no physical key/speech/editor or buying qualification.",
+        "Model literal phrasing and language limits retained; no new model or cloud service."
       ]
     }
   ],
