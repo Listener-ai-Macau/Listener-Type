@@ -36,8 +36,9 @@ export function SaveTextDraft({ name, original, text, disabled, onBusy, onSaved,
       {t(saving?'textDraft.saving':saved===signature?'textDraft.saved':'textDraft.save')}
     </Btn>
     {saved===signature&&<span role="status" className="ol-style-trial-hint"> {t(isTauri?compact?'textWorkspace.savedWhere':'textDraft.savedWhere':'textDraft.browserSaved')}</span>}
-    {saved===signature&&<Btn size="sm" variant="ghost" disabled={saving} data-open-just-saved-draft
+    {saved===signature&&<Btn size="sm" variant="ghost" disabled={saving}
       onClick={()=>setDraftsOpen(true)}>{t('textDraft.openSaved')}</Btn>}
     {error&&<p role="alert" className="ol-style-trial-hint">{error}</p>}
-  </div>{draftsOpen&&<SavedTextDraftsDialog initialDraftId={savedId} onClose={()=>setDraftsOpen(false)} />}</>;
+  </div>{draftsOpen&&<SavedTextDraftsDialog initialDraftId={savedId} onClose={()=>setDraftsOpen(false)}
+    onDeleted={id=>{if(id===savedId){setSaved('');setSavedId('');}}} />}</>;
 }

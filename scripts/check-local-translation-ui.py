@@ -18,7 +18,7 @@ with sync_playwright() as pw:
    window.__offlineFixture=(cmd,args,mock)=>{
     window.__offlineCalls.push({cmd,args});
     if(cmd==='get_local_translation_status')return structuredClone(window.__offlineStatus);
-    if(cmd==='list_saved_text_drafts')return [{id:'older-fixture',createdAt:'2020-01-01T00:00:00Z',name:'Earlier draft',original:'Earlier source',text:'An older saved draft'},...mock()];
+    if(cmd==='list_saved_text_drafts')return [{id:'older-fixture',createdAt:'2020-01-01T00:00:00Z',name:'Earlier draft',original:'Earlier source',text:'An older saved draft'},...(window.__missingSaved?[]:mock())];
     if(cmd==='get_style_text_trial_readiness')return {available:true,requiresTextService:args.stylePackId!=='builtin.raw',textServiceConfigured:true};
     if(cmd==='prepare_local_translation'){
       window.__offlineStatus.preparing=true;
@@ -97,7 +97,26 @@ with sync_playwright() as pw:
   expect(saved.get_by_role('combobox',name='Choose a saved draft',exact=True)).not_to_have_value('older-fixture')
   saved.get_by_role('button',name='Close',exact=True).click()
   expect(output).to_have_value('Do not send the email. Keep the draft for review.')
+  page.evaluate('window.__missingSaved=true')
+  page.get_by_role('button',name='Open this saved draft',exact=True).click()
+  saved=page.get_by_role('dialog',name='Saved drafts',exact=True)
+  expect(saved.get_by_role('status')).to_contain_text('could not be found')
+  expect(saved.get_by_role('textbox',name='Saved text',exact=True)).to_have_count(0)
+  expect(saved.get_by_role('combobox',name='Choose a saved draft',exact=True)).to_have_value('')
+  saved.get_by_role('combobox',name='Choose a saved draft',exact=True).select_option('older-fixture')
+  expect(saved.get_by_role('textbox',name='Saved text',exact=True)).to_have_value('An older saved draft')
+  saved.get_by_role('button',name='Close',exact=True).click();page.evaluate('window.__missingSaved=false')
+  page.get_by_role('button',name='Open this saved draft',exact=True).click()
+  saved=page.get_by_role('dialog',name='Saved drafts',exact=True)
+  expect(saved.get_by_role('textbox',name='Saved text',exact=True)).to_have_value('Do not send the email. Keep the draft for review.')
+  saved.get_by_role('button',name='Delete draft',exact=True).click()
+  saved.get_by_role('alert').get_by_role('button',name='Delete draft',exact=True).click()
+  saved.get_by_role('button',name='Close',exact=True).click()
+  expect(page.get_by_role('button',name='Open this saved draft',exact=True)).to_have_count(0)
+  expect(page.get_by_role('button',name='Save draft',exact=True)).to_be_enabled()
+  expect(output).to_have_value('Do not send the email. Keep the draft for review.')
   checks.append('Explicit save opens the returned draft directly even when the list starts with an older record; closing keeps the edited workspace')
+  checks.append('Missing requested draft never silently selects another; explicit deletion clears workspace saved state while retaining text')
   page.get_by_role('combobox',name='Original language',exact=True).select_option('en')
   expect(run).to_be_disabled();expect(output).to_have_count(0)
   page.get_by_role('combobox',name='Original language',exact=True).select_option('zh')
