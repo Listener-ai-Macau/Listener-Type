@@ -156,8 +156,20 @@ def trace(args):
     if route is None:
         raise RuntimeError('Unknown feature; run trace without --feature to list existing routes')
     guards = {entry['id']: entry for entry in manifest['entries']}
+    anchors = [guards[key] for key in route.get('guard_entries', [])]
+    # Routes retain their registration-time description. Delivery updates the
+    # referenced guards, so that historical description is not current status.
+    states = list(dict.fromkeys(entry['state'] for entry in anchors))
+    baseline_state = (states[0] if len(states) == 1 else
+                      'multiple_scoped_baselines_see_current_anchors' if states else
+                      route.get('baseline_state'))
     print(json.dumps({'feature': route['id'], 'acceptedScope': route.get('accepted_scope'),
-                      'baselineState': route.get('baseline_state'),
+                      'baselineState': baseline_state,
+                      'registeredBaselineState': route.get('baseline_state'),
+                      'currentAnchors': [
+                          {key: entry.get(key) for key in ('id', 'repo', 'commit', 'state', 'humanAccepted')}
+                          for entry in anchors
+                      ],
                       'knownFailures': route.get('known_failures', [])}, ensure_ascii=False, indent=2))
     for repo_id, paths in route['paths'].items():
         repo = (TYPE.parent / manifest['repositories'][repo_id]['path']).resolve()

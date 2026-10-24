@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T23:51:10.923828+08:00",
+  "updated_at": "2026-10-24T23:58:34.603543+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7821,7 +7821,7 @@
         "No real-user secret exposure established; only synthetic source/ZIP counterexamples.",
         "Diagnostic ZIP only: source local logs and explicit raw-log export are not modified, retained debug WAV policy remains explicit in manifest.",
         "No native Save dialog/full firmware diagnostic pull, real-device recovery/global-key/physical/long-term qualification. Existing159/174 inactive desktop failures excluded.",
-        "No new model, cloud service, provider/key/default, firmware or BLE protocol change. Matching native receipt will prove package launch/source only."
+        "No new model, cloud service, provider/key/default, firmware or BLE protocol change. Matching native receipt proves package launch/source only."
       ],
       "commit_subject": "Keep credentials and provider payloads out of diagnostic archives"
     }
