@@ -193,7 +193,7 @@ export function Translation() {
             </span>
           </div>
           <div style={{ fontSize: 12, color: 'var(--ol-ink-3)', lineHeight: 1.6, marginBottom: 10 }}>
-            {t('translation.target.desc')}
+            {t('translation.target.desc', { shortcut: translationHotkeyLabel })}
           </div>
           <SelectLite
             value={prefs.translationTargetLanguage}
@@ -203,6 +203,26 @@ export function Translation() {
             ariaLabel={t('translation.target.title')}
             style={{ width: '100%', maxWidth: 360, fontSize: 13, background: 'var(--ol-white)' }}
           />
+        </Card>
+
+        <Card>
+          <div data-translation-howto>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{t('translation.howto.title')}</div>
+            <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: 'var(--ol-ink-2)', lineHeight: 1.7 }}>
+              <li>{t('translation.howto.step1')}</li>
+              <li>{t('translation.howto.step2', { trigger: triggerLabel })}</li>
+              <li>{t('translation.howto.step3', { shortcut: translationHotkeyLabel })}</li>
+              <li>{t('translation.howto.step4')}</li>
+              <li>{t('translation.howto.step5')}</li>
+            </ol>
+          </div>
+          <div data-translation-device-howto style={{ marginTop: 14, fontSize: 12.5, color: 'var(--ol-ink-2)', lineHeight: 1.7 }}>
+            <div style={{ fontWeight: 600 }}>{t('translation.howto.deviceTitle')}</div>
+            <div>{t('translation.howto.deviceDesc')}</div>
+          </div>
+          <div data-translation-mode-indicator style={{ marginTop: 12, fontSize: 12, color: 'var(--ol-ink-3)', lineHeight: 1.6 }}>
+            {t('translation.howto.indicatorDesc')}
+          </div>
         </Card>
 
         <Card>
@@ -238,17 +258,6 @@ export function Translation() {
           </div>
         </Card>
 
-        {/* 3. 使用方法 */}
-        <Card>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{t('translation.howto.title')}</div>
-          <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: 'var(--ol-ink-2)', lineHeight: 1.7 }}>
-            <li>{t('translation.howto.step1', { trigger: triggerLabel })}</li>
-            <li>{t('translation.howto.step2', { trigger: triggerLabel })}</li>
-            <li>{t('translation.howto.step3', { shortcut: translationHotkeyLabel })}</li>
-            <li>{t('translation.howto.step4')}</li>
-            <li>{t('translation.howto.step5')}</li>
-          </ol>
-        </Card>
       </div>
     </>
   );
