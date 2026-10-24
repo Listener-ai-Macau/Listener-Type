@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-24T15:36:05.145407+08:00",
+  "updatedAt": "2026-10-24T15:58:01.759386+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 168,
-    "source": "be0d78e76eae9a78666fa2a8cbf4ff1bf7146f3c",
-    "sourceTag": "build-source/type168-20261024",
+    "build": 169,
+    "source": "4bceb3a27561c4e079b37bdba0bc26e49b2acb6b",
+    "sourceTag": "build-source/type169-20261024",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "63d38a632005692befef07afbf2e5c9b6021e162ee062ed67ecb681bdecc20f0",
-    "sizeBytes": 299360256,
-    "exeSha256": "08746df6cd921325cb575da607a67866fe2dde7ff20b7d35f7791781db5e20db",
+    "sha256": "ca34d1bf4bff105c26da3ec1eef32ea939bdb7c625b7b7eaec1939ee8b358dec",
+    "sizeBytes": 299364352,
+    "exeSha256": "ffb096a117c50118693e8428a502b678c4b738d5a7395092277f5324bb1c884e",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -438,7 +438,13 @@
     "type168Prior11PreservationCasesPassed": true,
     "type168AvailabilityMeaningStillInaccurate": true,
     "type168CustomerReviewed": false,
-    "type168PurchaseQualification": false
+    "type168PurchaseQualification": false,
+    "type169Original168CompoundEligibilityNativeVerified": true,
+    "type169FullCandidatePreviewsNativeVerified": true,
+    "type169OriginalAndSaveUndoNativeVerified": true,
+    "type169NoExtraModelDownloadOrPaidService": true,
+    "type169CustomerReviewed": false,
+    "type169PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -456,6 +462,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build168-20261024"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build169-20261024"
   }
 }

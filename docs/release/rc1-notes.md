@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build168 / Firmware37
+# Listener v1.0.6-rc1 · Type build169 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -7,9 +7,9 @@
 
 ## In this app update
 
-Type build168 keeps the original and current translation visible while comparing wording. Local model search now retains the meeting and both dayparts in a previously failing rescheduling request, without losing a previously correct quotation closing. This is a bounded improvement: the availability clause in that request is still inaccurate, so review before use. No extra model download or paid service; Firmware37 is unchanged.
+Type build169 keeps simple local wording suggestions within a clearly bounded request. Ambiguous compound imperatives, including a request followed by a separate promise, are left unchanged. Supported options preview the complete proposed message, with only the changed span highlighted. These limited rules do not rewrite complex English or repair translation meaning; keep reviewing drafts. No model download or added service, and Firmware37 is unchanged.
 
-The original text, editable result, named adopted wording and workspace Undo remain available. Manual edits and new results cannot borrow old Undo; saved drafts are not rewritten. Voice recognition still uses the selected speech service and its fees.
+The original/current comparison, explicit adoption, result-owned Undo and saved drafts remain available. Prior build168 bounded event/daypart improvements remain; its availability clause can still be inaccurate. This update does not claim general translation quality.
 
 ## Before using
 
