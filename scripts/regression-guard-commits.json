@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T02:16:30.552795+08:00",
+  "updated_at": "2026-10-24T08:17:37.641498+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -5720,7 +5720,7 @@
     {
       "id": "first_use133_dismissible_overview_preserves_utility_access",
       "subject": "Skip first-use overview persistently, default History and recover guide without changing device/recording settings",
-      "state": "affected_ui_exact_native_installed_verified_not_customer_or_physical_qualified",
+      "state": "historical133_whole_overview_hiding_superseded_by_Owner160_daily_status_requirement",
       "protects": [
         "Only explicitSkip persists an isolated UI flag; reload usesHistory by default and primary Overview stays hidden.",
         "Guide is recoverable from bottom-left Getting started; original explicit app-page IDs still work. No stale active-nav pill when recovered guide has no primary entry.",
@@ -5732,7 +5732,8 @@
         "python scripts/check-first-use-overview-ui.py --url <controlled-ui-url> --report <report.json>"
       ],
       "unverified": [
-        "New133 independent customer/aesthetic approval, physical hardware value, all target editors and automatic-end reliability."
+        "New133 independent customer/aesthetic approval, physical hardware value, all target editors and automatic-end reliability.",
+        "Owner2026-10-24 now requires daily Overview/status permanently present. Historical default-History/hidden-tab behavior is superseded by overview_status_home_survives_first_use_dismissal; original source/evidence remain."
       ],
       "repo": "type",
       "commit": "f0d2180f28122f79e04355d02851cbbb8f3d02de",
@@ -7009,6 +7010,37 @@
         "Original151 useful-software/deferred49 hardware purchase and full-function physical gaps remain; no unchanged customer resampling."
       ],
       "humanAccepted": false
+    },
+    {
+      "id": "overview_status_home_survives_first_use_dismissal",
+      "subject": "Daily Overview services/device status remain reachable independently of first-use guide dismissal",
+      "state": "source_and_five_locale_headless_verified_native160_pending",
+      "protects": [
+        "Persisted legacy ol.overviewHidden.v1 hides onboarding guidance only; it never removes daily Overview navigation or changes its requested startup route.",
+        "Overview, History and Tools stay in the sidebar; service and device-status panels remain after Skip and reload.",
+        "Getting started reopens guidance without clearing the saved dismissal; closing guidance stays on the status home.",
+        "Explicit tool/history destinations, unavailable-storage notice and existing utility entries remain. No recognition, Bluetooth, credential or device defaults change."
+      ],
+      "guards": [
+        "node --experimental-strip-types src/lib/firstUseOverview.test.ts",
+        "npx --no-install tsc --noEmit",
+        "python scripts/check-first-use-overview-ui.py --url <controlled-ui-url> --report <report.json>"
+      ],
+      "unverified": [
+        "Exact160 packaged native guide/state/status check, installation/public identity and Owner visual review pending. Physical translation/keys/lights and hardware buying interest not established by headless mocks."
+      ],
+      "repo": "type",
+      "commit": "2a1610c18818290c5c4969f624c05be2210920a3",
+      "commit_subject": "Verify persistent overview status and separately reopened guide in shipped locales",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\overview160-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\overview160-before.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\overview160-headless.json"
+      ],
+      "machine_accepted_scope": [
+        "Source/helper startup policy and five-locale mock React skip/reload/reopen/status presence; not native device status or purchase qualification."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -7795,7 +7827,8 @@
         "customer128_bundled_help_without_github_dependency",
         "customer129_all_workspace_settings_detours_preserve_work",
         "customer130_recording_selection_survives_speech_setup",
-        "customer136_trial_request_origin_and_selected_language_date"
+        "customer136_trial_request_origin_and_selected_language_date",
+        "overview_status_home_survives_first_use_dismissal"
       ],
       "paths": {
         "type": [
@@ -7871,7 +7904,10 @@
           "scripts/check-audio-workspace-provider-setup-ui.py",
           "src/components/PoliteEditSuggestions.tsx",
           "src/lib/politeEdits.ts",
-          "scripts/check-polite-edit-suggestions-ui.py"
+          "scripts/check-polite-edit-suggestions-ui.py",
+          "src/lib/firstUseOverview.ts",
+          "src/lib/firstUseOverview.test.ts",
+          "scripts/check-first-use-overview-ui.py"
         ]
       },
       "known_failures": [
