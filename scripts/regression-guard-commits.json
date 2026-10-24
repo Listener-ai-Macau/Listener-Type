@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T11:58:07.953320+08:00",
+  "updated_at": "2026-10-24T12:12:45.269776+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7262,7 +7262,8 @@
       "machine_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE163-aftersale-20261024\\customer-report.md",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-headless.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-saved-compatibility.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-saved-compatibility.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native164-snapshot-20261024-120406\\direct-delete-before.json"
       ],
       "machine_accepted_scope": [
         "Actual React delayed local/cloud notices and direct saved ID navigation; previous uncertain-save/idempotent retry/read/delete/content/History isolation cases pass. Typecheck and semantic version consistency passed; PowerShell parsed and mismatch refused before copy/build/app actions."
@@ -7270,6 +7271,37 @@
       "unverified": [
         "Matching packaged native notice, direct saved-item retrieval, footer and About pending.",
         "No new voice/physical Translation-key/global editor/all-function or purchase proof."
+      ],
+      "known_later_gap": "Unpublished first164 candidate694ea524 can reopen another draft after deleting its exact saved record; original actual native failure retained. Corrected by subsequent entry below."
+    },
+    {
+      "id": "local_saved_draft_deleted_or_missing_record_never_becomes_another_draft",
+      "subject": "Exact saved-draft ownership clears on acknowledged deletion and missing IDs require an explicit other selection",
+      "state": "source_actualReact_delete_missing_and_prior_save_compatibility_passed_matching_native_pending",
+      "repo": "type",
+      "commit": "e4b47b4357abe00c68b67f8ef13591850d8bbf89",
+      "commit_subject": "Keep saved-draft ownership synchronized after deletion and missing records",
+      "humanAccepted": false,
+      "protects": [
+        "Deleting the currently saved draft resets the originating workspace saved state; its source/output remain and can be saved again.",
+        "An unavailable requested ID is visible and does not fall back to another saved draft; selecting another is explicit.",
+        "Existing uncertain-save acknowledgement, immutable request retry, read failure, confirmed deletion and History/provider isolation remain retained."
+      ],
+      "guards": [
+        "python scripts/check-local-translation-ui.py --url <controlled-ui> --expected-build <candidate> --report <result>",
+        "python scripts/check-saved-text-drafts-ui.py --url <controlled-ui> --report <result>"
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native164-snapshot-20261024-120406\\direct-delete-before.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-delete-fix-headless.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-delete-fix-saved-compatibility.json"
+      ],
+      "machine_accepted_scope": [
+        "Same real React components: missing ID retains empty selection until explicit choice; deletion clears originating saved state and keeps text. Previous uncertain-save/read/delete compatibility still passes."
+      ],
+      "unverified": [
+        "Matching final164 native handoff/delete/resave pending; first candidate was not installed or published.",
+        "No new physical voice, hardware, global editor or purchase qualification."
       ]
     }
   ],
@@ -8492,7 +8524,8 @@
         "offline_translation_optional_verified_worker_no_cloud_fallback",
         "offline_translation_explicit_preview_voice_route_and_legacy_provider_preservation",
         "offline_translation_sentence_units_preserve_short_paragraph_content",
-        "local_translation_actual_route_notice_and_exact_saved_draft_navigation"
+        "local_translation_actual_route_notice_and_exact_saved_draft_navigation",
+        "local_saved_draft_deleted_or_missing_record_never_becomes_another_draft"
       ],
       "paths": {
         "type": [
