@@ -467,6 +467,8 @@ export interface UserPreferences {
   workingLanguages: string[];
   /** 翻译模式目标语言（单选，原生名）；空串 = 不启用 Shift 翻译。详见 issue #4。 */
   translationTargetLanguage: string;
+  translationEngine: 'local' | 'cloud';
+  translationSourceLanguage: string;
   /** 中文输出字形偏好：由界面语言（简/繁）自动同步，不单独暴露设置项。 */
   chineseScriptPreference: 'auto' | 'simplified' | 'traditional';
   /** 最终输出语言偏好：由界面语言自动同步，不单独暴露设置项。 */

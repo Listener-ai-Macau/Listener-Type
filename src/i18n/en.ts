@@ -689,7 +689,7 @@ export const en: typeof zhCN = {
     originalOutput: 'Original language (no translation)',
     authFailed: 'The text service rejected its credentials. Your source text is kept; check the text service settings before retrying.',
     trialName: 'Translate to {{language}}',
-    tryTextHint: 'Choose a target language, then preview and edit a translation without recording. Submitting uses your configured text service and may incur usage charges.',
+    tryTextHint: 'Preview and edit a translation without recording. Local translation has no translation API fee; cloud translation uses your selected service and its charges.',
     working: {
       title: 'Working languages',
       desc: 'Optional: select languages you regularly use to guide spelling and writing style. This does not choose the translation output language.',

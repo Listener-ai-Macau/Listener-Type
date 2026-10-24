@@ -17,6 +17,7 @@ import { zhCN } from './zh-CN';
 import { zhTW } from './zh-TW';
 import type { UserPreferences } from '../lib/types';
 import { deviceAutosaveTranslations } from './deviceAutosave';
+import { localTranslationMessages } from './localTranslation';
 
 export const SUPPORTED_LOCALES = ['zh-CN', 'zh-TW', 'en', 'ja', 'ko'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
@@ -69,6 +70,10 @@ void i18n.use(initReactI18next).init({
 for (const [locale, messages] of Object.entries(deviceAutosaveTranslations)) {
   const { onboardAutoSave, layoutDescription, loadIntoSettings, loadedDraft, ...device } = messages;
   i18n.addResourceBundle(locale, 'translation', { settings: { device: {...device,writeHint:device.autoSavePending}, deviceKeys: { onboardAutoSave } },deviceLayouts:{description:layoutDescription,loadIntoSettings,loadedDraft} }, true, true);
+}
+
+for (const [locale, offlineTranslation] of Object.entries(localTranslationMessages)) {
+  i18n.addResourceBundle(locale, 'translation', { offlineTranslation }, true, true);
 }
 
 export default i18n;

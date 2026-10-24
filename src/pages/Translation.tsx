@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { Card, PageHeader } from './_atoms';
 import { SavedToast } from '../components/SavedToast';
 import { StyleTextTrial } from '../components/StyleTextTrial';
+import { LocalTranslationSetup } from '../components/LocalTranslationSetup';
 import { SelectLite } from '../components/ui/SelectLite';
 import { SUPPORTED_LANGUAGES } from '../lib/types';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
@@ -25,6 +26,7 @@ export function Translation() {
   const [saveMessage, setSaveMessage] = useState('');
   const [trialOpen, setTrialOpen] = useState(false);
   const [trialDraft, setTrialDraft] = useState('');
+  const [preparingLocal, setPreparingLocal] = useState(false);
   const statusTimer = useRef<number | null>(null);
 
   useEffect(() => () => {
@@ -179,6 +181,14 @@ export function Translation() {
 
         {/* The output choice comes first; working languages do not choose it. */}
         <Card>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{t('offlineTranslation.engine')}</span>
+            <SelectLite ariaLabel={t('offlineTranslation.engine')} value={prefs.translationEngine ?? 'cloud'} disabled={preparingLocal}
+              onChange={value => { const translationEngine = value as 'local' | 'cloud';
+                void persistPrefs(current => ({ ...current, translationEngine }), t('translation.save.targetFailed')); }}
+              options={[{ value: 'local', label: t('offlineTranslation.local') }, { value: 'cloud', label: t('offlineTranslation.cloud') }]}
+              style={{ width: '100%', maxWidth: 440, fontSize: 13 }} />
+          </label>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>{t('translation.target.title')}</div>
             <span
@@ -206,7 +216,13 @@ export function Translation() {
             placeholder={t('translation.target.disabled')}
             ariaLabel={t('translation.target.title')}
             style={{ width: '100%', maxWidth: 360, fontSize: 13, background: 'var(--ol-white)' }}
+            disabled={preparingLocal}
           />
+          {prefs.translationEngine === 'local' && <LocalTranslationSetup
+            source={prefs.translationSourceLanguage ?? ''} target={prefs.translationTargetLanguage}
+            onSourceChange={translationSourceLanguage => { void persistPrefs(current => ({ ...current, translationSourceLanguage }), t('translation.save.targetFailed')); }}
+            onBusy={setPreparingLocal} />}
+          <p style={{ marginTop: 12, fontSize: 12, color: 'var(--ol-ink-3)', lineHeight: 1.6 }}>{t('offlineTranslation.voiceHint')}</p>
           <div style={{ marginTop: 12 }}>
             <button type="button" className="ol-btn ol-btn-secondary" disabled={!enabled}
               data-translation-try-text onClick={() => setTrialOpen(true)}>
@@ -277,6 +293,8 @@ export function Translation() {
           pack={translationTrialPack(prefs.translationTargetLanguage,
             t('translation.trialName', { language: prefs.translationTargetLanguage }), t('translation.tryTextHint'))}
           translationTarget={prefs.translationTargetLanguage}
+          initialTranslationEngine={prefs.translationEngine ?? 'cloud'}
+          initialTranslationSource={prefs.translationSourceLanguage}
           draft={trialDraft} onDraftChange={setTrialDraft} onClose={() => setTrialOpen(false)}
         />
       )}

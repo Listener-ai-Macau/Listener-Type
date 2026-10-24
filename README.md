@@ -8,7 +8,7 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build160](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build162](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 **English** · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md)
@@ -18,7 +18,7 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 *Actual Listener hardware. Planned appearance: transparent case and keycaps, black knob, broadly as shown. This is a photograph, not an operation video.*
 
 - **Say it:** the knob starts and stops dictation; Type handles recognition and writing on the computer.
-- **Shape the words:** keep the original by default, or choose a text style or translation with a configured text service.
+- **Shape the words:** keep the original by default, use optional local Chinese ↔ English translation, or choose a text style with your configured text service.
 - **Make it yours:** assign the four keys and adjust lights or power settings. Each device keeps its own settings.
 
 **[Hear a short message become text · 25-second software example](docs/VOICE_EXAMPLE.md).** Prerecorded synthetic voice and actual Type results; no hardware operation shown.
@@ -36,7 +36,7 @@ Firmware: **ESP32-S3 N16R8**, build `9d7fbbe67ed0223d`. Select the same ZIP for 
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device and read its settings. Explicit edits save automatically when editing finishes; reading or switching devices does not write computer defaults. Names, lights, power, keys and knob settings stay on the selected board. Use this paired MSI and firmware ZIP.
 
-Type build160 / Firmware37: Overview stays in the sidebar with device connection and service status, even after skipping first-use guidance. Getting started can be reopened separately; the saved choice stays intact. Audio/Bluetooth logic and Firmware37 are unchanged; full pre-sale acceptance remains incomplete.
+Type build162 / Firmware37: Overview stays in the sidebar with device connection and service status, even after skipping first-use guidance. Getting started can be reopened separately; the saved choice stays intact. Ordinary dictation capture, Bluetooth and Firmware37 are unchanged. Local translation applies only when chosen; full pre-sale acceptance remains incomplete.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
@@ -71,6 +71,8 @@ Then configure the recognition provider's credentials/model, or prepare a runtim
 Windows is the primary installation and full keyboard-audio path. macOS / Linux currently use source builds; see platform scope below.
 
 ### Free app, separate service costs
+
+**Local text translation:** Tools → Translation, or Try typed text → choose an output language. On 64-bit Windows, Chinese ↔ English translation runs on your computer without a text-provider API key or per-translation API fee. Choose the original language and explicitly download its components once (about 113 MB for the first Chinese→English setup, including the runtime). Components stay outside the MSI; later translations use CPU and an on-demand worker. Review the result before using it. Other offline languages are not qualified yet; existing cloud translation remains an explicit option with provider charges. Voice recognition is a separate step and keeps its existing setup and fees.
 
 The app is free; cloud costs are set by each provider. Without an API key, prepare a Windows local model and start with Raw.
 

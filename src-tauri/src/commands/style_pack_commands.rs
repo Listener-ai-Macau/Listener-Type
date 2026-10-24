@@ -103,7 +103,8 @@ pub fn get_local_translation_status() -> Result<crate::local_translation::Status
 /// a language, opening a dialog, recording, or requesting a translation.
 #[tauri::command]
 pub async fn prepare_local_translation(source_language: String, target_language: String) -> Result<crate::local_translation::Status, String> {
-    tauri::async_runtime::spawn_blocking(move || crate::local_translation::prepare(&source_language, &target_language))
+    let preparation = crate::local_translation::reserve_preparation(&source_language, &target_language)?;
+    tauri::async_runtime::spawn_blocking(move || preparation.run())
         .await.map_err(|_| "local_translation_runtime_failed".to_owned())?
 }
 
@@ -117,8 +118,7 @@ pub async fn try_local_translation_text(source_language: String, target_language
     let started = std::time::Instant::now();
     let pack_id = format!("local_translation:{source_language}:{target_language}");
     let pack_name = format!("{source_language} → {target_language}");
-    let output_text = tauri::async_runtime::spawn_blocking(move || crate::local_translation::translate(&source_language, &target_language, &raw_text))
-        .await.map_err(|_| "local_translation_runtime_failed".to_owned())??;
+    let output_text = crate::local_translation::translate_to_language(raw_text, source_language, target_language).await?;
     Ok(crate::types::StyleTextTrialResult {
         pack_id, pack_name, output_text, used_text_service: false,
         elapsed_ms: started.elapsed().as_millis() as u64,

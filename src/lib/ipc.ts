@@ -228,6 +228,8 @@ let mockSettings: UserPreferences = {
   allowNonTsfInsertionFallback: true,
   workingLanguages: ['简体中文'],
   translationTargetLanguage: '',
+  translationEngine: 'local',
+  translationSourceLanguage: '',
   qaHotkey: defaultQaShortcut(),
   chineseScriptPreference: 'auto',
   outputLanguagePreference: 'auto',
@@ -1790,6 +1792,39 @@ export function tryStylePackText(stylePackId: string, rawText: string): Promise<
 export function tryTranslationText(rawText: string, targetLanguage: string): Promise<StyleTextTrialResult> {
   return invokeOrMock('try_translation_text', { rawText, targetLanguage }, () => {
     throw new Error('style_trial_native_required');
+  });
+}
+
+export type LocalTranslationStatus = {
+  supported: boolean;
+  runtimeReady: boolean;
+  runtimeDownloadBytes: number;
+  pairs: { source: string; target: string; downloadBytes: number; ready: boolean }[];
+  preparing: boolean;
+  receivedBytes: number;
+  expectedBytes: number;
+};
+
+export function getLocalTranslationStatus(): Promise<LocalTranslationStatus> {
+  return invokeOrMock('get_local_translation_status', {}, () => ({
+    supported: false, runtimeReady: false, runtimeDownloadBytes: 0, pairs: [],
+    preparing: false, receivedBytes: 0, expectedBytes: 0,
+  }));
+}
+
+export function prepareLocalTranslation(sourceLanguage: string, targetLanguage: string): Promise<LocalTranslationStatus> {
+  return invokeOrMock('prepare_local_translation', { sourceLanguage, targetLanguage }, () => {
+    throw new Error('local_translation_platform_unavailable');
+  });
+}
+
+export function cancelLocalTranslationPreparation(): Promise<void> {
+  return invokeOrMock('cancel_local_translation_preparation', {}, () => {});
+}
+
+export function tryLocalTranslationText(rawText: string, sourceLanguage: string, targetLanguage: string): Promise<StyleTextTrialResult> {
+  return invokeOrMock('try_local_translation_text', { rawText, sourceLanguage, targetLanguage }, () => {
+    throw new Error('local_translation_platform_unavailable');
   });
 }
 

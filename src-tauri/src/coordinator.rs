@@ -57,7 +57,7 @@ use crate::types::{
     CapsuleState, ChineseScriptPreference, DeviceCustomKeyAction, DeviceCustomKeyGesture,
     DeviceCustomKeyId, DeviceCustomKeyMapping, DeviceKnobRotationAction, DictationInputSource,
     DictationSession, HotkeyCapability, HotkeyStatus, HotkeyStatusState, InsertStatus,
-    OutputLanguagePreference, PolishMode, ShortcutBinding,
+    OutputLanguagePreference, PolishMode, ShortcutBinding, UserPreferences,
 };
 #[cfg(target_os = "windows")]
 use crate::windows_ime_ipc::ImeSubmitTarget;
@@ -3532,7 +3532,7 @@ fn is_bailian_provider(id: &str) -> bool {
     id == crate::asr::bailian::PROVIDER_ID
 }
 
-fn apply_chinese_script_preference(text: &str, pref: ChineseScriptPreference) -> String {
+pub(crate) fn apply_chinese_script_preference(text: &str, pref: ChineseScriptPreference) -> String {
     if text.is_empty() {
         return String::new();
     }
@@ -3935,6 +3935,27 @@ async fn polish_text(
         note_llm_auth_rejection(auth_fingerprint);
     }
     Ok(result?)
+}
+
+/// Dispatch only the user's chosen translation engine. Offline failure retains
+/// the original text and never consults a cloud provider or credential vault.
+pub(crate) async fn translate_voice_or_passthrough(
+    raw: &RawTranscript,
+    prefs: &UserPreferences,
+    front_app: Option<&str>,
+) -> (String, Option<String>) {
+    if prefs.translation_engine == crate::types::TranslationEngine::Cloud {
+        return translate_or_passthrough(raw, &prefs.translation_target_language,
+            &prefs.working_languages, prefs.chinese_script_preference,
+            prefs.output_language_preference, prefs.llm_thinking_enabled, front_app).await;
+    }
+    match crate::local_translation::translate_to_language(
+        raw.text.clone(), prefs.translation_source_language.clone(),
+        prefs.translation_target_language.clone(),
+    ).await {
+        Ok(text) => (text, None),
+        Err(error) => (raw.text.clone(), Some(error)),
+    }
 }
 
 /// 翻译路径——和 polish 一样失败时返回原文 + 失败原因，避免"不丢字"约定被违反（CLAUDE.md）。

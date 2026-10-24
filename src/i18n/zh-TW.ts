@@ -688,7 +688,7 @@ export const zhTW: typeof zhCN = {
     originalOutput: '原來的語言（不翻譯）',
     authFailed: '文字服務驗證失敗，原文仍保留。請先檢查文字服務設定，再重試。',
     trialName: '翻譯為 {{language}}',
-    tryTextHint: '選擇目標語言後，不用錄音即可預覽和修改譯文。點擊處理才會呼叫已設定的文字服務，可能產生用量費用。',
+    tryTextHint: '無需錄音即可預覽和修改譯文。本機翻譯不產生翻譯 API 費用；選擇雲端方式時按原服務計費。',
     working: {
       title: '工作語言',
       desc: '可選：選擇日常使用的語言，用於輔助專名拼寫和表達習慣。這不會改變翻譯輸出的語言。',

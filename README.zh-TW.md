@@ -2,13 +2,17 @@
 
 ## 放在桌邊的 AI 入門小工具 · 49 美元
 
+<!-- offline-translation-162 -->
+**可選本機翻譯：** 64 位元 Windows 可在「工具 → 翻譯」或文字試用中選擇中英互譯，不需要文字服務 API 金鑰，也沒有逐次翻譯 API 費用。明確選擇原文語言、目標語言，再下載一次所需元件；首次中譯英含執行元件約 113 MB，元件不塞進 MSI。譯文可檢查、修改後再使用。其它離線語言尚未驗證；主動選擇現有雲端方式仍按服務商計費。語音辨識是獨立步驟，保留原有設定與費用。
+
+
 一個麥克風、一個錄音旋鈕、四顆可自訂按鍵。配合 Windows Type，用說話起草訊息、郵件或筆記，文字進入正在使用的輸入框。
 
 **49 美元為硬體價格，Type 軟體免費開源。**
 
 | 用途 | 直接下載 |
 | --- | --- |
-| **Windows 軟體** | **[下載 MSI · Type build160](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 軟體** | **[下載 MSI · Type build162](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **韌體：USB 燒寫 / 藍牙 OTA** | **[下載韌體 ZIP · 兩種方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 [English](README.md) · **繁體中文** · [简体中文](README.zh-CN.md)
@@ -36,7 +40,7 @@
 Type 預設使用 **USB 有線燒寫**，能力已內建；無需另裝 Python、ESP-IDF 或其他燒寫軟體。
 裝置設定各自獨立：選擇一台有線／藍牙裝置並讀取；完成編輯後自動儲存明確修改，讀取或切換裝置不會寫入電腦預設值。名稱、燈光、電源、按鍵與旋鈕設定儲存在所選裝置。請配套使用本頁 MSI 與韌體 ZIP。
 
-Type build160 / Firmware37：概覽、裝置連線和服務狀態保持常駐，略過首次引導不再隱藏整頁或預設跳到歷史；使用入門可單獨重開，原略過選擇仍保留。錄音／藍牙邏輯與韌體37未改，全功能售前驗收仍未完成。
+Type build162 / Firmware37：概覽、裝置連線和服務狀態保持常駐，略過首次引導不再隱藏整頁或預設跳到歷史；使用入門可單獨重開，原略過選擇仍保留。普通錄音擷取／藍牙邏輯與韌體37未改，本機翻譯僅在選擇後使用；全功能售前驗收仍未完成。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

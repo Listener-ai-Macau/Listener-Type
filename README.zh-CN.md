@@ -2,13 +2,17 @@
 
 ## 放在桌边的 AI 入门小工具 · 49 美元
 
+<!-- offline-translation-162 -->
+**可选本机翻译：** 64 位 Windows 可在「工具 → 翻译」或文字试用中选择中英互译，不需要文字服务 API 密钥，也没有逐次翻译 API 费用。明确选择原文语言、目标语言，再下载一次所需组件；首次中译英含运行组件约 113 MB，组件不塞进 MSI。译文可检查、修改后再使用。其它离线语言尚未验证；主动选择现有云端方式仍按服务商计费。语音识别是独立步骤，保留原有设置与费用。
+
+
 一个麦克风、一个录音旋钮、四颗可自定义按键。配合 Windows Type，用说话起草消息、邮件或笔记，文字进入正在使用的输入框。
 
 **49 美元为硬件价格，Type 软件免费开源。**
 
 | 用途 | 直接下载 |
 | --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build160](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 软件** | **[下载 MSI · Type build162](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 [English](README.md) · **简体中文** · [繁體中文](README.zh-TW.md)
@@ -36,7 +40,7 @@
 Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
 设备设置各自独立：选择一台有线／蓝牙设备并读取；完成编辑后自动保存明确修改，读取或切换设备不会写入电脑默认值。名称、灯光、电源、按键和旋钮设置保存在所选设备中。请配套使用本页 MSI 与固件 ZIP。
 
-Type build160 / Firmware37：概览、设备连接和服务状态保持常驻，跳过首次引导不再隐藏整页或默认跳到历史；使用入门可单独重开，原跳过选择仍保留。录音／蓝牙逻辑与固件37未改，全功能售前验收仍未完成。
+Type build162 / Firmware37：概览、设备连接和服务状态保持常驻，跳过首次引导不再隐藏整页或默认跳到历史；使用入门可单独重开，原跳过选择仍保留。普通录音采集／蓝牙逻辑与固件37未改，本机翻译仅在选择后使用；全功能售前验收仍未完成。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

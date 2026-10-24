@@ -1,0 +1,64 @@
+const en = {
+  title: 'Translate to {{language}}', engine: 'Translation method', local: 'On this computer · no translation API fee', cloud: 'Existing cloud service · provider charges apply',
+  source: 'Original language', chooseSource: 'Choose the language you will write or speak',
+  localNotice: 'Text is translated on this computer. Voice recognition still uses your selected speech service and its fees. Download only the language components you need.',
+  platform: 'Offline translation currently requires 64-bit Windows. No files have been downloaded.',
+  unsupported: 'The current offline packages support Chinese ↔ English. Choose different source and target languages in this pair. Other languages can use your cloud service only if you select it.',
+  ready: 'Offline components are ready. Review and edit the translation before using it.',
+  prepare: 'Download offline components (about {{mb}} MB)', repair: 'Check / repair offline components',
+  downloading: 'Preparing offline translation · {{mb}} / {{total}} MB', progress: 'Offline translation download progress',
+  background: 'You can leave this page while preparation continues. Use Cancel here to stop the download. Your normal recording settings stay unchanged.',
+  cancelled: 'Download stopped. Completed components remain available; you can prepare the rest later.',
+  notReady: 'Offline components are missing or damaged. Check / repair them below; your source text is retained.',
+  downloadFailed: 'The components could not be downloaded. Check the connection and retry. Your source and existing settings are retained.',
+  busy: 'Another local translation task is still finishing. Please try again shortly.',
+  timeout: 'Local translation timed out. Your source text is retained; no cloud translation was requested.',
+  invalidText: 'Enter up to 4,000 characters. Nothing has been translated or sent.',
+  failed: 'Local translation could not finish. Your source is retained. You can check / repair the components and retry.',
+  statusFailed: 'Could not read offline component status. Nothing was downloaded or translated.',
+  result: 'Local translation · {{seconds}} s', run: 'Translate',
+  voiceHint: 'These choices also apply when you explicitly start voice translation. Ordinary recording still keeps its original language.',
+};
+type Copy = { [K in keyof typeof en]: string };
+const zhCN: Copy = {
+  title:'翻译成{{language}}',engine:'翻译方式',local:'本机翻译 · 无翻译 API 费用',cloud:'现有云端服务 · 按服务商计费',source:'原文／说话语言',chooseSource:'请选择将要输入或说出的语言',
+  localNotice:'文字在本机翻译。语音识别仍使用你选择的语音服务，并按原服务计费。只需下载用到的语言组件。',
+  platform:'离线翻译当前支持 64 位 Windows，尚未下载任何文件。',
+  unsupported:'当前离线包支持中英互译，请选择不同的中英文来源和目标。其它语言只有在你主动选择云端服务后才会使用云端。',
+  ready:'离线组件已准备好。请先检查、修改译文，再使用。',prepare:'下载离线组件（约 {{mb}} MB）',repair:'检查／修复离线组件',
+  downloading:'正在准备离线翻译 · {{mb}} / {{total}} MB',progress:'离线翻译下载进度',background:'离开本页后会在后台继续准备；如需停止下载，请点这里的取消。日常录音设置保持不变。',
+  cancelled:'已停止下载，准备完成的组件会保留，可稍后继续。',notReady:'离线组件缺失或损坏，请在下方检查／修复；原文已保留。',
+  downloadFailed:'组件下载未完成，请检查网络后重试。原文和现有设置已保留。',busy:'另一项本地翻译任务仍在收尾，请稍后重试。',
+  timeout:'本地翻译超时，原文已保留，没有转到云端翻译。',invalidText:'请输入不超过 4,000 字的内容，尚未翻译或发送。',
+  failed:'本地翻译未完成，原文已保留。可检查／修复组件后重试。',statusFailed:'无法读取离线组件状态，尚未下载或翻译。',
+  result:'本机翻译 · {{seconds}} 秒',run:'翻译',voiceHint:'这些选择也用于你明确启动的语音翻译。普通录音仍保留原语言。',
+};
+const zhTW: Copy = {
+  title:'翻譯成{{language}}',engine:'翻譯方式',local:'本機翻譯 · 無翻譯 API 費用',cloud:'現有雲端服務 · 按服務商計費',source:'原文／說話語言',chooseSource:'請選擇將要輸入或說出的語言',
+  localNotice:'文字在本機翻譯。語音辨識仍使用你選擇的語音服務，並按原服務計費。只需下載用到的語言元件。',platform:'離線翻譯目前支援 64 位元 Windows，尚未下載任何檔案。',
+  unsupported:'目前離線包支援中英互譯，請選擇不同的中英文來源和目標。其它語言只有在你主動選擇雲端服務後才會使用雲端。',
+  ready:'離線元件已準備好。請先檢查、修改譯文，再使用。',prepare:'下載離線元件（約 {{mb}} MB）',repair:'檢查／修復離線元件',downloading:'正在準備離線翻譯 · {{mb}} / {{total}} MB',progress:'離線翻譯下載進度',
+  background:'離開本頁後會在背景繼續準備；如需停止下載，請點這裡的取消。日常錄音設定保持不變。',cancelled:'已停止下載，準備完成的元件會保留，可稍後繼續。',
+  notReady:'離線元件缺失或損壞，請在下方檢查／修復；原文已保留。',downloadFailed:'元件下載未完成，請檢查網路後重試。原文和現有設定已保留。',busy:'另一項本機翻譯任務仍在收尾，請稍後重試。',
+  timeout:'本機翻譯逾時，原文已保留，沒有轉到雲端翻譯。',invalidText:'請輸入不超過 4,000 字的內容，尚未翻譯或傳送。',failed:'本機翻譯未完成，原文已保留。可檢查／修復元件後重試。',statusFailed:'無法讀取離線元件狀態，尚未下載或翻譯。',
+  result:'本機翻譯 · {{seconds}} 秒',run:'翻譯',voiceHint:'這些選擇也用於你明確啟動的語音翻譯。普通錄音仍保留原語言。',
+};
+const ja: Copy = {
+  title:'{{language}}に翻訳',engine:'翻訳方法',local:'このPCで翻訳 · 翻訳API料金なし',cloud:'既存のクラウドサービス · 利用料金がかかります',source:'原文／話す言語',chooseSource:'入力または話す言語を選択',
+  localNotice:'文章はこのPCで翻訳します。音声認識には選択した音声サービスとその料金が引き続き適用されます。必要な言語の構成要素だけをダウンロードします。',platform:'オフライン翻訳は現在64ビットWindowsに対応しています。ファイルは未ダウンロードです。',
+  unsupported:'現在のオフラインパッケージは中国語と英語の相互翻訳です。異なる入力・出力言語を選んでください。他の言語でクラウドを使うには明示的な選択が必要です。',
+  ready:'オフライン翻訳の準備ができました。翻訳文を確認、編集してから使ってください。',prepare:'オフライン構成要素をダウンロード（約{{mb}} MB）',repair:'構成要素を確認／修復',downloading:'オフライン翻訳を準備中 · {{mb}} / {{total}} MB',progress:'オフライン翻訳のダウンロード進捗',
+  background:'ページを離れても準備は続きます。止めるにはここでキャンセルしてください。通常の録音設定は変わりません。',cancelled:'ダウンロードを停止しました。完了済みの構成要素は保持されます。',notReady:'構成要素が見つからないか壊れています。下で確認／修復してください。原文は残っています。',
+  downloadFailed:'ダウンロードできませんでした。接続を確認して再試行してください。原文と設定は残っています。',busy:'別のローカル翻訳を終了中です。少し待って再試行してください。',timeout:'ローカル翻訳がタイムアウトしました。原文は残り、クラウド翻訳には切り替えていません。',
+  invalidText:'4,000文字以内で入力してください。翻訳も送信もしていません。',failed:'ローカル翻訳を完了できませんでした。原文は残っています。構成要素を確認／修復して再試行できます。',statusFailed:'構成要素の状態を読めませんでした。ダウンロードも翻訳もしていません。',result:'ローカル翻訳 · {{seconds}}秒',run:'翻訳',voiceHint:'明示的に音声翻訳を開始した場合にも、この設定を使います。通常の録音は元の言語を保ちます。',
+};
+const ko: Copy = {
+  title:'{{language}}로 번역',engine:'번역 방식',local:'이 컴퓨터에서 번역 · 번역 API 요금 없음',cloud:'기존 클라우드 서비스 · 제공자 요금 적용',source:'원문 / 말하는 언어',chooseSource:'입력하거나 말할 언어 선택',
+  localNotice:'텍스트는 이 컴퓨터에서 번역합니다. 음성 인식에는 선택한 음성 서비스와 해당 요금이 계속 적용됩니다. 필요한 언어 구성 요소만 다운로드하세요.',platform:'오프라인 번역은 현재 64비트 Windows를 지원합니다. 아직 다운로드하지 않았습니다.',
+  unsupported:'현재 오프라인 패키지는 중국어 ↔ 영어 번역을 지원합니다. 서로 다른 원문과 목표 언어를 선택하세요. 다른 언어의 클라우드 사용은 직접 선택해야 합니다.',
+  ready:'오프라인 구성 요소가 준비되었습니다. 번역문을 확인하고 수정한 뒤 사용하세요.',prepare:'오프라인 구성 요소 다운로드 (약 {{mb}} MB)',repair:'구성 요소 확인 / 복구',downloading:'오프라인 번역 준비 중 · {{mb}} / {{total}} MB',progress:'오프라인 번역 다운로드 진행률',
+  background:'페이지를 떠나도 준비는 계속됩니다. 중지하려면 여기에서 취소하세요. 평소 녹음 설정은 바뀌지 않습니다.',cancelled:'다운로드를 중지했습니다. 완료된 구성 요소는 유지됩니다.',notReady:'구성 요소가 없거나 손상되었습니다. 아래에서 확인 / 복구하세요. 원문은 유지됩니다.',
+  downloadFailed:'다운로드하지 못했습니다. 연결을 확인하고 다시 시도하세요. 원문과 기존 설정은 유지됩니다.',busy:'다른 로컬 번역이 종료 중입니다. 잠시 후 다시 시도하세요.',timeout:'로컬 번역 시간이 초과되었습니다. 원문은 유지되며 클라우드 번역을 요청하지 않았습니다.',
+  invalidText:'최대 4,000자를 입력하세요. 번역하거나 보내지 않았습니다.',failed:'로컬 번역을 완료하지 못했습니다. 원문은 남아 있습니다. 구성 요소를 확인 / 복구한 뒤 다시 시도하세요.',statusFailed:'구성 요소 상태를 읽지 못했습니다. 다운로드하거나 번역하지 않았습니다.',result:'로컬 번역 · {{seconds}}초',run:'번역',voiceHint:'음성 번역을 명시적으로 시작할 때도 이 설정을 사용합니다. 일반 녹음은 원래 언어를 유지합니다.',
+};
+export const localTranslationMessages = { en, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, ko };

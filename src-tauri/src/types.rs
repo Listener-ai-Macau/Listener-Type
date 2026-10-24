@@ -1314,6 +1314,12 @@ pub struct UserPreferences {
     /// 由前端从内置语言列表中选择，后端只接收最终的原生名字符串拼进 prompt。详见 issue #4。
     #[serde(default)]
     pub translation_target_language: String,
+    /// Explicit translation route; missing legacy JSON keeps its cloud route.
+    #[serde(default)]
+    pub translation_engine: TranslationEngine,
+    /// Required offline source code. No language guessing or model download.
+    #[serde(default)]
+    pub translation_source_language: String,
     /// 中文输出字形偏好（不额外暴露为 UI 开关）：
     /// - Simplified: 中文输出优先简体
     /// - Traditional: 中文输出优先繁体
@@ -1527,6 +1533,19 @@ fn default_foundry_local_runtime_source() -> String {
     "auto".into()
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TranslationEngine {
+    #[default]
+    Cloud,
+    Local,
+}
+
+fn deserialize_optional_translation_engine<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error> {
+    // Present JSON null stays distinguishable from an absent legacy field.
+    serde_json::Value::deserialize(deserializer).map(Some)
+}
+
 fn default_active_asr_provider() -> String {
     "volcengine".into()
 }
@@ -1589,6 +1608,10 @@ struct UserPreferencesWire {
     allow_non_tsf_insertion_fallback: bool,
     working_languages: Vec<String>,
     translation_target_language: String,
+    #[serde(default, deserialize_with = "deserialize_optional_translation_engine")]
+    translation_engine: Option<serde_json::Value>,
+    #[serde(default)]
+    translation_source_language: serde_json::Value,
     chinese_script_preference: ChineseScriptPreference,
     #[serde(default)]
     output_language_preference: OutputLanguagePreference,
@@ -1714,6 +1737,8 @@ impl Default for UserPreferencesWire {
             allow_non_tsf_insertion_fallback: prefs.allow_non_tsf_insertion_fallback,
             working_languages: prefs.working_languages,
             translation_target_language: prefs.translation_target_language,
+            translation_engine: None,
+            translation_source_language: serde_json::Value::String(prefs.translation_source_language),
             chinese_script_preference: prefs.chinese_script_preference,
             output_language_preference: prefs.output_language_preference,
             qa_hotkey: prefs.qa_hotkey,
@@ -1914,7 +1939,17 @@ impl<'de> Deserialize<'de> for UserPreferences {
             paste_shortcut: wire.paste_shortcut,
             allow_non_tsf_insertion_fallback: wire.allow_non_tsf_insertion_fallback,
             working_languages: wire.working_languages,
+            translation_engine: match wire.translation_engine {
+                None if wire.translation_target_language.trim().is_empty()
+                    && cfg!(all(target_os = "windows", target_arch = "x86_64")) => TranslationEngine::Local,
+                None => TranslationEngine::Cloud,
+                Some(serde_json::Value::String(value)) if value == "cloud" => TranslationEngine::Cloud,
+                // Unknown future/invalid routes must not reset the whole
+                // preferences file or implicitly send text to a paid service.
+                _ => TranslationEngine::Local,
+            },
             translation_target_language: wire.translation_target_language,
+            translation_source_language: wire.translation_source_language.as_str().unwrap_or_default().to_owned(),
             chinese_script_preference: wire.chinese_script_preference,
             output_language_preference: wire.output_language_preference,
             qa_hotkey: wire.qa_hotkey,
@@ -2353,6 +2388,8 @@ impl Default for UserPreferences {
             allow_non_tsf_insertion_fallback: true,
             working_languages: default_working_languages(),
             translation_target_language: String::new(),
+            translation_engine: if cfg!(all(target_os = "windows", target_arch = "x86_64")) { TranslationEngine::Local } else { TranslationEngine::Cloud },
+            translation_source_language: String::new(),
             chinese_script_preference: ChineseScriptPreference::Auto,
             output_language_preference: OutputLanguagePreference::Auto,
             qa_hotkey: default_qa_hotkey(),

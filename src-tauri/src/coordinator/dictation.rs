@@ -4015,7 +4015,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // FAILED, typed 0 chars, then clipboard-pasted. Skip polish entirely when
     // the circuit is open so stop→Done stays snappy and the UX is quiet raw
     // insert (owner: "体验一般般").
-    let needs_llm_polish = mode != PolishMode::Raw || raw_uses_llm;
+    let needs_llm_polish = !translation_active && (mode != PolishMode::Raw || raw_uses_llm);
     let (llm_auth_blocked, llm_stall_blocked) = if needs_llm_polish {
         session_llm_circuit_state(inner, current_session_id)
     } else { (false, false) };
@@ -4046,14 +4046,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             working_languages,
             front_app
         );
-        let (p, e) = translate_or_passthrough(
-            &raw,
-            &translation_target,
-            &working_languages,
-            chinese_script_preference,
-            output_language_preference,
-            llm_thinking_enabled,
-            front_app.as_deref(),
+        let (p, e) = translate_voice_or_passthrough(
+            &raw, &prefs, front_app.as_deref(),
         )
         .await;
         PreparedDeliveryText {

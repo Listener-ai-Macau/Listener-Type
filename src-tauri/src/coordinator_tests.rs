@@ -6423,3 +6423,72 @@ async fn translation_text_preview_rejects_empty_oversize_and_invalid_language_wi
     assert_eq!(serde_json::to_value(coordinator.inner.history.list().unwrap()).unwrap(), serde_json::to_value(history_before).unwrap());
 }
 
+#[test]
+fn translation_engine_legacy_preferences_preserve_cloud_and_explicit_local_round_trips() {
+    let original = UserPreferences::default();
+    let mut legacy = serde_json::to_value(&original).unwrap();
+    legacy.as_object_mut().unwrap().remove("translationEngine");
+    legacy.as_object_mut().unwrap().remove("translationSourceLanguage");
+    legacy["translationTargetLanguage"] = serde_json::json!("English");
+    let read: UserPreferences = serde_json::from_value(legacy).unwrap();
+    assert_eq!(read.translation_engine, crate::types::TranslationEngine::Cloud);
+    assert_eq!(read.translation_target_language, "English");
+    assert!(read.translation_source_language.is_empty());
+    assert_eq!(read.active_asr_provider, original.active_asr_provider);
+    assert_eq!(read.active_llm_provider, original.active_llm_provider);
+    let mut unconfigured = serde_json::to_value(&read).unwrap();
+    unconfigured.as_object_mut().unwrap().remove("translationEngine");
+    unconfigured["translationTargetLanguage"] = serde_json::json!("");
+    let empty_target: UserPreferences = serde_json::from_value(unconfigured.clone()).unwrap();
+    if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        assert_eq!(empty_target.translation_engine, crate::types::TranslationEngine::Local);
+    }
+    unconfigured["translationEngine"] = serde_json::json!("cloud");
+    let explicit: UserPreferences = serde_json::from_value(unconfigured).unwrap();
+    assert_eq!(explicit.translation_engine, crate::types::TranslationEngine::Cloud);
+    let mut chosen = read;
+    chosen.translation_engine = crate::types::TranslationEngine::Local;
+    chosen.translation_source_language = "zh".into();
+    let round_trip: UserPreferences = serde_json::from_value(serde_json::to_value(&chosen).unwrap()).unwrap();
+    assert_eq!(round_trip.translation_engine, crate::types::TranslationEngine::Local);
+    assert_eq!(round_trip.translation_source_language, "zh");
+    assert_eq!(round_trip.translation_target_language, "English");
+}
+
+#[tokio::test]
+async fn translation_local_unprepared_voice_retains_source_without_cloud_fallback() {
+    let prefs = UserPreferences {
+        translation_engine: crate::types::TranslationEngine::Local,
+        translation_source_language: "zh".into(),
+        translation_target_language: "English".into(),
+        ..Default::default()
+    };
+    let raw = RawTranscript { text: "不要发送邮件，只保存草稿。".into(), duration_ms: 2500 };
+    let (text, error) = translate_voice_or_passthrough(&raw, &prefs, None).await;
+    assert_eq!(text, raw.text);
+    assert_eq!(error.as_deref(), Some("local_translation_not_ready"));
+    let mut unsupported = prefs;
+    unsupported.translation_target_language = "日本語".into();
+    let (text, error) = translate_voice_or_passthrough(&raw, &unsupported, None).await;
+    assert_eq!(text, raw.text);
+    assert_eq!(error.as_deref(), Some("local_translation_unsupported_pair"));
+}
+
+
+#[test]
+fn translation_unknown_new_fields_cannot_reset_existing_provider_preferences() {
+    let mut stored = serde_json::to_value(UserPreferences::default()).unwrap();
+    stored["activeAsrProvider"] = serde_json::json!("volcengine");
+    stored["activeLlmProvider"] = serde_json::json!("ark");
+    stored["translationTargetLanguage"] = serde_json::json!("English");
+    for invalid in [serde_json::json!("future-local-route"), serde_json::json!(42), serde_json::Value::Null, serde_json::json!({"local": true})] {
+        stored["translationEngine"] = invalid;
+        stored["translationSourceLanguage"] = serde_json::json!(false);
+        let read: UserPreferences = serde_json::from_value(stored.clone()).unwrap();
+        assert_eq!(read.active_asr_provider, "volcengine");
+        assert_eq!(read.active_llm_provider, "ark");
+        assert_eq!(read.translation_target_language, "English");
+        assert_eq!(read.translation_engine, crate::types::TranslationEngine::Local);
+        assert!(read.translation_source_language.is_empty());
+    }
+}

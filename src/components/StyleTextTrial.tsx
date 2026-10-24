@@ -1,7 +1,7 @@
 import { SaveTextDraft } from './SaveTextDraft';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { canInsertStyleTrialResult, cancelStyleTrialInsert, copyStyleTrialResult, getStyleTextTrialReadiness, insertStyleTrialResult, isTauri, tryStylePackText, tryTranslationText } from '../lib/ipc';
+import { canInsertStyleTrialResult, cancelStyleTrialInsert, copyStyleTrialResult, getStyleTextTrialReadiness, insertStyleTrialResult, isTauri, tryStylePackText, tryTranslationText, tryLocalTranslationText } from '../lib/ipc';
 import { detectOS } from './WindowChrome';
 import { stylePackExamplePresentation, stylePackPresentation } from '../lib/stylePackPresentation';
 import type { StylePack, StyleTextTrialReadiness, StyleTextTrialResult } from '../lib/types';
@@ -12,8 +12,11 @@ import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
 import { PoliteEditSuggestions } from './PoliteEditSuggestions';
 import { ProviderSettingsDialog } from './ProviderSettingsDialog';
 import { SUPPORTED_LANGUAGES } from '../lib/types';
+import { LocalTranslationSetup } from './LocalTranslationSetup';
+import { localTranslationErrorKey, localTranslationKey } from '../lib/localTranslation';
+import type { TranslationEngine, LocalTranslationReadiness } from '../lib/localTranslation';
 
-export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, prepareShorter, translationTarget, onTranslationTargetChange, draft, onDraftChange, onClose }: {
+export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, prepareShorter, translationTarget, onTranslationTargetChange, initialTranslationEngine, initialTranslationSource, draft, onDraftChange, onClose }: {
   pack: StylePack;
   packs?: StylePack[];
   onSelectPack?: (id: string) => void;
@@ -21,11 +24,20 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   prepareShorter?: () => Promise<StylePack>;
   translationTarget?: string;
   onTranslationTargetChange?: (language: string) => void;
+  initialTranslationEngine?: TranslationEngine;
+  initialTranslationSource?: string;
   draft: string;
   onDraftChange: (text: string) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const [translationEngine, setTranslationEngine] = useState<TranslationEngine>(initialTranslationEngine ?? 'local');
+  const [translationSource, setTranslationSource] = useState(initialTranslationSource ?? '');
+  const [translationPreparing, setTranslationPreparing] = useState(false);
+  const [offlineReadiness, setOfflineReadiness] = useState<LocalTranslationReadiness | null>(null);
+  const offline = !!translationTarget && translationEngine === 'local';
+  const offlineReady = offlineReadiness?.key === localTranslationKey(translationSource, translationTarget ?? '') && offlineReadiness.ready;
+  const cacheKey = (id: string) => translationTarget ? JSON.stringify([id, translationEngine, translationSource]) : id;
   const styleChangePending = extraStyleChoice?.pending;
   const presentation = stylePackPresentation(pack, t);
   const savedExamples = pack.examples
@@ -50,9 +62,9 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   // exact fresh result through the selection, rather than calling it a restore
   // merely because it has just been added to the comparison cache.
   const freshSelectionResult = useRef<{ packId: string; signature: string; result: StyleTextTrialResult } | null>(null);
-  const signature = JSON.stringify([draft, pack.prompt]);
+  const signature = JSON.stringify(translationTarget ? [draft, pack.prompt, translationEngine, translationSource] : [draft, pack.prompt]);
   const result = storedResult?.packId === pack.id && resultSignature === signature ? storedResult : null;
-  const savedForPack = completed.current.get(pack.id);
+  const savedForPack = completed.current.get(cacheKey(pack.id));
   const earlier = !result && savedForPack && savedForPack.signature !== signature ? savedForPack : null;
   // Previous styles stay visibly labelled while a new style has no result yet.
   // They belong only to this exact input and unchanged saved prompt, never a new draft.
@@ -68,7 +80,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   const [copyError, setCopyError] = useState(false);
   const [error, setError] = useState('');
   const [readinessAttempt, setReadinessAttempt] = useState(0);
-  const readinessKey = JSON.stringify([pack.id, pack.baseMode, pack.prompt, readinessAttempt]);
+  const readinessKey = JSON.stringify([pack.id, pack.baseMode, pack.prompt, readinessAttempt, translationTarget, translationEngine]);
   const [readinessResponse, setReadinessResponse] = useState<{
     key: string; value: StyleTextTrialReadiness | null; failed: boolean;
   } | null>(null);
@@ -87,14 +99,14 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   const delivering = deliveryStarted !== null;
   const resultOutput = editedOutput ?? result?.outputText ?? '';
   const savedCurrentDraft = savedDraftSignature === JSON.stringify([presentation.name, draft, resultOutput]);
-  const canProcess = !!readiness?.available && (!readiness.requiresTextService || readiness.textServiceConfigured);
+  const canProcess = offline ? offlineReady : !!readiness?.available && (!readiness.requiresTextService || readiness.textServiceConfigured);
 
   useEffect(() => {
     ++generation.current;
     running.current = false;
     setPending(false);
     setShortening(false);
-    const saved = completed.current.get(pack.id);
+    const saved = completed.current.get(cacheKey(pack.id));
     const matching = saved?.signature === signature ? saved : null;
     const arriving = freshSelectionResult.current;
     freshSelectionResult.current = null;
@@ -117,13 +129,17 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   useEffect(() => {
     let current = true;
     setReadinessResponse(null);
+    if (offline) {
+      setReadinessResponse({ key: readinessKey, value: { available: true, requiresTextService: false, textServiceConfigured: false }, failed: false });
+      return;
+    }
     void getStyleTextTrialReadiness(translationTarget ? 'builtin.formal' : pack.id).then(value => {
       if (current) setReadinessResponse({ key: readinessKey, value, failed: false });
     }).catch(() => {
       if (current) setReadinessResponse({ key: readinessKey, value: null, failed: true });
     });
     return () => { current = false; };
-  }, [pack.id, readinessKey, translationTarget]);
+  }, [pack.id, readinessKey, translationTarget, offline]);
 
   useEffect(() => {
     const element = dialog.current;
@@ -136,7 +152,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   }, []);
 
   const runTrial = async (prepare?: () => Promise<StylePack>) => {
-    if (draftSaving || running.current || copyRunning.current || deliveryRequest.current || styleChangePending || !canProcess || !draft.trim()) return;
+    if (draftSaving || translationPreparing || running.current || copyRunning.current || deliveryRequest.current || styleChangePending || !canProcess || !draft.trim()) return;
     if (prepare && !readiness?.textServiceConfigured) return;
     running.current = true;
     const request = ++generation.current;
@@ -154,15 +170,18 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       const target = prepare ? await prepare() : pack;
       // Closing the workspace while preparing must not start a paid request.
       if (generation.current !== request) return;
-      const targetSignature = JSON.stringify([draft, target.prompt]);
-      const cached = prepare ? completed.current.get(target.id) : null;
+      const targetSignature = JSON.stringify(translationTarget ? [draft, target.prompt, translationEngine, translationSource] : [draft, target.prompt]);
+      const cached = prepare ? completed.current.get(cacheKey(target.id)) : null;
       const matching = cached?.signature === targetSignature ? cached : null;
-      const value = matching?.result ?? await (translationTarget
-        ? tryTranslationText(draft, translationTarget)
+      const returned = matching?.result ?? await (translationTarget
+        ? offline ? tryLocalTranslationText(draft, translationSource, translationTarget) : tryTranslationText(draft, translationTarget)
         : tryStylePackText(target.id, draft));
+      // The backend receipt identifies the route; workspace identity also binds
+      // the captured source/method signature, so late results cannot cross it.
+      const value = offline ? { ...returned, packId: target.id, packName: target.name } : returned;
       if (generation.current === request) {
-        completed.current.delete(target.id);
-        completed.current.set(target.id, { signature: targetSignature, input: draft, result: value, edited: matching?.edited ?? null });
+        completed.current.delete(cacheKey(target.id));
+        completed.current.set(cacheKey(target.id), { signature: targetSignature, input: draft, result: value, edited: matching?.edited ?? null });
         if (completed.current.size > 8) completed.current.delete(completed.current.keys().next().value!);
         if (target.id !== pack.id && onSelectPack) {
           if (!matching) freshSelectionResult.current = { packId: target.id, signature: targetSignature, result: value };
@@ -180,7 +199,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
           style_trial_timeout: 'timeout',
         }[message];
         setResult(result); setResultSignature(resultSignature); setEditedOutput(editedOutput);
-        setError(translationTarget && /status 401|AuthenticationError|Unauthorized|credentials were already rejected/i.test(message) ? t('translation.authFailed')
+        setError(offline ? t(`offlineTranslation.${localTranslationErrorKey(cause)}`) : translationTarget && /status 401|AuthenticationError|Unauthorized|credentials were already rejected/i.test(message) ? t('translation.authFailed')
           : message === 'style_trial_prepare_shorter_failed' ? t('conciseDraft.failed')
           : key ? t(`style.trial.${key}`) : t('style.trial.failed', { error: message }));
       }
@@ -197,7 +216,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
     if (!result || copying || delivering || draftSaving) return;
     const edited = value === result.outputText ? null : value;
     setEditedOutput(edited);
-    completed.current.set(pack.id, { signature, input: draft, result, edited });
+    completed.current.set(cacheKey(pack.id), { signature, input: draft, result, edited });
     setCopiedResult(null); setCopyError(false); setDeliveryMessage('');
   };
 
@@ -268,19 +287,33 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       onCancel={event => { event.preventDefault(); if (!draftSaving) onClose(); }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-        <h2 id="style-trial-title" style={{ margin: 0, fontSize: 21 }}>{t('style.trial.title', { name: presentation.name })}</h2>
+        <h2 id="style-trial-title" style={{ margin: 0, fontSize: 21 }}>{translationTarget ? t('offlineTranslation.title', { language: translationTarget }) : t('style.trial.title', { name: presentation.name })}</h2>
         <Btn size="sm" variant="ghost" disabled={draftSaving} onClick={() => { if (!draftSaving) onClose(); }}>{t('common.close')}</Btn>
       </div>
-      <p id="style-trial-description" className="ol-style-trial-hint" data-style-trial-service-notice>{t(readiness?.requiresTextService === false ? prepareShorter ? 'textWorkspace.localWithShorterNotice' : 'textWorkspace.localNotice' : 'textWorkspace.cloudNotice')}</p>
+      <p id="style-trial-description" className="ol-style-trial-hint" data-style-trial-service-notice>{t(offline ? 'offlineTranslation.localNotice' : readiness?.requiresTextService === false ? prepareShorter ? 'textWorkspace.localWithShorterNotice' : 'textWorkspace.localNotice' : 'textWorkspace.cloudNotice')}</p>
       {onTranslationTargetChange && <label className="ol-style-trial-picker" data-translation-output-choice>
         <span>{t('translation.outputLanguage')}</span>
         <select aria-label={t('translation.outputLanguage')} value={translationTarget ?? ''}
-          disabled={pending || copying || delivering || draftSaving || styleChangePending}
+          disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing}
           onChange={event => onTranslationTargetChange(event.target.value)}>
           <option value="">{t('translation.originalOutput')}</option>
           {SUPPORTED_LANGUAGES.map(language => <option key={language} value={language}>{language}</option>)}
         </select>
       </label>}
+      {translationTarget && <>
+        <label className="ol-style-trial-picker">
+          <span>{t('offlineTranslation.engine')}</span>
+          <select aria-label={t('offlineTranslation.engine')} value={translationEngine}
+            disabled={pending || copying || delivering || draftSaving || translationPreparing}
+            onChange={event => setTranslationEngine(event.target.value as TranslationEngine)}>
+            <option value="local">{t('offlineTranslation.local')}</option>
+            <option value="cloud">{t('offlineTranslation.cloud')}</option>
+          </select>
+        </label>
+        {offline && <LocalTranslationSetup source={translationSource} target={translationTarget}
+          onSourceChange={setTranslationSource} disabled={pending || copying || delivering || draftSaving}
+          onReadiness={setOfflineReadiness} onBusy={setTranslationPreparing} showNotice={false} />}
+      </>}
       {packs && onSelectPack && <label className="ol-style-trial-picker">
         <span>{t('style.trial.styleLabel')}</span>
         <select aria-label={t('style.trial.styleLabel')} value={pack.id} disabled={pending || copying || delivering || draftSaving || styleChangePending}
@@ -288,7 +321,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
           {packs.map(option => <option key={option.id} value={option.id}>{stylePackPresentation(option, t).name}</option>)}
         </select>
       </label>}
-      <p className="ol-style-trial-hint ol-style-trial-purpose" data-style-trial-purpose>{presentation.description}</p>
+      {!translationTarget && <p className="ol-style-trial-hint ol-style-trial-purpose" data-style-trial-purpose>{presentation.description}</p>}
       {(!readiness || !readiness.available || (readiness.requiresTextService && !readiness.textServiceConfigured) || readinessError) && <div className="ol-style-trial-availability">
       {readiness?.available === false && <p role="status" className="ol-style-trial-hint">{t('style.trial.nativeRequired')}</p>}
       {readiness?.available && readiness.requiresTextService && !readiness.textServiceConfigured && <p role="status" className="ol-style-trial-hint">{t('style.trial.needsService')}</p>}
@@ -313,11 +346,11 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginTop: 12 }}>
         <Btn variant="blue" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !draft.trim()} onClick={() => void runTrial()}>
-          {t(pending ? 'style.trial.running' : 'style.trial.run')}
+          {t(pending ? 'style.trial.running' : translationTarget ? 'offlineTranslation.run' : 'style.trial.run')}
         </Btn>
         {prepareShorter && <Btn variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !readiness?.textServiceConfigured || !draft.trim()}
           onClick={() => void runTrial(prepareShorter)}>{t(shortening ? 'conciseDraft.running' : 'conciseDraft.run')}</Btn>}
-        {readiness?.available && <Btn variant="ghost" disabled={draftSaving} onClick={() => setProvidersOpen(true)}>{t('style.trial.providers')}</Btn>}
+        {!offline && readiness?.available && <Btn variant="ghost" disabled={draftSaving} onClick={() => setProvidersOpen(true)}>{t('style.trial.providers')}</Btn>}
         {readiness?.available === false && <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1" target="_blank" rel="noreferrer noopener" style={{ color: 'var(--ol-blue)', fontSize: 13 }}>{t('style.trial.download')}</a>}
       </div>
       {pending && <p role="status" className="ol-style-trial-hint">{t('style.trial.pending')}</p>}
@@ -328,8 +361,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         <section ref={resultSection} className="ol-style-trial-result" aria-label={t('style.trial.output')} aria-live="polite">
           <div className="ol-style-trial-result-heading">
             <div style={{ fontWeight: 600 }}>{t('style.trial.output')}</div>
-            <span className="ol-style-trial-result-meta" title={t(editedOutput !== null ? 'style.trial.editedResult' : result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}>
-              {t(editedOutput !== null ? 'textWorkspace.editedResult' : result.usedTextService ? 'textWorkspace.serviceResult' : 'textWorkspace.localResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}
+            <span className="ol-style-trial-result-meta" title={t(editedOutput !== null ? 'style.trial.editedResult' : offline ? 'offlineTranslation.result' : result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}>
+              {t(editedOutput !== null ? 'textWorkspace.editedResult' : offline ? 'offlineTranslation.result' : result.usedTextService ? 'textWorkspace.serviceResult' : 'textWorkspace.localResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}
             </span>
           </div>
           {result.usedTextService && result.outputText === draft && editedOutput === null && <p role="note" className="ol-style-trial-hint">{t('politeEdits.unchangedResult')}</p>}
@@ -347,8 +380,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
             </Btn>
             <SaveTextDraft compact name={presentation.name} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving}
               onSaved={text => setSavedDraftSignature(JSON.stringify([presentation.name, draft, text]))} />
-            <PoliteEditSuggestions text={resultOutput} cloudConfigured={readiness?.textServiceConfigured === true}
-              disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />
+            {!offline && <PoliteEditSuggestions text={resultOutput} cloudConfigured={readiness?.textServiceConfigured === true}
+              disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />}
           </div>
           <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t(savedCurrentDraft ? isTauri ? 'textWorkspace.saved' : 'textDraft.browserSaved' : isTauri ? 'textWorkspace.unsaved' : 'textWorkspace.browserUnsaved')}</p>
           {restored && <p role="note" className="ol-style-trial-hint" data-style-trial-restored>{t('style.trial.restoredResult')}</p>}

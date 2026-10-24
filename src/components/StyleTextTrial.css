@@ -25,6 +25,21 @@
 .ol-style-trial-placeholder h3 { margin: 0; font-size: inherit; }
 .ol-style-trial-availability { display: flex; align-items: center; margin-top: 10px; }
 .ol-style-trial-availability .ol-style-trial-hint { margin: 0; }
+.ol-local-translation-setup {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin: 10px 0 12px;
+  padding: 12px;
+  border: 1px solid var(--ol-line-strong);
+  border-radius: 10px;
+  background: var(--ol-surface-2);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.ol-local-translation-setup p { margin: 0; }
+.ol-local-translation-setup > button { align-self: flex-start; max-width: 100%; white-space: normal; height: auto; min-height: 30px; }
 .ol-style-trial-purpose { margin-bottom: 12px; }
 .ol-style-trial-result-heading { display: flex; gap: 8px 12px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; margin-bottom: 8px; }
 .ol-style-trial-result-meta { color: var(--ol-ink-3); font-size: 11px; font-weight: 400; line-height: 1.5; }

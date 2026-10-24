@@ -18,6 +18,7 @@ static PREPARING: AtomicBool = AtomicBool::new(false);
 static CANCEL: AtomicBool = AtomicBool::new(false);
 static RECEIVED: AtomicU64 = AtomicU64::new(0);
 static EXPECTED: AtomicU64 = AtomicU64::new(0);
+static PREPARATION_CONTROL: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 static INFERENCE: OnceLock<parking_lot::Mutex<()>> = OnceLock::new();
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -52,6 +53,7 @@ fn catalog() -> Catalog {
 pub(crate) struct Status {
     pub supported: bool,
     pub runtime_ready: bool,
+    pub runtime_download_bytes: u64,
     pub pairs: Vec<PairStatus>,
     pub preparing: bool,
     pub received_bytes: u64,
@@ -117,6 +119,7 @@ pub(crate) fn status() -> Result<Status, String> {
     Ok(Status {
         supported: cfg!(all(target_os = "windows", target_arch = "x86_64")),
         runtime_ready,
+        runtime_download_bytes: catalog().runtime.iter().map(|asset| asset.bytes).sum(),
         pairs: catalog().pairs.into_iter().map(|p| PairStatus {
             source: p.source, target: p.target, download_bytes: p.asset.bytes,
             ready: runtime_ready && manifest_ready(&root.join(p.asset.id), false),
@@ -131,7 +134,10 @@ fn cancelled() -> Result<(), String> {
     if CANCEL.load(Ordering::Acquire) { Err("local_translation_cancelled".into()) } else { Ok(()) }
 }
 
-pub(crate) fn cancel_preparation() { CANCEL.store(true, Ordering::Release); }
+pub(crate) fn cancel_preparation() {
+    let _control = PREPARATION_CONTROL.lock();
+    if PREPARING.load(Ordering::Acquire) { CANCEL.store(true, Ordering::Release); }
+}
 
 struct Stage { path: PathBuf, root: PathBuf }
 impl Stage {
@@ -165,18 +171,34 @@ fn download(asset: &Asset, path: &Path) -> Result<(), String> {
         .user_agent("Listener-Type-offline-translation/1");
     #[cfg(test)]
     let builder = builder.no_proxy(); // local fixture HTTP never uses machine proxy
-    let mut response = builder.build().map_err(|e| e.to_string())?
-        .get(&asset.url).header(reqwest::header::RANGE, format!("bytes=0-{}", asset.bytes - 1))
-        .send().await.map_err(|_| "local_translation_download_failed".to_owned())?
-        .error_for_status().map_err(|_| "local_translation_download_failed".to_owned())?;
+    log::info!("[offline-translation] download asset={} expected_bytes={}", asset.id, asset.bytes);
+    let client = builder.build().map_err(|e| e.to_string())?;
+    let request = client.get(&asset.url).header(reqwest::header::RANGE, format!("bytes=0-{}", asset.bytes - 1));
+    let cancellation = async {
+        while !CANCEL.load(Ordering::Acquire) { tokio::time::sleep(Duration::from_millis(50)).await; }
+    };
+    tokio::pin!(cancellation);
+    let mut response = tokio::select! {
+        biased;
+        _ = &mut cancellation => return Err("local_translation_cancelled".into()),
+        result = request.send() => result.map_err(|error| {
+            log::warn!("[offline-translation] download transport asset={} timeout={} connect={}", asset.id, error.is_timeout(), error.is_connect());
+            "local_translation_download_failed".to_owned()
+        })?,
+    };
+    if !response.status().is_success() {
+        log::warn!("[offline-translation] download rejected asset={} status={}", asset.id, response.status().as_u16());
+        return Err("local_translation_download_failed".into());
+    }
     let mut output = File::create(path).map_err(|e| e.to_string())?;
     let mut count = 0;
     let mut hash = Sha256::new();
     loop {
         cancelled()?;
         let chunk = tokio::select! {
+            biased;
+            _ = &mut cancellation => return Err("local_translation_cancelled".into()),
             chunk = response.chunk() => chunk.map_err(|_| "local_translation_download_failed".to_owned())?,
-            _ = tokio::time::sleep(Duration::from_millis(100)) => { cancelled()?; continue; }
         };
         let Some(chunk) = chunk else { break };
         count += chunk.len() as u64;
@@ -224,7 +246,13 @@ fn extract(archive: &Path, dest: &Path, model_only: bool, crt_only: bool) -> Res
         let output = dest.join(path);
         fs::create_dir_all(output.parent().ok_or("local_translation_invalid_asset_path")?).map_err(|e| e.to_string())?;
         let mut file = File::create(output).map_err(|e| e.to_string())?;
-        std::io::copy(&mut item, &mut file).map_err(|e| e.to_string())?;
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            cancelled()?;
+            let bytes = item.read(&mut buffer).map_err(|e| e.to_string())?;
+            if bytes == 0 { break; }
+            file.write_all(&buffer[..bytes]).map_err(|e| e.to_string())?;
+        }
     }
     Ok(())
 }
@@ -278,30 +306,46 @@ fn prepare_directory(root: &Path, id: &str, assets: &[Asset], model: bool) -> Re
     fs::rename(&content, &dest).map_err(|e| e.to_string())
 }
 
-pub(crate) fn prepare(source: &str, target: &str) -> Result<Status, String> {
+pub(crate) struct Preparation { pair: Pair }
+impl Drop for Preparation {
+    fn drop(&mut self) {
+        let _control = PREPARATION_CONTROL.lock();
+        PREPARING.store(false, Ordering::Release);
+    }
+}
+
+/// Reserve before queueing a blocking worker, so an immediate Cancel cannot be
+/// erased by that worker resetting its flag after it eventually starts.
+pub(crate) fn reserve_preparation(source: &str, target: &str) -> Result<Preparation, String> {
     if !cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         return Err("local_translation_platform_unavailable".into());
     }
     let pair = pair_for(source, target)?;
+    let _control = PREPARATION_CONTROL.lock();
     if PREPARING.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
         return Err("local_translation_preparing".into());
     }
-    struct Guard;
-    impl Drop for Guard { fn drop(&mut self) { PREPARING.store(false, Ordering::Release); } }
-    let _guard = Guard;
     CANCEL.store(false, Ordering::Release);
-    let root = root()?;
-    let catalog = catalog();
     RECEIVED.store(0, Ordering::Relaxed);
-    let runtime_missing = !manifest_ready(&root.join(RUNTIME), true);
-    let pair_missing = !manifest_ready(&root.join(&pair.asset.id), true);
-    EXPECTED.store(if runtime_missing { catalog.runtime.iter().map(|a| a.bytes).sum::<u64>() } else { 0 }
-        + if pair_missing { pair.asset.bytes } else { 0 }, Ordering::Relaxed);
-    prepare_directory(&root, RUNTIME, &catalog.runtime, false)?;
-    prepare_directory(&root, &pair.asset.id, std::slice::from_ref(&pair.asset), true)?;
-    let mut status = status()?;
-    status.preparing = false;
-    Ok(status)
+    EXPECTED.store(0, Ordering::Relaxed);
+    Ok(Preparation { pair })
+}
+impl Preparation {
+    pub(crate) fn run(self) -> Result<Status, String> {
+        cancelled()?;
+        let pair = &self.pair;
+        let root = root()?;
+        let catalog = catalog();
+        let runtime_missing = !manifest_ready(&root.join(RUNTIME), true);
+        let pair_missing = !manifest_ready(&root.join(&pair.asset.id), true);
+        EXPECTED.store(if runtime_missing { catalog.runtime.iter().map(|a| a.bytes).sum::<u64>() } else { 0 }
+            + if pair_missing { pair.asset.bytes } else { 0 }, Ordering::Relaxed);
+        prepare_directory(&root, RUNTIME, &catalog.runtime, false)?;
+        prepare_directory(&root, &pair.asset.id, std::slice::from_ref(&pair.asset), true)?;
+        let mut status = status()?;
+        status.preparing = false;
+        Ok(status)
+    }
 }
 
 fn worker_request(runtime: &Path, model: &Path, text: &str, timeout: Duration) -> Result<String, String> {
@@ -363,9 +407,29 @@ pub(crate) fn translate(source: &str, target: &str, text: &str) -> Result<String
     worker_request(&runtime, &model, text, Duration::from_secs(45))
 }
 
+pub(crate) fn language_code(language: &str) -> Option<&'static str> {
+    match language.trim() {
+        "en" | "English" => Some("en"),
+        "zh" | "简体中文" | "繁体中文" => Some("zh"),
+        _ => None,
+    }
+}
+
+/// The same explicit offline route is shared by text previews and voice
+/// translation. Language/script choice never changes the cloud provider.
+pub(crate) async fn translate_to_language(text: String, source: String, target: String) -> Result<String, String> {
+    let target_code = language_code(&target).ok_or("local_translation_unsupported_pair")?;
+    let output = tauri::async_runtime::spawn_blocking(move || translate(&source, target_code, &text))
+        .await.map_err(|_| "local_translation_runtime_failed".to_owned())??;
+    Ok(if target.trim() == "繁体中文" {
+        crate::coordinator::apply_chinese_script_preference(&output, crate::types::ChineseScriptPreference::Traditional)
+    } else { output })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    static FLAGS: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
     #[test]
     fn local_translation_paths_cannot_escape_cache() {
         for path in ["", "../name", "a/../b", "C:/temp", "a\\b", "/abs", "a:stream"] {
@@ -409,7 +473,11 @@ mod tests {
     }
 
     #[test]
-    fn local_translation_download_can_cancel_a_stalled_body() {
+    fn local_translation_download_can_cancel_a_stalled_body() { stalled_download_cancels(true); }
+    #[test]
+    fn local_translation_download_can_cancel_before_response_headers() { stalled_download_cancels(false); }
+    fn stalled_download_cancels(send_headers: bool) {
+        let _flags = FLAGS.lock();
         use std::net::TcpListener;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/fixture", listener.local_addr().unwrap());
@@ -419,7 +487,7 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0u8; 4096];
             stream.read(&mut request).unwrap();
-            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\na").unwrap();
+            if send_headers { stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\na").unwrap(); }
             ready.send(()).unwrap();
             let _ = finish.recv_timeout(Duration::from_secs(4));
         });
@@ -438,7 +506,19 @@ mod tests {
         assert_eq!(error, "local_translation_cancelled");
         assert!(start.elapsed() < Duration::from_secs(3));
         assert_eq!(file.parent().unwrap().canonicalize().unwrap(), std::env::temp_dir().canonicalize().unwrap());
-        fs::remove_file(file).unwrap();
+        if send_headers { fs::remove_file(file).unwrap(); }
+        else { assert!(!file.exists(), "cancel before headers must not create a partial asset"); }
+    }
+
+    #[test]
+    fn local_translation_cancel_before_worker_start_cannot_be_reset() {
+        let _flags = FLAGS.lock();
+        let reservation = reserve_preparation("zh", "en").unwrap();
+        assert!(PREPARING.load(Ordering::Acquire));
+        cancel_preparation();
+        assert_eq!(reservation.run().err().unwrap(), "local_translation_cancelled");
+        assert!(!PREPARING.load(Ordering::Acquire));
+        CANCEL.store(false, Ordering::Release);
     }
 
     #[test]
@@ -474,5 +554,32 @@ mod tests {
         let long = "请确认五百件样品的报价，运费单独列出。".repeat(30) + "最后，请不要取消订单。";
         let output = worker_request(&runtime, &model, &long, Duration::from_secs(45)).unwrap();
         assert!(output.to_lowercase().contains("do not cancel the order"), "distinct final instruction must survive repetitive content");
+        assert_eq!(output.matches("500").count(), 30);
+        // Publish only into the isolated test profile to exercise the real
+        // post-ASR voice route as well as the low-level worker. No microphone,
+        // provider key, clipboard or foreground app is involved.
+        let private = std::env::var_os("LISTENER_TYPE_DATA_DIR").expect("explicit private test profile");
+        let private = PathBuf::from(private).canonicalize().unwrap();
+        assert!(stage.root.starts_with(private));
+        let published_runtime = stage.root.join(RUNTIME);
+        let published_model = stage.root.join(pair.asset.id);
+        assert!(!published_runtime.exists() && !published_model.exists());
+        fs::rename(&runtime, &published_runtime).unwrap();
+        fs::rename(&model, &published_model).unwrap();
+        let prefs = crate::types::UserPreferences {
+            translation_engine: crate::types::TranslationEngine::Local,
+            translation_source_language: "zh".into(),
+            translation_target_language: "English".into(),
+            ..Default::default()
+        };
+        let raw = crate::asr::RawTranscript { text: "不要发送邮件，只保存草稿。".into(), duration_ms: 2500 };
+        let (output, failure) = tokio::runtime::Runtime::new().unwrap().block_on(
+            crate::coordinator::translate_voice_or_passthrough(&raw, &prefs, None));
+        // Move all owned files back before assertions; Stage cleans them even
+        // when the actual voice result fails the semantic checks below.
+        fs::rename(published_runtime, runtime).unwrap();
+        fs::rename(published_model, model).unwrap();
+        assert!(failure.is_none(), "{failure:?}");
+        assert!(output.to_lowercase().contains("do not send"));
     }
 }
