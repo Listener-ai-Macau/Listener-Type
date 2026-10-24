@@ -24,6 +24,19 @@ assert.equal(questionOptions.length, 2);
 assert.equal(applyLocalPoliteOption(customer121, questionOptions[0]), customer121.replace('Could you send', 'Could you please send'));
 assert.equal(applyLocalPoliteOption(customer121, questionOptions[1]), customer121.replace('Could you send', 'Would you be able to send'));
 for (const modal of ['Can', 'Could', 'Would', 'Will']) assert.equal(localPoliteOptions(`${modal} you share the notes by 3 pm?`).length, 2);
+// Translation review offers optional prefix edits for first-person requests too.
+// The literal model phrase remains untouched; this is not a model-quality fix.
+const translatedRequest = "I'm sorry. I have a temporary appointment this afternoon. Can I move the meeting to 10:00 tomorrow morning? If it's not convenient, Friday's fine.";
+const translatedOptions = localPoliteOptions(translatedRequest);
+assert.equal(translatedOptions.length, 2);
+assert.equal(applyLocalPoliteOption(translatedRequest, translatedOptions[0]), translatedRequest.replace('Can I move', 'Could I please move'));
+assert.equal(applyLocalPoliteOption(translatedRequest, translatedOptions[1]), translatedRequest.replace('Can I move', 'Would I be able to move'));
+const sharedRequest = 'If the room is free, can we book it at 10:00 on Friday?';
+assert.equal(applyLocalPoliteOption(sharedRequest, localPoliteOptions(sharedRequest)[0]), sharedRequest.replace('can we book', 'could we please book'));
+const conditionalCancellation = 'Can I cancel order A-102 if it has not shipped?';
+assert.equal(applyLocalPoliteOption(conditionalCancellation, localPoliteOptions(conditionalCancellation)[0]), conditionalCancellation.replace('Can I cancel', 'Could I please cancel'));
+assert.deepEqual(localPoliteOptions('Can I move it to Friday? Can I move it to Friday?'), []);
+assert.deepEqual(localPoliteOptions('Can we use https://example.com/private at 10:00?'), []);
 assert.deepEqual(localPoliteOptions('Could you please send the log?').map(edit => edit.tone), ['softer']);
 assert.throws(() => applyLocalPoliteOption(customer121.replace('3 pm', '4 pm'), questionOptions[1]));
 const customer122 = 'Hi, could you send me the updated schedule by Friday? I need it to plan the handover. Thanks!';

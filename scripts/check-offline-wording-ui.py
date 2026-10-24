@@ -1,0 +1,73 @@
+"""Actual React local-translation result editing with explicit IPC fixtures.
+This exercises wording controls and paid-service isolation, not model quality.
+"""
+import argparse, datetime, json, re
+from pathlib import Path
+from playwright.sync_api import sync_playwright, expect
+
+p=argparse.ArgumentParser(description=__doc__)
+p.add_argument('--url',required=True);p.add_argument('--report',type=Path,required=True)
+p.add_argument('--expected-build');p.add_argument('--capture-before',action='store_true')
+a=p.parse_args();checks=[]
+source='抱歉，我今天下午临时有事，能把会议改到明天上午十点吗？如果不方便，周五也可以。'
+machine="I'm sorry. I have a temporary appointment this afternoon. Can I move the meeting to 10:00 tomorrow morning? If it's not convenient, Friday's fine."
+revised=machine.replace('Can I move','Could I please move')
+with sync_playwright() as pw:
+ b=pw.chromium.launch(headless=True,channel='msedge')
+ try:
+  page=b.new_page(viewport={'width':1280,'height':960})
+  page.add_init_script("""localStorage.setItem('ol.locale','en');window.__wordingCalls=[];
+  window.__wordingFixture=(cmd,args,mock)=>{
+   window.__wordingCalls.push({cmd,args});
+   if(cmd==='get_credentials')return {activeAsrProvider:'volcengine',activeLlmProvider:'ark',asrConfigured:false,llmConfigured:true,volcengineConfigured:false,arkConfigured:true};
+   if(cmd==='get_local_translation_status')return {supported:true,runtimeReady:true,runtimeDownloadBytes:38481734,pairs:[{source:'zh',target:'en',downloadBytes:74481402,ready:true},{source:'en',target:'zh',downloadBytes:70743021,ready:true}],preparing:false,receivedBytes:0,expectedBytes:0};
+   if(cmd==='get_style_text_trial_readiness')return {available:true,requiresTextService:false,textServiceConfigured:true};
+   if(cmd==='try_local_translation_text')return {packId:'local_translation:zh:en',packName:'Local translation',outputText:MACHINE,usedTextService:false,elapsedMs:2300};
+   if(cmd==='suggest_polite_text_edits'||cmd==='try_translation_text')throw new Error('Offline task must not call a text service');
+   return mock();
+  };""".replace('MACHINE',json.dumps(machine)))
+  def ipc(route):
+   response=route.fetch();s=response.text();old='if (!isTauri) {\n    return mock();\n  }';assert old in s
+   route.fulfill(response=response,body=s.replace(old,'if (!isTauri) {\n    return window.__wordingFixture(cmd,args,mock);\n  }',1))
+  page.route(re.compile(r'/src/lib/ipc\.ts(?:\?.*)?$'),ipc)
+  page.goto(a.url,wait_until='networkidle')
+  if a.expected_build:expect(page.locator('[data-app-build]')).to_have_attribute('data-app-build',a.expected_build)
+  expect(page.locator('.ol-overview-text-entry')).to_contain_text('one-time component download, no API key or translation fee')
+  checks.append({'name':'Overview explains local translation availability, preparation and fee boundary before entry','passed':True})
+  page.get_by_role('button',name='Try typed text',exact=True).click()
+  page.locator('#style-trial-input').fill(source)
+  page.get_by_role('combobox',name='Translate output to',exact=True).select_option('English')
+  page.get_by_role('combobox',name='Original language',exact=True).select_option('zh')
+  page.get_by_role('button',name='Translate',exact=True).click()
+  output=page.locator('.ol-style-trial-result-editor');expect(output).to_have_value(machine)
+  wording=page.get_by_role('button',name='Wording options',exact=True)
+  available=wording.count()==1
+  checks.append({'name':'Offline English output exposes explicit local wording options','passed':available})
+  if available:
+   wording.click();panel=page.get_by_role('region',name='Request wording',exact=True)
+   expect(panel).to_contain_text('Could I please move the meeting to 10:00 tomorrow morning?')
+   expect(panel.get_by_role('button',name='Ask text service for alternatives',exact=True)).to_have_count(0)
+   expect(panel).to_contain_text('stays local')
+   expect(output).to_have_value(machine)
+   checks.append({'name':'Local suggestions are opt-in and keep cloud controls absent even when a cloud account is configured','passed':True})
+   panel.get_by_role('button',name='Use this wording',exact=True).first.click()
+   expect(output).to_have_value(revised)
+   expect(page.locator('#style-trial-input')).to_have_value(source)
+   expect(page.locator('[data-style-trial-retention]')).to_contain_text('Not saved')
+   checks.append({'name':'Choosing a local request prefix preserves subject, request body, dates, condition and untouched literal model wording','passed':True})
+   page.get_by_role('button',name='Save draft',exact=True).click()
+   page.get_by_role('button',name='Open this saved draft',exact=True).click()
+   saved=page.get_by_role('dialog',name='Saved drafts',exact=True)
+   expect(saved.get_by_role('textbox',name='Saved text',exact=True)).to_have_value(revised)
+   checks.append({'name':'Saved draft and original use the revised current result through the existing save/read flow','passed':True})
+  calls=page.evaluate('window.__wordingCalls.map(x=>x.cmd)')
+  forbidden=[c for c in calls if c in ['suggest_polite_text_edits','try_translation_text','prepare_local_translation','set_credential'] or re.match(r'^(copy_|insert_)',c)]
+  assert not forbidden,forbidden
+  if available:
+   saves=page.evaluate("window.__wordingCalls.filter(x=>x.cmd==='save_text_draft').map(x=>x.args)")
+   assert saves[-1]['original']==source and saves[-1]['text']==revised
+  checks.append({'name':'No cloud request, new preparation, credential, clipboard or external insertion is triggered','passed':True})
+ finally:b.close()
+r={'at':datetime.datetime.now().astimezone().isoformat(),'scope':__doc__,'passed':all(x['passed'] for x in checks),'checks':checks,'originalMachineText':machine,'expectedExplicitEdit':revised}
+a.report.parent.mkdir(parents=True,exist_ok=True);a.report.write_text(json.dumps(r,ensure_ascii=False,indent=2)+'\n',encoding='utf-8');print(json.dumps(r,ensure_ascii=False))
+if not r['passed'] and not a.capture_before:raise SystemExit(1)

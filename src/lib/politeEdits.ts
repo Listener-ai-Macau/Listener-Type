@@ -18,18 +18,19 @@ export function localPoliteOptions(source: string): LocalPoliteOption[] {
     if (sentence.length > 240 || /[\r\n`]|https?:|www\.|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/iu.test(sentence)) continue;
     // Find the request span rather than requiring the whole sentence to begin
     // with it. Greetings, addressees and preceding conditions stay outside it.
-    const question = /\b(?:could|can|would|will)[ \t]+you[ \t]+(?:please[ \t]+)?(send|share|check|review|confirm|provide|bring|update|let|tell|give|take|return|submit|forward|attach)[ \t]+([^?!]+?)\?$/iu.exec(sentence);
+    const question = /\b(?:could|can|would|will)[ \t]+(you|I|we)[ \t]+(?:please[ \t]+)?(send|share|check|review|confirm|provide|bring|update|let|tell|give|take|return|submit|forward|attach|move|change|reschedule|postpone|meet|join|schedule|use|book|cancel)[ \t]+([^?!]+?)\?$/iu.exec(sentence);
     const imperative = /(?:^|,[ \t]+)((?:(?:please|kindly)[ \t]+)?(send|share|check|review|confirm|provide|bring|update|let|tell|give|take|return|submit|forward|attach)[ \t]+([^?!]+?)[.!]?)$/iu.exec(sentence);
     if (!question && !imperative) continue;
     const old = question?.[0] ?? imperative![1];
-    const verb = question?.[1] ?? imperative![2];
-    const object = question?.[2] ?? imperative![3];
+    const subject = question?.[1].toLowerCase() === 'i' ? 'I' : question?.[1].toLowerCase() ?? 'you';
+    const verb = question?.[2] ?? imperative![2];
+    const object = question?.[3] ?? imperative![3];
     if (/\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|etc|[A-Z])\.$/u.test(old)) continue;
     if (source.indexOf(old) !== source.lastIndexOf(old)) continue;
     const body = `${verb.toLowerCase()} ${object}`;
     const choices: { tone: LocalPoliteOption['tone']; prefix: string }[] = [
-      { tone: 'courteous', prefix: 'Could you please' },
-      { tone: 'softer', prefix: 'Would you be able to' },
+      { tone: 'courteous', prefix: `Could ${subject} please` },
+      { tone: 'softer', prefix: `Would ${subject} be able to` },
     ];
     for (const { tone, prefix } of choices) {
       const caseMatchedPrefix = /^[a-z]/u.test(old) ? prefix[0].toLowerCase() + prefix.slice(1) : prefix;
