@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build169 / Firmware37
+# Listener v1.0.6-rc1 · Type build170 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -7,9 +7,9 @@
 
 ## In this app update
 
-Type build169 keeps simple local wording suggestions within a clearly bounded request. Ambiguous compound imperatives, including a request followed by a separate promise, are left unchanged. Supported options preview the complete proposed message, with only the changed span highlighted. These limited rules do not rewrite complex English or repair translation meaning; keep reviewing drafts. No model download or added service, and Firmware37 is unchanged.
+Type build170 lets you edit a copy from Saved drafts and explicitly save it as a new draft. The original message and attached source remain available. Unsaved changes can be kept or discarded when leaving; saving reuses the existing retry protection. No translation/model download or added service is involved, and Firmware37 is unchanged.
 
-The original/current comparison, explicit adoption, result-owned Undo and saved drafts remain available. Prior build168 bounded event/daypart improvements remain; its availability clause can still be inaccurate. This update does not claim general translation quality.
+Local translation and limited simple-request wording choices remain available. Review translations and edit them before using them; complex meaning and English grammar are not universally qualified.
 
 ## Before using
 

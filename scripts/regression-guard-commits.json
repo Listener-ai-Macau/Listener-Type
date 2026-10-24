@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T16:00:00.280190+08:00",
+  "updated_at": "2026-10-24T16:41:58.755117+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7542,6 +7542,47 @@
         "Narrow imperative eligibility is not a complete English parser; unsupported compounds remain editable with no local rewrite."
       ],
       "commit_subject": "Decline compound imperative rewrites and preview complete wording choices"
+    },
+    {
+      "id": "saved_draft_copy_shared_idempotent_save_retains_original",
+      "subject": "Saved-message editable copy creates independent record, with shared idempotent save and original/source retention",
+      "repo": "type",
+      "commit": "60f7741307b51d3de3e0c3c7c2a19dd9b021cbdd",
+      "state": "Type170_matching_package_installed_native_scoped_proof_and_public_asset_verified",
+      "humanAccepted": false,
+      "protects": [
+        "Editing a selected immutable snapshot creates a new record; original name/source/body/id are retained and no copy/insert/cloud operation is automatic.",
+        "Existing and new draft saves use one request/signature controller. Uncertain writes reuse request id; exact acknowledged payload restores saved state and only confirmed missing/deleted record invalidates prior receipt.",
+        "Pending save locks body/selection/close; unsaved Back/Close cancellation retains text, explicit discard creates no record. Returning exactly to saved copy content restores the matching acknowledgement."
+      ],
+      "guards": [
+        "python scripts/check-saved-text-drafts-ui.py --url <controlled> --edit-copy --report <receipt>",
+        "python scripts/check-offline-wording-ui.py --url <controlled> --check-undo --check-context --check-boundaries --report <receipt>"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\saved-copy170-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\saved-copy170-existing-wording.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native170-snapshot-20261024-162647\\saved-copy170-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build170\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build170\\type170-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build170\\post-update-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native170-snapshot-20261024-162647\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener170-update-20261024-162937\\qualification.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual controlled shared save legacy flow plus copy uncertain-write retry, pending locks, original/source preservation, new record selection, cancelled leave and explicit discard; old wording/Undo/retention scope unchanged.",
+        "Saved draft edit-as-new in existing library preserves original/body/source, adds independently saved record and supports explicit unsaved discard. Shared save controller retains idempotent uncertain-write retries, exact acknowledgement and pending locks. No model/cloud/ASR/BLE/firmware change.",
+        "Saved draft edit-as-new in existing library preserves original/body/source, adds independently saved record and supports explicit unsaved discard. Shared save controller retains idempotent uncertain-write retries, exact acknowledgement and pending locks. No model/cloud/ASR/BLE/firmware change. Exact native170 own169 draft read/copy edit/new save with independent id, unchanged old records/source and no-save discard. Uncertain-write retry/delay locks are controlled React; seeded own data is not in-place MSI migration or physical/buying proof."
+      ],
+      "pending_human_scope": [
+        "One-step undo of chosen wording only; not arbitrary edit history or saved-record deletion.",
+        "Controlled React until matching native evidence; no physical key/speech/editor or buying qualification.",
+        "Model literal phrasing and language limits retained; no new model or cloud service.",
+        "Original167 availability clause still mistranslated; event/daypart markers are not a complete semantic quality metric.",
+        "Narrow imperative eligibility is not a complete English parser; unsupported compounds remain editable with no local rewrite.",
+        "Own169 customer draft file explicitly copied as a native fixture; not real customer migration or physical qualification."
+      ],
+      "commit_subject": "Reuse saved messages as editable copies with shared idempotent saving"
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -8336,7 +8377,8 @@
         "offline_translation_wording_keeps_subject_facts_and_no_paid_controls",
         "wording_adoption_receipt_undo_owns_result_and_saved_text",
         "local_translation_event_dayparts_and_full_message_review",
-        "local_wording_compound_imperative_boundary_and_complete_candidate"
+        "local_wording_compound_imperative_boundary_and_complete_candidate",
+        "saved_draft_copy_shared_idempotent_save_retains_original"
       ],
       "paths": {
         "type": [
@@ -8428,7 +8470,11 @@
           "src/lib/politeEdits.test.ts",
           "src-tauri/resources/translation/worker.py",
           "src/lib/localTranslation.ts",
-          "scripts/check-local-translation-preservation.py"
+          "scripts/check-local-translation-preservation.py",
+          "src/lib/useTextDraftSave.ts",
+          "src/components/SavedTextDraftCopyEditor.tsx",
+          "src/i18n/savedDraftCopy.ts",
+          "src/i18n/index.ts"
         ]
       },
       "known_failures": [
