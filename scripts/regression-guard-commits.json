@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T22:07:48.010940+08:00",
+  "updated_at": "2026-10-24T22:54:40.165865+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7751,6 +7751,38 @@
         "No natural customer174 judgement or buying/real after-sale qualification."
       ],
       "commit_subject": "Localize style editing and unchanged factory vocabulary labels without rewriting user data"
+    },
+    {
+      "id": "ble_recovery_main_ui_ownership_and_about_feedback",
+      "subject": "Ordinary recovery entries join one operation across cancellation and settings navigation; About shows outcome",
+      "repo": "type",
+      "commit": "58e387143a23a5033e562d4f4fe60a7ffdb53567",
+      "state": "Type175_matching_package_installed_native_scoped_proof_and_public_asset_verified",
+      "humanAccepted": false,
+      "protects": [
+        "Ownership is published before cancellation and native recovery, survives page unmount/remount and releases on both result and rejection.",
+        "Existing Overview/pairing/About entries share the same main-WebView operation; About reopening observes it without a new cancel or recovery.",
+        "About busy/result/error stays visible, system opening failure is distinct, closed About cannot later open OS settings."
+      ],
+      "guards": [
+        "python scripts/check-device-recovery-ui.py --url <controlled> --report <receipt>"
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\recovery175-before.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\recovery175-after.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native175-snapshot-20261024-224642\\recovery175-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build175\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build175\\type175-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build175\\post-update-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native175-snapshot-20261024-224642\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener175-update-20261024-224835\\qualification.json"
+      ],
+      "machine_accepted_scope": [
+        "One shared ordinary-main-UI recovery operation is owned before cancellation/native request and survives About page navigation. About shows busy/result/error; retry works after settlement; closed page cannot later open system settings. No native recovery protocol, firmware, speech/model/provider/default change.",
+        "One shared ordinary-main-UI recovery operation is owned before cancellation/native request and survives About page navigation. About shows busy/result/error; retry works after settlement; closed page cannot later open system settings. No native recovery protocol, firmware, speech/model/provider/default change. Exact175 packaged idle About recovery control, local Help/back navigation and unchanged private stores. No recovery click, native request, physical repair or OS opening. Request lifecycle stays explicitly controlled-React evidence."
+      ],
+      "pending_human_scope": "No actual BLE recovery, system settings, physical disconnect/re-pair or OS-global qualification; controlled native replies only, daily unaffected.",
+      "commit_subject": "Keep BLE recovery requests owned across settings navigation and show results"
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -9044,6 +9076,21 @@
           "src/lib/vocabPresetPresentation.ts",
           "src/lib/vocabPresets.ts",
           "src/pages/Vocab.tsx"
+        ]
+      }
+    },
+    {
+      "id": "ble-recovery-ui",
+      "accepted_scope": "One shared ordinary-main-UI recovery operation is owned before cancellation/native request and survives About page navigation. About shows busy/result/error; retry works after settlement; closed page cannot later open system settings. No native recovery protocol, firmware, speech/model/provider/default change.",
+      "baseline_state": "affected_controlled_ui_passed_native_pending",
+      "guard_entries": [
+        "ble_recovery_main_ui_ownership_and_about_feedback"
+      ],
+      "paths": {
+        "type": [
+          "src/lib/ipc.ts",
+          "src/components/DeviceRecoveryControl.tsx",
+          "src/components/SettingsModal.tsx"
         ]
       }
     }
