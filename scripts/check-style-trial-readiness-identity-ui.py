@@ -74,7 +74,7 @@ window.__fixture=(cmd,args,mock)=>{
         expect(run).to_be_enabled()
         raw_notice = dialog.locator('[data-style-trial-service-notice]').inner_text()
         page.evaluate('window.__delay=true; window.__transitions=[]')
-        dialog.get_by_role('combobox').select_option('builtin.light')
+        dialog.get_by_role('combobox', name='Trial style', exact=True).select_option('builtin.light')
         page.wait_for_function('window.__pending.length===1')
         transition = page.evaluate('window.__transitions.at(-1)')
         report['rawNotice'] = raw_notice
@@ -88,7 +88,7 @@ window.__fixture=(cmd,args,mock)=>{
             expect(run).to_be_disabled()
             # Switching before the Light lookup returns must not let its late
             # result grant a service-dependent style eligibility or local label.
-            dialog.get_by_role('combobox').select_option('builtin.formal')
+            dialog.get_by_role('combobox', name='Trial style', exact=True).select_option('builtin.formal')
             page.wait_for_function('window.__pending.length===2')
             page.evaluate('window.__pending[0].resolve({available:true,requiresTextService:false,textServiceConfigured:false})')
             expect(run).to_be_disabled()

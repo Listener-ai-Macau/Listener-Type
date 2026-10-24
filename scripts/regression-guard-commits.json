@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T09:15:26.560555+08:00",
+  "updated_at": "2026-10-24T09:38:45.566017+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7085,7 +7085,7 @@
     {
       "id": "translation_preview_explicit_editable_and_failure_not_hidden",
       "subject": "Typed translation is an explicit source-preserving preview; failed translation is never silent Raw success",
-      "state": "source_native16_headless_scope_passed_matching_package_pending",
+      "state": "exact_MSI161_native_explicit_text_translation_copy_passed_held_not_installed_public",
       "repo": "type",
       "commit": "7394063f719fd985ccc016e961169dca84d0df07",
       "commit_subject": "Add explicit editable translation previews and retain visible translation failure receipts",
@@ -7101,13 +7101,18 @@
         "npx --no-install tsc --noEmit"
       ],
       "unverified": [
-        "Matching native preview real-service/invalid-service, package/install/public and fresh-customer improvement not yet established.",
-        "No all-function, physical dedicated gesture, real voice Translation success or hardware purchase qualification."
+        "Not installed or public; local translation prototype is separate and not integrated.",
+        "Real voice Translation with valid daily text credentials/dedicated key, physical warning lamp, arbitrary target and all-function acceptance remain separate.",
+        "Original Owner Ark401 is not a repaired or usable credential. No account/provider automatically switched."
       ],
       "machine_evidence": [
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\translation161-workspace-headless.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\translation161-guidance-headless.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-091319-9eae9a\\result.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-091319-9eae9a\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native161-snapshot-20261024-092424\\translation161-native-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native161-snapshot-20261024-092424\\setup-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261024-build161\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build161\\source-audit.json"
       ]
     }
   ],
