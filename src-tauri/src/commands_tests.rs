@@ -2700,15 +2700,36 @@ fn snapshot() -> CredentialsSnapshot {
 }
 
 #[test]
-fn diagnostic_redaction_masks_common_secret_tokens() {
+fn diagnostic_redaction_omits_credential_records() {
     let line = "Authorization: Bearer sk-test api_key=abc access_token=def ok";
-    let redacted = sanitize_diagnostic_log_line(line).expect("line retained");
+    assert!(sanitize_diagnostic_log_line(line).is_none());
+}
 
-    assert!(!redacted.contains("sk-test"));
-    assert!(!redacted.contains("api_key=abc"));
-    assert!(!redacted.contains("access_token=def"));
-    assert!(redacted.contains("[redacted] [redacted]"));
-    assert!(redacted.ends_with("ok"));
+#[test]
+fn diagnostic_redaction_excludes_standard_credential_field_formats() {
+    let canary = "CredentialCanaryForThisSyntheticFixture";
+    for line in [
+        format!("WARN Authorization: Bearer {canary}"),
+        format!(r#"WARN provider {{"apiKey": "{canary}"}}"#),
+        format!("WARN access_token = {canary}"),
+        format!("WARN X-Api-Key: {canary}"),
+        format!("WARN X-Api-Access-Key: {canary}"),
+        format!("WARN API Key: {canary}"),
+        format!("WARN refresh-token: {canary}"),
+        format!("WARN {{\"Authorization\":\"Basic {canary}\"}}"),
+    ] {
+        assert!(sanitize_diagnostic_log_line(&line).is_none());
+    }
+    for line in [
+        "WARN [embedded-ble] notify timed out attempt=3",
+        "INFO [asr] configured=true resource=volc.bigasr.sauc.duration",
+    ] {
+        assert_eq!(sanitize_diagnostic_log_line(line).as_deref(), Some(line));
+    }
+    let provider = format!("ERROR [llm] HTTP 400 body={{\"message\":\"{canary}\"}}");
+    let metadata = sanitize_diagnostic_log_line(&provider).expect("HTTP status retained");
+    assert!(!metadata.contains(canary));
+    assert!(metadata.contains("HTTP 400"));
 }
 
 #[test]
@@ -2925,6 +2946,23 @@ fn diagnostic_export_filename_includes_device_and_timestamp() {
 
 #[test]
 fn diagnostic_zip_export_writes_desktop_data_and_offline_firmware_summary() {
+    // Test logs are process-scoped by log_dir_path() under cfg(test). Exercise
+    // the real archive consumer, not only the string-sanitizer helper.
+    let log_path = crate::log_dir_path().join("listener-type.log");
+    std::fs::create_dir_all(log_path.parent().unwrap()).expect("test log directory");
+    struct RestoreLog(std::path::PathBuf, Option<Vec<u8>>);
+    impl Drop for RestoreLog {
+        fn drop(&mut self) {
+            if let Some(bytes) = &self.1 { let _ = std::fs::write(&self.0, bytes); }
+            else { let _ = std::fs::remove_file(&self.0); }
+        }
+    }
+    let _restore = RestoreLog(log_path.clone(), std::fs::read(&log_path).ok());
+    let credential = "SensitiveDiagnosticCredentialFixtureOnly";
+    let transcript = "SensitiveDiagnosticTranscriptFixtureOnly";
+    std::fs::write(&log_path, format!(
+        "2026-10-24T12:00:00Z [WARN] [embedded-ble] Authorization: Bearer {credential}\n2026-10-24T12:00:01Z [WARN] [embedded-ble] {{\"apiKey\": \"{credential}\"}}\n2026-10-24T12:00:02Z [WARN] [asr] access_token = {credential}\n2026-10-24T12:00:03Z [ERROR] rawTranscript={transcript}\n2026-10-24T12:00:04Z [WARN] [embedded-ble] ordinary_metadata attempt=3\n2026-10-24T12:00:05Z [ERROR] [llm] HTTP 400 body={{\"message\":\"{transcript}\"}}\n  \"continuation\": \"{credential}\"\n"
+    )).expect("write synthetic diagnostic lines");
     let package = diagnostic_export_test_package();
     let firmware_log = crate::embedded_ble::FirmwareDiagnosticLogPull::offline(
         "windows",
@@ -2940,6 +2978,17 @@ fn diagnostic_zip_export_writes_desktop_data_and_offline_firmware_summary() {
 
     let file = std::fs::File::open(&zip_path).expect("open diagnostic zip");
     let mut archive = zip::ZipArchive::new(file).expect("read diagnostic zip");
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).expect("archive entry");
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).expect("entry bytes");
+        assert!(!bytes.windows(credential.len()).any(|part| part == credential.as_bytes()));
+        assert!(!bytes.windows(transcript.len()).any(|part| part == transcript.as_bytes()));
+    }
+    let mut log_tail = String::new();
+    archive.by_name("desktop/listener-type-log-tail.txt").unwrap()
+        .read_to_string(&mut log_tail).expect("read sanitized log tail");
+    assert!(log_tail.contains("ordinary_metadata attempt=3"));
     assert!(archive.by_name("manifest.json").is_ok());
     assert!(archive.by_name("desktop/diagnostic_package.json").is_ok());
     assert!(archive

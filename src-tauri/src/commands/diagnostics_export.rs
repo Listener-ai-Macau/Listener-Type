@@ -15,9 +15,9 @@ pub fn export_error_log(target_path: String) -> Result<(), String> {
 
 /// Export the minimal first-start/OOBE diagnostic package used by the Windows installer path.
 ///
-/// The package is intentionally metadata-only: it excludes audio bytes, raw transcripts,
-/// final inserted text and credential values. Credentials are represented only as
-/// configured/unconfigured booleans.
+/// Desktop metadata excludes raw transcripts, final inserted text and credential
+/// values. Previously retained debug WAV samples may be included and are declared
+/// in the archive manifest; export does not start a new recording.
 #[tauri::command]
 pub fn export_diagnostic_package(
     coord: CoordinatorState<'_>,
@@ -830,6 +830,14 @@ fn read_diagnostic_log_tail(max_lines: usize) -> Vec<String> {
         .lines()
         .rev()
         .take(max_lines)
+        // The production logger writes RFC3339 record heads. Continuations
+        // can be pretty-printed provider payloads and carry no safe metadata
+        // boundary, so they must not become independent exported records.
+        .filter(|line| {
+            line.split_whitespace().next().is_some_and(|stamp| {
+                chrono::DateTime::parse_from_rfc3339(stamp).is_ok()
+            })
+        })
         .map(|line| line.to_string())
         .collect();
     lines.reverse();
@@ -887,12 +895,40 @@ fn is_diagnostic_error_line(line: &str) -> bool {
 }
 
 fn sanitize_diagnostic_log_line(line: &str) -> Option<String> {
-    if diagnostic_line_may_contain_user_text(line) {
+    let metadata = diagnostic_metadata_without_provider_payload(line);
+    let line = metadata.as_str();
+    if diagnostic_line_may_contain_user_text(line) || diagnostic_line_may_contain_credentials(line) {
         return None;
     }
     let redacted = redact_diagnostic_log_line(line);
     let trimmed: String = redacted.chars().take(480).collect();
     Some(trimmed)
+}
+
+fn diagnostic_metadata_without_provider_payload(line: &str) -> String {
+    // These are the free-form response fields used by the HTTP log producers.
+    // Preserve the status/prefix, never include arbitrary server response text.
+    let lower = line.to_ascii_lowercase();
+    let boundary = [" body=", " body:", " response_body=", " response_body:"]
+        .iter()
+        .filter_map(|marker| lower.find(marker))
+        .min();
+    match boundary {
+        Some(index) => format!("{} [provider payload omitted]", &line[..index]),
+        None => line.to_string(),
+    }
+}
+
+fn diagnostic_line_may_contain_credentials(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    // A value can be separated by whitespace, JSON punctuation, '=' or an
+    // authorization scheme. Omitting the whole record avoids guessing where
+    // a possibly multi-token value ends. Typed configured/unconfigured flags
+    // remain available in diagnostic_package.json.
+    diagnostic_token_contains_secret(&lower)
+        || lower
+            .split(|ch: char| !ch.is_ascii_alphanumeric())
+            .any(|word| matches!(word, "authorization" | "bearer"))
 }
 
 fn diagnostic_line_may_contain_user_text(line: &str) -> bool {
@@ -941,15 +977,21 @@ fn redact_diagnostic_log_line(line: &str) -> String {
 fn diagnostic_token_contains_secret(lower: &str) -> bool {
     const SECRET_MARKERS: &[&str] = &[
         "api_key",
+        "api-key",
+        "api key",
         "apikey",
         "x-goog-api-key",
         "access_key",
+        "access-key",
         "accesskey",
         "secret_key",
+        "secret-key",
         "secretkey",
         "access_token",
+        "access-token",
         "accesstoken",
         "refresh_token",
+        "refresh-token",
         "refreshtoken",
     ];
     SECRET_MARKERS.iter().any(|marker| lower.contains(marker))
