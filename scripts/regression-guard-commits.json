@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T09:38:45.566017+08:00",
+  "updated_at": "2026-10-24T10:12:44+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7114,6 +7114,37 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261024-build161\\type-artifact-verification.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build161\\source-audit.json"
       ]
+    },
+    {
+      "id": "offline_translation_optional_verified_worker_no_cloud_fallback",
+      "subject": "On-demand offline text translation runtime with verified assets and an isolated one-shot CPU worker",
+      "state": "source_backend_native_fixture_passed_not_installed_or_public",
+      "repo": "type",
+      "commit": "a7781710dc0d75cba1898a05c2729808e3f21f22",
+      "commit_subject": "Add an isolated on-demand offline text translation runtime",
+      "humanAccepted": false,
+      "protects": [
+        "No model/runtime network access except explicit preparation; no provider credentials, automatic paid fallback, microphone, clipboard or history side effects.",
+        "Pinned component bytes/SHA256, bounded data-only model extraction, owned atomic staging, independent private profile cache; corrupt assets cannot be used for inference.",
+        "Two CPU threads, isolated embedded interpreter without user packages/converters/Torch/NumPy; worker exits after a bounded request.",
+        "Long Windows dependency paths use extended library discovery; native readers receive relative verified model paths.",
+        "Short paragraph context stays together; long repetitive paragraphs retain a distinct last instruction rather than silent source truncation."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib local_translation::tests::"
+      ],
+      "unverified": [
+        "No front-end download/source/engine controls yet; no ordinary UI path or voice translation routing proved.",
+        "Actual native fixture reused saved official archives; first real Type download UI is not tested.",
+        "General translation accuracy, all languages, target OS variants and non-ASCII profile matrix remain unqualified.",
+        "Existing cloud ASR charges and daily Ark401 remain separate, unchanged."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\local-nmt\\integration-checkpoint.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-100954-9db2c2\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-100954-476809\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\local-nmt\\long-runtime-path-result.json"
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -8324,6 +8355,22 @@
           "src-tauri/src/coordinator/dictation_embedded_stream.rs",
           "src-tauri/src/coordinator/dictation_embedded_stream_session.rs",
           "src-tauri/src/coordinator/dictation_tests.rs"
+        ]
+      }
+    },
+    {
+      "id": "offline-text-translation",
+      "accepted_scope": "Controlled saved-archive Windows backend inference and lifecycle only; no front-end, voice, general quality or product delivery.",
+      "baseline_state": "source_backend_native_fixture_passed",
+      "guard_entries": [
+        "offline_translation_optional_verified_worker_no_cloud_fallback"
+      ],
+      "paths": {
+        "type": [
+          "src-tauri/src/local_translation.rs",
+          "src-tauri/resources/translation/worker.py",
+          "src-tauri/resources/translation/catalog.json",
+          "src-tauri/src/commands/style_pack_commands.rs"
         ]
       }
     }
