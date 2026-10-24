@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build167 / Firmware37
+# Listener v1.0.6-rc1 · Type build168 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -7,10 +7,9 @@
 
 ## In this app update
 
-- After choosing wording, the review panel names the adopted tone instead of saying that no matching local option remains.
-- Undo wording change restores the text from just before that choice. It changes the current workspace only: original text and previously saved drafts remain unchanged. Review the result before copying or saving.
-- A manual edit retires the old undo action. A new translation result cannot inherit an older result's undo receipt, even when its wording is identical. Existing local-only review remains free of cloud suggestion requests; cloud alternatives retain their separate explicit action and fee notice.
-- Translation models, local language coverage, providers, normal recording, Bluetooth and Firmware37 are unchanged. This is a one-step wording undo, not a general edit history or a full translation-quality repair.
+Type build168 keeps the original and current translation visible while comparing wording. Local model search now retains the meeting and both dayparts in a previously failing rescheduling request, without losing a previously correct quotation closing. This is a bounded improvement: the availability clause in that request is still inaccurate, so review before use. No extra model download or paid service; Firmware37 is unchanged.
+
+The original text, editable result, named adopted wording and workspace Undo remain available. Manual edits and new results cannot borrow old Undo; saved drafts are not rewritten. Voice recognition still uses the selected speech service and its fees.
 
 ## Before using
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T14:58:21.387075+08:00",
+  "updated_at": "2026-10-24T15:37:29.876211+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7454,6 +7454,51 @@
         "Controlled React until matching native evidence; no physical key/speech/editor or buying qualification.",
         "Model literal phrasing and language limits retained; no new model or cloud service."
       ]
+    },
+    {
+      "id": "local_translation_event_dayparts_and_full_message_review",
+      "subject": "Bounded event/daypart retention and original/current message context during optional wording review",
+      "repo": "type",
+      "commit": "be0d78e76eae9a78666fa2a8cbf4ff1bf7146f3c",
+      "state": "Type168_matching_package_installed_native_scoped_proof_and_public_asset_verified",
+      "humanAccepted": false,
+      "protects": [
+        "Original167 meeting/Tue3pm/Wed10am restored by beam8 only; original166 Thanks retained. Coverage/clause/nbest failed research not shipped.",
+        "Original and current result stay accessible above independently scrolling choices; selection/edit/Undo update current context and stale result ownership is fenced.",
+        "UI-localized target heading retains native language value; local translation never silently switches to paid services."
+      ],
+      "guards": [
+        "python scripts/check-local-translation-preservation.py --runtime <prepared> --zh-en <prepared> --en-zh <prepared> --report <receipt>",
+        "python scripts/check-offline-wording-ui.py --url <controlled> --check-context --check-undo --report <receipt>",
+        "python scripts/check-polite-edit-suggestions-ui.py --url <controlled> --report <receipt>"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\local-nmt\\preservation168-product.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\local-nmt\\coverage168-research.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\local-nmt\\clause168-research.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\local-nmt\\nbest168-research.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\review168-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\review168-cloud-compatibility.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\review168-controller-failure.json",
+        "work\\customer-onboarding-20261020\\isolated-native168-snapshot-20261024-153410\\local-wording168-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build168\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build168\\type168-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build168\\post-update-native.json",
+        "work\\customer-onboarding-20261020\\isolated-native168-snapshot-20261024-153410\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener168-update-20261024-153507\\qualification.json"
+      ],
+      "machine_accepted_scope": [
+        "11 saved-model bounded marker cases and actual controlled React geometry at1280/700/520 widths, context changes/Undo/save/cloud isolation. Original167 availability relation remains wrong; no general translation quality or hardware claim.",
+        "Local translation beam8 restores actual167 event and both dayparts while retaining actual166 quotation/Thanks; complete original/current result stays visible above independently scrolling wording choices. Current text tracks selection/edit/Undo and target heading follows UI locale. Availability relation remains inaccurate; not a general quality guarantee.",
+        "Local translation beam8 restores actual167 event and both dayparts while retaining actual166 quotation/Thanks; complete original/current result stays visible above independently scrolling wording choices. Current text tracks selection/edit/Undo and target heading follows UI locale. Availability relation remains inaccurate; not a general quality guarantee. Exact native168 original166 quotation/Thanks, source/revision save/Undo and current context, original167 event/dayparts and new source/current context. Availability relation remains wrong; no full quality, physical or buying claim."
+      ],
+      "pending_human_scope": [
+        "One-step undo of chosen wording only; not arbitrary edit history or saved-record deletion.",
+        "Controlled React until matching native evidence; no physical key/speech/editor or buying qualification.",
+        "Model literal phrasing and language limits retained; no new model or cloud service.",
+        "Original167 availability clause still mistranslated; event/daypart markers are not a complete semantic quality metric."
+      ],
+      "commit_subject": "Keep full message visible during wording review and restore omitted meeting details"
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -8246,7 +8291,8 @@
         "translation_preview_explicit_editable_and_failure_not_hidden",
         "local_text_launch_keeps_explicit_speech_setup_and_scoped_history",
         "offline_translation_wording_keeps_subject_facts_and_no_paid_controls",
-        "wording_adoption_receipt_undo_owns_result_and_saved_text"
+        "wording_adoption_receipt_undo_owns_result_and_saved_text",
+        "local_translation_event_dayparts_and_full_message_review"
       ],
       "paths": {
         "type": [
@@ -8335,7 +8381,10 @@
           "src/i18n/ko.ts",
           "scripts/check-offline-wording-ui.py",
           "src/i18n/politeEdits.ts",
-          "src/lib/politeEdits.test.ts"
+          "src/lib/politeEdits.test.ts",
+          "src-tauri/resources/translation/worker.py",
+          "src/lib/localTranslation.ts",
+          "scripts/check-local-translation-preservation.py"
         ]
       },
       "known_failures": [
