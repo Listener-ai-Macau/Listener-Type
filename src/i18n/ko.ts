@@ -400,7 +400,7 @@ export const ko: typeof zhCN = {
     firstDictationInput: "마이크 및 입력 소스",
     firstDictationCancel: "Esc 키로 녹음을 취소합니다.",
     tryTypedText: "입력한 글로 사용해 보기",
-    tryTypedTextHint: "마이크 없이 스타일을 선택해 볼 수 있습니다. 문장 다듬기에는 텍스트 서비스가 필요합니다.",
+    tryTypedTextHint: 'Windows 로컬 중국어↔영어 번역은 구성 요소를 한 번 내려받으면 API 키와 번역 요금이 필요 없습니다. AI 문장 다듬기에는 텍스트 서비스가 필요합니다.',
     quickStartTitle: '빠른 시작',
     quickStartDesc: "음성 인식을 설정하면 받아쓰기를 시작할 수 있습니다. AI 문장 다듬기는 선택 사항입니다.",
     quickStartAsrReady: "음성 인식이 설정되었습니다. 기기 버튼이나 녹음 단축키로 받아쓰기를 시작하세요. AI 문장 다듬기는 선택 사항입니다.",

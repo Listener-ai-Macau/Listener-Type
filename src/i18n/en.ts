@@ -443,7 +443,7 @@ export const en: typeof zhCN = {
     firstDictationInput: "Microphone and input source",
     firstDictationCancel: "Esc cancels the recording.",
     tryTypedText: "Try typed text",
-    tryTypedTextHint: "No microphone needed. Choose a style; polishing needs a text service.",
+    tryTypedTextHint: 'Windows: local Chinese ↔ English translation needs a one-time component download, no API key or translation fee. AI polishing needs a text service.',
     quickStartTitle: 'Quick start',
     quickStartDesc: "Set up speech recognition to start dictating. AI polishing is optional.",
     quickStartAsrReady: "Speech recognition is configured. Use your device key or recording shortcut to dictate; AI polishing is optional.",

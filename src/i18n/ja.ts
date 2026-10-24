@@ -400,7 +400,7 @@ export const ja: typeof zhCN = {
     firstDictationInput: "マイクと入力元",
     firstDictationCancel: "Esc で録音をキャンセルできます。",
     tryTypedText: "入力した文章で試す",
-    tryTypedTextHint: "マイクは不要です。スタイルを選んで試せます。整文にはテキストサービスが必要です。",
+    tryTypedTextHint: 'Windows のローカル中英翻訳は、コンポーネントを一度ダウンロードすれば API キーも翻訳料金も不要です。AI 文章整形にはテキストサービスが必要です。',
     quickStartTitle: 'クイックスタート',
     quickStartDesc: "音声認識を設定すると入力を始められます。AIによる文章調整は任意です。",
     quickStartAsrReady: "音声認識は設定済みです。デバイスのキーか録音ショートカットで入力できます。AIによる文章調整は任意です。",

@@ -440,7 +440,7 @@ export const zhCN = {
     firstDictationInput: "麦克风与输入来源",
     firstDictationCancel: "按 Esc 可取消录音。",
     tryTypedText: "先试一段文字",
-    tryTypedTextHint: "无需麦克风，选择风格即可试用；润色需要文本服务。",
+    tryTypedTextHint: 'Windows 可使用本机中英翻译：先下载组件，无需 API Key 或翻译费用。AI 润色另需文本服务。',
     quickStartTitle: '快速开始',
     quickStartDesc: "先设置语音识别，即可开始听写；AI 润色为可选功能。",
     quickStartAsrReady: "语音识别已配置，可通过设备按键或录音快捷键听写；AI 润色为可选功能。",
