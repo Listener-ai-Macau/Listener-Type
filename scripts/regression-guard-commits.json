@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T22:54:40.165865+08:00",
+  "updated_at": "2026-10-24T23:51:10.923828+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7781,8 +7781,49 @@
         "One shared ordinary-main-UI recovery operation is owned before cancellation/native request and survives About page navigation. About shows busy/result/error; retry works after settlement; closed page cannot later open system settings. No native recovery protocol, firmware, speech/model/provider/default change.",
         "One shared ordinary-main-UI recovery operation is owned before cancellation/native request and survives About page navigation. About shows busy/result/error; retry works after settlement; closed page cannot later open system settings. No native recovery protocol, firmware, speech/model/provider/default change. Exact175 packaged idle About recovery control, local Help/back navigation and unchanged private stores. No recovery click, native request, physical repair or OS opening. Request lifecycle stays explicitly controlled-React evidence."
       ],
-      "pending_human_scope": "No actual BLE recovery, system settings, physical disconnect/re-pair or OS-global qualification; controlled native replies only, daily unaffected.",
+      "pending_human_scope": [
+        "No actual BLE recovery, system settings, physical disconnect/re-pair or OS-global qualification; controlled native replies only, daily unaffected."
+      ],
       "commit_subject": "Keep BLE recovery requests owned across settings navigation and show results"
+    },
+    {
+      "id": "diagnostic_zip_sensitive_record_boundaries_preserve_safe_metadata",
+      "subject": "Diagnostic archive excludes standard credential fields and free-form provider payloads including continuation records",
+      "repo": "type",
+      "commit": "1da31df3c201e6a321dc95877daece4ee4e82c83",
+      "state": "Type176_matching_package_installed_native_scoped_proof_and_public_asset_verified",
+      "humanAccepted": false,
+      "protects": [
+        "Credential-bearing records are omitted without guessing token/value boundaries; no dependence on sk-prefix or joined key=value.",
+        "Known free-form provider response body is omitted with HTTP status retained; only production RFC3339 record heads enter the exported tail.",
+        "Actual ZIP writer tests scan all members for synthetic credential/transcript canaries and retain ordinary BLE metadata and existing archive structure.",
+        "Original local logs, raw-log export and explicit retained debug-WAV policy remain unchanged."
+      ],
+      "guards": [
+        "cargo test --target x86_64-pc-windows-msvc --lib commands::tests::diagnostic_ -- --test-threads=1"
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\diagnostic176-provider-before.log",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\diagnostic176-complete-after.log",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-233431-f872f3\\result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native176-snapshot-20261024-234404\\identity176-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build176\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build176\\type176-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build176\\post-update-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native176-snapshot-20261024-234404\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener176-update-20261024-234443\\qualification.json"
+      ],
+      "machine_accepted_scope": [
+        "Diagnostic ZIP omits credential-bearing records across whitespace/JSON/header formats, strips free-form provider response bodies and excludes unframed continuation lines. Safe status/connection metadata remains. Source logs, explicit raw-log export, retained debug-WAV policy, voice/models/providers, BLE protocol and Firmware37 remain unchanged.",
+        "Diagnostic ZIP omits credential-bearing records across whitespace/JSON/header formats, strips free-form provider response bodies and excludes unframed continuation lines. Safe status/connection metadata remains. Source logs, explicit raw-log export, retained debug-WAV policy, voice/models/providers, BLE protocol and Firmware37 remain unchanged. Exact176 package native launch/source identity with keyless independent profile and no background BLE/model download. Privacy behavior is proved by the separate actual Windows Rust/ZIP tests, not this launch receipt; no diagnostic export/GATT or OS Save dialog invoked."
+      ],
+      "pending_human_scope": [
+        "No real-user secret exposure established; only synthetic source/ZIP counterexamples.",
+        "Diagnostic ZIP only: source local logs and explicit raw-log export are not modified, retained debug WAV policy remains explicit in manifest.",
+        "No native Save dialog/full firmware diagnostic pull, real-device recovery/global-key/physical/long-term qualification. Existing159/174 inactive desktop failures excluded.",
+        "No new model, cloud service, provider/key/default, firmware or BLE protocol change. Matching native receipt will prove package launch/source only."
+      ],
+      "commit_subject": "Keep credentials and provider payloads out of diagnostic archives"
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -9091,6 +9132,20 @@
           "src/lib/ipc.ts",
           "src/components/DeviceRecoveryControl.tsx",
           "src/components/SettingsModal.tsx"
+        ]
+      }
+    },
+    {
+      "id": "diagnostic-export",
+      "accepted_scope": "Diagnostic ZIP omits credential-bearing records across whitespace/JSON/header formats, strips free-form provider response bodies and excludes unframed continuation lines. Safe status/connection metadata remains. Source logs, explicit raw-log export, retained debug-WAV policy, voice/models/providers, BLE protocol and Firmware37 remain unchanged.",
+      "baseline_state": "actual_rust_counterexamples_and_archive_scope_passed_package_pending",
+      "guard_entries": [
+        "diagnostic_zip_sensitive_record_boundaries_preserve_safe_metadata"
+      ],
+      "paths": {
+        "type": [
+          "src-tauri/src/commands/diagnostics_export.rs",
+          "src-tauri/src/commands_tests.rs"
         ]
       }
     }

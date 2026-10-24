@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-24T22:52:10.116607+08:00",
+  "updatedAt": "2026-10-24T23:46:11.740135+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 175,
-    "source": "58e387143a23a5033e562d4f4fe60a7ffdb53567",
-    "sourceTag": "build-source/type175-20261024",
+    "build": 176,
+    "source": "1da31df3c201e6a321dc95877daece4ee4e82c83",
+    "sourceTag": "build-source/type176-20261024",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "76cb2c0a4b16dd99312398b82a8143d1519f123bad7ca7f38176d47f9bc75794",
-    "sizeBytes": 299364352,
-    "exeSha256": "1e3a6ab57facad5fbfe9a244dd512f1be464983b07428f75252988af2565fba7",
+    "sha256": "aec81a42bb0675a388ded9d5bc3fb5e965c446159350bed97c29ba9ffb6f9ffd",
+    "sizeBytes": 299343872,
+    "exeSha256": "c42e25fede0dbd779031f7401c18449c7cfde1e4386a86930d86d0dfb9b0bcda",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -469,7 +469,10 @@
     "modelsVoiceAndFirmwareUnchangedIn174": true,
     "bleRecoveryUiOwnershipControlledBuild": 175,
     "bleRecoveryIdleNativeEntryBuild": 175,
-    "nativeFirmwareSpeechAndProvidersUnchangedIn175": true
+    "nativeFirmwareSpeechAndProvidersUnchangedIn175": true,
+    "diagnosticPrivacyActualRustArchiveBuild": 176,
+    "diagnosticPrivacyAffectedWindowsTests": 10,
+    "sourceLogsVoiceFirmwareUnchangedIn176": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -487,6 +490,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build175-20261024"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build176-20261024"
   }
 }

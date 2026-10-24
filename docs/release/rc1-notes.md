@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build175 / Firmware37
+# Listener v1.0.6-rc1 · Type build176 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -7,9 +7,11 @@
 
 ## In this app update
 
-One-click repair now keeps one outstanding operation across the ordinary main-window entries, including the cancellation step. Closing and reopening About observes the same repair. About shows progress and the result; it allows a fresh retry after completion or failure. A failure to open system Bluetooth settings has its own message. A closed About page cannot later open those settings from a stale response.
+Diagnostic ZIP exports now omit records containing credential fields, including ordinary Bearer values, spaced JSON and separated assignments. Free-form provider response bodies and unframed continuation lines are excluded; connection metadata and HTTP status remain. Original local logs and explicit raw-log export are unchanged. Previously retained debug WAV samples may still be included, as declared in the archive manifest; export does not start a recording.
 
-The old About button could send two cancellation/recovery requests while the first repair was still pending. Eight controlled UI/request checks cover the new lifecycle. The exact packaged native check covers the idle control, local Help navigation and retained state; it intentionally does not invoke repair on a device in use. Actual GATT recovery/re-pair and OS launch remain separately unqualified. The native recovery protocol, Firmware37, recording, recognition, models and provider preferences are unchanged.
+The old whitespace-only masker missed synthetic standard credential formats. The same actual Rust functions changed from four failures/one pass to five passes. Ten affected Windows Rust tests also verify the real ZIP writer/reader, checking all archive members for synthetic credential/transcript canaries, preserving safe BLE metadata and the existing offline/firmware archive structures. These are synthetic software checks, not evidence of a real-user leak or actual device export. Matching package launch/source identity is checked separately. The native Save dialog and real firmware diagnostic pull remain separately unverified.
+
+Recording, recognition, models, providers, keys, BLE protocol and Firmware37 are unchanged.
 
 ## Before using
 
@@ -19,11 +21,11 @@ Strong background-speech separation remains incomplete; older intermittent endin
 
 ## File identity
 
-- Type source: `58e387143a23a5033e562d4f4fe60a7ffdb53567` · `build-source/type175-20261024`
-- MSI: 299364352 bytes · SHA256 `76cb2c0a4b16dd99312398b82a8143d1519f123bad7ca7f38176d47f9bc75794`
+- Type source: `1da31df3c201e6a321dc95877daece4ee4e82c83` · `build-source/type176-20261024`
+- MSI: 299343872 bytes · SHA256 `aec81a42bb0675a388ded9d5bc3fb5e965c446159350bed97c29ba9ffb6f9ffd`
 - Firmware37 source: `87ea79ec3d6e34a95d09b73e2a5848207a919f1c` · runtime `9d7fbbe67ed0223d`
 - ZIP: 1956799 bytes · SHA256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`
 
 ## 中文说明
 
-让一键修复在执行期间保持同一操作，关闭再打开关于页也不会重复发起；关于页显示处理中和结果，打不开系统蓝牙设置时给出明确提示。固件37、原生蓝牙恢复协议及语音／模型设置不变。 原“关于”按钮处理中仍可重复点击、没有结果回显的问题已保留反例。8个受控界面范围和匹配原生空闲入口分别留证；没有调用在用设备恢复，不冒充真实断连／重新配对通过。原未完成验收范围继续保留。
+加强诊断ZIP过滤：排除含凭据的记录、服务端自由正文及续行，保留连接和HTTP状态元数据。原始本地日志和已声明的调试音频保留政策不变；语音、模型、蓝牙协议与固件37不变。 实际Rust函数反例与10项Windows归档测试分别留证，原始失败保留；没有读取真人日志或让在用设备导出。仅确认本批诊断ZIP内容过滤，系统保存窗口／真实固件拉取及其它未完范围继续保留。
