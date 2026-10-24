@@ -1256,9 +1256,7 @@ fn pull_firmware_diagnostic_log_from_target(
         while offset < export_count_snapshot as usize {
             let command = format!("{{\"op\":\"read\",\"offset\":{offset}}}");
             write_diagnostic_control(&control, &command, timeout, "read")?;
-            let packet = rx.recv_timeout(timeout).map_err(|err| {
-                format!("BLE diagnostic notification timed out at offset {offset}: {err}")
-            })?;
+            let packet = receive_diagnostic_chunk_packet(&rx, offset, timeout)?;
             let (event_count, header_offset, firmware_crc, payload) =
                 parse_diagnostic_chunk(&packet, offset)?;
             if header_offset != offset as u32 {
@@ -4968,6 +4966,32 @@ fn write_diagnostic_control(
         &format!("diagnostic control {op}"),
     )?;
     Ok(())
+}
+
+fn receive_diagnostic_chunk_packet(
+    rx: &mpsc::Receiver<Vec<u8>>,
+    offset: usize,
+    timeout: Duration,
+) -> Result<Vec<u8>, String> {
+    // Firmware37's ble_diag_log_on_gap_subscribe/on_gap_mtu reuse this
+    // diagnostic data characteristic for the OTA generation-ready marker.
+    // It is not a log header. Ignore only that exact protocol-v1 marker;
+    // all other packets still undergo the original offset/length/CRC checks.
+    const OTA_READY: &[u8] = b"DOTA_READY_V1";
+    let deadline = Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(format!("BLE diagnostic notification timed out at offset {offset}"));
+        }
+        let packet = rx.recv_timeout(remaining).map_err(|err| {
+            format!("BLE diagnostic notification timed out at offset {offset}: {err}")
+        })?;
+        if packet.as_slice() == OTA_READY {
+            continue; // An out-of-band marker does not renew the read deadline.
+        }
+        return Ok(packet);
+    }
 }
 
 fn parse_diagnostic_chunk(

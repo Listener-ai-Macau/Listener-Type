@@ -3,6 +3,84 @@
 
 use super::*;
 
+fn diagnostic_stream_test_chunk(offset: u32) -> Vec<u8> {
+    let payload = vec![0u8; 24];
+    let crc = denzic_ota_core::crc32_ieee(&payload);
+    let mut packet = Vec::new();
+    packet.extend_from_slice(&1u16.to_le_bytes());
+    packet.extend_from_slice(&offset.to_le_bytes());
+    packet.extend_from_slice(&crc.to_le_bytes());
+    packet.extend_from_slice(&payload);
+    packet
+}
+
+#[test]
+fn diagnostic_stream_demultiplexes_captured_ota_ready_before_log_data() {
+    // Exact13-byte public protocol marker observed at HCI frames162/203.
+    let ready = b"DOTA_READY_V1";
+    assert!(parse_diagnostic_chunk(ready, 0).unwrap_err().contains("count=20292"));
+    let (tx, rx) = mpsc::channel();
+    tx.send(ready.to_vec()).unwrap();
+    tx.send(ready.to_vec()).unwrap(); // subscription and MTU readiness
+    let expected = diagnostic_stream_test_chunk(70_000);
+    tx.send(expected.clone()).unwrap();
+    let packet = receive_diagnostic_chunk_packet(&rx, 70_000, Duration::from_millis(100)).unwrap();
+    assert_eq!(packet, expected);
+    let (count, offset, crc, payload) = parse_diagnostic_chunk(&packet, 70_000).unwrap();
+    assert_eq!((count, offset, payload.len()), (1, 70_000, 24));
+    assert_eq!(crc, denzic_ota_core::crc32_ieee(payload));
+}
+
+#[test]
+fn diagnostic_stream_does_not_ignore_unknown_or_corrupt_packets() {
+    for packet in [b"DOTA_READY_V2".to_vec(), b"DOTA_READY".to_vec(), vec![1u8; 13]] {
+        let (tx, rx) = mpsc::channel();
+        tx.send(packet.clone()).unwrap();
+        let received = receive_diagnostic_chunk_packet(&rx, 0, Duration::from_millis(100)).unwrap();
+        assert_eq!(received, packet);
+        assert!(parse_diagnostic_chunk(&received, 0).is_err());
+    }
+    let mut bad_crc = diagnostic_stream_test_chunk(0);
+    bad_crc[6] ^= 1;
+    let (tx, rx) = mpsc::channel();
+    tx.send(bad_crc.clone()).unwrap();
+    let received = receive_diagnostic_chunk_packet(&rx, 0, Duration::from_millis(100)).unwrap();
+    assert_eq!(received, bad_crc);
+    let (_, _, crc, payload) = parse_diagnostic_chunk(&received, 0).unwrap();
+    assert_ne!(crc, denzic_ota_core::crc32_ieee(payload), "existing CRC rejection must remain effective");
+}
+
+#[test]
+fn diagnostic_stream_marker_without_data_does_not_report_success() {
+    let (tx, rx) = mpsc::channel();
+    tx.send(b"DOTA_READY_V1".to_vec()).unwrap();
+    drop(tx);
+    assert!(receive_diagnostic_chunk_packet(&rx, 7, Duration::from_millis(100))
+        .unwrap_err().contains("offset 7"));
+}
+
+#[test]
+fn diagnostic_stream_readiness_cannot_extend_the_original_deadline() {
+    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+    let stop = Arc::new(AtomicBool::new(false));
+    let producer_stop = Arc::clone(&stop);
+    let (tx, rx) = mpsc::channel();
+    let producer = std::thread::spawn(move || {
+        let until = Instant::now() + Duration::from_millis(500);
+        while !producer_stop.load(Ordering::Acquire) && Instant::now() < until {
+            if tx.send(b"DOTA_READY_V1".to_vec()).is_err() { break; }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    });
+    let started = Instant::now();
+    let result = receive_diagnostic_chunk_packet(&rx, 0, Duration::from_millis(40));
+    let elapsed = started.elapsed();
+    stop.store(true, Ordering::Release);
+    producer.join().unwrap();
+    assert!(result.is_err());
+    assert!(elapsed < Duration::from_millis(300), "readiness renewed the read deadline: {elapsed:?}");
+}
+
 #[test]
 fn gatt_readiness_timeout_keeps_pairing_without_claiming_cache_damage() {
     for status in [Some(GattSessionStatus::Closed), None] {
