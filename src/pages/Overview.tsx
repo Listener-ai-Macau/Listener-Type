@@ -357,7 +357,7 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
         </div>
       </Card>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 12 }}>
+      <div data-overview-services style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 12 }}>
         <ProviderCard
           kind={t('overview.asrKind')}
           name={asrProviderName}
@@ -374,7 +374,7 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
         />
       </div>
 
-      <div style={{ marginBottom: 18 }}>
+      <div data-overview-device-status style={{ marginBottom: 18 }}>
         <EmbeddedBleStatusPanel
           recovery={bleRecoveryUi}
           onOpenBluetoothSettings={openBluetoothSettings}
