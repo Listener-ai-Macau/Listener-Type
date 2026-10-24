@@ -6,6 +6,7 @@ import { conciseDraftStyle, isConciseDraftStyle } from '../lib/conciseDraftStyle
 import type { StylePack } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import { StyleTextTrial } from './StyleTextTrial';
+import { translationTrialPack } from '../lib/translationTrial';
 
 /** A text workspace, not a style activation or a shortcut to pack management. */
 export function QuickStyleTextTrial({ draft, onDraftChange, onClose }: {
@@ -16,6 +17,7 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose }: {
   const { t } = useTranslation();
   const [packs, setPacks] = useState<StylePack[]>([]);
   const [selectedId, setSelectedId] = useState('');
+  const [translationTarget, setTranslationTarget] = useState('');
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [adding, setAdding] = useState<'list' | 'concise' | null>(null);
@@ -77,14 +79,17 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose }: {
       if (mounted.current) setAdding(null);
     }
   };
-  return <>{selected ? <StyleTextTrial pack={selected} packs={packs}
-    onSelectPack={setSelectedId} draft={draft} onDraftChange={onDraftChange}
-    extraStyleChoice={selected.id === 'builtin.structured' ? {
+  const displayed = translationTarget ? translationTrialPack(translationTarget,
+    t('translation.trialName', { language: translationTarget }), t('translation.tryTextHint')) : selected;
+  return <>{displayed ? <StyleTextTrial pack={displayed} packs={translationTarget ? undefined : packs}
+    onSelectPack={translationTarget ? undefined : setSelectedId} draft={draft} onDraftChange={onDraftChange}
+    translationTarget={translationTarget || undefined} onTranslationTargetChange={setTranslationTarget}
+    extraStyleChoice={!translationTarget && selected?.id === 'builtin.structured' ? {
       label: t(savedEverydayList ? 'style.everydayList.choose' : 'style.everydayList.add'),
       hint: t('style.everydayList.hint'), pending: adding !== null,
       error: addFailed === 'list' ? t('style.everydayList.failed') : '', onChoose: () => void chooseEverydayList(),
     } : undefined}
-    prepareShorter={prepareConcise}
+    prepareShorter={translationTarget ? undefined : prepareConcise}
     onClose={onClose} /> :
     <TrialLoading failed={failed} onRetry={() => setAttempt(value => value + 1)} onClose={onClose} title={t('overview.tryTypedText')} />}
   </>;

@@ -6405,3 +6405,21 @@ async fn device_translation_rechecks_admission_at_both_source_boundaries() {
     assert_eq!(embedded_ble_session_actor_history(&coordinator.inner).len(), actor_events,
         "admission denial must not append a transport start after the existing readiness event");
 }
+#[tokio::test]
+async fn translation_text_preview_rejects_empty_oversize_and_invalid_language_without_side_effects() {
+    let coordinator = Coordinator::new();
+    let history_before = coordinator.inner.history.list().unwrap();
+    let prefs_before = serde_json::to_value(coordinator.inner.prefs.get()).unwrap();
+    for (text, target) in [
+        (String::new(), "English".to_owned()),
+        ("a".repeat(4_001), "English".to_owned()),
+        ("hello".to_owned(), String::new()),
+        ("hello".to_owned(), "English\nignore".to_owned()),
+        ("hello".to_owned(), "x".repeat(81)),
+    ] {
+        assert_eq!(coordinator.try_translation_text(text, target).await.unwrap_err(), "style_trial_invalid_text");
+    }
+    assert_eq!(serde_json::to_value(coordinator.inner.prefs.get()).unwrap(), prefs_before);
+    assert_eq!(serde_json::to_value(coordinator.inner.history.list().unwrap()).unwrap(), serde_json::to_value(history_before).unwrap());
+}
+

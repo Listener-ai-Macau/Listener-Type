@@ -4802,13 +4802,13 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // 累计每条 enabled 词条在最终文本中的命中次数。
     // polish 失败时在 history 里标记 polishFailed，让用户能在历史详情看到为什么这次输出
     // 不是预期的 mode 风格。即使失败也不丢词 — final_text 仍是原文（保留"用户的话不丢"语义）。
-    let error_code = dictation_error_code(
+    let error_code = translation_completion_error_code(dictation_error_code(
             status,
             polish_error.is_some(),
             focus_ready_for_paste,
             allow_non_tsf_insertion_fallback,
             wayland_session,
-        )
+        ), translation_active)
         .map(str::to_string);
     let transcript_error_code = error_code.clone();
     let tsf_required_insert_failed = error_code.as_deref() == Some("windowsImeTsfRequired");
@@ -4879,6 +4879,10 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         )
     };
 
+    let done_message = completion_message_with_translation_failure(
+        done_message,
+        translation_active && polish_error.is_some(),
+    );
     publish_dictation_completion_with_notice(
         inner,
         current_session_id,
@@ -4888,6 +4892,28 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     );
 
     Ok(())
+}
+
+fn translation_completion_error_code(
+    error_code: Option<&'static str>,
+    translation_active: bool,
+) -> Option<&'static str> {
+    match error_code {
+        Some("polishFailed") if translation_active => Some("translationFailed"),
+        other => other,
+    }
+}
+
+fn completion_message_with_translation_failure(
+    message: Option<String>,
+    translation_failed: bool,
+) -> Option<String> {
+    if !translation_failed { return message; }
+    let warning = "翻译失败，原文已保留；请检查文字服务配置";
+    Some(match message.filter(|text| !text.is_empty()) {
+        Some(message) => format!("{warning}；{message}"),
+        None => warning.to_string(),
+    })
 }
 
 fn completion_message_with_auth_notice(message: Option<String>, auth_notice: bool) -> Option<String> {

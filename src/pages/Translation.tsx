@@ -8,10 +8,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, PageHeader } from './_atoms';
 import { SavedToast } from '../components/SavedToast';
+import { StyleTextTrial } from '../components/StyleTextTrial';
 import { SelectLite } from '../components/ui/SelectLite';
 import { SUPPORTED_LANGUAGES } from '../lib/types';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { formatComboLabel } from '../lib/hotkey';
+import { translationTrialPack } from '../lib/translationTrial';
 import type { UserPreferences } from '../lib/types';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
@@ -21,6 +23,8 @@ export function Translation() {
   const { prefs, loading, error, refresh, updatePrefs: savePrefs } = useHotkeySettings();
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMessage, setSaveMessage] = useState('');
+  const [trialOpen, setTrialOpen] = useState(false);
+  const [trialDraft, setTrialDraft] = useState('');
   const statusTimer = useRef<number | null>(null);
 
   useEffect(() => () => {
@@ -203,6 +207,15 @@ export function Translation() {
             ariaLabel={t('translation.target.title')}
             style={{ width: '100%', maxWidth: 360, fontSize: 13, background: 'var(--ol-white)' }}
           />
+          <div style={{ marginTop: 12 }}>
+            <button type="button" className="ol-btn ol-btn-secondary" disabled={!enabled}
+              data-translation-try-text onClick={() => setTrialOpen(true)}>
+              {t('translation.tryText')}
+            </button>
+            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--ol-ink-3)', lineHeight: 1.6 }}>
+              {t('translation.tryTextHint')}
+            </div>
+          </div>
         </Card>
 
         <Card>
@@ -259,6 +272,14 @@ export function Translation() {
         </Card>
 
       </div>
+      {trialOpen && enabled && (
+        <StyleTextTrial
+          pack={translationTrialPack(prefs.translationTargetLanguage,
+            t('translation.trialName', { language: prefs.translationTargetLanguage }), t('translation.tryTextHint'))}
+          translationTarget={prefs.translationTargetLanguage}
+          draft={trialDraft} onDraftChange={setTrialDraft} onClose={() => setTrialOpen(false)}
+        />
+      )}
     </>
   );
 }

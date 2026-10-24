@@ -1,7 +1,7 @@
 import { SaveTextDraft } from './SaveTextDraft';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { canInsertStyleTrialResult, cancelStyleTrialInsert, copyStyleTrialResult, getStyleTextTrialReadiness, insertStyleTrialResult, isTauri, tryStylePackText } from '../lib/ipc';
+import { canInsertStyleTrialResult, cancelStyleTrialInsert, copyStyleTrialResult, getStyleTextTrialReadiness, insertStyleTrialResult, isTauri, tryStylePackText, tryTranslationText } from '../lib/ipc';
 import { detectOS } from './WindowChrome';
 import { stylePackExamplePresentation, stylePackPresentation } from '../lib/stylePackPresentation';
 import type { StylePack, StyleTextTrialReadiness, StyleTextTrialResult } from '../lib/types';
@@ -11,13 +11,16 @@ import { DeviceLayoutsDialog } from './DeviceLayoutsDialog';
 import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
 import { PoliteEditSuggestions } from './PoliteEditSuggestions';
 import { ProviderSettingsDialog } from './ProviderSettingsDialog';
+import { SUPPORTED_LANGUAGES } from '../lib/types';
 
-export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, prepareShorter, draft, onDraftChange, onClose }: {
+export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, prepareShorter, translationTarget, onTranslationTargetChange, draft, onDraftChange, onClose }: {
   pack: StylePack;
   packs?: StylePack[];
   onSelectPack?: (id: string) => void;
   extraStyleChoice?: { label: string; hint: string; pending: boolean; error: string; onChoose: () => void };
   prepareShorter?: () => Promise<StylePack>;
+  translationTarget?: string;
+  onTranslationTargetChange?: (language: string) => void;
   draft: string;
   onDraftChange: (text: string) => void;
   onClose: () => void;
@@ -114,13 +117,13 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   useEffect(() => {
     let current = true;
     setReadinessResponse(null);
-    void getStyleTextTrialReadiness(pack.id).then(value => {
+    void getStyleTextTrialReadiness(translationTarget ? 'builtin.formal' : pack.id).then(value => {
       if (current) setReadinessResponse({ key: readinessKey, value, failed: false });
     }).catch(() => {
       if (current) setReadinessResponse({ key: readinessKey, value: null, failed: true });
     });
     return () => { current = false; };
-  }, [pack.id, readinessKey]);
+  }, [pack.id, readinessKey, translationTarget]);
 
   useEffect(() => {
     const element = dialog.current;
@@ -154,7 +157,9 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       const targetSignature = JSON.stringify([draft, target.prompt]);
       const cached = prepare ? completed.current.get(target.id) : null;
       const matching = cached?.signature === targetSignature ? cached : null;
-      const value = matching?.result ?? await tryStylePackText(target.id, draft);
+      const value = matching?.result ?? await (translationTarget
+        ? tryTranslationText(draft, translationTarget)
+        : tryStylePackText(target.id, draft));
       if (generation.current === request) {
         completed.current.delete(target.id);
         completed.current.set(target.id, { signature: targetSignature, input: draft, result: value, edited: matching?.edited ?? null });
@@ -175,7 +180,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
           style_trial_timeout: 'timeout',
         }[message];
         setResult(result); setResultSignature(resultSignature); setEditedOutput(editedOutput);
-        setError(message === 'style_trial_prepare_shorter_failed' ? t('conciseDraft.failed')
+        setError(translationTarget && /status 401|AuthenticationError|Unauthorized|credentials were already rejected/i.test(message) ? t('translation.authFailed')
+          : message === 'style_trial_prepare_shorter_failed' ? t('conciseDraft.failed')
           : key ? t(`style.trial.${key}`) : t('style.trial.failed', { error: message }));
       }
     } finally {
@@ -266,6 +272,15 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         <Btn size="sm" variant="ghost" disabled={draftSaving} onClick={() => { if (!draftSaving) onClose(); }}>{t('common.close')}</Btn>
       </div>
       <p id="style-trial-description" className="ol-style-trial-hint" data-style-trial-service-notice>{t(readiness?.requiresTextService === false ? prepareShorter ? 'textWorkspace.localWithShorterNotice' : 'textWorkspace.localNotice' : 'textWorkspace.cloudNotice')}</p>
+      {onTranslationTargetChange && <label className="ol-style-trial-picker" data-translation-output-choice>
+        <span>{t('translation.outputLanguage')}</span>
+        <select aria-label={t('translation.outputLanguage')} value={translationTarget ?? ''}
+          disabled={pending || copying || delivering || draftSaving || styleChangePending}
+          onChange={event => onTranslationTargetChange(event.target.value)}>
+          <option value="">{t('translation.originalOutput')}</option>
+          {SUPPORTED_LANGUAGES.map(language => <option key={language} value={language}>{language}</option>)}
+        </select>
+      </label>}
       {packs && onSelectPack && <label className="ol-style-trial-picker">
         <span>{t('style.trial.styleLabel')}</span>
         <select aria-label={t('style.trial.styleLabel')} value={pack.id} disabled={pending || copying || delivering || draftSaving || styleChangePending}

@@ -1031,6 +1031,7 @@ pub fn run() {
             commands::save_style_pack,
             commands::preview_style_pack_runtime,
             commands::try_style_pack_text,
+            commands::try_translation_text,
             commands::suggest_polite_text_edits,
             commands::transcribe_audio_file_trial,
             commands::cancel_audio_file_trial,

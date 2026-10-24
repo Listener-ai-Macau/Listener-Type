@@ -1787,6 +1787,12 @@ export function tryStylePackText(stylePackId: string, rawText: string): Promise<
   });
 }
 
+export function tryTranslationText(rawText: string, targetLanguage: string): Promise<StyleTextTrialResult> {
+  return invokeOrMock('try_translation_text', { rawText, targetLanguage }, () => {
+    throw new Error('style_trial_native_required');
+  });
+}
+
 export function getStyleTextTrialReadiness(stylePackId: string): Promise<StyleTextTrialReadiness> {
   return invokeOrMock('get_style_text_trial_readiness', { stylePackId }, () => ({
     available: false, requiresTextService: false, textServiceConfigured: false,

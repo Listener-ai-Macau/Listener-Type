@@ -1,4 +1,5 @@
 use super::{
+    completion_message_with_translation_failure, translation_completion_error_code,
     acknowledge_automatic_wake_capsule_visible, append_typed_prefix,
     arm_accepted_automatic_wake_text_guard, arm_automatic_wake_text_guard,
     automatic_wake_body_started, automatic_wake_initial_body_wait_active,
@@ -15706,6 +15707,37 @@ fn default_done_message_treats_raw_insert_after_polish_failure_as_successful_fal
             "上屏失败，内容在剪贴板，请粘贴".to_string()
         })
     );
+}
+
+#[test]
+fn translation_service_failure_is_not_a_silent_successful_raw_recording() {
+    // Field990f40ac: Shift and target English were active; provider401 returned
+    // the Chinese source and PasteSent. Quiet ordinary polish fallback must
+    // not hide that the requested language transformation failed.
+    let quiet_raw = default_done_message(InsertStatus::PasteSent, true, false);
+    assert!(quiet_raw.is_none());
+    let message = completion_message_with_translation_failure(quiet_raw, true).unwrap();
+    assert!(message.contains("翻译失败"));
+    assert!(message.contains("原文已保留"));
+    let error = translation_completion_error_code(
+        dictation_error_code(InsertStatus::PasteSent, true, true, true, false), true);
+    assert_eq!(error, Some("translationFailed"));
+    assert!(!device_processing_final_succeeded(InsertStatus::PasteSent, error));
+}
+
+#[test]
+fn translation_failure_keeps_delivery_warnings_and_ordinary_polish_behavior() {
+    for code in ["insertUnconfirmed", "noEditableTarget", "focusRestoreFailed", "windowsImeTsfRequired"] {
+        assert_eq!(translation_completion_error_code(Some(code), true), Some(code));
+    }
+    let delivery_warning = Some("未找到输入框，正文已保存在历史记录".to_owned());
+    let combined = completion_message_with_translation_failure(delivery_warning.clone(), true).unwrap();
+    assert!(combined.contains("翻译失败"));
+    assert!(combined.contains("未找到输入框"));
+    assert_eq!(completion_message_with_translation_failure(delivery_warning.clone(), false), delivery_warning);
+    assert_eq!(translation_completion_error_code(Some("polishFailed"), false), Some("polishFailed"));
+    assert_eq!(translation_completion_error_code(None, true), None);
+    assert!(completion_message_with_translation_failure(None, false).is_none());
 }
 
 #[test]

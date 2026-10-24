@@ -681,6 +681,12 @@ export const zhCN = {
     desc: '把口述的内容自动翻译成目标语言后再插入。目标语言、工作语言、触发方式都在这里配置。',
     statusEnabled: '已启用',
     statusDisabled: '未启用',
+    tryText: '先试一段文字翻译',
+    outputLanguage: '译文语言',
+    originalOutput: '原来的语言（不翻译）',
+    authFailed: '文字服务验证失败，原文仍保留。请先检查文字服务配置，再重试。',
+    trialName: '翻译为 {{language}}',
+    tryTextHint: '选择目标语言后，无需录音就能预览和修改译文。点击处理才会调用已配置的文字服务，可能产生用量费用。',
     working: {
       title: '工作语言',
       desc: '可选：选择日常使用的语言，用于辅助专名拼写和表达习惯。这不会改变翻译输出的语言。',

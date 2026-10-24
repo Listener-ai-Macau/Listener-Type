@@ -641,6 +641,12 @@ export const ko: typeof zhCN = {
     desc: '구술 내용을 자동으로 대상 언어로 번역한 후 입력합니다. 대상 언어, 작업 언어, 트리거 방식 모두 여기서 설정합니다.',
     statusEnabled: '활성화됨',
     statusDisabled: '비활성화됨',
+    tryText: '텍스트로 번역해 보기',
+    outputLanguage: '번역 출력 언어',
+    originalOutput: '원래 언어 (번역 안 함)',
+    authFailed: '텍스트 서비스 인증에 실패했습니다. 원문은 보존되어 있습니다. 서비스 설정을 확인한 후 다시 시도하세요.',
+    trialName: '{{language}}로 번역',
+    tryTextHint: '대상 언어를 선택하면 녹음 없이 번역문을 확인하고 수정할 수 있습니다. 처리를 시작하면 설정된 텍스트 서비스를 사용하며 이용 요금이 발생할 수 있습니다.',
     working: {
       title: '작업 언어',
       desc: '선택 사항: 평소 사용하는 언어를 선택하면 고유명사 표기와 문체에 참고합니다. 번역 출력 언어는 바뀌지 않습니다.',

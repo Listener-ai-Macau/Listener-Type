@@ -684,6 +684,12 @@ export const en: typeof zhCN = {
     desc: 'Translate the dictation into a target language before insertion. Target, working languages and trigger are configured here.',
     statusEnabled: 'Enabled',
     statusDisabled: 'Disabled',
+    tryText: 'Try a text translation',
+    outputLanguage: 'Translate output to',
+    originalOutput: 'Original language (no translation)',
+    authFailed: 'The text service rejected its credentials. Your source text is kept; check the text service settings before retrying.',
+    trialName: 'Translate to {{language}}',
+    tryTextHint: 'Choose a target language, then preview and edit a translation without recording. Submitting uses your configured text service and may incur usage charges.',
     working: {
       title: 'Working languages',
       desc: 'Optional: select languages you regularly use to guide spelling and writing style. This does not choose the translation output language.',

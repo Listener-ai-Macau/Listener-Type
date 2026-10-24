@@ -2604,6 +2604,39 @@ impl Coordinator {
         })
     }
 
+    /// Explicit preview using only the supplied text and chosen output language.
+    /// Does not start a recording, change its mode, insert, copy or save history.
+    pub async fn try_translation_text(
+        &self,
+        raw_text: String,
+        target_language: String,
+    ) -> Result<crate::types::StyleTextTrialResult, String> {
+        let target = target_language.trim();
+        if raw_text.trim().is_empty() || raw_text.chars().count() > 4_000
+            || target.is_empty() || target.chars().count() > 80 || target.chars().any(char::is_control)
+        {
+            return Err("style_trial_invalid_text".into());
+        }
+        let prefs = self.inner.prefs.get();
+        let started = std::time::Instant::now();
+        // Return a service failure to the workspace. Raw fallback must never be
+        // labelled as a successful translation preview.
+        let output_text = tokio::time::timeout(
+            std::time::Duration::from_secs(45),
+            translate_text(&raw_text, target, &prefs.working_languages,
+                prefs.chinese_script_preference, prefs.output_language_preference,
+                prefs.llm_thinking_enabled, None),
+        ).await.map_err(|_| "style_trial_timeout".to_owned())?
+            .map_err(|error| error.to_string())?;
+        Ok(crate::types::StyleTextTrialResult {
+            pack_id: format!("translation:{target}"),
+            pack_name: target.to_owned(),
+            output_text,
+            used_text_service: true,
+            elapsed_ms: started.elapsed().as_millis() as u64,
+        })
+    }
+
     /// Explicit suggestions only: no style activation, history, clipboard or insertion.
     pub async fn suggest_polite_text_edits(
         &self,

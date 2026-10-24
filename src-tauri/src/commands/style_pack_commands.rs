@@ -86,6 +86,15 @@ pub async fn try_style_pack_text(
 }
 
 #[tauri::command]
+pub async fn try_translation_text(
+    coord: CoordinatorState<'_>,
+    raw_text: String,
+    target_language: String,
+) -> Result<crate::types::StyleTextTrialResult, String> {
+    coord.try_translation_text(raw_text, target_language).await
+}
+
+#[tauri::command]
 pub async fn copy_style_trial_result(text: String) -> Result<(), String> {
     if text.is_empty() || text.chars().count() > 100_000 {
         return Err("style_trial_clipboard_unavailable".into());
