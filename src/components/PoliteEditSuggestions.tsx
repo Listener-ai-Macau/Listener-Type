@@ -5,6 +5,7 @@ import { applyLocalPoliteOption, applyPoliteEdits, localPoliteOptions, reviewPol
 import { Btn } from '../pages/_atoms';
 
 type SuggestionFailure = 'native' | 'requestFailed' | 'unusableReply' | 'applyFailed';
+type AppliedWording = { before: string; after: string; label: 'courteous' | 'softer' | 'chosenEdits' };
 
 export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured = true, localOnly = false }: {
   text: string; disabled: boolean; onApply: (text: string) => void;
@@ -18,10 +19,13 @@ export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured
   const [reply, setReply] = useState<{ source: string; review: PoliteEditReview; elapsedMs: number } | null>(null);
   const [selected, setSelected] = useState<number[]>([]);
   const [error, setError] = useState<{ source: string; kind: SuggestionFailure } | null>(null);
-  const [applied, setApplied] = useState<string | null>(null);
+  const [applied, setApplied] = useState<AppliedWording | null>(null);
   const [open, setOpen] = useState(false);
   const panel = useRef<HTMLElement>(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  // A hand edit supersedes the receipt even if the user later types its old
+  // output again. A fresh translation also remounts this result-owned review.
+  useEffect(() => { setApplied(value => value && value.after !== text ? null : value); }, [text]);
   useEffect(() => {
     if (!open) return;
     // Reveal the choices the user explicitly opened, without moving input focus.
@@ -29,11 +33,12 @@ export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured
     return () => cancelAnimationFrame(frame);
   }, [open]);
   const current = !localOnly && reply?.source === text ? reply : null;
+  const currentApplied = applied?.after === text ? applied : null;
   const localOptions = localPoliteOptions(text);
   const request = async () => {
     if (running.current || disabled || localOnly || !cloudConfigured || !text.trim() || text.length > 4000) return;
     const source = text;
-    running.current = true; setPending(true); setError(null); setReply(null); setSelected([]); setApplied(null);
+    running.current = true; setPending(true); setError(null); setReply(null); setSelected([]);
     let receivedReply = false;
     try {
       const response = await suggestPoliteTextEdits(source);
@@ -56,21 +61,31 @@ export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured
     if (!current || disabled || pending || !selected.length) return;
     try {
       const updated = applyPoliteEdits(text, selected.map(index => current.review.edits[index]));
-      onApply(updated); setApplied(updated); setReply(null); setSelected([]);
+      onApply(updated); setApplied({ before: text, after: updated, label: 'chosenEdits' }); setReply(null); setSelected([]);
     } catch { setError({ source: text, kind: 'applyFailed' }); }
+  };
+  const undo = () => {
+    if (!currentApplied || disabled || pending) return;
+    onApply(currentApplied.before);
+    setApplied(null); setReply(null); setSelected([]); setError(null);
   };
   return <>
     <Btn size="sm" variant="ghost" disabled={disabled || !text.trim()} onClick={() => setOpen(value => !value)}>{t('politeEdits.open')}</Btn>
     {open && <section ref={panel} aria-label={t('politeEdits.title')} className="ol-style-trial-comparisons" style={{ flexBasis: '100%', minWidth: 0, margin: '4px 0' }}>
     <p className="ol-style-trial-hint">{t(localOnly ? 'politeEdits.localOnlyHint' : 'politeEdits.localHint')}</p>
-    {localOptions.length === 0 && <p className="ol-style-trial-hint">{t(localOnly ? 'politeEdits.localOnlyNone' : 'politeEdits.localNone')}</p>}
+    {currentApplied && <div role="status" data-wording-applied style={{ margin: '10px 0' }}>
+      <strong>{t('politeEdits.appliedChoice', { choice: t(`politeEdits.${currentApplied.label}`) })}</strong>{' '}
+      <Btn size="sm" variant="ghost" disabled={disabled || pending} onClick={undo}>{t('politeEdits.undo')}</Btn>
+      <p className="ol-style-trial-hint">{t('politeEdits.undoHint')}</p>
+    </div>}
+    {localOptions.length === 0 && !currentApplied && <p className="ol-style-trial-hint">{t(localOnly ? 'politeEdits.localOnlyNone' : 'politeEdits.localNone')}</p>}
     {localOptions.map(edit => <div key={edit.old + '\0' + edit.new} style={{ margin: '10px 0', lineHeight: 1.6, overflowWrap: 'anywhere' }}>
       <strong>{t(`politeEdits.${edit.tone}`)}</strong>
       <p style={{ margin: '4px 0' }}><del>{edit.old}</del>{' → '}<ins>{edit.new}</ins></p>
       <Btn size="sm" disabled={disabled || pending} onClick={() => {
         try {
           const updated = applyLocalPoliteOption(text, edit);
-          onApply(updated); setApplied(updated); setReply(null); setSelected([]); setError(null);
+          onApply(updated); setApplied({ before: text, after: updated, label: edit.tone }); setReply(null); setSelected([]); setError(null);
         } catch { setError({ source: text, kind: 'applyFailed' }); }
       }}>{t('politeEdits.useLocal')}</Btn>
     </div>)}
@@ -90,7 +105,6 @@ export function PoliteEditSuggestions({ text, disabled, onApply, cloudConfigured
       <Btn size="sm" variant="ghost" disabled={disabled} onClick={() => { setReply(null); setSelected([]); }}>{t('politeEdits.keep')}</Btn>
     </>}
     {!localOnly && reply && !current && <p role="status" className="ol-style-trial-hint">{t('politeEdits.stale')}</p>}
-    {applied === text && <p role="status" className="ol-style-trial-hint">{t('politeEdits.applied')}</p>}
     {error?.source === text && (!localOnly || error.kind === 'applyFailed') && <p role="alert" className="ol-style-trial-hint">{t(`politeEdits.${error.kind}`)}</p>}
   </section>}
   </>;

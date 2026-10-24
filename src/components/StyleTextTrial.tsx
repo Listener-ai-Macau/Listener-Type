@@ -384,7 +384,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
             <SaveTextDraft compact name={presentation.name} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving}
               onUnsaved={() => setSavedDraftSignature('')}
               onSaved={text => setSavedDraftSignature(JSON.stringify([presentation.name, draft, text]))} />
-            {(!offline || translationTarget === 'English') && <PoliteEditSuggestions text={resultOutput} localOnly={offline} cloudConfigured={!offline && readiness?.textServiceConfigured === true}
+            {(!offline || translationTarget === 'English') && <PoliteEditSuggestions key={`${generation.current}:${result?.packId ?? ''}`} text={resultOutput} localOnly={offline} cloudConfigured={!offline && readiness?.textServiceConfigured === true}
               disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />}
           </div>
           <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t(savedCurrentDraft ? isTauri ? 'textWorkspace.saved' : 'textDraft.browserSaved' : isTauri ? 'textWorkspace.unsaved' : 'textWorkspace.browserUnsaved')}</p>
