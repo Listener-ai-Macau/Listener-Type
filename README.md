@@ -8,8 +8,11 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build172](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build173](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
+
+<!-- listener-local-text-entry -->
+**Try without hardware or a cloud key:** [Download Windows MSI](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi), open **Overview → Chinese ↔ English on this PC**, then explicitly prepare the required components once. Text translation has no API fee; voice recognition is separate. [Setup details](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/features/translation-shortcut.md).
 
 **English** · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md)
 
@@ -36,7 +39,7 @@ Firmware: **ESP32-S3 N16R8**, build `9d7fbbe67ed0223d`. Select the same ZIP for 
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device and read its settings. Explicit edits save automatically when editing finishes; reading or switching devices does not write computer defaults. Names, lights, power, keys and knob settings stay on the selected board. Use this paired MSI and firmware ZIP.
 
-Type build172 separates the text task from writing style: choose to keep the language or translate, retain the last target, and explicitly confirm a Han-script hint for Chinese input. No automatic source change, download, cloud call or device write. Saved drafts, local key practice and existing models remain; review translations before use. Firmware37 is unchanged.
+Type build173 puts translated text and Save back in view: selected setup folds after success, stays identifiable in its language/method summary, and expands for recovery on failure. Reopen it without losing text or selections. Overview directly opens Chinese ↔ English local translation on Windows. Models, voice/device settings and Firmware37 are unchanged; literal translation still needs review.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

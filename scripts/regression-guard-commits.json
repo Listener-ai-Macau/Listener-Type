@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T18:15:56.355292+08:00",
+  "updated_at": "2026-10-24T18:51:46.292962+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7670,6 +7670,47 @@
         "Saved-library tab wish retained but deferred: direct existing History entry and exact saved draft retrieval worked, while Owner requests fewer top-level pages."
       ],
       "commit_subject": "Separate text tasks from styles and offer explicit Chinese source confirmation"
+    },
+    {
+      "id": "translation_workspace_result_visibility_and_direct_local_entry",
+      "subject": "Result and Save visible after successful translation, recoverable setup and explicit direct local entry",
+      "repo": "type",
+      "commit": "416457b263116f04fd74dcd288be3f971a972bbf",
+      "state": "Type173_matching_package_installed_native_scoped_proof_and_public_asset_verified",
+      "humanAccepted": false,
+      "protects": [
+        "Selected task/language/method settings fold only after accepted translation success, keep a truthful route summary, and reopen on accepted failure; reopening does not change source/result or rerun.",
+        "Responsive settings grid retains usable desktop/laptop result and Save visibility and no narrow horizontal overflow.",
+        "Direct Windows local translation entry selects only the existing text task; ordinary text entry resets task while retaining input. No source guess, component download, cloud request, active-style/device or recording preference change."
+      ],
+      "guards": [
+        "python scripts/check-local-translation-ui.py --url <controlled> --report <receipt>",
+        "python scripts/check-translation-text-trial-ui.py --url <controlled> --report <receipt>",
+        "python scripts/check-offline-wording-ui.py --url <controlled> --check-undo --check-context --check-boundaries --report <receipt>"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\workspace173-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\workspace173-cloud-compatibility.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\workspace173-wording-compatibility.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native173-snapshot-20261024-184510\\text-task173-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build173\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build173\\type173-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build173\\post-update-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native173-snapshot-20261024-184510\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener173-update-20261024-184600\\qualification.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual controlled React13 local/setup/fold/save scopes, five explicit cloud compatibility scopes and14 wording scopes; no inference or physical proof from these fixtures.",
+        "Original172 presale and aftersale shared result/save visibility: responsive compact task options, selected translation setup folds after success with accurate route summary and reopens on failure; settings can be reopened without changing data. Windows Overview directly opens existing local translation workspace; regular text entry retains its own task. Models, voice/device preferences and firmware unchanged.",
+        "Original172 presale and aftersale shared result/save visibility: responsive compact task options, selected translation setup folds after success with accurate route summary and reopens on failure; settings can be reopened without changing data. Windows Overview directly opens existing local translation workspace; regular text entry retains its own task. Models, voice/device preferences and firmware unchanged. Exact173 private native direct local entry/ordinary task reset, original171 same CPU translation, success-folded truthful summary with Save visible at y489–518 inside1240x800, reopen retains values/output, explicit manual revision saved/reopened with exact source; preferences/history/styles/empty credentials retained. No new model quality, physical key/editor, natural173 or buying claim."
+      ],
+      "pending_human_scope": [
+        "No translation quality repair:172 presale location clause still awkward,171 condition/wording limitations retained;173 does not alter model output.",
+        "Direct entry does not configure ASR/cloud, download components or simulate hardware. Scope is ordinary text workspace.",
+        "Actual172 Owner34.02s/3992packet exact157char Codex insertion confirmed, physical start/stop origin and shortcut comparison unknown. This is not173 physical or long-term proof.",
+        "172 natural presale/aftersale feedback is not173 natural use or real buyer/after-sale qualification. Full22feature coverage still contains explicit pending OS/global/device/optional-model cases."
+      ],
+      "commit_subject": "Keep translation results and saved drafts in view with direct local entry"
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -8467,7 +8508,8 @@
         "local_wording_compound_imperative_boundary_and_complete_candidate",
         "saved_draft_copy_shared_idempotent_save_retains_original",
         "saved_message_variants_explicit_local_key_practice",
-        "text_workspace_explicit_task_and_confirmed_source_hint"
+        "text_workspace_explicit_task_and_confirmed_source_hint",
+        "translation_workspace_result_visibility_and_direct_local_entry"
       ],
       "paths": {
         "type": [

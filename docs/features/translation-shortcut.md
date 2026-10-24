@@ -1,9 +1,16 @@
-# Translation Shortcut
+# Translation
 
 ## Status
 
 - status: `implemented`
 - scope: translation page and dedicated hotkey binding that is kept separate from dictation and QA
+
+## Using translation
+
+- **Text only:** on 64-bit Windows, open Overview → Chinese ↔ English on this PC. Confirm the source and target, explicitly prepare the required components once, then translate. No hardware or cloud key is needed for this local text route. Review/edit the result before saving or copying it.
+- Successful text translation folds the selected setup and keeps its language/method summary visible. Reopen it to change choices; an error expands it for recovery. Saving keeps the original and edited result in History → Saved drafts.
+- **Voice:** speech recognition is separate. Choose the local or cloud translation engine and languages on the Translation page for explicitly triggered voice translation. Plain dictation retains its original language. Text-trial choices do not change voice settings.
+- Local Chinese ↔ English translation has no per-request translation API fee; existing cloud recognition or explicitly selected cloud translation still follows provider charges. Other offline pairs and universal translation quality are not established.
 
 ## Source Map
 
