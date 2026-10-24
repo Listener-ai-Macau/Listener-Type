@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-25T01:55:59.930492+08:00",
+  "updated_at": "2026-10-25T02:09:51.657677+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7925,6 +7925,36 @@
         "No model, paid cloud, voice/provider/configuration or Firmware37 changes; unknown/corrupt diagnostic data is still rejected."
       ],
       "commit_subject": "Demultiplex OTA readiness markers from firmware diagnostic log chunks"
+    },
+    {
+      "id": "capsule_saved_position_startup_actual_mixed_dpi_monitors",
+      "subject": "Actual packaged178 loads saved capsule placement and restores native anchors on real125percent and200percent monitors",
+      "repo": "type",
+      "commit": "98cdb6cc969401aac715a5f334ffd9281b5cf31b",
+      "commit_subject": "Demultiplex OTA readiness markers from firmware diagnostic log chunks",
+      "state": "actual_exact178_saved_startup_position_two_real_mixed_DPI_monitors_scoped_passed",
+      "humanAccepted": false,
+      "protects": [
+        "Existing implementation origin792d2dd4 is unchanged; full tested package source98cdb6cc records actual startup/file/native placement context.",
+        "At125percent and200percent real monitors, saved centerX0.31/bottomY0.65 is restored within1physicalpixel and target monitor identity matches.",
+        "Only private synthetic placement is seeded; capsule remains hidden and no OS focus/input/cursor/clipboard, BLE, service or Owner setting change occurs."
+      ],
+      "guards": [
+        "cargo test --target x86_64-pc-windows-msvc --lib capsule_placement::tests -- --test-threads=1"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build178\\capsule-startup-position-native-summary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native178-snapshot-20261025-020446\\capsule-startup-position-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native178-snapshot-20261025-020643\\capsule-startup-position-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native178-snapshot-20261025-020446\\setup-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native178-snapshot-20261025-020643\\setup-result.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual exact178 hidden native startup restoration from two synthetic per-profile saved placements on this real125percent/200percent dual-monitor desktop. Not drag, active-window visibility, hot-plug, monitor removal or speech."
+      ],
+      "pending_human_scope": [
+        "Actual user drag, changed/missing monitor/DPI topology and visible real recording remain separately unverified."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -9287,6 +9317,25 @@
       "known_failures": [
         "Legacy speed controller pins FW22/31/33 and old host binaries; never use it for current Firmware37 or relax its guards.",
         "Radio-check receiver collection is not complete encrypted RF or an air-throughput measurement."
+      ]
+    },
+    {
+      "id": "capsule-saved-position",
+      "accepted_scope": "Actual exact178 hidden native startup restoration from two synthetic per-profile saved placements on this real125percent/200percent dual-monitor desktop. Not drag, active-window visibility, hot-plug, monitor removal or speech.",
+      "baseline_state": "actual_exact178_saved_startup_position_two_real_mixed_DPI_monitors_scoped_passed",
+      "guard_entries": [
+        "capsule_saved_position_startup_actual_mixed_dpi_monitors"
+      ],
+      "paths": {
+        "type": [
+          "src-tauri/src/capsule_placement.rs",
+          "src-tauri/src/coordinator/support.rs",
+          "src-tauri/src/lib.rs",
+          "src-tauri/src/persistence.rs"
+        ]
+      },
+      "known_failures": [
+        "First acceptance getter incorrectly called instance.currentMonitor; the installed API exports module.currentMonitor. Controller-only preparation failure is retained. No product defect found; exact same package/profile used after correcting that read-only getter."
       ]
     }
   ]
