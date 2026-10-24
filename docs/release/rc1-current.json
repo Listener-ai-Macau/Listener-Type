@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-24T12:33:08.818927+08:00",
+  "updatedAt": "2026-10-24T13:21:28.524256+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 164,
-    "source": "15b42506a35f5b401ddb5e2fe4bbb0222fe10908",
-    "sourceTag": "build-source/type164-20261024",
+    "build": 165,
+    "source": "df315d76973ab2a6e68cd4a990bf7423108b54b6",
+    "sourceTag": "build-source/type165-20261024",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "f56a49736a67edcf2b7c487b782d53aa5888c7813931492a8f9da4aad24efaab",
-    "sizeBytes": 299376640,
-    "exeSha256": "31986b8e868b1c5311b7d4bb5ab14973336ce5e903c6b0460c8ba9df75b3a6f9",
+    "sha256": "dbcbd8e793f461acf0d0411bb4964bddad4cfb90ab029de8d7bae9a34486ba73",
+    "sizeBytes": 299360256,
+    "exeSha256": "64a152c5182aa17dc3f10ae0a2d0e0c87f6a1eb0f493d44c0f782e2113196a30",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -414,7 +414,12 @@
     "type164FooterAboutBuildIdentityNativeVerified": true,
     "type164TextAudioReceiptLifecycleControlledVerified": true,
     "customer164Reviewed": false,
-    "customer164PurchaseQualification": false
+    "customer164PurchaseQualification": false,
+    "type165KeylessNativeLaunchAndReloadVerified": true,
+    "type165ScopedHistorySavedDraftReadVerified": true,
+    "type165ExplicitMissingAsrCredentialGateVerified": true,
+    "type165CustomerReviewed": false,
+    "type165PurchaseQualification": false
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -432,6 +437,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build164-20261024"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build165-20261024"
   }
 }

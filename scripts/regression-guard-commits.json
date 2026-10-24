@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T13:12:50.931548+08:00",
+  "updated_at": "2026-10-24T13:23:19.269227+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7330,7 +7330,7 @@
     {
       "id": "local_text_launch_keeps_explicit_speech_setup_and_scoped_history",
       "subject": "Keyless local text launches without automatic ASR modal; History names dictation and Q&A scope while preserving saved drafts",
-      "state": "source_scoped_react_before_after_passed_matching_native_pending",
+      "state": "Type165_matching_package_installed_native_scoped_proof_and_public_asset_verified",
       "repo": "type",
       "commit": "6f1c0d8f9bf5f8505fdfdfe4428e9e928f4ccf5a",
       "commit_subject": "Let keyless text users launch without speech setup interruption",
@@ -7347,13 +7347,25 @@
       ],
       "machine_evidence": [
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\text-first165-before.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\text-first165-after.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\text-first165-after.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build165\\source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native165-snapshot-20261024-131812\\text-first165-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build165\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build165\\type165-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build165\\post-update-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native165-snapshot-20261024-131812\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener165-update-20261024-132036\\qualification.json"
       ],
       "machine_accepted_scope": [
-        "Actual controlled React keyless visible/fresh launches, editing local text, empty History and existing saved draft read, explicit provider-settings navigation. No native speech or physical evidence yet."
+        "Actual controlled React keyless visible/fresh launches, editing local text, empty History and existing saved draft read, explicit provider-settings navigation. No native speech or physical evidence yet.",
+        "Keyless visible launch/fresh session does not interrupt local text with automatic ASR setup. Explicit speech setup remains in Overview; unchanged backend credential gate is verified separately before capture. History labels scope dictation and Q&A, with saved drafts read separately and preserved. No translation model, provider, capture, BLE or firmware change.",
+        "Keyless visible launch/fresh session does not interrupt local text with automatic ASR setup. Explicit speech setup remains in Overview; unchanged backend credential gate is verified separately before capture. History labels scope dictation and Q&A, with saved drafts read separately and preserved. No translation model, provider, capture, BLE or firmware change. Exact native165 keyless visible launch/reload, local draft editing, scoped empty History, existing saved text read and explicit provider entry. Direct native missing-credential start rejects before recording and cancel restores Idle. No physical voice/migration/purchase qualification."
       ],
       "pending_human_scope": [
-        "Hardware/global input/live recognition and new-customer improvement not established by this UI check."
+        "No change to or new quality claim for translation models;164 machine-editing limitation retained.",
+        "No physical recording/key/target editor/global shortcut/new ASR or hardware purchase qualification.",
+        "History and saved drafts remain distinct stores; no migration or merged history.",
+        "Automatic dialog removed; explicit missing-credential attempt/native error and retained setup are separately checked."
       ]
     }
   ],
@@ -8226,7 +8238,12 @@
           "src/lib/firstUseOverview.test.ts",
           "scripts/check-first-use-overview-ui.py",
           "scripts/check-text-first-onboarding-ui.py",
-          "src/i18n/firstUse.ts"
+          "src/i18n/firstUse.ts",
+          "src/i18n/en.ts",
+          "src/i18n/zh-CN.ts",
+          "src/i18n/zh-TW.ts",
+          "src/i18n/ja.ts",
+          "src/i18n/ko.ts"
         ]
       },
       "known_failures": [
