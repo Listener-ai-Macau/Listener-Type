@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T08:28:17.946140+08:00",
+  "updated_at": "2026-10-24T09:15:26.560555+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7027,7 +7027,7 @@
         "python scripts/check-first-use-overview-ui.py --url <controlled-ui-url> --report <report.json>"
       ],
       "unverified": [
-        "Exact160 packaged native guide/state/status check, installation/public identity and Owner visual review pending. Physical translation/keys/lights and hardware buying interest not established by headless mocks."
+        "Owner visual review of installed160 status home remains separate; physical Translation/other keys/lights and hardware buying interest are not established by its native/headless UI cases."
       ],
       "repo": "type",
       "commit": "2a1610c18818290c5c4969f624c05be2210920a3",
@@ -7054,6 +7054,60 @@
       "pending_human_scope": [
         "Headless fixtures use browser mocks; exact native160 pending. No audio/Bluetooth/native-key/translation/model/provider/credentials changes.",
         "Full functional acceptance, original151 deferred49 hardware interest and previous refusals remain unchanged."
+      ]
+    },
+    {
+      "id": "translation_guidance_follows_actual_shortcut_and_device_action",
+      "subject": "Translation setup explains actual shortcut, ordinary recording and optional onboard Translation action",
+      "state": "source_headless_five_locale_verified_not_native_packaged",
+      "protects": [
+        "Translation help follows translationHotkey instead of hardcoded Shift.",
+        "The target language alone does not activate ordinary recordings; show both modifier and dedicated device-action routes plus actual mode indicator.",
+        "Original normal recording, provider settings and per-board mappings remain unchanged."
+      ],
+      "guards": [
+        "python scripts/check-translation-guidance-ui.py --url <controlled-ui-url> --report <report.json>",
+        "npx --no-install tsc --noEmit"
+      ],
+      "unverified": [
+        "Matching native package not yet made; human Translation chain and physical dedicated device gesture remain separate."
+      ],
+      "repo": "type",
+      "commit": "be1d2207d53e669136185675d30c94ce3f486b3d",
+      "commit_subject": "Explain translation activation using the configured shortcut and onboard key action",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\translation-guidance-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\translation-guidance-after.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build160\\live-translation\\translation-reviewed.json"
+      ]
+    },
+    {
+      "id": "translation_preview_explicit_editable_and_failure_not_hidden",
+      "subject": "Typed translation is an explicit source-preserving preview; failed translation is never silent Raw success",
+      "state": "source_native16_headless_scope_passed_matching_package_pending",
+      "repo": "type",
+      "commit": "7394063f719fd985ccc016e961169dca84d0df07",
+      "commit_subject": "Add explicit editable translation previews and retain visible translation failure receipts",
+      "humanAccepted": false,
+      "protects": [
+        "Quick typed-text workspace can choose an output language; choosing alone makes no paid request or global recording/style/provider/device change.",
+        "Only explicit submit sends supplied text and target to the existing text provider; raw fallback is not a successful translation preview.",
+        "Original/result stay editable, with explicit save/copy/insert; a closed workspace cannot adopt late translation results.",
+        "Translation recording failures retain original text, record translationFailed where no stronger delivery warning applies, and preserve delivery warnings while showing visible failure. Ordinary polish fallback remains unchanged."
+      ],
+      "guards": [
+        "python scripts/check-translation-text-trial-ui.py --url <controlled-ui-url> --report <report.json>",
+        "npx --no-install tsc --noEmit"
+      ],
+      "unverified": [
+        "Matching native preview real-service/invalid-service, package/install/public and fresh-customer improvement not yet established.",
+        "No all-function, physical dedicated gesture, real voice Translation success or hardware purchase qualification."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\translation161-workspace-headless.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\translation161-guidance-headless.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261024-091319-9eae9a\\result.json"
       ]
     }
   ],
@@ -7842,7 +7896,9 @@
         "customer129_all_workspace_settings_detours_preserve_work",
         "customer130_recording_selection_survives_speech_setup",
         "customer136_trial_request_origin_and_selected_language_date",
-        "overview_status_home_survives_first_use_dismissal"
+        "overview_status_home_survives_first_use_dismissal",
+        "translation_guidance_follows_actual_shortcut_and_device_action",
+        "translation_preview_explicit_editable_and_failure_not_hidden"
       ],
       "paths": {
         "type": [
