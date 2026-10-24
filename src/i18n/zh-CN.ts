@@ -1471,6 +1471,7 @@ export const zhCN = {
       openBluetoothSettings: '一键修复',
       bluetoothSettingsOpenFailed: '无法打开蓝牙设置，请手动打开系统的蓝牙设置。',
       exporting: '导出中…',
+      exportAlreadyRunning: "诊断包正在导出，请等待当前任务完成。",
       exportProgress: '正在收集桌面、BLE、固件和音频元数据…',
       exportSuccess: '已保存',
       exportFailed: '导出失败',

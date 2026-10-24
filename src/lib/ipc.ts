@@ -2083,7 +2083,57 @@ export async function exportErrorLog(suggestedFileName: string): Promise<string 
   return target;
 }
 
-export async function exportDiagnosticPackage(suggestedFileName: string): Promise<string | null> {
+export type DiagnosticExportSnapshot = {
+  status: 'idle' | 'busy' | 'ok' | 'err';
+  message: string;
+};
+let diagnosticExportSnapshot: DiagnosticExportSnapshot = { status: 'idle', message: '' };
+let pendingDiagnosticExport: Promise<string | null> | null = null;
+const diagnosticExportListeners = new Set<(value: DiagnosticExportSnapshot) => void>();
+
+export function getDiagnosticExportSnapshot(): DiagnosticExportSnapshot {
+  return diagnosticExportSnapshot;
+}
+
+export function subscribeDiagnosticExportState(listener: (value: DiagnosticExportSnapshot) => void): () => void {
+  diagnosticExportListeners.add(listener);
+  listener(diagnosticExportSnapshot);
+  return () => { diagnosticExportListeners.delete(listener); };
+}
+
+function publishDiagnosticExport(value: DiagnosticExportSnapshot): void {
+  diagnosticExportSnapshot = value;
+  for (const listener of diagnosticExportListeners) {
+    try { listener(value); }
+    catch (cause) { console.warn('[diagnostic-export] status observer failed', cause); }
+  }
+}
+
+export function exportDiagnosticPackage(suggestedFileName: string): Promise<string | null> {
+  if (pendingDiagnosticExport) return pendingDiagnosticExport;
+  // Own the operation before the OS save dialog, and keep it across About
+  // navigation. The native worker independently guards all WebViews/callers.
+  const request = Promise.resolve().then(() => performDiagnosticExport(suggestedFileName));
+  pendingDiagnosticExport = request;
+  publishDiagnosticExport({ status: 'busy', message: '' });
+  void request.then(target => {
+    if (pendingDiagnosticExport !== request) return;
+    pendingDiagnosticExport = null;
+    const snapshot: DiagnosticExportSnapshot = target === null
+      ? { status: 'idle', message: '' } : { status: 'ok', message: target };
+    publishDiagnosticExport(snapshot);
+    if (target !== null) window.setTimeout(() => {
+      if (diagnosticExportSnapshot === snapshot) publishDiagnosticExport({ status: 'idle', message: '' });
+    }, 4000);
+  }, cause => {
+    if (pendingDiagnosticExport !== request) return;
+    pendingDiagnosticExport = null;
+    publishDiagnosticExport({ status: 'err', message: cause instanceof Error ? cause.message : String(cause) });
+  });
+  return request;
+}
+
+async function performDiagnosticExport(suggestedFileName: string): Promise<string | null> {
   if (!isTauri) {
     return `~/Downloads/${suggestedFileName}`;
   }

@@ -1473,6 +1473,7 @@ export const zhTW: typeof zhCN = {
       openBluetoothSettings: '一鍵修復',
       bluetoothSettingsOpenFailed: '無法開啟藍牙設定，請手動開啟系統的藍牙設定。',
       exporting: '匯出中…',
+      exportAlreadyRunning: "診斷套件正在匯出，請等候目前工作完成。",
       exportProgress: '正在收集桌面、BLE、韌體和音訊元資料…',
       exportSuccess: '已儲存',
       exportFailed: '匯出失敗',

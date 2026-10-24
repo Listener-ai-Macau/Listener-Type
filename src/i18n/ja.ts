@@ -1431,6 +1431,7 @@ export const ja: typeof zhCN = {
       openBluetoothSettings: 'ワンクリック修復',
       bluetoothSettingsOpenFailed: 'Bluetooth設定を開けませんでした。システムのBluetooth設定を手動で開いてください。',
       exporting: 'エクスポート中…',
+      exportAlreadyRunning: "診断パッケージをエクスポート中です。完了するまでお待ちください。",
       exportProgress: 'デスクトップ、BLE、ファームウェア、音声メタデータを収集中…',
       exportSuccess: '保存しました',
       exportFailed: 'エクスポート失敗',

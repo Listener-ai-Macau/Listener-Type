@@ -19,15 +19,47 @@ pub fn export_error_log(target_path: String) -> Result<(), String> {
 /// values. Previously retained debug WAV samples may be included and are declared
 /// in the archive manifest; export does not start a new recording.
 #[tauri::command]
-pub fn export_diagnostic_package(
+pub async fn export_diagnostic_package(
     coord: CoordinatorState<'_>,
     target_path: String,
 ) -> Result<String, String> {
-    let package = build_diagnostic_package(coord.inner())?;
-    let firmware_log = crate::embedded_ble::pull_firmware_diagnostic_log(Duration::from_secs(45));
-    let target = diagnostic_export_target_path(&target_path, &package)?;
-    write_diagnostic_package_zip(&target, &package, &firmware_log)?;
-    Ok(target.display().to_string())
+    static BUSY: std::sync::OnceLock<Arc<std::sync::atomic::AtomicBool>> = std::sync::OnceLock::new();
+    let busy = BUSY.get_or_init(|| Arc::new(std::sync::atomic::AtomicBool::new(false))).clone();
+    let coord = Arc::clone(coord.inner());
+    run_diagnostic_export_job(busy, move || {
+        let package = build_diagnostic_package(&coord)?;
+        let target = diagnostic_export_target_path(&target_path, &package)?;
+        let firmware_log = crate::embedded_ble::pull_firmware_diagnostic_log(Duration::from_secs(45));
+        write_diagnostic_package_zip(&target, &package, &firmware_log)?;
+        Ok(target.display().to_string())
+    }).await
+}
+
+/// The blocking device/file work owns admission, including if its IPC caller
+/// disappears. A cancelled async waiter must not admit a second device pull.
+struct DiagnosticExportPermit(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for DiagnosticExportPermit {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+async fn run_diagnostic_export_job<F>(
+    busy: Arc<std::sync::atomic::AtomicBool>,
+    work: F,
+) -> Result<String, String>
+where
+    F: FnOnce() -> Result<String, String> + Send + 'static,
+{
+    busy.compare_exchange(false, true, std::sync::atomic::Ordering::AcqRel,
+        std::sync::atomic::Ordering::Acquire)
+        .map_err(|_| "diagnostic_export_busy".to_string())?;
+    let permit = DiagnosticExportPermit(busy);
+    tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    }).await.map_err(|error| format!("Diagnostic export worker failed: {error}"))?
 }
 
 #[derive(Debug, Serialize)]

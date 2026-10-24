@@ -2700,6 +2700,63 @@ fn snapshot() -> CredentialsSnapshot {
 }
 
 #[test]
+fn diagnostic_export_worker_keeps_ownership_after_waiter_cancellation() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let busy = Arc::new(AtomicBool::new(false));
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let caller = std::thread::current().id();
+    tauri::async_runtime::block_on(async {
+        let job = tauri::async_runtime::spawn(super::run_diagnostic_export_job(
+            Arc::clone(&busy), move || {
+                started_tx.send(std::thread::current().id()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+                Ok("first export".to_string())
+            },
+        ));
+        let worker = started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_ne!(worker, caller, "device and ZIP work must leave the caller thread");
+        assert!(busy.load(Ordering::Acquire));
+        let rejected = super::run_diagnostic_export_job(Arc::clone(&busy), || {
+            panic!("a second export must not enter device work")
+        }).await;
+        assert_eq!(rejected.unwrap_err(), "diagnostic_export_busy");
+        job.abort();
+        assert!(job.await.is_err());
+        assert!(busy.load(Ordering::Acquire), "cancelled waiter cannot release the device job");
+        release_tx.send(()).unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        while busy.load(Ordering::Acquire) && Instant::now() < until {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        assert!(!busy.load(Ordering::Acquire));
+        assert_eq!(super::run_diagnostic_export_job(Arc::clone(&busy), || {
+            Ok("retry export".to_string())
+        }).await.unwrap(), "retry export");
+    });
+}
+
+#[test]
+fn diagnostic_export_worker_releases_admission_after_error_or_panic() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let busy = Arc::new(AtomicBool::new(false));
+    tauri::async_runtime::block_on(async {
+        assert_eq!(super::run_diagnostic_export_job(Arc::clone(&busy), || {
+            Err("synthetic write failure".to_string())
+        }).await.unwrap_err(), "synthetic write failure");
+        assert!(!busy.load(Ordering::Acquire));
+        let panicked = super::run_diagnostic_export_job(Arc::clone(&busy), || {
+            panic!("synthetic worker panic")
+        }).await;
+        assert!(panicked.unwrap_err().starts_with("Diagnostic export worker failed:"));
+        assert!(!busy.load(Ordering::Acquire));
+        assert_eq!(super::run_diagnostic_export_job(Arc::clone(&busy), || {
+            Ok("recovered export".to_string())
+        }).await.unwrap(), "recovered export");
+    });
+}
+
+#[test]
 fn diagnostic_redaction_omits_credential_records() {
     let line = "Authorization: Bearer sk-test api_key=abc access_token=def ok";
     assert!(sanitize_diagnostic_log_line(line).is_none());

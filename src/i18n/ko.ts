@@ -1431,6 +1431,7 @@ export const ko: typeof zhCN = {
       openBluetoothSettings: '원클릭 복구',
       bluetoothSettingsOpenFailed: 'Bluetooth 설정을 열 수 없습니다. 시스템의 Bluetooth 설정을 직접 열어 주세요.',
       exporting: '내보내는 중…',
+      exportAlreadyRunning: "진단 패키지를 내보내는 중입니다. 현재 작업이 완료될 때까지 기다려 주세요.",
       exportProgress: '데스크톱, BLE, 펌웨어, 오디오 메타데이터 수집 중…',
       exportSuccess: '저장됨',
       exportFailed: '내보내기 실패',

@@ -17,6 +17,8 @@ import { readFontScale, setFontScale, type FontScaleId } from '../lib/fontScale'
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import {
   exportDiagnosticPackage,
+  getDiagnosticExportSnapshot,
+  subscribeDiagnosticExportState,
   openExternal,
 } from '../lib/ipc';
 import type { OS } from './WindowChrome';
@@ -341,8 +343,12 @@ function AboutMini({ onOpenHelp }: { onOpenHelp: () => void }) {
   const { t } = useTranslation();
   const [qqCopied, setQqCopied] = useState(false);
   const qqCopiedRef = useRef<number | null>(null);
-  const [exportStatus, setExportStatus] = useState<'idle' | 'busy' | 'ok' | 'err'>('idle');
-  const [exportMessage, setExportMessage] = useState<string>('');
+  const [diagnosticExport, setDiagnosticExport] = useState(getDiagnosticExportSnapshot);
+  const exportStatus = diagnosticExport.status;
+  const exportMessage = diagnosticExport.message === 'diagnostic_export_busy'
+    ? t('modal.about.exportAlreadyRunning') : diagnosticExport.message;
+
+  useEffect(() => subscribeDiagnosticExportState(setDiagnosticExport), []);
 
   useEffect(() => () => {
     if (qqCopiedRef.current) clearTimeout(qqCopiedRef.current);
@@ -356,22 +362,10 @@ function AboutMini({ onOpenHelp }: { onOpenHelp: () => void }) {
   };
 
   const onExportDiagnosticPackage = async () => {
-    setExportStatus('busy');
-    setExportMessage('');
     try {
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const target = await exportDiagnosticPackage(`listener-type-diagnostic-device-${ts}.zip`);
-      if (target == null) {
-        setExportStatus('idle');
-        return;
-      }
-      setExportStatus('ok');
-      setExportMessage(target);
-      window.setTimeout(() => setExportStatus('idle'), 4000);
-    } catch (err) {
-      setExportStatus('err');
-      setExportMessage(err instanceof Error ? err.message : String(err));
-    }
+      await exportDiagnosticPackage(`listener-type-diagnostic-device-${ts}.zip`);
+    } catch { /* Shared state retains the failure for the current or reopened About page. */ }
   };
 
   return (
@@ -423,7 +417,7 @@ function AboutMini({ onOpenHelp }: { onOpenHelp: () => void }) {
         </div>
       </Row>
       <Row label={t('modal.about.exportDiagnosticPackage')} desc={t('modal.about.exportDiagnosticPackageDesc')}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div data-diagnostic-export-control style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button style={btnGhost} onClick={onExportDiagnosticPackage} disabled={exportStatus === 'busy'}>
             {exportStatus === 'busy' ? t('modal.about.exporting') : t('modal.about.exportDiagnosticPackageBtn')}
           </button>

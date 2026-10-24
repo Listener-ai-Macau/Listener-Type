@@ -1476,6 +1476,7 @@ export const en: typeof zhCN = {
       openBluetoothSettings: 'One-click repair',
       bluetoothSettingsOpenFailed: 'Could not open Bluetooth settings. Open your system’s Bluetooth settings manually.',
       exporting: 'Exporting…',
+      exportAlreadyRunning: "A diagnostic export is already running. Wait for it to finish.",
       exportProgress: 'Collecting desktop, BLE, firmware, and audio metadata…',
       exportSuccess: 'Saved',
       exportFailed: 'Export failed',
