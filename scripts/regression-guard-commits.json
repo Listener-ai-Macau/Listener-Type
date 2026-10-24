@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T12:12:45.269776+08:00",
+  "updated_at": "2026-10-24T12:25:16.629797+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7277,15 +7277,17 @@
     {
       "id": "local_saved_draft_deleted_or_missing_record_never_becomes_another_draft",
       "subject": "Exact saved-draft ownership clears on acknowledged deletion and missing IDs require an explicit other selection",
-      "state": "source_actualReact_delete_missing_and_prior_save_compatibility_passed_matching_native_pending",
+      "state": "source_shared_receipt_lifecycle_all_callers_controlled_UI_passed_matching_native_pending",
       "repo": "type",
-      "commit": "e4b47b4357abe00c68b67f8ef13591850d8bbf89",
-      "commit_subject": "Keep saved-draft ownership synchronized after deletion and missing records",
+      "commit": "3bb6868376a637a14ffbb6f14fa54a64392863cc",
+      "commit_subject": "Propagate saved receipt removal to both text and audio workspace owners",
       "humanAccepted": false,
       "protects": [
         "Deleting the currently saved draft resets the originating workspace saved state; its source/output remain and can be saved again.",
         "An unavailable requested ID is visible and does not fall back to another saved draft; selecting another is explicit.",
-        "Existing uncertain-save acknowledgement, immutable request retry, read failure, confirmed deletion and History/provider isolation remain retained."
+        "Existing uncertain-save acknowledgement, immutable request retry, read failure, confirmed deletion and History/provider isolation remain retained.",
+        "Save receipt unavailable/deleted events invalidate both text and audio originating retention/close-protection state; not only the Save button.",
+        "The requested record identity remains fixed through missing-record feedback, so a retry cannot silently substitute another record."
       ],
       "guards": [
         "python scripts/check-local-translation-ui.py --url <controlled-ui> --expected-build <candidate> --report <result>",
@@ -7294,7 +7296,11 @@
       "machine_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native164-snapshot-20261024-120406\\direct-delete-before.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-delete-fix-headless.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-delete-fix-saved-compatibility.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-delete-fix-saved-compatibility.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-parent-retention-before.log",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-receipt-lifecycle-headless.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-receipt-lifecycle-saved-compatibility.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-audio-receipt-lifecycle.json"
       ],
       "machine_accepted_scope": [
         "Same real React components: missing ID retains empty selection until explicit choice; deletion clears originating saved state and keeps text. Previous uncertain-save/read/delete compatibility still passes."
@@ -7302,7 +7308,12 @@
       "unverified": [
         "Matching final164 native handoff/delete/resave pending; first candidate was not installed or published.",
         "No new physical voice, hardware, global editor or purchase qualification."
-      ]
+      ],
+      "rejected_intermediate_core": {
+        "commit": "e4b47b4357abe00c68b67f8ef13591850d8bbf89",
+        "reason": "Child saved state was cleared but parent text/audio retention indicators still retained their own saved receipt. Actual React before test failed; uninstalled second candidate preserved.",
+        "evidence": "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-parent-retention-before.log"
+      }
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
