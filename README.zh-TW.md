@@ -40,7 +40,7 @@
 Type 預設使用 **USB 有線燒寫**，能力已內建；無需另裝 Python、ESP-IDF 或其他燒寫軟體。
 裝置設定各自獨立：選擇一台有線／藍牙裝置並讀取；完成編輯後自動儲存明確修改，讀取或切換裝置不會寫入電腦預設值。名稱、燈光、電源、按鍵與旋鈕設定儲存在所選裝置。請配套使用本頁 MSI 與韌體 ZIP。
 
-Type build162 / Firmware37：概覽、裝置連線和服務狀態保持常駐，略過首次引導不再隱藏整頁或預設跳到歷史；使用入門可單獨重開，原略過選擇仍保留。普通錄音擷取／藍牙邏輯與韌體37未改，本機翻譯僅在選擇後使用；全功能售前驗收仍未完成。
+Type build162 / Firmware37：新增可選本機中英互譯，無需文字 API 金鑰、無逐次翻譯 API 費用。明確下載元件一次後在 CPU 翻譯，可核對編輯原文與結果；既有雲端選擇保留，不自動轉收費服務。概覽狀態與一般錄音保留，雲端辨識費用獨立；整機售前驗收尚未全部完成。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
