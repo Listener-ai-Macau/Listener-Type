@@ -191,9 +191,8 @@ assert.ok(
 );
 assert.ok(
   deviceSectionSource.includes('onKeyDown={handleSettingsKeyDown}') &&
-    deviceSectionSource.includes('target.blur();') &&
-    deviceSectionSource.includes('void save();'),
-  'device settings inputs must submit the existing write path on Enter',
+    deviceSectionSource.includes('target.blur();'),
+  'Enter must finish device field editing; actual autosave persistence is covered by check-device-autosave-ui.py',
 );
 assert.ok(
   deviceSectionSource.includes('setForm(snapshotToForm(value.snapshot));'),

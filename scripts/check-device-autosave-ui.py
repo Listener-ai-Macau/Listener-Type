@@ -92,6 +92,14 @@ window.__fixture=async(cmd,args,mock)=>{
   n=len(writes());app_key=keys.get_by_role('combobox',name='选择设备键动作').nth(10);choose(app_key,'打开指定应用');quiet()
   app_stack=app_key.locator('xpath=ancestor::div[contains(@class,"ol-device-key-control-stack")]')
   choose(app_stack.get_by_role('combobox').nth(1),'Fixture App');expect(keys).to_contain_text('已保存到设备');assert page.evaluate('window.__boards.B.profile.deviceCustomKeyLongPresses.key3.externalAppPath')=='C:\\Fixture\\app.exe';r['installedApplicationChoiceAutosaves']=True
+  # Enter commits the editable numeric draft through blur/autosave. A settled
+  # draft alone must issue no request; the removed Write button is not involved.
+  n=len(writes());status.fill('44');quiet();assert len(writes())==n
+  status.press('Enter');expect(status).not_to_be_focused();expect(core).to_contain_text('已保存到设备');quiet()
+  assert len(writes())==n+1 and writes()[-1]['args']['device']['id']=='usb:B'
+  assert page.evaluate('window.__boards.B.snapshot.statusLedBrightnessPercent')==44
+  assert page.evaluate('window.__boards.A.snapshot.statusLedBrightnessPercent')==42
+  r['enterCommitsDraftOnceThroughAutosaveToSelectedDevice']=True
   r['writes']=writes();r['passed']=True
  except Exception as e:
   r['error']=str(e);page.screenshot(path=str(a.report.with_suffix('.png')),full_page=True)
