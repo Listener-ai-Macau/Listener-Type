@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-24T23:46:11.740135+08:00",
+  "updatedAt": "2026-10-25T01:52:01.812434+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 176,
-    "source": "1da31df3c201e6a321dc95877daece4ee4e82c83",
-    "sourceTag": "build-source/type176-20261024",
+    "build": 178,
+    "source": "98cdb6cc969401aac715a5f334ffd9281b5cf31b",
+    "sourceTag": "build-source/type178-20261025",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "aec81a42bb0675a388ded9d5bc3fb5e965c446159350bed97c29ba9ffb6f9ffd",
-    "sizeBytes": 299343872,
-    "exeSha256": "c42e25fede0dbd779031f7401c18449c7cfde1e4386a86930d86d0dfb9b0bcda",
+    "sha256": "3b557756de051ee01b13804833fd4dc86f1ad60546d1d7e73849666a2bfac6ca",
+    "sizeBytes": 299360256,
+    "exeSha256": "53f703d92f434b8cbffb1ac6d9ecf971d2a943d175f2fe27c46145bc2cc6829e",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -472,7 +472,14 @@
     "nativeFirmwareSpeechAndProvidersUnchangedIn175": true,
     "diagnosticPrivacyActualRustArchiveBuild": 176,
     "diagnosticPrivacyAffectedWindowsTests": 10,
-    "sourceLogsVoiceFirmwareUnchangedIn176": true
+    "sourceLogsVoiceFirmwareUnchangedIn176": true,
+    "diagnosticExportActualNativeBuild": 178,
+    "diagnosticExportWorkerWindowsTestsReused177": 12,
+    "diagnosticExportUiControlledScopesReused177": 9,
+    "diagnosticStreamWindowsTests178": 4,
+    "diagnosticFirmwareActualEventBytes178": 6144,
+    "diagnosticConcurrentNativeReplies178": 20,
+    "diagnosticOriginalStoresPreserved178": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -490,6 +497,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build176-20261024"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build178-20261025"
   }
 }

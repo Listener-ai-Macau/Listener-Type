@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build176 / Firmware37
+# Listener v1.0.6-rc1 · Type build178 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -7,25 +7,25 @@
 
 ## In this app update
 
-Diagnostic ZIP exports now omit records containing credential fields, including ordinary Bearer values, spaced JSON and separated assignments. Free-form provider response bodies and unframed continuation lines are excluded; connection metadata and HTTP status remain. Original local logs and explicit raw-log export are unchanged. Previously retained debug WAV samples may still be included, as declared in the archive manifest; export does not start a recording.
+Diagnostic exports run device/file work on a worker and retain exclusive ownership while the work is active, including when a caller leaves. Repeated export requests share one operation and feedback across About navigation. The firmware's existing OTA readiness notification is recognized separately from real diagnostic log chunks; it no longer gets parsed as20,292 events. Unknown or corrupt chunks still fail their original validation and readiness does not renew the receive deadline.
 
-The old whitespace-only masker missed synthetic standard credential formats. The same actual Rust functions changed from four failures/one pass to five passes. Ten affected Windows Rust tests also verify the real ZIP writer/reader, checking all archive members for synthetic credential/transcript canaries, preserving safe BLE metadata and the existing offline/firmware archive structures. These are synthetic software checks, not evidence of a real-user leak or actual device export. Matching package launch/source identity is checked separately. The native Save dialog and real firmware diagnostic pull remain separately unverified.
+The first177 candidate produced a valid ZIP but could not read firmware events. That failure is retained. The corrected installed178 received6,144 bytes of real firmware events with valid ZIP CRC;20 native status replies returned while export was pending. Audio readiness and all four existing state stores were preserved. The private test archive was deleted without playing, transcribing or publishing retained audio.177 worker/UI proofs and176 archive filtering tests are reused for their unchanged scopes; four new actual Windows receiver tests passed. The OS Save dialog and full About-to-save flow remain separately unverified.
 
-Recording, recognition, models, providers, keys, BLE protocol and Firmware37 are unchanged.
+Original local logs, explicit raw-log export and declared retained debug-WAV policy are unchanged. Recording, recognition, providers, models and Firmware37 are unchanged. This is a diagnostic reliability fix, not a Bluetooth throughput or background-speech separation claim.
 
 ## Before using
 
-US$49 is the hardware price. Type is free and open source. Cloud recognition and optional cloud text services require preparation and separate usage charges; this release does not provide a ready-to-use official account or allowance. Optional Windows Chinese ↔ English local text translation needs a one-time component download and has no translation API fee. It does not configure speech recognition. USB flashing and Bluetooth OTA use the same firmware ZIP.
+US$49 is the hardware price. Type is free and open source. Cloud recognition and optional cloud text services require preparation and separate usage charges; this release does not provide a ready-to-use official account or allowance. Optional Windows Chinese ↔ English local text translation needs a one-time component download and has no translation API fee; it does not configure speech recognition. USB flashing and Bluetooth OTA use the same firmware ZIP.
 
-Strong background-speech separation remains incomplete; older intermittent ending, arbitrary-editor and other physical/long-term scopes remain separately open. Limited software checks are not all-feature qualification or a real order.
+Strong background-speech separation, some real OS/global-key/physical paths and long-term qualification remain incomplete. Scoped software/native checks do not prove every customer-facing function or a real order.
 
 ## File identity
 
-- Type source: `1da31df3c201e6a321dc95877daece4ee4e82c83` · `build-source/type176-20261024`
-- MSI: 299343872 bytes · SHA256 `aec81a42bb0675a388ded9d5bc3fb5e965c446159350bed97c29ba9ffb6f9ffd`
+- Type source: `98cdb6cc969401aac715a5f334ffd9281b5cf31b` · `build-source/type178-20261025`
+- MSI: 299360256 bytes · SHA256 `3b557756de051ee01b13804833fd4dc86f1ad60546d1d7e73849666a2bfac6ca`
 - Firmware37 source: `87ea79ec3d6e34a95d09b73e2a5848207a919f1c` · runtime `9d7fbbe67ed0223d`
-- ZIP: 1956799 bytes · SHA256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`
+- ZIP:1956799 bytes · SHA256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`
 
 ## 中文说明
 
-加强诊断ZIP过滤：排除含凭据的记录、服务端自由正文及续行，保留连接和HTTP状态元数据。原始本地日志和已声明的调试音频保留政策不变；语音、模型、蓝牙协议与固件37不变。 实际Rust函数反例与10项Windows归档测试分别留证，原始失败保留；没有读取真人日志或让在用设备导出。仅确认本批诊断ZIP内容过滤，系统保存窗口／真实固件拉取及其它未完范围继续保留。
+修复诊断导出可靠性：文件／设备任务移出界面调度，重复请求与跨页共用一次操作，固件就绪消息不再误作日志头。实际安装版已收到固件事件，导出时后台状态仍响应。录音、提供商、模型与固件37不变。 177候选的固件读取失败已保留；178实际导出收到6144字节固件事件，ZIP校验通过，并行原生请求正常返回，原配置／历史／凭据保持。仅清除测试新副本，未播放或发布录音。系统保存窗口、部分全局／实体与长期范围继续保留未完成，不宣称整机全功能合格。

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-25T00:32:12.792005+08:00",
+  "updated_at": "2026-10-25T01:55:59.930492+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7880,6 +7880,51 @@
         "No real recording/QA collision injection, whole encrypted RF, speed gain, alternate boards or long-term qualification."
       ],
       "commit_subject": "Add USB request-tagged key replies and prevent staging restart after chunks"
+    },
+    {
+      "id": "diagnostic_export_worker_request_lifecycle_and_ready_marker_stream",
+      "subject": "Diagnostic export remains responsive, owns one request and separates exact OTA readiness from real firmware log data",
+      "repo": "type",
+      "commit": "98cdb6cc969401aac715a5f334ffd9281b5cf31b",
+      "state": "Type178_matching_package_installed_native_scoped_proof_and_public_asset_verified",
+      "humanAccepted": false,
+      "protects": [
+        "Native export uses blocking pool and the worker owns exclusive admission even if its caller is cancelled; failures/panics release it.",
+        "Save/export operation begins shared ownership before the OS Save boundary and survives About navigation without duplicate exports.",
+        "Only exact DOTA_READY_V1 is excluded from the diagnostic log data stream; one absolute read deadline and all original binary offset/length/CRC checks remain.",
+        "Previous176 ZIP redaction and declared retained audio policy are unchanged.",
+        "Actual installed178 export returned6144bytes of firmware events and20 successful concurrent native status replies, then audioReady and original four stores."
+      ],
+      "guards": [
+        "cargo test --target x86_64-pc-windows-msvc --lib diagnostic_stream_ -- --test-threads=1",
+        "cargo test --target x86_64-pc-windows-msvc --lib commands::tests::diagnostic_worker -- --test-threads=1",
+        "python scripts/check-diagnostic-export-ui.py --url http://127.0.0.1:5173 --report diagnostic-export-ui.json"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261025-005502-fda3b2\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\diagnostic177-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261025-014330-ba6a42\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build177\\native-stream-counterexample.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build178\\diagnostic-export-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native178-snapshot-20261025-014929\\identity178-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build178\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build178\\type178-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build177\\diagnostic-export-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build178\\source-audit.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build178\\post-update-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native178-snapshot-20261025-014929\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener178-update-20261025-014959\\qualification.json"
+      ],
+      "machine_accepted_scope": [
+        "Diagnostic export reliability: native device/file IO runs off UI dispatch with worker-owned exclusive admission; shared save/export request and feedback survive About navigation. The exact Firmware37 OTA-ready marker is demultiplexed from diagnostic log chunks without renewing the receive deadline; unknown/corrupt data retains offset/length/CRC rejection.176 archive filtering, retained debug-sample policy, voice/providers/models and Firmware37 unchanged.",
+        "Diagnostic export reliability: native device/file IO runs off UI dispatch with worker-owned exclusive admission; shared save/export request and feedback survive About navigation. The exact Firmware37 OTA-ready marker is demultiplexed from diagnostic log chunks without renewing the receive deadline; unknown/corrupt data retains offset/length/CRC rejection.176 archive filtering, retained debug-sample policy, voice/providers/models and Firmware37 unchanged. Exact178 native launch/source identity only in independent keyless profile, no background BLE or model download. The separate installed178 diagnostic-export-native.json proves actual firmware bytes/responsiveness and preservation; this identity receipt does not prove OS Save or hardware."
+      ],
+      "pending_human_scope": [
+        "Actual178 firmware diagnostic export/readiness and native responsiveness are qualified only for this connected Firmware37 device and ordinary export.",
+        "OS Save and full About-button-to-save flow, other device/collision faults, full RF/throughput, physical/long-term and other original22 conditions remain open.",
+        "No model, paid cloud, voice/provider/configuration or Firmware37 changes; unknown/corrupt diagnostic data is still rejected."
+      ],
+      "commit_subject": "Demultiplex OTA readiness markers from firmware diagnostic log chunks"
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -9193,17 +9238,31 @@
     },
     {
       "id": "diagnostic-export",
-      "accepted_scope": "Diagnostic ZIP omits credential-bearing records across whitespace/JSON/header formats, strips free-form provider response bodies and excludes unframed continuation lines. Safe status/connection metadata remains. Source logs, explicit raw-log export, retained debug-WAV policy, voice/models/providers, BLE protocol and Firmware37 remain unchanged.",
+      "accepted_scope": "176 archive privacy filtering remains, with178 diagnostic execution/request lifecycle and real firmware stream correctness. Diagnostic export reliability: native device/file IO runs off UI dispatch with worker-owned exclusive admission; shared save/export request and feedback survive About navigation. The exact Firmware37 OTA-ready marker is demultiplexed from diagnostic log chunks without renewing the receive deadline; unknown/corrupt data retains offset/length/CRC rejection.176 archive filtering, retained debug-sample policy, voice/providers/models and Firmware37 unchanged.",
       "baseline_state": "actual_rust_counterexamples_and_archive_scope_passed_package_pending",
       "guard_entries": [
-        "diagnostic_zip_sensitive_record_boundaries_preserve_safe_metadata"
+        "diagnostic_zip_sensitive_record_boundaries_preserve_safe_metadata",
+        "diagnostic_export_worker_request_lifecycle_and_ready_marker_stream"
       ],
       "paths": {
         "type": [
           "src-tauri/src/commands/diagnostics_export.rs",
-          "src-tauri/src/commands_tests.rs"
+          "src-tauri/src/commands_tests.rs",
+          "src/lib/ipc.ts",
+          "src/components/SettingsModal.tsx",
+          "src/i18n/en.ts",
+          "src/i18n/zh-CN.ts",
+          "src/i18n/zh-TW.ts",
+          "src/i18n/ja.ts",
+          "src/i18n/ko.ts",
+          "scripts/check-diagnostic-export-ui.py",
+          "src-tauri/src/embedded_ble/windows_ble/mod.rs",
+          "src-tauri/src/embedded_ble/windows_ble_tests.rs"
         ]
-      }
+      },
+      "known_failures": [
+        "2026-10-25 installed177/da09ae04: actual export ZIP/CRC and20 concurrent native replies passed, firmware data failed. HCI frames162/203 carried exact DOTA_READY_V1; old log parser read count20292. Corrected178/98cdb6cc received6144bytes real firmware events. Keep177 partial failure: outputs/Listener-售前验收-20261025-build177/diagnostic-export-native.json and native-stream-counterexample.json; do not repeat unchanged177 or alter already-uncached policy/UUID/working Firmware37 to hide the marker."
+      ]
     },
     {
       "id": "ble-firmware-ota-current",
