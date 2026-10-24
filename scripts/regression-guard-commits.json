@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T11:34:43.741200+08:00",
+  "updated_at": "2026-10-24T11:43:25.411328+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7199,7 +7199,7 @@
     {
       "id": "offline_translation_sentence_units_preserve_short_paragraph_content",
       "subject": "Local NMT uses each source sentence independently; bounded decode retains original and new omission cases",
-      "state": "source_real_worker_preservation_passed_matching_MSI_pending",
+      "state": "Type163_matching_package_installed_native_scoped_proof_and_public_asset_verified",
       "repo": "type",
       "commit": "11f3bd5587c8b55a5a9e467748145c030d7160ef",
       "commit_subject": "Preserve every local translation sentence instead of collapsing short paragraphs",
@@ -7213,17 +7213,29 @@
         "python scripts/check-local-translation-preservation.py --runtime <prepared-runtime> --zh-en <prepared-pair-root> --en-zh <prepared-pair-root> --report <result.json>"
       ],
       "unverified": [
-        "Exact new MSI and ordinary native UI pending.",
-        "Some lexical choices remain imperfect; this is not global translation quality, physical voice, hardware or purchase qualification."
+        "Lexical choices can remain imperfect; bounded preservation evidence is not universal quality or all-language support.",
+        "Real voice/physical Translation key, arbitrary editor, full acceptance and hardware purchase remain separate."
       ],
       "machine_evidence": [
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\local-nmt\\sentence-context-before-after163.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\local-nmt\\sentence-beam-analysis163.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\local-nmt\\worker-preservation163.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE162-presale-20261024\\REPORT.md"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE162-presale-20261024\\REPORT.md",
+        "work\\customer-onboarding-20261020\\isolated-native163-snapshot-20261024-113935\\local-translation163-native-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build163\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build163\\type163-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build163\\post-update-native.json",
+        "work\\customer-onboarding-20261020\\isolated-native163-snapshot-20261024-113935\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener163-update-20261024-114015\\qualification.json"
       ],
       "machine_accepted_scope": [
-        "Same exact two model assets/runtime; actual nine bounded content-preservation worker cases pass."
+        "Same exact two model assets/runtime; actual nine bounded content-preservation worker cases pass.",
+        "Same-model local translation correction for actual162 content loss. Sentence units and bounded beam5 retain original missing content and previous negative/draft meaning; ordinary native checks are scoped, not universal quality.",
+        "Same-model local translation correction for actual162 content loss. Sentence units and bounded beam5 retain original missing content and previous negative/draft meaning; ordinary native checks are scoped, not universal quality. Matching native163 ordinary UI restores both original162 omitted-content examples and retains the no-send/save-draft meaning in Traditional output. Nine saved-worker cases and these three UI cases are bounded preservation evidence; lexical quality and physical voice remain separate."
+      ],
+      "pending_human_scope": [
+        "Lexical choices can remain imperfect; bounded preservation evidence is not universal quality or all-language support.",
+        "Real voice/physical Translation key, arbitrary editor, full acceptance and hardware purchase remain separate."
       ]
     }
   ],
@@ -8461,7 +8473,8 @@
           "src/pages/Translation.tsx",
           "src/lib/localTranslation.ts",
           "src/lib/ipc.ts",
-          "src/components/Translation.tsx"
+          "src/components/Translation.tsx",
+          "scripts/check-local-translation-preservation.py"
         ]
       }
     }

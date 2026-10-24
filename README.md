@@ -8,7 +8,7 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build162](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build163](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 **English** · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md)
@@ -36,7 +36,7 @@ Firmware: **ESP32-S3 N16R8**, build `9d7fbbe67ed0223d`. Select the same ZIP for 
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device and read its settings. Explicit edits save automatically when editing finishes; reading or switching devices does not write computer defaults. Names, lights, power, keys and knob settings stay on the selected board. Use this paired MSI and firmware ZIP.
 
-Type build162 / Firmware37: Optional local Chinese↔English translation now runs without a text API key or per-translation API fee. Explicitly download components once, then translate on CPU and review/edit the result. Existing active cloud choices are retained; no automatic paid fallback. Overview/status and normal recording remain; cloud ASR costs are separate. Full physical pre-sale acceptance remains incomplete.
+Type build163 / Firmware37: Local Chinese↔English translation now processes every sentence separately, correcting content omitted from short multi-sentence paragraphs. Both original162 omissions and retained dates/quantities/negative instructions were checked on the same model assets. Optional downloads and no translation API fee remain; review the wording. Ordinary capture/Bluetooth/provider choices and Firmware37 are unchanged.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
