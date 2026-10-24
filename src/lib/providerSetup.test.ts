@@ -3,21 +3,9 @@ import {
   areProvidersConfigured,
   classifyEmbeddedBleProbeError,
   classifyProviderConnectionError,
-  shouldShowProviderSetupPrompt,
 } from './providerSetup.ts';
 
 const providersSectionSource = readFileSync('src/pages/settings/ProvidersSection.tsx', 'utf8');
-const asrOnlyCustomer = {
-  activeAsrProvider: 'volcengine', activeLlmProvider: 'ark',
-  asrConfigured: true, llmConfigured: false,
-  volcengineConfigured: true, arkConfigured: false,
-};
-if (shouldShowProviderSetupPrompt(asrOnlyCustomer, null)) {
-  throw new Error('Basic dictation must not be blocked by optional polishing setup');
-}
-if (!shouldShowProviderSetupPrompt({ ...asrOnlyCustomer, asrConfigured: false, llmConfigured: true }, null)) {
-  throw new Error('A configured polishing service must not hide missing speech recognition');
-}
 if (!providersSectionSource.includes(
   "const ASR_DEFAULT_RESOURCE_ID = 'volc.bigasr.sauc.duration';",
 )) {
@@ -86,54 +74,6 @@ assertEqual(
   }),
   true,
   'configured when active ASR is non-volcengine but already ready',
-);
-
-assertEqual(
-  shouldShowProviderSetupPrompt(
-    {
-      activeAsrProvider: 'whisper',
-      activeLlmProvider: 'ark',
-      asrConfigured: false,
-      llmConfigured: false,
-      volcengineConfigured: false,
-      arkConfigured: false,
-    },
-    null,
-  ),
-  true,
-  'show first-run prompt when providers are missing and no prompt was seen',
-);
-
-assertEqual(
-  shouldShowProviderSetupPrompt(
-    {
-      activeAsrProvider: 'whisper',
-      activeLlmProvider: 'ark',
-      asrConfigured: false,
-      llmConfigured: false,
-      volcengineConfigured: false,
-      arkConfigured: false,
-    },
-    '1',
-  ),
-  false,
-  'do not repeat first-run prompt after the user has deferred it in this session',
-);
-
-assertEqual(
-  shouldShowProviderSetupPrompt(
-    {
-      activeAsrProvider: 'whisper',
-      activeLlmProvider: 'ark',
-      asrConfigured: true,
-      llmConfigured: true,
-      volcengineConfigured: false,
-      arkConfigured: true,
-    },
-    null,
-  ),
-  false,
-  'do not show prompt when providers are already configured',
 );
 
 assertStringEqual(

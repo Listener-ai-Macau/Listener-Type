@@ -31,18 +31,12 @@ import { buildFirstRunPairingWizard, type FirstRunPairingAction, type FirstRunPa
 import { applyFontScale, readFontScale } from '../lib/fontScale';
 import { initialOverviewTab, readOverviewHidden, rememberOverviewHidden } from '../lib/firstUseOverview';
 import {
-  getCredentials,
   getEmbeddedBleRuntimeStatus,
-  isMainWindowStartHidden,
   isTauri,
   openSystemSettings,
   recoverEmbeddedBleDevice,
 } from '../lib/ipc';
 import type { DeviceCustomKeyAppPage, EmbeddedBleRepairResult, EmbeddedBleRuntimeStatus } from '../lib/types';
-import {
-  PROVIDER_SETUP_PROMPT_DEFERRED_KEY,
-  shouldShowProviderSetupPrompt,
-} from '../lib/providerSetup';
 import { type SettingsSectionId } from '../pages/Settings';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { useAppState, type AppTab } from '../state/useAppState';
@@ -99,7 +93,6 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const { currentTab, setCurrentTab, settingsOpen, setSettingsOpen } = useAppState(entryTab, initialSettings);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionId | undefined>();
   const [settingsProviderFocus, setSettingsProviderFocus] = useState<'llm' | undefined>();
-  const [providerPromptOpen, setProviderPromptOpen] = useState(false);
   const [blePairingPromptOpen, setBlePairingPromptOpen] = useState(false);
   const [demoModeSession, setDemoModeSession] = useState<DemoModeSession | null>(null);
   const [quickTrialOpen, setQuickTrialOpen] = useState(false);
@@ -147,31 +140,10 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     setPillRect({ top: el.offsetTop, height: el.offsetHeight });
   }, [primaryTab, NAV]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (await isMainWindowStartHidden()) {
-        return;
-      }
-      const credentials = await getCredentials();
-      const promptDeferredValue = window.sessionStorage.getItem(PROVIDER_SETUP_PROMPT_DEFERRED_KEY);
-      if (!cancelled && shouldShowProviderSetupPrompt(credentials, promptDeferredValue)) {
-        setProviderPromptOpen(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Pairing is an explicit choice in Recording settings. Selecting the computer
-  // microphone must never open a hardware guide over the customer's current task.
-
-  const rememberProviderPrompt = () => {
-    window.sessionStorage.setItem(PROVIDER_SETUP_PROMPT_DEFERRED_KEY, '1');
-    setProviderPromptOpen(false);
-  };
-
+  // Opening Type does not imply a speech task: local text works without ASR.
+  // Overview keeps explicit speech setup, and the recording backend still
+  // rejects missing credentials before microphone capture starts.
+  // Pairing is also an explicit choice in Recording settings.
 
   const deferBlePairingPrompt = () => {
     window.sessionStorage.setItem(BLE_PAIRING_PROMPT_DEFERRED_KEY, '1');
@@ -265,18 +237,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, []);
 
-  const openProviderSettings = () => {
-    rememberProviderPrompt();
-    openSettings('providers');
-  };
-
-  const openRecordingSettingsFromProviderPrompt = () => {
-    rememberProviderPrompt();
-    openSettings('recording');
-  };
-
   const startDemoMode = (source: DemoModeSession['source']) => {
-    setProviderPromptOpen(false);
     setBlePairingPromptOpen(false);
     setSettingsOpen(false);
     setDemoModeSession(createDemoModeSession(source));
@@ -575,15 +536,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
         />
       }
 
-      {providerPromptOpen ? (
-        <ProviderSetupPrompt
-          onLater={rememberProviderPrompt}
-          onOpenSettings={openProviderSettings}
-          onOpenRecording={openRecordingSettingsFromProviderPrompt}
-          onStartDemo={startProviderDemoMode}
-          onOpenLocalSettings={() => { rememberProviderPrompt(); openSettings('localAsr'); }}
-        />
-      ) : blePairingPromptOpen ? (
+      {blePairingPromptOpen ? (
         <BlePairingPrompt
           onLater={deferBlePairingPrompt}
           onUseMicrophone={keepMicrophoneFromBlePrompt}
@@ -593,7 +546,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
         />
       ) : null}
 
-      {/* tab 切换 + provider prompt + footer popover 公用的入场关键帧 */}
+      {/* tab 切换 + pairing prompt + footer popover 公用的入场关键帧 */}
       <style>{`
         /* nav 三段视觉层次：
              基础态  → ink-3（中灰文字 + 透明底）
@@ -1090,105 +1043,6 @@ function toneColor(tone: 'outline' | 'blue' | 'ok' | 'err'): string {
   if (tone === 'err') return '#b42318';
   if (tone === 'blue') return 'var(--ol-ink)';
   return 'var(--ol-ink-4)';
-}
-
-function ProviderSetupPrompt({
-  onLater,
-  onOpenSettings,
-  onOpenRecording,
-  onStartDemo,
-  onOpenLocalSettings,
-}: {
-  onLater: () => void;
-  onOpenSettings: () => void;
-  onOpenRecording: () => void;
-  onStartDemo: () => void;
-  onOpenLocalSettings: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        inset: 0,
-        zIndex: 70,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 28,
-        background: 'rgba(15,17,22,0.28)',
-        backdropFilter: 'blur(6px) saturate(140%)',
-        WebkitBackdropFilter: 'blur(6px) saturate(140%)',
-        animation: 'ol-prompt-fade 0.2s var(--ol-motion-soft)',
-      }}
-    >
-      <div
-        style={{
-          width: 430,
-          borderRadius: 12,
-          background: 'var(--ol-surface)',
-          border: '0.5px solid var(--ol-line)',
-          boxShadow: '0 24px 70px -24px rgba(15,17,22,.38), 0 0 0 0.5px rgba(0,0,0,.06)',
-          padding: 20,
-          animation: 'ol-prompt-pop 0.26s var(--ol-motion-spring)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-          <div
-            style={{
-              width: 34,
-              height: 34,
-              borderRadius: 8,
-              background: 'rgba(101,123,112,0.10)',
-              color: 'var(--ol-blue)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <Icon name="settings" size={17} />
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ol-ink)' }}>{t('shell.providerPrompt.title')}</div>
-        </div>
-        <div style={{ fontSize: 12.5, color: 'var(--ol-ink-3)', lineHeight: 1.55 }}>
-          {t('shell.providerPrompt.body')}
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginTop: 8 }}>
-          {t('shell.providerPrompt.demoHint')}
-        </div>
-        <button onClick={onOpenLocalSettings} style={{ ...promptSoftButtonStyle, width: '100%', marginTop: 12 }}>
-          {t('overview.quickStartLocal')}
-        </button>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
-          <button
-            onClick={onLater}
-            style={promptSecondaryButtonStyle}
-          >
-            {t('shell.providerPrompt.later')}
-          </button>
-          <button
-            onClick={onStartDemo}
-            style={promptSoftButtonStyle}
-          >
-            {t('shell.providerPrompt.demoMode')}
-          </button>
-          <button
-            onClick={onOpenRecording}
-            style={promptSoftButtonStyle}
-          >
-            {t('shell.providerPrompt.testAudio')}
-          </button>
-          <button
-            onClick={onOpenSettings}
-            style={promptPrimaryButtonStyle}
-          >
-            {t('shell.providerPrompt.openSettings')}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 const promptSecondaryButtonStyle: CSSProperties = {

@@ -1,7 +1,5 @@
 import type { CredentialsStatus } from './types';
 
-export const PROVIDER_SETUP_PROMPT_DEFERRED_KEY = 'ol.providerSetupPromptDeferredThisSession';
-
 export type ProviderConnectionErrorKind =
   | 'apiKeyRejected'
   | 'rateLimited'
@@ -29,14 +27,6 @@ export function areProvidersConfigured(credentials: CredentialsStatus): boolean 
   const asrConfigured = credentials.asrConfigured ?? credentials.volcengineConfigured;
   const llmConfigured = credentials.llmConfigured ?? credentials.arkConfigured;
   return asrConfigured && llmConfigured;
-}
-
-export function shouldShowProviderSetupPrompt(
-  credentials: CredentialsStatus,
-  promptDeferredValue: string | null,
-): boolean {
-  const speechConfigured = credentials.asrConfigured ?? credentials.volcengineConfigured;
-  return !speechConfigured && promptDeferredValue !== '1';
 }
 
 function errorText(error: unknown): string {
