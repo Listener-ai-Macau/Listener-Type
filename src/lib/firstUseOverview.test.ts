@@ -8,7 +8,8 @@ assert.equal(readOverviewHidden(storage), false);
 assert.equal(initialOverviewTab('overview', false), 'overview');
 assert.equal(rememberOverviewHidden(storage), true);
 assert.equal(readOverviewHidden(storage), true);
-assert.equal(initialOverviewTab('overview', readOverviewHidden(storage)), 'history');
+assert.equal(initialOverviewTab('overview', readOverviewHidden(storage)), 'overview',
+  'skipping first-use guidance must preserve the daily status home');
 for (const tab of ['history', 'tools', 'style', 'vocab', 'translation', 'selectionAsk']) {
   assert.equal(initialOverviewTab(tab, true), tab, 'explicit page destinations remain intact');
 }

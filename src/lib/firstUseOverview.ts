@@ -1,4 +1,5 @@
-// Per-user UI choice, independent of device settings and recording preferences.
+// Legacy storage key is retained, but the choice hides only first-use guidance.
+// Daily overview/status navigation must remain available after dismissal.
 export const OVERVIEW_HIDDEN_KEY = 'ol.overviewHidden.v1';
 type OverviewStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
@@ -18,6 +19,6 @@ export function rememberOverviewHidden(storage?: OverviewStorage): boolean {
   } catch { return false; }
 }
 
-export function initialOverviewTab<T extends string>(requested: T, hidden: boolean): T | 'history' {
-  return requested === 'overview' && hidden ? 'history' : requested;
+export function initialOverviewTab<T extends string>(requested: T, _guideHidden: boolean): T {
+  return requested;
 }

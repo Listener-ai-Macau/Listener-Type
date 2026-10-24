@@ -92,9 +92,10 @@ export function FloatingShell({ os: osProp, initialTab = 'overview', initialSett
 function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initialTab: AppTab; initialSettings: boolean }) {
   const { t } = useTranslation();
   const { prefs, updatePrefs } = useHotkeySettings();
-  const [overviewHidden, setOverviewHidden] = useState(readOverviewHidden);
+  const [firstUseGuideHidden, setFirstUseGuideHidden] = useState(readOverviewHidden);
+  const [firstUseGuideReopened, setFirstUseGuideReopened] = useState(false);
   const [overviewSaveFailed, setOverviewSaveFailed] = useState(false);
-  const entryTab = initialOverviewTab(initialTab, overviewHidden);
+  const entryTab = initialOverviewTab(initialTab, firstUseGuideHidden);
   const { currentTab, setCurrentTab, settingsOpen, setSettingsOpen } = useAppState(entryTab, initialSettings);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionId | undefined>();
   const [settingsProviderFocus, setSettingsProviderFocus] = useState<'llm' | undefined>();
@@ -129,9 +130,8 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   }, []);
 
   const NAV = useMemo(
-    () => PRIMARY_NAV.filter(b => !overviewHidden || b.id !== 'overview')
-      .map(b => ({ ...b, name: t(`nav.${b.id}`) })),
-    [t, overviewHidden],
+    () => PRIMARY_NAV.map(b => ({ ...b, name: t(`nav.${b.id}`) })),
+    [t],
   );
   const Page = (NAV_BASE.find((n) => n.id === displayTab) ?? NAV_BASE[0]).cmp;
   const primaryTab = isToolTab(currentTab) ? 'tools' : currentTab;
@@ -326,8 +326,8 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
 
   const dismissOverview = () => {
     setOverviewSaveFailed(!rememberOverviewHidden());
-    setOverviewHidden(true);
-    setCurrentTab('history');
+    setFirstUseGuideHidden(true);
+    setFirstUseGuideReopened(false);
   };
 
   return (
@@ -426,7 +426,10 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
           </nav>
 
           <div style={{ flex: 1 }} />
-          <button type="button" data-open-overview onClick={() => setCurrentTab('overview')}
+          <button type="button" data-open-overview onClick={() => {
+            setFirstUseGuideReopened(true);
+            setCurrentTab('overview');
+          }}
             style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
               border: 0, background: 'transparent', color: 'var(--ol-ink-3)', font: 'inherit',
               fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>
@@ -505,6 +508,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
               ) : null}
               {displayTab === 'overview' ? (
                 <Overview
+                  showFirstUseGuide={!firstUseGuideHidden || firstUseGuideReopened}
                   onDismissOverview={dismissOverview}
                   onOpenProvidersSettings={() => openSettings('providers')}
                   onOpenRecordingSettings={() => openSettings('recording')}

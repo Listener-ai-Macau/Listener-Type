@@ -33,6 +33,7 @@ import { hardwarePhoto } from '../components/DeviceLayoutMap';
 import './Overview.css';
 
 interface OverviewProps {
+  showFirstUseGuide?: boolean;
   onDismissOverview?: () => void;
   onOpenProvidersSettings?: () => void;
   onOpenRecordingSettings?: () => void;
@@ -68,7 +69,7 @@ const LLM_NAME_KEY_BY_ID: Record<string, string> = {
   custom: 'custom',
 };
 
-export function Overview({ onDismissOverview, onOpenProvidersSettings, onOpenRecordingSettings, onOpenLocalAsrSettings, onStartDemoMode, onOpenStyles, onOpenAudioFile, onOpenSavedDrafts }: OverviewProps) {
+export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenProvidersSettings, onOpenRecordingSettings, onOpenLocalAsrSettings, onStartDemoMode, onOpenStyles, onOpenAudioFile, onOpenSavedDrafts }: OverviewProps) {
   const { t } = useTranslation();
   const [layoutsOpen, setLayoutsOpen] = useState<'configure' | 'practice' | 'phrases' | null>(null);
   const [history, setHistory] = useState<DictationSession[]>([]);
@@ -302,10 +303,10 @@ export function Overview({ onDismissOverview, onOpenProvidersSettings, onOpenRec
 
   return (
     <>
-      <PageHeader title={t('firstUse.title')} desc={t('firstUse.description')}
-        right={onDismissOverview && <Btn size="sm" onClick={onDismissOverview}>{t('firstUse.skip')}</Btn>} />
+      <PageHeader title={showFirstUseGuide ? t('firstUse.title') : t('nav.overview')} desc={showFirstUseGuide ? t('firstUse.description') : undefined}
+        right={showFirstUseGuide && onDismissOverview && <Btn size="sm" onClick={onDismissOverview}>{t('firstUse.skip')}</Btn>} />
 
-      <section className="ol-overview-start">
+      {showFirstUseGuide && <section className="ol-overview-start">
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
           <Icon name="mic" size={17} />
           <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{t('overview.firstDictationTitle')}</h2>
@@ -341,10 +342,10 @@ export function Overview({ onDismissOverview, onOpenProvidersSettings, onOpenRec
           <span style={{ fontSize: 12, color: 'var(--ol-ink-3)' }}>{t('deviceLayouts.entryHint')}</span>
           </div>
         </details>
-      </section>
+      </section>}
       {layoutsOpen && <DeviceLayoutsDialog rememberSelection initialPractice={layoutsOpen === 'practice'} initialPhrases={layoutsOpen === 'phrases'} initialProfile={layoutsOpen === 'practice' ? writingDeviceKeyProfile() : undefined} onClose={() => setLayoutsOpen(null)} />}
 
-      <Card style={{ marginBottom: 14 }}>
+      {showFirstUseGuide && <Card style={{ marginBottom: 14 }}>
         <div className="ol-listener-hardware-entry">
           <img src={hardwarePhoto} alt={t('hardwareLayout.photo')} width={210} height={148} />
           <div>
@@ -354,7 +355,7 @@ export function Overview({ onDismissOverview, onOpenProvidersSettings, onOpenRec
             <p className="ol-device-layout-hint">{t('hardwareLayout.price')}</p>
           </div>
         </div>
-      </Card>
+      </Card>}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 12 }}>
         <ProviderCard
