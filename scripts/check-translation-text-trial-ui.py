@@ -33,6 +33,7 @@ with sync_playwright() as pw:
   def close_trial():page.locator('dialog[open]').get_by_role('button',name='Close',exact=True).first.click()
   def request_count():return page.evaluate("window.__translationCalls.filter(x=>x.cmd==='try_translation_text').length")
   open_trial();source='明天下午三点开会，请带上产品样品。';page.locator('#style-trial-input').fill(source)
+  page.get_by_role('combobox',name='What would you like to do?',exact=True).select_option('translate')
   page.get_by_role('combobox',name='Translate output to',exact=True).select_option('English');page.get_by_role('combobox',name='Translation method',exact=True).select_option('cloud')
   expect(page.locator('#style-trial-input')).to_have_value(source);assert request_count()==0
   checks.append('Selecting English retains draft and does not call a service')
@@ -48,6 +49,7 @@ with sync_playwright() as pw:
   page.get_by_role('combobox',name='Translate output to',exact=True).select_option('日本語');page.get_by_role('button',name='Translate',exact=True).click();page.wait_for_function('window.__pendingTranslation.length===1');close_trial();open_trial()
   page.evaluate('window.__pendingTranslation.shift()()');expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)
   checks.append('Closed workspace cannot accept a delayed translation result into its replacement')
+  page.get_by_role('combobox',name='What would you like to do?',exact=True).select_option('translate')
   page.get_by_role('combobox',name='Translate output to',exact=True).select_option('English');page.get_by_role('combobox',name='Translation method',exact=True).select_option('cloud');page.evaluate('window.__authFailure=true');page.get_by_role('button',name='Translate',exact=True).click()
   expect(page.locator('dialog[open] [role=alert]')).to_contain_text('rejected its credentials');expect(page.locator('#style-trial-input')).to_have_value(source);expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)
   checks.append('401 is visible and keeps the source; no fake successful raw translation')

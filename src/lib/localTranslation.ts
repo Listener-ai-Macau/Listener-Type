@@ -19,6 +19,13 @@ export function localTargetCode(language: string): string {
   return '';
 }
 
+// This is a script hint, not language identification: Han also occurs in
+// Japanese. Never change the selected source or start/download a task here.
+export function canSuggestChineseSource(text: string, target: string): boolean {
+  return localTargetCode(target) === 'en' && /\p{Script=Han}/u.test(text)
+    && !/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(text);
+}
+
 export function localTranslationKey(source: string, target: string): string {
   return JSON.stringify([source, target]);
 }

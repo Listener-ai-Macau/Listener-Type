@@ -39,6 +39,7 @@ with sync_playwright() as pw:
   checks.append({'name':'Overview explains local translation availability, preparation and fee boundary before entry','passed':True})
   page.get_by_role('button',name='Try typed text',exact=True).click()
   page.locator('#style-trial-input').fill(source)
+  page.get_by_role('combobox',name='What would you like to do?',exact=True).select_option('translate')
   page.get_by_role('combobox',name='Translate output to',exact=True).select_option('English')
   page.get_by_role('combobox',name='Original language',exact=True).select_option('zh')
   page.get_by_role('button',name='Translate',exact=True).click()

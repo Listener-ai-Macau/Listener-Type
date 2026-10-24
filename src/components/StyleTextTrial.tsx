@@ -13,7 +13,7 @@ import { PoliteEditSuggestions } from './PoliteEditSuggestions';
 import { ProviderSettingsDialog } from './ProviderSettingsDialog';
 import { SUPPORTED_LANGUAGES } from '../lib/types';
 import { LocalTranslationSetup } from './LocalTranslationSetup';
-import { localTranslationErrorKey, localTranslationKey, translationLanguageLabel } from '../lib/localTranslation';
+import { canSuggestChineseSource, localTranslationErrorKey, localTranslationKey, translationLanguageLabel } from '../lib/localTranslation';
 import type { TranslationEngine, LocalTranslationReadiness } from '../lib/localTranslation';
 
 export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, prepareShorter, translationTarget, onTranslationTargetChange, initialTranslationEngine, initialTranslationSource, draft, onDraftChange, onClose }: {
@@ -33,6 +33,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   const { t, i18n } = useTranslation();
   const [translationEngine, setTranslationEngine] = useState<TranslationEngine>(initialTranslationEngine ?? 'local');
   const [translationSource, setTranslationSource] = useState(initialTranslationSource ?? '');
+  const lastTranslationTarget = useRef(translationTarget || 'English');
+  useEffect(() => { if (translationTarget) lastTranslationTarget.current = translationTarget; }, [translationTarget]);
   const [translationPreparing, setTranslationPreparing] = useState(false);
   const [offlineReadiness, setOfflineReadiness] = useState<LocalTranslationReadiness | null>(null);
   const offline = !!translationTarget && translationEngine === 'local';
@@ -287,16 +289,24 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       onCancel={event => { event.preventDefault(); if (!draftSaving) onClose(); }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-        <h2 id="style-trial-title" style={{ margin: 0, fontSize: 21 }}>{translationTarget ? t('offlineTranslation.title', { language: translationLanguageLabel(translationTarget, i18n.resolvedLanguage ?? i18n.language) }) : t('style.trial.title', { name: presentation.name })}</h2>
+        <h2 id="style-trial-title" style={{ margin: 0, fontSize: 21 }}>{translationTarget ? t('offlineTranslation.title', { language: translationLanguageLabel(translationTarget, i18n.resolvedLanguage ?? i18n.language) }) : onTranslationTargetChange ? t('textWorkspace.title') : t('style.trial.title', { name: presentation.name })}</h2>
         <Btn size="sm" variant="ghost" disabled={draftSaving} onClick={() => { if (!draftSaving) onClose(); }}>{t('common.close')}</Btn>
       </div>
       <p id="style-trial-description" className="ol-style-trial-hint" data-style-trial-service-notice>{t(offline ? 'offlineTranslation.localNotice' : readiness?.requiresTextService === false ? prepareShorter ? 'textWorkspace.localWithShorterNotice' : 'textWorkspace.localNotice' : 'textWorkspace.cloudNotice')}</p>
-      {onTranslationTargetChange && <label className="ol-style-trial-picker" data-translation-output-choice>
+      {onTranslationTargetChange && <label className="ol-style-trial-picker" data-text-task-choice>
+        <span>{t('textWorkspace.task')}</span>
+        <select aria-label={t('textWorkspace.task')} value={translationTarget ? 'translate' : 'text'}
+          disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing}
+          onChange={event => onTranslationTargetChange(event.target.value === 'translate' ? lastTranslationTarget.current : '')}>
+          <option value="text">{t('textWorkspace.textTask')}</option>
+          <option value="translate">{t('textWorkspace.translationTask')}</option>
+        </select>
+      </label>}
+      {onTranslationTargetChange && translationTarget && <label className="ol-style-trial-picker" data-translation-output-choice>
         <span>{t('translation.outputLanguage')}</span>
         <select aria-label={t('translation.outputLanguage')} value={translationTarget ?? ''}
           disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing}
           onChange={event => onTranslationTargetChange(event.target.value)}>
-          <option value="">{t('translation.originalOutput')}</option>
           {SUPPORTED_LANGUAGES.map(language => <option key={language} value={language}>{language}</option>)}
         </select>
       </label>}
@@ -345,6 +355,11 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         placeholder={t('style.trial.placeholder')}
         onChange={event => { onDraftChange(event.target.value); setResult(null); setError(''); setCopiedResult(null); setCopyError(false); }}
       />
+      {offline && !translationSource && canSuggestChineseSource(draft, translationTarget ?? '') && <div className="ol-style-trial-hint" data-local-source-suggestion>
+        <p>{t('textWorkspace.hanSourceHint')}</p>
+        <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || translationPreparing}
+          onClick={() => setTranslationSource('zh')}>{t('textWorkspace.confirmChinese')}</Btn>
+      </div>}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginTop: 12 }}>
         <Btn variant="blue" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !draft.trim()} onClick={() => void runTrial()}>
           {t(pending ? 'style.trial.running' : translationTarget ? 'offlineTranslation.run' : 'style.trial.run')}

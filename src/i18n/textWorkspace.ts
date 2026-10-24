@@ -1,4 +1,6 @@
 const en = {
+  title: 'Text workspace', task: 'What would you like to do?', textTask: 'Keep the language · choose a writing style', translationTask: 'Translate text',
+  hanSourceHint: 'This text contains Han characters. If it is Chinese, confirm the source language below.', confirmChinese: 'Use Chinese as the source',
     pendingLocal: "Processing text on this computer. This task makes no cloud text-service request.",
   cloudNotice: 'Submitting sends text to your configured service; service charges may apply.',
   localNotice: 'Text only. This style makes no service request.',
@@ -17,6 +19,8 @@ const en = {
 export const textWorkspaceTranslations = {
   en,
   'zh-CN': {
+    title: '文字工作区', task: '文字任务', textTask: '保留原语言 · 选择文字风格', translationTask: '翻译文字',
+    hanSourceHint: '这段文字包含汉字。如果是中文，可直接确认原文语言。', confirmChinese: '确认原文是中文',
     pendingLocal: "正在本机处理文字，本次任务不请求云端文本服务。",
     cloudNotice: '提交后，文字会发送至你配置的文本服务，可能产生服务费用。',
     localNotice: '仅处理文字；此风格不请求文本服务。',
@@ -28,6 +32,8 @@ export const textWorkspaceTranslations = {
     draftsIntro: '成稿保存在本机，与录音分别存放。', draftsDetails: '成稿保存说明',
   },
   'zh-TW': {
+    title: '文字工作區', task: '文字任務', textTask: '保留原語言 · 選擇文字風格', translationTask: '翻譯文字',
+    hanSourceHint: '這段文字包含漢字。如果是中文，可直接確認原文語言。', confirmChinese: '確認原文是中文',
     pendingLocal: "正在本機處理文字，本次任務不請求雲端文字服務。",
     cloudNotice: '提交後，文字會傳送至你設定的文字服務，可能產生服務費用。',
     localNotice: '僅處理文字；此風格不請求文字服務。',
@@ -39,6 +45,8 @@ export const textWorkspaceTranslations = {
     draftsIntro: '成稿儲存在本機，與錄音分開存放。', draftsDetails: '成稿儲存說明',
   },
   ja: {
+    title: '文章ワークスペース', task: '文章の操作', textTask: '言語を保つ · スタイルを選択', translationTask: '文章を翻訳',
+    hanSourceHint: '漢字が含まれています。中国語の文章であれば、原文の言語を確認してください。', confirmChinese: '原文を中国語に設定',
     pendingLocal: "このPCで文章を処理中です。この処理はクラウドのテキストサービスを利用しません。",
     cloudNotice: '送信すると設定したテキストサービスに文章を送ります。利用料が発生する場合があります。',
     localNotice: '文章のみの処理です。このスタイルはサービスに送信しません。',
@@ -50,6 +58,8 @@ export const textWorkspaceTranslations = {
     draftsIntro: 'このPCに保存した文章です。録音とは別に保管されます。', draftsDetails: '下書きの保存について',
   },
   ko: {
+    title: '텍스트 작업 공간', task: '텍스트 작업', textTask: '언어 유지 · 문체 선택', translationTask: '텍스트 번역',
+    hanSourceHint: '한자가 포함되어 있습니다. 중국어 문장이라면 원문 언어를 확인하세요.', confirmChinese: '원문을 중국어로 설정',
     pendingLocal: "이 컴퓨터에서 텍스트를 처리 중입니다. 이 작업은 클라우드 텍스트 서비스를 요청하지 않습니다.",
     cloudNotice: '제출하면 설정한 텍스트 서비스로 글을 보냅니다. 서비스 요금이 발생할 수 있습니다.',
     localNotice: '텍스트만 처리합니다. 이 스타일은 서비스 요청을 보내지 않습니다.',
