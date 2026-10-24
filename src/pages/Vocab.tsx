@@ -15,7 +15,7 @@ import {
   setVocabEnabled,
 } from '../lib/ipc';
 import type { CorrectionRule, DictionaryEntry, VocabPreset } from '../lib/types';
-import { DEFAULT_VOCAB_PRESETS, loadVocabPresets, persistVocabPresets } from '../lib/vocabPresets';
+import { DEFAULT_VOCAB_PRESETS, loadVocabPresets, persistVocabPresets, vocabPresetLabel } from '../lib/vocabPresets';
 import { Btn, Card, Collapsible, PageHeader } from './_atoms';
 
 const NEW_PRESET_DRAFT_ID = '__new__';
@@ -327,7 +327,7 @@ export function Vocab() {
                   background: selectedPresetIds.includes(p.id) ? 'var(--ol-blue-soft)' : 'var(--ol-surface-2)',
                 }}
               >
-                {p.name}
+                {vocabPresetLabel(p, t)}
               </button>
             ))}
             <Btn size="sm" variant="ghost" onClick={createPreset}>{t('vocab.presets.create')}</Btn>
@@ -335,6 +335,7 @@ export function Vocab() {
           </div>
           {editingPresetId && (
             <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--ol-ink-3)' }}>{t('vocabPresetLabels.storedContent')}</p>
               <input value={presetNameDraft} onChange={e => setPresetNameDraft(e.target.value)} placeholder={t('vocab.presets.namePlaceholder')} />
               <textarea value={presetPhrasesDraft} onChange={e => setPresetPhrasesDraft(e.target.value)} placeholder={t('vocab.presets.wordsPlaceholder')} rows={3} />
               <div style={{ display: 'flex', gap: 8 }}>
@@ -347,7 +348,7 @@ export function Vocab() {
             <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {presets.map(p => (
                 <Btn key={`${p.id}-edit`} size="sm" variant="ghost" onClick={() => startEditPreset(p)}>
-                  {t('vocab.presets.edit', { name: p.name })}
+                  {t('vocab.presets.edit', { name: vocabPresetLabel(p, t) })}
                 </Btn>
               ))}
             </div>

@@ -1,6 +1,7 @@
 import defaultPresetsJson from './vocab-presets.json';
 import { listVocabPresets, saveVocabPresets } from './ipc';
 import type { VocabPreset, VocabPresetStore } from './types';
+export { vocabPresetLabel } from './vocabPresetPresentation';
 
 export const DEFAULT_VOCAB_PRESETS: VocabPreset[] = defaultPresetsJson as VocabPreset[];
 
