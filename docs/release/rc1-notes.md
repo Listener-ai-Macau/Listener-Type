@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build165 / Firmware37
+# Listener v1.0.6-rc1 · Type build166 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -7,9 +7,10 @@
 
 ## In this app update
 
-- Open Type and continue local text work without dismissing a speech-provider setup popup on every launch. Overview still shows speech readiness and its setup button; recording still requires a ready recognition service.
-- History now explicitly identifies dictation and Q&A records. Text you saved remains separate in Saved drafts and can be opened from the empty History page.
-- Existing local Chinese ↔ English translation, editable results, exact saved-draft opening and deletion safeguards remain. This update does not change the translation models, providers, normal recording or Bluetooth.
+- The text entry now explains local Chinese ↔ English translation on Windows, its one-time component download and absence of a translation API key or per-translation fee.
+- English results from local translation now offer optional Wording options generated on this computer. Compare a courteous or softer request and explicitly choose it. This changes only a request prefix; the subject, body, dates and other text stay unchanged. Cloud suggestion controls are not available in this local review.
+- The automatic translation remains intact until you choose or manually edit it. You can save the original and revised result, then open the exact saved draft. This is a limited English wording aid, not a full grammar or translation-quality repair; review the complete translation before using it.
+- Translation models, providers, normal recording, Bluetooth and Firmware37 are unchanged. Existing cloud wording controls remain available only in their separate non-offline context with the stated service charges.
 
 ## Before using
 
