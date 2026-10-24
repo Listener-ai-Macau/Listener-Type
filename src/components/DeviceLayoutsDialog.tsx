@@ -14,13 +14,14 @@ type Group = typeof layoutGestures[number];
 const primaryKeys = ['RightControl','LeftControl','RightShift','LeftShift','RightAlt','LeftAlt', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', 'Enter','Tab','Space','Escape','Backspace','Delete','Insert','Home','End','PageUp','PageDown','ArrowUp','ArrowDown','ArrowLeft','ArrowRight', ...Array.from({length:12},(_,i)=>`F${i+1}`)];
 const overviewLayoutKey = 'ol.overviewLastDeviceLayout';
 
-export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPractice = false, initialPhrases = false, rememberSelection = false, incomingText, onUseLayout, onLeaveForPage, onClose }: {
+export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPractice = false, initialPhrases = false, rememberSelection = false, incomingText, phraseOrigin = 'trial', onUseLayout, onLeaveForPage, onClose }: {
   initialProfile?: DeviceKeyProfile;
   initialKnob?: DeviceKnobRotationAction;
   initialPractice?: boolean;
   initialPhrases?: boolean;
   rememberSelection?: boolean;
   incomingText?: string;
+  phraseOrigin?: 'trial' | 'savedDraft';
   onUseLayout?: (layout: DeviceLayout) => void;
   onLeaveForPage?: () => void;
   onClose: () => void;
@@ -192,7 +193,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
       {incomingText !== undefined && <section className="ol-device-layout-editor" aria-label={t('keyPhrase.title')}>
         {gestureSelect}
         <label>{t('keyPhrase.text')}<textarea aria-label={t('keyPhrase.text')} rows={3} maxLength={2000} value={phrase} onChange={event => setPhrase(event.target.value)} /></label>
-        <p className="ol-device-layout-hint">{t('keyPhrase.hint')}</p>
+        <p className="ol-device-layout-hint">{t(phraseOrigin==='savedDraft'?'textDraft.keyPhraseHint':'keyPhrase.hint')}</p>
         {phrase.length > 2000 && <p role="alert" className="ol-device-layout-hint">{t('keyPhrase.tooLong')}</p>}
         <Btn size="sm" variant="blue" disabled={!phrase.trim() || phrase.length > 2000} onClick={() => { edit({...mapping, action:'pasteTemplate', pasteTemplate:phrase}); phraseCheckpoint.current = phrase; }}>
           {t('keyPhrase.use', {key:key === 'knob' ? t('settings.deviceKeys.knob.title') : t('deviceLayouts.key', {number:key.slice(3)}), gesture:t(`settings.deviceKeys.gestures.${key === 'knob' ? 'singleClick' : ['singleClick','doubleClick','longPress'][layoutGestures.indexOf(group)]}`)})}

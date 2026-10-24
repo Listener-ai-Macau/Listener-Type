@@ -22,7 +22,7 @@ export function SavedTextDraftCopyEditor({ record, text, disabled, onTextChange,
       </Btn>
       <Btn size="sm" variant="ghost" disabled={disabled || saved.saving} onClick={onBack}>{t('textDraft.backToDrafts')}</Btn>
     </div>
-    {saved.isSaved && <p role="status" className="ol-device-layout-hint">{t(isTauri ? 'textDraft.savedWhere' : 'textDraft.browserSaved')}</p>}
+    {saved.isSaved && <p role="status" className="ol-device-layout-hint">{t(isTauri ? 'textWorkspace.savedWhere' : 'textDraft.browserSaved')}</p>}
     {saved.error && <p role="alert">{saved.error}</p>}
   </section>;
 }
