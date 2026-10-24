@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T11:25:47.988858+08:00",
+  "updated_at": "2026-10-24T11:34:43.741200+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7195,6 +7195,36 @@
         "Cloud ASR remains separate and may incur fees. Local translation is currently Windows x64 Chinese↔English only; explicit optional downloads required.",
         "Daily existing active cloud route is preserved; current malformed Ark credential was not silently replaced."
       ]
+    },
+    {
+      "id": "offline_translation_sentence_units_preserve_short_paragraph_content",
+      "subject": "Local NMT uses each source sentence independently; bounded decode retains original and new omission cases",
+      "state": "source_real_worker_preservation_passed_matching_MSI_pending",
+      "repo": "type",
+      "commit": "11f3bd5587c8b55a5a9e467748145c030d7160ef",
+      "commit_subject": "Preserve every local translation sentence instead of collapsing short paragraphs",
+      "humanAccepted": false,
+      "protects": [
+        "No <=96-token whole-paragraph exception: sentence models receive every sentence as an independent unit, including short paragraphs.",
+        "Two original162 customer failures and previous no-send/save-draft, amounts, times, IDs, paragraphs and long repeated-source case are retained with actual worker outputs.",
+        "No sample-specific output substitutions, new model downloads, additional cloud service or daily capture/provider changes."
+      ],
+      "guards": [
+        "python scripts/check-local-translation-preservation.py --runtime <prepared-runtime> --zh-en <prepared-pair-root> --en-zh <prepared-pair-root> --report <result.json>"
+      ],
+      "unverified": [
+        "Exact new MSI and ordinary native UI pending.",
+        "Some lexical choices remain imperfect; this is not global translation quality, physical voice, hardware or purchase qualification."
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\local-nmt\\sentence-context-before-after163.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\local-nmt\\sentence-beam-analysis163.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\local-nmt\\worker-preservation163.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE162-presale-20261024\\REPORT.md"
+      ],
+      "machine_accepted_scope": [
+        "Same exact two model assets/runtime; actual nine bounded content-preservation worker cases pass."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -8414,7 +8444,8 @@
       "baseline_state": "source_UI_and_controlled_native_passed_MSI_pending",
       "guard_entries": [
         "offline_translation_optional_verified_worker_no_cloud_fallback",
-        "offline_translation_explicit_preview_voice_route_and_legacy_provider_preservation"
+        "offline_translation_explicit_preview_voice_route_and_legacy_provider_preservation",
+        "offline_translation_sentence_units_preserve_short_paragraph_content"
       ],
       "paths": {
         "type": [
