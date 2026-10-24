@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T16:41:58.755117+08:00",
+  "updated_at": "2026-10-24T17:51:33.736828+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7583,6 +7583,52 @@
         "Own169 customer draft file explicitly copied as a native fixture; not real customer migration or physical qualification."
       ],
       "commit_subject": "Reuse saved messages as editable copies with shared idempotent saving"
+    },
+    {
+      "id": "saved_message_variants_explicit_local_key_practice",
+      "subject": "Saved-message deadline variants stay identifiable and chosen complete message enters only explicit local key practice",
+      "repo": "type",
+      "commit": "fdcd7f45e93e1468a7c6e1c20abfd6cb16777b6a",
+      "state": "Type171_matching_package_installed_native_scoped_proof_and_public_asset_verified",
+      "humanAccepted": false,
+      "protects": [
+        "Bounded head/tail preview distinguishes same-opening message variants, with stable record IDs and unmodified stored text. Labels memoized outside edit keystrokes.",
+        "Copy-save retention uses existing canonical History hint. Selected complete message is frozen when explicitly opening local key-layout preparation; its origin hint is accurate.",
+        "Existing2000-character phrase bound blocks oversize without truncating original. Explicit use and software key practice operate in scoped fields; discard returns to same library record, no automatic device/global clipboard/draft/layout write."
+      ],
+      "guards": [
+        "python scripts/check-saved-message-reuse-ui.py --url <controlled> --report <receipt>",
+        "python scripts/check-result-key-phrase-ui.py --url <controlled> --report <receipt>",
+        "python scripts/check-saved-text-drafts-ui.py --url <controlled> --edit-copy --report <receipt>"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\saved-reuse171-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\saved-reuse171-ui-calls.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\saved-reuse171-before-settings-scope.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\saved-reuse171-trial-compatibility.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\saved-reuse171-copy-compatibility.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native171-snapshot-20261024-173631\\saved-copy171-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build171\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build171\\type171-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build171\\post-update-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native171-snapshot-20261024-173631\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener171-update-20261024-174236\\qualification.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual React original170 variants with same name/date, selected message-to-local-practice, explicit discard and oversize bound; old trial phrase and copy/idempotent-save paths retained. Startup legacy hotkey normalization is separated by actual phase/stack from zero mutation in the new phrase route.",
+        "Saved-message reuse: bounded head+tail labels expose deadlines; copy-save hint uses canonical History route; explicit selected-message snapshot enters existing local key-layout editor and safe software practice, without automatic layout/device/clipboard writes. Existing translation, original drafts and device-apply flow unchanged.",
+        "Saved-message reuse: bounded head+tail labels expose deadlines; copy-save hint uses canonical History route; explicit selected-message snapshot enters existing local key-layout editor and safe software practice, without automatic layout/device/clipboard writes. Existing translation, original drafts and device-apply flow unchanged. Exact171 native own170 variants and copy-save canonical History hint; selected full saved message explicitly placed in local draft key, virtual key inserts it into scoped practice field, discard retains all messages/layouts/preferences. Prepared own draft fixture is not in-place migration; no physical key/device write, model or external insertion/purchase proof."
+      ],
+      "pending_human_scope": [
+        "One-step undo of chosen wording only; not arbitrary edit history or saved-record deletion.",
+        "Controlled React until matching native evidence; no physical key/speech/editor or buying qualification.",
+        "Model literal phrasing and language limits retained; no new model or cloud service.",
+        "Original167 availability clause still mistranslated; event/daypart markers are not a complete semantic quality metric.",
+        "Narrow imperative eligibility is not a complete English parser; unsupported compounds remain editable with no local rewrite.",
+        "Own169 customer draft file explicitly copied as a native fixture; not real customer migration or physical qualification.",
+        "Scoped key practice is not real hardware/OS input; applying a saved layout to a physical device is outside this batch."
+      ],
+      "commit_subject": "Distinguish saved-message variants and bring them into local key practice"
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -8378,7 +8424,8 @@
         "wording_adoption_receipt_undo_owns_result_and_saved_text",
         "local_translation_event_dayparts_and_full_message_review",
         "local_wording_compound_imperative_boundary_and_complete_candidate",
-        "saved_draft_copy_shared_idempotent_save_retains_original"
+        "saved_draft_copy_shared_idempotent_save_retains_original",
+        "saved_message_variants_explicit_local_key_practice"
       ],
       "paths": {
         "type": [
@@ -8474,7 +8521,8 @@
           "src/lib/useTextDraftSave.ts",
           "src/components/SavedTextDraftCopyEditor.tsx",
           "src/i18n/savedDraftCopy.ts",
-          "src/i18n/index.ts"
+          "src/i18n/index.ts",
+          "scripts/check-saved-message-reuse-ui.py"
         ]
       },
       "known_failures": [

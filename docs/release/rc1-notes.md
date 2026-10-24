@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build170 / Firmware37
+# Listener v1.0.6-rc1 · Type build171 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -7,9 +7,9 @@
 
 ## In this app update
 
-Type build170 lets you edit a copy from Saved drafts and explicitly save it as a new draft. The original message and attached source remain available. Unsaved changes can be kept or discarded when leaving; saving reuses the existing retry protection. No translation/model download or added service is involved, and Firmware37 is unchanged.
+Type build171 shows both ends of saved-message previews so revised deadlines are easier to tell apart, and uses History consistently in copy-save guidance. You can explicitly open a saved message in the existing local key-layout editor and try its virtual key in Type. This prepares a local layout and does not write to a device; applying it still uses Device settings. Messages over2000 characters remain saved but need shortening before use for a key. Translation models, service choices and Firmware37 are unchanged.
 
-Local translation and limited simple-request wording choices remain available. Review translations and edit them before using them; complex meaning and English grammar are not universally qualified.
+The practice field simulates supported local text actions only, without the system clipboard. Recording/AI, external applications, the physical knob/key feel and actual device application are not simulated. Review translations before using them; complex meaning and general English grammar remain unqualified.
 
 ## Before using
 
