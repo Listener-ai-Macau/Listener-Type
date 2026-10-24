@@ -40,6 +40,7 @@ interface OverviewProps {
   onOpenLocalAsrSettings?: () => void;
   onStartDemoMode?: () => void;
   onOpenStyles?: () => void;
+  onOpenLocalTranslation?: () => void;
   onOpenAudioFile?: () => void;
   onOpenSavedDrafts?: () => void;
 }
@@ -69,7 +70,7 @@ const LLM_NAME_KEY_BY_ID: Record<string, string> = {
   custom: 'custom',
 };
 
-export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenProvidersSettings, onOpenRecordingSettings, onOpenLocalAsrSettings, onStartDemoMode, onOpenStyles, onOpenAudioFile, onOpenSavedDrafts }: OverviewProps) {
+export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenProvidersSettings, onOpenRecordingSettings, onOpenLocalAsrSettings, onStartDemoMode, onOpenStyles, onOpenLocalTranslation, onOpenAudioFile, onOpenSavedDrafts }: OverviewProps) {
   const { t } = useTranslation();
   const [layoutsOpen, setLayoutsOpen] = useState<'configure' | 'practice' | 'phrases' | null>(null);
   const [history, setHistory] = useState<DictationSession[]>([]);
@@ -327,7 +328,8 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
         </div>
         {onOpenStyles && (
           <div className="ol-overview-text-entry">
-            <Btn size="sm" variant="blue" onClick={onOpenStyles}>{t('overview.tryTypedText')}</Btn>
+            {onOpenLocalTranslation && detectOS() === 'win' && <Btn size="sm" variant="blue" onClick={onOpenLocalTranslation}>{t('textWorkspace.localTranslationEntry')}</Btn>}
+            <Btn size="sm" variant={onOpenLocalTranslation && detectOS() === 'win' ? 'ghost' : 'blue'} onClick={onOpenStyles}>{t('overview.tryTypedText')}</Btn>
             <span style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--ol-ink-3)' }}>{t('overview.tryTypedTextHint')}</span>
           </div>
         )}

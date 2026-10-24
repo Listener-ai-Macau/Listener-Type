@@ -1,4 +1,6 @@
 const en = {
+  localTranslationEntry: 'Chinese ↔ English on this PC',
+  translationOptions: 'Translation settings · {{source}} → {{target}} · {{engine}}', styleOptions: 'Text settings · {{style}}',
   title: 'Text workspace', task: 'What would you like to do?', textTask: 'Keep the language · choose a writing style', translationTask: 'Translate text',
   hanSourceHint: 'This text contains Han characters. If it is Chinese, confirm the source language below.', confirmChinese: 'Use Chinese as the source',
     pendingLocal: "Processing text on this computer. This task makes no cloud text-service request.",
@@ -19,6 +21,8 @@ const en = {
 export const textWorkspaceTranslations = {
   en,
   'zh-CN': {
+    localTranslationEntry: '本机中英翻译',
+    translationOptions: '翻译设置 · {{source}} → {{target}} · {{engine}}', styleOptions: '文字设置 · {{style}}',
     title: '文字工作区', task: '文字任务', textTask: '保留原语言 · 选择文字风格', translationTask: '翻译文字',
     hanSourceHint: '这段文字包含汉字。如果是中文，可直接确认原文语言。', confirmChinese: '确认原文是中文',
     pendingLocal: "正在本机处理文字，本次任务不请求云端文本服务。",
@@ -32,6 +36,8 @@ export const textWorkspaceTranslations = {
     draftsIntro: '成稿保存在本机，与录音分别存放。', draftsDetails: '成稿保存说明',
   },
   'zh-TW': {
+    localTranslationEntry: '本機中英翻譯',
+    translationOptions: '翻譯設定 · {{source}} → {{target}} · {{engine}}', styleOptions: '文字設定 · {{style}}',
     title: '文字工作區', task: '文字任務', textTask: '保留原語言 · 選擇文字風格', translationTask: '翻譯文字',
     hanSourceHint: '這段文字包含漢字。如果是中文，可直接確認原文語言。', confirmChinese: '確認原文是中文',
     pendingLocal: "正在本機處理文字，本次任務不請求雲端文字服務。",
@@ -45,6 +51,8 @@ export const textWorkspaceTranslations = {
     draftsIntro: '成稿儲存在本機，與錄音分開存放。', draftsDetails: '成稿儲存說明',
   },
   ja: {
+    localTranslationEntry: 'このPCで中国語・英語翻訳',
+    translationOptions: '翻訳設定 · {{source}} → {{target}} · {{engine}}', styleOptions: '文章の設定 · {{style}}',
     title: '文章ワークスペース', task: '文章の操作', textTask: '言語を保つ · スタイルを選択', translationTask: '文章を翻訳',
     hanSourceHint: '漢字が含まれています。中国語の文章であれば、原文の言語を確認してください。', confirmChinese: '原文を中国語に設定',
     pendingLocal: "このPCで文章を処理中です。この処理はクラウドのテキストサービスを利用しません。",
@@ -58,6 +66,8 @@ export const textWorkspaceTranslations = {
     draftsIntro: 'このPCに保存した文章です。録音とは別に保管されます。', draftsDetails: '下書きの保存について',
   },
   ko: {
+    localTranslationEntry: '이 PC에서 중·영 번역',
+    translationOptions: '번역 설정 · {{source}} → {{target}} · {{engine}}', styleOptions: '텍스트 설정 · {{style}}',
     title: '텍스트 작업 공간', task: '텍스트 작업', textTask: '언어 유지 · 문체 선택', translationTask: '텍스트 번역',
     hanSourceHint: '한자가 포함되어 있습니다. 중국어 문장이라면 원문 언어를 확인하세요.', confirmChinese: '원문을 중국어로 설정',
     pendingLocal: "이 컴퓨터에서 텍스트를 처리 중입니다. 이 작업은 클라우드 텍스트 서비스를 요청하지 않습니다.",

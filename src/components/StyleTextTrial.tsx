@@ -33,6 +33,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   const { t, i18n } = useTranslation();
   const [translationEngine, setTranslationEngine] = useState<TranslationEngine>(initialTranslationEngine ?? 'local');
   const [translationSource, setTranslationSource] = useState(initialTranslationSource ?? '');
+  const [optionsOpen, setOptionsOpen] = useState(true);
   const lastTranslationTarget = useRef(translationTarget || 'English');
   useEffect(() => { if (translationTarget) lastTranslationTarget.current = translationTarget; }, [translationTarget]);
   const [translationPreparing, setTranslationPreparing] = useState(false);
@@ -182,6 +183,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       // the captured source/method signature, so late results cannot cross it.
       const value = offline ? { ...returned, packId: target.id, packName: target.name } : returned;
       if (generation.current === request) {
+        if (translationTarget) setOptionsOpen(false);
         completed.current.delete(cacheKey(target.id));
         completed.current.set(cacheKey(target.id), { signature: targetSignature, input: draft, result: value, edited: matching?.edited ?? null });
         if (completed.current.size > 8) completed.current.delete(completed.current.keys().next().value!);
@@ -194,6 +196,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       }
     } catch (cause) {
       if (generation.current === request) {
+        if (translationTarget) setOptionsOpen(true);
         const message = String(cause instanceof Error ? cause.message : cause);
         const key = {
           style_trial_native_required: 'nativeRequired',
@@ -293,6 +296,14 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         <Btn size="sm" variant="ghost" disabled={draftSaving} onClick={() => { if (!draftSaving) onClose(); }}>{t('common.close')}</Btn>
       </div>
       <p id="style-trial-description" className="ol-style-trial-hint" data-style-trial-service-notice>{t(offline ? 'offlineTranslation.localNotice' : readiness?.requiresTextService === false ? prepareShorter ? 'textWorkspace.localWithShorterNotice' : 'textWorkspace.localNotice' : 'textWorkspace.cloudNotice')}</p>
+      <details className="ol-style-trial-options-panel" data-text-options-panel open={optionsOpen}
+        onToggle={event => setOptionsOpen(event.currentTarget.open)}>
+        <summary>{translationTarget ? t('textWorkspace.translationOptions', {
+          source: translationSource ? translationLanguageLabel(translationSource, i18n.resolvedLanguage ?? i18n.language) : t('offlineTranslation.chooseSource'),
+          target: translationLanguageLabel(translationTarget, i18n.resolvedLanguage ?? i18n.language),
+          engine: t(offline ? 'offlineTranslation.local' : 'offlineTranslation.cloud'),
+        }) : t('textWorkspace.styleOptions', { style: presentation.name })}</summary>
+      <div className="ol-style-trial-options">
       {onTranslationTargetChange && <label className="ol-style-trial-picker" data-text-task-choice>
         <span>{t('textWorkspace.task')}</span>
         <select aria-label={t('textWorkspace.task')} value={translationTarget ? 'translate' : 'text'}
@@ -323,7 +334,6 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         {offline && <LocalTranslationSetup source={translationSource} target={translationTarget}
           onSourceChange={setTranslationSource} disabled={pending || copying || delivering || draftSaving}
           onReadiness={setOfflineReadiness} onBusy={setTranslationPreparing} showNotice={false} />}
-        <p className="ol-style-trial-hint" data-translation-trial-scope>{t('offlineTranslation.trialOnly')}</p>
       </>}
       {packs && onSelectPack && <label className="ol-style-trial-picker">
         <span>{t('style.trial.styleLabel')}</span>
@@ -332,6 +342,9 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
           {packs.map(option => <option key={option.id} value={option.id}>{stylePackPresentation(option, t).name}</option>)}
         </select>
       </label>}
+      </div>
+      </details>
+      {translationTarget && <p className="ol-style-trial-hint" data-translation-trial-scope>{t('offlineTranslation.trialOnly')}</p>}
       {!translationTarget && <p className="ol-style-trial-hint ol-style-trial-purpose" data-style-trial-purpose>{presentation.description}</p>}
       {(!readiness || !readiness.available || (readiness.requiresTextService && !readiness.textServiceConfigured) || readinessError) && <div className="ol-style-trial-availability">
       {readiness?.available === false && <p role="status" className="ol-style-trial-hint">{t('style.trial.nativeRequired')}</p>}

@@ -46,6 +46,7 @@ with sync_playwright() as pw:
   checks.append('Explicit translation route shows editable source/output comparison')
   assert not page.evaluate("window.__translationCalls.some(x=>['insert_style_trial_result','copy_style_trial_result','save_text_draft','set_active_style_pack','set_selected_device_key_profile'].includes(x.cmd))")
   checks.append('No automatic insertion, copying, saving, style activation or device write')
+  page.locator('[data-text-options-panel] > summary').click()
   page.get_by_role('combobox',name='Translate output to',exact=True).select_option('日本語');page.get_by_role('button',name='Translate',exact=True).click();page.wait_for_function('window.__pendingTranslation.length===1');close_trial();open_trial()
   page.evaluate('window.__pendingTranslation.shift()()');expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)
   checks.append('Closed workspace cannot accept a delayed translation result into its replacement')

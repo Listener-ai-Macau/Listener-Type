@@ -97,6 +97,8 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const [demoModeSession, setDemoModeSession] = useState<DemoModeSession | null>(null);
   const [quickTrialOpen, setQuickTrialOpen] = useState(false);
   const [quickTrialDraft, setQuickTrialDraft] = useState('');
+  const [quickTrialTarget, setQuickTrialTarget] = useState('');
+  const openQuickTrial = (target = '') => { setQuickTrialTarget(target); setQuickTrialOpen(true); };
   const [audioFileOpen, setAudioFileOpen] = useState(false);
   const [savedDraftsOpen, setSavedDraftsOpen] = useState(false);
 
@@ -475,12 +477,13 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                   onOpenRecordingSettings={() => openSettings('recording')}
                   onOpenLocalAsrSettings={() => openSettings('localAsr')}
                   onStartDemoMode={startProviderDemoMode}
-                  onOpenStyles={() => setQuickTrialOpen(true)}
+                  onOpenStyles={() => openQuickTrial()}
+                  onOpenLocalTranslation={() => openQuickTrial('English')}
                   onOpenAudioFile={() => setAudioFileOpen(true)}
                   onOpenSavedDrafts={() => setSavedDraftsOpen(true)}
                 />
               ) : displayTab === 'tools' ? (
-                <Tools onOpen={setCurrentTab} onTryText={() => setQuickTrialOpen(true)}
+                <Tools onOpen={setCurrentTab} onTryText={() => openQuickTrial()}
                   onOpenAudioFile={() => setAudioFileOpen(true)} onOpenSavedDrafts={() => setSavedDraftsOpen(true)} />
               ) : (
                 <>
@@ -499,7 +502,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
       </div>
 
       {quickTrialOpen && <QuickStyleTextTrial draft={quickTrialDraft} onDraftChange={setQuickTrialDraft}
-        onClose={() => setQuickTrialOpen(false)} />}
+        initialTranslationTarget={quickTrialTarget} onClose={() => setQuickTrialOpen(false)} />}
       {savedDraftsOpen && <SavedTextDraftsDialog onClose={() => setSavedDraftsOpen(false)} />}
       {audioFileOpen && <AudioFileTrial onClose={() => setAudioFileOpen(false)} />}
 

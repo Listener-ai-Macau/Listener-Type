@@ -9,15 +9,16 @@ import { StyleTextTrial } from './StyleTextTrial';
 import { translationTrialPack } from '../lib/translationTrial';
 
 /** A text workspace, not a style activation or a shortcut to pack management. */
-export function QuickStyleTextTrial({ draft, onDraftChange, onClose }: {
+export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTranslationTarget = '' }: {
   draft: string;
   onDraftChange: (text: string) => void;
   onClose: () => void;
+  initialTranslationTarget?: string;
 }) {
   const { t } = useTranslation();
   const [packs, setPacks] = useState<StylePack[]>([]);
   const [selectedId, setSelectedId] = useState('');
-  const [translationTarget, setTranslationTarget] = useState('');
+  const [translationTarget, setTranslationTarget] = useState(initialTranslationTarget);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [adding, setAdding] = useState<'list' | 'concise' | null>(null);

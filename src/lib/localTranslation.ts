@@ -7,7 +7,7 @@ export function translationLanguageLabel(language: string, locale: string): stri
     Français: 'fr', Deutsch: 'de', Español: 'es', Italiano: 'it', Português: 'pt',
     Русский: 'ru', 'العربية': 'ar', 'Tiếng Việt': 'vi', 'ไทย': 'th', 'हिन्दी': 'hi',
   };
-  const code = codes[language];
+  const code = codes[language] ?? (language === 'zh' || language === 'en' ? language : undefined);
   if (!code) return language;
   try { return new Intl.DisplayNames([locale], { type: 'language' }).of(code) ?? language; }
   catch { return language; }
