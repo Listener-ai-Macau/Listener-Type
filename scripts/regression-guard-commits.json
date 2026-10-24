@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T13:23:19.269227+08:00",
+  "updated_at": "2026-10-24T14:02:34.988473+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7367,6 +7367,39 @@
         "History and saved drafts remain distinct stores; no migration or merged history.",
         "Automatic dialog removed; explicit missing-credential attempt/native error and retained setup are separately checked."
       ]
+    },
+    {
+      "id": "offline_translation_wording_keeps_subject_facts_and_no_paid_controls",
+      "subject": "Offline English translation has explicit local request-prefix review with cloud controls absent",
+      "state": "source_scoped_react_passed_matching_native_pending",
+      "repo": "type",
+      "commit": "1a8de5a7227c8bbc168e00cf06959a95d85aabd2",
+      "commit_subject": "Offer explicit local-only request wording for offline English translations",
+      "humanAccepted": false,
+      "protects": [
+        "Offline English result retains automatic model text until an explicit wording choice.",
+        "Local request prefixes preserve I/we/you, exact body, dates/numbers/conditions and all untouched model output; no lexical model-output replacement.",
+        "Offline review hides and internally fences paid suggestions even when cloud credentials exist.",
+        "Accepted local revision is editable and saved/read with exact source/result; no automatic Copy/Insert.",
+        "English local scope and Windows/initial download/no translation fee entry boundary are explicit; not a full grammar or translation-quality guarantee."
+      ],
+      "guards": [
+        "node --experimental-strip-types src/lib/politeEdits.test.ts",
+        "python scripts/check-offline-wording-ui.py --url <controlled-ui> --expected-build <candidate> --report <result>",
+        "python scripts/check-polite-edit-suggestions-ui.py --url <controlled-ui> --report <result>"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\offline-wording166-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\offline-wording166-after.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wording166-cloud-compatibility.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\local-nmt\\decoder-quality166-research.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual controlled React local-only review with configured-cloud fixture, explicit apply/save/read and original cloud suggestion/error/stale/retention paths; pure prefix facts/subject and ambiguous/protected-span cases. No model or native/physical/purchase quality claim yet."
+      ],
+      "pending_human_scope": [
+        "Matching native optional workflow and independent new use not yet completed; hardware and real speech remain separate."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -8157,7 +8190,8 @@
         "overview_status_home_survives_first_use_dismissal",
         "translation_guidance_follows_actual_shortcut_and_device_action",
         "translation_preview_explicit_editable_and_failure_not_hidden",
-        "local_text_launch_keeps_explicit_speech_setup_and_scoped_history"
+        "local_text_launch_keeps_explicit_speech_setup_and_scoped_history",
+        "offline_translation_wording_keeps_subject_facts_and_no_paid_controls"
       ],
       "paths": {
         "type": [
@@ -8243,7 +8277,9 @@
           "src/i18n/zh-CN.ts",
           "src/i18n/zh-TW.ts",
           "src/i18n/ja.ts",
-          "src/i18n/ko.ts"
+          "src/i18n/ko.ts",
+          "scripts/check-offline-wording-ui.py",
+          "src/i18n/politeEdits.ts"
         ]
       },
       "known_failures": [

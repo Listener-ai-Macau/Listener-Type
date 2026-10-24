@@ -1,5 +1,5 @@
 const en = {
-  localOnlyHint: 'Offline translation stays local. These optional English request edits change the request prefix only, with no service request or fee. Review the complete translation before using it.', localOnlyNone: 'No matching local request option. You can keep or edit the translation directly; no text service is called.', 
+  localOnlyHint: 'Offline translation stays local. These optional English request edits change the request prefix only, with no service request or fee. Review the complete translation before using it.', localOnlyNone: 'No matching local request option. You can keep or edit the translation directly; no text service is called.',
   unchangedResult: 'The text service returned your original wording unchanged · {{seconds}} s. No reason was provided. You can keep it, edit it or compare Wording options.',
   cloudSetupHint: 'Local options need no text-service account. Configure a text service only if you want to ask it for other alternatives.',
   title: 'Request wording', open: 'Wording options', request: 'Ask text service for alternatives', pending: 'Finding wording suggestions…',
