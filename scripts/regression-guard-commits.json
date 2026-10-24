@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T12:25:16.629797+08:00",
+  "updated_at": "2026-10-24T12:35:44.586385+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7241,7 +7241,7 @@
     {
       "id": "local_translation_actual_route_notice_and_exact_saved_draft_navigation",
       "subject": "Local tasks do not show paid-cloud warning; explicit save opens returned draft; visible release identity follows the packaged batch",
-      "state": "source_actualReact_pending_save_identity_and_legacy_save_scope_passed_matching_native_pending",
+      "state": "Type164_combined_batch_installed_public_with_subsequent_deleted_record_ownership_fix",
       "repo": "type",
       "commit": "ae840d97403e3177e5739c872480d4df6e532c51",
       "commit_subject": "Clarify local processing and open the exact saved draft with readable release identity",
@@ -7263,21 +7263,23 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE163-aftersale-20261024\\customer-report.md",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-headless.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-saved-compatibility.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native164-snapshot-20261024-120406\\direct-delete-before.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native164-snapshot-20261024-120406\\direct-delete-before.json",
+        "work\\customer-onboarding-20261020\\isolated-native164-snapshot-20261024-123018\\local-text-handoff164-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build164\\source-audit.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build164\\published.json"
       ],
       "machine_accepted_scope": [
         "Actual React delayed local/cloud notices and direct saved ID navigation; previous uncertain-save/idempotent retry/read/delete/content/History isolation cases pass. Typecheck and semantic version consistency passed; PowerShell parsed and mismatch refused before copy/build/app actions."
       ],
       "unverified": [
-        "Matching packaged native notice, direct saved-item retrieval, footer and About pending.",
-        "No new voice/physical Translation-key/global editor/all-function or purchase proof."
+        "No new physical voice, device/Translation key, arbitrary editor, full RF, general language quality or hardware purchase qualification."
       ],
       "known_later_gap": "Unpublished first164 candidate694ea524 can reopen another draft after deleting its exact saved record; original actual native failure retained. Corrected by subsequent entry below."
     },
     {
       "id": "local_saved_draft_deleted_or_missing_record_never_becomes_another_draft",
       "subject": "Exact saved-draft ownership clears on acknowledged deletion and missing IDs require an explicit other selection",
-      "state": "source_shared_receipt_lifecycle_all_callers_controlled_UI_passed_matching_native_pending",
+      "state": "Type164_matching_package_installed_native_scoped_proof_and_public_asset_verified",
       "repo": "type",
       "commit": "3bb6868376a637a14ffbb6f14fa54a64392863cc",
       "commit_subject": "Propagate saved receipt removal to both text and audio workspace owners",
@@ -7300,20 +7302,30 @@
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-parent-retention-before.log",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-receipt-lifecycle-headless.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-receipt-lifecycle-saved-compatibility.json",
-        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-audio-receipt-lifecycle.json"
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-audio-receipt-lifecycle.json",
+        "work\\customer-onboarding-20261020\\isolated-native164-snapshot-20261024-123018\\local-text-handoff164-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build164\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build164\\type164-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build164\\post-update-native.json",
+        "work\\customer-onboarding-20261020\\isolated-native164-snapshot-20261024-123018\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener164-update-20261024-123128\\qualification.json"
       ],
       "machine_accepted_scope": [
-        "Same real React components: missing ID retains empty selection until explicit choice; deletion clears originating saved state and keeps text. Previous uncertain-save/read/delete compatibility still passes."
+        "Same real React components: missing ID retains empty selection until explicit choice; deletion clears originating saved state and keeps text. Previous uncertain-save/read/delete compatibility still passes.",
+        "Actual local-route notice, trial setting scope, exact saved draft open/delete/resave with both owner retention states, and readable matching Footer/About build identity. Existing translation worker/models, ordinary capture, Bluetooth and providers unchanged.",
+        "Actual local-route notice, trial setting scope, exact saved draft open/delete/resave with both owner retention states, and readable matching Footer/About build identity. Existing translation worker/models, ordinary capture, Bluetooth and providers unchanged. Exact native164 actual local pending/no-cloud-task message, Footer/About build identity, exact stored draft opening and acknowledged deletion/resave retain source/output. Missing-ID behavior and cloud notice retain their controlled-React scope; no physical speech/purchase qualification."
       ],
       "unverified": [
-        "Matching final164 native handoff/delete/resave pending; first candidate was not installed or published.",
-        "No new physical voice, hardware, global editor or purchase qualification."
+        "No new physical voice, device/Translation key, arbitrary editor, full RF, general language quality or hardware purchase qualification."
       ],
       "rejected_intermediate_core": {
         "commit": "e4b47b4357abe00c68b67f8ef13591850d8bbf89",
         "reason": "Child saved state was cleared but parent text/audio retention indicators still retained their own saved receipt. Actual React before test failed; uninstalled second candidate preserved.",
         "evidence": "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-parent-retention-before.log"
-      }
+      },
+      "pending_human_scope": [
+        "No new physical voice, device/Translation key, arbitrary editor, full RF, general language quality or hardware purchase qualification."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -8553,7 +8565,13 @@
           "src/lib/localTranslation.ts",
           "src/lib/ipc.ts",
           "src/components/Translation.tsx",
-          "scripts/check-local-translation-preservation.py"
+          "scripts/check-local-translation-preservation.py",
+          "src/components/SaveTextDraft.tsx",
+          "src/components/SavedTextDraftsDialog.tsx",
+          "src/components/AudioFileTrial.tsx",
+          "src/lib/appVersion.ts",
+          "vite.config.ts",
+          "scripts/windows-package-msvc.ps1"
         ]
       }
     }
