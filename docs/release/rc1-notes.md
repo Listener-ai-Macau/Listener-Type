@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build159 / Firmware37
+# Listener v1.0.6-rc1 · Type build160 / Firmware37
 
 ## Download
 
@@ -7,30 +7,26 @@
 
 ## Changes
 
-Recognition startup now checks session identity, recording phase, cancellation and update exclusion before accepting a connection. A late or duplicate initializer keeps the first valid resource and cannot replace a newer session. Rejected resources are cancelled outside state locks. Every microphone and embedded-provider registration handles rejected startup explicitly; retiring a session during startup is ignored quietly instead of reporting an error for a replacement.
+Overview remains a permanent daily page with device connection, speech/text service status and usage statistics. Skipping first-use guidance now hides only the guidance, preserves Overview in the sidebar and keeps the requested startup page. Getting started reopens the guide separately; closing it returns to the daily status view without clearing the saved choice. Existing dismissal settings are retained.
 
-Bailian connections are registered before the first network wait. Cancellation interrupts pending connection/handshake/task-start waits and a cancelled instance cannot reopen. Both Volcengine startup-completion paths retain current Processing for tail finalization while rejecting completed Inserting/Idle or replaced sessions. Shared capture cleanup from158 remains.
+No recording, recognition, Bluetooth, key mapping, credentials or firmware logic changed. Prior maintenance repairs remain. Firmware37 is the same ZIP/binary.
 
-Normal sample rate, Bluetooth protocol/parameters and the three-second ending policy are unchanged. No service credentials or optional models changed. Firmware37 is the same ZIP/binary.
+## Checked scope
 
-## Checked scope and limits
+Source startup policy and five UI locales checked. Exact MSI native ordinary Skip, reload, return from History, and reopen/close guide preserve all three primary tabs and daily service/device panels. Installed preferences/history/styles/protected vault are retained and normal BLE audio readiness returns. These UI checks do not establish full physical acceptance, every target editor, all keys/lamp/power behavior or hardware purchase value. Strong background-speech exclusion remains incomplete.
 
-Original resource storage fails5 of8 controlled cases; original Bailian cancellation fails2 local-loopback cases; the extracted old completion predicate also fails the completed-state check. Matching repaired native coordinator780 tests pass with32 existing cases ignored;6 Bailian tests and3 embedded-startup integration cases pass. Loopback tests use fake credentials and withhold the handshake locally, including cancellation through the actual coordinator. Exact packaged startup, cleanup, installed identity and preservation of preferences/history/styles/protected vault are checked.
-
-These results do not qualify physical speech, remote provider recognition accuracy, BLE cancellation, all target editors or every intermittent early-ending report. Full pre-sale acceptance, physical Translation/global keys, live external-selection Q&A, cross-computer keys and some lamp/power behavior remain incomplete. Strong-interference exclusion is not guaranteed.
-
-US$49 is the hardware price; Type is free and open source. Recognition and optional text services require preparation and separate usage charges; this release supplies no ready-to-use official account/allowance. RC1 remains a prerelease. AI interest is not a real order or full physical acceptance.
+US$49 is the hardware price; Type is free and open source. Recognition and optional text services require preparation and separate usage charges. This release supplies no ready-to-use official cloud account/allowance. RC1 remains a prerelease; the full pre-sale matrix is not yet complete.
 
 ## Exact artifacts
 
-- Type source `2e90f66ef22fcecee2f62b436cb9ca8cc1273ce6`; tag `build-source/type159-20261024`.
-- MSI 299216896 bytes; SHA-256 `3ea2c950bb9f3ff060650dc33708ec7a9b48c5c752656c27cc03f3a9b28dc442`.
-- Consumed shared capture source `39bae009668ab1bd8b5257dc6ce187b14e09a675`; Denzic-Platform tag `build-source/host-audio158-20261024`. Other product pins are unchanged.
+- Type source `c353893bf8d2480325bd1bc71c17ffd2f9fde473`; tag `build-source/type160-20261024`.
+- MSI 299216896 bytes; SHA-256 `4459dea395acb6e17a09b58a3cfa784757e4b3dd9a7016f0847d78b81c3d5652`.
+- Consumed shared capture source `39bae009668ab1bd8b5257dc6ce187b14e09a675`; tag `build-source/host-audio158-20261024`.
 - Firmware source `87ea79ec3d6e34a95d09b73e2a5848207a919f1c`; tag `build-source/firmware37-20261023`.
 - ZIP1956799 bytes; SHA-256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`.
 
-Only MSI and firmware ZIP are current downloads. Prior exact sources, failures and local rollback packages remain preserved.
+Only MSI and firmware ZIP are current downloads; prior exact sources, failures and rollback packages are preserved.
 
 ## 中文说明
 
-修复同一识别启动链的资源归属、等待期间取消、迟到完成回调问题。过期任务不能覆盖当前录音，取消可及时中断百炼连接等待，有效尾句仍可完成收尾。已保留原实现失败并完成匹配原生与本地连接对照、包体及空闲安装核验；不把受控测试说成真实云端语音、所有现场故障或全功能售前验收通过。固件37、蓝牙参数、采样和三秒结束规则未改。
+修复跳过首次引导时把概览、连接状态一起藏掉的问题。概览／历史／工具保持常驻，原来的跳过选择只作用于引导，使用入门仍可随时重开。五种语言和精确安装包的四条实际界面路径已验证；配置与历史保持，音频连接恢复。录音、云识别、蓝牙、按键与固件37均未改，不把这次界面修复称作所有硬件和售前项目通过。
