@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build171 / Firmware37
+# Listener v1.0.6-rc1 · Type build172 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -7,14 +7,23 @@
 
 ## In this app update
 
-Type build171 shows both ends of saved-message previews so revised deadlines are easier to tell apart, and uses History consistently in copy-save guidance. You can explicitly open a saved message in the existing local key-layout editor and try its virtual key in Type. This prepares a local layout and does not write to a device; applying it still uses Device settings. Messages over2000 characters remain saved but need shortening before use for a key. Translation models, service choices and Firmware37 are unchanged.
+Choose a text task explicitly: keep the language and select a writing style, or translate. Switching tasks retains your source text and last translation target. Text containing Han characters can offer a Chinese-source confirmation; this is a character hint, not automatic language identification. It never overrides an explicit source choice or starts a download, translation or cloud request. Existing saved messages, optional local key-layout practice and translation models are retained.
 
-The practice field simulates supported local text actions only, without the system clipboard. Recording/AI, external applications, the physical knob/key feel and actual device application are not simulated. Review translations before using them; complex meaning and general English grammar remain unqualified.
+Cloud recognition, wake/end logic and Bluetooth firmware are unchanged. Review and edit translations before use; literal phrasing, redundant wording and conditional meaning can still need correction. This release adds no new translation language or model.
 
 ## Before using
 
-US$49 is the hardware price. Type is free and open source. Recognition and optional cloud text services require preparation and may have separate provider charges; this release does not provide a ready-to-use official account or six-month usage entitlement.
+US$49 is the hardware price. Type is free and open source. Recognition and optional cloud text services require preparation and separate usage charges; this release does not provide a ready-to-use official account or allowance. Optional Windows local Chinese ↔ English translation needs a one-time component download and has no translation API fee. Local translation does not perform voice recognition. USB flashing and Bluetooth OTA use the same firmware ZIP.
 
-On 64-bit Windows, local Chinese ↔ English translation needs one explicit component download, then no translation API key or per-translation API fee. Review and edit the translation before using it. Other offline languages and universal translation quality are not qualified. Voice recognition is a separate step with its existing setup and fees.
+RC1 is a prerelease. Strong background-speech separation remains incomplete. Older intermittent early-ending and arbitrary target-field scopes remain open; scoped software checks do not establish physical or long-term reliability, purchase value or a real order.
 
-Firmware37 is unchanged. Use its ZIP for built-in wired flashing or Bluetooth OTA. Other hardware, external-editor, radio-throughput, long-term and purchase qualifications retain their separately recorded scope; this app update is not a new whole-device acceptance claim.
+## File identity
+
+- Type source: `3f1310c8eecd572be4f0895d9df2068773ef09a0` · `build-source/type172-20261024`
+- MSI: 299360256 bytes · SHA256 `e4ecaa91e41fb7b8f7655102d12f95a277802bf81d882fc6711142447fd151a4`
+- Firmware37 source: `87ea79ec3d6e34a95d09b73e2a5848207a919f1c` · runtime `9d7fbbe67ed0223d`
+- ZIP: 1956799 bytes · SHA256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`
+
+## 中文说明
+
+文字工作区先区分保留原语言／翻译，切换保留输入和上次目标语种；含汉字时仅给出由用户明确确认的中文提示，不自动判断语言或发起任务。成稿、按键本机练习和原翻译模型保留；没有自动写设备或改日常语音配置。译文仍需检查，旧生硬／重复／条件关系问题没有被这次UI修改修好。安装、模型与固件的实际范围分开记录，不把AI体验当真人购买或实物合格。

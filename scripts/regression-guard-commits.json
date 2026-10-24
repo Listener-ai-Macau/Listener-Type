@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T17:51:33.736828+08:00",
+  "updated_at": "2026-10-24T18:15:56.355292+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7629,6 +7629,47 @@
         "Scoped key practice is not real hardware/OS input; applying a saved layout to a physical device is outside this batch."
       ],
       "commit_subject": "Distinguish saved-message variants and bring them into local key practice"
+    },
+    {
+      "id": "text_workspace_explicit_task_and_confirmed_source_hint",
+      "subject": "Text purpose is separate from style, target retained and source never guessed or applied silently",
+      "repo": "type",
+      "commit": "3f1310c8eecd572be4f0895d9df2068773ef09a0",
+      "state": "Type172_matching_package_installed_native_scoped_proof_and_public_asset_verified",
+      "humanAccepted": false,
+      "protects": [
+        "Explicit unchanged-language/translation task selection; target and source are preserved in a session, no active style or recording preferences changed.",
+        "Han-script suggestion states actual character evidence, excludes kana and Hangul, requires confirmation and never overrides a selected source. No language-ID/model/download/cloud request implicit in selection.",
+        "Legacy local/cloud failure and late-response fencing, manual text edit, exact save and local wording boundaries retained."
+      ],
+      "guards": [
+        "python scripts/check-local-translation-ui.py --url <controlled> --report <receipt>",
+        "python scripts/check-translation-text-trial-ui.py --url <controlled> --report <receipt>",
+        "python scripts/check-offline-wording-ui.py --url <controlled> --check-undo --check-context --check-boundaries --report <receipt>"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\text-task172-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\text-task172-cloud-compatibility.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\text-task172-wording-compatibility.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native172-snapshot-20261024-181209\\text-task172-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build172\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261024-build172\\type172-installed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-售前验收-20261024-build172\\post-update-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native172-snapshot-20261024-181209\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\sniffer-alternative-butterfly-20261018\\listener172-update-20261024-181250\\qualification.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual React11 local/setup/save/readback scopes, five cloud-route compatibility scopes and14 optional wording scopes, with explicit IPC fixtures; not model/inference/physical proof.",
+        "Explicit text-task selection separates language-preserving styles from translation; switching retains draft/source/last target. A Han-script hint offers Chinese only after confirmation, never replacing an explicit source or starting translation/download. Existing models, cloud/voice/device settings and saved records retained.",
+        "Explicit text-task selection separates language-preserving styles from translation; switching retains draft/source/last target. A Han-script hint offers Chinese only after confirmation, never replacing an explicit source or starting translation/download. Existing models, cloud/voice/device settings and saved records retained. Exact packaged172 ordinary private UI: original171 source, explicit task and Han-source confirmation; last target/draft kept across modes; unchanged real CPU output; manual revision explicitly saved/reopened with exact source. Cloud credentials/history/styles/preferences retained. No model quality improvement, physical or purchase claim."
+      ],
+      "pending_human_scope": [
+        "Script hint is not general language identification; Han-only Japanese remains possible, so source confirmation is explicit. No new language pair or model-quality repair.",
+        "Original171 redundant afternoon and weakened conditional still need review/manual revision; output unchanged by this UI batch.",
+        "No physical key/speech/external editor/first component download/long-term or hardware buying qualification.",
+        "Saved-library tab wish retained but deferred: direct existing History entry and exact saved draft retrieval worked, while Owner requests fewer top-level pages."
+      ],
+      "commit_subject": "Separate text tasks from styles and offer explicit Chinese source confirmation"
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -8425,7 +8466,8 @@
         "local_translation_event_dayparts_and_full_message_review",
         "local_wording_compound_imperative_boundary_and_complete_candidate",
         "saved_draft_copy_shared_idempotent_save_retains_original",
-        "saved_message_variants_explicit_local_key_practice"
+        "saved_message_variants_explicit_local_key_practice",
+        "text_workspace_explicit_task_and_confirmed_source_hint"
       ],
       "paths": {
         "type": [
@@ -8522,7 +8564,8 @@
           "src/components/SavedTextDraftCopyEditor.tsx",
           "src/i18n/savedDraftCopy.ts",
           "src/i18n/index.ts",
-          "scripts/check-saved-message-reuse-ui.py"
+          "scripts/check-saved-message-reuse-ui.py",
+          "src/i18n/textWorkspace.ts"
         ]
       },
       "known_failures": [

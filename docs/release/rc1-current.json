@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-24T17:44:51.823964+08:00",
+  "updatedAt": "2026-10-24T18:13:45.874286+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 171,
-    "source": "fdcd7f45e93e1468a7c6e1c20abfd6cb16777b6a",
-    "sourceTag": "build-source/type171-20261024",
+    "build": 172,
+    "source": "3f1310c8eecd572be4f0895d9df2068773ef09a0",
+    "sourceTag": "build-source/type172-20261024",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "6e58db08c48b02f200da10bffe679c922f4677a33ee1bca56d491d70786f63cc",
-    "sizeBytes": 299372544,
-    "exeSha256": "fa8810d657dac79b9a9b8d64131807e0d648c7c61926d5e7d9694c995be866fa",
+    "sha256": "e4ecaa91e41fb7b8f7655102d12f95a277802bf81d882fc6711142447fd151a4",
+    "sizeBytes": 299360256,
+    "exeSha256": "6c80185083556e9793e972a6e4a9ea22b928585e94ce04d84f6f1bff699c4858",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -456,7 +456,10 @@
     "type171TrialAndCopyFlowControlledCompatibility": true,
     "type171NoNewModelOrPaidService": true,
     "type171CustomerReviewed": false,
-    "type171PurchaseQualification": false
+    "type171PurchaseQualification": false,
+    "explicitTextTaskAndSourceConfirmationNative": true,
+    "nativeTextTaskBuild": 172,
+    "localTranslationModelsUnchangedIn172": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -474,6 +477,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build171-20261024"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build172-20261024"
   }
 }
