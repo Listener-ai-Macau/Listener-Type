@@ -2,7 +2,7 @@
 import argparse,json,re
 from pathlib import Path
 from playwright.sync_api import sync_playwright,expect
-p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--report',required=True,type=Path);a=p.parse_args();checks=[]
+p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--report',required=True,type=Path);p.add_argument('--edit-copy',action='store_true');a=p.parse_args();checks=[]
 with sync_playwright() as pw:
  b=pw.chromium.launch(headless=True,channel='msedge')
  try:
@@ -16,6 +16,32 @@ with sync_playwright() as pw:
   page.evaluate('window.__delaySave=true');trial.get_by_role('button',name='Save draft',exact=True).click();expect(trial.get_by_label('Your text',exact=True)).to_be_disabled();expect(trial.get_by_label('Result text',exact=True)).to_be_disabled();expect(trial.get_by_label('Trial style',exact=True)).to_be_disabled();expect(trial.get_by_role('button',name='Close',exact=True)).to_be_disabled();trial.press('Escape');expect(trial).to_be_visible();expect(trial.locator('[data-style-trial-retention]')).to_contain_text('Not saved');page.evaluate('window.__finishSave()');expect(trial.get_by_role('button',name='Saved draft',exact=True)).to_be_disabled();expect(trial.get_by_role('status')).to_contain_text('browser session');calls=[x for x in page.evaluate('window.__draftCalls') if x['cmd']=='save_text_draft'];assert len(calls)==2 and calls[0]['args']['id']==calls[1]['args']['id'];checks.append('retry reuses the same immutable request id, while save blocks draft/style/close changes until actual acknowledgement')
   expect(trial.locator('[data-style-trial-retention]')).to_have_text('Saved only in this browser session, not to disk.');trial.get_by_label('Result text',exact=True).fill(edited+' later');expect(trial.locator('[data-style-trial-retention]')).to_contain_text('Not saved');trial.get_by_label('Result text',exact=True).fill(edited);expect(trial.locator('[data-style-trial-retention]')).to_have_text('Saved only in this browser session, not to disk.');assert len([x for x in page.evaluate('window.__draftCalls') if x['cmd']=='save_text_draft'])==2;checks.append('retention advice changes only after exact save acknowledgement, invalidates on edits and restores for the exact saved payload without another save request')
   trial.get_by_role('button',name='Close',exact=True).click();page.locator('aside nav').get_by_role('button',name='History',exact=True).click();page.get_by_role('button',name='Saved drafts',exact=True).first.click();d=page.get_by_role('dialog',name='Saved drafts',exact=True);expect(d.get_by_label('Choose a saved draft',exact=True).locator('option')).to_have_count(1);expect(d.get_by_role('textbox',name='Saved text',exact=True)).to_have_value(edited);d.get_by_text('Original text saved with this draft',exact=True).click();expect(d.locator('pre')).to_have_text(original);d.get_by_role('button',name='Copy saved text',exact=True).click();expect(d.get_by_role('status')).to_contain_text('Copied to your clipboard');assert page.evaluate('window.__draftCopies')==[edited];checks.append('ordinary reopen shows exactly one saved edited draft plus its original; explicit Copy uses that saved text');d.screenshot(path=str(a.report.with_name(a.report.stem+'-saved-copy.png')))
+  if a.edit_copy:
+   chooser=d.get_by_label('Choose a saved draft',exact=True);original_id=chooser.input_value()
+   d.get_by_role('button',name='Edit a copy',exact=True).click()
+   editor=d.get_by_role('textbox',name='Draft copy text',exact=True);expect(editor).to_have_value(edited)
+   revision=edited+'\nA new reusable version.';editor.fill(revision)
+   expect(chooser).to_be_disabled()
+   d.get_by_role('button',name='Back to saved drafts',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('unsaved changes');d.get_by_role('button',name='Cancel',exact=True).click();expect(editor).to_have_value(revision)
+   d.get_by_role('button',name='Close',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('unsaved changes');d.get_by_role('button',name='Cancel',exact=True).click();expect(editor).to_have_value(revision)
+   checks.append('edit-copy owns a snapshot; selection cannot switch it and cancelling either leave/discard path retains unsaved text')
+   page.evaluate('window.__delaySave=false;window.__firstUncertain=true')
+   d.get_by_role('button',name='Save as new draft',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('Could not save');expect(editor).to_have_value(revision)
+   page.evaluate('window.__delaySave=true');d.get_by_role('button',name='Save as new draft',exact=True).click();expect(editor).to_be_disabled();expect(d.get_by_role('button',name='Close',exact=True)).to_be_disabled();expect(d.get_by_role('button',name='Back to saved drafts',exact=True)).to_be_disabled();d.press('Escape');expect(d).to_be_visible();page.evaluate('window.__finishSave()')
+   expect(d.get_by_role('button',name='New draft saved',exact=True)).to_be_disabled()
+   saves=[x for x in page.evaluate('window.__draftCalls') if x['cmd']=='save_text_draft'];assert len(saves)==4 and saves[2]['args']['id']==saves[3]['args']['id'] and saves[2]['args']['id']!=original_id
+   assert saves[2]['args']['original']==original and saves[2]['args']['text']==revision
+   checks.append('copy uncertain-write retry shares one request id and locks mutation/close until acknowledgement, creating one new record with the retained source')
+   editor.fill(revision+' Unsaved change.');d.get_by_role('button',name='Back to saved drafts',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('unsaved changes');d.get_by_role('button',name='Cancel',exact=True).click();editor.fill(revision)
+   expect(d.get_by_role('button',name='New draft saved',exact=True)).to_be_disabled()
+   d.get_by_role('button',name='Back to saved drafts',exact=True).click();expect(chooser.locator('option')).to_have_count(2);copy_id=chooser.input_value();assert copy_id!=original_id
+   expect(d.get_by_role('textbox',name='Saved text',exact=True)).to_have_value(revision)
+   chooser.select_option(original_id);expect(d.get_by_role('textbox',name='Saved text',exact=True)).to_have_value(edited);expect(d.locator('pre')).to_have_text(original)
+   checks.append('new copy is selected after save; original result and attached source remain exact and separately selectable')
+   d.get_by_role('button',name='Edit a copy',exact=True).click();editor.fill('Discard this unsaved copy.');d.get_by_role('button',name='Back to saved drafts',exact=True).click();d.get_by_role('button',name='Discard changes',exact=True).click();expect(d.get_by_role('textbox',name='Saved text',exact=True)).to_have_value(edited);expect(chooser.locator('option')).to_have_count(2)
+   chooser.select_option(copy_id);d.get_by_role('button',name='Delete draft',exact=True).click();d.get_by_role('alert').get_by_role('button',name='Delete draft',exact=True).click();expect(chooser).to_have_value(original_id);expect(d.get_by_role('textbox',name='Saved text',exact=True)).to_have_value(edited)
+   assert page.evaluate('window.__draftCopies')==[edited]
+   checks.append('discard makes no save/copy request; deleting the explicitly chosen new copy leaves the original intact')
   month=page.evaluate("new Date().toLocaleDateString('en',{month:'short'})")
   expect(d.get_by_label('Choose a saved draft',exact=True).locator('option')).to_contain_text(month)
   checks.append('saved draft date follows the selected English app language even with a Chinese browser/system locale')

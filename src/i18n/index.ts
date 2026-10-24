@@ -18,6 +18,7 @@ import { zhTW } from './zh-TW';
 import type { UserPreferences } from '../lib/types';
 import { deviceAutosaveTranslations } from './deviceAutosave';
 import { localTranslationMessages } from './localTranslation';
+import { savedDraftCopyMessages } from './savedDraftCopy';
 
 export const SUPPORTED_LOCALES = ['zh-CN', 'zh-TW', 'en', 'ja', 'ko'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
@@ -74,6 +75,9 @@ for (const [locale, messages] of Object.entries(deviceAutosaveTranslations)) {
 
 for (const [locale, offlineTranslation] of Object.entries(localTranslationMessages)) {
   i18n.addResourceBundle(locale, 'translation', { offlineTranslation }, true, true);
+}
+for (const [locale, textDraft] of Object.entries(savedDraftCopyMessages)) {
+  i18n.addResourceBundle(locale, 'translation', { textDraft }, true, true);
 }
 
 export default i18n;
