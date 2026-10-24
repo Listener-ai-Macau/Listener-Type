@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T11:43:25.411328+08:00",
+  "updated_at": "2026-10-24T11:58:07.953320+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7237,6 +7237,40 @@
         "Lexical choices can remain imperfect; bounded preservation evidence is not universal quality or all-language support.",
         "Real voice/physical Translation key, arbitrary editor, full acceptance and hardware purchase remain separate."
       ]
+    },
+    {
+      "id": "local_translation_actual_route_notice_and_exact_saved_draft_navigation",
+      "subject": "Local tasks do not show paid-cloud warning; explicit save opens returned draft; visible release identity follows the packaged batch",
+      "state": "source_actualReact_pending_save_identity_and_legacy_save_scope_passed_matching_native_pending",
+      "repo": "type",
+      "commit": "ae840d97403e3177e5739c872480d4df6e532c51",
+      "commit_subject": "Clarify local processing and open the exact saved draft with readable release identity",
+      "humanAccepted": false,
+      "protects": [
+        "Offline translation and local raw processing display local task notices. Explicit cloud/shorter requests retain cloud cost notice; no network routing changes.",
+        "Translation text trial choices are clearly scoped and do not silently change voice settings.",
+        "Only acknowledged saved current text offers explicit direct-open; returned draft ID selects the record even when another draft is listed first. Closing returns to the edited source workspace.",
+        "Footer/About display the canonical artifact build number; version used for actual release tag/download URL remains unchanged. Invalid build/path mismatch is refused before operations.",
+        "Only non-bundled root AGENTS is excluded from modified-source label; every other product change remains visible."
+      ],
+      "guards": [
+        "python scripts/check-local-translation-ui.py --url <controlled-ui> --expected-build <candidate> --report <result>",
+        "python scripts/check-saved-text-drafts-ui.py --url <controlled-ui> --report <result>",
+        "npm run check:version",
+        "npx --no-install tsc --noEmit"
+      ],
+      "machine_evidence": [
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\Listener-FIRST_USE163-aftersale-20261024\\customer-report.md",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-headless.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ux164-saved-compatibility.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual React delayed local/cloud notices and direct saved ID navigation; previous uncertain-save/idempotent retry/read/delete/content/History isolation cases pass. Typecheck and semantic version consistency passed; PowerShell parsed and mismatch refused before copy/build/app actions."
+      ],
+      "unverified": [
+        "Matching packaged native notice, direct saved-item retrieval, footer and About pending.",
+        "No new voice/physical Translation-key/global editor/all-function or purchase proof."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -8457,7 +8491,8 @@
       "guard_entries": [
         "offline_translation_optional_verified_worker_no_cloud_fallback",
         "offline_translation_explicit_preview_voice_route_and_legacy_provider_preservation",
-        "offline_translation_sentence_units_preserve_short_paragraph_content"
+        "offline_translation_sentence_units_preserve_short_paragraph_content",
+        "local_translation_actual_route_notice_and_exact_saved_draft_navigation"
       ],
       "paths": {
         "type": [
