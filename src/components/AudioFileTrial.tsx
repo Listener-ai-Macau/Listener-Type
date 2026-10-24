@@ -140,7 +140,7 @@ export function AudioFileTrial({ onClose }: { onClose: () => void }) {
             saveBusy.current = value; setSaving(value);
             if (value) { setError(''); setCloseConfirm(false); }
           }}
-          onSaved={value => { setSavedText(value); setCloseConfirm(false); }} />
+          onSaved={value => { setSavedText(value); setCloseConfirm(false); }} onUnsaved={() => setSavedText('')} />
         <Btn variant="ghost" disabled={copying || saving || !text.trim() || text.length > 4000} onClick={() => {
           if (copyBusy.current || saveBusy.current || !text.trim() || text.length > 4000) return;
           setTextWorkspaceDraft(text); setTextWorkspaceOpen(true);

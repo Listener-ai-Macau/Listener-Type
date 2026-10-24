@@ -4,9 +4,10 @@ import { isTauri, saveTextDraft } from '../lib/ipc';
 import { Btn } from '../pages/_atoms';
 import { SavedTextDraftsDialog } from './SavedTextDraftsDialog';
 
-export function SaveTextDraft({ name, original, text, disabled, onBusy, onSaved, compact = false }: {
+export function SaveTextDraft({ name, original, text, disabled, onBusy, onSaved, onUnsaved, compact = false }: {
   name: string; original: string; text: string; disabled: boolean; onBusy: (busy: boolean) => void;
   onSaved?: (text: string) => void;
+  onUnsaved?: () => void;
   compact?: boolean;
 }) {
   const { t } = useTranslation();
@@ -40,5 +41,5 @@ export function SaveTextDraft({ name, original, text, disabled, onBusy, onSaved,
       onClick={()=>setDraftsOpen(true)}>{t('textDraft.openSaved')}</Btn>}
     {error&&<p role="alert" className="ol-style-trial-hint">{error}</p>}
   </div>{draftsOpen&&<SavedTextDraftsDialog initialDraftId={savedId} onClose={()=>setDraftsOpen(false)}
-    onDeleted={id=>{if(id===savedId){setSaved('');setSavedId('');}}} />}</>;
+    onUnavailable={id=>{if(id===savedId){setSaved('');setSavedId('');onUnsaved?.();}}} />}</>;
 }

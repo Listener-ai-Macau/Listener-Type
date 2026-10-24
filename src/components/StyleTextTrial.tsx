@@ -382,6 +382,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
             </Btn>
             <SaveTextDraft compact name={presentation.name} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving}
+              onUnsaved={() => setSavedDraftSignature('')}
               onSaved={text => setSavedDraftSignature(JSON.stringify([presentation.name, draft, text]))} />
             {!offline && <PoliteEditSuggestions text={resultOutput} cloudConfigured={readiness?.textServiceConfigured === true}
               disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />}

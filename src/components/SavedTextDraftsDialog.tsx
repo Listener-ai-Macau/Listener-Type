@@ -5,9 +5,12 @@ import { detectOS } from './WindowChrome';
 import { Btn } from '../pages/_atoms';
 import './DeviceLayoutsDialog.css';
 
-export function SavedTextDraftsDialog({onClose,initialDraftId,onDeleted}:{onClose:()=>void;initialDraftId?:string;onDeleted?:(id:string)=>void}) {
+export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable}:{onClose:()=>void;initialDraftId?:string;onUnavailable?:(id:string)=>void}) {
   const {t,i18n}=useTranslation();const dialog=useRef<HTMLDialogElement>(null),alive=useRef(true),running=useRef(false);
-  const [items,setItems]=useState<SavedTextDraft[]>([]),[selectedId,setSelected]=useState(initialDraftId??'');
+  // Keep the identity requested when this dialog opened, even if its owner
+  // clears its saved receipt after learning that the record is unavailable.
+  const requestedId=useRef(initialDraftId).current;
+  const [items,setItems]=useState<SavedTextDraft[]>([]),[selectedId,setSelected]=useState(requestedId??'');
   const [missingRequested,setMissingRequested]=useState(false);
   const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[loadError,setLoadError]=useState(false),[error,setError]=useState(''),[copied,setCopied]=useState(''),[confirm,setConfirm]=useState(false);
   const selected=items.find(d=>d.id===selectedId);
@@ -17,10 +20,10 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onDeleted}:{onClos
     const time=new Date(draft.createdAt).toLocaleString(i18n.resolvedLanguage??i18n.language,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
     return `${preview} · ${draft.name} · ${time}`;
   };
-  const refresh=async()=>{setLoading(true);setLoadError(false);try{const value=await listSavedTextDrafts();if(alive.current){const missing=!!initialDraftId&&!value.some(d=>d.id===initialDraftId);setItems(value);setMissingRequested(missing);setSelected(current=>value.some(d=>d.id===current)?current:missing?'':value[0]?.id??'');}}catch{if(alive.current)setLoadError(true);}finally{if(alive.current)setLoading(false);}};
+  const refresh=async()=>{setLoading(true);setLoadError(false);try{const value=await listSavedTextDrafts();if(alive.current){const missing=!!requestedId&&!value.some(d=>d.id===requestedId);setItems(value);setMissingRequested(missing);setSelected(current=>value.some(d=>d.id===current)?current:missing?'':value[0]?.id??'');if(missing)onUnavailable?.(requestedId!);}}catch{if(alive.current)setLoadError(true);}finally{if(alive.current)setLoading(false);}};
   useEffect(()=>{alive.current=true;dialog.current?.showModal();void refresh();return()=>{alive.current=false;dialog.current?.close();};},[]);
   const copy=async()=>{if(!selected||running.current)return;const value=selected;running.current=true;setBusy(true);setError('');setCopied('');try{await copyExplicitText(value.text,detectOS()==='win');if(alive.current)setCopied(value.id);}catch{if(alive.current)setError(t('textDraft.copyFailed'));}finally{running.current=false;if(alive.current)setBusy(false);}};
-  const remove=async()=>{if(!selected||running.current)return;const id=selected.id;running.current=true;setBusy(true);setError('');try{await deleteSavedTextDraft(id);if(alive.current){setItems(current=>current.filter(d=>d.id!==id));setSelected(items.find(d=>d.id!==id)?.id??'');setConfirm(false);setCopied('');onDeleted?.(id);}}catch{if(alive.current)setError(t('textDraft.deleteFailed'));}finally{running.current=false;if(alive.current)setBusy(false);}};
+  const remove=async()=>{if(!selected||running.current)return;const id=selected.id;running.current=true;setBusy(true);setError('');try{await deleteSavedTextDraft(id);if(alive.current){setItems(current=>current.filter(d=>d.id!==id));setSelected(items.find(d=>d.id!==id)?.id??'');setConfirm(false);setCopied('');onUnavailable?.(id);}}catch{if(alive.current)setError(t('textDraft.deleteFailed'));}finally{running.current=false;if(alive.current)setBusy(false);}};
   const close=()=>{if(!running.current)onClose();};
   return <dialog ref={dialog} className="ol-device-layout-dialog ol-thinscroll" aria-labelledby="saved-text-drafts-title" onCancel={e=>{e.preventDefault();close();}}>
     <div className="ol-device-layout-heading"><h2 id="saved-text-drafts-title">{t('textDraft.title')}</h2><Btn size="sm" variant="ghost" disabled={busy} onClick={close}>{t('common.close')}</Btn></div>
