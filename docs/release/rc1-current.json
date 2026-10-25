@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-25T10:09:47.109850+08:00",
+  "updatedAt": "2026-10-25T13:10:51.465633+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 180,
-    "source": "a4e135e29524b47c4ed7c96bd0d119ea37fcdcca",
-    "sourceTag": "build-source/type180-20261025",
+    "build": 184,
+    "source": "03089e7a2f6bbb3007a1a5ca35dc346cf949d97b",
+    "sourceTag": "build-source/type184-20261025",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "0738179122d6fd2017bbcbaee8d2d75a84e11f99677e87f46d4b1792fc701dd8",
-    "sizeBytes": 299360256,
-    "exeSha256": "7edbd5b0eaa032535a2e22162ab60d747c5f0d9b2adbf3c44124ee4c6cba7933",
+    "sha256": "247ddfe7a0cb1cefc19a43df8af276e3a21e0db408496a436d83279d6eb2befb",
+    "sizeBytes": 299388928,
+    "exeSha256": "4610e2948a80a01601517f3bc074225144267b844baccc9c67ec2d5358bf7d6c",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -483,7 +483,14 @@
     "audioFileChooserCancelPreservesSelectionActualNative": true,
     "audioFileDialogOwnEscapeAndReopenActualNative": true,
     "firstDictationGuideMatchesActualInputSource": true,
-    "aboutActualOsSaveCancelAndZipNativePassed": true
+    "aboutActualOsSaveCancelAndZipNativePassed": true,
+    "qaWindowNativeVisibilityOwnerInherited181": true,
+    "qaPreparationAndDirectSettingsNativeScopedPass": true,
+    "qaExistingWindowAndErrorLiveLocaleNativePass": true,
+    "qaActualSpeechAnswerQualified": false,
+    "qaLazyMainCreationQualified": false,
+    "qaMissingSetupFooterNativePass": true,
+    "qaLocalHistoryExplanationNativePass": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -501,6 +508,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build180-20261025"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build184-20261025"
   }
 }

@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build180 / Firmware37
+# Listener v1.0.6-rc1 · Type build184 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -7,25 +7,25 @@
 
 ## In this app update
 
-Getting started now shows the recording method for your selected input. Listener BLE input uses the device key configured for dictation (the knob by default). Computer microphone input shows your configured computer shortcut. The guide no longer tells Listener users to press a computer shortcut that BLE mode intentionally ignores.
+The question window now has visible Open, Start question, Finish and ask, and Close controls. On Windows, showing and hiding use one native visibility owner, fixing a window that could remain visible after Close. Optional shortcuts are kept.
 
-Device settings continue to follow the selected board's saved profile. This update keeps your existing key mappings and firmware. It does not synchronize old computer preferences onto a board or change recognition, wake/ending, provider credentials or models. The earlier recorded-file cancellation and diagnostic export fixes remain included.
+Before a question starts, Type shows separate configuration-presence indicators for Volcengine recognition and the active AI answering service. Missing setup links directly to Providers, with APP ID, Access Token and Resource ID named consistently. Configured means values are present; it does not establish authentication, network or quota health. The question window uses the computer microphone. It does not change ordinary Listener dictation or board key mappings.
 
-Exact native checks cover both input guides and the ordinary About export button through real Windows Save/Cancel, ZIP validation and visible completion. These scoped checks do not establish complete hardware/long-term reliability or Bluetooth throughput.
+Existing windows and retained setup errors now follow the interface-language choice. Missing service setup no longer shows Ready while Start is disabled. The history switch explains local question/answer storage and that cloud processing still sends data. Exact native checks cover missing-configuration handling, direct settings navigation, language changes and Close; actual speech-to-answer/selected-context and opening Settings before the main window exists remain unqualified. Earlier file-cancellation, diagnosis, device-profile and input-source fixes are retained. Firmware37 is unchanged; no reflash is needed for this app update.
 
 ## Before using
 
-US$49 is the hardware price. Type is free and open source. Recognition and optional text services require preparation and separate usage charges; this release does not provide a ready-to-use official cloud account or allowance. USB flashing and Bluetooth OTA use the same firmware ZIP. Optional local translation components are prepared separately; general translation quality remains limited.
+US$49 is the hardware price. Type is free and open source. Cloud recognition and optional AI services require preparation and separate usage charges; this release does not provide a ready-to-use official cloud account or allowance. USB flashing and Bluetooth OTA use the same firmware ZIP. Optional local translation components are prepared separately; general translation quality remains limited.
 
-RC1 is a prerelease. Strong background-speech separation, some physical/global-key/optional-resource scopes and long-term acceptance remain incomplete. AI software feedback is not a hardware qualification or real order.
+RC1 is a prerelease. Strong background-speech separation, some physical/global-key/optional-resource scopes and long-term acceptance remain incomplete. AI software feedback is not hardware qualification or a real order.
 
 ## File identity
 
-- Type source: `a4e135e29524b47c4ed7c96bd0d119ea37fcdcca` · `build-source/type180-20261025`
-- MSI: 299360256 bytes · SHA256 `0738179122d6fd2017bbcbaee8d2d75a84e11f99677e87f46d4b1792fc701dd8`
+- Type source: `03089e7a2f6bbb3007a1a5ca35dc346cf949d97b` · `build-source/type183-20261025`
+- MSI: 299388928 bytes · SHA256 `247ddfe7a0cb1cefc19a43df8af276e3a21e0db408496a436d83279d6eb2befb`
 - Firmware37 source: `87ea79ec3d6e34a95d09b73e2a5848207a919f1c` · runtime `9d7fbbe67ed0223d`
 - ZIP: 1956799 bytes · SHA256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`
 
 ## 中文说明
 
-首页指引现在跟随实际输入来源：Listener 蓝牙用设备上设为录音的按键（默认旋钮），电脑麦克风才显示电脑录音快捷键。保留板上既有按键、固件及日常识别行为。设备配置继续从选中的板子读取，不把旧本机偏好覆盖到设备。关于页导出诊断包已补真实系统保存框的取消／保存、ZIP校验及成功反馈检查；这不代表整机长期／抗干扰／蓝牙吞吐全部通过。固件仍37，无需为本次指引修复重刷。
+问答可以直接用按钮打开、开始、结束并提问、关闭，不要求记住快捷键。Windows显示／隐藏统一原生入口，修复后台已关闭但窗口还在的问题。开始前显示识别与回答两项配置存在状态，缺配置可直达提供商，字段统一为APP ID／Access Token／Resource ID；已开浮窗和已出现的配置错误随主界面语言更新。缺配置时不再提示准备就绪，历史开关说明本机保存与云处理的边界。问答仍使用电脑麦克风，保留Listener日用录音来源与板上按键。原生已检查相关配置、跳转、语言和关闭；配置存在不等于鉴权／网络／额度有效，真实讲话与选区到回答、首次创建主窗仍未完整验证。固件37不变，无需为本次软件修复重刷。
