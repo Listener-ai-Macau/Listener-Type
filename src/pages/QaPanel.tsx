@@ -10,7 +10,7 @@
 // 关闭：Esc / Close 按钮 / 再按 Cmd+Shift+; → qa_window_dismiss → 后端清历史 + 隐藏窗口。
 // **不再自动关**（v1 的 blur / 30s 超时去掉）：用户多轮思考时浮窗保持。
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getSettings, isTauri, qaWindowDismiss, qaWindowPin, qaWindowRecord } from '../lib/ipc';
 import type { QaChatMessage, QaStatePayload, UserPreferences } from '../lib/types';
@@ -46,6 +46,8 @@ export function QaPanel() {
   const [streamingAnswer, setStreamingAnswer] = useState<string>('');
   /** 录音电平：0..1。后端每帧 33ms 通过 qa:level emit。详见 issue #162。 */
   const [level, setLevel] = useState<number>(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const followAnswerTail = useRef(true);
   /** 用户当前的录音热键 label（如 "右 Option" / "Right Alt"）。issue #205：
    *  原版硬编码 "Option"，Windows 用户没这个键，文案失真。读 prefs 后由 i18n
    *  插值动态显示，平台与用户配置都能跟上。 */
@@ -71,6 +73,7 @@ export function QaPanel() {
           }
           switch (payload.kind) {
             case 'idle':
+              followAnswerTail.current = true;
               setStatus('idle');
               setSelectionPreview('');
               setErrorMsg('');
@@ -78,6 +81,7 @@ export function QaPanel() {
               setLevel(0);
               break;
             case 'recording':
+              followAnswerTail.current = true;
               setStatus('recording');
               setSelectionPreview(payload.selection_preview ?? '');
               setErrorMsg('');
@@ -222,18 +226,21 @@ export function QaPanel() {
     }
   };
 
-  // ── 自动滚动到底（新消息进来时）────────────────────────────────────
-  const scrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
+  // Follow streamed growth as well as completed messages. Preserve the reading
+  // position when the user scrolls up; reaching the bottom resumes following.
+  useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
+    if (!el || !followAnswerTail.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, status]);
+  }, [messages, status, streamingAnswer]);
 
   return (
     <div style={shellStyle}>
       <Toolbar pinned={pinned} onTogglePin={onTogglePin} onClose={onClose} />
-      <div ref={scrollRef} style={contentStyle}>
+      <div ref={scrollRef} style={contentStyle} onScroll={event => {
+        const el = event.currentTarget;
+        followAnswerTail.current = el.scrollHeight - el.clientHeight - el.scrollTop <= 32;
+      }}>
         {!preparation.ready && <QaPreparation preparation={preparation} />}
         {messages.length === 0 && status === 'idle' && preparation.ready && (
           <EmptyHint t={t} recordHotkey={recordHotkeyLabel} />
