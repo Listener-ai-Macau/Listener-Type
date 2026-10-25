@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build188 / Firmware37
+# Listener v1.0.6-rc1 · Type build189 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,8 @@
 | **ESP32-S3 firmware · USB or Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+Navigation now mounts the selected page in the same render as its active sidebar item. It no longer leaves the old, blurred page on screen while an exit timer runs. The new-page animation, guide Skip preference and guide reopening are retained. Affected checks cover actual React rendering and the matching private native MSI; these are local UI checks, not speech or Bluetooth speed measurements.
 
 Opening Providers from the question window now works after silent startup when no main window exists. Windows first-window creation no longer blocks its UI callback; navigation is retained until the new renderer is ready. Existing-window restore remains unchanged. Exact private-native checks observed first Providers opening in0.515 seconds and restoring the same native window in0.157 seconds; these are local UI timings, not recognition or Bluetooth throughput.
 
@@ -29,12 +31,14 @@ RC1 is a prerelease. Strong background-speech separation, some physical/global-k
 
 ## File identity
 
-- Type source: `2cea7c327fdf995d204347f6950d87d077ad8f36` · `build-source/type188-20261025`
-- MSI: 299388928 bytes · SHA256 `25d765cf892778965fe5e2349f4772e17d1ccc287173c402873f055709902fa2`
+- Type source: `b1a655cbf93592936a84b4a55111d6fc96153051` · `build-source/type189-20261025`
+- MSI: 299380736 bytes · SHA256 `0c5c44be286ca26dacc4be43982dda95612850493902aa106a7185ca01983f1a`
 - Firmware37 source: `87ea79ec3d6e34a95d09b73e2a5848207a919f1c` · runtime `9d7fbbe67ed0223d`
 - ZIP: 1956799 bytes · SHA256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`
 
 ## 中文说明
+
+导航选中项与正文现在同步切换，不再等旧页退出模糊动画；首次引导的跳过记忆和重新打开保留。受影响的实际React渲染与匹配原生MSI已核对；本批不改录音、服务凭据、模型、设备设置或固件，不把界面耗时称作语音／蓝牙提速。
 
 静默启动、主窗口尚未创建时，从提问窗打开提供商设置不再卡住。首次窗口创建不阻塞Windows界面回调，页面目的保留至渲染器准备好；已存在窗口的恢复逻辑保持。匹配私有原生环境首次进入约0.515秒，再次恢复同一窗口约0.157秒；这是本机界面耗时，不是识别或蓝牙速度。实际语音到回答／选区／物理按键仍未验收通过。
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-25T18:00:57.919114+08:00",
+  "updated_at": "2026-10-25T19:40:03.307424+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8321,6 +8321,40 @@
       "pending_human_scope": [
         "Other boards/crossPC, visual lights, real voice/global trigger and full RF/throughput remain outside this one-board USB UI validation."
       ]
+    },
+    {
+      "id": "navigation_destination_matches_active_tab_without_exit_delay",
+      "subject": "Selected navigation and rendered destination share state; no timed old-page rendering",
+      "state": "exact189_private_native_navigation_and_guide_passed_physical_input_unknown",
+      "protects": [
+        "Active sidebar and destination content change in the same React render",
+        "Entry animation and sidebar indicator retained; no exiting old guide over a selected destination",
+        "Explicit skip preference and guide reopen retained"
+      ],
+      "guards": [
+        "Actual before188/after React next-frame DOM states and guide persistence",
+        "Matching native MSI189 sidebar/guide check"
+      ],
+      "pending_human_scope": [
+        "Owner desktop actual input and global/hardware unchanged; this UI scope does not qualify them."
+      ],
+      "repo": "type",
+      "commit": "b1a655cbf93592936a84b4a55111d6fc96153051",
+      "commit_subject": "fix(ui): render the selected page without an exit timer",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build188\\customer-navigation-first-paint188.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build188\\customer-navigation-candidate189.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\navigation189-frontend-tests.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\navigation189-frontend-build.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build189\\source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native189-snapshot-20261025-193835\\navigation189-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build189\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build189\\type189-installed.json"
+      ],
+      "machine_accepted_scope": [
+        "Exact MSI189 private native ordinary navigation: destination content and selected sidebar agree on next animation frame; inline first-use guide skip/reload/reopen preserves intended preference. No voice/service/global/BLE/physical qualification."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -9413,7 +9447,8 @@
       "accepted_scope": "Controlled React and exact native software navigation, retained old native device-page event route; no new physical or purchasing qualification.",
       "baseline_state": "controlled_ui_exact_native_installed_verified_live_hardware_not_rerun",
       "guard_entries": [
-        "primary_navigation132_three_entries_existing_tools"
+        "primary_navigation132_three_entries_existing_tools",
+        "navigation_destination_matches_active_tab_without_exit_delay"
       ],
       "known_failures": [
         "Initial screenshot captured an outgoing180ms fade, corrected test settling; not product blank-page reproduction.",
