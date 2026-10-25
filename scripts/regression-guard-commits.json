@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-25T09:09:17.106718+08:00",
+  "updated_at": "2026-10-25T10:09:51.929986+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8022,6 +8022,65 @@
       "machine_accepted_scope": [
         "The actual178 file-cancel counterexample, repeated only on exact fixed179.\n\nOwn private Windows dialog buttons and private WebView input only. No ASR,\nglobal input, Owner focus/clipboard, device or model operation.\n"
       ]
+    },
+    {
+      "id": "first_dictation_guide_follows_current_input_source",
+      "subject": "BLE first-use guidance must not prescribe the computer-only microphone shortcut",
+      "state": "exact180_native_two_sources_and_five_locale_React_passed",
+      "protects": [
+        "BLE input guide names configured device recording key with knob as default, not the computer shortcut",
+        "Microphone guide uses actual configured shortcut; loading preferences do not prescribe a wrong default",
+        "Legacy local key fields are not selected-board state and are never copied to a board by this update"
+      ],
+      "guards": [
+        "python scripts/check-dictation-guide-input-source-ui.py --url <isolated-vite-url> --report <output-json>"
+      ],
+      "pending_human_scope": [
+        "No new live speech, hardware key, general shortcut or long-term qualification; current BLE keyboard Ctrl is intentionally ignored, not a failed recording trigger."
+      ],
+      "repo": "type",
+      "commit": "a4e135e29524b47c4ed7c96bd0d119ea37fcdcca",
+      "commit_subject": "Match first dictation guidance to the selected audio input source",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build180\\guide-input-source-react.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build180\\source-audit.json",
+        "work\\customer-onboarding-20261020\\isolated-native180-snapshot-20261025-100628\\guide-about180-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build180\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build180\\type180-installed.json"
+      ],
+      "machine_accepted_scope": [
+        "Exact180 first-use guide follows actual native private input preference; ten five-locale React source cases. Configured BLE/device key versus microphone/computer shortcut only, no actual mic/HID/user target qualification."
+      ]
+    },
+    {
+      "id": "about180_actual_system_save_cancel_and_native_diagnostic_zip",
+      "subject": "Ordinary About diagnostic export through actual Windows Cancel/Save and real native ZIP",
+      "repo": "type",
+      "commit": "a4e135e29524b47c4ed7c96bd0d119ea37fcdcca",
+      "commit_subject": "Match first dictation guidance to the selected audio input source",
+      "state": "exact180_ordinary_About_actual_Save_Cancel_ZIP_CRC_and_visible_success_passed",
+      "humanAccepted": false,
+      "protects": [
+        "Ordinary About Export -> actual system Save Cancel -> button usable, no native export result",
+        "Ordinary About Export -> actual system Save path -> real ZIP CRC with8members/0audio and firmware statusok -> visible success; new private ZIP removed"
+      ],
+      "guards": [
+        "python scripts/check-diagnostic-export-ui.py --url <isolated-vite-url> --report <output-json>"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native180-snapshot-20261025-100628\\guide-about180-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native180-snapshot-20261025-100628\\file-picker-cancel-controls.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native180-snapshot-20261025-100628\\file-picker-open-controls.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native180-snapshot-20261025-100628\\native-existing-dialog-inspect.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native180-snapshot-20261025-100628\\setup-result.json"
+      ],
+      "machine_accepted_scope": [
+        "Newly qualifies About ordinary UI and actual OS file controls on its authenticated independent private station. Prior178 real firmware stream and177 responsiveness evidence remain separate. No fullRF, new transport, physical/global or recovery qualification."
+      ],
+      "pending_human_scope": [
+        "One-click actual device recovery, external browser launch, original optional/physical/long-term scopes remain incomplete."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -8821,7 +8880,9 @@
         "saved_message_variants_explicit_local_key_practice",
         "text_workspace_explicit_task_and_confirmed_source_hint",
         "translation_workspace_result_visibility_and_direct_local_entry",
-        "audio_file_chooser_cancel_preserves_selected_recording"
+        "audio_file_chooser_cancel_preserves_selected_recording",
+        "first_dictation_guide_follows_current_input_source",
+        "about180_actual_system_save_cancel_and_native_diagnostic_zip"
       ],
       "paths": {
         "type": [
@@ -8920,7 +8981,10 @@
           "src/i18n/index.ts",
           "scripts/check-saved-message-reuse-ui.py",
           "src/i18n/textWorkspace.ts",
-          "scripts/check-audio-file-cancel-ui.py"
+          "scripts/check-audio-file-cancel-ui.py",
+          "src/lib/types.ts",
+          "src-tauri/src/types.rs",
+          "scripts/check-dictation-guide-input-source-ui.py"
         ]
       },
       "known_failures": [

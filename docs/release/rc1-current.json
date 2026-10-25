@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-25T09:09:17.106718+08:00",
+  "updatedAt": "2026-10-25T10:09:47.109850+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 179,
-    "source": "adabc2c89ec9301806b63cdfeab2692c2745d23c",
-    "sourceTag": "build-source/type179-20261025",
+    "build": 180,
+    "source": "a4e135e29524b47c4ed7c96bd0d119ea37fcdcca",
+    "sourceTag": "build-source/type180-20261025",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "2148767f124a202f313fdd60d0da2cf9ac9b45b86a66a6bbd8e9ab5eaa509e64",
+    "sha256": "0738179122d6fd2017bbcbaee8d2d75a84e11f99677e87f46d4b1792fc701dd8",
     "sizeBytes": 299360256,
-    "exeSha256": "d6df9eee5bc90117c8e4694891ea96a6fd57ffba8cce6deb435fef2068384888",
+    "exeSha256": "7edbd5b0eaa032535a2e22162ab60d747c5f0d9b2adbf3c44124ee4c6cba7933",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -481,7 +481,9 @@
     "diagnosticConcurrentNativeReplies178": 20,
     "diagnosticOriginalStoresPreserved178": true,
     "audioFileChooserCancelPreservesSelectionActualNative": true,
-    "audioFileDialogOwnEscapeAndReopenActualNative": true
+    "audioFileDialogOwnEscapeAndReopenActualNative": true,
+    "firstDictationGuideMatchesActualInputSource": true,
+    "aboutActualOsSaveCancelAndZipNativePassed": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -499,6 +501,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build179-20261025"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build180-20261025"
   }
 }
