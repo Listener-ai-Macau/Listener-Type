@@ -104,23 +104,6 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const [audioFileOpen, setAudioFileOpen] = useState(false);
   const [savedDraftsOpen, setSavedDraftsOpen] = useState(false);
 
-  // displayTab 是实际渲染的 tab，currentTab 是用户点中的目标 tab。
-  const [displayTab, setDisplayTab] = useState<AppTab>(entryTab);
-  const [tabPhase, setTabPhase] = useState<'idle' | 'exiting'>('idle');
-  useEffect(() => {
-    if (currentTab === displayTab) {
-      // Returning before the timeout cancels the transition, including its fade.
-      setTabPhase('idle');
-      return;
-    }
-    setTabPhase('exiting');
-    const id = window.setTimeout(() => {
-      setDisplayTab(currentTab);
-      setTabPhase('idle');
-    }, 180);
-    return () => window.clearTimeout(id);
-  }, [currentTab, displayTab]);
-
   // 字体档位 — 启动时按 localStorage 应用一次；之后改动来自 Settings 的"个性化"section。
   useEffect(() => {
     applyFontScale(readFontScale());
@@ -130,7 +113,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     () => PRIMARY_NAV.map(b => ({ ...b, name: t(`nav.${b.id}`) })),
     [t],
   );
-  const Page = (NAV_BASE.find((n) => n.id === displayTab) ?? NAV_BASE[0]).cmp;
+  const Page = (NAV_BASE.find((n) => n.id === currentTab) ?? NAV_BASE[0]).cmp;
   const primaryTab = isToolTab(currentTab) ? 'tools' : currentTab;
 
   // sidebar nav 滑动指示器：测量当前 active button 的 offsetTop / height，
@@ -427,15 +410,15 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                 <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1" target="_blank" rel="noreferrer noopener">{t('shell.browserPreviewDownload')}</a>
               </div>
             )}
-            {/* key={displayTab} 让每次切换重挂这棵子树 → ol-page-slide keyframe 重新触发。
-                旧 tab 退出时不立刻 unmount，而是先播 ol-page-fadeout（blur+淡出），
-                180ms 后再切到新 tab 并播入场动画。详见 displayTab/tabPhase 的 effect。
+            {/* Navigation and content share currentTab, so the destination mounts in
+                the same render as its active navigation button. Only the new page
+                animates; an exit timer must not leave the old guide on screen.
                 padding + overflow:auto 直接挂在这棵 wrapper 上：
                   - 自然高度的页（Overview / Vocab / Style）—— 整页内容超出时 wrapper 出现滚动条
                   - 用 height:100% 撑满的页（History 左右双列）—— 100% 能解析到 wrapper 的固定高度，
                     两列内部各自的 overflow:auto 才能独立滚动 */}
             <div
-              key={displayTab}
+              key={currentTab}
               // issue #243：所有 tab 都允许 overflow:auto，让窗口被压缩 / 文案
               //   变长时仍可触达底部内容（Codex P1：之前 overview 用 hidden
               //   会让缩窗后 Recent 卡彻底不可见）。
@@ -452,9 +435,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                 // 锚到这块控制台卡的右上角，而不是横在页头变成长横幅。
                 position: 'relative',
                 // 苹果"spring out"风格的曲线：开始快、收尾顺滑，符合人体直觉
-                animation: tabPhase === 'exiting'
-                  ? 'ol-page-fadeout 0.18s var(--ol-motion-soft) forwards'
-                  : 'ol-page-slide 0.34s var(--ol-motion-spring) both',
+                animation: 'ol-page-slide 0.34s var(--ol-motion-spring) both',
                 willChange: 'opacity, transform, filter',
                 display: 'flex',
                 flexDirection: 'column',
@@ -471,7 +452,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                   onOpenStyles={() => { setDemoModeSession(null); setCurrentTab('style'); }}
                 />
               ) : null}
-              {displayTab === 'overview' ? (
+              {currentTab === 'overview' ? (
                 <Overview
                   showFirstUseGuide={!firstUseGuideHidden || firstUseGuideReopened}
                   onDismissOverview={dismissOverview}
@@ -484,18 +465,18 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                   onOpenAudioFile={() => setAudioFileOpen(true)}
                   onOpenSavedDrafts={() => setSavedDraftsOpen(true)}
                 />
-              ) : displayTab === 'tools' ? (
+              ) : currentTab === 'tools' ? (
                 <Tools onOpen={setCurrentTab} onTryText={() => openQuickTrial()}
                   onOpenAudioFile={() => setAudioFileOpen(true)} onOpenSavedDrafts={() => setSavedDraftsOpen(true)} />
               ) : (
                 <>
-                  {isToolTab(displayTab) && <button type="button" onClick={() => setCurrentTab('tools')}
+                  {isToolTab(currentTab) && <button type="button" onClick={() => setCurrentTab('tools')}
                     className="ol-tools-back" style={{ display: 'inline-flex', alignSelf: 'flex-start', alignItems: 'center', gap: 5,
                       marginBottom: 16, padding: '4px 0', border: 0, background: 'transparent',
                       color: 'var(--ol-ink-3)', font: 'inherit', fontSize: 12, cursor: 'pointer' }}>
                     <Icon name="chevLeft" size={14} />{t('nav.tools')}
                   </button>}
-                  {displayTab === 'history' ? <History onOpenSavedDrafts={() => setSavedDraftsOpen(true)} /> : <Page />}
+                  {currentTab === 'history' ? <History onOpenSavedDrafts={() => setSavedDraftsOpen(true)} /> : <Page />}
                 </>
               )}
             </div>
@@ -574,10 +555,6 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
         @keyframes ol-page-slide {
           from { opacity: 0; transform: translate3d(10px, 0, 0) scale(.996); filter: blur(6px); }
           to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); filter: blur(0); }
-        }
-        @keyframes ol-page-fadeout {
-          from { opacity: 1; filter: blur(0); }
-          to   { opacity: 0; filter: blur(8px); }
         }
         @keyframes ol-prompt-fade {
           from { opacity: 0; backdrop-filter: blur(0); -webkit-backdrop-filter: blur(0); }
