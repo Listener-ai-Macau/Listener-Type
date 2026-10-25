@@ -49,6 +49,7 @@ mod polish;
 #[cfg(any(target_os = "windows", test))]
 mod protected_voice_profile;
 mod qa_hotkey;
+mod qa_overlay_layout;
 mod recorder;
 mod selection;
 mod shortcut_binding;
@@ -282,7 +283,6 @@ const WRY_DEFAULT_DISABLED_WEBVIEW2_FEATURES: &str = "msWebOOUI,msPdfOOUI,msSmar
 
 /// 第一次 show 时把 QA 浮窗摆到屏幕底部居中；之后的 show 不再 reposition，
 /// 让用户拖动后的位置在 hide → show 之间得以保持。详见 issue #118 v2。
-static QA_WINDOW_POSITIONED: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "windows")]
 static QA_WINDOW_VISIBILITY_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static APP_QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -3203,34 +3203,48 @@ fn wait_for_app_activation<R: Runtime>(_app: &AppHandle<R>) {}
 
 /// Compact initial size in logical pixels, matching tauri.conf.json. The
 /// question/setup content scrolls independently of the fixed action controls.
-const QA_WINDOW_WIDTH: f64 = 360.0;
-const QA_WINDOW_HEIGHT: f64 = 300.0;
-/// 胶囊与 QA 窗口的间距，与设计稿一致。
-const QA_WINDOW_GAP_TO_CAPSULE: f64 = 8.0;
-/// 给 macOS Dock 留的下边距（与 capsule 同源）。
-const DOCK_BOTTOM_PADDING_FOR_QA: f64 = 80.0;
+const QA_WINDOW_WIDTH: f64 = 300.0;
+const QA_WINDOW_HEIGHT: f64 = 176.0;
 
-/// 把 QA 浮窗放到屏幕底部居中、紧贴胶囊上方。tauri 启动期 + show 之前都会调一次，
-/// 防止用户切换显示器后位置错乱。
+/// Share the recording capsule's current location, including a user-moved
+/// capsule or a secondary monitor. Grow upward from the visible pill's bottom.
 fn position_qa_window<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> tauri::Result<()> {
-    let monitor = match window.current_monitor()? {
+    use qa_overlay_layout::{anchored_question_origin, PhysicalRect};
+    let app = window.app_handle();
+    let capsule = app.get_webview_window("capsule");
+    let capsule_monitor = capsule.as_ref().and_then(|c| c.current_monitor().ok().flatten());
+    let target_monitor = if capsule_monitor.is_some() {
+        capsule_monitor
+    } else {
+        window.current_monitor()?.or(app.primary_monitor()?)
+    };
+    let monitor = match target_monitor {
         Some(m) => m,
         None => return Ok(()),
     };
     let scale = monitor.scale_factor();
     let size = monitor.size();
-    let logical_w = size.width as f64 / scale;
-    let logical_h = size.height as f64 / scale;
-    let capsule_height = capsule_height_for_qa();
-    let x = ((logical_w - QA_WINDOW_WIDTH) / 2.0).max(0.0);
-    let y = (logical_h
-        - DOCK_BOTTOM_PADDING_FOR_QA
-        - capsule_height
-        - QA_WINDOW_GAP_TO_CAPSULE
-        - QA_WINDOW_HEIGHT)
-        .max(0.0);
+    let origin = monitor.position();
+    let bounds = capsule_window_bounds(false);
+    let anchor = capsule.and_then(|c| c.outer_position().ok().zip(c.outer_size().ok()))
+        .filter(|(_, size)| size.width > 0 && size.height > 0)
+        .map(|(p, s)| PhysicalRect { x: p.x, y: p.y, width: s.width, height: s.height })
+        .unwrap_or_else(|| {
+            let (x, y) = capsule_bottom_center_physical_position(origin.x, origin.y,
+                size.width, size.height, scale, bounds, capsule_visual_height(false));
+            PhysicalRect { x, y, width: (bounds.width * scale).round() as u32,
+                height: (bounds.height * scale).round() as u32 }
+        });
+    // Move the hidden window onto the target monitor before sizing in logical
+    // pixels, so a different monitor's DPI cannot determine the card size.
+    window.set_position(PhysicalPosition::new(anchor.x, anchor.y))?;
     window.set_size(tauri::LogicalSize::new(QA_WINDOW_WIDTH, QA_WINDOW_HEIGHT))?;
-    window.set_position(LogicalPosition::new(x, y))?;
+    let question = window.outer_size()?;
+    let (x, y) = anchored_question_origin(
+        PhysicalRect { x: origin.x, y: origin.y, width: size.width, height: size.height },
+        anchor, (question.width, question.height), (bounds.bottom_inset * scale).round() as u32,
+    );
+    window.set_position(PhysicalPosition::new(x, y))?;
     Ok(())
 }
 
@@ -3243,12 +3257,12 @@ pub(crate) fn show_qa_window<R: tauri::Runtime>(app: &AppHandle<R>, content_kind
         log::info!("[qa] show 跳过：qa 窗口不存在 (content_kind={content_kind})");
         return;
     };
-    // 仅首次 show 时居中；之后保留用户拖动后的位置。
-    if !QA_WINDOW_POSITIONED.load(Ordering::Relaxed) {
+    // Re-anchor each new opening after the capsule moves; never reposition a
+    // visible card while the user is reading or dragging it.
+    if !window.is_visible().unwrap_or(false) {
         if let Err(e) = position_qa_window(&window) {
             log::warn!("[qa] position before first show failed: {e}");
         }
-        QA_WINDOW_POSITIONED.store(true, Ordering::Relaxed);
     }
     // macOS：不用 window.show()（它会 makeKeyAndOrderFront 把 Listener Type 推成 frontmost，
     // 之后 capture_selection 的 AX read / Cmd+C fallback 都跑在 Listener Type 自己的 webview 上
