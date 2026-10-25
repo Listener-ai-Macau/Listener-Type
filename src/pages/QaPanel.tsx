@@ -22,6 +22,15 @@ const SELECTION_PREVIEW_MAX = 60;
 
 type Status = 'idle' | 'recording' | 'thinking' | 'error';
 
+const QA_ERROR_TRANSLATIONS = new Map([
+  ['qa_speech_setup_required', 'qaPreparation.speechNeeded'],
+  ['qa_dictation_busy', 'qa.dictationBusy'],
+  ['qa_ota_busy', 'qa.otaBusy'],
+  ['qa_action_failed', 'qa.actionFailed'],
+  ['qa_close_failed', 'qa.closeFailed'],
+  ['qa_unknown_error', 'qa.error'],
+]);
+
 export function QaPanel() {
   const { t, i18n } = useTranslation();
   const preparation = useQaPreparation();
@@ -42,8 +51,6 @@ export function QaPanel() {
   const [recordHotkeyLabel, setRecordHotkeyLabel] = useState<string>(() =>
     i18n.t('hotkey.fallback'),
   );
-  const tRef = useRef(t);
-  tRef.current = t;
 
   // ── 后端事件订阅（mount 时订阅一次，永不重订阅）──────────────────
   useEffect(() => {
@@ -107,7 +114,9 @@ export function QaPanel() {
               break;
             case 'error':
               setStatus('error');
-              setErrorMsg(payload.error === 'qa_speech_setup_required' ? tRef.current('qaPreparation.speechNeeded') : payload.error ?? tRef.current('qa.error'));
+              // Keep the stable code, so existing errors also follow live UI
+              // language changes. Provider text remains untouched.
+              setErrorMsg(payload.error ?? 'qa_unknown_error');
               setStreamingAnswer('');
               setLevel(0);
               break;
@@ -193,7 +202,7 @@ export function QaPanel() {
   };
 
   const onClose = () => {
-    void qaWindowDismiss().catch(() => { setErrorMsg(t('qa.closeFailed')); setStatus('error'); });
+    void qaWindowDismiss().catch(() => { setErrorMsg('qa_close_failed'); setStatus('error'); });
   };
 
   const onRecord = async () => {
@@ -205,7 +214,7 @@ export function QaPanel() {
     try { await qaWindowRecord(); }
     catch (cause) {
       const code = String(cause).replace(/^Error: /, '');
-      setErrorMsg(t(code === 'qa_dictation_busy' ? 'qa.dictationBusy' : code === 'qa_ota_busy' ? 'qa.otaBusy' : 'qa.actionFailed'));
+      setErrorMsg(QA_ERROR_TRANSLATIONS.has(code) ? code : 'qa_action_failed');
       setStatus('error');
     } finally {
       pendingActions.current.delete(action); setRequestedActions(new Set(pendingActions.current));
@@ -252,7 +261,7 @@ export function QaPanel() {
           <TurnIndicator kind="thinking" t={t} />
         )}
         {status === 'error' && (
-          <ErrorRow message={errorMsg} t={t} recordHotkey={recordHotkeyLabel} />
+          <ErrorRow message={QA_ERROR_TRANSLATIONS.has(errorMsg) ? t(QA_ERROR_TRANSLATIONS.get(errorMsg)!) : errorMsg} t={t} recordHotkey={recordHotkeyLabel} />
         )}
       </div>
       <div data-qa-actions style={{ padding: '10px 14px', borderTop: '1px solid var(--ol-line)', display: 'grid', gap: 6 }}>
