@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-25T13:10:51.465633+08:00",
+  "updated_at": "2026-10-25T13:46:47.552406+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8122,6 +8122,41 @@
       "machine_accepted_scope": [
         "Exact184 incomplete-setup idle footer/history-scope UI and native Close; unchanged183 setup status/navigation/live error locale and181 active-desktop native visibility proof retained. No actual speech/selection/hardware/lazy-main claim."
       ]
+    },
+    {
+      "id": "qa_compact_resizable_window_keeps_actions_visible",
+      "subject": "QA should not cover half the screen by default or force oversized setup; fixed controls remain available at minimum size",
+      "state": "exact185_native_default_min_mechanical_resize_close_passed_independent_UI_flow_completed_voice_unknown",
+      "protects": [
+        "InitialQA360x300 logical and native resizable/min320x260 agree with tauri.conf.json",
+        "Setup help and long content scroll inside content instead of increasing fixed action footer",
+        "Close/start/finish stay in bounds at default/minimum with supported languages",
+        "In-run user-resized dimensions survive ordinary Close/reopen; native no-activate visibility owner retained"
+      ],
+      "guards": [
+        "Exact185 private native accept185_qa_compact_native.py --root <matching-private-root>, expectedsource750731d8; owned private HWND only/per-monitor-DPI-aware resize operator",
+        "Related frontend-only check185_qa_compact.py and check185_qa_ready_layout.py; synthetic fixture results are layout proof only"
+      ],
+      "pending_human_scope": [
+        "Owner stopped manual QA and requested independent customer UI use. Actual edge-dragging/live microphone/ASR/LLM/selected context remain unqualified by this keyless UI batch."
+      ],
+      "repo": "type",
+      "commit": "750731d844955cb737bf176e6367732c698211ef",
+      "commit_subject": "Keep QA window compact and resizable with fixed action controls",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build185\\source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build185\\qa185-compact-layout.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build185\\qa185-ready-layout.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build184\\owner-window-size-feedback.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE185-aftersale-qa-20261025\\customer-experience.md",
+        "work\\customer-onboarding-20261020\\isolated-native185-snapshot-20261025-133644\\qa185-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build185\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build185\\type185-installed.json"
+      ],
+      "machine_accepted_scope": [
+        "Exact185 native compact360x300, min320x260 mechanical private resize with fixed Close/Start, native resizable style/getter, dimension retention on Close/reopen; five-locale missing-setup and controlled ready/long-content UI layouts. No human dragging/voice/ASR/LLM or whole-hardware qualification."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -9298,7 +9333,8 @@
         "type145_qa_capsule_cannot_hide_or_replace_active_dictation",
         "qa_followup_selection_and_honest_saved_answer_history",
         "qa_ota_admission_and_canonical_shortcut_label",
-        "qa_windows_native_visibility_and_readiness_locale_setup"
+        "qa_windows_native_visibility_and_readiness_locale_setup",
+        "qa_compact_resizable_window_keeps_actions_visible"
       ],
       "paths": {
         "type": [
@@ -9320,7 +9356,8 @@
           "src/i18n/index.ts",
           "src/i18n/qaPreparation.ts",
           "src/lib/credentialsStatusEvents.ts",
-          "src/lib/ipc.ts"
+          "src/lib/ipc.ts",
+          "src-tauri/tauri.conf.json"
         ]
       },
       "known_failures": [
