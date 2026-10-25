@@ -30,12 +30,13 @@ import { embeddedBleProbeErrorMessage, runEmbeddedBleProbeWithTimeout, type Embe
 import { buildFirstRunPairingWizard, type FirstRunPairingAction, type FirstRunPairingStageStatus } from '../lib/firstRunPairingWizard';
 import { applyFontScale, readFontScale } from '../lib/fontScale';
 import { initialOverviewTab, readOverviewHidden, rememberOverviewHidden } from '../lib/firstUseOverview';
+import { createMainNavigationDrain } from '../lib/mainWindowNavigation';
 import {
   getEmbeddedBleRuntimeStatus,
   isTauri,
   openSystemSettings,
   recoverEmbeddedBleDevice,
-  qaTakeProviderSettingsRequest,
+  takeMainWindowNavigation,
 } from '../lib/ipc';
 import type { DeviceCustomKeyAppPage, EmbeddedBleRepairResult, EmbeddedBleRuntimeStatus } from '../lib/types';
 import { type SettingsSectionId } from '../pages/Settings';
@@ -170,22 +171,6 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   };
 
   useEffect(() => {
-    if (!isTauri) return;
-    let cancelled = false;
-    let unlisten: (() => void) | undefined;
-    const consume = async () => {
-      if (!cancelled && await qaTakeProviderSettingsRequest() && !cancelled) openSettings('providers');
-    };
-    void (async () => {
-      const handle = await listen('qa:provider-setup-requested', () => { void consume(); });
-      if (cancelled) { handle(); return; }
-      unlisten = handle;
-      await consume();
-    })().catch(cause => console.warn('[qa] provider-settings navigation failed', cause));
-    return () => { cancelled = true; unlisten?.(); };
-  }, []);
-
-  useEffect(() => {
     if (!import.meta.env.DEV) return;
     const section = new URLSearchParams(window.location.search).get('openSettings');
     if (section && DEV_SETTINGS_SECTIONS.includes(section as SettingsSectionId)) {
@@ -222,23 +207,23 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   };
 
   useEffect(() => {
+    if (!isTauri) return;
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    listen<DeviceCustomKeyAppPage>('device-key:open-app-page', event => {
-      openDeviceKeyAppPage(event.payload);
-    }).then(fn => {
-      // effect 已卸载但 listen promise 才 resolve：立即销毁句柄，避免订阅泄漏。
-      if (cancelled) {
-        fn();
-      } else {
-        unlisten = fn;
-      }
-    }).catch(error => {
-      console.warn('[device-key] open app page listener setup failed', error);
-    });
+    const drain = createMainNavigationDrain(takeMainWindowNavigation, destination => {
+      if (destination.kind === 'providers') openSettings('providers');
+      else openDeviceKeyAppPage(destination.page);
+    }, cause => console.warn('[main] page navigation failed', cause));
+    void (async () => {
+      const handle = await listen('main-window:navigate', () => { void drain.request(); });
+      if (cancelled) { handle(); return; }
+      unlisten = handle;
+      await drain.request();
+    })().catch(cause => console.warn('[main] page listener setup failed', cause));
     return () => {
       cancelled = true;
-      if (unlisten) unlisten();
+      drain.dispose();
+      unlisten?.();
     };
     // openSettings only wraps stable React setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps

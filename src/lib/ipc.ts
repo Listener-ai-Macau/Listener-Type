@@ -5,6 +5,7 @@
 
 import { notifyCredentialsStatusChanged } from './credentialsStatusEvents';
 import { trackProviderWrite } from './providerWriteBarrier';
+import type { MainWindowDestination } from './mainWindowNavigation';
 
 import type {
   CloudAccountStatus,
@@ -2038,8 +2039,8 @@ export function getQaServiceStatus(): Promise<CredentialsStatus> {
   }));
 }
 
-export function qaTakeProviderSettingsRequest(): Promise<boolean> {
-  return invokeOrMock('qa_take_provider_settings_request', undefined, () => false);
+export function takeMainWindowNavigation(): Promise<MainWindowDestination | null> {
+  return invokeOrMock('take_main_window_navigation', undefined, () => null);
 }
 
 export function qaWindowPin(pinned: boolean): Promise<void> {

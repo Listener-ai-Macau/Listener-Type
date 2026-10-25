@@ -37,6 +37,7 @@ mod insertion;
 mod local_translation;
 mod llm_gemini;
 mod marketplace_backend;
+mod main_window_navigation;
 mod net_health;
 mod network_health_state;
 mod observability;
@@ -1082,7 +1083,7 @@ pub fn run() {
             commands::qa_window_record,
             commands::qa_open_provider_settings,
             commands::qa_get_service_status,
-            commands::qa_take_provider_settings_request,
+            commands::take_main_window_navigation,
             commands::validate_combo_hotkey,
             commands::set_combo_hotkey,
             commands::validate_provider_credentials,
@@ -1980,7 +1981,54 @@ fn ensure_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>
     Ok(window)
 }
 
+#[cfg(target_os = "windows")]
+static MAIN_WINDOW_CREATION_PENDING: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "windows")]
+struct MainWindowCreationReset;
+
+#[cfg(target_os = "windows")]
+impl Drop for MainWindowCreationReset {
+    fn drop(&mut self) {
+        MAIN_WINDOW_CREATION_PENDING.store(false, Ordering::Release);
+    }
+}
+
 pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
+    // WebView2 creation cannot run in a synchronous command/event callback on
+    // Windows: its completion needs the UI event loop that callback is holding.
+    // All cold-show callers share this dispatch; an existing main window keeps
+    // its established synchronous restore/focus path. Startup creation stays in
+    // setup, before the event loop starts handling requests.
+    #[cfg(target_os = "windows")]
+    if app.get_webview_window("main").is_none() {
+        if MAIN_WINDOW_CREATION_PENDING
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            let app = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let _reset = MainWindowCreationReset;
+                show_main_window_inner(&app);
+            });
+        }
+        return;
+    }
+    show_main_window_inner(app);
+}
+
+pub(crate) fn request_main_window_navigation<R: Runtime>(
+    app: &AppHandle<R>,
+    destination: main_window_navigation::MainWindowDestination,
+) {
+    main_window_navigation::request(destination);
+    show_main_window(app);
+    // This notification is optional for the first render: it drains the same
+    // retained request after registering, so early events cannot lose a page.
+    let _ = app.emit("main-window:navigate", ());
+}
+
+fn show_main_window_inner<R: Runtime>(app: &AppHandle<R>) {
     activate_window_mode(app);
     match ensure_main_window(app) {
         Ok(w) => {

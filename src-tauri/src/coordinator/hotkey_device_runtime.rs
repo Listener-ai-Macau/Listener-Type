@@ -543,8 +543,10 @@ fn handle_device_custom_key_mapping(inner:&Arc<Inner>,key:DeviceCustomKeyId,gest
                 let app_for_main = app.clone();
                 let app_page = mapping.app_page;
                 let _ = app.run_on_main_thread(move || {
-                    crate::show_main_window(&app_for_main);
-                    let _ = app_for_main.emit("device-key:open-app-page", app_page);
+                    crate::request_main_window_navigation(
+                        &app_for_main,
+                        crate::main_window_navigation::MainWindowDestination::DevicePage(app_page),
+                    );
                 });
                 crate::timeline::mark(
                     "backend.device_key",

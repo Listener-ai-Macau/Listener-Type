@@ -2025,8 +2025,6 @@ pub async fn qa_window_record(coord: CoordinatorState<'_>) -> Result<(), String>
     coord.qa_window_record().await
 }
 
-static QA_PROVIDER_SETUP_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 #[tauri::command]
 pub fn qa_get_service_status() -> CredentialsStatus {
     // Match the providers actually used by QA, rather than ordinary dictation's
@@ -2044,17 +2042,12 @@ pub fn qa_get_service_status() -> CredentialsStatus {
 
 #[tauri::command]
 pub fn qa_open_provider_settings(app: tauri::AppHandle) {
-    use tauri::Emitter;
-    // Retain the request before lazy main-window creation. Its event listener
-    // registers first, then drains this flag, so the initial click is not lost.
-    QA_PROVIDER_SETUP_PENDING.store(true, std::sync::atomic::Ordering::SeqCst);
-    crate::show_main_window(&app);
-    let _ = app.emit("qa:provider-setup-requested", ());
+    crate::request_main_window_navigation(&app, crate::main_window_navigation::MainWindowDestination::Providers);
 }
 
 #[tauri::command]
-pub fn qa_take_provider_settings_request(window: tauri::WebviewWindow) -> bool {
-    window.label() == "main" && QA_PROVIDER_SETUP_PENDING.swap(false, std::sync::atomic::Ordering::SeqCst)
+pub fn take_main_window_navigation(window: tauri::WebviewWindow) -> Option<crate::main_window_navigation::MainWindowDestination> {
+    if window.label() == "main" { crate::main_window_navigation::take() } else { None }
 }
 
 // ─────────────────────────── 自定义组合键 ───────────────────────────
