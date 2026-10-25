@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-25T22:39:31.318996+08:00",
+  "updated_at": "2026-10-25T23:03:02.375666+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -4016,7 +4016,13 @@
         ],
         "unverified": [
           "Native candidate and natural aftersale re-use of corrected entry remain pending next coherent delivery."
-        ]
+        ],
+        "matching_native191": {
+          "source": "d5937bfc16db62edd37f02bc9feb35a8edf8cb2e",
+          "receipt": "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native191-snapshot-20261025-225750\\style191-native.json",
+          "state": "actual_native_UI_add_explicit_trial_blank_editor_passed_installed191",
+          "new_customer191": false
+        }
       }
     },
     {
@@ -8402,6 +8408,39 @@
       "machine_accepted_scope": [
         "Exact190 private native existing tool disclosure pointer/keyboard and five voice-only localized explanations with320x260 WebView content viewports and fixed controls. Reuse185 native resize proof; no mic/selection/global/hardware/system-dialog qualification."
       ]
+    },
+    {
+      "id": "qa_stream_display_follow_tail_preserves_reading",
+      "subject": "Streamed QA growth follows the visible tail while user scroll-up preserves reading and bottom resumes following",
+      "state": "exact191_native_controlled_stream_wheel_follow_and_final_once_passed_voice_unqualified",
+      "protects": [
+        "Streaming answer growth updates the visible tail without waiting for final answer",
+        "Scrolling up preserves older-text reading; reaching bottom resumes following; new recording/open resets follow",
+        "Final answer replaces the temporary streaming bubble once; services, capture and session admission remain unchanged"
+      ],
+      "guards": [
+        "Exact190 native synthetic-event counterexample gap566px retained",
+        "Exact191 same event sequence and private-window wheel up/down/final one-answer receipt"
+      ],
+      "pending_human_scope": [
+        "Actual microphone/selection-to-answer operation and physical/global input are separate, not qualified by synthetic Tauri events"
+      ],
+      "repo": "type",
+      "commit": "d5937bfc16db62edd37f02bc9feb35a8edf8cb2e",
+      "commit_subject": "Follow streamed answers while preserving the question reader position",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build191\\source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build190\\qa-stream-native-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-AFTERSALE190-personalized-writing-20261025\\style-followup-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native191-snapshot-20261025-225750\\style191-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native191-snapshot-20261025-225750\\qa191-stream-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build191\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build191\\type191-installed.json"
+      ],
+      "machine_accepted_scope": [
+        "Exact191 private native synthetic Tauri QA display events: streamed text follows tail, ordinary private-wheel reading is retained, wheel to bottom resumes follow and final answer appears once. Actual native style library add/trial/blank-editor and unchanged recording default verified separately. No actual mic/selection/services/global/hardware qualification."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -9588,7 +9627,8 @@
         "qa_compact_resizable_window_keeps_actions_visible",
         "qa_start_requires_both_service_setups_before_capture",
         "deferred_main_creation_off_ui_callback_and_retained_navigation",
-        "qa_fixed_pcm_existing_services_answer_and_history"
+        "qa_fixed_pcm_existing_services_answer_and_history",
+        "qa_stream_display_follow_tail_preserves_reading"
       ],
       "paths": {
         "type": [

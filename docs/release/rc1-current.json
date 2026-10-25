@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-25T21:20:42.019528+08:00",
+  "updatedAt": "2026-10-25T23:03:02.375666+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 190,
-    "source": "37fa866e7fd0d952ac185013a718a0f78cd10272",
-    "sourceTag": "build-source/type190-20261025",
+    "build": 191,
+    "source": "d5937bfc16db62edd37f02bc9feb35a8edf8cb2e",
+    "sourceTag": "build-source/type191-20261025",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "9e34027a4ef6df3c74794f458f90049477367a810e0169be135b9ade6730b7a5",
-    "sizeBytes": 299401216,
-    "exeSha256": "7999e197556bf222f809992348b26ccf9db21e02b368eec88f3e073ba4d0c164",
+    "sha256": "d68c93682c002328db9e6698ee135ee55414e15a28c895912ee7065501bf9cdb",
+    "sizeBytes": 299384832,
+    "exeSha256": "782b34c4d86263f0eb2b92239d857007bf8d341ebc1a482b3f815061402016e3",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -511,7 +511,9 @@
     "navigationScope": "Exact189 private native sidebar/guide only; no recording/Bluetooth changes",
     "toolDisclosureQualified": true,
     "voiceQuestionExpectationFiveLocalesQualified": true,
-    "scope": "Private native content only; no actual question or hardware qualification"
+    "scope": "Controlled native answer rendering and ordinary style UI; no actual voice question or hardware qualification",
+    "qaStreamingDisplayControlledNativeQualified": true,
+    "readyMadeStyleLibraryNativeQualified": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -529,6 +531,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build190-20261025"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build191-20261025"
   }
 }

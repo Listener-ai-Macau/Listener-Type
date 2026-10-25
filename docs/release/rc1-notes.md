@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build190 / Firmware37
+# Listener v1.0.6-rc1 · Type build191 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,8 @@
 | **ESP32-S3 firmware · USB or Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+QA answers now stay at the visible tail while streaming. Scrolling up preserves the reading position, and returning to the bottom resumes following. Adding the ready-made Everyday list stays in the library for an explicit trial; blank new styles still open their editor. Five interface languages distinguish built-in/custom styles and show loading instead of an early zero count. Native checks use labelled synthetic QA events and ordinary private-window input; they do not qualify microphone questions, external selection or physical shortcuts.
 
 More tools now looks and behaves like an expandable control, with a clear row, arrow and keyboard focus. The question page and question window explain in five interface languages that questions are spoken through the computer microphone; typed questions are not currently supported. These changes address current software feedback without adding a new service, model or question workflow. Native checks cover the disclosure and localized content/action layout; they do not qualify actual microphone questions.
 
@@ -39,6 +41,8 @@ RC1 is a prerelease. Strong background-speech separation, some physical/global-k
 - ZIP: 1956799 bytes · SHA256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`
 
 ## 中文说明
+
+问答流式长回答跟随尾部，向上阅读不被拉回，回到底部恢复跟随；现成清单添加后留在列表，空白新建仍可编辑。风格按内置／自定义显示，加载期间不先报0。该范围已用标记合成事件及私有窗口普通输入核对，不能代表真实麦克风、外部选区或物理快捷键已验收。固件37不变。
 
 “更多工具”改为明确的展开整行、箭头与键盘焦点；提问入口和浮窗的五种语言说明这是电脑麦克风语音提问，当前不能键入问题。独立189软件顾客已自然打开提问窗，但未实际说话或得到答案；本批限定原生界面检查不替代真实问答。没有新增服务、模型或问答流程，固件37不变。
 
