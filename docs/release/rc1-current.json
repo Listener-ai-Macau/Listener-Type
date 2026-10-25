@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-25T19:40:03.307424+08:00",
+  "updatedAt": "2026-10-25T21:20:42.019528+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 189,
-    "source": "b1a655cbf93592936a84b4a55111d6fc96153051",
-    "sourceTag": "build-source/type189-20261025",
+    "build": 190,
+    "source": "37fa866e7fd0d952ac185013a718a0f78cd10272",
+    "sourceTag": "build-source/type190-20261025",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "0c5c44be286ca26dacc4be43982dda95612850493902aa106a7185ca01983f1a",
-    "sizeBytes": 299380736,
-    "exeSha256": "07d7ef84dfbc20df71a61b89d1b7f126098269eb74786d75854316ecc95cafc1",
+    "sha256": "9e34027a4ef6df3c74794f458f90049477367a810e0169be135b9ade6730b7a5",
+    "sizeBytes": 299401216,
+    "exeSha256": "7999e197556bf222f809992348b26ccf9db21e02b368eec88f3e073ba4d0c164",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -508,7 +508,10 @@
     "actualNativeFilePickerToWiredFlashComplete": true,
     "actualNativeWiredFlashQualificationScope": "ExactType188/Firmware37 one known COM16 board; actual OS picker, normal UI button/progress/result,4MD5/reset, retained core/keys, daily ready; no full RF or other-board inference",
     "navigationContentSameFrameQualified": true,
-    "navigationScope": "Exact189 private native sidebar/guide only; no recording/Bluetooth changes"
+    "navigationScope": "Exact189 private native sidebar/guide only; no recording/Bluetooth changes",
+    "toolDisclosureQualified": true,
+    "voiceQuestionExpectationFiveLocalesQualified": true,
+    "scope": "Private native content only; no actual question or hardware qualification"
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -526,6 +529,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build189-20261025"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build190-20261025"
   }
 }

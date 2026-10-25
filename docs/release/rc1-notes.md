@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build189 / Firmware37
+# Listener v1.0.6-rc1 · Type build190 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,8 @@
 | **ESP32-S3 firmware · USB or Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+More tools now looks and behaves like an expandable control, with a clear row, arrow and keyboard focus. The question page and question window explain in five interface languages that questions are spoken through the computer microphone; typed questions are not currently supported. These changes address current software feedback without adding a new service, model or question workflow. Native checks cover the disclosure and localized content/action layout; they do not qualify actual microphone questions.
 
 Navigation now mounts the selected page in the same render as its active sidebar item. It no longer leaves the old, blurred page on screen while an exit timer runs. The new-page animation, guide Skip preference and guide reopening are retained. Affected checks cover actual React rendering and the matching private native MSI; these are local UI checks, not speech or Bluetooth speed measurements.
 
@@ -31,12 +33,14 @@ RC1 is a prerelease. Strong background-speech separation, some physical/global-k
 
 ## File identity
 
-- Type source: `b1a655cbf93592936a84b4a55111d6fc96153051` · `build-source/type189-20261025`
-- MSI: 299380736 bytes · SHA256 `0c5c44be286ca26dacc4be43982dda95612850493902aa106a7185ca01983f1a`
+- Type source: `37fa866e7fd0d952ac185013a718a0f78cd10272` · `build-source/type190-20261025`
+- MSI: 299401216 bytes · SHA256 `9e34027a4ef6df3c74794f458f90049477367a810e0169be135b9ade6730b7a5`
 - Firmware37 source: `87ea79ec3d6e34a95d09b73e2a5848207a919f1c` · runtime `9d7fbbe67ed0223d`
 - ZIP: 1956799 bytes · SHA256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`
 
 ## 中文说明
+
+“更多工具”改为明确的展开整行、箭头与键盘焦点；提问入口和浮窗的五种语言说明这是电脑麦克风语音提问，当前不能键入问题。独立189软件顾客已自然打开提问窗，但未实际说话或得到答案；本批限定原生界面检查不替代真实问答。没有新增服务、模型或问答流程，固件37不变。
 
 导航选中项与正文现在同步切换，不再等旧页退出模糊动画；首次引导的跳过记忆和重新打开保留。受影响的实际React渲染与匹配原生MSI已核对；本批不改录音、服务凭据、模型、设备设置或固件，不把界面耗时称作语音／蓝牙提速。
 
