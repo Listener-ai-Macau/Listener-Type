@@ -24,6 +24,7 @@ type Status = 'idle' | 'recording' | 'thinking' | 'error';
 
 const QA_ERROR_TRANSLATIONS = new Map([
   ['qa_speech_setup_required', 'qaPreparation.speechNeeded'],
+  ['qa_answer_setup_required', 'qaPreparation.answersHelp'],
   ['qa_dictation_busy', 'qa.dictationBusy'],
   ['qa_ota_busy', 'qa.otaBusy'],
   ['qa_action_failed', 'qa.actionFailed'],

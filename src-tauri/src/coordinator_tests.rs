@@ -6281,7 +6281,7 @@ async fn qa_ota_gate_rejects_start_before_selection_or_session_claim() {
     let coordinator = Coordinator::new();
     // The private test vault is empty: an admitted legacy start stops at the
     // credential check, so this counterexample cannot open a microphone/cloud.
-    assert!(ensure_qa_volcengine_credentials().is_err());
+    assert!(ensure_qa_service_setup().is_err());
     coordinator.inner.qa_state.lock().panel_visible = true;
     let owner = coordinator.inner.qa_state.lock().session_id;
     coordinator.inner.embedded_ble_ota_active.store(true, Ordering::SeqCst);

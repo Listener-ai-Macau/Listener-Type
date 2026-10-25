@@ -11,6 +11,16 @@ use super::{
     end_qa_session, Inner,
 };
 
+pub(super) fn validate_qa_setup(status: &crate::types::CredentialsStatus) -> Result<(), String> {
+    if !status.volcengine_configured {
+        Err("qa_speech_setup_required".into())
+    } else if !status.llm_configured {
+        Err("qa_answer_setup_required".into())
+    } else {
+        Ok(())
+    }
+}
+
 // QA and dictation share the capsule, but have independent recording lifecycles.
 // A QA close/error/level event must never take display ownership from dictation.
 // Bind every admitted QA request to the observed idle dictation generation so
@@ -212,6 +222,26 @@ pub(super) fn close_qa_panel(inner: &Arc<Inner>) {
 mod tests {
     use super::*;
     use crate::coordinator::Coordinator;
+
+    #[test]
+    fn qa_start_requires_both_services_shown_by_the_ui() {
+        for (speech, answers, expected) in [
+            (false, false, Some("qa_speech_setup_required")),
+            (false, true, Some("qa_speech_setup_required")),
+            (true, false, Some("qa_answer_setup_required")),
+            (true, true, None),
+        ] {
+            let status = crate::types::CredentialsStatus {
+                active_asr_provider: "volcengine".into(),
+                active_llm_provider: "deepseek".into(),
+                asr_configured: speech,
+                llm_configured: answers,
+                volcengine_configured: speech,
+                ark_configured: answers,
+            };
+            assert_eq!(validate_qa_setup(&status).err().as_deref(), expected);
+        }
+    }
 
     fn selected(text: &str) -> Option<SelectionContext> {
         Some(SelectionContext { text: text.into(), source_app: None })

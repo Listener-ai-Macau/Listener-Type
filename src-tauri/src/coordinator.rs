@@ -3574,16 +3574,12 @@ pub(crate) fn apply_chinese_script_preference(text: &str, pref: ChineseScriptPre
     }
 }
 
-/// QA 路径专用：begin_qa_session 永远走 Volcengine 流式（低延迟要求），所以
-/// 凭据校验也只看 Volcengine 字段，不依赖 active_asr。dictation 路径请用
-/// `ensure_asr_credentials`。
-fn ensure_qa_volcengine_credentials() -> Result<(), String> {
-    let creds = read_volc_credentials();
-    if creds.app_id.trim().is_empty() || creds.access_token.trim().is_empty() {
-        Err("qa_speech_setup_required".to_string())
-    } else {
-        Ok(())
-    }
+/// All QA starts share the UI's service-presence check before selection/capture.
+/// Preserve the Windows system-vault refresh from the prior speech check.
+/// Presence is not an authentication, network or quota probe.
+fn ensure_qa_service_setup() -> Result<(), String> {
+    let _ = read_volc_credentials();
+    qa::validate_qa_setup(&crate::commands::qa_get_service_status())
 }
 
 /// 润色文本；失败时返回原文 + 失败原因，调用方据此弹错误胶囊 + 写历史 error_code。
@@ -4203,10 +4199,10 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
     // 重置 SSE 取消标志：上一轮可能 set 过的 true 留着会让本轮流式立即 break。
     inner.qa_stream_cancelled.store(false, Ordering::SeqCst);
 
-    // Reject missing speech configuration before reading any source selection
+    // Reject missing speech/answer setup before reading any source selection
     // or opening a microphone. Only report the stable code to localized UI.
-    if let Err(message) = ensure_qa_volcengine_credentials() {
-        log::warn!("[coord] QA: ASR credentials missing: {message}");
+    if let Err(message) = ensure_qa_service_setup() {
+        log::warn!("[coord] QA: service setup missing: {message}");
         finish_qa_with_error(inner, session_id, message.clone());
         return Err(message);
     }
