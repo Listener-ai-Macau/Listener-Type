@@ -11,6 +11,10 @@ import { ProviderSettingsDialog } from './ProviderSettingsDialog';
 import './StyleTextTrial.css';
 
 const MAX_WAV = 60 * 32_000 + 65_536;
+function validateSelectedFileLength(length: number): void {
+  if (length === 0) throw new Error('audio_file_empty_file');
+  if (length > MAX_WAV) throw new Error('audio_file_too_long');
+}
 export function AudioFileTrial({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -63,12 +67,16 @@ export function AudioFileTrial({ onClose }: { onClose: () => void }) {
     selecting.current = true; setLoading(true); setError('');
     const version = ++generation.current;
     try {
-      if (size !== undefined && size > MAX_WAV) throw new Error('audio_file_too_long');
+      if (size !== undefined) validateSelectedFileLength(size);
       const bytes = new Uint8Array(await read());
-      if (!bytes.length || bytes.length > MAX_WAV) throw new Error('audio_file_too_long');
+      validateSelectedFileLength(bytes.length);
       if (generation.current === version) setSelection({ name, bytes: Array.from(bytes), sample });
     } catch (cause) {
-      if (generation.current === version) { setSelection(null); setError(String(cause).includes('audio_file_too_long') ? t('audioFile.tooLong') : t('audioFile.loadFailed')); }
+      if (generation.current === version) {
+        const code = cause instanceof Error ? cause.message : String(cause);
+        setSelection(null);
+        setError(t(code === 'audio_file_empty_file' ? 'audioFile.emptyFile' : code === 'audio_file_too_long' ? 'audioFile.tooLong' : 'audioFile.loadFailed'));
+      }
     } finally {
       selecting.current = false;
       if (generation.current === version) setLoading(false);
