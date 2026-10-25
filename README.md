@@ -8,7 +8,7 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build187](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build188](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <!-- listener-local-text-entry -->
@@ -39,7 +39,7 @@ Firmware: **ESP32-S3 N16R8**, build `9d7fbbe67ed0223d`. Select the same ZIP for 
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device and read its settings. Explicit edits save automatically when editing finishes; reading or switching devices does not write computer defaults. Names, lights, power, keys and knob settings stay on the selected board. Use this paired MSI and firmware ZIP.
 
-Type build187: QA start now checks both recognition and answering setup before capture, consistently with the Start button. Missing answering setup is reported immediately. Compact/resizable QA, file-input fixes, ordinary dictation and Firmware37 are retained.
+Type build188: opening settings from QA now works when the main window has not yet been created. First-window creation and navigation requests share one retained path. Compact/resizable QA and previous file/setup fixes remain; Firmware37 is unchanged.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

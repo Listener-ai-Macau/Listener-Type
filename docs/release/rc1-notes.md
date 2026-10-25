@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build187 / Firmware37
+# Listener v1.0.6-rc1 · Type build188 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,8 @@
 | **ESP32-S3 firmware · USB or Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+Opening Providers from the question window now works after silent startup when no main window exists. Windows first-window creation no longer blocks its UI callback; navigation is retained until the new renderer is ready. Existing-window restore remains unchanged. Exact private-native checks observed first Providers opening in0.515 seconds and restoring the same native window in0.157 seconds; these are local UI timings, not recognition or Bluetooth throughput.
 
 All new QA recordings now use the same recognition-and-answering configuration-presence check as the UI before reading selected text or opening capture. Missing answering setup is reported immediately, including requests through the common shortcut entry, instead of waiting until speech has been recognized. The existing Windows system-vault refresh is preserved. This check does not authenticate services or establish network/quota health. Native proof uses synthetic configuration and rejects before capture; it does not qualify real speech or a physical global key.
 
@@ -17,7 +19,7 @@ The question window now has visible Open, Start question, Finish and ask, and Cl
 
 Before a question starts, Type shows separate configuration-presence indicators for Volcengine recognition and the active AI answering service. Missing setup links directly to Providers, with APP ID, Access Token and Resource ID named consistently. Configured means values are present; it does not establish authentication, network or quota health. The question window uses the computer microphone. It does not change ordinary Listener dictation or board key mappings.
 
-Existing windows and retained setup errors now follow the interface-language choice. Missing service setup no longer shows Ready while Start is disabled. The history switch explains local question/answer storage and that cloud processing still sends data. Exact native checks cover missing-configuration handling, direct settings navigation, language changes and Close; actual speech-to-answer/selected-context and opening Settings before the main window exists remain unqualified. Earlier file-cancellation, diagnosis, device-profile and input-source fixes are retained. Firmware37 is unchanged; no reflash is needed for this app update.
+Existing windows and retained setup errors now follow the interface-language choice. Missing service setup no longer shows Ready while Start is disabled. The history switch explains local question/answer storage and that cloud processing still sends data. Exact native checks cover missing-configuration handling, direct settings navigation, language changes and Close; actual speech-to-answer/selected-context remain unqualified. The previously unqualified first-main-window case is covered by this update’s scoped native check. Earlier file-cancellation, diagnosis, device-profile and input-source fixes are retained. Firmware37 is unchanged; no reflash is needed for this app update.
 
 ## Before using
 
@@ -27,12 +29,14 @@ RC1 is a prerelease. Strong background-speech separation, some physical/global-k
 
 ## File identity
 
-- Type source: `3ebfb66c4ea1ddd55f819a94395b543b58574d7d` · `build-source/type187-20261025`
-- MSI: 299384832 bytes · SHA256 `c0003400ab0f4f831aea8a716c4a81ced95e6ce5f2d44901a6f6cd836069e042`
+- Type source: `2cea7c327fdf995d204347f6950d87d077ad8f36` · `build-source/type188-20261025`
+- MSI: 299388928 bytes · SHA256 `25d765cf892778965fe5e2349f4772e17d1ccc287173c402873f055709902fa2`
 - Firmware37 source: `87ea79ec3d6e34a95d09b73e2a5848207a919f1c` · runtime `9d7fbbe67ed0223d`
 - ZIP: 1956799 bytes · SHA256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`
 
 ## 中文说明
+
+静默启动、主窗口尚未创建时，从提问窗打开提供商设置不再卡住。首次窗口创建不阻塞Windows界面回调，页面目的保留至渲染器准备好；已存在窗口的恢复逻辑保持。匹配私有原生环境首次进入约0.515秒，再次恢复同一窗口约0.157秒；这是本机界面耗时，不是识别或蓝牙速度。实际语音到回答／选区／物理按键仍未验收通过。
 
 问答的共用开始入口现在与界面使用同一套识别＋回答配置存在性检查，在读取选区／采音前拦下未准备好的请求，包括共用快捷键路径；缺回答配置不会等说完才报错。保留原Windows凭据刷新；这不是鉴权、网络或额度检查。已在匹配原生程序用合成配置验证缺回答提示和关闭，未冒充真实语音／物理全局键验收。
 

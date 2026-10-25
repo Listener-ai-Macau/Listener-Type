@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-25T15:36:25.921863+08:00",
+  "updated_at": "2026-10-25T17:06:31.135265+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8227,6 +8227,40 @@
       "machine_accepted_scope": [
         "Exact187 native common QA start with synthetic ASR presence/missing answer setup rejects with localized Chinese answer-setup error before capture; disabled Start and ordinary Close from error state pass; four actual-source admission combinations and retained OS-vault refresh compile/run. No speech, physical/global key, authentication or quota qualification."
       ]
+    },
+    {
+      "id": "deferred_main_creation_off_ui_callback_and_retained_navigation",
+      "subject": "Cold main creation must not block Windows UI callback; retain navigation until main renderer is ready",
+      "state": "exact188_private_cold_providers_and_warm_same_hwnd_restore_passed_physical_global_unknown",
+      "protects": [
+        "Windows cold creation dispatched off callback; shared pending guard coalesces and resets on failure/panic",
+        "Existing warm restore/focus body byte-equivalent to187",
+        "Latest QA/provider and device-page destination retained until renderer registers; serialized async drain prevents notification/reply loss or disposal navigation"
+      ],
+      "guards": [
+        "window188-source-check.json: actual extracted dispatch/kernel with fake executor, not native scheduling",
+        "mainWindowNavigation.test.ts: asynchronous overlap/retry/dispose",
+        "qa188-lazy-main-reviewed.json combines preserved cold receipt and warm close API continuation, no rerun/rebuild"
+      ],
+      "pending_human_scope": [
+        "Actual microphone speech-to-answer, physical/global triggers, Bluetooth and all device-page destinations remain unqualified by this private-window batch."
+      ],
+      "repo": "type",
+      "commit": "2cea7c327fdf995d204347f6950d87d077ad8f36",
+      "commit_subject": "Create deferred main windows outside UI callbacks and retain navigation until ready",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build188\\source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build188\\window188-source-check.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\window188-frontend-tests.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\startup188-contract.log",
+        "work\\customer-onboarding-20261020\\isolated-native188-snapshot-20261025-164730\\qa188-lazy-main-reviewed.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build188\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build188\\type188-installed.json"
+      ],
+      "machine_accepted_scope": [
+        "Same immutable188 private host: real cold startup lacks main HWND/page; ordinary QA settings link creates visible-intent native main and correct Providers. Reuse that actual cold result then complete warm close/restore via actual window close API. Cross-station PostMessage preparation failure remains untouched; no repeated cold test, no product change/rebuild."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -9407,7 +9441,8 @@
         "qa_ota_admission_and_canonical_shortcut_label",
         "qa_windows_native_visibility_and_readiness_locale_setup",
         "qa_compact_resizable_window_keeps_actions_visible",
-        "qa_start_requires_both_service_setups_before_capture"
+        "qa_start_requires_both_service_setups_before_capture",
+        "deferred_main_creation_off_ui_callback_and_retained_navigation"
       ],
       "paths": {
         "type": [
@@ -9430,7 +9465,11 @@
           "src/i18n/qaPreparation.ts",
           "src/lib/credentialsStatusEvents.ts",
           "src/lib/ipc.ts",
-          "src-tauri/tauri.conf.json"
+          "src-tauri/tauri.conf.json",
+          "src-tauri/src/main_window_navigation.rs",
+          "src-tauri/src/coordinator/hotkey_device_runtime.rs",
+          "src/lib/mainWindowNavigation.ts",
+          "src/lib/mainWindowNavigation.test.ts"
         ]
       },
       "known_failures": [
